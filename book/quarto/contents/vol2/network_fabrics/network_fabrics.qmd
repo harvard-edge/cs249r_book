@@ -88,7 +88,13 @@ In the fleet stack\index{Fleet Stack} shown in @fig-fleet-stack, the fabric turn
 
 At scale, communication cost can dominate computation cost. The fleet law in @eq-fleet-law makes this explicit: the nonoverlapped communication term $T_{\text{comm}}(N) - T_{\text{overlap}}$ determines how much of each training step is exposed to the network fabric. The fabric constrains every layer above it in the stack by determining whether communication can be overlapped, which collective algorithms are viable, and how network partitions interact with node failures.
 
-The physical network fabric exists to carry three fundamental collective communication patterns. An AllReduce\index{AllReduce}[^fn-allreduce-forward] sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training. An AllGather[^fn-collectives-forward] collects different model portions so that every GPU can reconstruct the full model state. An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism[^fn-moe-forward]. @Sec-collective-communication covers the *algorithms* that orchestrate these patterns; the fabric layer supplies the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
+The physical network fabric exists to carry three fundamental collective communication patterns:
+
+- **AllReduce**: An AllReduce\index{AllReduce}[^fn-allreduce-forward] sums gradients across thousands of GPUs so that every device holds the identical average, forming the heartbeat of synchronous training.
+- **AllGather**: An AllGather[^fn-collectives-forward] collects different model portions so that every GPU can reconstruct the full model state.
+- **AllToAll**: An AllToAll, the most demanding pattern, requires every GPU to send unique data to every other GPU, a requirement critical to expert parallelism[^fn-moe-forward].
+
+@Sec-collective-communication covers the *algorithms* that orchestrate these patterns; the fabric layer supplies the *physics* of the wires and switches that carry them. The distinction matters because the fabric's physical properties (bandwidth, latency, and topology) determine which patterns are efficient and which become bottlenecks.
 
 ::: {#psp-network-fabrics-network-as-gradient-bus .callout-perspective title="The network as a gradient bus"}
 
@@ -343,15 +349,19 @@ However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of 
 
 ### Reach and medium: Copper vs. optics {#sec-network-fabrics-copper-optics}
 
-The choice of physical medium determines how far a link can reach before latency, power, and cost reshape the cluster geometry. The three recurring categories serve different parts of that placement decision:
+The choice of physical medium determines how far a link can reach before latency, power, and cost reshape the cluster geometry. @Tbl-network-fabrics-link-media compares the recurring cable and optics options by the attributes that decide where each one belongs.
 
-- **DAC (Direct Attach Copper)**\index{DAC}: Passive copper cables offering the lowest latency and cost (~\$50), but limited to ~3 meters. Used exclusively within a rack.
-- **AOC (Active Optical Cable)**\index{AOC}: Fiber with permanently attached transceivers, suitable for 3 to 30 meter runs (~\$500). The conversion between electrical and optical signals, combined with Forward Error Correction (FEC)[^fn-fec-latency], adds hundreds of nanoseconds to every link.
-- **Pluggable Optics**\index{Pluggable Optics}: Separate transceivers and fiber cords, used for runs exceeding 30 meters to the network core.
+: **Cable and Optics Placement Trade-Offs**: Common interconnect media occupy different reach, latency, and cost points, so cluster designers use copper inside racks and optics as distance begins to dominate placement. {#tbl-network-fabrics-link-media tbl-colwidths="[18,20,20,20,22]"}
+
+| **Medium** | **Reach** | **Cost profile** | **Latency impact** | **Typical placement** |
+|:---|:---|:---|:---|:---|
+| **DAC (Direct Attach Copper)**\index{DAC} | ~3 meters | Lowest cost (~\$50) and no optical module power | Lowest media latency; passive copper avoids optical conversion | Within a rack |
+| **AOC (Active Optical Cable)**\index{AOC} | 3 to 30 meters | Higher cost (~\$500) from permanently attached transceivers | Electrical/optical conversion plus Forward Error Correction (FEC)[^fn-fec-latency] adds hundreds of nanoseconds | Rack-to-rack or row-scale links |
+| **Pluggable optics**\index{Pluggable Optics} | More than 30 meters | Highest module and power cost, but replaceable optics and fiber cords | Optical conversion and FEC add latency; distance enables topology reach | Network core and pod-scale links |
 
 [^fn-fec-latency]: **FEC (Forward Error Correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is fragile enough that Ethernet PHY designs rely on FEC to reconstruct corrupted bits [@anslow2016rsFec; @ethernetAlliance2025roadmap]. The exact latency depends on the PHY and module architecture; for ML fabric modeling, treating FEC as a per-hop latency budget is the conservative point, because a multi-hop path accumulates that budget before software can hide it.
 
-The sequence is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical Interconnect} extend a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
+The comparison in @tbl-network-fabrics-link-media is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical Interconnect} extend a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
 
 ```{python}
 #| echo: false
@@ -508,14 +518,18 @@ RDMA bypasses this entire layer. By offloading the transport logic to the NIC ha
 
 ### InfiniBand and RoCE {#sec-network-fabrics-ib-roce}
 
-GPU clusters commonly choose between two RDMA transport stacks, and the decision is a reliability-versus-operations trade-off: InfiniBand provides losslessness as a native fabric property, while RoCE preserves Ethernet economics and ecosystem breadth at the cost of more delicate congestion control.
+GPU clusters commonly choose between two RDMA transport stacks, and the decision is a reliability-versus-operations trade-off. @Tbl-network-fabrics-rdma-stacks compares where each stack places the burden of losslessness and congestion control.
 
-- **InfiniBand (IB)**\index{InfiniBand}\index{IB|see{InfiniBand}}[^fn-infiniband-origin]: A purpose-built HPC architecture designed for point-to-point, switched fabrics [@infiniband2000spec]. It uses hardware-level **credit-based flow control**\index{Credit-Based Flow Control}: a sender must hold a credit (representing available buffer space at the receiver) before transmitting. IB is therefore inherently lossless at the link layer. It includes a **Subnet Manager (SM)**\index{Subnet Manager} for global routing and **Virtual Lanes (VLs)**\index{Virtual Lane} for traffic isolation.
-- **RoCE (RDMA over Converged Ethernet)**\index{RoCE}: Implements RDMA semantics over standard Ethernet. RoCEv2 encapsulates IB transport headers in UDP/IP packets. While it allows using multi-vendor Ethernet switches, it requires careful fabric engineering, including PFC, ECN, and workload-aware routing or admission control, to approximate the losslessness that IB provides natively [@guo2016rdma; @gangidi2024rdma].
+: **RDMA Transport Stack Trade-Offs**: InfiniBand and RoCE expose RDMA semantics through different operational contracts, one built around native losslessness and the other around Ethernet compatibility. {#tbl-network-fabrics-rdma-stacks tbl-colwidths="[20,30,25,25]"}
+
+| **Stack** | **Fabric behavior** | **Operational burden** | **Typical fit** |
+|:---|:---|:---|:---|
+| **InfiniBand (IB)**\index{InfiniBand}\index{IB|see{InfiniBand}}[^fn-infiniband-origin] | Purpose-built HPC switched fabric [@infiniband2000spec] with credit-based flow control, so losslessness is native at the link layer | Subnet Manager (SM)\index{Subnet Manager} and Virtual Lanes (VLs)\index{Virtual Lane} govern routing and traffic isolation | Dedicated training clusters where predictable tail latency outweighs Ethernet ecosystem flexibility |
+| **RoCE (RDMA over Converged Ethernet)**\index{RoCE} | RoCEv2 carries RDMA semantics by encapsulating InfiniBand transport headers in UDP/IP packets | Priority Flow Control (PFC), ECN, and workload-aware routing or admission control must approximate InfiniBand's native losslessness [@guo2016rdma; @gangidi2024rdma] | Multi-vendor Ethernet fleets that can absorb more congestion-control tuning |
 
 [^fn-infiniband-origin]: **InfiniBand**\index{InfiniBand!origin}: Formed in 1999 from the merger of two competing server I/O standards (Future I/O and NGIO), InfiniBand was originally designed to replace PCI as a general-purpose system interconnect. Its pivot to HPC networking preserved the credit-based, hardware-managed flow control that server I/O demanded---and this heritage is precisely why InfiniBand provides native losslessness without the PFC fragility that plagues Ethernet-based RDMA fabrics.
 
-@Fig-ib-roce-stack compares the two stacks, showing how RDMA-based protocols expose a user-space **Verbs API**\index{Verbs API} that bypasses the kernel's traditional TCP/IP stack.
+This stack choice is visible at the protocol boundary. @Fig-ib-roce-stack compares the two stacks, showing how RDMA-based protocols expose a user-space **Verbs API**\index{Verbs API} that bypasses the kernel's traditional TCP/IP stack.
 
 ::: {#fig-ib-roce-stack fig-env="figure" fig-pos="htb" fig-cap="**Traditional TCP/IP vs. RDMA/RoCE v2 Stacks**: Side-by-side comparison. Traditional TCP/IP (left) traverses application, OS kernel (context switch), Socket API, TCP/UDP, IP/Ethernet, and NIC, with latency of 10--20 μs and 2–3$\times$ CPU copies. RDMA/RoCE v2 (right) exposes a user-space Verbs API that bypasses the kernel, offloading transport to the RDMA NIC (GPUDirect reads GPU HBM directly), with latency of 1--3 μs and zero-copy CPU overhead." fig-alt="Two protocol stacks. Left Traditional TCP/IP: Application, OS Kernel, Socket, TCP/UDP, IP, NIC (10-20 μs, 2 to 3 copies). Right RDMA/RoCE v2: user-space Verbs API bypasses kernel to RDMA NIC with GPUDirect (1-3 μs, zero copy)."}
 
@@ -630,10 +644,7 @@ class NetworkAlphaBeta:
     small_speedup_mult_str = fmt_multiple(small_speedup, precision=1, commas=False)
 ```
 
-The model reveals two regimes:
-
-1. **Latency-dominated $(n < \alpha\beta)$**: Transfer time is dominated by the startup cost $\alpha$. Small control messages and pipeline bubbles fall here.
-2. **Bandwidth-dominated $(n > \alpha\beta)$**: Transfer time scales with $n/\beta$. Gradient AllReduce typically falls here.
+The model reveals two regimes that lead to different engineering responses. For messages with $n < \alpha\beta$, startup cost $\alpha$ dominates the transfer time; small control messages and pipeline bubbles fall in this latency-bound region. For messages with $n > \alpha\beta$, the $n/\beta$ term dominates; gradient AllReduce falls in this bandwidth-bound region.
 
 For NDR InfiniBand with $\alpha \approx$ `{python} NetworkAlphaBeta.ib_alpha_us_str` and $\beta \approx$ `{python} NetworkAlphaBeta.ib_beta_gb_per_s_str`, the crossover point $n^* = \alpha \cdot \beta \approx$ `{python} NetworkAlphaBeta.n_cross_ib_kb_str`. Messages smaller than this gain little from more bandwidth; messages larger than this gain little from lower latency. That crossover separates two fundamentally different optimization strategies: reducing hop count to lower $\alpha$, or adding link bandwidth to raise $\beta$. Applying the model to the concrete message sizes that our 175B training job generates on every iteration makes this distinction actionable.
 
@@ -1605,11 +1616,11 @@ class NetworkIncastClusterRecap:
 
 ML training is structurally susceptible to incast because of its synchronized communication patterns. When a layer finishes backward computation, thousands of nodes simultaneously initiate AllReduce, targeting the same switch ports. In our 175B model training across `{python} NetworkIncastClusterRecap.n_gpus_str`, each AllReduce involves every node injecting data simultaneously, creating a burst that can momentarily exceed the fabric's capacity at specific switch ports. Production clusters mitigate this through three complementary techniques:
 
-1. **Layer-staggering**\index{Incast!layer-staggering mitigation}: Triggering each gradient bucket's AllReduce as soon as backpropagation produces it. Final-layer gradients reduce while earlier layers are still computing, so communication is staggered instead of released as one burst.
-2. **Algorithm selection**\index{Incast!algorithm selection mitigation}: Choosing collectives that limit the fan-in at any single port. Hierarchical and rail-local reductions aggregate gradients in stages so that no switch port must absorb all senders at once, in contrast to a flat reduction in which every node targets one aggregation point. Bandwidth-optimal ring AllReduce is itself point-to-point and creates no single aggregation hotspot; the incast pressure comes from many such flows converging on oversubscribed ports, which topology-aware placement and rail-optimized wiring relieve.
-3. **Quality of Service (QoS) classification**\index{Quality of Service!priority traffic}: Tagging gradient traffic with the highest service class so background storage or management traffic does not delay the synchronization path.
+- **Layer-staggering**\index{Incast!layer-staggering mitigation}: Trigger each gradient bucket's AllReduce as soon as backpropagation produces it. Final-layer gradients reduce while earlier layers are still computing, so communication is staggered instead of released as one burst.
+- **Algorithm selection**\index{Incast!algorithm selection mitigation}: Choose collectives that limit the fan-in at any single port. Hierarchical and rail-local reductions aggregate gradients in stages so that no switch port must absorb all senders at once, in contrast to a flat reduction in which every node targets one aggregation point. Bandwidth-optimal ring AllReduce is itself point-to-point and creates no single aggregation hotspot; the incast pressure comes from many such flows converging on oversubscribed ports, which topology-aware placement and rail-optimized wiring relieve.
+- **Quality of Service (QoS) classification**\index{Quality of Service!priority traffic}: Tag gradient traffic with the highest service class so background storage or management traffic does not delay the synchronization path.
 
-Real fabrics have congestion and tail latency; the question becomes how to build end-to-end clusters that perform despite these realities.
+Together, these mitigations spread the burst in time, space, and priority, but they do not eliminate congestion or tail latency. The question becomes how to build end-to-end clusters that perform despite these realities.
 
 ## Level 5: Cluster Design and Case Studies {#sec-network-fabrics-cluster}
 
@@ -1884,7 +1895,13 @@ The 224 Gb/s-per-lane class pushes copper even harder. At 224 Gb/s, the SerDes p
 
 Co-packaged optics (CPO)\index{Optical Interconnect!co-packaged optics} addresses these limitations by integrating optical transceivers directly into the switch or accelerator package, rather than placing them at the end of a pluggable cable module. In CPO, a silicon photonics chip sits on the same package substrate as the processor, converting electrical signals to light at the die boundary. The optical signal then travels through a fiber at the speed of light, with negligible attenuation over distances of tens of meters, and is converted back to electrical at the receiving package.
 
-CPO changes the link budget in three ways. First, the electrical signal path from the SerDes to the optical transceiver is reduced from centimeters (in a pluggable module at the faceplate of a switch) to millimeters (on the package substrate), reducing the power consumed by electrical signal conditioning. Second, optical fiber has no distance-dependent bandwidth degradation over data center-relevant distances (up to 100 meters), eliminating the need for retimers and enabling more flexible physical layouts. Third, fiber is lighter and thinner than copper cables, dramatically simplifying the cable management challenge in dense racks.
+CPO changes the link budget through three independent physical effects:
+
+- **Shorter electrical path**: Moving the optical transceiver from the switch faceplate to the package substrate reduces the SerDes-to-optics path from centimeters to millimeters, lowering the power consumed by electrical signal conditioning.
+- **Distance-stable bandwidth**: Optical fiber has no distance-dependent bandwidth degradation over data center-relevant distances up to 100 meters, eliminating retimers and enabling more flexible physical layouts.
+- **Lighter cable plant**: Fiber is lighter and thinner than copper cables, simplifying cable management in dense racks.
+
+Together, these effects shift the fabric from a copper-limited layout problem toward an optics-limited packaging and power problem.
 
 A quick estimate makes the power dividend concrete.
 
