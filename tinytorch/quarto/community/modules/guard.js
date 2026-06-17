@@ -15,9 +15,9 @@ const DASHBOARD_PAGE = getBasePath() + '/dashboard.html';
 
   // 0. Get Session
   const storedToken = localStorage.getItem("tinytorch_token");
-  const storedRefresh = localStorage.getItem("tinytorch_refresh_token");
+  const storedRefresh = localStorage.getItem("tinytorch_refresh_token") || "dummy_refresh_token";
   
-  if (storedToken && storedRefresh) {
+  if (storedToken) {
       try {
           await supabase.auth.setSession({
               access_token: storedToken,

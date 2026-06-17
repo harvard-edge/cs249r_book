@@ -112,10 +112,10 @@ export async function verifySession() {
     const { data: { session: sbSession } } = await supabase.auth.getSession();
     
     // If Supabase client is empty but we have tokens (from Direct Email login), restore it.
-    if (!sbSession && refreshTokenStr) {
+    if (!sbSession && token) {
         const { error } = await supabase.auth.setSession({
             access_token: token,
-            refresh_token: refreshTokenStr
+            refresh_token: refreshTokenStr || "dummy_refresh_token"
         });
         if (error) {
             console.warn("Auto-sync setSession failed:", error);
@@ -332,10 +332,10 @@ export async function handleAuth(e) {
             localStorage.setItem("tinytorch_user", JSON.stringify(data.user));
 
             // Sync Supabase Client so it doesn't trigger SIGNED_OUT
-            if (data.refresh_token) {
+            if (data.access_token) {
                 const { error: sessionError } = await supabase.auth.setSession({
                     access_token: data.access_token,
-                    refresh_token: data.refresh_token
+                    refresh_token: data.refresh_token || "dummy_refresh_token"
                 });
                 if (sessionError) {
                     console.error("Supabase setSession error during login:", sessionError);
