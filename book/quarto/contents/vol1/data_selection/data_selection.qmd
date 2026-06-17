@@ -283,11 +283,7 @@ The gap between what compute can process and what accessible, high-quality data 
 
 The compute-data asymmetry can invert the optimization priority. When *data* is abundant and *compute* is scarce, the highest-leverage strategy is often algorithmic efficiency: squeeze more accuracy from limited GPU cycles. When *compute* is abundant and *quality data* is scarce, the highest-leverage strategy becomes data selection: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware, directly shrinking the total operations $(O)$ term in the iron law. That is why the systems perspective treats selection as upstream workload reduction rather than a modeling heuristic. For teams whose accelerator budget exceeds their curated corpus, the bottleneck shifts from GPU access to the quality, legality, and diversity of the training data.
 
-The engineering toolkit for intelligent data selection follows a deliberate optimization ordering\index{Data Selection!optimization ordering}: first ask whether a sample is worth processing, then ask how to process the remaining workload efficiently. Data selection puts the "largest return first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. The highest-return move comes first: static pruning removes low-value samples before a single gradient is computed, dynamic selection adapts the data diet during training, and synthetic generation fills gaps when real data runs short.
-
-1. **Static pruning**\index{Static Pruning!definition} removes low-value samples before training begins through coreset construction and deduplication.
-2. **Dynamic selection**\index{Dynamic Selection!definition} selects high-value samples during training through curriculum learning and active learning.
-3. **Synthetic generation**\index{Synthetic Data Generation!definition} creates high-value samples on demand through augmentation, simulation, or teacher-generated examples.
+The engineering toolkit for intelligent data selection follows a deliberate optimization ordering\index{Data Selection!optimization ordering}: first ask whether a sample is worth processing, then ask how to process the remaining workload efficiently. Data selection puts the "largest return first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. The highest-return move comes first. Static pruning\index{Static Pruning!definition} removes low-value samples before a single gradient is computed. Dynamic selection\index{Dynamic Selection!definition} adapts the data diet during training through curriculum learning and active learning. Synthetic generation\index{Synthetic Data Generation!definition} creates high-value samples through augmentation, simulation, or teacher-generated examples when real data runs short.
 
 Each stage increases the information density of the data that reaches the model, and together they form a complementary toolkit: pruning reduces *what* the pipeline contains, selection focuses *how* the pipeline uses it, and synthesis expands *what* the pipeline can access. Before examining these techniques, we must formalize *what* "data selection" means, *why* it is inherently a systems problem, and *how* to measure its effectiveness.
 
@@ -347,7 +343,13 @@ class ComputeDataGap:
     cluster_cost_m_str = fmt_usd(cluster_cost, precision=1, commas=False, scale="M")
 ```
 
-The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{python} ComputeDataGap.training_months_str`) represents roughly `{python} ComputeDataGap.cluster_cost_m_str` at the chapter's cloud-training price anchor and can process about `{python} ComputeDataGap.tokens_capacity_str` at `{python} ComputeDataGap.sustained_mfu_pct_str` sustained MFU. Estimates of quality- and repetition-adjusted public human-generated text are on the order of `{python} ComputeDataGap.public_text_stock_str`, far larger than a single curated web corpus. The practical bottleneck is narrower: how much of that stock is accessible, legally usable, high quality, deduplicated, and useful for the target distribution. If a team has only a `{python} ComputeDataGap.filtered_corpus_tokens_str` filtered corpus ready for use, the compute budget can already process it roughly `{python} ComputeDataGap.corpus_reuse_ratio_mult_str` over. The team faces three options: train on the same data for multiple epochs (diminishing returns after epochs 2--3), lower quality thresholds to include more data (which can degrade model quality), or invest in data selection through better filtering, curriculum design, and synthetic augmentation to extract more learning from each token. Under these assumptions, the decision criterion favors selection over simply buying more accelerator time.
+The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{python} ComputeDataGap.training_months_str`) represents roughly `{python} ComputeDataGap.cluster_cost_m_str` at the chapter's cloud-training price anchor and can process about `{python} ComputeDataGap.tokens_capacity_str` at `{python} ComputeDataGap.sustained_mfu_pct_str` sustained MFU. Estimates of quality- and repetition-adjusted public human-generated text are on the order of `{python} ComputeDataGap.public_text_stock_str`, far larger than a single curated web corpus. The practical bottleneck is narrower: how much of that stock is accessible, legally usable, high quality, deduplicated, and useful for the target distribution. If a team has only a `{python} ComputeDataGap.filtered_corpus_tokens_str` filtered corpus ready for use, the compute budget can already process it roughly `{python} ComputeDataGap.corpus_reuse_ratio_mult_str` over. At that point, the team faces three options:
+
+- **Repeat epochs**: The team can train on the same data for multiple epochs, but returns usually diminish after epochs 2--3.
+- **Lower quality thresholds**: The team can include more data, but lower-quality tokens can degrade model quality.
+- **Invest in data selection**: The team can improve filtering, curriculum design, and synthetic augmentation to extract more learning from each token.
+
+Under these assumptions, the decision criterion favors selection over simply buying more accelerator time.
 
 The data selection imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are memory bandwidth-bound during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs. Because data selection benefits every architecture regardless of its dominant bottleneck, the appropriate framing is systemic rather than purely statistical.
 
@@ -428,11 +430,7 @@ class IronLawSavings:
 
 ::: {#psp-data-selection-data-selection-iron-law .callout-perspective title="Data selection and the iron law"}
 
-In the iron law of ML systems $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, data selection is the only technique that reduces the total operations term at its source. Later model-level optimizations can reduce operations per sample, and machine-level optimizations can increase throughput per operation. Data selection, by contrast, reduces the number of samples processed entirely.
-
-- **Model-level optimization**: Reduces $O$ per forward/backward pass
-- **Machine-level optimization**: Increases $R_{\text{peak}}$ (peak throughput) and $\eta_{\text{hw}}$ (utilization)
-- **Data selection**: Reduces the number of passes through the entire equation
+In the iron law of ML systems $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, data selection is the only technique that reduces the total operations term at its source. Later model-level optimizations reduce $O$ per forward/backward pass, and machine-level optimizations increase $R_{\text{peak}}$ (peak throughput) and $\eta_{\text{hw}}$ (utilization). Data selection, by contrast, reduces the number of passes through the entire equation.
 
 This makes data selection multiplicatively valuable in the iron law\index{Iron Law!multiplicative savings from data selection}: when all three optimization layers act on the same bottleneck, a `{python} IronLawSavings.factor_data_mult_str` reduction in dataset size with `{python} IronLawSavings.factor_model_mult_str` fewer operations per sample and `{python} IronLawSavings.factor_hw_mult_str` higher effective throughput yields `{python} IronLawSavings.combined_factor_mult_str` total cost reduction, not `{python} IronLawSavings.additive_sum_mult_str`.
 
@@ -1848,16 +1846,16 @@ class ActiveLearningRoi:
 
 **Scenario A: Naive Labeling**
 
-1.  **Cost**: Labeling all `{python} ActiveLearningRoi.n_unlabeled_str` scans would cost `{python} ActiveLearningRoi.cost_all_str` (`{python} ActiveLearningRoi.over_budget_ratio_mult_str` over budget).
-2.  **Time**: The budget only covers labeling `{python} ActiveLearningRoi.n_random_str` random scans.
-3.  **Naive labeling outcome**: The model misses rare pathologies because they were not in the random `{python} ActiveLearningRoi.n_random_pct_str`.
+- **Cost**: Labeling all `{python} ActiveLearningRoi.n_unlabeled_str` scans would cost `{python} ActiveLearningRoi.cost_all_str` (`{python} ActiveLearningRoi.over_budget_ratio_mult_str` over budget).
+- **Time**: The budget only covers labeling `{python} ActiveLearningRoi.n_random_str` random scans.
+- **Naive labeling outcome**: The model misses rare pathologies because they were not in the random `{python} ActiveLearningRoi.n_random_pct_str`.
 
 **Scenario B: Active Learning**
 
-1.  **Strategy**: Use an uncertainty-based selection to pick the `{python} ActiveLearningRoi.n_active_str` "hardest" scans for the doctor to label.
-2.  **Cost**: `{python} ActiveLearningRoi.n_active_str` $\times$ `{python} ActiveLearningRoi.cost_per_label_str` = `{python} ActiveLearningRoi.cost_active_str`. (`{python} ActiveLearningRoi.cost_active_pct_str` under budget).
-3.  **Training speed**: With `{python} ActiveLearningRoi.speedup_mult_str` less data, each training epoch is `{python} ActiveLearningRoi.speedup_mult_str` faster.
-4.  **Active learning outcome**: Empirical studies suggest that these `{python} ActiveLearningRoi.n_active_str` "high-information" samples often achieve higher accuracy than `{python} ActiveLearningRoi.n_random_str` random samples.
+- **Strategy**: The team uses uncertainty-based selection to pick the `{python} ActiveLearningRoi.n_active_str` "hardest" scans for the doctor to label.
+- **Cost**: `{python} ActiveLearningRoi.n_active_str` $\times$ `{python} ActiveLearningRoi.cost_per_label_str` = `{python} ActiveLearningRoi.cost_active_str`. (`{python} ActiveLearningRoi.cost_active_pct_str` under budget).
+- **Training speed**: With `{python} ActiveLearningRoi.speedup_mult_str` less data, each training epoch is `{python} ActiveLearningRoi.speedup_mult_str` faster.
+- **Active learning outcome**: Empirical studies suggest that these `{python} ActiveLearningRoi.n_active_str` "high-information" samples often achieve higher accuracy than `{python} ActiveLearningRoi.n_random_str` random samples.
 
 **Systems insight**: Data selection functions as a `{python} ActiveLearningRoi.speedup_mult_str` compute accelerator and a `{python} ActiveLearningRoi.cost_saving_str` cost-saving measure, delivering gains that compound with every training iteration.
 
@@ -2427,7 +2425,13 @@ The solution is aggressive augmentation. MobileNetV2 training typically uses str
 
 ### Generative synthesis: Creating new samples {#sec-data-selection-generative-synthesis-creating-new-samples-a43d}
 
-Augmentation transforms existing samples; synthetic data generation goes further by creating entirely new examples using generative models. This capability becomes essential in three common scenarios: when real data is privacy-sensitive (as with medical records or financial transactions), when edge cases are rare (such as autonomous driving failure scenarios that must be covered but seldom occur), or when data collection is prohibitively expensive (as in robotics or scientific experiments where each sample requires physical resources). The distribution sketch in @fig-domain-gap shows the central risk of that strategy: synthetic examples can be plentiful and still misaligned with deployment data.
+Augmentation transforms existing samples; synthetic data generation goes further by creating entirely new examples using generative models. This capability becomes essential in three common scenarios:
+
+- **Privacy-sensitive data**: Synthetic examples can reduce exposure when real records contain medical, financial, or otherwise sensitive information.
+- **Rare edge cases**: Synthetic examples can cover failure modes, such as autonomous driving scenarios, that must be tested but seldom occur naturally.
+- **Expensive collection**: Synthetic examples can supplement domains such as robotics or scientific experiments where each real sample requires physical resources.
+
+The distribution sketch in @fig-domain-gap shows the central risk of that strategy: synthetic examples can be plentiful and still misaligned with deployment data.
 
 ::: {#fig-domain-gap fig-env="figure" fig-pos="htb" fig-cap="**The Domain Gap Problem**: Synthetic data (blue) and real data (orange) have different distributions. A model trained on synthetic data alone learns a boundary that fails on real data. Domain adaptation techniques aim to align these distributions or learn domain-invariant features." fig-alt="Two overlapping bell curves representing synthetic and real data distributions, with a decision boundary that works for synthetic but misses real data."}
 
@@ -2712,7 +2716,13 @@ Each path requires a structured assessment because the same dataset symptom can 
 
 #### Step 1: Assess the bottleneck {.unnumbered}
 
-Identify which resource constraint most severely limits the training pipeline. If labeling cost dominates the budget, consider label efficiency techniques such as Active Learning, Semi-Supervised, or Self-Supervised learning. These methods maximize the value extracted from each human annotation. When compute cost is the primary concern, prioritize dataset reduction through Coreset selection, Deduplication, and Curriculum Learning, all of which reduce the number of training iterations required. If data scarcity is the primary problem, pursue data creation through Augmentation, Synthesis, and Distillation to expand the effective training set beyond what raw collection provides.
+Identify which resource constraint most severely limits the training pipeline:
+
+- **Labeling cost**: Label-efficiency techniques such as Active Learning, Semi-Supervised learning, and Self-Supervised learning maximize the value extracted from each human annotation.
+- **Compute cost**: Dataset reduction through Coreset selection, Deduplication, and Curriculum Learning reduces the number of training iterations required.
+- **Data scarcity**: Data creation through Augmentation, Synthesis, and Distillation expands the effective training set beyond what raw collection provides.
+
+This diagnostic step keeps technique selection tied to the binding resource constraint rather than to the most familiar algorithm.
 
 #### Step 2: Check prerequisites {.unnumbered}
 
@@ -3480,7 +3490,13 @@ class DeduplicationAmortization:
 
 : **Amortized ROI over Multiple Training Runs**: A deduplication pipeline that loses money on its first use becomes highly profitable when amortized across ten-plus runs, illustrating why infrastructure investments should be evaluated over their full expected lifetime. {#tbl-amortized-roi .striped .hover}
 
-The amortization pattern reveals which circumstances favor infrastructure investment. Data selection investments deliver the highest returns under three conditions: training runs repeat frequently (hyperparameter search, model iterations, or scheduled retraining); datasets are shared across multiple teams or model architectures; and the technique generalizes broadly. Deduplication exemplifies a high-transfer investment because it benefits all models trained on the cleaned dataset. Task-specific coresets, by contrast, may not transfer across architectures, limiting their amortization potential. For one-off training runs, simple techniques like random sampling or basic augmentation often yield better ROI than sophisticated methods requiring substantial infrastructure investment.
+The ROI pattern in @tbl-amortized-roi reveals which circumstances favor infrastructure investment. Data selection investments deliver the highest returns under three conditions:
+
+- **Repeated training runs**: Hyperparameter search, model iterations, and scheduled retraining reuse the same selection infrastructure many times.
+- **Shared datasets**: A cleaned or deduplicated corpus can support multiple teams or model architectures.
+- **Broadly reusable techniques**: Methods such as deduplication transfer across models, whereas task-specific coresets may not.
+
+Deduplication exemplifies a high-transfer investment because it benefits all models trained on the cleaned dataset. Task-specific coresets, by contrast, may not transfer across architectures, limiting their amortization potential. For one-off training runs, simple techniques like random sampling or basic augmentation often yield better ROI than sophisticated methods requiring substantial infrastructure investment.
 
 The investment decision therefore reduces to a practical split between high-reuse, data-limited workflows and one-off, already-curated ones.
 
@@ -3560,7 +3576,13 @@ When even hierarchical approaches prove too expensive, approximate global select
 
 The approximate selection strategies assume static selection criteria, but active learning introduces an additional complication: the model changes during selection. Consider what happens when Worker A scores samples using the model at step $t$ while Worker B simultaneously updates the model to step $t+1$. Worker A's scores are now stale and may select samples that the updated model would rank differently.
 
-Several strategies mitigate this staleness problem, each with distinct overhead characteristics. Synchronous scoring\index{Synchronous Scoring!active learning} forces all workers to pause training and score simultaneously, guaranteeing consistency but at substantial cost in GPU utilization. Periodic score refresh\index{Periodic Score Refresh!active learning} offers a middle ground by re-scoring every $k$ epochs rather than every batch, trading freshness for reduced overhead. The most robust approach selects samples that exhibit high uncertainty under multiple model checkpoints, ensuring that selection decisions remain valid even as the model evolves. A distributed coreset scenario shows how these strategies combine in practice.
+Several strategies mitigate this staleness problem, each with distinct overhead characteristics:
+
+- **Synchronous scoring**\index{Synchronous Scoring!active learning}: All workers pause training and score simultaneously, guaranteeing consistency but at substantial cost in GPU utilization.
+- **Periodic score refresh**\index{Periodic Score Refresh!active learning}: Workers re-score every $k$ epochs rather than every batch, trading freshness for reduced overhead.
+- **Checkpoint-robust selection**: The system selects samples that exhibit high uncertainty under multiple model checkpoints, keeping selection decisions valid as the model evolves.
+
+A distributed coreset scenario shows how these strategies combine in practice.
 
 ```{python}
 #| echo: false
