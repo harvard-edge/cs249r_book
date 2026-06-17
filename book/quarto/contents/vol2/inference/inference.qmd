@@ -1946,7 +1946,7 @@ Is it autoregressive text generation?
                 └─ No → Dynamic batching with adaptive parameters
 ```
 
-@Tbl-batching-parameters summarizes the key tuning parameters for each strategy:
+The decision tree selects the batching family; @tbl-batching-parameters identifies the parameter that each strategy exposes and the tuning goal that keeps that choice aligned with the serving bottleneck.
 
 | **Strategy**         |   **Key Parameters**  | **Tuning Goal**                  |
 |:---------------------|:---------------------:|:---------------------------------|
@@ -3409,9 +3409,11 @@ The communication pattern differs from tensor parallelism: instead of all-reduce
 
 This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
 
-1.  **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
-2.  Capacity factor\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
-3.  **Expert buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
+- **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
+- **Capacity factor**\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
+- **Expert buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
+
+These mechanisms keep expert utilization balanced enough that routing remains a throughput advantage instead of a new straggler source.
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
@@ -4284,12 +4286,7 @@ The choice of load balancing algorithm has quantitative impact on system perform
 
 : **Load Balancing Algorithm Comparison**: More sophisticated algorithms reduce queue lengths and latency at the cost of increased overhead. {#tbl-lb-comparison}
 
-The progression shows clear trade-offs:
-
-- Random/round-robin: Zero overhead but higher latency variance
-- Two-choices: Minimal overhead (2 probes), 47 percent latency improvement
-- Least-connections: State maintenance overhead, 58 percent latency improvement
-- Combined: Best performance, highest complexity
+@Tbl-lb-comparison shows the familiar serving trade-off: random and round-robin routing keep CPU overhead near zero but leave longer queues and higher latency variance; two-choices roughly halves p99 latency with only two probes per request; least-connections improves further when request cost varies but requires global state; and combining two-choices with least-connections produces the shortest queues at the highest implementation complexity.
 
 For many serving systems, two-choices provides a strong trade-off between performance improvement and implementation complexity. Least-connections adds value for workloads with high request size variance (LLM serving, recommendation ranking).
 
@@ -5247,10 +5244,7 @@ Quantization reduces numerical precision of model weights and activations, decre
 
 Large language models present unique quantization challenges distinct from vision or recommendation models. The outlier activation problem occurs because certain attention heads produce activation magnitudes orders of magnitude larger than typical values. Naive quantization clips these outliers, causing significant quality degradation.
 
-Consider a large language-model layer where most activation values are modest but specific channels produce much larger outliers [@xiao2023smoothquant]. Symmetric INT8 quantization with range [-127, 127] must choose:
-
-- **Wide range**: Most typical values collapse into a small number of bins, losing information
-- **Narrow range**: Outliers clip, causing large errors
+Consider a large language-model layer where most activation values are modest but specific channels produce much larger outliers [@xiao2023smoothquant]. Symmetric INT8 quantization with range [-127, 127] has no painless scale choice: a wide range preserves outliers but collapses typical values into too few bins, while a narrow range preserves resolution for typical values but clips outliers and introduces large errors.
 
 The outlier distribution explains why the specialized methods that follow differ: each one protects a different part of the serving contract.
 
