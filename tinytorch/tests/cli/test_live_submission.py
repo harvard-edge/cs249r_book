@@ -17,7 +17,6 @@ import json
 import urllib.request
 import urllib.error
 import pytest
-from unittest.mock import patch
 from pathlib import Path
 import sys
 

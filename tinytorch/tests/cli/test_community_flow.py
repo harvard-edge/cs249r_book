@@ -7,7 +7,6 @@ These tests validate:
 3. Execution of progress syncing POST requests with mock servers.
 """
 
-import os
 import json
 import pytest
 from unittest.mock import MagicMock, patch
@@ -19,7 +18,6 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tito.core.config import CLIConfig
 from tito.core.submission import SubmissionHandler
-from tito.core import auth
 
 
 class TestCommunitySyncFlow:

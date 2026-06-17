@@ -112,7 +112,7 @@ export async function verifySession() {
     const { data: { session: sbSession } } = await supabase.auth.getSession();
     
     // If Supabase client is empty but we have tokens (from Direct Email login), restore it.
-    if (!sbSession && token) {
+    if (!sbSession) {
         const { error } = await supabase.auth.setSession({
             access_token: token,
             refresh_token: refreshTokenStr || "dummy_refresh_token"
