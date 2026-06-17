@@ -1982,10 +1982,7 @@ nodes near coords={\pgfmathprintnumber{\pgfplotspointmeta}\%},
 
 :::
 
-The distillation workflow, laid out in @fig-kd-overview, trains the student model to minimize two loss functions:
-
-1.  **Distillation Loss**\index{Knowledge Distillation!distillation loss}: Typically the Kullback-Leibler (KL) divergence\index{Kullback-Leibler Divergence}[^fn-kl-divergence-distillation] between the teacher's softened output distribution and the student's distribution.
-2.  **Student Loss**\index{Knowledge Distillation!student loss}: Standard cross-entropy loss against the ground-truth hard labels.
+The distillation workflow, laid out in @fig-kd-overview, trains the student model to minimize two loss functions. The distillation loss\index{Knowledge Distillation!distillation loss} is typically the Kullback-Leibler (KL) divergence\index{Kullback-Leibler Divergence}[^fn-kl-divergence-distillation] between the teacher's softened output distribution and the student's distribution, while the student loss\index{Knowledge Distillation!student loss} is the standard cross-entropy loss against the ground-truth hard labels.
 
 Operationally, the workflow has four decisions before training begins: choose a teacher with the desired behavior, choose a student whose dense architecture fits the deployment target, run the teacher on calibration or task data to produce soft targets, and select the temperature and loss weight that balance teacher imitation against the hard labels. The validation step then checks more than accuracy. A successful distilled model must preserve calibration, subgroup behavior, and latency on the target hardware, because the student can inherit the teacher's errors as easily as its useful uncertainty.
 
@@ -3036,12 +3033,7 @@ class EnergyDividend:
 
 The memory reduction of quantization is often the primary motivation, but the **Energy Dividend**\index{Energy Dividend!quantization efficiency} is the most significant systems consequence. While moving from FP32 to INT8 precision reduces the model's footprint by exactly 4$\times$, the energy required to perform the math drops much more precipitously.
 
-The framework section's energy hierarchy already exposed this asymmetry; here it becomes the dividend. Consider the energy per operation $(E_{\text{op}})$ for an addition, the backbone of the accumulators in matrix multiplication:
-
-*   **FP32 Addition**: Requires `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`.
-*   **INT8 Addition**: Requires `{python} EnergyDividend.energy_add_int8_pj_per_op_str`.
-
-The resulting efficiency gain is `{python} EnergyDividend.energy_dividend_factor_mult_str`. We call this the "Dividend" because the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, quantization is often mandatory to stay within the power envelope even if a model could fit in memory at higher precision. This disparity reinforces why the machine axis of the D·A·M taxonomy has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware.
+The framework section's energy hierarchy already exposed this asymmetry; here it becomes the dividend. Consider the energy per operation $(E_{\text{op}})$ for an addition, the backbone of the accumulators in matrix multiplication. An FP32 addition requires `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition requires only `{python} EnergyDividend.energy_add_int8_pj_per_op_str`. The resulting efficiency gain is `{python} EnergyDividend.energy_dividend_factor_mult_str`. We call this the "Dividend" because the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, quantization is often mandatory to stay within the power envelope even if a model could fit in memory at higher precision. This disparity reinforces why the machine axis of the D·A·M taxonomy has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware.
 
 ::: {.column-margin}
 ```{=latex}
@@ -4597,12 +4589,16 @@ Box/.style={inner xsep=2pt,
 
 :::
 
-Quantization granularity\index{Quantization!granularity} is the control knob that trades calibration overhead for accuracy: fewer shared ranges are cheaper, while more local ranges preserve more information when channels differ. Granularity spans four levels:
+Quantization granularity\index{Quantization!granularity} is the control knob that trades calibration overhead for accuracy: fewer shared ranges are cheaper, while more local ranges preserve more information when channels differ. The four levels run from one shared range per layer to a separate range within each filter, trading rising overhead for rising precision, as @tbl-quantization-granularity summarizes.
 
-- **Layerwise**\index{Quantization!layerwise}: One range per layer. Simple but suboptimal when filter ranges vary widely.
-- **Groupwise**\index{Quantization!groupwise}: Filters grouped with shared ranges. Used in Q-BERT [@shen2020] for transformer attention layers.
-- **Channelwise**\index{Quantization!channelwise}: One range per filter. The current standard, balancing accuracy and efficiency.
-- **Sub-channelwise**\index{Quantization!sub-channelwise}: Ranges within each filter. Maximum precision but significant overhead.
+| **Level**                                           | **Range sharing**                  | **Trade-off**                                               |
+|:----------------------------------------------------|:-----------------------------------|:------------------------------------------------------------|
+| Layerwise\index{Quantization!layerwise}             | One range per layer                | Simple but suboptimal when filter ranges vary widely        |
+| Groupwise\index{Quantization!groupwise}             | Filters grouped with shared ranges | Used in Q-BERT [@shen2020] for transformer attention layers |
+| Channelwise\index{Quantization!channelwise}         | One range per filter               | The current standard, balancing accuracy and efficiency     |
+| Sub-channelwise\index{Quantization!sub-channelwise} | Ranges within each filter          | Maximum precision but significant overhead                  |
+
+: **Quantization Granularity Levels**: Granularity trades calibration overhead for accuracy, from a single per-layer range to per-filter sub-ranges. {#tbl-quantization-granularity tbl-colwidths="[22,33,45]"}
 
 Channelwise quantization has become the dominant approach, providing significant accuracy improvements over layerwise quantization with minimal computational overhead.
 
@@ -5260,12 +5256,16 @@ class V100Specs:
 
 On a V100 GPU with `{python} V100Specs.v100_bw_gb_per_s_str` HBM bandwidth and `{python} V100Specs.v100_fp32_tflop_per_s_str` FP32 compute, the unfused sequence takes approximately `{python} FusionCalc.unfused_time_us_str` (memory bound), while the fused version takes approximately `{python} FusionCalc.fused_time_us_str` (`{python} FusionCalc.fusion_speedup_mult_str` speedup). The speedup comes entirely from reducing memory traffic, as the compute remains identical.
 
-Fusion effectiveness varies by workload: memory-bound operations benefit most, while compute-bound operations see minimal improvement.
+Fusion effectiveness varies by workload, as @tbl-fusion-speedup shows: memory-bound operations benefit most, while compute-bound operations see minimal improvement.
 
-- **Element-wise operations**: 2--4$\times$ speedup (highly memory bound, low arithmetic intensity)
-- **Conv-BN-Act patterns**: 1.5--2$\times$ speedup (mixed memory/compute characteristics)
-- **GEMM-based operations**: 1.2--1.5$\times$ speedup (compute bound, fusion reduces memory-bound tail)
-- **Attention mechanisms**: 2--4$\times$ speedup on long sequences (quadratic memory scaling)
+| **Workload**            |   **Speedup**    | **Why**                                             |
+|:------------------------|:----------------:|:----------------------------------------------------|
+| Element-wise operations |   2--4$\times$   | Highly memory bound, low arithmetic intensity       |
+| Conv-BN-Act patterns    |  1.5--2$\times$  | Mixed memory/compute characteristics                |
+| GEMM-based operations   | 1.2--1.5$\times$ | Compute bound; fusion reduces the memory-bound tail |
+| Attention mechanisms    |   2--4$\times$   | Long sequences; quadratic memory scaling            |
+
+: **Operator Fusion Speedup by Workload**: Memory-bound workloads gain most from fusion, while compute-bound workloads see only marginal improvement. {#tbl-fusion-speedup tbl-colwidths="[34,18,48]"}
 
 Fusion also reduces kernel launch overhead. Each CUDA kernel launch incurs microsecond-scale latency. For a ResNet-50 with fifty-three convolutional layers, unfused execution launches `{python} FusionCalc.kernels_unfused_str` kernels (Conv + BN + ReLU), while fused execution launches `{python} FusionCalc.kernels_fused_str` kernels, saving repeated launch overhead in addition to memory traffic.
 
