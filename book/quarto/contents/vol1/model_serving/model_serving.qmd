@@ -2279,12 +2279,7 @@ class BatchingTax:
 
 While Little's Law relates queue depth to throughput, it does not account for the **Batching Tax**\index{Batching!tax, latency penalty}: the deliberate delay introduced to maximize hardware utilization. In the tradition of quantitative systems, we analyze this as a queuing delay problem.
 
-When an inference server batches requests, it introduces two distinct sources of latency:
-
-1.  **Batch formation delay $(L_{\text{lat,form}})$**\index{Batching!batch formation delay, definition}: The time the first request in a batch waits for the last request to arrive.
-2.  **Inference inflation**\index{Inference Inflation!definition}: The growth in inference time $T_{\text{inf}}(B)$ when the GPU processes $B$ samples instead of 1.
-
-The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} is the set of configurations where one cannot improve throughput without paying a "tax" in increased latency. We can quantify the total batched-request latency for a batch size $B$ and arrival rate $\lambda_{\text{arr}}$ as @eq-batching-tax:
+When an inference server batches requests, it introduces two distinct sources of latency. Batch formation delay $(L_{\text{lat,form}})$\index{Batching!batch formation delay, definition} is the time the first request in a batch waits for the last request to arrive. Inference inflation\index{Inference Inflation!definition} is the growth in inference time $T_{\text{inf}}(B)$ when the GPU processes $B$ samples instead of 1. The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} is the set of configurations where one cannot improve throughput without paying a "tax" in increased latency. We can quantify the total batched-request latency for a batch size $B$ and arrival rate $\lambda_{\text{arr}}$ as @eq-batching-tax:
 $$ L_{\text{lat,total}} \approx \underbrace{ \frac{B-1}{2\lambda_{\text{arr}}} }_{\text{Formation delay}} + \underbrace{ T_{\text{inf}}(B) }_{\text{Inference time}} $$ {#eq-batching-tax}
 
 This equation reveals the "cost of throughput." Increasing $B$ to saturate the GPU amortizes the hardware cost, but inflates the per-request latency. Concretely, at 500 QPS, moving from batch-1 to batch-32 increases wait-time from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, contributing to a `{python} BatchingTax.penalty_ratio_mult_str` total latency penalty (`{python} BatchingTax.lat_b1_ms_str` → `{python} BatchingTax.lat_b32_ms_str`). For a systems engineer, this tax is the primary regulator of economic efficiency: the engineer chooses the batch size that maximizes throughput (minimizing cost per query) without violating the latency SLO $(L_{\text{lat}})$.
@@ -3269,19 +3264,16 @@ class BatchingOptimization:
     latency_p99_increase_ms_str = fmt_time(round(s2_window - s1_window), 'millisecond', precision=0, commas=False)
 ```
 
-Scenario one: Conservative window ($T_{\text{window}}$ = `{python} BatchingOptimization.s1_window_ms_str`)
+Comparing a conservative batching window against an aggressive one isolates how the window choice trades wait time, inference budget, and throughput. @Tbl-batching-windows lays the two configurations side by side.
 
-- Average wait: `{python} BatchingOptimization.s1_wait_ms_str` (maximum wait = `{python} BatchingOptimization.s1_window_ms_str` for the first request in a window)
-- Latency budget for inference: `{python} BatchingOptimization.s1_budget_ms_str` (mean-latency planning; tail SLOs should budget the full window)
-- Memory cap: `{python} BatchingOptimization.s1_batch_str` (typical batch ≈ `{python} BatchingOptimization.s1_expected_batch_str` at this throughput)
-- Achieved throughput: ~`{python} BatchingOptimization.s1_throughput_img_per_s_str`
+| **Metric**                   | **Conservative ($T_{\text{window}}$ = `{python} BatchingOptimization.s1_window_ms_str`)**                                                      | **Aggressive ($T_{\text{window}}$ = `{python} BatchingOptimization.s2_window_ms_str`)**                              |
+|:-----------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------|
+| Average wait                 | `{python} BatchingOptimization.s1_wait_ms_str` (max wait = `{python} BatchingOptimization.s1_window_ms_str` for the first request in a window) | `{python} BatchingOptimization.s2_wait_ms_str`                                                                       |
+| Latency budget for inference | `{python} BatchingOptimization.s1_budget_ms_str` (mean-latency planning; tail SLOs should budget the full window)                              | `{python} BatchingOptimization.s2_budget_ms_str`                                                                     |
+| Batch size cap               | `{python} BatchingOptimization.s1_batch_str` (typical batch ≈ `{python} BatchingOptimization.s1_expected_batch_str`)                           | `{python} BatchingOptimization.s2_batch_str` (typical batch ≈ `{python} BatchingOptimization.s2_expected_batch_str`) |
+| Achieved throughput          | ~`{python} BatchingOptimization.s1_throughput_img_per_s_str`                                                                                   | ~`{python} BatchingOptimization.s2_throughput_img_per_s_str`                                                         |
 
-Scenario two: Aggressive window ($T_{\text{window}}$ = `{python} BatchingOptimization.s2_window_ms_str`)
-
-- Average wait: `{python} BatchingOptimization.s2_wait_ms_str`
-- Latency budget for inference: `{python} BatchingOptimization.s2_budget_ms_str`
-- Configured batch size cap: `{python} BatchingOptimization.s2_batch_str` (typical batch ≈ `{python} BatchingOptimization.s2_expected_batch_str` at this throughput)
-- Achieved throughput: ~`{python} BatchingOptimization.s2_throughput_img_per_s_str`
+: **Batching window trade-off**: How a conservative versus aggressive batching window trades average wait, inference budget, batch size, and throughput at fixed arrival rate. {#tbl-batching-windows tbl-colwidths="[28,36,36]"}
 
 The aggressive window achieves only `{python} BatchingOptimization.throughput_gain_pct_str` higher throughput but increases average latency by `{python} BatchingOptimization.latency_avg_increase_ms_str` and p99 latency by `{python} BatchingOptimization.latency_p99_increase_ms_str`. Examine @tbl-batching-throughput: for latency-sensitive applications, the conservative window provides better user experience at modest throughput cost.
 
@@ -3336,12 +3328,7 @@ class SloViolationCalc:
 
 Batch size variability causes SLO violations even when mean latency appears safe. The p99 latency includes both worst-case wait time (full window) and worst-case batch size (governed by Poisson tail). @Eq-p99-batch-latency captures this relationship:
 $$L_{\text{lat,p99}} \approx T_{\text{window}} + T_{\text{service}}(B_{\text{p99}})$$ {#eq-p99-batch-latency}
-where $B_{\text{p99}}$ is the 99th percentile batch size. For $\lambda_{\text{arr}}$ = `{python} SloViolationCalc.qps_str` and $T_{\text{window}}$ = `{python} SloViolationCalc.T_slo_ms_str`:
-
-- Mean batch size: `{python} SloViolationCalc.mean_batch_str`
-- p99 batch size: `{python} SloViolationCalc.p99_batch_str` (from Poisson distribution)
-- Mean latency: `{python} SloViolationCalc.mean_wait_ms_str` + `{python} SloViolationCalc.mean_service_ms_str` = `{python} SloViolationCalc.mean_latency_ms_str`
-- p99 latency: `{python} SloViolationCalc.T_slo_ms_str` + `{python} SloViolationCalc.p99_service_ms_str` = `{python} SloViolationCalc.p99_latency_ms_str`
+where $B_{\text{p99}}$ is the 99th percentile batch size. For $\lambda_{\text{arr}}$ = `{python} SloViolationCalc.qps_str` and $T_{\text{window}}$ = `{python} SloViolationCalc.T_slo_ms_str`, the mean batch size is `{python} SloViolationCalc.mean_batch_str` while the Poisson tail pushes the p99 batch size to `{python} SloViolationCalc.p99_batch_str`. That tail propagates into latency: the mean adds `{python} SloViolationCalc.mean_wait_ms_str` of wait to `{python} SloViolationCalc.mean_service_ms_str` of service for `{python} SloViolationCalc.mean_latency_ms_str`, whereas the p99 adds the full window of `{python} SloViolationCalc.T_slo_ms_str` to `{python} SloViolationCalc.p99_service_ms_str` of service for `{python} SloViolationCalc.p99_latency_ms_str`.
 
 The p99 latency is `{python} SloViolationCalc.p99_ratio_mult_str` the mean, reflecting both wait time variance and batch size variance. Systems that provision based on mean latency will experience SLO violations.
 
@@ -4965,25 +4952,15 @@ class LlmServingCalc:
     remaining_vram_gb_str = fmt_memory(remaining_vram, unit=GB, precision=0, commas=False)
 ```
 
-*   $T_{\text{token}} \approx$ `{python} LlmServingCalc.model_weight_gb_str` / `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` ≈ `{python} LlmServingCalc.token_time_theoretical_ms_str` (theoretical limit).
-*   In this scenario, accounting for kernel launch overhead, attention computation, and a conservative production safety margin, realized $T_{\text{token}}$ is approximately `{python} LlmServingCalc.realized_tpot_ms_str`.
-*   Total decode time: `{python} LlmServingCalc.decode_tokens_str` $\times$ `{python} LlmServingCalc.realized_tpot_ms_str` = `{python} LlmServingCalc.total_decode_s_str`.
-*   TPOT is `{python} LlmServingCalc.realized_tpot_ms_str`, well within the 20 ms "fluidity" SLO.
+Reading the `{python} LlmServingCalc.model_weight_gb_str` weight tensor at `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` sets the theoretical floor: $T_{\text{token}} \approx$ `{python} LlmServingCalc.token_time_theoretical_ms_str`. Accounting for kernel launch overhead, attention computation, and a conservative production safety margin, the realized $T_{\text{token}}$ is approximately `{python} LlmServingCalc.realized_tpot_ms_str`. Generating all `{python} LlmServingCalc.decode_tokens_str` therefore takes `{python} LlmServingCalc.decode_tokens_str` $\times$ `{python} LlmServingCalc.realized_tpot_ms_str` = `{python} LlmServingCalc.total_decode_s_str`, and the resulting TPOT of `{python} LlmServingCalc.realized_tpot_ms_str` sits well within the 20 ms "fluidity" SLO.
 
 #### Memory and throughput {#sec-model-serving-memory-throughput-63dd}
 
-With 4-bit weights occupying `{python} LlmServingCalc.model_weight_gb_str`, the remaining ~`{python} LlmServingCalc.remaining_vram_gb_str` is available for the KV Cache. Using PagedAttention, we can allocate this memory with near-zero fragmentation.
-
-*   Each token requires approximately `{python} LlmServingCalc.kv_per_token_mb_str` of INT4 KV cache in the 8-billion-parameter Llama 3 configuration (Grouped Query Attention reduces KV-head storage relative to full multi-head attention at FP16).
-*   Total cache capacity ≈ `{python} LlmServingCalc.kv_cache_gb_str` / `{python} LlmServingCalc.kv_per_token_mb_str` ≈ `{python} LlmServingCalc.kv_capacity_tokens_str`.
-*   At `{python} LlmServingCalc.tokens_per_req_str`, the GPU can handle a concurrent batch size of ~`{python} LlmServingCalc.concurrent_batch_str`.
+With 4-bit weights occupying `{python} LlmServingCalc.model_weight_gb_str`, the remaining ~`{python} LlmServingCalc.remaining_vram_gb_str` is available for the KV Cache, which PagedAttention allocates with near-zero fragmentation. Each token requires approximately `{python} LlmServingCalc.kv_per_token_mb_str` of INT4 KV cache in the 8-billion-parameter Llama 3 configuration, since Grouped Query Attention reduces KV-head storage relative to full multi-head attention at FP16. Dividing the `{python} LlmServingCalc.kv_cache_gb_str` of cache by that per-token cost yields capacity for ≈ `{python} LlmServingCalc.kv_capacity_tokens_str`, so at `{python} LlmServingCalc.tokens_per_req_str` the GPU can hold a concurrent batch size of ~`{python} LlmServingCalc.concurrent_batch_str`.
 
 #### Unit economics {#sec-model-serving-unit-economics-b685}
 
-For a representative H100 SXM5 rental cost of approximately `{python} LlmServingCalc.hourly_cost_str`:
-
-*   Prefill-limited admissions: `{python} LlmServingCalc.prefill_tokens_per_s_str` divided by `{python} LlmServingCalc.prompt_tokens_str` = `{python} LlmServingCalc.prefill_req_per_s_str`. This is below the KV-residency limit of `{python} LlmServingCalc.concurrent_batch_str` / `{python} LlmServingCalc.req_time_s_str` ≈ `{python} LlmServingCalc.decode_req_capacity_req_per_s_str`, so full-request throughput is `{python} LlmServingCalc.prefill_req_per_s_str` $\times$ `{python} LlmServingCalc.sec_per_hr_str` $\times$ `{python} LlmServingCalc.tokens_per_req_str` ≈ `{python} LlmServingCalc.m_tokens_per_hour_str`.
-*   **Cost per million tokens**: `{python} LlmServingCalc.hourly_cost_str` / `{python} LlmServingCalc.m_tokens_per_hour_str` ≈ `{python} LlmServingCalc.cost_per_million_tokens_usd_str`.
+Consider a representative H100 SXM5 rental cost of approximately `{python} LlmServingCalc.hourly_cost_str`. Prefill-limited admissions come to `{python} LlmServingCalc.prefill_tokens_per_s_str` divided by `{python} LlmServingCalc.prompt_tokens_str` = `{python} LlmServingCalc.prefill_req_per_s_str`. This is below the KV-residency limit of `{python} LlmServingCalc.concurrent_batch_str` / `{python} LlmServingCalc.req_time_s_str` ≈ `{python} LlmServingCalc.decode_req_capacity_req_per_s_str`, so full-request throughput is `{python} LlmServingCalc.prefill_req_per_s_str` $\times$ `{python} LlmServingCalc.sec_per_hr_str` $\times$ `{python} LlmServingCalc.tokens_per_req_str` ≈ `{python} LlmServingCalc.m_tokens_per_hour_str`. Dividing the hourly cost by that throughput gives a cost per million tokens of `{python} LlmServingCalc.hourly_cost_str` / `{python} LlmServingCalc.m_tokens_per_hour_str` ≈ `{python} LlmServingCalc.cost_per_million_tokens_usd_str`.
 
 This analysis highlights that for LLMs, memory capacity\index{Memory!capacity, LLM throughput}\index{KV Cache!memory capacity} (the size of the KV cache) determines the maximum concurrent residency, while prefill compute and decode bandwidth determine realized token throughput and cost under a specific traffic mix. Memory bandwidth\index{Memory Bandwidth!LLM latency}\index{HBM!memory bandwidth} remains the primary determinant of decode latency.
 
