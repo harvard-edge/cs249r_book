@@ -58,6 +58,17 @@ export interface Question {
    */
   chain_tiers?: Record<string, "primary" | "secondary">;
 
+  /**
+   * "Go deeper" pointers back into the textbook, derived at build time from
+   * the question's `topic` via `schema/topic_chapter_map.yaml` (one mapping
+   * per topic, inherited by every question that carries it). This is a
+   * recommended-reading pointer tied to the topic, NOT an answer key — render
+   * it AFTER the attempt as a "Learn more" affordance. Ships in the summary
+   * bundle so the card renders synchronously (no worker fetch). Absent for
+   * the handful of topics with no chapter mapped.
+   */
+  book_refs?: BookRef[];
+
   // ── Heavy fields (bundled as empty stubs; hydrated from worker) ──
   // The summary bundle ships scenario: "" and details with empty strings
   // for common_mistake / realistic_solution / napkin_math. Hydration via
@@ -91,6 +102,22 @@ export interface Question {
 export interface Resource {
   name: string;
   url: string;
+}
+
+/**
+ * Build-derived textbook chapter pointer (from topic_chapter_map.yaml). The
+ * `primary` ref carries an authored `why` line connecting the topic to the
+ * chapter; `also_see` refs are secondary reading. `url` is a chapter-level
+ * mlsysbook.ai link (section anchors are deferred — they regenerate on
+ * rebuild). See `BookRefResolver` in vault-cli and cs249r_book#1822.
+ */
+export interface BookRef {
+  vol: number;
+  chapter: string;
+  title: string;
+  url: string;
+  role: "primary" | "also_see";
+  why?: string;
 }
 
 const questions = corpusData as unknown as Question[];

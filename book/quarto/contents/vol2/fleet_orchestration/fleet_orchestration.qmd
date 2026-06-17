@@ -151,7 +151,7 @@ ML workloads present scheduling challenges that distinguish them from ordinary c
 
 ***Gang Scheduling***\index{Gang Scheduling!definition} is the ML cluster scheduling policy that allocates all of a job's accelerators atomically (all-or-nothing) because synchronous distributed training makes the marginal value of a partial allocation zero: every worker must reach every collective, so a job cannot trade fewer GPUs for proportionally slower progress.
 
-1.  **Significance (quantitative)**: A 1,024-GPU synchronous job holding 512 GPUs completes zero training steps, not half as many: each AllReduce stalls until every rank arrives, so the held GPUs burn power and capital at 0 percent useful output. Without atomic allocation, two such jobs can each acquire half the cluster and deadlock, both at zero progress while consuming the full cluster's operating cost.
+1.  **Significance**: A 1,024-GPU synchronous job holding 512 GPUs completes zero training steps, not half as many: each AllReduce stalls until every rank arrives, so the held GPUs burn power and capital at 0 percent useful output. Without atomic allocation, two such jobs can each acquire half the cluster and deadlock, both at zero progress while consuming the full cluster's operating cost.
 2.  **Distinction**: Unlike cloud service placement (where a service granted half its requested replicas serves roughly half its traffic) and unlike flexible HPC workloads (which degrade gracefully with fewer ranks), synchronous training has step-function utility: full allocation or nothing, which forces the scheduler to reason about atomic multi-resource allocations rather than incremental bin packing.
 3.  **Common pitfall**: A frequent misconception is that priorities or quotas alone solve this. Atomicity must extend to every co-scheduled resource the job needs to make progress (accelerators, high-bandwidth interconnect domains, network capacity for collectives); enforcing it at GPU granularity alone recreates the deadlock one resource layer down.
 
@@ -577,7 +577,7 @@ The most pernicious of these is priority inversion, a scenario borrowed from rea
 
 ***Priority Inversion***\index{Priority Inversion!definition} is an ML cluster scheduling pathology in which a high-priority task is forced to wait for a lower-priority task to release a shared resource.
 
-1.  **Significance (quantitative)**: It reduces the progress rate of the entire fleet to that of the lowest-priority job. In ML clusters, this typically occurs when a low-priority job holding GPUs is starved of auxiliary resources (for example, $\text{BW}$ for checkpointing), preventing it from finishing and releasing the accelerators needed by high-priority workloads.
+1.  **Significance**: It reduces the progress rate of the entire fleet to that of the lowest-priority job. In ML clusters, this typically occurs when a low-priority job holding GPUs is starved of auxiliary resources (for example, $\text{BW}$ for checkpointing), preventing it from finishing and releasing the accelerators needed by high-priority workloads.
 2.  **Distinction**: Unlike Standard Queuing (where tasks wait their turn), Priority Inversion involves an Active Blockage\index{Priority Inversion!active blockage}: the high-priority task is ready to run but is transitively dependent on a task that the scheduler does not prioritize.
 3.  **Common pitfall**: A frequent misconception is that strict priority levels solve this. In reality, without Holistic Preemption (reserving all resources needed for a task to exit), increasing priority levels can actually increase the likelihood of inversion by creating more complex dependency chains.
 
@@ -593,7 +593,7 @@ The traditional gang scheduling model assumes a homogeneous Bulk Synchronous Par
 
 ::: {#psp-fleet-orchestration-routing-over-synchrony .callout-perspective title="Routing over synchrony"}
 
-This necessitates **Heterogeneous Gang Scheduling**\index{Heterogeneous Gang Scheduling}. The scheduler must atomically allocate a diverse constellation of resources—high-HBM nodes optimized for memory-bound inference generation, alongside high-compute nodes for compute-bound backpropagation. The orchestration challenge shifts from static topological bin-packing to dynamic data routing. Activations and gradients are no longer just reduced within a homogeneous ring; instead, data must stream continuously between inference nodes generating rollouts and training nodes computing policy updates. If the heterogeneous gang allocation is not perfectly balanced across these distinct workload profiles, the entire cluster falls out of sync, leaving expensive accelerators starved for data.
+Heterogeneous gang scheduling\index{Heterogeneous Gang Scheduling} reframes this allocation. The scheduler must atomically allocate a diverse constellation of resources: high-HBM nodes optimized for memory-bound inference generation, alongside high-compute nodes for compute-bound backpropagation. The orchestration challenge shifts from static topological bin-packing to dynamic data routing. Activations and gradients are no longer just reduced within a homogeneous ring; instead, data must stream continuously between inference nodes generating rollouts and training nodes computing policy updates. If the heterogeneous gang allocation is not perfectly balanced across these distinct workload profiles, the entire cluster falls out of sync, leaving expensive accelerators starved for data.
 
 :::
 
@@ -1069,9 +1069,9 @@ Proper scheduling yields a `{python} TopologyPlacement.speedup_mult_str` speedup
 
 The computational cost of topology-aware placement is nontrivial. Evaluating all possible placements for a 256-GPU job across a 10,000-GPU cluster is combinatorially intractable. Production schedulers use heuristic approaches: greedy algorithms that build placements bottom-up (first fill NVLink domains, then fill racks, then spread across racks), tree-search algorithms with pruning that explore the most promising placements first, or scoring-based approaches that evaluate a sample of feasible placements and select the best. The scheduling latency introduced by topology-aware algorithms (milliseconds to seconds, depending on cluster size and algorithm complexity) is negligible compared to job runtimes of hours to weeks, making the throughput improvement worth the scheduling overhead.
 
-::: {#psp-fleet-orchestration-topology-placement-impact .callout-perspective title="Topology placement impact"}
+::: {#nbk-fleet-orchestration-topology-placement-3d-parallel .callout-notebook title="Placement impact on 3D-parallel training"}
 
-Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-way pipeline parallel, 8-way data parallel.
+**Scenario**: Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-way pipeline parallel, 8-way data parallel.
 
 **Good placement** (topology-aware):
 
@@ -1085,7 +1085,9 @@ Consider a 256-GPU training job using 3D parallelism: 8-way tensor parallel, 4-w
 - Pipeline stages scattered across racks (2 switch hops instead of 1)
 - Data parallel replicas randomly distributed
 
-The tensor parallel communication alone illustrates the impact. With NVLink delivering `{python} FleetTopologyInterconnect.nvlink_h100_perdir_gb_per_s_str` per direction, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_mult_str` slowdown. The `{python} TopologyPlacement.speedup_mult_str` AllReduce-latency gap in @fig-topology-placement is a communication-only measurement; it does not become a `{python} TopologyPlacement.speedup_mult_str` end-to-end penalty because synchronous training overlaps much of that communication with the next iteration's compute. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), the residual exposed communication compounds to 15 to 30 percent total training throughput degradation, the figure to carry forward for 3D-parallel jobs.
+**Math**: The tensor parallel communication alone illustrates the impact. With NVLink delivering `{python} FleetTopologyInterconnect.nvlink_h100_perdir_gb_per_s_str` per direction, a `{python} FleetTopologyInterconnect.activation_gb_str` activation transfer takes approximately `{python} FleetTopologyInterconnect.nvlink_xfer_ms_str`. Over InfiniBand at `{python} FleetTopologyInterconnect.ib_ndr_gb_per_s_str`, the same transfer takes approximately `{python} FleetTopologyInterconnect.ib_xfer_ms_str`, a `{python} FleetTopologyInterconnect.xfer_slowdown_mult_str` slowdown.
+
+**Systems insight**: The `{python} TopologyPlacement.speedup_mult_str` AllReduce-latency gap in @fig-topology-placement is a communication-only measurement; it does not become a `{python} TopologyPlacement.speedup_mult_str` end-to-end penalty because synchronous training overlaps much of that communication with the next iteration's compute. Since tensor parallelism communicates at every transformer layer (typically 80+ layers for large models), the residual exposed communication compounds to 15 to 30 percent total training throughput degradation, the figure to carry forward for 3D-parallel jobs.
 
 :::
 
@@ -2453,15 +2455,7 @@ class DebugValueCalc:
     cluster_change_pp_str = fmt_pp(cluster_change_pp, precision=0, commas=False, style="symbol")
 ```
 
-The debugging method is to compare scheduler state with physical capability, inspect job requests against the actual hardware pools, and then test for a policy-infrastructure mismatch. A full queue and idle accelerators can coexist when the scheduler is honoring constraints that the dashboard has aggregated away.
-
-::: {#exmp-fleet-orchestration-debugging-low-gpu-utilization .callout-example title="Debugging low GPU utilization"}
-
-**Problem**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization, below the `{python} DebugValueCalc.debug_target_util_pct_str` operating target, despite a full queue with over `{python} DebugValueCalc.pending_jobs_str` pending jobs. Dashboards show idle GPUs, but users still wait. Identify the binding constraint and the diagnostic path.
-
-The fleet stack framework in @fig-fleet-stack structures the diagnosis: inspect hardware capability first, then scheduling policy, then the mismatch between them.
-
-The first diagnostic step is infrastructure-layer analysis\index{Infrastructure Layer!analysis}. @Tbl-fleet-orchestration-debug-inventory shows the cluster's heterogeneous hardware across three procurement cycles:
+The debugging method is to compare scheduler state with physical capability, inspect job requests against the actual hardware pools, and then test for a policy-infrastructure mismatch. A full queue and idle accelerators can coexist when the scheduler is honoring constraints that the dashboard has aggregated away. The cluster at the center of the worked example below runs the heterogeneous hardware in @tbl-fleet-orchestration-debug-inventory, accumulated across three procurement cycles.
 
 | **GPU Type**   |                  **Count**                  |                     **Memory**                     |                       **Interconnect**                       |                                               **Nodes**                                               |
 |:---------------|:-------------------------------------------:|:--------------------------------------------------:|:------------------------------------------------------------:|:-----------------------------------------------------------------------------------------------------:|
@@ -2471,7 +2465,13 @@ The first diagnostic step is infrastructure-layer analysis\index{Infrastructure 
 
 : **Cluster hardware inventory**: Three procurement generations create distinct resource pools with different capabilities. A100 nodes support tensor parallelism via NVLink, while V100 nodes are limited to data parallelism. {#tbl-fleet-orchestration-debug-inventory}
 
-The inventory in @tbl-fleet-orchestration-debug-inventory separates physical capability before the scheduler policy is examined.
+::: {#exmp-fleet-orchestration-debugging-low-gpu-utilization .callout-example title="Debugging low GPU utilization"}
+
+**Problem**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization, below the `{python} DebugValueCalc.debug_target_util_pct_str` operating target, despite a full queue with over `{python} DebugValueCalc.pending_jobs_str` pending jobs. Dashboards show idle GPUs, but users still wait. Identify the binding constraint and the diagnostic path.
+
+The fleet stack framework in @fig-fleet-stack structures the diagnosis: inspect hardware capability first, then scheduling policy, then the mismatch between them.
+
+The first diagnostic step is infrastructure-layer analysis\index{Infrastructure Layer!analysis}. The hardware inventory in @tbl-fleet-orchestration-debug-inventory separates physical capability before the scheduler policy is examined: A100 nodes can run tensor-parallel jobs over NVLink, while the V100 pool is confined to data parallelism over PCIe.
 
 The second diagnostic step is distribution-layer analysis\index{Distribution Layer!analysis}. The Slurm scheduler implements gang scheduling with strict resource type matching. Examining the job specifications reveals the demand pattern:
 
@@ -2492,7 +2492,11 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 
 **Solution**: Implement tiered resource matching with topology awareness. The policy changes are durable: express capability requirements instead of exact GPU SKUs, reserve NVLink-connected nodes for jobs that need tensor parallelism, backfill compatible smaller jobs into otherwise idle pools, seed appropriate workloads onto older accelerators with lower cost accounting, and make the correct resource request easier than the over-specified template.
 
-**Impact**: @Tbl-fleet-orchestration-debug-results reports the two-week validation result after implementing tiered matching and backfill scheduling:
+**Impact**: After implementing tiered matching and backfill scheduling, a two-week validation run recovered idle capacity across every pool, with the per-pool before-and-after allocation reported in @tbl-fleet-orchestration-debug-results.
+
+**Systems lesson**: Surface-level diagnosis suggested a scheduling algorithm problem. Deeper analysis showed a policy-infrastructure mismatch: the scheduler correctly implemented policies written for a homogeneous A100-80 GB cluster, but the infrastructure had become heterogeneous. Many utilization problems have this shape. The fix is not always a new scheduler; often it is updating the operational policy so it matches the fleet that actually exists.
+
+:::
 
 | **Pool**         |                                                        **Before**                                                        |                                                       **After**                                                        |                       **Change**                       |
 |:-----------------|:------------------------------------------------------------------------------------------------------------------------:|:----------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------:|
@@ -2504,10 +2508,6 @@ The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few r
 : **Utilization recovery results**: The distinction between "allocated" and "effective" utilization captures the policy-induced utilization gap: before the fix, A100-80 GB GPUs showed high allocation in Slurm but lower actual compute utilization, while strict job templates stranded other capable hardware pools. {#tbl-fleet-orchestration-debug-results}
 
 As @tbl-fleet-orchestration-debug-results shows, this utilization gain adds approximately `{python} DebugValueCalc.debug_productive_gain_str` fully utilized GPUs of productive work. That is equivalent to buying `{python} DebugValueCalc.debug_recovered_str` additional raw GPUs if those GPUs ran at the old `{python} DebugValueCalc.debug_util_before_pct_str` utilization. At `{python} DebugValueCalc.debug_gpu_hour_rate_str`, the equivalent raw capacity represents approximately `{python} DebugValueCalc.debug_annual_usd_str` in annual recovered value, achieved through policy changes requiring zero additional hardware investment.
-
-**Systems lesson**: Surface-level diagnosis suggested a scheduling algorithm problem. Deeper analysis showed a policy-infrastructure mismatch: the scheduler correctly implemented policies written for a homogeneous A100-80 GB cluster, but the infrastructure had become heterogeneous. Many utilization problems have this shape. The fix is not always a new scheduler; often it is updating the operational policy so it matches the fleet that actually exists.
-
-:::
 
 ### Common utilization anti-patterns {#sec-fleet-orchestration-anti-patterns}
 

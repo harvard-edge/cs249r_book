@@ -5,9 +5,9 @@ import { RELEASE_ID, RELEASE_HASH, BUILD_DATE } from "../lib/stats";
 /**
  * Page-end footer with a stable cross-link back to the ML Systems textbook.
  *
- * Per-question book links are deferred until mlsysbook.ai URLs stabilize. In
- * the meantime the site-level cross-link to the book homepage — which cannot
- * 404 — gives every StaffML page a closing funnel back to the textbook. The
+ * Per-question book links now ship via BookRefCard (topic → chapter, derived
+ * from schema/topic_chapter_map.yaml and build-link-checked against live
+ * mlsysbook.ai chapter URLs). This footer remains the site-level funnel: the
  * top-of-page EcosystemBar covers discovery; this footer covers intent (the
  * user finished reading and wants to learn more).
  *

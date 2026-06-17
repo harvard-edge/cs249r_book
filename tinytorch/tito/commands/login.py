@@ -84,6 +84,7 @@ class LoginCommand(BaseCommand):
             if tokens:
                 save_credentials(tokens)
                 self.console.print(f"[green]Success! Logged in as {tokens['user_email']}[/green]")
+                self._offer_post_login_sync()
                 return 0
             else:
                 self.console.print("[red]Login timed out.[/red]")
@@ -93,6 +94,36 @@ class LoginCommand(BaseCommand):
         except Exception as e:
             self.console.print(f"[red]Error: {e}[/red]")
             return 1
+
+    def _offer_post_login_sync(self) -> None:
+        """Offer to upload progress completed *before* logging in.
+
+        Closes the complete-then-login gap: without this, modules finished while
+        logged out never reached the dashboard, because automatic sync only ran
+        during 'tito module complete' (#1849). Only fires when local progress
+        actually exists, so a fresh login stays quiet.
+        """
+        import json
+        from tito.core.submission import auto_sync_after_completion
+        from tito.core.modules import get_module_mapping
+
+        progress_file = self.config.project_root / ".tito" / "progress.json"
+        try:
+            data = json.loads(progress_file.read_text()) if progress_file.exists() else {}
+            completed = data.get("completed_modules", [])
+        except (json.JSONDecodeError, OSError):
+            completed = []
+
+        if not completed:
+            return  # nothing completed yet; sync will happen as modules complete
+
+        self.console.print()
+        auto_sync_after_completion(
+            self.config,
+            self.console,
+            total_modules=len(get_module_mapping()),
+            prompt=f"You have {len(completed)} completed module(s) saved locally. Upload them now?",
+        )
 
 
 class LogoutCommand(BaseCommand):

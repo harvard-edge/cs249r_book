@@ -373,10 +373,6 @@ class InferenceEconomics:
 
 The same leverage holds across application categories with different cost structures. A recommendation model (DLRM) trained for `{python} InferenceEconomics.training_cost_total_str` (`{python} InferenceEconomics.training_hardware_cost_str` hardware for `{python} InferenceEconomics.n_gpu_hours_str` at `{python} InferenceEconomics.cost_per_gpu_hour_usd_str`, plus `{python} InferenceEconomics.engineering_mult_str` additional engineering cost for data and experimentation) and served at `{python} InferenceEconomics.qps_str` for `{python} InferenceEconomics.serve_duration_days_str` days accumulates `{python} InferenceEconomics.lifetime_queries_latex_math` lifetime queries, which at `{python} InferenceEconomics.cost_per_million_queries_usd_str` costs `{python} InferenceEconomics.serving_cost_total_str` to serve—a `{python} InferenceEconomics.leverage_ratio_mult_str` leverage on serving optimization over training optimization. The cost dominance ratio varies by application. @Tbl-cost-ratios quantifies this disparity:
 
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
-
 | **Application**               | **Training Cost** | **Annual Serving Cost** |     **Ratio**     |
 |:------------------------------|:-----------------:|:-----------------------:|:-----------------:|
 | **Recommendation (high QPS)** |   \$10K--\$100K   |       \$1M--\$10M       | 100--1000$\times$ |
@@ -653,7 +649,7 @@ Serving systems differ fundamentally in how they manage accelerator memory, and 
 
 ***KV Cache***\index{KV Cache!definition} is a per-request LLM inference memory buffer that stores the Key and Value attention tensors of all previously generated tokens so the next token can be produced without recomputing the full attention over the prefix.
 
-1.  **Significance (quantitative)**: It reduces per-token attention compute from $O(n^2)$ to $O(n)$ in the sequence length, but its footprint grows linearly with both context length and batch size, often consuming more HBM than the model weights themselves and becoming the binding constraint on serving capacity. @Sec-appdx-inference-scale-kv-cache-fundamentals-2ccd derives the fundamental sizing math.
+1.  **Significance**: It reduces per-token attention compute from $O(n^2)$ to $O(n)$ in the sequence length, but its footprint grows linearly with both context length and batch size, often consuming more HBM than the model weights themselves and becoming the binding constraint on serving capacity. @Sec-appdx-inference-scale-kv-cache-fundamentals-2ccd derives the fundamental sizing math.
 2.  **Distinction**: Unlike model weights (which are shared across all requests and statically allocated), the KV cache is request-private and dynamically sized; each concurrent user pays a separate, sequence-length-proportional memory tax that the scheduler must budget for.
 3.  **Common pitfall**: A frequent misconception is that reducing model size proportionally reduces serving memory. In practice, the KV cache dominates HBM at long contexts, so a quantized 70B model can still be capacity-bound at batch sizes the weights alone would easily admit.
 
@@ -1085,19 +1081,19 @@ The autoregressive bottleneck (principle \ref{pri-autoregressive-bottleneck}) go
 
 ***Continuous Batching***\index{Continuous Batching!definition} is a serving strategy that decouples batch membership from iteration boundaries, allowing new requests to enter and completed ones to exit at every decode step.
 
-1.  **Significance (quantitative)**: It maximizes system throughput $(X)$ by eliminating the padding waste and head-of-line blocking inherent in static batching. It ensures the GPU remains saturated even when requests have widely varying sequence lengths.
+1.  **Significance**: It maximizes system throughput $(X)$ by eliminating the padding waste and head-of-line blocking inherent in static batching. It ensures the GPU remains saturated even when requests have widely varying sequence lengths.
 2.  **Distinction**: Unlike static or dynamic batching (which group requests at the request level), continuous batching operates at the Iteration Level\index{Continuous Batching!iteration-level scheduling}, dynamically reshaping the compute tensor at each clock cycle.
 3.  **Common pitfall**: A frequent misconception is that continuous batching is "purely a scheduler change." In reality, it requires a Dynamic Memory Manager (like PagedAttention) because the KV caches for different requests grow and shrink at different rates, preventing static memory preallocation.
 
 :::
 
-The same idea is easier to see as slot reuse over time.
+Decoupling batch membership from iteration boundaries is, concretely, reusing a freed slot the moment a request exits rather than waiting for the whole batch to drain.
 
 ::: {#psp-inference-analogy-restaurant-kitchen .callout-perspective title="Analogy: The restaurant kitchen"}
 
 Imagine a restaurant where a waiter seats a table of four (a batch of 4 requests). In static batching, if three diners finish their meals in 20 minutes, but the fourth takes an hour, the waiter refuses to seat anyone else at those three empty chairs until the entire table is clear. The kitchen (the GPU) sits mostly idle while the last diner eats.
 
-In continuous batching, the restaurant operates like a sushi bar. The moment one diner finishes and leaves, the host immediately seats a new customer in that empty stool. The kitchen is constantly preparing food at maximum capacity, regardless of how long any individual diner takes to eat.
+In continuous batching, the restaurant operates like a sushi bar. The moment one diner finishes and leaves, the host immediately seats a new customer in that empty stool. Mapping back to the system, a diner leaving is a request reaching its stop token and exiting at an iteration boundary, and the freed stool is the KV-cache slot the scheduler hands to a waiting request on the very next decode step, keeping the bandwidth-bound GPU saturated rather than idling on a single slow sequence.
 
 :::
 
@@ -2200,7 +2196,7 @@ Production systems report 60--80 percent memory waste from fragmentation under r
 
 ***PagedAttention***\index{PagedAttention!definition}\index{PagedAttention!block table} is an LLM serving memory management technique that applies virtual memory principles to KV Cache allocation, storing attention states in noncontiguous, fixed-size physical blocks.
 
-1.  **Significance (quantitative)**: It eliminates Internal and External Fragmentation\index{Internal and External Fragmentation}, which can waste 60--80 percent of the memory allocated to the KV cache under contiguous preallocation. By allowing sequences to grow dynamically, it enables 2--4$\times$ higher Concurrent Throughput $(X)$ on the same hardware.
+1.  **Significance**: It eliminates Internal and External Fragmentation\index{Internal and External Fragmentation}, which can waste 60--80 percent of the memory allocated to the KV cache under contiguous preallocation. By allowing sequences to grow dynamically, it enables 2--4$\times$ higher Concurrent Throughput $(X)$ on the same hardware.
 2.  **Distinction**: Unlike Contiguous Allocation (which requires prereserving the maximum context length), PagedAttention uses a Block Table to map logical sequence indices to physical memory pages, allocating only what is currently used.
 3.  **Common pitfall**: A frequent misconception is that PagedAttention speeds up *individual token math*. In reality, it is a Capacity Optimization\index{Optimization!capacity}: it improves *system-level efficiency* by allowing larger batch sizes, though it adds a small Indirection Overhead $(L_{\text{lat}})$ for the pointer lookups.
 
@@ -2274,14 +2270,14 @@ def paged_attention(Q, page_table, physical_blocks, block_size):
 
 **Systems insight**: The throughput impact\index{PagedAttention!throughput impact} of gather operations is small compared to the memory savings; @tbl-inference-pagedattention-throughput shows the 2.5--4$\times$ throughput improvement coming from fitting more concurrent sequences in the same memory.
 
-:::
-
 | **Approach**       | **KV Cache Pool Utilization** | **Throughput (relative)** |
 |:-------------------|:-----------------------------:|:-------------------------:|
 | **Contiguous**     |             30-40%            |   1.0$\times$ (baseline)  |
 | **PagedAttention** |              95%+             |       2.5--4$\times$      |
 
 : **PagedAttention vs. Contiguous KV Cache**: KV cache pool utilization and relative serving throughput for contiguous allocation against PagedAttention. {#tbl-inference-pagedattention-throughput}
+
+:::
 
 ### Prefix caching {#sec-inference-scale-prefix-caching-8e8b}
 
@@ -2459,8 +2455,6 @@ class PrefixCachingAnalysis:
 
 **Systems insight**: Prefix caching pays off when the prefix hit rate\index{Prefix Caching!hit rate} is high because many requests share a long prefix. @Tbl-inference-prefix-caching-workloads contrasts hit rates and memory savings across workloads, showing where the technique changes serving capacity and where it does not.
 
-:::
-
 | **Workload**                     | **Prefix Hit Rate** | **Memory Savings** |
 |:---------------------------------|:-------------------:|:------------------:|
 | **Chatbot (same system prompt)** |         95%+        |       70-80%       |
@@ -2468,6 +2462,8 @@ class PrefixCachingAnalysis:
 | **General API (diverse)**        |       20--40%       |      10--30%       |
 
 : **Prefix Caching Effectiveness by Workload**: Typical prefix hit rates and resulting KV-cache memory savings for chatbot, document-QA, and general API workloads, showing where prefix caching pays off and where it does not. {#tbl-inference-prefix-caching-workloads}
+
+:::
 
 ### KV cache compression and architectural optimization {#sec-inference-scale-kv-cache-compression-943a}
 
@@ -2630,12 +2626,6 @@ class PrecisionDividend:
 
 :::
 
-::: {.content-visible when-format="pdf"}
-
-\newpage
-
-:::
-
 ### Speculative decoding as a serving policy {#sec-inference-scale-speculative-decoding-c438}
 
 @Sec-performance-engineering-speculative established speculative decoding as an algorithmic optimization: a small draft model proposes $K$ tokens, the target model verifies them in one parallel forward pass, and rejection sampling guarantees the emitted tokens follow the target model's distribution exactly, so the technique is lossless and bounded by the draft acceptance rate $\alpha_{\text{acc}}$. The serving question is different. Speculation becomes a resource-admission policy under SLA pressure: the scheduler must decide when to enable it, how its memory cost interacts with KV-cache admission, and what it does to the SLA the endpoint is bound by.
@@ -2776,7 +2766,7 @@ Max concurrent sequences = KV pool size / (avg_seq_length * per_token_cache)
 
 That budget determines how many sequences can coexist before the scheduler must choose between rejection, preemption, or paging. When the cache is full, LRU eviction removes the sequence with the oldest access, size-based eviction frees the longest sequence first, and priority-based eviction protects paid-tier or latency-critical requests. Continuous batching then turns eviction into a scheduling decision: a high-priority request that cannot fit triggers victim selection, swaps the victim's KV cache to CPU memory, allocates GPU memory to the new request, and restores the victim later if its service-level objective still permits the delay.
 
-::: {#nbk-inference-kv-cache-memory-hierarchy .callout-notebook title="KV cache memory hierarchy"}
+::: {#exmp-inference-kv-cache-memory-hierarchy .callout-example title="KV cache memory hierarchy"}
 
 Production systems manage KV-cache memory pressure across the three-tier hierarchy in @tbl-inference-kv-cache-memory-hierarchy, paging from GPU HBM down to CPU DRAM and NVMe SSD as the active working set exceeds each tier's capacity:
 
@@ -2809,9 +2799,11 @@ async def swap_to_gpu(sequence_id):
 - GPU+CPU swapping: 500 concurrent sequences (10$\times$)
 - Average swap latency: 3 ms (acceptable for nonurgent requests)
 
+**Systems insight**: Treating CPU DRAM and NVMe as overflow tiers behind HBM raises concurrency by an order of magnitude at the cost of millisecond swap latency, so paging is a throughput lever for non-urgent traffic but not a substitute for HBM capacity on the latency-critical path.
+
 :::
 
-Swapping expands capacity by an order of magnitude, but the underlying problem remains: a single GPU must handle both the compute-heavy prompt processing and the bandwidth-heavy token generation. Separating those phases onto different hardware pools eliminates this mismatch entirely.
+The mismatch swapping papers over remains structural: a single GPU must handle both the compute-heavy prompt processing and the bandwidth-heavy token generation. Separating those phases onto different hardware pools eliminates this mismatch entirely.
 
 ### Disaggregated serving: Splitting the workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
 
@@ -2825,7 +2817,7 @@ LLM inference consists of two distinct phases with different computational chara
 
 ***Prefill and Decode Phases***\index{Prefill and Decode!definition}\index{Inference!prefill vs. decode} are the two distinct computational regimes of transformer-based LLM inference.
 
-1.  **Significance (quantitative)**: The Prefill Phase\index{Prefill Phase} (processing the prompt) is compute bound $(R_{\text{peak}})$ with high arithmetic intensity, while the Decode Phase\index{Decode Phase} (generating tokens) is bandwidth bound $(\text{BW})$\index{Bandwidth-Bound} with extremely low arithmetic intensity. This mismatch means a single request's efficiency $(\eta_{\text{hw}})$ varies wildly during its lifecycle.
+1.  **Significance**: The Prefill Phase\index{Prefill Phase} (processing the prompt) is compute bound $(R_{\text{peak}})$ with high arithmetic intensity, while the Decode Phase\index{Decode Phase} (generating tokens) is bandwidth bound $(\text{BW})$\index{Bandwidth-Bound} with extremely low arithmetic intensity. This mismatch means a single request's efficiency $(\eta_{\text{hw}})$ varies wildly during its lifecycle.
 2.  **Distinction**: Unlike Single-Pass Inference (for example, ImageNet), where the resource bottleneck is constant, LLM inference switches between these regimes at every request, requiring Iteration-Level Scheduling to maintain utilization.
 3.  **Common pitfall**: A frequent misconception is that both phases should be batched together naively. In reality, because they have opposing hardware requirements, mixing them in the same batch without Chunked Prefill or similar techniques can lead to significant queuing delays $(L_{\text{lat}})$ for decoding tokens.
 
@@ -2846,9 +2838,9 @@ The decode phase, by contrast, generates output tokens one at a time. Each token
 
 Because decode is bandwidth-bound, hardware that shrinks the bytes moved per token attacks that phase's binding constraint directly.
 
-::: {#lhs-inference-blackwell-fp4-inference-frontier .callout-lighthouse title="Archetype A (GPT-4/Llama-3): The FP4 inference frontier"}
+::: {#psp-inference-fp4-decode-bandwidth .callout-perspective title="FP4 as a bandwidth lever for decode"}
 
-For the Archetype A LLM serving workload, the Blackwell (B200) architecture introduces native **FP4 support**\index{FP4 Support}, making 4-bit inference a first-class hardware target rather than a framework-specific workaround. Because decode is often bandwidth-bound, shrinking weights and cache entries can raise token throughput and concurrent sequence capacity without increasing clock speed. The exact cost-per-token gain depends on model architecture, kernel maturity, batch shape, and the fraction of time spent in prefill versus decode, so production systems should validate FP4 with workload-specific benchmarks rather than assuming a fixed multiplier.
+The durable point is that decode is bandwidth-bound, so any technique that shrinks the bytes moved per token attacks the binding constraint; native hardware support for narrow formats is the current manifestation of that lever. The Blackwell (B200) architecture introduces native **FP4 support**\index{FP4 Support}, making 4-bit inference a first-class hardware target rather than a framework-specific workaround. Halving weight and KV-cache bytes relative to FP8 raises token throughput and concurrent-sequence capacity without increasing clock speed, which is what loosens the decode-pool sizing in a disaggregated deployment. The product is point-in-time, and the exact cost-per-token gain depends on model architecture, kernel maturity, batch shape, and the fraction of time spent in prefill versus decode, so production systems should validate FP4 with workload-specific benchmarks rather than assuming a fixed multiplier.
 
 :::
 
@@ -3160,6 +3152,16 @@ Consider serving Llama-70B with the following configuration: [@touvron2023llama2
 
 @Tbl-inference-tp8-layer-breakdown decomposes the per-layer cost of 8-way tensor parallelism on 8$\times$ H100 (NVLink interconnect) into compute and AllReduce phases, exposing the realized 6.9$\times$ speedup as compute scaling minus a small communication tax.
 
+| **Component**             |               **Sequential (1 GPU)**              |                    **8-way TP**                   |                   **Speedup**                    |
+|:--------------------------|:-------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------:|
+| **Attention compute**     |      `{python} TpSpeedupCalc.att_seq_ms_str`      |       `{python} TpSpeedupCalc.att_tp_ms_str`      |  `{python} TpSpeedupCalc.att_speedup_mult_str`   |
+| **AllReduce (attention)** |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
+| **Feed-forward compute**  |       `{python} TpSpeedupCalc.ff_seq_ms_str`      |       `{python} TpSpeedupCalc.ff_tp_ms_str`       |   `{python} TpSpeedupCalc.ff_speedup_mult_str`   |
+| **AllReduce (FF)**        |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
+| **Total per layer**       | **`{python} TpSpeedupCalc.seq_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp8_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp_speedup_mult_str`** |
+
+: **8-Way Tensor Parallelism Per-Layer Breakdown**: Sequential vs. 8-way tensor-parallel timings for attention, feed-forward, and AllReduce phases of one Llama-70B transformer layer, decomposing the realized 6.9$\times$ speedup into compute scaling and communication tax. {#tbl-inference-tp8-layer-breakdown}
+
 **Layer-stack estimate** (`{python} TpSpeedupCalc.n_layers_str` layers on the same prefill workload):
 
 - Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` for the full prefill pass
@@ -3175,16 +3177,6 @@ The `{python} TpSpeedupCalc.tp_speedup_mult_str` speedup (vs. theoretical `{pyth
 **Systems insight**: Tensor parallelism buys latency by spending communication. It works for Llama-70B only because the interconnect keeps the collective tax small relative to the compute saved by sharding.
 
 :::
-
-| **Component**             |               **Sequential (1 GPU)**              |                    **8-way TP**                   |                   **Speedup**                    |
-|:--------------------------|:-------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------:|
-| **Attention compute**     |      `{python} TpSpeedupCalc.att_seq_ms_str`      |       `{python} TpSpeedupCalc.att_tp_ms_str`      |  `{python} TpSpeedupCalc.att_speedup_mult_str`   |
-| **AllReduce (attention)** |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
-| **Feed-forward compute**  |       `{python} TpSpeedupCalc.ff_seq_ms_str`      |       `{python} TpSpeedupCalc.ff_tp_ms_str`       |   `{python} TpSpeedupCalc.ff_speedup_mult_str`   |
-| **AllReduce (FF)**        |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
-| **Total per layer**       | **`{python} TpSpeedupCalc.seq_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp8_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp_speedup_mult_str`** |
-
-: **8-Way Tensor Parallelism Per-Layer Breakdown**: Sequential vs. 8-way tensor-parallel timings for attention, feed-forward, and AllReduce phases of one Llama-70B transformer layer, decomposing the realized 6.9$\times$ speedup into compute scaling and communication tax. {#tbl-inference-tp8-layer-breakdown}
 
 ### Pipeline parallelism for inference {#sec-inference-scale-pipeline-parallelism-inference-7ee3}
 
@@ -3487,8 +3479,6 @@ Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer w
 
 **Systems insight**: Routing imbalance directly erodes GPU utilization and throughput across the eight experts; @tbl-inference-moe-load-balancing quantifies the degradation\index{Load Balancing!metrics}. Production systems monitor routing statistics and may retrain or fine-tune gating to improve balance.
 
-:::
-
 | **Routing Distribution**     | **GPU Utilization** | **Throughput Impact** |
 |:-----------------------------|:-------------------:|:---------------------:|
 | **Perfectly balanced**       |         100%        |        Baseline       |
@@ -3496,6 +3486,8 @@ Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer w
 | **Severe imbalance (50%)**   |         67%         |          -33%         |
 
 : **MoE Routing Load Balance vs. Throughput**: GPU utilization and throughput impact as routing imbalance grows across the eight experts of a Mixtral-8x7B MoE layer with 4-way expert parallelism. {#tbl-inference-moe-load-balancing}
+
+:::
 
 Expert parallelism represents the peak of model sharding complexity, requiring tight integration between the model architecture, the routing algorithm, and the physical interconnect topology. The next section examines how recommendation systems use similar sharding techniques for massive embedding tables.
 
@@ -3892,7 +3884,7 @@ If ten model replicas are actively serving traffic, and a new request arrives as
 
 ::: {#lhs-inference-archetype-b-dlrm-at-scale-tail-at-scale .callout-lighthouse title="Archetype B (DLRM at Scale): The tail at scale"}
 
-Archetype B (DLRM at Scale) is the canonical victim of tail latency. Processing 10 million QPS means that a 1-in-10,000 latency spike happens 1,000 times every second. For Archetype B (DLRM at Scale), sophisticated load balancing (like Power-of-Two-Choices) is mandatory to suppress these outliers; simple Round-Robin would allow queues to build up, causing the 99th percentile latency to collapse into unacceptable slowness.
+Archetype B (DLRM at Scale) is the canonical victim of tail latency. Processing 10 million QPS means that a 1-in-10,000 latency spike happens 1,000 times every second. For Archetype B (DLRM at Scale), sophisticated load balancing (routing each request to the less-loaded of two sampled replicas, the technique @sec-inference-scale-power-two-choices-ffdd develops) is mandatory to suppress these outliers; simple Round-Robin would allow queues to build up, causing the 99th percentile latency to collapse into unacceptable slowness.
 
 :::
 
@@ -4272,10 +4264,6 @@ async def startup():
 
 The three probe tiers each balance fast outage detection against GPU-resident probing cost; @tbl-inference-health-check-cadences fixes interval, timeout, and failure-threshold values for liveness, readiness, and deep-health probes\index{Health Check!timeout configuration}. The cadences form a gradient: readiness probes run fastest because routing decisions depend on them, liveness probes run slower because they only catch a dead process, and deep health checks run rarest because they consume GPU resources to validate model output.
 
-**Systems lesson**: A serving process being alive is not the same as a model replica being ready. GPU memory, warm-up state, and model-output validity must be part of the health contract.
-
-:::
-
 | **Check Type**  | **Interval** | **Timeout** | **Failure Threshold** |
 |:----------------|:------------:|:-----------:|:---------------------:|
 | **Liveness**    |     10s      |      5s     |       3 failures      |
@@ -4283,6 +4271,10 @@ The three probe tiers each balance fast outage detection against GPU-resident pr
 | **Deep health** |     30s      |     10s     |       1 failure       |
 
 : **GPU Inference Health-Check Cadences**: Liveness, readiness, and deep-health probe intervals, timeouts, and failure thresholds for GPU inference servers, balancing fast outage detection against the cost of GPU-resident probes. {#tbl-inference-health-check-cadences tbl-colwidths="[30,18,18,34]"}
+
+**Systems lesson**: A serving process being alive is not the same as a model replica being ready. GPU memory, warm-up state, and model-output validity must be part of the health contract.
+
+:::
 
 ### Quantitative analysis: Load balancing impact {#sec-inference-scale-quantitative-analysis-load-balancing-impact-34d1}
 
@@ -4369,8 +4361,6 @@ Consider a scenario where one server becomes slow (thermal throttling):
 
 **Systems lesson**: For GPU inference\index{Inference!configuration for gpu}, the canonical thresholds and recovery settings appear in @tbl-inference-circuit-breaker-gpu. Circuit breakers preserve partial capacity by stopping retries from amplifying one slow replica into a system-wide overload.
 
-:::
-
 | **Parameter**          |                                  **Value**                                  | **Rationale**                         |
 |:-----------------------|:---------------------------------------------------------------------------:|:--------------------------------------|
 | **Error threshold**    |     `{python} CircuitBreakerServingProfile.error_threshold_pct_tbl_str`     | GPU OOM failures are serious          |
@@ -4379,6 +4369,8 @@ Consider a scenario where one server becomes slow (thermal throttling):
 | **Half-open requests** |     `{python} CircuitBreakerServingProfile.half_open_requests_count_str`    | Careful testing before full reopening |
 
 : **Circuit-Breaker Settings for GPU Inference**: Error and latency thresholds, open duration, and half-open probe count chosen so that a single throttling GPU is isolated quickly without prematurely failing healthy nodes. {#tbl-inference-circuit-breaker-gpu}
+
+:::
 
 Efficient routing assumes that our inference servers own the underlying hardware. In enterprise environments, however, our critical production models are often running on the exact same physical clusters as experimental models and developer endpoints. To prevent a rogue developer query from crashing our flagship service, we must enforce strict multi-tenancy and resource isolation.
 
@@ -4576,10 +4568,6 @@ The bulkhead pattern[^fn-bulkhead-isolation] [@nygard2007releaseit] physically i
 [^fn-bulkhead-isolation]: [offset=-30mm] **Bulkhead Pattern**\index{Bulkhead Pattern!isolation}: Named after ship compartments that contain flooding to isolated sections. The Titanic's bulkheads failed because they did not extend to the top of the hull, allowing water to cascade over as the ship tilted. The lesson for multi-tenant inference: shared GPU pools with soft quotas provide only partial isolation, and a single tenant's burst can exhaust memory or saturate bandwidth for all others. Effective bulkheads require dedicated hardware resources per critical tenant.
 
 The strongest form of bulkhead dedicates entire replicas to specific tenants or tenant groups. @Fig-bulkhead-patterns illustrates this deployment-level isolation between gold and standard tiers:
-
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
 
 ::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb" fig-cap="**Bulkhead Isolation Patterns**: To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. Deployment-level bulkheads (shown) assign dedicated physical replicas to high-priority tenants, ensuring complete isolation. Request-level bulkheads enforce strict concurrency limits within shared processes. Like ship compartments, these boundaries ensure that a failure or resource exhaustion in one segment cannot sink the entire platform." fig-alt="Two-tier system diagram. Gold tier at top with dedicated load balancer and 2 replicas. Standard tier below with shared load balancer and 3 replicas, one showing failure. Dashed line marks complete isolation boundary between tiers."}
 
@@ -5111,10 +5099,6 @@ For interactive applications (chatbots, autocomplete), these delays compound acr
 
 Each region runs independent inference replicas with identical models. A global load balancer routes each user to the nearest region based on measured round-trip latency, as shown in @fig-global-inference-multiregion. A shared model registry synchronizes weights across regions during rollouts.
 
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
-
 ::: {#fig-global-inference-multiregion fig-env="figure" fig-pos="htb" fig-cap="**Multi-Region Inference: Global Load Balancing**: A global load balancer routes requests to three independent regional deployments (US-East, EU-West, Asia-Pacific) based on latency. Each region operates independently; a shared model registry synchronizes weights. During regional failure, the LB reroutes to the next nearest healthy region." fig-alt="Diagram with Global Load Balancer box at top fanning out to three region boxes each containing two replica boxes. Lines connect all regions to a shared Model Registry at the bottom. RTT annotations and failover note shown."}
 
 ![](images/svg/global-inference-multiregion.svg)
@@ -5164,10 +5148,6 @@ Because cross-region sharding is so costly on the steady-state path, most produc
 #### Cross-region failover {#sec-inference-scale-crossregion-failover-0d67}
 
 When a region becomes unavailable, traffic must reroute to healthy regions. @Lst-active-failover shows active-active failover\index{Failover!active-active} routing logic that falls back to the next healthy region after timeout or unavailability.
-
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
 
 ::: {#lst-active-failover lst-cap="**Active-Active Failover**: Global routing that falls back to the second-nearest healthy region on timeout or unavailability."}
 

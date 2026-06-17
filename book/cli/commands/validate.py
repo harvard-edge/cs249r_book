@@ -411,6 +411,18 @@ class ValidateCommand:
             # key-content fails on dev (legacy keys grandfathered).
             # Was never wired to pre-commit; default=False preserves status quo.
             Scope("key-content", "_run_bib_key_content", default=False),
+            # key-year: ERRORS-ONLY subset of key-content (key year vs entry year,
+            # >1yr gap = silent citation corruption). Gated at pre-commit; the
+            # surname WARNINGS (intentional project-name keys) stay opt-in above.
+            Scope("key-year", "_run_bib_key_year",
+                  note="key year must match entry year (errors-only; pre-commit gate)"),
+            # duplicate-keys: two entries sharing a citekey -> ambiguous citation.
+            Scope("duplicate-keys", "_run_bib_duplicate_keys",
+                  note="every citekey must be unique across the bibliography"),
+            # links: every doi/url field must resolve (MIT Press "confirm all
+            # URLs"). Network-bound -> opt-in, not a pre-commit gate.
+            Scope("links", "_run_bib_links", default=False,
+                  note="DOI/URL liveness: every locator resolves (network; opt-in)"),
         ],
         "footnotes": [
             Scope(
@@ -8983,9 +8995,12 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_bib_key_content(self, root: Path) -> ValidationRunResult:
+    def _run_bib_key_content(self, root: Path, errors_only: bool = False) -> ValidationRunResult:
         """Verify bib key surname/year tokens match the entry's actual
-        author and year fields.
+        author and year fields. With errors_only=True, emit only the
+        year-mismatch ERRORs (skip surname-mismatch WARNINGs) so the
+        key-year scope can gate pre-commit without the intentional
+        project-name-key warnings blocking every commit.
 
         The bib **key** is a contract: `surname[firstauthor]year[topicword]`.
         When the key drifts from the entry body, citing the key in prose
@@ -9048,6 +9063,17 @@ class ValidateCommand:
             "systems", "contributors", "developers", "authors", "community",
             "staff", "editors", "board", "office", "department", "ministry",
             "agency", "bureau", "commission", "service", "services",
+        }
+
+        # Standards/specification keys are `body + standard-number + year +
+        # topic` (e.g. iso140402006lca, isoiec420012023ai, ieee8021ar2018), so
+        # the surname-year convention regex grabs the *standard number* as the
+        # "year" (iso14040 -> "1404"). These are not personal surname-year keys;
+        # skip them entirely. (added 2026-06-15 after the references.bib
+        # validation pass false-flagged the ISO/IEC/IEEE standards entries.)
+        STANDARDS_KEY_PREFIXES = {
+            "iso", "iec", "isoiec", "ieee", "ansi", "etsi", "itu", "ituT",
+            "rfc", "nist", "jedec", "gsma", "omg", "din", "fips", "w3c", "ietf",
         }
 
         def author_list_surnames(author_field: str) -> List[str]:
@@ -9131,6 +9157,11 @@ class ValidateCommand:
                 key_surname = cm.group(1)
                 key_year = cm.group(2)
 
+                # Standards/spec keys are not surname-year keys (the regex
+                # mis-reads the standard number as a year). Skip them.
+                if key_surname in STANDARDS_KEY_PREFIXES:
+                    continue
+
                 fields: Dict[str, str] = {}
                 for fm in field_re.finditer(body):
                     name = fm.group(1).lower()
@@ -9142,7 +9173,7 @@ class ValidateCommand:
 
                 surnames = author_list_surnames(author)
 
-                if surnames:
+                if surnames and not errors_only:
                     # Bidirectional prefix match: tolerates both
                     # `boroumandasplos2018` (key longer than surname,
                     # appended venue) AND `hebert2018multicalibration`
@@ -9213,6 +9244,173 @@ class ValidateCommand:
         return ValidationRunResult(
             name="bib-key-content",
             description="Bib key prefix must match author surname + year (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_key_year(self, root: Path) -> ValidationRunResult:
+        """Errors-only subset of key-content: key year vs entry year (>1yr gap).
+        Pre-commit gate for the silent-citation-corruption class; the
+        surname-mismatch warnings stay in the opt-in key-content scope."""
+        res = self._run_bib_key_content(root, errors_only=True)
+        return ValidationRunResult(
+            name="bib-key-year",
+            description="Bib key year must match entry year (errors-only gate, §5)",
+            files_checked=res.files_checked,
+            issues=res.issues,
+            elapsed_ms=res.elapsed_ms,
+        )
+
+    def _run_bib_duplicate_keys(self, root: Path) -> ValidationRunResult:
+        """Every citekey must be unique. Two entries sharing a key make every
+        `[@key]` citation resolve to whichever entry the parser keeps — silent
+        ambiguity that no other check catches (bibtex-tidy only warns)."""
+        t0 = time.time()
+        bib_files = self._bib_files(root)
+        issues: List[ValidationIssue] = []
+        header_re = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = self._relative_file(bib_path)
+            except ValueError:
+                rel = str(bib_path)
+            seen: Dict[str, int] = {}
+            for hm in header_re.finditer(text):
+                etype = hm.group(1).lower()
+                if etype in ("comment", "string", "preamble"):
+                    continue
+                key = hm.group(2)
+                line_no = text[:hm.start()].count("\n") + 1
+                if key in seen:
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=line_no,
+                        code="bib_duplicate_key",
+                        message=(
+                            f"Duplicate citekey @{key} (first defined at line "
+                            f"{seen[key]}). Every [@{key}] citation resolves "
+                            f"ambiguously to one of the two entries. Rename one "
+                            f"key to be unique and update its citations."
+                        ),
+                        severity="error",
+                        context=f"@{etype}{{{key},",
+                        suggestion=(
+                            f"Give the second entry a distinct key (e.g. @{key}b "
+                            f"or @{key}web) and repoint the prose cites that "
+                            f"belong to it."
+                        ),
+                    ))
+                else:
+                    seen[key] = line_no
+        return ValidationRunResult(
+            name="bib-duplicate-keys",
+            description="Every citekey must be unique across the bibliography",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_links(self, root: Path) -> ValidationRunResult:
+        """DOI/URL liveness for the shared bibliography (MIT Press: confirm all
+        URLs). Network-bound and opt-in. 404/410/DNS = error (dead locator);
+        403/401 = warning (bot-block, ambiguous); 2xx/3xx = pass. DOIs are
+        checked via https://doi.org/<doi>."""
+        import ssl, urllib.request, urllib.error, urllib.parse
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        t0 = time.time()
+        ua = "MLSysBook-binder-bibcheck/1.0 (mailto:jvijay@gmail.com)"
+        ctx = ssl.create_default_context()
+        field_re = re.compile(r"\b(doi|url)\s*=\s*\{([^{}]*)\}", re.I)
+        header_re = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
+
+        def resolve(u):
+            for method in ("HEAD", "GET"):
+                try:
+                    r = urllib.request.urlopen(urllib.request.Request(
+                        u, method=method, headers={"User-Agent": ua}), timeout=25, context=ctx)
+                    return r.status, None
+                except urllib.error.HTTPError as e:
+                    # Many servers (and doi.org for some DataCite DOIs, e.g.
+                    # NIST) answer HEAD with 404/403/405 but GET with 200.
+                    # Retry GET before trusting a HEAD failure.
+                    if e.code in (403, 401, 405, 400, 404, 410, 501) and method == "HEAD":
+                        continue
+                    return e.code, None
+                except Exception as e:
+                    if method == "GET":
+                        return None, type(e).__name__
+            return None, "error"
+
+        # collect (key, line, kind, target_url) for the shared book bib only
+        targets = []
+        shared = root / "book" / "quarto" / "contents" / "references.bib"
+        bib_files = [shared] if shared.exists() else self._bib_files(root)
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = self._relative_file(bib_path)
+            except ValueError:
+                rel = str(bib_path)
+            # map each entry's char span to (key, line)
+            entries = [(m.group(2), text[:m.start()].count("\n") + 1, m.start())
+                       for m in header_re.finditer(text)]
+            for fm in field_re.finditer(text):
+                kind = fm.group(1).lower()
+                val = fm.group(2).strip()
+                if not val:
+                    continue
+                url = ("https://doi.org/" + re.sub(r"^https?://(dx\.)?doi\.org/", "", val, flags=re.I)
+                       if kind == "doi" else val)
+                pos = fm.start()
+                key, line = "?", text[:pos].count("\n") + 1
+                for k, ln, st in entries:
+                    if st <= pos:
+                        key, line = k, ln
+                    else:
+                        break
+                targets.append((rel, key, line, kind, url))
+
+        issues: List[ValidationIssue] = []
+        def check(t):
+            rel, key, line, kind, url = t
+            st, err = resolve(url)
+            return (rel, key, line, kind, url, st, err)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for fut in as_completed({ex.submit(check, t): t for t in targets}):
+                rel, key, line, kind, url, st, err = fut.result()
+                # Only a definitive HTTP 404/410 is "dead" (error). A timeout,
+                # DNS failure, 5xx, or 403/401 means "could not confirm" — a
+                # warning to check by hand, not proof the locator is dead.
+                if st in (404, 410):
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_dead_locator",
+                        message=(f"@{key} {kind} is dead ({st}): {url[:90]}"),
+                        severity="error", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Replace with a resolving DOI/URL or the canonical source page."))
+                elif st in (403, 401):
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_locator_forbidden",
+                        message=(f"@{key} {kind} returned {st} (bot-block; verify by hand): {url[:80]}"),
+                        severity="warning", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Likely a real page that blocks automated requests; confirm in a browser."))
+                elif err is not None or st is None or st >= 500:
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_locator_unconfirmed",
+                        message=(f"@{key} {kind} could not be confirmed ({err or st}): {url[:80]}"),
+                        severity="warning", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Timeout/DNS/5xx — slow or transient; confirm in a browser."))
+        issues.sort(key=lambda i: (i.file, i.line))
+        return ValidationRunResult(
+            name="bib-links",
+            description="DOI/URL liveness (MIT Press: confirm all URLs)",
             files_checked=len(bib_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),

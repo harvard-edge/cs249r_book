@@ -279,15 +279,7 @@ to[bend right=15]
 ```
 :::
 
-The gap between what compute can process and what accessible, high-quality data can support is therefore a systems variable, not a fixed law. Maintaining model relevance requires repeated refreshes of the training corpus as the world changes, and intelligent data selection becomes critical when data quality rather than accelerator time is the binding constraint.
-
-::: {#psp-data-selection-scaling-asymmetry .callout-perspective title="The scaling asymmetry"}
-
-**Problem**: Compute scales exponentially. Data does not (@tbl-scaling-asymmetry).
-
-**Consequence**: In regimes where accelerator budgets outrun accessible high-quality data, the system becomes compute-rich and data-constrained.
-
-:::
+The gap between what compute can process and what accessible, high-quality data can support is therefore a systems variable, not a fixed law. Compute scales exponentially while accessible high-quality data does not (@tbl-scaling-asymmetry), so in regimes where accelerator budgets outrun the corpus the system becomes compute-rich and data-constrained. Maintaining model relevance requires repeated refreshes of the training corpus as the world changes, and intelligent data selection becomes critical when data quality rather than accelerator time is the binding constraint.
 
 The compute-data asymmetry can invert the optimization priority. When *data* is abundant and *compute* is scarce, the highest-leverage strategy is often algorithmic efficiency: squeeze more accuracy from limited GPU cycles. When *compute* is abundant and *quality data* is scarce, the highest-leverage strategy becomes data selection: squeeze more learning from each sample. Data selection operates upstream of all other optimizations. By pruning redundancy and selecting high-value samples, we reduce the workload before it ever enters the model or hits the hardware, directly shrinking the total operations $(O)$ term in the iron law. That is why the systems perspective treats selection as upstream workload reduction rather than a modeling heuristic. For teams whose accelerator budget exceeds their curated corpus, the bottleneck shifts from GPU access to the quality, legality, and diversity of the training data.
 
@@ -307,7 +299,7 @@ The three-stage pipeline needs a quantity that lets engineers compare samples be
 
 ***Data Selection***\index{Data Selection!definition} is the process of maximizing the Information-Compute Ratio (ICR) of a training dataset.
 
-1.  **Significance (quantitative)**: It identifies the smallest subset of data sufficient to define the decision boundary, reducing the total operations $(O)$ of the iron law by eliminating redundant or noisy samples from the dataset $D$ before they consume GPU cycles.
+1.  **Significance**: It identifies the smallest subset of data sufficient to define the decision boundary, reducing the total operations $(O)$ of the iron law by eliminating redundant or noisy samples from the dataset $D$ before they consume GPU cycles.
 2.  **Distinction**: Unlike data engineering, which focuses on the cleanliness and consistency of data, data selection focuses on the informativeness and diversity of the samples.
 3.  **Common pitfall**: A frequent misconception is that more data is always better. In reality, it is the quality of the samples that matters: adding 10$\times$ more low-quality data may yield less accuracy than 1.1$\times$ carefully selected, high-quality data.
 
@@ -1123,38 +1115,20 @@ class QualityMultiplier:
     ratio_str = fmt(ratio, precision=0, commas=False)
 ```
 
-:::: {#nbk-data-selection-data-quality-multiplier .callout-notebook title="The data quality multiplier"}
+::: {#nbk-data-selection-data-quality-multiplier .callout-notebook title="The data quality multiplier"}
 
-**The physics of noise**: This estimate explains why one clean sample provides as much learning signal as `{python} QualityMultiplier.ratio_str` noisy ones.
+**Problem**: How much more noisy data does it take to reach the same target error as clean data?
 
-<!--
-::: {.column-margin}
-![](images/svg/vol1_data_selection_margin_001.svg){width="100%" fig-alt="Vertical log-scale data ladder comparing 10,000 noisy samples against 100 clean samples, showing a 100-times sample-quality multiplier."}
-
-*One clean label can be worth a hundred noisy ones.*
-:::
--->
-
-**Math**: Classical learning theory (for convex optimization with SGD) tells us that convergence rates depend on label noise. While deep learning operates in a nonconvex regime, the qualitative relationship holds broadly.
-
-1.  **Clean data**: Convergence rate is typically $\mathcal{O}(1/D)$. Halving the error requires 2$\times$ data.
-2.  **Noisy data**: Convergence rate drops to $\mathcal{O}(1/\sqrt{D})$. Halving the error requires 4$\times$ data.
-
-**Multiplier**:
-To reach a target error $\epsilon$:
-
-*   $D_{\text{clean}} \propto 1/\epsilon$
-*   $D_{\text{noisy}} \propto 1/\epsilon^2$
-
-**Example**: For target error $\epsilon$ = `{python} QualityMultiplier.epsilon_str` (`{python} QualityMultiplier.epsilon_pct_str`):
+**Math**: Classical learning theory (for convex optimization with SGD) ties convergence rate to label noise, and while deep learning operates in a nonconvex regime, the qualitative relationship holds broadly. Clean data converges at $\mathcal{O}(1/D)$, so halving the error needs 2$\times$ data and the sample budget scales as $D_{\text{clean}} \propto 1/\epsilon$. Noisy data converges at $\mathcal{O}(1/\sqrt{D})$, so halving the error needs 4$\times$ data and the budget scales as $D_{\text{noisy}} \propto 1/\epsilon^2$. For target error $\epsilon$ = `{python} QualityMultiplier.epsilon_str` (`{python} QualityMultiplier.epsilon_pct_str`):
 
 *   $D_{\text{clean}}$ ≈ `{python} QualityMultiplier.n_clean_str`
 *   $D_{\text{noisy}}$ ≈ `{python} QualityMultiplier.n_noisy_str`
-*   **Ratio**: `{python} QualityMultiplier.ratio_mult_str` more data required if noisy.
+
+**Result**: Noisy data requires `{python} QualityMultiplier.ratio_mult_str` more samples to reach the same target error, so one clean sample provides as much learning signal as `{python} QualityMultiplier.ratio_str` noisy ones.
 
 **Systems insight**: Cleaning the dataset (removing label noise) is a `{python} QualityMultiplier.ratio_mult_str` compute accelerator.
 
-::::
+:::
 
 The practical question then becomes *how* to identify which samples to keep.
 
@@ -3035,21 +3009,6 @@ plt.close()
 
 The lesson from @fig-selection-inequality is unambiguous: selection overhead can negate the benefits of training on a smaller subset. The cost also compounds when selection runs every epoch instead of once: a per-epoch selection step that costs as much as one epoch of training spends as much compute on selection as on the subset itself, erasing any savings.
 
-::: {#chk-data-selection-selection-inequality .callout-checkpoint title="The selection inequality"}
-
-Data selection is not free. It introduces a new term to the iron law.
-
-Equation checks:
-
-- [ ] **Selection cost**: Do you understand why $T_{\text{selection}} + T_{\text{train}}(\text{subset})$ must be less than $T_{\text{train}}(\text{full})$ for the technique to be valid?
-- [ ] **Overhead management**: How do proxy models and cached embeddings keep $T_{\text{selection}}$ low?
-
-Systems implications:
-
-- [ ] **I/O patterns**: Why does random access (required for dynamic selection) kill data loader throughput compared to sequential reads?
-
-:::
-
 ### Hardware empathy: The random access penalty {#sec-data-selection-hardware-empathy-random-access-penalty-ef16}
 
 The selection inequality addresses compute overhead, but data selection introduces a second, often overlooked cost: I/O pattern degradation. Data selection strategies like coresets or dynamic sampling often require random access to samples across the dataset, jumping to sample 47,231, then 892,104, then 3,417 based on selection scores. Standard training uses sequential reads that benefit from hardware readahead and OS page caching; random access patterns devastate throughput, especially on distributed filesystems or traditional hard drives. @Tbl-io-performance quantifies this penalty across storage tiers.
@@ -3132,6 +3091,21 @@ High-efficiency systems mitigate this penalty through several techniques. Small 
 [^fn-faiss-selection]: [offset=-70mm] **FAISS (Facebook AI Similarity Search)**: Provides GPU-accelerated similarity search using exact, approximate, and compressed-domain index designs [@johnson2019billion]. Johnson, Douze, and Jegou report billion-vector graph construction on multiple GPUs, showing why vector-index infrastructure matters for web-scale selection. For data selection pipelines, FAISS-style indexing supports $k$-nearest-neighbor retrieval for coreset selection, embedding-based deduplication, and stratified clustering for balanced sampling. Without this infrastructure, embedding-based selection would often fall back to expensive full-corpus scans. \index{FAISS!selection infrastructure}
 
 Data loaders\index{Data Loading!shard-based sequential I/O} also require architectural adaptation. Sharded dataset formats package many samples into sequentially readable chunks; WebDataset and FFCV are concrete examples. Shuffle buffers\index{Shuffle Buffer!approximate random sampling} are a data-machine co-design: the loader reads large sequential shards into memory and samples randomly within the buffer, preserving sequential I/O throughput while achieving the statistical benefits of random sampling. In multi-accelerator training, each worker maintains its own shuffle buffer over a non-overlapping shard, so the randomization is local rather than global; rare classes or boundary cases that appear in only a few shards receive uneven coverage across workers unless the coreset is first stratified and shards are balanced before distribution.
+
+::: {#chk-data-selection-selection-inequality .callout-checkpoint title="The selection inequality"}
+
+Data selection is not free. It introduces a new term to the iron law and a new I/O cost.
+
+Equation checks:
+
+- [ ] **Selection cost**: Do you understand why $T_{\text{selection}} + T_{\text{train}}(\text{subset})$ must be less than $T_{\text{train}}(\text{full})$ for the technique to be valid?
+- [ ] **Overhead management**: How do proxy models and cached embeddings keep $T_{\text{selection}}$ low?
+
+Systems implications:
+
+- [ ] **I/O patterns**: Why does random access (required for dynamic selection) kill data loader throughput compared to sequential reads?
+
+:::
 
 ### Data echoing: Amortizing I/O costs {#sec-data-selection-data-echoing-amortizing-io-costs-b4e0}
 
@@ -3667,10 +3641,6 @@ class DistributedOverheadCalc:
 - Embedding: `{python} DistributedOverheadCalc.t_embed_min_str` (parallel)
 - Deduplication: `{python} DistributedOverheadCalc.t_dedup_min_str` (distributed hash join)
 - Scoring: `{python} DistributedOverheadCalc.t_score_min_str` (parallel, five epochs proxy training)
-
-```{=latex}
-\tcbbreak
-```
 - Selection: `{python} DistributedOverheadCalc.t_select_min_str` (centralized)
 - **Total overhead**: `{python} DistributedOverheadCalc.t_total_overhead_min_str` for 10$\times$ training speedup
 
@@ -4706,7 +4676,7 @@ The techniques explored throughout this chapter (deduplication, coreset selectio
 * **Start with deduplication**: Exact deduplication is often the lowest-risk data selection technique and can deliver immediate storage and compute savings. Near-duplicate and semantic deduplication should precede expensive selection methods only after thresholds are validated against downstream quality metrics.
 * **The selection inequality gates every technique**: $T_{\text{selection}} + T_{\text{train}}(\text{subset}) < T_{\text{train}}(\text{full})$. Selection overhead should stay below 10 percent of full-training time. Proxy models and cached embeddings keep $T_{\text{selection}}$ low; expensive selection algorithms can consume all the savings they promise.
 * **Dynamic selection adapts the data diet as the model learns**: Curriculum learning (easy-to-hard ordering) and active learning (uncertainty-guided labeling) exploit the insight that the optimal training distribution changes during training, improving convergence speed and label efficiency respectively.
-* **Self-supervised pretraining amortizes labels**: In the worked example, it delivers a 100$\times$ labeled-data multiplier. Foundation models amortize expensive pretraining across many downstream tasks, reducing per-task label requirements by 100$\times$ and marginal compute by 20$\times$. Broader foundation-model deployments can reach larger label-efficiency multipliers, but the chapter's concrete amortization example uses this 100$\times$ reduction. This cost amortization is strongest when techniques are reused across teams and training runs.
+* **Self-supervised pretraining amortizes labels**: Pretraining once and fine-tuning many times spreads expensive label and compute costs across downstream tasks; the worked example delivers a 100$\times$ labeled-data multiplier and a 20$\times$ marginal-compute reduction. The amortization is strongest when the pretrained foundation is reused across teams and training runs.
 * **Synthetic data is a supplement, not a replacement**: Mixing 50–80 percent synthetic with 20–50 percent real data typically yields the best results. Pure synthetic training risks model collapse and domain gap degradation.
 * **Data selection sits upstream of every later optimization**: Savings from data selection are multiplicative with downstream model and machine improvements. Every FLOP eliminated upstream is a FLOP that never needs to be simplified or accelerated.
 
