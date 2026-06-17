@@ -110,7 +110,7 @@ Reducing parameters, precision, or operations only matters when the machine can 
 
 ***Hardware Acceleration***\index{Hardware Acceleration!definition} is the practice of replacing general-purpose processor logic with domain-specific silicon optimized for the regular tensor operations of ML workloads, trading programmability for the compute density $(R_{\text{peak}})$ and performance-per-watt gains that data-parallel matrix multiplication can exploit.
 
-1.  **Significance (quantitative)**: The throughput gain is orders of magnitude. An A100 GPU delivers `{python} HwAccelSetup.a100_fp16_tflop_per_s_str` for FP16/BF16 matrix multiplication, while a server-class CPU delivers roughly 1–2 TFLOP/s for the same operation, a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap achieved by dedicating 80+ billion transistors to parallel arithmetic units rather than to branch predictors, out-of-order schedulers, and large caches [@NVIDIA2020; @choquette2021].
+1.  **Significance**: The throughput gain is orders of magnitude. An A100 GPU delivers `{python} HwAccelSetup.a100_fp16_tflop_per_s_str` for FP16/BF16 matrix multiplication, while a server-class CPU delivers roughly 1–2 TFLOP/s for the same operation, a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap achieved by dedicating 80+ billion transistors to parallel arithmetic units rather than to branch predictors, out-of-order schedulers, and large caches [@NVIDIA2020; @choquette2021].
 2.  **Distinction**: Unlike a general-purpose CPU, which is optimized to minimize latency for any single instruction in an arbitrary serial program, an accelerator is optimized to maximize throughput for a specific operation class—meaning it achieves its gains only when the workload presents enough parallel work to keep all arithmetic units busy simultaneously.
 3.  **Common pitfall**: A frequent misconception is that an accelerator's advertised peak throughput is the throughput a workload receives. Delivered performance is the lower of the compute ceiling and what memory bandwidth can feed, the roofline constraint: a low-arithmetic-intensity kernel can sit at a small fraction of peak FLOP/s no matter how fast the silicon is rated, because it starves for data rather than for arithmetic.
 
@@ -124,7 +124,7 @@ Hardware alone, however, cannot achieve these gains. The algorithms must be desi
 
 ***Hardware-Software Co-design***\index{Hardware-Software Co-design!definition} is the ML accelerator development methodology that intentionally violates traditional hardware-software abstraction layers, allowing algorithm constraints to inform silicon design and hardware capabilities to directly shape algorithm formulation.
 
-1.  **Significance (quantitative)**: Co-design unlocks gains unavailable to either layer acting alone. INT8 quantization can deliver multi-fold throughput improvement not because 8-bit arithmetic is faster in the abstract, but because modern tensor-core datapaths pack lower-precision operations more densely than FP32 operations; the algorithm change pays off only when the hardware was co-designed to exploit it [@NVIDIA2020; @dally2021; @dally2023].
+1.  **Significance**: Co-design unlocks gains unavailable to either layer acting alone. INT8 quantization can deliver multi-fold throughput improvement not because 8-bit arithmetic is faster in the abstract, but because modern tensor-core datapaths pack lower-precision operations more densely than FP32 operations; the algorithm change pays off only when the hardware was co-designed to exploit it [@NVIDIA2020; @dally2021; @dally2023].
 2.  **Distinction**: Unlike layered abstraction (where software calls a hardware API without knowing the silicon details), co-design exposes hardware constraints directly to algorithm and compiler authors: data alignment requirements, precision formats, and memory access patterns all become visible inputs to global cross-layer optimization.
 3.  **Common pitfall**: A frequent misconception is that co-design is a one-time hardware design choice. In practice, co-design is a continuous feedback loop: NVIDIA Tensor Cores were designed for FP16 matrix multiply, then upgraded to support TF32 and INT8 after observing that ML workloads demanded them, then extended again to sparse 2:4 patterns after algorithmic pruning research demonstrated structured sparsity was trainable [@nvidia_tensors_fp16_2017; @NVIDIA2020].
 
@@ -800,7 +800,7 @@ Machine learning constitutes a computational domain with unique characteristics 
 ```{python}
 #| echo: false
 #| label: ml-accelerator-callout-calc
-from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate, fmt_multiple_range
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate
 
 class MlAcceleratorCallout:
     """A100 throughput and bandwidth vs. server CPU for the ML accelerator callout."""
@@ -808,29 +808,22 @@ class MlAcceleratorCallout:
     # LOAD
     a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
     a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
-    cpu_flops_low = Hardware.Cloud.ReferenceCPU.compute.peak_flops
-    cpu_flops_high = 2 * (TFLOP / second)  # scenario assumption: high-end server CPU upper bound
-
-    # EXECUTE
-    cpu_gap_min = (a100_peak_flops / cpu_flops_high).to_base_units().magnitude
-    cpu_gap_max = (a100_peak_flops / cpu_flops_low).to_base_units().magnitude
 
     # GUARD
-    check(150 <= cpu_gap_min <= 160, f"Unexpected lower CPU gap: {cpu_gap_min:.1f}x")
-    check(300 <= cpu_gap_max <= 320, f"Unexpected upper CPU gap: {cpu_gap_max:.1f}x")
+    check(a100_peak_flops > 0, "A100 peak FLOP/s must be positive")
+    check(a100_bandwidth > 0, "A100 memory bandwidth must be positive")
 
     # OUTPUT
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
-    cpu_gap_range_mult_str = fmt_multiple_range(cpu_gap_min, cpu_gap_max, precision=0, commas=False)
 ```
 
 ::: {#dfn-hw-acceleration-ml-accelerator .callout-definition title="ML accelerator"}
 
 ***Machine Learning Accelerators***\index{ML Accelerator!definition}\index{Accelerator!ML} are domain-specific processors whose silicon is designed primarily for the dense matrix operations and regular data flow of neural networks, achieving high $R_{\text{peak}}$ and memory bandwidth utilization for these workloads by devoting die area to arithmetic units rather than to general-purpose control logic.
 
-1.  **Significance (quantitative)**: The efficiency differential over CPUs is quantifiable. An A100 GPU delivers `{python} MlAcceleratorCallout.a100_fp16_tflop_per_s_str` for FP16/BF16 matrix multiplication with `{python} MlAcceleratorCallout.a100_bw_tb_per_s_str` memory bandwidth, while a high-end server CPU delivers roughly 1–2 TFLOP/s FP32 with 200 GB/s bandwidth, a `{python} MlAcceleratorCallout.cpu_gap_range_mult_str` compute throughput gap and a 10$\times$ bandwidth gap for the same matrix-multiply workloads that dominate neural network training and inference [@NVIDIA2020; @choquette2021].
-2.  **Distinction**: Unlike a general-purpose CPU, which executes complex, branch-dependent serial programs efficiently by minimizing per-instruction latency, an ML accelerator processes thousands of independent arithmetic operations in parallel with predictable memory access patterns, making it orders of magnitude faster on dense matrix multiplication while potentially slower than a CPU for irregular control flow programs like tree traversal or dynamic programming.
+1.  **Significance**: An ML accelerator's defining feature is not raw arithmetic but a balanced feed of data to that arithmetic. The A100's `{python} MlAcceleratorCallout.a100_bw_tb_per_s_str` of memory bandwidth, roughly a 10$\times$ gap over a server CPU's 200 GB/s, is what lets its `{python} MlAcceleratorCallout.a100_fp16_tflop_per_s_str` of FP16/BF16 throughput stay fed rather than starved [@NVIDIA2020; @choquette2021]. That balance is then specialized by workload: training accelerators size FLOP/s and bandwidth for bidirectional gradient flow and large activation footprints, while inference accelerators trade those for energy efficiency and deterministic single-request latency.
+2.  **Distinction**: The accelerator's gains are conditional on the data flowing through it being parallel and regular. An ML accelerator processes thousands of independent arithmetic operations at once with predictable memory access, so it is orders of magnitude faster than a CPU on dense matrix multiplication but can be slower on irregular control flow such as tree traversal or dynamic programming, where there is no parallel data stream to feed.
 3.  **Common pitfall**: A frequent misconception is that ML accelerators always accelerate ML. An accelerator only delivers its peak throughput when the workload provides enough parallel work to saturate all arithmetic units simultaneously: a batch-1 autoregressive inference request may use only a small fraction of a large training accelerator's compute capacity because sequential token generation cannot fill thousands of parallel compute lanes.
 
 :::
@@ -2303,10 +2296,6 @@ Because systolic arrays physically fix how data flows\index{Dataflow!weight-stat
 
 **The architects' dilemma**: Systolic arrays must choose which data to keep stationary (in registers) to minimize movement. This choice hard-codes the hardware's preference for certain model types. @Tbl-hw-acceleration-systolic-dataflow previews the three stationary-operand strategies and the workloads each favors; @sec-hardware-acceleration-dataflow-optimization-strategies-ce52 develops each one in full as a general mapping decision.
 
-There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs where filters are small and heavily reused, but faces challenges with LLM inference at small batch sizes, where the weight matrix is read once per token with minimal reuse, pushing architectures toward output-stationary or hybrid dataflow patterns.
-
-:::
-
 | **Strategy**                                                     | **Stationary Item** | **Optimized For**          | **Example Workload**                                                                        |
 |:-----------------------------------------------------------------|:--------------------|:---------------------------|:--------------------------------------------------------------------------------------------|
 | **Weight-Stationary**\index{Weight-Stationary!dataflow strategy} | Weights ($W$)       | High Reuse of Weights      | **CNNs (Conv2D)**: Filters are small and reused across the entire image.                    |
@@ -2314,6 +2303,10 @@ There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (
 | **Input-Stationary**\index{Input-Stationary!dataflow strategy}   | Inputs ($A$)        | High Reuse of Activations  | **Transformers**: The same activations feed many weight matrices across attention heads.    |
 
 : **Systolic-Array Dataflow Strategies**: Three stationary-operand choices for systolic arrays, the reuse pattern each maximizes, and the workload class that benefits, showing how a fixed dataflow choice hard-codes an accelerator's affinity for specific models. {#tbl-hw-acceleration-systolic-dataflow tbl-colwidths="[20,18,18,44]"}
+
+There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (like early TPUs) excels at CNNs where filters are small and heavily reused, but faces challenges with LLM inference at small batch sizes, where the weight matrix is read once per token with minimal reuse, pushing architectures toward output-stationary or hybrid dataflow patterns.
+
+:::
 
 The synchronized data flow ensures that matrix element $A[i,k]$ encounters corresponding $B[k,j]$ elements at precise temporal intervals, executing the multiply-accumulate operations required for matrix multiplication $C[i,j] = \sum_k A[i,k]\times B[k,j]$. This systematic reuse of operands across multiple processing elements substantially reduces memory bandwidth requirements by eliminating redundant data fetches from external memory subsystems.
 
@@ -2582,7 +2575,7 @@ The AI memory wall\index{Memory Wall!definition}\index{Memory Wall!compute-memor
 
 ***The AI Memory Wall***\index{AI Memory Wall!definition} is the ML accelerator performance constraint that arises when arithmetic throughput $(R_{\text{peak}})$ outpaces memory bandwidth $(\text{BW})$.
 
-1.  **Significance (quantitative)**: It dictates that system performance is no longer bounded by FLOP/s, but by the energy and latency cost of moving data. Within the iron law, it is the point where the $\frac{D_{\text{vol}}}{\text{BW}}$ term dominates the total execution time $(T)$.
+1.  **Significance**: It dictates that system performance is no longer bounded by FLOP/s, but by the energy and latency cost of moving data. Within the iron law, it is the point where the $\frac{D_{\text{vol}}}{\text{BW}}$ term dominates the total execution time $(T)$.
 2.  **Distinction**: Unlike a general-purpose memory wall, which affects all computing, the AI memory wall is driven by the massive model state and activation storage required by deep learning.
 3.  **Common pitfall**: A frequent misconception is that the memory wall is "fixed" by more memory. In reality, it is a bandwidth-latency gap: even with infinite capacity, the speed of moving data between memory and compute remains the fundamental physical bottleneck.
 
@@ -3653,7 +3646,7 @@ class RooflineGap:
 
 ***Arithmetic Intensity***\index{Arithmetic Intensity!definition} is the ratio of floating-point operations to bytes of memory traffic for a given computation ($\text{FLOP}/\text{byte}$), determining whether the workload is limited by compute throughput $(R_{\text{peak}})$ or memory bandwidth $(\text{BW})$ on a given accelerator.
 
-1.  **Significance (quantitative)**: The intensity threshold separating memory-bound from compute-bound regimes is the roofline ridge point: $R_{\text{peak}} / \text{BW}$. For an A100 (`{python} RooflineGap.a100_fp16_tflop_per_s_str` FP16/BF16, `{python} RooflineGap.a100_bw_tb_per_s_str`), the ridge point is roughly `{python} RooflineGap.a100_ridge_str`. Matrix multiplications around 100--200 FLOP/byte straddle that threshold, while a larger well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` matrix multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte and is compute bound; a pointwise ReLU performs around `{python} RooflineGap.relu_ai_str` FLOP/byte under a read-plus-write traffic model (memory bound), placing these operations in different optimization regimes on the same hardware.
+1.  **Significance**: The intensity threshold separating memory-bound from compute-bound regimes is the roofline ridge point: $R_{\text{peak}} / \text{BW}$. For an A100 (`{python} RooflineGap.a100_fp16_tflop_per_s_str` FP16/BF16, `{python} RooflineGap.a100_bw_tb_per_s_str`), the ridge point is roughly `{python} RooflineGap.a100_ridge_str`. Matrix multiplications around 100--200 FLOP/byte straddle that threshold, while a larger well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` matrix multiply reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte and is compute bound; a pointwise ReLU performs around `{python} RooflineGap.relu_ai_str` FLOP/byte under a read-plus-write traffic model (memory bound), placing these operations in different optimization regimes on the same hardware.
 2.  **Distinction**: Unlike total FLOPs (a count of operations), arithmetic intensity is a ratio that characterizes the shape of a workload's hardware demand. Two kernels with identical FLOPs but different memory access patterns have different arithmetic intensities and will be bottlenecked by different hardware resources.
 3.  **Common pitfall**: A frequent misconception is that arithmetic intensity is a fixed property of an operation. In practice, it depends on implementation details: a naive matrix-multiply that reloads operands from DRAM for each output element has low arithmetic intensity; a blocked (tiled) implementation that reuses data from fast SRAM achieves high arithmetic intensity—the same mathematical operation, orders of magnitude apart in hardware efficiency.
 
@@ -4240,10 +4233,6 @@ A batch-1 GPT-2 calculation makes this bandwidth ceiling concrete.
 *   **Operation**: Autoregressive generation (1 token at a time).
 *   **Data movement**: Must load all weights (`{python} Gpt2ThroughputCalc.gpt2_weight_gb_str` @ FP16) for every token.
 *   **Compute**: Vector-Matrix multiplication. 2 $\times$ Params ≈ `{python} Gpt2ThroughputCalc.gpt2_decode_gflop_str`.
-
-```{=latex}
-\tcbbreak
-```
 *   **Arithmetic intensity**:
     `{python} Gpt2ThroughputCalc.gpt2_decode_gflop_str` / `{python} Gpt2ThroughputCalc.gpt2_weight_gb_str` = `{python} Gpt2ThroughputCalc.gpt2_decode_ai_str` FLOP/byte
 
@@ -4274,19 +4263,13 @@ Consider a $3{\times}3$ convolution running on an accelerator tile. The mathemat
 
 ***Mapping in AI Acceleration***\index{Hardware Mapping!definition} is the accelerator-compiler process of binding the Logical Computation Graph to the Physical Hardware Topology by deciding which operations execute on which processing elements, which data resides in which memory tier, and in what temporal order.
 
-1.  **Significance (quantitative)**: Within the D·A·M taxonomy, mapping is the machine-axis decision that determines whether the algorithm's operations run at $R_{\text{peak}}$ or at $\text{BW} \times \text{AI}$. Specifically, a general matrix multiply (GEMM) with arithmetic intensity $\text{AI}$ runs at $\min(R_{\text{peak}},\; \text{BW} \times \text{AI})$; a poor tiling choice that forces unnecessary DRAM accesses can reduce effective $\text{AI}$ enough to collapse a compute-bound operation into a bandwidth-bound one and cause a commensurate drop in sustained throughput.
+1.  **Significance**: Within the D·A·M taxonomy, mapping is the machine-axis decision that determines whether the algorithm's operations run at $R_{\text{peak}}$ or at $\text{BW} \times \text{AI}$. Specifically, a general matrix multiply (GEMM) with arithmetic intensity $\text{AI}$ runs at $\min(R_{\text{peak}},\; \text{BW} \times \text{AI})$; a poor tiling choice that forces unnecessary DRAM accesses can reduce effective $\text{AI}$ enough to collapse a compute-bound operation into a bandwidth-bound one and cause a commensurate drop in sustained throughput.
 2.  **Distinction**: Unlike Traditional Compilation (which targets a linear instruction stream on a von Neumann processor), Mapping targets a Dataflow Architecture\index{Dataflow Architecture!definition} where the movement of data is as costly as the computation itself: off-chip DRAM access consumes ~200$\times$ more energy than a multiply-accumulate in local registers.
 3.  **Common pitfall**: A frequent misconception is that mapping is automatically handled by frameworks. For general GPU workloads, compilers like Accelerated Linear Algebra (XLA) can find strong mappings for common kernels; for specialized accelerators (systolic arrays, custom ASICs), compiler-generated mappings may still lag hand-tuned schedules because the compiler's search space is limited by the time budget at compilation.
 
 :::
 
-The convolution example exposes the three decisions that recur throughout accelerator compilation. Placement assigns the multiply-accumulate work to processing elements so parallelism does not turn into idle time or interconnect congestion. Allocation keeps weights, activations, and partial sums in the memory tier where their next use will occur, rather than letting reuse spill back to DRAM. Scheduling orders loops and kernels so the chosen placement and allocation remain valid over time. A poor choice in any one dimension can collapse a high-arithmetic-intensity operation back into a bandwidth-bound execution. In practice, these choices are too coupled to manage manually at model scale, which is why compiler support becomes part of the accelerator system.
-
-::: {#psp-hw-acceleration-role-compiler .callout-perspective title="The role of the compiler"}
-
-Developers rarely perform this complex mapping manually. Instead, a specialized compiler (like NVIDIA's NVCC or Google's XLA) takes the high-level model from the framework and explores the mapping search space to find a good execution plan within compile-time and hardware constraints. The compiler is the critical software layer that translates the model's computational graph into an efficient hardware-specific dataflow, balancing the three interrelated aspects of computation placement, memory allocation, and execution scheduling described earlier. This compiler support is examined in detail in @sec-hardware-acceleration-compiler-support-172e.
-
-:::
+The convolution example exposes the three decisions that recur throughout accelerator compilation. Placement assigns the multiply-accumulate work to processing elements so parallelism does not turn into idle time or interconnect congestion. Allocation keeps weights, activations, and partial sums in the memory tier where their next use will occur, rather than letting reuse spill back to DRAM. Scheduling orders loops and kernels so the chosen placement and allocation remain valid over time. A poor choice in any one dimension can collapse a high-arithmetic-intensity operation back into a bandwidth-bound execution. In practice, these choices are too coupled for developers to manage by hand at model scale, which is why a specialized compiler such as NVIDIA's NVCC or Google's XLA takes over: it accepts the high-level model from the framework and searches the mapping space for a good execution plan within the compile-time and hardware budget it is given. @Sec-hardware-acceleration-compiler-support-172e examines that compiler support in detail.
 
 ### Placement and allocation {#sec-hardware-acceleration-computation-placement-23d2}
 
@@ -4809,10 +4792,10 @@ These fusion decisions are ultimately about data locality, which now ties togeth
 
 The dataflow building blocks are now in place: data locality, tensor layout, and kernel fusion. You should be able to reason through each one:
 
-- [ ] **Which data stays local?** Can you explain how weight-stationary, output-stationary, and input-stationary dataflows each choose a tensor to keep near compute units, and why that choice changes memory traffic?
-- [ ] **Which layout fits the kernel?** Can you explain why a tensor's physical layout (NHWC vs. NCHW) must match the access pattern the selected backend expects, so that a layout mismatch can cost a multi-fold slowdown?
-- [ ] **How are operations combined?** Can you explain why fusing operations such as Conv2D + BatchNorm + ReLU avoids intermediate DRAM writes, and why fusion helps most when the fused operations share simple data dependencies?
-- [ ] **What remains unsolved?** Can you state why locality, layout, and fusion are insufficient unless the computation is also tiled so the chosen data actually fits in fast memory?
+- [ ] **Locality choice**: Given weight-stationary, output-stationary, and input-stationary dataflows, which tensor does each hold near the compute units, and how does that choice shift where the memory traffic lands?
+- [ ] **Layout match**: A kernel runs on a backend expecting NHWC but receives an NCHW tensor. Predict what happens to its memory access pattern and to delivered throughput.
+- [ ] **Fusion eligibility**: For a Conv2D, a BatchNorm, and a ReLU executed in sequence, decide which pairs are worth fusing and what determines whether fusing them pays off.
+- [ ] **Remaining gap**: Locality, layout, and fusion are all chosen well, yet the operation still stalls on memory. What is the missing transformation, and why do the other three not address it?
 
 :::
 
@@ -5315,21 +5298,7 @@ class RuntimeProductionTdp:
     a100_tdp_w_str = fmt_power(Hardware.Cloud.A100.tdp, unit=watt, precision=0, commas=False)
 ```
 
-::: {#psp-hw-acceleration-when-production-differs-from-development .callout-perspective title="When production differs from development"}
-
-Runtime behavior often surprises engineers who optimized their models in development environments. Four patterns account for most of the gap between development and production performance.
-
-Training uses fixed batch sizes, but production inference may receive single requests (batch=1) or bursts (batch=64+). Runtimes must handle variable batch sizes efficiently, applying latency optimization for single requests and throughput optimization for bursts.
-
-Long-running inference servers can gradually fragment GPU memory. Production systems usually manage this risk with memory pools, static allocation plans, admission control, and occasional process restarts rather than relying on arbitrary in-place compaction. Understanding these memory fragmentation dynamics determines when preallocation is enough and when service recycling must be part of the operating plan.
-
-Cloud accelerators are often shared, leading to multi-tenant interference. A model that met its latency target in isolation can miss that target when a neighbor workload competes for memory bandwidth. Production systems need monitoring to detect and respond to this interference.
-
-Sustained workloads may trigger thermal throttling that was not observed in short benchmarks. The A100 SXM operates at `{python} RuntimeProductionTdp.a100_tdp_w_str` TDP while the A100 PCIe operates at 300 W TDP; these represent different form factors with different cooling requirements, not boost vs. sustained states. Production performance depends on which variant is deployed and whether thermal limits are approached.
-
-Understanding runtime adaptation mechanisms helps engineers design systems that degrade gracefully rather than fail unexpectedly.
-
-:::
+The deepest reason an AI runtime cannot run a fixed plan is that the development environment lies about the production one. The clearest case is thermal: a model tuned on a short benchmark never sees the throttling that a sustained workload triggers, and even the same chip is not the same chip. The A100 SXM operates at `{python} RuntimeProductionTdp.a100_tdp_w_str` TDP while the A100 PCIe operates at 300 W; these are different form factors with different cooling envelopes, not boost versus sustained states, so a kernel that holds peak throughput in the lab can quietly lose it in production depending on which variant is deployed. The same development-to-production gap shows up in batch size that swings from single requests to bursts, in long-running servers that fragment GPU memory, and in shared accelerators where a neighbor workload steals the bandwidth a latency target depended on. None of these conditions is known when the model is compiled, which is why the runtime, not the compiler, has to absorb them.
 
 To see how these runtime mechanisms work together in practice, consider a concrete scenario: a transformer inference request arrives at a production server. The runtime must adapt execution parameters such as tiling and memory allocation to current conditions (dynamic execution), determine which kernel implementation to use for each operation based on real-time hardware state (kernel selection), and schedule the selected kernels across available compute units to maximize utilization (kernel scheduling). These are not independent systems but three interrelated phases of a single runtime pipeline, and the following subsections examine each phase using this transformer inference request as a running example.
 

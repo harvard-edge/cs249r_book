@@ -120,12 +120,6 @@ Scale forces distribution: Compute, Communication, and Coordination replace the 
 
 The physical stack begins at the silicon die and expands outward through four levels. At each level, the same engineering pattern appears: a constraint becomes intolerable, and the solution creates the next layer of infrastructure. Nodes aggregate accelerators to overcome memory capacity limits. Racks concentrate nodes and confront power delivery and cooling. Pods wire racks into a warehouse-scale computer and face the communication wall at full force. The path from transistor to data center is anchored by the `{python} InfraSetup.frontier_params_b_str` model, which serves as the thread connecting each level.
 
-::: {.content-visible when-format="pdf"}
-
-\newpage
-
-:::
-
 ::: {#fig-three-walls-grid fig-env="figure" fig-pos="htb" fig-cap="**The Four Infrastructure Walls**: Four dominant constraints arranged across a Scaling Journey: Power wall (data center delivery limits, ~40 MW facility), memory wall (HBM bandwidth gap, 3.35 TB/s HBM3 vs. ~2K TFLOP/s), communication wall (network bisection limit, 400 Gb/s NDR IB per port), and reliability wall (MTBF ~2 hours at 25K GPUs). Each wall becomes the dominant constraint at a different scale, from a single GPU through 8-GPU nodes and 1K-GPU clusters to 25K+ GPU fleets." fig-alt="Four walls laid out horizontally: Power, Memory, Comm., and Reliability, each with a quantitative constraint and a mitigation. Below, a Scaling Journey marks Single Node, 8-GPU Node, Multi-Node Cluster, and 10K+ GPU Fleet."}
 
 ![](images/svg/infra-walls.svg)
@@ -172,7 +166,7 @@ The programming model distinction between GPUs and TPUs has practical implicatio
 
 **Context**: In 2013, Google engineers projected that if users spoke to their Android phones for just three minutes per day using voice search, the company would need to double its data center compute capacity to handle the inference load. The cost was prohibitive.
 
-**Observation**: Google's TPU analysis framed production neural-network inference as a dense-linear-algebra workload large enough that voice-search growth alone could have doubled serving capacity needs. This observation led directly to the TPU v1, a purpose-built inference accelerator with a $256{\times}256$ systolic array that could deliver 92 TOPS (INT8) within a 75 W power envelope. The first TPUs were deployed in 2015 and served production inference workloads including RankBrain and portions of Google Neural Machine Translation [@jouppi2017]; the AlphaGo match-play system is documented separately [@silver2016].
+**Insight**: Google's TPU analysis framed production neural-network inference as a dense-linear-algebra workload large enough that voice-search growth alone could have doubled serving capacity needs. This finding led directly to the TPU v1, a purpose-built inference accelerator with a $256{\times}256$ systolic array that could deliver 92 TOPS (INT8) within a 75 W power envelope. The first TPUs were deployed in 2015 and served production inference workloads including RankBrain and portions of Google Neural Machine Translation [@jouppi2017]; the AlphaGo match-play system is documented separately [@silver2016].
 
 **Systems lesson**: Specialization became economically justified because the workload was stable, massive, and dominated by one operation class. The TPU story is a generality-tax case, not merely a faster-chip story.
 
@@ -760,7 +754,7 @@ class MemoryBandwidthPitfallRecap:
 
 ***High Bandwidth Memory (HBM)***\index{HBM!definition}\index{High Bandwidth Memory|see{HBM}} is the 3D-stacked DRAM architecture used by ML accelerators, in which multiple memory dies are vertically bonded and connected to the processor through thousands of Through-Silicon Vias (TSVs) on a shared silicon interposer, eliminating the centimeter-scale PCB traces of conventional DRAM and replacing them with micrometer-scale vertical paths.
 
-1.  **Significance (quantitative)**: HBM3 in the H100 delivers approximately 3.35 TB/s of memory bandwidth—roughly 16$\times$ DDR5's ~200 GB/s—at 2 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\text{BW}$ ceiling in the iron law: the H100's FP16 ridge point is approximately $989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte, so any operator with arithmetic intensity below 295 FLOP/byte (for example, attention at 5–20 FLOP/byte) remains memory-bound even with HBM.
+1.  **Significance**: HBM3 in the H100 delivers approximately 3.35 TB/s of memory bandwidth—roughly 16$\times$ DDR5's ~200 GB/s—at 2 pJ/bit vs. DDR5's ~20 pJ/bit. This bandwidth sets the $\text{BW}$ ceiling in the iron law: the H100's FP16 ridge point is approximately $989\,\text{TFLOP/s} / 3.35\,\text{TB/s} \approx 295$ FLOP/byte, so any operator with arithmetic intensity below 295 FLOP/byte (for example, attention at 5–20 FLOP/byte) remains memory-bound even with HBM.
 2.  **Distinction**: Unlike DDR memory, which connects through centimeters of PCB trace (introducing capacitance, attenuation, and high driving current), HBM uses 1,024-bit-wide TSV buses with path lengths measured in micrometers, a 1,000$\times$ reduction in signal distance that enables the wider bus without proportionally higher power.
 3.  **Common pitfall**: A frequent misconception is that HBM solves the memory wall. HBM moves the wall rather than eliminates it: Tensor Core throughput $(R_{\text{peak}})$ has scaled faster than HBM bandwidth across generations (from `{python} V100MemoryWallRecap.mem_bw_gb_per_s_str` with `{python} V100MemoryWallRecap.flops_fp16_tflop_per_s_str` FP16 in V100 to `{python} MemoryBandwidthPitfallRecap.h100_bw_tb_per_s_str` with `{python} MemoryBandwidthPitfallRecap.h100_flops_fp16_tflop_per_s_str` FP16 in H100), so the ridge point continues rising and more operations remain memory-bound despite HBM improvements.
 
@@ -1004,11 +998,6 @@ class TokenLatencyScenario:
     t_mem_math = fmt_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{t_mem.to(millisecond).magnitude:.1f} \\text{{ ms}}}}")
 ```
 
-::: {#nbk-token-latency .callout-notebook title="The physics of token latency"}
-
-**Problem**: Generating one token from Llama-3 70B (`{python} TokenLatencyScenario.weight_gb_str` of FP16 weights) requires both arithmetic and a full weight load from HBM. Assuming capacity has been solved (by sharding, a higher-capacity device, or quantization), which dominates the per-token time on an H100: compute or memory transfer?
-
-1. **Compute Time**\index{Latency!compute time}: Each token requires $2 \times 70 \times 10^9 = 1.4 \times 10^{11}$ floating-point operations. At `{python} TokenLatencyScenario.h100_fp16_tflop_per_s_str` of FP16/BF16 Tensor Core peak throughput, the arithmetic takes `{python} TokenLatencyScenario.t_comp_math`.
 ```{python}
 #| echo: false
 from mlsysim.fmt import fmt_qty
@@ -1019,6 +1008,12 @@ class MemoryBandwidthLatencyRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
 ```
+
+::: {#nbk-token-latency .callout-notebook title="The physics of token latency"}
+
+**Problem**: Generating one token from Llama-3 70B (`{python} TokenLatencyScenario.weight_gb_str` of FP16 weights) requires both arithmetic and a full weight load from HBM. Assuming capacity has been solved (by sharding, a higher-capacity device, or quantization), which dominates the per-token time on an H100: compute or memory transfer?
+
+1. **Compute Time**\index{Latency!compute time}: Each token requires $2 \times 70 \times 10^9 = 1.4 \times 10^{11}$ floating-point operations. At `{python} TokenLatencyScenario.h100_fp16_tflop_per_s_str` of FP16/BF16 Tensor Core peak throughput, the arithmetic takes `{python} TokenLatencyScenario.t_comp_math`.
 
 2. **Memory Time**\index{Latency!memory time}:
 
@@ -1215,11 +1210,7 @@ class MemoryBandwidthRooflineFnRecap:
 
 For an H100 (`{python} MemoryBandwidthRooflineFnRecap.h100_flops_fp16_tflop_per_s_str` FP16, `{python} MemoryBandwidthRooflineFnRecap.h100_bw_tb_per_s_str` HBM), the ridge point is ~295 FLOP/byte; most LLM inference operators fall well below this threshold, which is *why* the Roofline remains the first diagnostic tool for identifying whether more compute or more bandwidth will improve performance.
 
-::: {#psp-compute-infrastructure-arithmetic-intensity .callout-perspective title="Arithmetic intensity"}
-
-**Arithmetic intensity**\index{Arithmetic Intensity} $(I)$ is defined as $I = \text{FLOP}/\text{byte}$, the ratio of computation to memory traffic that determines whether a workload is bandwidth-bound or compute-bound on the Roofline Model. The same quantity is applied to fleet-scale performance analysis at @sec-performance-engineering-roofline.
-
-:::
+The quantity that places a workload on this plot is its **arithmetic intensity**\index{Arithmetic Intensity} $(I)$, defined as $I = \text{FLOP}/\text{byte}$: the ratio of computation to memory traffic that determines whether a workload is bandwidth-bound or compute-bound. The same quantity carries forward to fleet-scale performance analysis at @sec-performance-engineering-roofline.
 
 ::: {.column-margin}
 ![](images/svg/compute_infrastructure_decode_roofline.svg){width="100%" fig-alt="A roofline: a blue memory-bound slope rising to an orange compute-bound ceiling at the ridge point. A workload dot sits low on the blue slope, far left of the ridge, marking LLM decode as deeply memory bound."}
@@ -1237,7 +1228,7 @@ $$ \text{Achievable FLOP/s} = \min\left(R_{\text{peak}},\ \text{BW} \times I\rig
 
 ***Ridge Point***\index{Ridge Point!definition} is the ML accelerator arithmetic intensity where the memory bandwidth ceiling meets the compute ceiling $(I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}})$.
 
-1.  **Significance (quantitative)**: It defines the Hardware Efficiency Threshold. Workloads with an intensity below the ridge point are bandwidth-bound $(\text{BW})$, while those above are compute-bound\index{Compute-Bound} $(R_{\text{peak}})$.
+1.  **Significance**: It defines the Hardware Efficiency Threshold. Workloads with an intensity below the ridge point are bandwidth-bound $(\text{BW})$, while those above are compute-bound\index{Compute-Bound} $(R_{\text{peak}})$.
 2.  **Distinction**: Unlike Peak FLOP/s\index{Peak FLOP/s} (which only describes the horizontal ceiling), the ridge point describes the Balance of the architecture. A rising ridge point over hardware generations indicates that compute is growing faster than bandwidth, making utilization harder.
 3.  **Common pitfall**: A frequent misconception is that all GPUs have the same ridge point. In reality, it varies by Precision: because $R_{\text{peak}}$ is higher for INT8 than FP32 while $\text{BW}$ is constant, the ridge point for INT8 is much higher, requiring more data reuse to saturate the hardware.
 
@@ -1637,10 +1628,6 @@ XLA compilation for TPUs must decompose the computation into sequences of matrix
 
 The hardware dictates the software abstraction, which in turn shapes what architectures are practical to experiment with. This coupling between hardware and software is a defining characteristic of ML infrastructure and explains why hardware selection has downstream effects on research velocity and model design flexibility.
 
-::: {#dfn-compute-infrastructure-tensor-core .callout-definition title="Tensor core"}
-
-***Tensor Core***\index{Tensor Core!definition} is a specialized ML accelerator hardware unit that performs a fused matrix-multiply-accumulate (MMA) operation $\mathbf{Y} = \mathbf{A} \times \mathbf{B} + \mathbf{C}$ on small tiles (for example, $16{\times}8{\times}16$ in BF16) as a single hardware instruction, delivering dramatically higher throughput than general-purpose CUDA cores by trading programmability for fixed-function matrix arithmetic.
-
 ```{python}
 #| echo: false
 from mlsysim import Hardware
@@ -1662,7 +1649,11 @@ class TensorCoreTdpRecap:
     h100_fp32_cuda_tflop_per_s_str = fmt_flop_rate(_fp32_cuda, unit=TFLOPs / second, precision=0, commas=False)
 ```
 
-1.  **Significance (quantitative)**: Tensor Cores provide the bulk of the H100's `{python} TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str` FP16/BF16 peak (and ~`{python} TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str` at FP8)—roughly `{python} TensorCoreTdpRecap.tc_vs_cuda_ratio_mult_str` the ~`{python} TensorCoreTdpRecap.h100_fp32_cuda_tflop_per_s_str` delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
+::: {#dfn-compute-infrastructure-tensor-core .callout-definition title="Tensor core"}
+
+***Tensor Core***\index{Tensor Core!definition} is a specialized ML accelerator hardware unit that performs a fused matrix-multiply-accumulate (MMA) operation $\mathbf{Y} = \mathbf{A} \times \mathbf{B} + \mathbf{C}$ on small tiles (for example, $16{\times}8{\times}16$ in BF16) as a single hardware instruction, delivering dramatically higher throughput than general-purpose CUDA cores by trading programmability for fixed-function matrix arithmetic.
+
+1.  **Significance**: Tensor Cores provide the bulk of the H100's `{python} TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str` FP16/BF16 peak (and ~`{python} TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str` at FP8)—roughly `{python} TensorCoreTdpRecap.tc_vs_cuda_ratio_mult_str` the ~`{python} TensorCoreTdpRecap.h100_fp32_cuda_tflop_per_s_str` delivered by CUDA (vector) cores alone. However, this peak is only achievable for operations that decompose into tiled matrix multiplications. Layer normalization and softmax, which involve reductions and element-wise operations rather than matrix multiplications, run at approximately 3–8 percent of peak throughput on the same hardware.
 2.  **Distinction**: Unlike general-purpose CUDA cores (which execute one floating-point operation per clock per lane in a SIMT pipeline), Tensor Cores execute 512 multiply-accumulate operations per clock per warp on matrix tiles—trading the arbitrary per-element programmability of CUDA cores for the specific throughput of matrix arithmetic.
 3.  **Common pitfall**: A frequent misconception is that all GPU operations benefit from Tensor Cores. Only operations that map to the $\mathbf{Y} = \mathbf{A} \times \mathbf{B} + \mathbf{C}$ tile computation (dense linear layers, attention score computation, convolutions) engage Tensor Cores; element-wise activations, layer norm, and embedding lookups fall back to CUDA cores and can run 10--30$\times$ slower per FLOP than Tensor Core operations.
 
@@ -1788,7 +1779,7 @@ This is the thermodynamic limit (principle \ref{pri-thermodynamic-limit}) in act
 
 ***Thermal Design Power (TDP)***\index{Thermal Design Power!definition} is the maximum sustained thermal load in watts that an ML accelerator's cooling system must continuously remove for the processor to operate at its rated clock frequency—defining both the cooling infrastructure requirement and the performance ceiling for the accelerator.
 
-1.  **Significance (quantitative)**: The H100 SXM5 operates at `{python} H100TdpWallRecap.tdp_w_str` TDP. When a liquid cooling system can only sustain 500 W of heat removal (inadequate cooling), the GPU firmware reduces clock frequency via thermal throttling, dropping $R_{\text{peak}}$ from `{python} H100TdpWallRecap.flops_fp16_tflop_per_s_str` to roughly 712 TFLOP/s FP16, a 28 percent reduction in training throughput that propagates directly into longer wall-clock training time and higher cost per model.
+1.  **Significance**: The H100 SXM5 operates at `{python} H100TdpWallRecap.tdp_w_str` TDP. When a liquid cooling system can only sustain 500 W of heat removal (inadequate cooling), the GPU firmware reduces clock frequency via thermal throttling, dropping $R_{\text{peak}}$ from `{python} H100TdpWallRecap.flops_fp16_tflop_per_s_str` to roughly 712 TFLOP/s FP16, a 28 percent reduction in training throughput that propagates directly into longer wall-clock training time and higher cost per model.
 2.  **Distinction**: Unlike peak power consumption (the instantaneous maximum during a single-instruction burst), TDP specifies the steady-state thermal budget: the long-term average that determines whether training can run continuously at rated performance or must throttle.
 3.  **Common pitfall**: A frequent misconception is that TDP is a power limit for the software. TDP is a cooling requirement: the processor exceeds its rated speed only if the cooling system removes heat at least as fast as the chip generates it; insufficient cooling causes hardware throttling silently—no error is raised, training simply slows down and MFU drops without obvious cause.
 
@@ -2314,7 +2305,7 @@ class H100NvlinkNodeRecap:
 
 ***Node***\index{Node!definition} is the ML training cluster's physical server chassis that aggregates multiple accelerators (typically 8) through a high-speed intra-node interconnect (NVLink or ICI), creating the fundamental boundary between high-bandwidth local communication and the order-of-magnitude slower inter-node network fabric.
 
-1.  **Significance (quantitative)**: The NVLink bandwidth within a DGX H100 node reaches `{python} H100NvlinkNodeRecap.nvlink_gb_per_s_str` bidirectional, or `{python} H100NvlinkNodeRecap.nvlink_per_dir_gb_per_s_str` per direction, while inter-node InfiniBand NDR provides 50 GB/s, a `{python} H100NvlinkNodeRecap.nvlink_ib_gap_mult_str` per-direction gap that constrains where each parallelism strategy can run. Tensor parallelism, which AllReduces every layer's output, must stay within the node; pipeline parallelism, which transfers only stage-boundary activations, can span nodes over InfiniBand. The node is also the primary failure domain: a single node failure in a bulk synchronous parallel (BSP) training job, where workers advance in lockstep at step barriers, idles the entire cluster until recovery.
+1.  **Significance**: The NVLink bandwidth within a DGX H100 node reaches `{python} H100NvlinkNodeRecap.nvlink_gb_per_s_str` bidirectional, or `{python} H100NvlinkNodeRecap.nvlink_per_dir_gb_per_s_str` per direction, while inter-node InfiniBand NDR provides 50 GB/s, a `{python} H100NvlinkNodeRecap.nvlink_ib_gap_mult_str` per-direction gap that constrains where each parallelism strategy can run. Tensor parallelism, which AllReduces every layer's output, must stay within the node; pipeline parallelism, which transfers only stage-boundary activations, can span nodes over InfiniBand. The node is also the primary failure domain: a single node failure in a bulk synchronous parallel (BSP) training job, where workers advance in lockstep at step barriers, idles the entire cluster until recovery.
 2.  **Distinction**: Unlike a single accelerator (which provides fast HBM bandwidth but limited capacity), a node aggregates 8$\times$ the HBM capacity and 8$\times$ the compute of a single chip -- enough to place large FP16 weight shards (8 $\times$ 80 GB = 640 GB on DGX H100), but not enough to keep the full Adam training state in HBM.
 3.  **Common pitfall**: A frequent misconception is that nodes in a distributed training job operate independently. In BSP training, all nodes are synchronously coupled at every step barrier: a performance degradation on one node (from thermal throttling, a faulty NIC, or a slow storage read) stalls the entire cluster and drops overall MFU for the duration of that step.
 
@@ -2365,7 +2356,9 @@ The node's internal memory hierarchy, consisting of HBM (fast, small), host DRAM
 
 ### Bandwidth hierarchy {#sec-compute-bandwidth-hierarchy}
 
-The defining characteristic of multi-accelerator systems is not the *number of chips* but the *speed at which they can exchange data*. Data movement speed drops by orders of magnitude as it crosses physical boundaries. Each boundary represents a different physical medium, a different connector technology, and a different set of engineering constraints. Understanding this bandwidth hierarchy\index{Bandwidth Hierarchy} is essential because it dictates *where* in the hierarchy each type of parallelism can operate efficiently.
+The defining characteristic of multi-accelerator systems is not the *number of chips* but the *speed at which they can exchange data*. Data movement speed drops by orders of magnitude as it crosses physical boundaries. Each boundary represents a different physical medium, a different connector technology, and a different set of engineering constraints. This physical ordering of data transfer rates, from on-chip SRAM at the fast end to the wide-area network at the slow end, is the **bandwidth hierarchy**\index{Bandwidth Hierarchy}, and understanding it is essential because it dictates *where* in the hierarchy each type of parallelism can operate efficiently.
+
+The hierarchy reflects the physical cost of distance: shorter signal paths over denser wiring achieve higher throughput at lower energy per bit, so at each boundary the effective bandwidth $(\text{BW})$ drops by roughly an order of magnitude while latency $(L_{\text{lat}})$ rises. That gradient sets a scaling ceiling for distributed training. The common mistake is to treat all cluster communication as equal, but parallelism placement must be hierarchy-aware: putting high-frequency synchronization such as tensor parallelism on a slow tier idles the compute units $(R_{\text{peak}})$ and collapses scaling efficiency $(\eta_{\text{scaling}})$.
 
 The bandwidth hierarchy is best understood as a series of concentric zones around each accelerator. The innermost zone is the HBM on the same package, with terabytes per second of bandwidth and sub-microsecond latency\index{Latency!bandwidth hierarchy}. The next zone encompasses the other accelerators within the same node, reachable over NVLink at hundreds of gigabytes per second with microsecond-scale latency. The outermost zone spans all other nodes in the cluster, connected by InfiniBand at tens of gigabytes per second with latency measured in single-digit microseconds. At each zone boundary, the bandwidth drops by roughly an order of magnitude while the latency increases by roughly an order of magnitude. @Tbl-bandwidth-hierarchy-compute maps those zones to the parallelism strategies they can support.
 
@@ -2462,21 +2455,7 @@ Transfer time is $T_{\text{transfer}} = D_{\text{vol}} / \text{BW}$.
 
 :::
 
-Those timings are the operational form of a broader concept: bandwidth falls in tiers as data crosses physical boundaries.
-
-::: {#dfn-compute-infrastructure-bandwidth-hierarchy .callout-definition title="Bandwidth hierarchy"}
-
-***Bandwidth Hierarchy***\index{Bandwidth Hierarchy!definition} is the physical ordering of data transfer rates across ML system boundaries, from on-chip SRAM (fastest) to the wide-area network (slowest).
-
-1.  **Significance (quantitative)**: It dictates the Scaling Ceiling for distributed training. At each physical boundary (die edge, package edge, chassis, rack), the Effective Bandwidth $(\text{BW})$ drops by approximately one order of magnitude while latency $(L_{\text{lat}})$ increases.
-2.  **Distinction**: Unlike Idealized Networking Models\index{Idealized Networking Models}, the Bandwidth Hierarchy captures the Physical Cost of Distance\index{Physical Cost of Distance}: shorter signal paths over denser wiring achieve higher throughput at lower energy per bit.
-3.  **Common pitfall**: A frequent misconception is that all cluster communication is equal. In reality, parallelism strategies must be Hierarchy-Aware\index{Hierarchy-Aware Parallelism}: placing high-frequency synchronization (for example, Tensor Parallelism) on a slow tier will rapidly idle the compute units $(R_{\text{peak}})$, collapsing scaling efficiency $(\eta_{\text{scaling}})$.
-
-:::
-
-Each cliff exists for a different physical reason rooted in the signal-propagation regime at that distance scale.
-
-The **intra-package**\index{Intra-package interconnect} interconnect achieves terabytes per second because signals travel through lithographically patterned copper traces on a silicon interposer, with path lengths measured in millimeters. At these distances, signal attenuation is negligible, no amplification is needed, and the signaling rate is limited only by the trace geometry and the transceiver design.
+Each cliff in the bandwidth staircase exists for a different physical reason, rooted in the signal-propagation regime at its distance scale. The **intra-package**\index{Intra-package interconnect} interconnect achieves terabytes per second because signals travel through lithographically patterned copper traces on a silicon interposer, with path lengths measured in millimeters. At these distances, signal attenuation is negligible, no amplification is needed, and the signaling rate is limited only by the trace geometry and the transceiver design.
 
 NVLink achieves hundreds of gigabytes per second using high-speed SerDes[^fn-serdes-signaling] transceivers over short copper cables or traces within a chassis, with path lengths of tens of centimeters. At these distances, signal attenuation is measurable but manageable with simple equalization circuits. The SerDes transceivers use PAM-4 (4-level pulse amplitude modulation) signaling at 112 Gb/s per lane, packing 2 bits per symbol to double the data rate relative to NRZ (nonreturn-to-zero) signaling.
 
@@ -3324,7 +3303,7 @@ For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, trai
 
 ***Rack***\index{Rack!definition} is the physical infrastructure unit, a standardized 42U enclosure, that houses multiple compute nodes, a Top-of-Rack (ToR) switch (the first network aggregation point connecting all nodes in the rack to the broader cluster fabric), power distribution units, and cooling distribution manifolds, defining the granularity at which power and cooling capacity must be provisioned.
 
-1.  **Significance (quantitative)**: AI rack power density has grown dramatically: a rack of 4 DGX H100 nodes contains 32 GPUs at `{python} H100TdpRackRecap.tdp_w_str` each, totaling 22.4 kW of GPU power alone, plus 11+ kW for CPUs, NVSwitch, NICs, power conversion losses, and cooling overhead, reaching 33–40 kW per rack. This far exceeds the 5–10 kW typical of general-purpose data center racks, requiring dedicated liquid cooling infrastructure and electrical circuits that must be co-designed with the building.
+1.  **Significance**: AI rack power density has grown dramatically: a rack of 4 DGX H100 nodes contains 32 GPUs at `{python} H100TdpRackRecap.tdp_w_str` each, totaling 22.4 kW of GPU power alone, plus 11+ kW for CPUs, NVSwitch, NICs, power conversion losses, and cooling overhead, reaching 33–40 kW per rack. This far exceeds the 5–10 kW typical of general-purpose data center racks, requiring dedicated liquid cooling infrastructure and electrical circuits that must be co-designed with the building.
 2.  **Distinction**: Unlike a node (the compute unit), a rack is the infrastructure unit: it is the physical level at which cooling manifolds, power distribution, and the ToR switch are integrated—making the rack the minimum replaceable and serviceable unit for facility operations, not the node.
 3.  **Common pitfall**: A frequent misconception is that rack placement is a logistical afterthought. Nodes within the same rack share a ToR switch and have single-hop connectivity; nodes in different racks cross at least two switch hops. Placing all pipeline-parallel stages of a training job within the same rack minimizes inter-stage latency and reduces inter-rack fabric load.
 
@@ -3644,7 +3623,7 @@ At this scale, the unit of analysis is no longer a rack or pod of independent se
 
 ***Warehouse-Scale Computer (WSC)***\index{Warehouse-Scale Computer!definition}\index{WSC!data center scale} is a building-scale computing system in which thousands of servers are operated as a single coherent machine (with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system), enabling training workloads that would be physically impossible on any single machine.
 
-1.  **Significance (quantitative)**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` at FP8), enabling 175B-class training workloads at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
+1.  **Significance**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` at FP8), enabling 175B-class training workloads at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
 2.  **Distinction**: Unlike a general-purpose compute cluster (which runs many independent jobs on separate nodes with no requirement for tight coupling), a WSC training cluster operates as a single synchronous instrument in which every node must participate in every AllReduce, making the failure or slowdown of a single node a cluster-wide performance event.
 3.  **Common pitfall**: A frequent misconception is that WSC design is primarily software engineering or IT operations. WSC design is building-level computer architecture: the physical layout (rack placement to minimize inter-rack hops), power delivery chain (PUE targets, liquid cooling manifolds), and network topology must be co-designed as a unified system: a mistake at any layer propagates through all layers.
 
@@ -3731,10 +3710,6 @@ An important node-architecture technology is **Compute Express Link (CXL)**\inde
 For ML training, the natural target is cold or phase-local state rather than the active matrix-multiply working set. The Adam optimizer state for our `{python} EmergingInfrastructureRecap.frontier_params_b_str` model occupies `{python} EmergingInfrastructureRecap.optimizer_state_gb_str`, and it is touched during parameter updates rather than streamed through every Tensor Core operation. A shared CXL pool could therefore reduce per-node memory pressure by holding optimizer shards, embedding-table spillover, or local data-cache buffers outside the accelerator HBM tier. The training framework still has to schedule this state carefully, but the placement problem becomes less binary than "fits in this node" or "spills to storage."
 
 The new wall is bandwidth. A representative CXL memory path over PCIe Gen5 x16 provides `{python} EmergingInfrastructureRecap.cxl_bw_gb_per_s_str`, while H100 HBM provides `{python} EmergingInfrastructureRecap.h100_hbm_bw_tb_per_s_str`. That `{python} EmergingInfrastructureRecap.cxl_vs_hbm_gap_mult_str` gap means weights and activations for the forward and backward passes still belong in HBM. CXL is a capacity tier, not an HBM replacement. The fleet-design implication is concrete: planners should ask whether server platforms, rack layouts, and orchestration software can absorb CXL memory pooling, not whether CXL removes the need for high-bandwidth accelerator memory.
-
-::: {.content-visible when-format="pdf"}
-\newpage
-:::
 
 ::: {.column-margin}
 ![](images/svg/compute_infrastructure_cxl_bandwidth_gap.svg){width="100%" fig-alt="Two-rung bandwidth ladder comparing HBM3 with CXL memory and showing a large bandwidth gap."}
