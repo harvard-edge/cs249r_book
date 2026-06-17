@@ -763,11 +763,7 @@ The throughput equation describes the system's capacity:
 
 $$X(B) = \frac{B}{T_{\text{lat}}(B)} = \frac{B}{T_{\text{fixed}} + B \times T_{\text{variable}}}$$
 
-The resulting curve is the **Batching Efficiency Curve**\index{Batching!efficiency curve}:
-
-1.  **Small $B$**: Throughput is dominated by $T_{\text{fixed}}$. The system is latency-bound (or overhead-bound). Increasing $B$ yields super-linear throughput gains.
-2.  **Large $B$**: As $B \to \infty$, the $T_{\text{fixed}}$ term becomes negligible. Throughput asymptotically approaches the hardware limit $1/T_{\text{variable}}$. The system becomes compute-bound\index{Compute-Bound} (or bandwidth-bound for LLMs).
-3.  **The knee**: The optimal batch size is the point where throughput gains diminish while latency continues to grow linearly.
+The resulting **Batching Efficiency Curve**\index{Batching!efficiency curve} shows three distinct regimes. For small batch sizes ($B$), throughput is dominated by $T_{\text{fixed}}$, making the system latency-bound (or overhead-bound) where increasing $B$ yields super-linear throughput gains. As $B$ becomes large, the $T_{\text{fixed}}$ term becomes negligible, and throughput asymptotically approaches the hardware limit $1/T_{\text{variable}}$, leaving the system compute-bound\index{Compute-Bound} (or bandwidth-bound for LLMs). The optimal batch size sits at the knee of the curve, the point where throughput gains diminish while latency continues to grow linearly.
 
 ::: {.column-margin}
 ```{=latex}
@@ -1759,11 +1755,7 @@ As @tbl-inference-recsys-latency-breakdown shows, the per-phase latency\index{La
 
 Streaming workloads define the boundary where batching itself becomes the wrong response. Real-time speech recognition, video analysis, and robotics require processing inputs as they arrive with minimal latency.
 
-Streaming inference processes inputs incrementally without waiting for batch formation:
-
-- **Speech**: Process audio frames (10--20 ms chunks) as they arrive from the microphone
-- **Video**\index{Video}: Process frames at capture rate (30–60 FPS) without buffering
-- **Robotics**\index{Robotics}: Process sensor readings at control loop frequency (100--1000 Hz)
+Streaming inference processes inputs incrementally without waiting for batch formation. In speech recognition, it processes audio frames (10--20 ms chunks) as they arrive from the microphone. In video\index{Video} analysis, it processes frames at the capture rate (30--60 FPS) without buffering. In robotics\index{Robotics}, it processes sensor readings at the control loop frequency (100--1000 Hz).
 
 For streaming applications, the relevant metric is not throughput but time to process each input:
 
@@ -1827,11 +1819,7 @@ elif P99_latency < 0.5 * SLO:
     increase T_window by 10%
 ```
 
-The feedback loop maintains latency headroom while maximizing throughput during normal operation. Request-aware batching adds a third dimension by considering request characteristics when forming batches. For LLMs:
-
-- Group requests by expected output length (inferred from prompt type)
-- Group requests by prompt length to minimize padding
-- Prioritize latency-sensitive requests in smaller batches
+The feedback loop maintains latency headroom while maximizing throughput during normal operation. Request-aware batching adds a third dimension by considering request characteristics when forming batches. For LLMs, this means grouping requests by expected output length (inferred from prompt type), grouping them by prompt length to minimize padding, and prioritizing latency-sensitive requests in smaller batches.
 
 Production serving infrastructure embodies these adaptive principles. The NVIDIA Triton Inference Server implements a configurable adaptive batching system that illustrates how SLO-aware and request-aware strategies operate in practice. Triton exposes three knobs: **max_batch_size**\index{Batching!max batch size} (the upper bound on batch size), **batching_timeout_ms**\index{Batching!timeout parameter} (the maximum time to wait for batch formation), and **preferred_batch_size**\index{Batching!preferred batch size} (target batch sizes that align with kernel efficiency). Internally, the scheduler maintains separate queues for each preferred batch size and routes requests to minimize total latency:
 
@@ -2208,7 +2196,14 @@ PagedAttention [@kwon2023], introduced in vLLM, applies virtual memory concepts 
 ![](images/svg/kv-cache-fragmentation.svg)
 :::
 
-PagedAttention provides several benefits. It eliminates internal fragmentation by allocating only the pages needed for actual tokens. It eliminates external fragmentation because any free page can be used by any sequence. It enables dynamic growth so sequences can grow without preallocation. It supports memory sharing so common prefixes can share physical pages.
+PagedAttention provides four capacity benefits:
+
+- **Internal fragmentation**: It allocates only the pages needed for actual tokens.
+- **External fragmentation**: Any free page can be used by any sequence.
+- **Dynamic growth**: Sequences can grow without preallocation.
+- **Prefix sharing**: Common prefixes can share physical pages.
+
+Together, these properties turn KV cache capacity into a schedulable resource rather than a fixed per-request reservation.
 
 ::: {#exmp-inference-pagedattention-implementation-details .callout-example title="PagedAttention implementation details"}
 
@@ -2838,10 +2833,7 @@ $$\text{Chunk latency} = \frac{\text{Chunk size}}{\text{Prefill throughput}}$$
 
 With chunk size chosen to match decode iteration time, prefill and decode can share GPU resources without decode latency spikes.
 
-Prefill-decode disaggregation takes this separation further by running prefill and decode on separate GPU pools:
-
-- Prefill pool\index{Prefill Pool}: Optimized for compute intensity (for example, H100 nodes with high TFLOP/s) using moderate request batches or large token chunks to maximize throughput without blocking decode.
-- Decode pool\index{Disaggregated Serving!decode pool}: Optimized for memory bandwidth (for example, nodes with maximum HBM capacity, the Tier 0 storage resource discussed in @sec-storage-tier0-hbm) to handle thousands of concurrent autoregressive streams.
+Prefill-decode disaggregation takes this separation further by running prefill and decode on separate GPU pools. The prefill pool\index{Prefill Pool} is optimized for compute intensity, using nodes with high TFLOP/s, moderate request batches, or large token chunks to maximize throughput without blocking decode. The decode pool\index{Disaggregated Serving!decode pool} is optimized for memory bandwidth, using nodes with maximum HBM capacity, the Tier 0 storage resource discussed in @sec-storage-tier0-hbm, to handle thousands of concurrent autoregressive streams.
 
 Independent scaling follows directly: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache (often megabytes of data) must be migrated to a decode node within the inter-token latency budget, typically under 10 ms. InfiniBand's low-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation, a displacement of overhead that trades communication bandwidth for specialized prefill and decode hardware.
 
@@ -3399,18 +3391,15 @@ Expert parallelism distributes experts across devices, with each device hosting 
 
 The communication pattern differs from tensor parallelism: instead of all-reduce (*same data to all devices*), expert parallelism uses all-to-all (*different data to different devices* based on routing). This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
 
-1.  Auxiliary loss\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
-2.  Capacity factor\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
-3.  Expert buffering\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
+- **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
+- **Capacity factor**\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
+- **Expert buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
+
+These mechanisms keep expert utilization balanced enough that routing remains a throughput advantage instead of a new straggler source.
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
-Router behavior directly impacts both system performance and model quality. Some failures are training-shaped problems that become visible during serving, while others are runtime overload conditions the serving system must mitigate directly:
-
--   Expert collapse\index{Expert Collapse}: A training-time router failure in which the router converges to a small subset of experts, leaving others undertrained. The served model then behaves like a small dense model with a massive memory footprint.
--   Routing instability\index{Routing Instability}: A training-time failure in which assignments oscillate, preventing experts from specialized learning.
--   Distribution shift\index{Distribution Shift}: A serving-time workload mismatch in which a router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
--   Token dropping\index{Token Dropping}: A serving-time overload behavior in which capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
+Router behavior directly impacts both system performance and model quality. Expert collapse\index{Expert Collapse} is a training-time router failure in which the router converges to a small subset of experts, leaving others undertrained; the served model then behaves like a small dense model with a massive memory footprint. Routing instability\index{Routing Instability} is another training-time failure: assignments oscillate, preventing experts from specializing. Serving introduces runtime overload conditions as well. Distribution shift\index{Distribution Shift} can make a router trained on formal text overload specific "grammar experts" when served colloquial chat data, creating hotspots. Token dropping\index{Token Dropping} occurs when capacity-limited experts drop tokens, skip their computation, and rely only on the residual connection, degrading output quality.
 
 These failure modes follow from the basic MoE serving trade-off[^fn-moe-serving]: computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
 
@@ -3880,7 +3869,14 @@ Archetype B (DLRM at Scale) is the canonical victim of tail latency. Processing 
 
 Load balancing serves two primary goals that sometimes conflict: latency minimization and utilization maximization. Latency minimization routes requests to the replicas that can serve them fastest, considering current queue depth and processing time; utilization maximization spreads load evenly to avoid both idle replicas and overloaded replicas. The tension arises because latency-optimal routing may concentrate load on fast replicas, reducing their performance and leaving other replicas underutilized.
 
-Evaluation therefore needs both tail-latency and balance signals. Maximum queue length determines worst-case latency, load variance measures how evenly work is distributed, utilization spread shows whether some replicas are idle while others are saturated, and decision overhead captures the cost of making the routing choice. A policy that optimizes only one of these signals can look healthy in aggregate while sending unlucky requests into the tail.
+Evaluation therefore needs four signals that cover both tail latency and load balance:
+
+- **Maximum queue length**: This determines worst-case latency.
+- **Load variance**: This measures how evenly work is distributed.
+- **Utilization spread**: This shows whether some replicas are idle while others are saturated.
+- **Decision overhead**: This captures the cost of making the routing choice.
+
+A policy that optimizes only one of these signals can look healthy in aggregate while sending unlucky requests into the tail.
 
 ### Round-robin and random assignment {#sec-inference-scale-roundrobin-random-assignment-f374}
 
@@ -4272,12 +4268,7 @@ The choice of load balancing algorithm has quantitative impact on system perform
 
 : **Load Balancing Algorithm Comparison**: More sophisticated algorithms reduce queue lengths and latency at the cost of increased overhead. {#tbl-lb-comparison}
 
-The progression shows clear trade-offs:
-
-- Random/round-robin: Zero overhead but higher latency variance
-- Two-choices: Minimal overhead (2 probes), 47 percent latency improvement
-- Least-connections: State maintenance overhead, 58 percent latency improvement
-- Combined: Best performance, highest complexity
+@Tbl-lb-comparison shows the familiar serving trade-off: random and round-robin routing keep CPU overhead near zero but leave longer queues and higher latency variance; two-choices roughly halves p99 latency with only two probes per request; least-connections improves further when request cost varies but requires global state; and combining two-choices with least-connections produces the shortest queues at the highest implementation complexity.
 
 For many serving systems, two-choices provides a strong trade-off between performance improvement and implementation complexity. Least-connections adds value for workloads with high request size variance (LLM serving, recommendation ranking).
 
@@ -4291,7 +4282,13 @@ The **circuit breaker pattern**\index{Circuit Breaker!circuit breaker pattern}[^
 
 Backpressure propagation complements the breaker by making overload visible upstream. When queue depth crosses a threshold, the server returns a signal such as `503 Service Unavailable`; the load balancer marks the replica as degraded and routes fewer requests to it. If all replicas become degraded, the system shifts from routing control to admission control, rejecting some requests at the edge rather than accepting work it cannot serve within the latency SLO. Circuit breakers isolate unhealthy replicas; backpressure tells the rest of the system to slow down before retries amplify the failure.
 
-A saturated LLM fleet under KV cache pressure has relief valves that generic backpressure cannot provide: the serving system can evict older conversational turns from the KV cache to reduce context window and free memory, disable speculative decoding to reclaim the GPU memory its draft model occupies, or route new requests to a smaller quantized fallback model until the primary queue drains. Each of these responses trades output quality or latency for continued availability, which is often preferable to rejection from the user's perspective. The system designer must specify which degradation modes are acceptable at each pressure tier, because the correct trade-off depends on the application—a real-time assistant tolerates context truncation better than silent quality degradation.
+A saturated LLM fleet under KV cache pressure has three relief valves that generic backpressure cannot provide:
+
+- **Context eviction**: Evict older conversational turns from the KV cache to reduce context window and free memory.
+- **Speculative decoding**: Disable speculative decoding to reclaim the GPU memory its draft model occupies.
+- **Fallback routing**: Route new requests to a smaller quantized fallback model until the primary queue drains.
+
+Each response trades output quality or latency for continued availability, which is often preferable to rejection from the user's perspective. The system designer must specify which degradation modes are acceptable at each pressure tier, because the correct trade-off depends on the application—a real-time assistant tolerates context truncation better than silent quality degradation.
 
 ```{python}
 #| echo: false
@@ -4651,7 +4648,11 @@ That rejection path is the isolation guarantee. It may lower utilization in the 
 
 Effective multi-tenancy requires per-tenant visibility into resource consumption and performance. The essential metrics span four dimensions: request volume and latency distribution (P50, P95, P99), GPU memory and KV cache utilization, throttling and preemption event counts, and error rates broken down by error type. Together, these metrics reveal whether each tenant is receiving its contracted quality of service.
 
-Three alerting thresholds transform these metrics into actionable signals. An SLO violation alert fires when a tenant's P99 latency exceeds its target by more than 10 percent for five consecutive minutes. A quota exhaustion alert triggers when usage reaches 90 percent of the tenant's allocation, providing advance warning before hard limits cause request rejection. A noisy neighbor detection alert identifies tenants consuming more than twice their fair share for five minutes, flagging interference before it cascades to other tenants.
+Three alerting thresholds transform these metrics into actionable signals:
+
+- **SLO violation**: An alert fires when a tenant's P99 latency exceeds its target by more than 10 percent for five consecutive minutes.
+- **Quota exhaustion**: An alert triggers when usage reaches 90 percent of the tenant's allocation, providing advance warning before hard limits cause request rejection.
+- **Noisy neighbor detection**: An alert identifies tenants consuming more than twice their fair share for five minutes, flagging interference before it cascades to other tenants.
 
 Chargeback and attribution close the operational loop by mapping resource consumption -- GPU-seconds, KV cache GB-hours, network egress -- to individual tenants for billing and capacity planning. Without per-tenant attribution, organizations cannot distinguish between tenants that need more capacity and tenants that are simply inefficient, making informed provisioning decisions impossible.
 
@@ -4792,7 +4793,11 @@ When the primary concern is SLO compliance rather than utilization, latency-base
 
 $$\text{Desired replicas} = \left\lceil \frac{\text{P99}_{\text{observed}}}{\text{P99}_{\text{target}}} \times \text{Current replicas} \right\rceil$$
 
-All reactive approaches share three fundamental limitations. Cold start time prevents rapid response to sudden spikes. Metric-based triggers can create oscillation between scale-up and scale-down cycles. The system must over-provision during the cold start window to absorb load that new replicas cannot yet handle.
+All reactive approaches share three fundamental limitations:
+
+- **Cold start vulnerability**: Cold start time prevents rapid response to sudden spikes.
+- **Oscillation risk**: Metric-based triggers can create oscillation between scale-up and scale-down cycles.
+- **Over-provisioning requirement**: The system must over-provision during the cold start window to absorb load that new replicas cannot yet handle.
 
 These limits show up most sharply during a traffic spike, where replicas must exist before cold-started capacity becomes usable.
 
@@ -5085,14 +5090,7 @@ Each region runs independent inference replicas with identical models. A global 
 
 :::
 
-As @fig-global-inference-multiregion shows, independent regional replicas reduce RTT from 150--200 ms to under 10 ms for distant users, while the shared model registry ensures consistency across deployments. Several key considerations govern this architecture:
-
-- Model synchronization\index{Model Synchronization}: Model updates must propagate to all regions. Options include:
-  - Push-based: Central registry pushes to all regions (simple, potential inconsistency window)
-  - Pull-based: Regions poll for updates (higher latency, guaranteed consistency)
-  - Hybrid: Push notification + pull verification
-
-- Version consistency\index{Version Consistency}: During model rollouts, different regions may briefly serve different versions. For most applications this is acceptable; for applications requiring strict consistency, implement version pinning in request routing.
+As @fig-global-inference-multiregion shows, independent regional replicas reduce RTT from 150--200 ms to under 10 ms for distant users, while the shared model registry ensures consistency across deployments. Model synchronization\index{Model Synchronization} is the first architectural concern: updates must propagate to all regions. Push-based synchronization lets a central registry push to every region, which is simple but creates a possible inconsistency window; pull-based synchronization lets regions poll for updates, trading higher rollout latency for stronger consistency; hybrid synchronization combines push notification with pull verification. Version consistency\index{Version Consistency} is the second concern. During rollouts, different regions may briefly serve different versions. For most applications this is acceptable, but applications requiring strict consistency need version pinning in request routing.
 
 #### Pattern 2: Edge caching with central inference {#sec-inference-scale-pattern-2-edge-caching-central-inference-f08e}
 
@@ -5146,11 +5144,7 @@ def route_request(user_region, request):
 
 :::
 
-Stateful LLM serving makes failover harder than ordinary HTTP routing because the receiving region must absorb both traffic and lost session state:
-
-- Session affinity loss\index{Session Affinity!loss}: Users mid-conversation lose KV cache state. The fallback region must regenerate context from conversation history.
-- Capacity spike: The receiving region sees sudden traffic increase. Preprovision headroom (typically 30--50 percent over steady-state) or accept degraded latency during failover.
-- Gradual recovery\index{Failover!gradual recovery}: When the failed region recovers, gradually shift traffic back to avoid oscillation.
+Stateful LLM serving makes failover harder than ordinary HTTP routing because the receiving region must absorb both traffic and lost session state. Session affinity loss\index{Session Affinity!loss} means users mid-conversation lose KV cache state, so the fallback region must regenerate context from conversation history. The receiving region also sees a sudden capacity spike, requiring preprovisioned headroom, typically 30--50 percent over steady state, or accepted degraded latency during failover. When the failed region recovers, gradual recovery\index{Failover!gradual recovery} shifts traffic back slowly enough to avoid oscillation.
 
 #### Global model deployment {#sec-inference-scale-global-model-deployment-11b3}
 
@@ -5230,10 +5224,7 @@ Quantization reduces numerical precision of model weights and activations, decre
 
 Large language models present unique quantization challenges distinct from vision or recommendation models. The outlier activation problem occurs because certain attention heads produce activation magnitudes orders of magnitude larger than typical values. Naive quantization clips these outliers, causing significant quality degradation.
 
-Consider a large language-model layer where most activation values are modest but specific channels produce much larger outliers [@xiao2023smoothquant]. Symmetric INT8 quantization with range [-127, 127] must choose:
-
-- **Wide range**: Most typical values collapse into a small number of bins, losing information
-- **Narrow range**: Outliers clip, causing large errors
+Consider a large language-model layer where most activation values are modest but specific channels produce much larger outliers [@xiao2023smoothquant]. Symmetric INT8 quantization with range [-127, 127] has no painless scale choice: a wide range preserves outliers but collapses typical values into too few bins, while a narrow range preserves resolution for typical values but clips outliers and introduces large errors.
 
 The outlier distribution explains why the specialized methods that follow differ: each one protects a different part of the serving contract.
 
@@ -5432,12 +5423,7 @@ A 70B model with 4-bit weights requires approximately `{python} QuantizedServing
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
-The final selection matches the method to the binding constraint. Deployment constraints determine the appropriate quantization method through a short decision sequence:
-
-1. **Primary goal**: Latency-sensitive paths should prefer FP16 or BF16 when quantization overhead would dominate. Throughput-oriented paths are more likely to benefit from quantization.
-2. **Available hardware**: H100 and H200 deployments can consider FP8 because the hardware provides native support with minimal quality loss. A100 and A10G deployments usually choose between W8A8 and W4A16 depending on the workload, while consumer GPUs often require W4A16 simply to fit the model.
-3. **Quality budget**: If less than 0.5 percent degradation is acceptable, AWQ 4-bit is a plausible target. If less than 1 percent degradation is acceptable, GPTQ 4-bit or SmoothQuant W8A8 may be viable. If no degradation is acceptable, FP16 or BF16 remains the safest choice.
-4. **Binding resource**: Compute-bound prefill favors W8A8 because it can provide a 2$\times$ speedup. Memory-bound decode favors W4A16 because it can provide a 4$\times$ effective bandwidth increase.
+The final selection matches the method to the binding constraint. Latency-sensitive paths should prefer FP16 or BF16 when quantization overhead would dominate, while throughput-oriented paths are more likely to benefit from quantization. Hardware support narrows the viable choices: H100 and H200 deployments can consider FP8 because the hardware provides native support with minimal quality loss; A100 and A10G deployments usually choose between W8A8 and W4A16 depending on the workload; consumer GPUs often require W4A16 simply to fit the model. The quality budget then sets the lower precision bound. If less than 0.5 percent degradation is acceptable, AWQ 4-bit is a plausible target; if less than 1 percent degradation is acceptable, GPTQ 4-bit or SmoothQuant W8A8 may be viable; if no degradation is acceptable, FP16 or BF16 remains the safest choice. The binding resource makes the final distinction: compute-bound prefill favors W8A8 because it can provide a 2$\times$ speedup, whereas memory-bound decode favors W4A16 because it can provide a 4$\times$ effective bandwidth increase.
 
 @Tbl-quantization-serving-cost shows how quantization reshapes serving cost per million tokens:
 
