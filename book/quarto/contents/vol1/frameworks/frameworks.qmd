@@ -432,11 +432,7 @@ No single execution model optimizes all these dimensions. Frameworks must choose
 
 ### Three execution strategies {#sec-ml-frameworks-three-execution-strategies-5934}
 
-The computational graph representation enables global optimization, but it leaves a critical design choice unresolved: *when* the framework builds the graph. Consider a simple operation like `y = x * 2`. Two distinct approaches exist:
-
-1. **Immediate execution**: Perform the multiplication right now, storing the result in `y`. Natural and debuggable, but the framework sees only one operation at a time.
-
-2. **Deferred execution**: Record the intention to multiply, building a graph of operations. Execute later when explicitly requested. Less intuitive, but the framework sees the complete computation, enabling optimization.
+The computational graph representation enables global optimization, but it leaves a critical design choice unresolved: *when* the framework builds the graph. Consider a simple operation like `y = x * 2`. One approach performs the multiplication immediately, storing the result in `y`. This is natural and debuggable, but the framework sees only one operation at a time. The other approach defers execution, recording the intention to multiply and building a graph of operations that runs later when explicitly requested. This is less intuitive, but the framework sees the complete computation, which enables optimization.
 
 Neither approach dominates; each embodies different trade-offs between *flexibility* and *optimization potential*. Modern frameworks have explored three primary execution strategies: eager execution with dynamic graphs, static computation graphs, and hybrid approaches that combine just-in-time (JIT) compilation with eager development. We examine each through its systems implications.
 
@@ -811,8 +807,7 @@ Eager execution's performance ceiling is driven by a fundamental systems mismatc
 
 Every operation in an eager framework (like standard PyTorch) must pay a fixed "Tax" of approximately `{python} DispatchTax.python_overhead_str` $\mu$s for Python to look up the function, check tensor types, and launch the kernel.
 
-*   **For small operations** (for example, a ReLU on a small vector), the kernel might execute in only `{python} DispatchTax.small_kernel_str` $\mu$s. The dispatch tax is `{python} DispatchTax.small_tax_pct_str`, meaning the GPU spends the vast majority of its time waiting for the next command.
-*   **For large operations** (for example, a large matrix multiply), the kernel executes for `{python} DispatchTax.large_kernel_str` $\mu$s. The dispatch tax drops to `{python} DispatchTax.large_tax_pct_str`, and the system becomes compute bound.
+The relative weight of this tax depends entirely on operation size. For a small operation such as a ReLU on a small vector, the kernel might execute in only `{python} DispatchTax.small_kernel_str` $\mu$s, so the dispatch tax reaches `{python} DispatchTax.small_tax_pct_str` and the GPU spends the vast majority of its time waiting for the next command. For a large operation such as a large matrix multiply, the kernel executes for `{python} DispatchTax.large_kernel_str` $\mu$s, the dispatch tax drops to `{python} DispatchTax.large_tax_pct_str`, and the system becomes compute bound.
 
 The dispatch tax explains why models with many small layers run significantly slower than their raw FLOP count predicts. @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 places this symptom in the bottleneck taxonomy, classifying a dispatch-dominated workload as latency-bound rather than compute-bound and showing which optimizations actually move it. To approach efficient execution, frameworks must move from *kernel-by-kernel dispatch* to *graph-level execution*, where the dispatch tax is paid once for the entire graph rather than per operation. The hybrid JIT and compilation strategies in @sec-ml-frameworks-hybrid-approaches-jit-compilation-8954 exist precisely to address this overhead.
 
@@ -4404,11 +4399,7 @@ Calling `loss.backward()`\index{Backward Pass!triggering gradient computation} t
 
 1. **Tape Traversal**\index{Autograd Tape!reverse traversal}: The autograd engine traverses the recorded graph in reverse topological order.
 
-2. **Gradient Computation**: For each node, it calls the registered backward function. Here $W_1$ and $W_2$ are layer weight matrices, which are components of the model weights $\theta$:
-   - `CrossEntropyBackward`: Computes $\frac{\partial \mathcal{L}}{\partial \text{logits}}$ using softmax derivative
-   - `MmBackward` (W2): Computes $\frac{\partial \mathcal{L}}{\partial W_2} = h^T \cdot \frac{\partial \mathcal{L}}{\partial \text{logits}}$ and $\frac{\partial \mathcal{L}}{\partial h}$
-   - `ReluBackward`: Applies ReLU derivative mask (zero where h ≤ 0)
-   - `MmBackward` (W1): Computes $\frac{\partial \mathcal{L}}{\partial W_1}$ and $\frac{\partial \mathcal{L}}{\partial x}$
+2. **Gradient Computation**: For each node, it calls the registered backward function, where $W_1$ and $W_2$ are layer weight matrices that form part of the model weights $\theta$. Traversing in reverse, `CrossEntropyBackward` computes $\frac{\partial \mathcal{L}}{\partial \text{logits}}$ using the softmax derivative; `MmBackward` for $W_2$ computes $\frac{\partial \mathcal{L}}{\partial W_2} = h^T \cdot \frac{\partial \mathcal{L}}{\partial \text{logits}}$ along with $\frac{\partial \mathcal{L}}{\partial h}$; `ReluBackward` applies the ReLU derivative mask (zero where $h \leq 0$); and `MmBackward` for $W_1$ computes $\frac{\partial \mathcal{L}}{\partial W_1}$ and $\frac{\partial \mathcal{L}}{\partial x}$.
 
 3. **Gradient Accumulation**: Gradients are accumulated into `.grad` attributes of leaf tensors.
 
@@ -4592,12 +4583,16 @@ The training step is overhead-bound.\index{Overhead-Bound!small model training} 
 
 ### Phase 4: Hardware abstraction (solving the abstraction problem) {.unnumbered}
 
-The same Python code runs on different hardware through abstraction layers:
+The same Python code runs on different hardware through abstraction layers, each pairing a backend library with a hardware-specific execution mechanism, as @tbl-framework-backends summarizes.
 
-- **CUDA GPU**\index{GPU Backend!CUDA implementation}: cuBLAS GEMM kernels and CUDA streams for async execution [@nvidia_cublas; @choquette2021]
-- **CPU**\index{CPU Backend!optimized BLAS libraries}: Intel oneMKL or OpenBLAS, with thread-level parallelism around optimized kernels [@intelOneMKL; @openblasDocs]
-- **TPU**\index{TPU!XLA compilation}: XLA compilation to TPU-specific high-level optimizer (HLO) operations [@GoogleXLA]
-- **Apple Silicon**: Metal Performance Shaders via MPS backend
+: **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[22,33,45]"}
+
+| **Hardware**                                    | **Backend library**                                    | **Execution mechanism**                                           |
+|:------------------------------------------------|:-------------------------------------------------------|:------------------------------------------------------------------|
+| CUDA GPU\index{GPU Backend!CUDA implementation} | cuBLAS [@nvidia_cublas; @choquette2021]                | GEMM kernels and CUDA streams for async execution                 |
+| CPU\index{CPU Backend!optimized BLAS libraries} | Intel oneMKL or OpenBLAS [@intelOneMKL; @openblasDocs] | Thread-level parallelism around optimized kernels                 |
+| TPU\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific high-level optimizer (HLO) operations |
+| Apple Silicon                                   | Metal Performance Shaders                              | MPS backend                                                       |
 
 Each backend implements the same tensor operations with hardware-specific optimizations. The framework's abstraction layer (@sec-ml-frameworks-abstraction-problem-37a5) ensures identical numerical results (within floating-point tolerance) across platforms. This is the abstraction problem solved: a single `loss.backward()` call triggers completely different code paths depending on hardware, yet produces mathematically equivalent gradients.
 
