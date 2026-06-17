@@ -59,22 +59,49 @@ Ensures help text is consistent and complete:
   - All registered commands documented
   - Checkpoint command specifically validated
 
+### 4. `test_community_flow.py` - Community Flow Unit Tests
+Validates the community syncing client-side code and payload schema:
+- **TestCommunitySyncFlow**: Core validation
+  - Validates JSON payload schema (percentages, milestone formats, user email).
+  - Verifies successful urllib offline mocking for status 200.
+  - Verifies token expiry handling (401 Unauthorized) and subsequent refresh logic.
+
+### 5. `test_live_submission.py` - Live E2E Integration Tests
+Runs E2E integration tests against the remote production Supabase backend:
+- **TestLiveCommunitySync**: End-to-End backend syncing
+  - Performs programmatic login using user credentials and Supabase Anon Key.
+  - Seeds CLI progress mock data.
+  - Submits progress to the Edge Function `/upload-progress`.
+  - Queries `/get-profile-details` to verify that completion progress successfully persists.
+
 ## Running the Tests
 
 Run all CLI tests:
 ```bash
-pytest tests/cli/ -v
+TINYTORCH_SKIP_EXPORT_CHECK=1 pytest tests/cli/ -v
 ```
 
 Run specific test file:
 ```bash
-pytest tests/cli/test_cli_registry.py -v
+TINYTORCH_SKIP_EXPORT_CHECK=1 pytest tests/cli/test_cli_registry.py -v
 ```
 
 Run with output:
 ```bash
-pytest tests/cli/ -v -s
+TINYTORCH_SKIP_EXPORT_CHECK=1 pytest tests/cli/ -v -s
 ```
+
+### Running Live Community Sync Integration Tests
+The live integration tests connect directly to the remote Supabase database and require credentials. They automatically skip if credentials are not configured:
+1. Create a `local.env` file in the project root:
+   ```env
+   TINYTORCH_TEST_EMAIL=your_student_email@domain.com
+   TINYTORCH_TEST_PASSWORD=your_password
+   ```
+2. Run pytest targeting the live submission file:
+   ```bash
+   TINYTORCH_SKIP_EXPORT_CHECK=1 pytest tests/cli/test_live_submission.py -v
+   ```
 
 ## What These Tests Catch
 
