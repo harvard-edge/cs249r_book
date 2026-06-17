@@ -543,6 +543,23 @@ class LayoutCommand:
             help="PDF rasterization DPI for contact sheets (default 110).",
         )
 
+        purpose = sub.add_parser(
+            "purpose",
+            help="Check that each chapter's Purpose fits on its opener page "
+                 "(no overflow onto the next page).",
+            formatter_class=_LayoutHelpFormatter,
+        )
+        purpose.add_argument("pdf", help="Path to the built volume PDF to scan.")
+        pvol = purpose.add_mutually_exclusive_group(required=True)
+        pvol.add_argument(
+            "--vol1", dest="volume", action="store_const", const="vol1",
+            help="Check Volume I.",
+        )
+        pvol.add_argument(
+            "--vol2", dest="volume", action="store_const", const="vol2",
+            help="Check Volume II.",
+        )
+
         if not args:
             parser.print_help()
             return False
@@ -613,9 +630,35 @@ class LayoutCommand:
                 contact_rows=max(1, opts.contact_rows),
                 dpi=max(36, opts.dpi),
             )
+        if opts.subcommand == "purpose":
+            return self._purpose(Path(opts.pdf), opts.volume)
 
         parser.print_help()
         return False
+
+    # ------------------------------------------------------------------
+    # purpose-overflow
+    # ------------------------------------------------------------------
+
+    def _purpose(self, pdf_path: Path, volume: str) -> bool:
+        """Gate: no chapter's Purpose section may overflow past its opener page.
+
+        Delegates to book/tools/audit/check_purpose_overflow.py so the logic is
+        testable standalone and identical to the preflight runner.
+        """
+        script = self._repo_root() / "book" / "tools" / "audit" / "check_purpose_overflow.py"
+        if not script.exists():
+            console.print(f"[red]Purpose check missing:[/red] {script}")
+            return False
+        try:
+            proc = subprocess.run(
+                ["python3", str(script), str(pdf_path), "--vol", volume],
+                cwd=self._repo_root(),
+            )
+        except OSError as exc:
+            console.print(f"[red]Failed to run Purpose check:[/red] {exc}")
+            return False
+        return proc.returncode == 0
 
     # ------------------------------------------------------------------
     # tables
@@ -1318,7 +1361,11 @@ class LayoutCommand:
             out.write_text(json.dumps(plan, indent=2), encoding="utf-8")
             console.print(f"[dim]wrote {out}[/dim]")
 
-        return not plan["items"]
+        # Purpose-overflow gate: every chapter Purpose must fit its opener page.
+        console.print("\n[bold]Purpose-overflow check[/bold]")
+        purpose_ok = self._purpose(pdf_path, volume)
+
+        return (not plan["items"]) and purpose_ok
 
     def _build_volume_pdf(self, volume: str) -> bool:
         binder = self._repo_root() / "book" / "binder"
