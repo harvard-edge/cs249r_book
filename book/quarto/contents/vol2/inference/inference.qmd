@@ -748,7 +748,7 @@ Batching efficiency depends on how computation scales with batch size relative t
 
 For **vision models**\index{Vision Models}, including convolutional neural networks (CNNs) and vision transformers (ViTs) processing fixed-size images, computation scales linearly with batch size while memory scales sub-linearly due to weight sharing. Larger batches improve GPU utilization with minimal overhead, making static or dynamic batching with large batch sizes optimal.
 
-For **LLMs in the decode phase**\index{LLM!decode phase}, computation per token is small relative to memory bandwidth requirements for loading model weights. The bottleneck is *memory bandwidth*, not *compute*. Larger batches amortize weight loading across more tokens, dramatically improving throughput but with diminishing returns as batch size grows.
+For LLMs in the decode phase\index{LLM!decode phase}, computation per token is small relative to memory bandwidth requirements for loading model weights. The bottleneck is *memory bandwidth*, not *compute*. Larger batches amortize weight loading across more tokens, dramatically improving throughput but with diminishing returns as batch size grows.
 
 For recommendation systems\index{Recommendation System}, the bottleneck is often embedding lookup rather than dense computation. Batching strategies must optimize for parallel embedding access patterns rather than matrix multiplication throughput.
 
@@ -2856,8 +2856,8 @@ With chunk size chosen to match decode iteration time, prefill and decode can sh
 
 Prefill-decode disaggregation takes this separation further by running prefill and decode on separate GPU pools:
 
-- **Prefill pool**\index{Prefill Pool}: Optimized for compute intensity (for example, H100 nodes with high TFLOP/s) using moderate request batches or large token chunks to maximize throughput without blocking decode.
-- **Decode pool**\index{Disaggregated Serving!decode pool}: Optimized for memory bandwidth (for example, nodes with maximum HBM capacity, the Tier 0 storage resource discussed in @sec-storage-tier0-hbm) to handle thousands of concurrent autoregressive streams.
+- Prefill pool\index{Prefill Pool}: Optimized for compute intensity (for example, H100 nodes with high TFLOP/s) using moderate request batches or large token chunks to maximize throughput without blocking decode.
+- Decode pool\index{Disaggregated Serving!decode pool}: Optimized for memory bandwidth (for example, nodes with maximum HBM capacity, the Tier 0 storage resource discussed in @sec-storage-tier0-hbm) to handle thousands of concurrent autoregressive streams.
 
 Independent scaling follows directly: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache (often megabytes of data) must be migrated to a decode node within the inter-token latency budget, typically under 10 ms. InfiniBand's low-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation, a displacement of overhead that trades communication bandwidth for specialized prefill and decode hardware.
 
@@ -3417,18 +3417,18 @@ The communication pattern differs from tensor parallelism: instead of all-reduce
 
 This AllToAll pattern creates a critical system challenge: load balancing. If the router consistently sends more tokens to certain experts than others, those experts' GPUs become bottlenecks while other GPUs sit idle. Three mechanisms address load imbalance:
 
-1.  **Auxiliary loss**\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
+1.  Auxiliary loss\index{Auxiliary Loss}: An additional term in the training loss penalizes uneven expert utilization by rewarding uniform routing probabilities.
 2.  Capacity factor\index{Capacity Factor}: Each expert has a maximum number of tokens it will accept per batch (typically 1.25$\times$ the fair share). Tokens exceeding this are dropped or rerouted.
-3.  **Expert buffering**\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
+3.  Expert buffering\index{Expert Buffering}: Tokens are buffered and processed in subsequent iterations if experts are at capacity, smoothing out load spikes at the cost of latency variance.
 
 #### Routing failure modes {#sec-inference-scale-moe-routing-failures}
 
 Router behavior directly impacts both system performance and model quality. Some failures are training-shaped problems that become visible during serving, while others are runtime overload conditions the serving system must mitigate directly:
 
--   **Expert collapse**\index{Expert Collapse}: A training-time router failure in which the router converges to a small subset of experts, leaving others undertrained. The served model then behaves like a small dense model with a massive memory footprint.
--   **Routing instability**\index{Routing Instability}: A training-time failure in which assignments oscillate, preventing experts from specialized learning.
--   **Distribution shift**\index{Distribution Shift}: A serving-time workload mismatch in which a router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
--   **Token dropping**\index{Token Dropping}: A serving-time overload behavior in which capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
+-   Expert collapse\index{Expert Collapse}: A training-time router failure in which the router converges to a small subset of experts, leaving others undertrained. The served model then behaves like a small dense model with a massive memory footprint.
+-   Routing instability\index{Routing Instability}: A training-time failure in which assignments oscillate, preventing experts from specialized learning.
+-   Distribution shift\index{Distribution Shift}: A serving-time workload mismatch in which a router trained on formal text may overload specific "grammar experts" when served colloquial chat data, creating hotspots.
+-   Token dropping\index{Token Dropping}: A serving-time overload behavior in which capacity-limited experts drop tokens, skipping their computation and relying solely on the residual connection, which degrades output quality.
 
 These failure modes follow from the basic MoE serving trade-off[^fn-moe-serving]: computation is dynamically routed to different experts based on input, so the routing pattern becomes a systems workload rather than only a model-internal choice. Popular models like Mixtral [@jiang2024mixtral] use MoE to achieve high capacity with lower inference cost.
 
@@ -4228,7 +4228,7 @@ Body: {"prompt": "test"}
 Response: 200 OK with valid output, or error
 ```
 
-Deep health checks are the primary defense against a failure mode that does not exist in traditional web servers: silent hardware degradation. A GPU with degraded HBM modules may continue to respond to process-level probes while producing output corrupted by NaN propagation or silent bit errors in activation tensors. The replica returns HTTP 200 and passes every liveness and readiness probe, yet every generated sequence is nonsense. Deep health checks catch this by validating the *tensor output* of a known probe input against expected bounds—checking, for example, that logit distributions stay within a plausible entropy range and that no NaN or Inf values appear in the output. Standard health checks are necessary but insufficient for GPU-accelerated servers, which face these hardware-specific failure modes.
+Deep health checks are the primary defense against a failure mode that does not exist in traditional web servers: silent hardware degradation. A GPU with degraded HBM modules may continue to respond to process-level probes while producing output corrupted by NaN propagation or silent bit errors in activation tensors. The replica returns HTTP 200 and passes every liveness and readiness probe, yet every generated sequence is nonsense. Deep health checks catch this by validating the tensor output of a known probe input against expected bounds—checking, for example, that logit distributions stay within a plausible entropy range and that no NaN or Inf values appear in the output. Standard health checks are necessary but insufficient for GPU-accelerated servers, which face these hardware-specific failure modes.
 
 ::: {#exmp-inference-health-checks-gpu-inference .callout-example title="Health checks for GPU inference"}
 
@@ -5107,12 +5107,12 @@ Each region runs independent inference replicas with identical models. A global 
 
 As @fig-global-inference-multiregion shows, independent regional replicas reduce RTT from 150--200 ms to under 10 ms for distant users, while the shared model registry ensures consistency across deployments. Several key considerations govern this architecture:
 
-- **Model synchronization**\index{Model Synchronization}: Model updates must propagate to all regions. Options include:
+- Model synchronization\index{Model Synchronization}: Model updates must propagate to all regions. Options include:
   - Push-based: Central registry pushes to all regions (simple, potential inconsistency window)
   - Pull-based: Regions poll for updates (higher latency, guaranteed consistency)
   - Hybrid: Push notification + pull verification
 
-- **Version consistency**\index{Version Consistency}: During model rollouts, different regions may briefly serve different versions. For most applications this is acceptable; for applications requiring strict consistency, implement version pinning in request routing.
+- Version consistency\index{Version Consistency}: During model rollouts, different regions may briefly serve different versions. For most applications this is acceptable; for applications requiring strict consistency, implement version pinning in request routing.
 
 #### Pattern 2: Edge caching with central inference {#sec-inference-scale-pattern-2-edge-caching-central-inference-f08e}
 
@@ -5168,9 +5168,9 @@ def route_request(user_region, request):
 
 Stateful LLM serving makes failover harder than ordinary HTTP routing because the receiving region must absorb both traffic and lost session state:
 
-- **Session affinity loss**\index{Session Affinity!loss}: Users mid-conversation lose KV cache state. The fallback region must regenerate context from conversation history.
-- **Capacity spike**: The receiving region sees sudden traffic increase. Preprovision headroom (typically 30--50 percent over steady-state) or accept degraded latency during failover.
-- **Gradual recovery**\index{Failover!gradual recovery}: When the failed region recovers, gradually shift traffic back to avoid oscillation.
+- Session affinity loss\index{Session Affinity!loss}: Users mid-conversation lose KV cache state. The fallback region must regenerate context from conversation history.
+- Capacity spike: The receiving region sees sudden traffic increase. Preprovision headroom (typically 30--50 percent over steady-state) or accept degraded latency during failover.
+- Gradual recovery\index{Failover!gradual recovery}: When the failed region recovers, gradually shift traffic back to avoid oscillation.
 
 #### Global model deployment {#sec-inference-scale-global-model-deployment-11b3}
 
