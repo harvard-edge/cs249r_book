@@ -598,17 +598,9 @@ The cycle of splitting data, computing gradients, synchronizing results, and upd
 
 Data parallelism is a common starting strategy for a reason: it scales throughput linearly with device count, provided the model fits in memory and communication is not the bottleneck. However, it hits a hard ceiling defined by the communication-computation ratio: once gradient exchange dominates useful computation, more workers mainly add synchronization work [@ben-nun2019].
 
-Data parallelism offers three principal advantages:
+Data parallelism offers three principal advantages. Throughput scales linearly for compute-bound models: scaling ResNet-50 on ImageNet from 1 to 256 GPUs yields near-linear speedup because the gradient exchange is small relative to the compute time. The model architecture also remains unchanged; the framework wraps the model in a data-parallel container that intercepts backward-pass hooks to trigger gradient synchronization automatically. Utilization stays high because, unlike model parallelism, there are no pipeline bubbles: all GPUs work on the forward and backward pass simultaneously.
 
-- **Linear throughput scaling**: Scaling ResNet-50 on ImageNet from 1 to 256 GPUs yields near-linear speedup for compute-bound models, because the gradient exchange is small relative to the compute time.
-- **Unmodified architecture**: The framework wraps the model in a data-parallel container that intercepts backward-pass hooks to trigger gradient synchronization automatically.
-- **High utilization**: Unlike model parallelism, there are no pipeline bubbles—all GPUs work on the forward and backward pass simultaneously.
-
-Three hard ceilings limit these advantages:
-
-- **The memory wall**\index{Memory Wall!data parallelism}: Every GPU must hold a full copy of the model parameters, gradients, and optimizer states; for a `{python} FrontierTrainingContext.frontier_params_b_str` parameter model, this demands more than 1 TB of memory per GPU, exceeding per-device HBM budgets without ZeRO sharding.
-- **The bandwidth wall**: As $N$ grows, the AllReduce cost $\frac{2(N-1)}{N} \times \frac{M}{\text{BW}_{\text{net}}}$ eventually dominates, and for large language models gradient synchronization can consume more than 50 percent of the step time, collapsing efficiency.
-- **The batch size trap**: Scaling to thousands of GPUs requires increasing the global batch size $(B_{\text{global}} = N \times B_{\text{local}})$, and eventually the critical batch size is reached, where adding more data per step yields diminishing returns in convergence.
+Three hard ceilings limit these advantages. The memory wall\index{Memory Wall!data parallelism} requires every GPU to hold a full copy of the model parameters, gradients, and optimizer states; for a `{python} FrontierTrainingContext.frontier_params_b_str` parameter model, this demands more than 1 TB of memory per GPU, exceeding per-device HBM budgets without ZeRO sharding. The bandwidth wall emerges as $N$ grows: the AllReduce cost $\frac{2(N-1)}{N} \times \frac{M}{\text{BW}_{\text{net}}}$ eventually dominates, and for large language models gradient synchronization can consume more than 50 percent of the step time, collapsing efficiency. The batch size trap compounds the problem because scaling to thousands of GPUs requires increasing the global batch size $(B_{\text{global}} = N \times B_{\text{local}})$, and eventually the critical batch size is reached, where adding more data per step yields diminishing returns in convergence.
 
 ::: {#nbk-distributed-training-gpt-2-data-parallel-scaling .callout-notebook title="GPT-2 data parallel scaling: single node"}
 
@@ -2314,17 +2306,9 @@ class ModelParallelTradeoffsRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-Model parallelism offers three principal advantages:
+Model parallelism offers three principal advantages. Memory scaling enables training of models that exceed single-device capacity: with 8-way tensor parallelism, the FP16 weight slice of a `{python} ModelParallelTradeoffsRecap.frontier_params_b_str` model fits within A100 HBM before optimizer state and activation budgets are counted. Splitting the model also allows larger global batch sizes without out-of-memory errors, since each GPU processes a smaller parameter slice. The approach maps naturally to the physical structure of transformers, where attention heads split via tensor parallelism and layers split via pipeline parallelism.
 
-- **Memory scaling**: This enables training of models that exceed single-device capacity; with 8-way tensor parallelism, the FP16 weight slice of a `{python} ModelParallelTradeoffsRecap.frontier_params_b_str` model fits within A100 HBM before optimizer state and activation budgets are counted.
-- **Larger global batch sizes**: Splitting the model allows larger global batch sizes without out-of-memory errors, since each GPU processes a smaller parameter slice.
-- **Natural topological mapping**: The approach maps directly to the physical structure of transformers, where attention heads split via tensor parallelism and layers split via pipeline parallelism.
-
-The advantages come at the cost of three fundamental limitations:
-
-- **Pipeline bubbles**: GPUs sit idle while filling and draining the pipeline; the bubble fraction is approximately $(p-1)/(m+p-1)$, where $p$ is pipeline stages and $m$ is microbatches, and achieving more than 90 percent efficiency requires $m \gg p$, which increases activation memory.
-- **Communication intensity**: In tensor parallelism, two AllReduce operations execute per layer on the critical path, demanding extremely high-bandwidth, low-latency interconnects (NVLink) and typically preventing scaling beyond a single node (8 GPUs) before hitting the bandwidth wall.
-- **Implementation complexity**: The strategy requires invasive changes to the model definition—replacing standard linear layers with column-parallel and row-parallel variants—unlike data parallelism, which wraps the model externally without modifying internals.
+The advantages come at the cost of three fundamental limitations. Pipeline bubbles cause GPUs to sit idle while filling and draining the pipeline; the bubble fraction is approximately $(p-1)/(m+p-1)$, where $p$ is pipeline stages and $m$ is microbatches, and achieving more than 90 percent efficiency requires $m \gg p$, which increases activation memory. Communication intensity in tensor parallelism is equally constraining: two AllReduce operations execute per layer on the critical path, demanding extremely high-bandwidth, low-latency interconnects (NVLink) and typically preventing scaling beyond a single node (8 GPUs) before hitting the bandwidth wall. Implementation complexity rounds out the trade-off, requiring invasive changes to the model definition—replacing standard linear layers with column-parallel and row-parallel variants—unlike data parallelism, which wraps the model externally without modifying internals.
 
 ## FP8 for distributed training {#sec-distributed-training-fp8}
 
