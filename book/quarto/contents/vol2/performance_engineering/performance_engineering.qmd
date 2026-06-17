@@ -173,15 +173,19 @@ The central lesson of @fig-iron-law-flowchart is that profiling must precede opt
 
 That discipline of bounding the worst case before a global rollout is the operational complement to throughput-vs-quality tuning, and that tuning implies a trade-off space with a boundary. The **efficiency frontier**\index{Efficiency Frontier!definition} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. Performance engineering pushes the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
 
-The multi-dimensional nature of this frontier makes optimization challenging. Five dimensions span the efficiency frontier:
+The multi-dimensional nature of this frontier makes optimization challenging. @Tbl-performance-engineering-frontier-dimensions identifies the five dimensions that performance engineers must balance before choosing an optimization target.
 
-- Throughput\index{Throughput} (tokens/second or requests/second): How much work the system completes per unit time.
-- Latency\index{Latency} (time-to-first-token, the wait before the first output token; inter-token latency, the gap between subsequent tokens): How quickly the system responds to individual requests.
-- Cost (dollars per million tokens): The economic efficiency of the system.
-- Quality (perplexity, benchmark accuracy, human preference): The accuracy and usefulness of model outputs.
-- Memory (peak GPU memory): The resource constraint that limits batch size and sequence length.
+: **Efficiency Frontier Dimensions**: Performance optimization balances measurable throughput, latency, cost, quality, and memory constraints rather than a single hardware-utilization number. {#tbl-performance-engineering-frontier-dimensions tbl-colwidths="[18,28,27,27]"}
 
-These dimensions interact in nonobvious ways. Increasing batch size improves throughput and cost efficiency but degrades latency. Reducing precision improves throughput and memory but may degrade quality. Speculative decoding improves latency but may increase per-token cost. The performance engineer's task is to navigate these trade-offs guided by the application's specific requirements.
+| **Dimension** | **How it is measured** | **What it constrains** | **Typical tension** |
+|:---|:---|:---|:---|
+| **Throughput**\index{Throughput} | Tokens/second or requests/second | How much work the system completes per unit time | Larger batches improve throughput but often degrade latency |
+| **Latency**\index{Latency} | Time-to-first-token and inter-token latency | How quickly the system responds to individual requests | Lower latency can require smaller batches and higher per-token cost |
+| **Cost** | Dollars per million tokens | Economic efficiency of the system | Cheapest configurations may miss latency or quality targets |
+| **Quality** | Perplexity, benchmark accuracy, or human preference | Accuracy and usefulness of model outputs | Precision reduction and speculation require quality guardrails |
+| **Memory** | Peak GPU memory | Feasible batch size and sequence length | Larger contexts and batches consume capacity needed for model state |
+
+The dimensions in @tbl-performance-engineering-frontier-dimensions interact in nonobvious ways. Increasing batch size improves throughput and cost efficiency but degrades latency. Reducing precision improves throughput and memory but may degrade quality. Speculative decoding improves latency but may increase per-token cost. The performance engineer's task is to navigate these trade-offs guided by the application's specific requirements.
 
 A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the performance-engineering toolbox provides the methods for reaching that point.
 
@@ -279,15 +283,18 @@ The capacity-bandwidth tension shapes the optimization space. Operator fusion re
 
 ### The GPU memory hierarchy {#sec-performance-engineering-memory-hierarchy}
 
-To understand why the memory wall exists, consider the physical structure of a GPU memory system. The hierarchy spans four levels, each trading capacity for bandwidth and latency.
+To understand why the memory wall exists, consider the physical structure of a GPU memory system. @Tbl-performance-engineering-memory-hierarchy summarizes the four levels by scale, access cost, and the optimization constraint each one imposes.
 
-Registers are the fastest storage, located directly within each streaming multiprocessor (SM). The H100 provides `{python} MemoryWallScenario.reg_per_sm_kib_str` of register file\index{Register File} per SM across its `{python} MemoryWallScenario.sm_count_str` SMs, totaling approximately `{python} MemoryWallScenario.register_total_mib_str` of register space across the entire chip. Register access is essentially free in terms of latency (one clock cycle) and energy (~0.01 pJ per access). Registers are, however, private to individual threads and cannot be shared. The dominant consumer of register capacity in mixed-precision kernels is FP32 accumulators: Tensor Core matrix-multiplication tiles compute in FP16 or FP8 but accumulate partial sums in FP32 to preserve numerical precision. Each thread must hold its accumulator tile in registers for the duration of the outer product loop, and a kernel that attempts a larger tile than the register file can hold is forced into **register spilling**\index{Register File!register spilling}, where the excess accumulators overflow to L1/shared memory at a cost of roughly 20--30 clock cycles per access instead of one. Register pressure is therefore a first-class design constraint in custom Triton and CUDA kernels for ML operations such as FlashAttention, where the tile size directly controls both arithmetic intensity and register demand.
+: **GPU Memory Hierarchy Constraints**: Faster GPU storage is smaller, closer to the compute units, and more explicitly managed, while HBM supplies capacity at much higher latency and energy cost. {#tbl-performance-engineering-memory-hierarchy tbl-colwidths="[17,24,24,35]"}
 
-Shared memory (SRAM) occupies the next level, pooled within each SM. The H100 provides up to `{python} MemoryWallScenario.shared_mem_per_sm_kib_str` of configurable shared memory per SM. This memory is shared among all threads in a thread block, enabling cooperative data reuse. Access latency is approximately 20--30 clock cycles (~20 ns), and energy cost is roughly 0.5 pJ per access. Shared memory is the critical resource for operator fusion: if intermediate results fit in shared memory, they never need to traverse the slow HBM bus.
+| **Level** | **Scale on H100** | **Access cost** | **Optimization constraint** |
+|:---|:---|:---|:---|
+| **Registers**\index{Register File} | `{python} MemoryWallScenario.reg_per_sm_kib_str` per SM across `{python} MemoryWallScenario.sm_count_str` SMs, about `{python} MemoryWallScenario.register_total_mib_str` total | One clock cycle and ~0.01 pJ per access | Private to each thread; FP32 accumulators can force register spilling\index{Register File!register spilling} to L1/shared memory at 20--30 clock cycles per access |
+| **Shared memory (SRAM)**\index{SRAM} | Up to `{python} MemoryWallScenario.shared_mem_per_sm_kib_str` configurable shared memory per SM | 20--30 clock cycles (~20 ns) and ~0.5 pJ per access | Shared within a thread block; operator fusion is profitable when intermediates fit here instead of returning to HBM |
+| **L2 cache** | `{python} MemoryWallScenario.l2_cache_mb_str` on-chip buffer | About 200 clock cycles (~130 ns) | Captures reuse automatically across SMs but cannot be explicitly managed by kernel authors |
+| **High Bandwidth Memory (HBM)** | `{python} MemoryWallScenario.h100_mem_gb_str` at `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` bandwidth | About `{python} MemoryWallScenario.hbm_latency_ns_str` and `{python} MemoryWallScenario.hbm_energy_pj_str` per access | Supplies model and activation capacity, but reading the full device takes about 24 ms, far longer than real-time inference latency targets |
 
-The L2 cache sits between the SMs and HBM, providing a `{python} MemoryWallScenario.l2_cache_mb_str` on-chip buffer on the H100. It captures reuse patterns automatically (when the same data is accessed by multiple SMs) but cannot be explicitly managed by kernel authors. Access latency is approximately 200 clock cycles (~130 ns). The L2 cache is particularly important for multi-head attention, where multiple attention heads may access the same KV cache entries. If the KV cache for a given sequence position fits in L2, subsequent heads accessing the same position benefit from cache hits rather than paying the full HBM access cost.
-
-High Bandwidth Memory (HBM) is the main off-chip memory, providing `{python} MemoryWallScenario.h100_mem_gb_str` of capacity at `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` bandwidth. HBM access latency is approximately `{python} MemoryWallScenario.hbm_latency_ns_str`, and each access costs roughly `{python} MemoryWallScenario.hbm_energy_pj_str` of energy. Despite the "high bandwidth" designation, the bandwidth-to-capacity ratio means that reading the full `{python} MemoryWallScenario.h100_mem_gb_str` of HBM takes approximately 24 ms, far longer than the sub-millisecond latency targets of real-time inference.
+The table makes register pressure a first-class design constraint in custom Triton and CUDA kernels: tile size controls both arithmetic intensity and register demand. It also explains why shared memory and L2 reuse matter so much for attention. If KV cache entries or fused intermediates remain on chip, the kernel avoids the slow, high-energy HBM round trip that dominates low-arithmetic-intensity operations.
 
 The energy cost of data movement has a direct economic consequence at data center scale. Consider a training cluster of 1,000 H100 GPUs, each performing approximately $10^{12}$ memory accesses per second during a memory-bound workload. If each access reads from HBM at 640 pJ, the memory subsystem alone consumes approximately 640 W per GPU, a significant fraction of the H100's `{python} MemoryWallScenario.h100_tdp_w_str` TDP. If operator fusion moves half of those accesses from HBM to SRAM (at 0.5 pJ each), the per-GPU memory power drops by approximately 320 W. Across 1,000 GPUs, this saves 320 kW, equivalent to powering roughly 250 homes. This is not a secondary consideration; at cloud electricity prices, the annual cost difference is substantial, and it scales linearly with cluster size. The physics of data movement is not merely a performance constraint; it is an economic one.
 
@@ -2157,17 +2164,20 @@ Diagnosing performance requires a drill-down approach, moving from global sympto
 
 Metrics are not interchangeable; each answers a different bottleneck question. MFU and MBU diagnose useful hardware work, TTFT and ITL diagnose serving latency, and throughput exposes capacity under batching. Understanding their relationships and trade-offs is essential for performance engineering.
 
-Model FLOPs Utilization (MFU) measures what fraction of the hardware's theoretical peak is being productively used by the model's computation. MFU captures the combined effect of all inefficiencies: memory bandwidth limitations, kernel launch overhead, communication wait time, and software stack overhead. For large-scale LLM training, MFU of 40--60 percent is a common target range in well-tuned runs; values above 60 percent indicate excellent optimization.
+@Tbl-performance-engineering-key-metrics maps the common metrics to the bottleneck question each one answers.
 
-Hardware FLOPs Utilization (HFU) is the simpler metric: total arithmetic operations executed (including overhead like activation recomputation) divided by peak FLOP/s. HFU is usually at least as high as MFU because it counts recomputed operations that do not directly advance the model's computation. The gap between HFU and MFU quantifies the "wasted" compute from techniques like activation checkpointing.
+: **Performance Metrics and Their Diagnostic Use**: Each metric measures a different layer of the system, so choosing the wrong metric can hide the real bottleneck. {#tbl-performance-engineering-key-metrics tbl-colwidths="[18,32,28,22]"}
 
-Time-to-first-token (TTFT)\index{Time to First Token} measures the latency from when a request arrives to when the first output token is generated. TTFT includes queue waiting time, prefill computation, and any initialization overhead. For interactive applications, TTFT below 500 ms is generally acceptable; below 200 ms feels responsive.
+| **Metric** | **Definition** | **Best diagnostic use** | **Caveat or target** |
+|:---|:---|:---|:---|
+| **Model FLOPs Utilization (MFU)** | Fraction of hardware peak FLOP/s productively used by model computation | Training efficiency across memory limits, launch overhead, communication wait, and software overhead | 40--60 percent is common in well-tuned LLM training; above 60 percent is excellent |
+| **Hardware FLOPs Utilization (HFU)** | Total arithmetic operations executed, including recomputation, divided by peak FLOP/s | Separating useful model work from overhead such as activation recomputation | Usually exceeds MFU, and the HFU--MFU gap estimates wasted compute |
+| **Time-to-first-token (TTFT)**\index{Time to First Token} | Latency from request arrival to the first generated token | Interactive serving responsiveness, including queueing, prefill, and initialization | Below 500 ms is generally acceptable; below 200 ms feels responsive |
+| **Inter-token latency (ITL)**\index{Inter-Token Latency} | Time between consecutive generated tokens during decode | Perceived generation speed after the first token | Below 50 ms supports comfortable reading; real-time speech may require below 25 ms |
+| **Throughput** | Tokens/second for the system, or tokens/second/GPU for per-device efficiency | Aggregate serving or training capacity under batching | Large batches improve throughput but increase per-request latency; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 covers the queueing trade-off |
+| **Model Bandwidth Utilization (MBU)**\index{Model Bandwidth Utilization} | Achieved memory bandwidth divided by hardware peak bandwidth | Memory-bound inference, especially decode workloads | An H100 decode step can show 2 percent MFU but 85 percent MBU, which indicates a memory-saturated and well-optimized path |
 
-Inter-token latency (ITL)\index{Inter-Token Latency} measures the time between consecutive output tokens during the decode phase. ITL directly determines the perceived generation speed. For a comfortable reading experience, ITL should be below 50 ms (20 tokens/second); for real-time speech synthesis, ITL below 25 ms may be required.
-
-Throughput (tokens/second for the system, or tokens/second/GPU for per-device efficiency) measures aggregate production capacity. Throughput is maximized by large batch sizes and high utilization, often at the expense of increased per-request latency. @Sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 explores how queuing theory captures the fundamental trade-off between throughput and latency.
-
-While MFU is a common metric for training efficiency, it is often misleading for inference. Inference is predominantly memory-bound, meaning the Tensor Cores spend most cycles waiting for data. For these workloads, **Model Bandwidth Utilization (MBU)**\index{Model Bandwidth Utilization} is the more informative metric: the ratio of achieved memory bandwidth to the hardware's peak bandwidth. A decoding step on an H100 might show a dismal 2 percent MFU (using a fraction of the compute capability) but achieve 85 percent MBU (saturating the HBM3 memory bandwidth). In this context, 85 percent MBU indicates a highly optimized system; no amount of code optimization can squeeze more tokens per second without faster memory hardware. The choice of primary metric, MFU for *training* and MBU for *inference*, reflects the fundamental bottleneck shift between these two regimes.
+The metric choice in @tbl-performance-engineering-key-metrics reflects the fundamental bottleneck shift between training and inference: MFU is usually the right training-efficiency lens, while MBU is often the right inference-efficiency lens when decode is limited by HBM traffic.
 
 ### Using the roofline for diagnosis {#sec-performance-engineering-roofline-diagnosis}
 
@@ -2257,12 +2267,16 @@ with profile(
 
 The `schedule` parameter defines a warmup period where the profiler runs but does not record, allowing CUDA caches and just-in-time (JIT) compilation to stabilize before measurement begins. Without warmup, the first few iterations include one-time costs (kernel compilation, memory allocation, CUDA context initialization) that inflate the measured times and misrepresent steady-state performance.
 
-The resulting trace, viewable in TensorBoard or Chrome's trace viewer, matters only insofar as each view maps to an intervention:
+The resulting trace, viewable in TensorBoard or Chrome's trace viewer, matters only insofar as each view maps to an intervention. @Tbl-performance-engineering-profiler-views turns those views into a diagnostic checklist.
 
-- **Kernel timeline**\index{Kernel!timeline}: Which CUDA kernels execute and for how long. Look for gaps (GPU idle time) and unexpectedly long kernels.
-- **Memory timeline**\index{Memory!timeline}: GPU memory allocation and deallocation over time. Spikes indicate inefficient memory management; gradual growth suggests memory leaks.
-- **CPU-GPU synchronization**\index{CPU-GPU Synchronization}: Points where the CPU waits for the GPU (or vice versa). Excessive synchronization often indicates that the CPU is not launching kernels fast enough to keep the GPU busy.
-- **Communication events**\index{Communication!event timeline}: NCCL collective operations and their duration relative to compute kernels. Short compute between long communications indicates poor overlap.
+: **Profiler Views and Interventions**: PyTorch profiler views are useful when each visual signal points to a concrete next experiment. {#tbl-performance-engineering-profiler-views tbl-colwidths="[24,38,38]"}
+
+| **Trace view** | **Diagnostic signal** | **Likely intervention** |
+|:---|:---|:---|
+| **Kernel timeline**\index{Kernel!timeline} | CUDA kernels, their duration, GPU idle gaps, and unexpectedly long kernels | Fuse operators, use CUDA Graphs, or investigate long kernels with Nsight Compute |
+| **Memory timeline**\index{Memory!timeline} | Allocation and deallocation spikes or gradual memory growth | Reuse buffers, plan allocations, or investigate leaks |
+| **CPU-GPU synchronization**\index{CPU-GPU Synchronization} | Points where the CPU waits for the GPU, or the GPU waits for CPU launch work | Remove blocking synchronization and reduce launch overhead |
+| **Communication events**\index{Communication!event timeline} | NCCL collective duration relative to compute kernels | Tune overlap, bucket sizing, or parallelization strategy |
 
 The profiler is therefore a triage tool, not the final performance proof: it identifies whether the next experiment should target fusion, memory planning, CUDA Graphs, or overlap.
 
@@ -2291,13 +2305,17 @@ The NCCL row (for distributed workloads) shows collective communication operatio
 
 The NVTX row shows user-annotated regions, which PyTorch maps to module names (`Linear`, `LayerNorm`, `Attention`). This connects low-level kernel names (often cryptic strings like `volta_fp16_s1688gemm_fp16_256x128_ldg8_f2f_nn`) to the model-level operations that produced them.
 
-Four patterns reveal the most diagnostic information from a Nsight Systems trace:
+Five patterns reveal the most diagnostic information from a Nsight Systems trace. @Tbl-performance-engineering-nsight-patterns maps each visual pattern to the bottleneck question it answers.
 
-1. The ratio of kernel execution to idle time, which measures GPU utilization.
-2. The distribution of kernel durations, where many short kernels suggest fusion opportunities.
-3. The alignment of NCCL and CUDA HW rows, which reveals overlap effectiveness.
-4. Memory allocation spikes, which may indicate inefficient memory management or unnecessary tensor materializations.
-5. The proportion of time in GEMM vs. non-GEMM kernels, which indicates how much of the execution is doing "useful" matrix arithmetic vs. overhead.
+: **Nsight Timeline Diagnostic Patterns**: Timeline patterns connect visual structure to utilization, fusion, overlap, allocation, and arithmetic-efficiency questions. {#tbl-performance-engineering-nsight-patterns tbl-colwidths="[34,33,33]"}
+
+| **Timeline pattern** | **Diagnostic question** | **Optimization direction** |
+|:---|:---|:---|
+| Kernel execution vs. idle gaps | How much of the trace is useful GPU execution rather than waiting? | Investigate launch overhead, CPU stalls, or input starvation |
+| Distribution of kernel durations | Are many short kernels fragmenting the workload? | Try fusion, CUDA Graphs, or compiler capture |
+| NCCL alignment with CUDA HW rows | Does communication overlap with computation? | Tune bucket sizes, scheduling, or parallelization layout |
+| Memory allocation spikes | Are tensors being materialized or allocated repeatedly? | Add memory planning, buffer reuse, or fused kernels |
+| GEMM vs. non-GEMM time | How much execution is useful matrix arithmetic vs. overhead? | Move non-GEMM work into fused kernels or reduce memory traffic |
 
 Experienced performance engineers develop pattern recognition for these traces, quickly identifying the dominant bottleneck from the visual structure of the timeline. A trace dominated by thin, closely packed kernel bars with minimal gaps indicates a well-optimized pipeline. A trace with large gaps between kernels, or with NCCL bars that do not overlap with CUDA HW bars, immediately reveals the primary optimization target.
 
@@ -2496,11 +2514,15 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 
 ### Detecting scaling regressions {#sec-performance-engineering-detecting-scaling-regressions-7c11}
 
-At scale, the system is nonlinear. A code change that introduces a minor memory overhead on a single GPU can trigger a catastrophic performance collapse at 1,000 GPUs due to increased garbage collection pauses or exhausted InfiniBand credit buffers. Detecting these scaling regressions requires a tiered testing strategy:
+At scale, the system is nonlinear. A code change that introduces a minor memory overhead on a single GPU can trigger a catastrophic performance collapse at 1,000 GPUs due to increased garbage collection pauses or exhausted InfiniBand credit buffers. @Tbl-performance-engineering-scaling-regression-tests shows how tiered tests catch that collapse before it becomes a fleet incident.
 
-1.  **Small-scale canaries**\index{Small-Scale Canaries}: Running the model on 8 and 64 GPUs to establish a scaling efficiency curve.
-2.  **Fleet baseline comparison**\index{Fleet Baseline Comparison}: Continuously comparing every production run's MFU against the reference baseline for that model architecture.
-3.  **Gray failure detection**\index{Gray Failure Detection}: Monitoring the distribution of step times across the fleet. A single "straggler" node that is 10 percent slower due to thermal throttling can reduce the entire cluster's MFU by 10 percent in a synchronous data-parallel workload.
+: **Scaling Regression Test Tiers**: Fleet performance testing moves from small canaries to production baselines and gray-failure detection so that local changes are checked against distributed behavior. {#tbl-performance-engineering-scaling-regression-tests tbl-colwidths="[24,38,38]"}
+
+| **Testing tier** | **What it measures** | **Regression caught** |
+|:---|:---|:---|
+| **Small-scale canaries**\index{Small-Scale Canaries} | Model behavior on 8 and 64 GPUs to establish a scaling efficiency curve | Code changes that look harmless on one GPU but bend the curve before full-fleet launch |
+| **Fleet baseline comparison**\index{Fleet Baseline Comparison} | Every production run's MFU against the reference baseline for that model architecture | Architecture, compiler, or configuration changes that reduce useful fleet work |
+| **Gray failure detection**\index{Gray Failure Detection} | Distribution of step times across the fleet | Straggler nodes, such as one 10 percent slower node that can reduce synchronous data-parallel MFU by 10 percent |
 
 Those same measurements also explain why benchmark numbers cannot be copied directly into production capacity plans.
 
@@ -2540,15 +2562,9 @@ The fourth step is to apply and verify. Implement the highest-impact optimizatio
 
 ### Combining techniques {#sec-performance-engineering-combining}
 
-Production systems combine techniques because no single intervention covers every term in the iron law. A highly optimized LLM serving system might employ all of the following:
+Production systems combine techniques because no single intervention covers every term in the iron law. A highly optimized LLM serving system may use FlashAttention-2 or later FlashAttention-family kernels to reduce attention memory traffic, INT4 weight quantization with GPTQ or AWQ to reduce HBM reads, and INT8 KV cache compression with per-channel scaling to increase feasible batch size. Compiler and runtime tools such as `torch.compile`\index{torch.compile!kernel fusion} or TensorRT\index{TensorRT!kernel selection} then handle element-wise fusion and kernel selection.
 
-- FlashAttention-2 or later FlashAttention-family kernels for memory-efficient attention computation
-- INT4 weight quantization (GPTQ or AWQ) with FP16 dequantization during GEMM
-- INT8 KV cache compression with per-channel scaling
-- torch.compile\index{torch.compile!kernel fusion} or TensorRT\index{TensorRT!kernel selection} for element-wise fusion and kernel selection
-- Speculative decoding for latency reduction at low batch sizes
-- Continuous batching\index{Continuous Batching} (the scheduler refilling the batch as requests finish, introduced in @sec-performance-engineering-batch-size) with dynamic sequence grouping for high throughput
-- Tensor parallelism\index{Tensor Parallelism} across GPUs with overlapped AllReduce
+The serving layer adds another set of controls. Speculative decoding reduces latency at low batch sizes, continuous batching\index{Continuous Batching} refills the batch as requests finish (introduced in @sec-performance-engineering-batch-size), dynamic sequence grouping improves throughput, and tensor parallelism\index{Tensor Parallelism} spreads the model across GPUs while overlapping AllReduce. These techniques belong together only when the profile shows that each one moves a currently binding term.
 
 The speedups from these techniques are not additive; they interact in ways that demand careful sequencing. For instance, INT4 weight quantization reduces per-token HBM traffic by 4$\times$, which might shift the bottleneck from memory-bound to compute-bound. Once compute-bound, further bandwidth optimizations (KV cache compression) yield diminishing returns, and compute optimizations (FP8 Tensor Cores) become the priority. This is why the iterative profile-optimize-verify loop is essential: the optimal combination depends on the specific model, hardware, and workload characteristics.
 
