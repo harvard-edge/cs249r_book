@@ -147,7 +147,9 @@ class LineWalker:
     # callout-tip and callout-checkpoint blocks. `::: {.callout-tip}`
     # opens a div; a bare `:::` closes it. Nested divs are supported
     # via callout_depth counting.
-    _DIV_OPEN_TIP_RE = re.compile(r"^\s*:::+\s*\{[^}]*\.callout-tip\b")
+    _DIV_OPEN_TIP_RE = re.compile(
+        r"^\s*:::+\s*\{[^}]*\.(?:callout-tip|callout-learning-objectives)\b"
+    )
     _DIV_OPEN_CHECKPOINT_RE = re.compile(
         r"^\s*:::+\s*\{[^}]*\.callout-checkpoint\b"
     )
