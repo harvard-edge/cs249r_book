@@ -104,7 +104,7 @@ def _extract_citations(line: str) -> list[tuple[int, str]]:
     out: list[tuple[int, str]] = []
     for m in _CITE_RE.finditer(line):
         key = m.group(1)
-        if key.startswith(_XREF_PREFIXES):
+        if key.lower().startswith(_XREF_PREFIXES):
             continue
         out.append((m.start(), key))
     return out
