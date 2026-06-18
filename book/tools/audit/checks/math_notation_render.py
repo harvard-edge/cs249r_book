@@ -120,9 +120,10 @@ _TIMES_NO_SPACE_RE = re.compile(
 # `$` (so display math `$$...$$` is handled separately by the walker's
 # display-math state). Negative lookbehind on `\\` ensures we skip the
 # already-correct `\%` escape.
-_BARE_PERCENT_IN_MATH_RE = re.compile(
-    r"\$(?!\$)([^$\n]*?(?<!\\)%[^$\n]*?)\$(?!\$)"
+_INLINE_MATH_SPAN_RE = re.compile(
+    r"(?<!\$)\$(?!\$)(?:[^\n$]|\\\$)+?(?<!\\)\$(?!\$)"
 )
+_UNESCAPED_PERCENT_RE = re.compile(r"(?<!\\)%")
 
 
 # ── Additional protected-context detection ──────────────────────────────────
@@ -327,18 +328,27 @@ def check(
             )
             counter += 1
 
-        # ── Pattern 5: Bare `%` inside math ──
+        # ── Pattern 5: Bare `%` inside actual inline math ──
         # High confidence: `%` inside `$...$` starts a LaTeX comment.
-        for m in _BARE_PERCENT_IN_MATH_RE.finditer(line):
-            # Skip if the match starts inside inline code or an index
-            # entry; otherwise we want to flag (including matches inside
-            # protected attributes like fig-cap, where math still renders).
-            if position_in_spans(m.start(), [
+        # This must inspect real inline-math spans, not arbitrary pairs
+        # of dollar signs. A table row such as `$C_2$ ... 30% ... $\eta$`
+        # contains a percent sign between two math spans, but not inside
+        # math; a broad `$...%...$` regex would pair the closing dollar of
+        # `$C_2$` with the opening dollar of `$\eta$` and flag a false
+        # positive.
+        for math_span in _INLINE_MATH_SPAN_RE.finditer(line):
+            # Skip if the math span itself is inside inline code or an
+            # index entry; otherwise flag, including matches inside
+            # protected attributes like fig-cap, where math still renders.
+            if position_in_spans(math_span.start(), [
                 s for s in spans if line[s[0]:s[1]].startswith("`")
                 or line[s[0]:s[1]].startswith("\\index")
             ]):
                 continue
-            body = m.group(1)
+            body = math_span.group(0)[1:-1]
+            percent = _UNESCAPED_PERCENT_RE.search(body)
+            if percent is None:
+                continue
             issues.append(
                 Issue(
                     id=make_issue_id(scope, CATEGORY, counter),
@@ -347,7 +357,7 @@ def check(
                     rule_text=RULE_TEXT,
                     file=str(file_path),
                     line=line_num,
-                    col=m.start(),
+                    col=math_span.start() + 1 + percent.start(),
                     before=line,
                     suggested_after="",
                     auto_fixable=False,
