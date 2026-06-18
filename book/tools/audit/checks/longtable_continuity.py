@@ -215,11 +215,20 @@ def check(
                 if len(preview) > 100:
                     preview = preview[:97] + "..."
                 reason_text = "; ".join(reasons)
-                suggested_after = (
-                    "Add `{tbl-colwidths=\"[...]\"}` to the caption "
-                    "attribute list and verify the rendered PDF repeats "
-                    "the header row across page breaks."
-                )
+                if has_colwidths:
+                    suggested_after = (
+                        "This table already has `tbl-colwidths`; render the "
+                        "PDF and verify the header row repeats across page "
+                        "breaks without a caption counter reset. If the "
+                        "render is wrong, use an explicit longtable/layout "
+                        "fix rather than adding duplicate `tbl-colwidths`."
+                    )
+                else:
+                    suggested_after = (
+                        "Add `{tbl-colwidths=\"[...]\"}` to the caption "
+                        "attribute list and verify the rendered PDF repeats "
+                        "the header row across page breaks."
+                    )
                 issues.append(
                     Issue(
                         id=make_issue_id(scope, CATEGORY, counter),
