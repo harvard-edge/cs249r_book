@@ -152,6 +152,7 @@ _NAMED_PHRASES = (
     "CHIPS Act",
     "Flash Attention",
     "Paged Attention",
+    "Kullback-Leibler",
     "Tensor Cores",
     "Tensor Core",
     "Compute Express Link",
