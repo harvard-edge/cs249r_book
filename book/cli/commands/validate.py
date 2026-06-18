@@ -603,6 +603,8 @@ class ValidateCommand:
                   note="bare pipes, fracs, HTML entities"),
             Scope("caption-required", "_run_table_caption_required",
                   note="body-prose pipe tables need : caption {#tbl-X}"),
+            Scope("caption-position", "_run_table_caption_position",
+                  note="pipe-table captions belong below the table"),
             Scope("caption-orphan", "_run_table_caption_orphan",
                   note="caption between two `:::` closes breaks EPUB"),
             Scope("caption-detached", "_run_table_caption_detached",
@@ -3527,10 +3529,10 @@ class ValidateCommand:
                     j = i + 2
                     while j < n and self._PIPE_ROW_RE.match(lines[j]):
                         j += 1
-                    # Quarto pipe-table captions can sit on EITHER side of
-                    # the table: a `: caption {#tbl-X}` line up to ~3 non-
-                    # blank lines BEFORE the header row, or up to ~5 non-
-                    # blank lines AFTER the last data row. Look at both.
+                    # `caption-required` is intentionally permissive so it
+                    # can distinguish missing captions from misplaced ones.
+                    # `caption-position` below enforces the book convention:
+                    # pipe-table captions belong after the table body.
                     after: List[str] = []
                     k = j
                     while k < n and len(after) < 5:
@@ -3594,6 +3596,113 @@ class ValidateCommand:
             ),
             files_checked=len(files),
             issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _caption_is_after_pipe_table(
+        self,
+        lines: List[str],
+        caption_idx: int,
+    ) -> bool:
+        """Return True when a caption is already attached below a pipe table."""
+        j = caption_idx - 1
+        while j >= 0:
+            stripped = lines[j].strip()
+            if not stripped or stripped.startswith("\\index{"):
+                j -= 1
+                continue
+            # A caption may sit just after a closing div fence when a legacy
+            # colwidths wrapper is involved.
+            if stripped.startswith(":::"):
+                j -= 1
+                continue
+            return self._PIPE_ROW_LOOSE_RE.match(lines[j]) is not None
+        return False
+
+    def _pipe_table_start_after_caption(
+        self,
+        lines: List[str],
+        caption_idx: int,
+    ) -> Optional[int]:
+        """Return 0-indexed pipe-table header line after a top caption."""
+        j = caption_idx + 1
+        limit = min(len(lines), caption_idx + 8)
+        while j < limit:
+            stripped = lines[j].strip()
+            if not stripped:
+                j += 1
+                continue
+            # Allow a wrapper fence between a misplaced caption and table.
+            if stripped.startswith(":::"):
+                j += 1
+                continue
+            if (
+                self._PIPE_ROW_RE.match(lines[j])
+                and j + 1 < len(lines)
+                and self._PIPE_SEP_RE.match(lines[j + 1])
+            ):
+                return j
+            return None
+        return None
+
+    def _run_table_caption_position(self, root: Path) -> ValidationRunResult:
+        """Flag pipe-table captions placed before the table body.
+
+        MLSysBook convention is the Pandoc/Quarto pipe-table form:
+
+            | **Column** | **Column** |
+            |:-----------|:-----------|
+            | value      | value      |
+
+            : **Caption**: Explanation. {#tbl-id}
+
+        A caption placed above the pipe table still looks plausible in source,
+        but it is inconsistent with the corpus convention and makes later
+        table-moving/layout tooling ambiguous.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        for file in files:
+            # Frontmatter is allowed to contain non-book scaffolding; all book
+            # body/backmatter pipe tables use the same caption placement.
+            if "/frontmatter/" in str(file).replace("\\", "/"):
+                continue
+            lines = self._read_text(file).splitlines()
+            state = list(self._captions_iter_body_lines(lines))
+            meta = {idx: kind for idx, _, _, _, kind in state}
+            for i, line in enumerate(lines):
+                idx = i + 1
+                if meta.get(idx) != "prose":
+                    continue
+                if not self._TBL_CAP_LABELED_RE.match(line):
+                    continue
+                if self._caption_is_after_pipe_table(lines, i):
+                    continue
+                table_start = self._pipe_table_start_after_caption(lines, i)
+                if table_start is None:
+                    continue
+                raw_issues.append(ValidationIssue(
+                    file=self._relative_file(file),
+                    line=idx,
+                    code="table_caption_before_pipe_table",
+                    message=(
+                        "Pipe-table caption appears before the table "
+                        f"(table header starts at line {table_start + 1}). "
+                        "Move the caption below the final table row."
+                    ),
+                    severity="error",
+                    context=line.strip()[:120],
+                    suggestion=(
+                        "Use the canonical order: pipe table first, then "
+                        "`: **Title**: explanation. {#tbl-id}`."
+                    ),
+                ))
+        return ValidationRunResult(
+            name="table-caption-position",
+            description="Pipe-table captions must appear below the table body",
+            files_checked=len(files),
+            issues=raw_issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
 

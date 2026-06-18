@@ -2158,8 +2158,6 @@ Metrics are not interchangeable; each answers a different bottleneck question. M
 
 @Tbl-performance-engineering-key-metrics maps the common metrics to the bottleneck question each one answers.
 
-: **Performance Metrics and Their Diagnostic Use**: Each metric measures a different layer of the system, so choosing the wrong metric can hide the real bottleneck. {#tbl-performance-engineering-key-metrics tbl-colwidths="[18,32,28,22]"}
-
 | **Metric**                                                               | **Definition**                                                                        | **Best diagnostic use**                                                                              | **Caveat or target**                                                                                                                                              |
 |:-------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Model FLOPs Utilization (MFU)**                                        | Fraction of hardware peak FLOP/s productively used by model computation               | Training efficiency across memory limits, launch overhead, communication wait, and software overhead | 40--60% is common in well-tuned LLM training; above 60% is excellent                                                                                              |
@@ -2168,6 +2166,8 @@ Metrics are not interchangeable; each answers a different bottleneck question. M
 | **Inter-token latency (ITL)**\index{Inter-Token Latency}                 | Time between consecutive generated tokens during decode                               | Perceived generation speed after the first token                                                     | Below 50 ms supports comfortable reading; real-time speech may require below 25 ms                                                                                |
 | **Throughput**                                                           | Tokens/second for the system, or tokens/second/GPU for per-device efficiency          | Aggregate serving or training capacity under batching                                                | Large batches improve throughput but increase per-request latency; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 covers the queueing trade-off |
 | **Model Bandwidth Utilization (MBU)**\index{Model Bandwidth Utilization} | Achieved memory bandwidth divided by hardware peak bandwidth                          | Memory-bound inference, especially decode workloads                                                  | An H100 decode step can show 2% MFU but 85% MBU, which indicates a memory-saturated and well-optimized path                                                       |
+
+: **Performance Metrics and Their Diagnostic Use**: Each metric measures a different layer of the system, so choosing the wrong metric can hide the real bottleneck. {#tbl-performance-engineering-key-metrics tbl-colwidths="[18,32,28,22]"}
 
 The metric choice in @tbl-performance-engineering-key-metrics reflects the fundamental bottleneck shift between training and inference: MFU is usually the right training-efficiency lens, while MBU is often the right inference-efficiency lens when decode is limited by HBM traffic.
 
@@ -2261,14 +2261,14 @@ The `schedule` parameter defines a warmup period where the profiler runs but doe
 
 The resulting trace, viewable in TensorBoard or Chrome's trace viewer, matters only insofar as each view maps to an intervention. @Tbl-performance-engineering-profiler-views turns those views into a diagnostic checklist.
 
-: **Profiler Views and Interventions**: PyTorch profiler views are useful when each visual signal points to a concrete next experiment. {#tbl-performance-engineering-profiler-views tbl-colwidths="[24,38,38]"}
-
 | **Trace view**                                               | **Diagnostic signal**                                                        | **Likely intervention**                                                          |
 |:-------------------------------------------------------------|:-----------------------------------------------------------------------------|:---------------------------------------------------------------------------------|
 | **Kernel timeline**\index{Kernel!timeline}                   | CUDA kernels, their duration, GPU idle gaps, and unexpectedly long kernels   | Fuse operators, use CUDA Graphs, or investigate long kernels with Nsight Compute |
 | **Memory timeline**\index{Memory!timeline}                   | Allocation and deallocation spikes or gradual memory growth                  | Reuse buffers, plan allocations, or investigate leaks                            |
 | **CPU-GPU synchronization**\index{CPU-GPU Synchronization}   | Points where the CPU waits for the GPU, or the GPU waits for CPU launch work | Remove blocking synchronization and reduce launch overhead                       |
 | **Communication events**\index{Communication!event timeline} | NCCL collective duration relative to compute kernels                         | Tune overlap, bucket sizing, or parallelization strategy                         |
+
+: **Profiler Views and Interventions**: PyTorch profiler views are useful when each visual signal points to a concrete next experiment. {#tbl-performance-engineering-profiler-views tbl-colwidths="[24,38,38]"}
 
 The profiler is therefore a triage tool, not the final performance proof: it identifies whether the next experiment should target fusion, memory planning, CUDA Graphs, or overlap.
 
@@ -2299,8 +2299,6 @@ The NVTX row shows user-annotated regions, which PyTorch maps to module names (`
 
 Five patterns reveal the most diagnostic information from a Nsight Systems trace. @Tbl-performance-engineering-nsight-patterns maps each visual pattern to the bottleneck question it answers.
 
-: **Nsight Timeline Diagnostic Patterns**: Timeline patterns connect visual structure to utilization, fusion, overlap, allocation, and arithmetic-efficiency questions. {#tbl-performance-engineering-nsight-patterns tbl-colwidths="[34,33,33]"}
-
 | **Timeline pattern**             | **Diagnostic question**                                            | **Optimization direction**                                     |
 |:---------------------------------|:-------------------------------------------------------------------|:---------------------------------------------------------------|
 | Kernel execution vs. idle gaps   | How much of the trace is useful GPU execution rather than waiting? | Investigate launch overhead, CPU stalls, or input starvation   |
@@ -2308,6 +2306,8 @@ Five patterns reveal the most diagnostic information from a Nsight Systems trace
 | NCCL alignment with CUDA HW rows | Does communication overlap with computation?                       | Tune bucket sizes, scheduling, or parallelization layout       |
 | Memory allocation spikes         | Are tensors being materialized or allocated repeatedly?            | Add memory planning, buffer reuse, or fused kernels            |
 | GEMM vs. non-GEMM time           | How much execution is useful matrix arithmetic vs. overhead?       | Move non-GEMM work into fused kernels or reduce memory traffic |
+
+: **Nsight Timeline Diagnostic Patterns**: Timeline patterns connect visual structure to utilization, fusion, overlap, allocation, and arithmetic-efficiency questions. {#tbl-performance-engineering-nsight-patterns tbl-colwidths="[34,33,33]"}
 
 Experienced performance engineers develop pattern recognition for these traces, quickly identifying the dominant bottleneck from the visual structure of the timeline. A trace dominated by thin, closely packed kernel bars with minimal gaps indicates a well-optimized pipeline. A trace with large gaps between kernels, or with NCCL bars that do not overlap with CUDA HW bars, immediately reveals the primary optimization target.
 
@@ -2508,13 +2508,13 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 
 At scale, the system is nonlinear. A code change that introduces a minor memory overhead on a single GPU can trigger a catastrophic performance collapse at 1,000 GPUs due to increased garbage collection pauses or exhausted InfiniBand credit buffers. @Tbl-performance-engineering-scaling-regression-tests shows how tiered tests catch that collapse before it becomes a fleet incident.
 
-: **Scaling Regression Test Tiers**: Fleet performance testing moves from small canaries to production baselines and gray-failure detection so that local changes are checked against distributed behavior. {#tbl-performance-engineering-scaling-regression-tests tbl-colwidths="[24,38,38]"}
-
 | **Testing tier**                                               | **What it measures**                                                                  | **Regression caught**                                                                             |
 |:---------------------------------------------------------------|:--------------------------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------|
 | **Small-scale canaries**\index{Small-Scale Canaries}           | Model behavior on 8 and 64 GPUs to establish a scaling efficiency curve               | Code changes that look harmless on one GPU but bend the curve before full-fleet launch            |
 | **Fleet baseline comparison**\index{Fleet Baseline Comparison} | Every production run's MFU against the reference baseline for that model architecture | Architecture, compiler, or configuration changes that reduce useful fleet work                    |
 | **Gray failure detection**\index{Gray Failure Detection}       | Distribution of step times across the fleet                                           | Straggler nodes, such as one 10% slower node that can reduce synchronous data-parallel MFU by 10% |
+
+: **Scaling Regression Test Tiers**: Fleet performance testing moves from small canaries to production baselines and gray-failure detection so that local changes are checked against distributed behavior. {#tbl-performance-engineering-scaling-regression-tests tbl-colwidths="[24,38,38]"}
 
 Those same measurements also explain why benchmark numbers cannot be copied directly into production capacity plans.
 
