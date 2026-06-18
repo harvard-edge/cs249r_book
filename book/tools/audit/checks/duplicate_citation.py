@@ -1,14 +1,13 @@
 r"""Check: duplicate Pandoc citation keys within a close window.
 
-Rule: book-prose-merged.md section 10.X (citation density)
+Rule: .claude/rules/citation.md (duplicate citation density)
 
     The same `[@key]` cited 3+ times within a tight window (~50 lines)
-    inside one file usually means the author over-cited a single source.
-    The fix is editorial: collapse to one citation, rephrase so a single
-    cite covers the cluster, or distribute the cites across distinct
-    claims that need separate attribution. This is a *judgment* check —
-    sometimes 3+ cites of the same key really are needed because each
-    cite anchors a distinct claim that, on its own, would be unsupported.
+    inside one file means the cluster needs editorial review. This is not
+    a deletion rule. Keep repeats that anchor distinct local claims, numbers,
+    dates, method details, table/caption/footnote claims, or source-specific
+    attributions. Collapse only repeats that re-anchor the same nearby claim.
+    Never replace a normal bibliography citation with `Reference:` prose.
 
 Auto-fixable: NO. The fix is a rewrite decision, not a substitution.
 Confidence: LOW. We expect a non-trivial false-positive rate because
@@ -46,10 +45,11 @@ from audit.ledger import Issue, make_issue_id
 from audit.protected_contexts import LineWalker
 
 CATEGORY = "duplicate-citation"
-RULE = "book-prose-merged.md section 10.X"
+RULE = ".claude/rules/citation.md duplicate citation density"
 RULE_TEXT = (
-    "The same citation key cited 3+ times within ~50 lines suggests "
-    "over-citation; consider collapsing to one cite or rephrasing."
+    "The same citation key cited 3+ times within ~50 lines requires "
+    "editorial review: keep repeats that anchor distinct local claims; "
+    "collapse only repeats of the same nearby claim."
 )
 
 # Window size (lines) within which 3+ uses of the same key fire.
@@ -207,9 +207,10 @@ def check(
                 col=first_col,
                 before=raw_line,
                 suggested_after=(
-                    f"consider collapsing to one cite or rephrasing "
+                    f"review cluster; keep citations that anchor distinct "
+                    f"local claims, and collapse only redundant repeats "
                     f"(@{key} cited {cite_count}x within lines "
-                    f"{first_line}-{last_line})"
+                    f"{first_line}-{last_line}; do not use `Reference:` prose)"
                 ),
                 auto_fixable=False,
                 needs_subagent=False,
