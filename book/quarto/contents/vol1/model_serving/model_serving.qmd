@@ -2675,11 +2675,9 @@ Three strategies address multi-model memory management. Time-multiplexing\index{
 
 #### Multi-stream execution {#sec-model-serving-multistream-execution-1b1f}
 
-When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU[^fn-mig-multimodel]\index{MIG!hardware isolation} technology enables hardware-level isolation, dividing an A100 into up to seven independent GPU instances, each with dedicated memory and compute resources [@nvidiaMigUserGuide]. MIG is available on A100, A30 (up to four instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation.
+When multiple models or multiple instances of the same model must run concurrently on a single GPU, the hardware must partition resources between them. NVIDIA's Multi-Instance GPU[^fn-mig-multimodel]\index{MIG!hardware isolation} technology enables hardware-level isolation, dividing an A100 into up to seven independent GPU instances, each with dedicated memory and compute resources [@nvidiaMigUserGuide]. MIG is available on A100, A30 (up to four instances), H100, H200, and newer data center GPUs. For older GPUs such as V100 or T4, CUDA stream scheduling provides time-multiplexed sharing without hardware isolation. The choice depends on whether consistent latency with MIG or maximum utilization with shared streams is the priority.
 
 [^fn-mig-multimodel]: **MIG (Multi-Instance GPU)**\index{MIG!hardware isolation}: Introduced with NVIDIA's A100 [@NVIDIA2020] and documented across supported data-center GPUs [@nvidiaMigUserGuide], MIG partitions a single physical GPU into independent instances, each with dedicated compute and memory resources. Unlike software sharing (MPS or time-slicing), MIG provides hardware-level isolation between partitions. The trade-off is granularity---partitions must follow fixed profiles, so resources cannot be divided arbitrarily. For multi-model serving, MIG reduces noisy-neighbor risk on shared hardware, while per-model SLO guarantees still depend on scheduler policy, load, and the selected partition profile.
-
-The choice depends on whether consistent latency with MIG or maximum utilization with shared streams is the priority.
 
 #### Model swapping and host memory {#sec-model-serving-model-swapping-host-memory-c54f}
 
@@ -3333,11 +3331,9 @@ The two regimes optimize opposite quantities, so a model that is "fast" at batch
 
 :::
 
-The same batch-size dependence drives how the serving system shapes its batches in the first place, which the next adaptive-window analysis makes concrete.
-
 #### Adaptive batching windows {#sec-model-serving-adaptive-batching-windows-c404}
 
-Fixed batching windows waste latency budget during high traffic when large batches form quickly. @Lst-adaptive-batching demonstrates how adaptive strategies adjust the window based on queue depth.
+The same batch-size dependence drives how the serving system shapes its batches in the first place. Fixed batching windows waste latency budget during high traffic when large batches form quickly. @Lst-adaptive-batching demonstrates how adaptive strategies adjust the window based on queue depth.
 
 This approach reduces average wait time during high traffic while maintaining batch sizes. For traffic varying between 200–1000 QPS, a fixed 10 ms window produces 15 ms average latency at 650 img/s, while an adaptive window cuts average latency to 11 ms (27 percent reduction) and improves throughput to 680 img/s (5 percent improvement). The interplay between window size and batch limits creates a space of possible configurations, each representing a different balance between throughput and latency.
 
@@ -3896,9 +3892,11 @@ Generative models produce a stream of tokens rather than a single output tensor.
 
 :::
 
+These two metrics capture distinct user experience aspects, and production systems set separate SLO targets for each.
+
 ::: {#psp-model-serving-llm-serving-latency-targets .callout-perspective title="LLM serving latency targets"}
 
-TTFT and TPOT capture distinct user experience aspects, so interactive LLM services usually need separate SLOs for responsiveness, generation fluidity, and fleet throughput. The values below are illustrative targets rather than universal requirements:
+Interactive LLM services usually need separate SLOs for responsiveness, generation fluidity, and fleet throughput. The values below are illustrative targets rather than universal requirements:
 
 - **TTFT**: < 500 ms (for a 1000-token prompt)
 - **TPOT**: < 50 ms (equivalent to ~20 tokens/s, faster than human reading speed)
@@ -3908,11 +3906,9 @@ The systems point is that a single "latency" number hides the prefill/decode spl
 
 :::
 
-Meeting these TPOT targets depends on more than memory bandwidth alone: the algorithm used to select each token also affects per-token latency and output quality.
-
 ### Decoding strategies {#sec-model-serving-decoding-strategies-afe8}
 
-Generative models require decoding strategies that trade off quality, diversity, and latency. The choice of decoding strategy dramatically affects both output quality and computational cost.
+Meeting these TPOT targets depends on more than memory bandwidth alone: the algorithm used to select each token also affects per-token latency and output quality. Generative models require decoding strategies that trade off quality, diversity, and latency. The choice of decoding strategy dramatically affects both output quality and computational cost.
 
 The simplest approach, greedy decoding\index{Greedy Decoding!LLM generation}, selects the highest-probability token at each step at the cost of one model pass per token. It is fast but often produces repetitive outputs because it cannot recover from early mistakes. Beam search\index{Beam Search!decoding strategy} improves quality by maintaining multiple candidate sequences and selecting the highest-scoring complete sequence, but it multiplies per-token compute by the beam width. Sampling\index{Sampling!temperature, top-k, top-p} with temperature, top-$k$\index{Top-k!sampling}, and top-$p$ (also called nucleus sampling\index{Nucleus Sampling!top-p}) injects controlled randomness for diversity at negligible extra compute [@holtzman2020curious]; its serving cost lies less in arithmetic than in output-length variance, which widens the spread of sequence lengths that continuous batching must absorb. These costs compound at the per-token level [@meister2020]: beam search with width five runs roughly 5$\times$ the compute of greedy decoding for every token, which is why interactive, latency-sensitive deployments rarely use it and instead reach for greedy or sampling.
 
@@ -3924,15 +3920,11 @@ Generative inference requires managing the KV Cache[^fn-kv-cache-serving]\index{
 
 [^fn-kv-cache-serving]: **KV Cache (Key-Value Cache)**\index{KV Cache!memory scaling}: To avoid redundant work, the system caches the Key and Value vectors from previous tokens, which remain valid throughout generation. This design choice is the direct cause of the dynamic memory growth described; the cache's size grows linearly with every generated token, making memory management, not computation, the primary constraint. For the 70-billion-parameter-class grouped-query-attention sizing example in this section, the FP16 KV cache is about 0.31 MB per token per sequence; grouped-query attention (GQA), used in Llama-family models such as Llama 3, shares key/value heads across multiple query heads, reducing the cache relative to full multi-head attention [@dubey2024llama]. A batch of 32 requests at an 8,000-token context therefore requires roughly 80 GB just for KV cache, several times larger still without grouped-query or multi-query attention.
 
-The continuous batching and PagedAttention techniques covered in @sec-model-serving-continuous-batching-8bb6 address these challenges.
-
 #### Prefix caching and memory offloading {#sec-model-serving-prefix-caching-offloading}
 
-The memory pressure from KV caches can be further mitigated through architectural strategies that exploit request patterns. **Prefix Caching**\index{Prefix Caching!KV cache reuse} stores the KV cache of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing many independent requests to reuse the same precomputed hidden states. For $N$ requests sharing a prefix of $S_{\text{prefix}}$ tokens, the saved prefill work is roughly $(N-1)S_{\text{prefix}}$ token steps, plus the avoided reads and writes of the prefix KV state. For multi-turn conversations, this "caching of the past" allows the system to process only the *new* tokens in each turn.
+The continuous batching and PagedAttention techniques covered in @sec-model-serving-continuous-batching-8bb6 address request scheduling and cache paging; the remaining memory pressure can be further mitigated through architectural strategies that exploit request patterns. **Prefix Caching**\index{Prefix Caching!KV cache reuse} stores the KV cache of common instruction prefixes (such as a 2,000-token system prompt or a shared retrieval-augmented generation (RAG) context), allowing many independent requests to reuse the same precomputed hidden states. For $N$ requests sharing a prefix of $S_{\text{prefix}}$ tokens, the saved prefill work is roughly $(N-1)S_{\text{prefix}}$ token steps, plus the avoided reads and writes of the prefix KV state. For multi-turn conversations, this "caching of the past" allows the system to process only the *new* tokens in each turn.
 
-When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV Cache Offloading**\index{KV Cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents Out-of-Memory (OOM) failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly.
-
-Advanced techniques including speculative decoding[^fn-speculative-decoding] and distributed parallelism, where one request is split across multiple devices or machines, are covered in specialized treatments of large-scale systems.
+When the aggregate KV cache exceeds GPU VRAM, systems can employ **KV Cache Offloading**\index{KV Cache!offloading}. This strategy spills inactive or low-priority context windows to host CPU RAM or NVMe SSD, freeing VRAM for active generation. The reload cost is bounded below by bytes moved divided by PCIe or NVMe bandwidth, before software overhead and queueing are added. Offloading therefore prevents Out-of-Memory (OOM) failures and enables larger context windows, but it also creates affinity, invalidation, and hot-decode latency risks that must be budgeted explicitly. Advanced techniques including speculative decoding[^fn-speculative-decoding] and distributed parallelism, where one request is split across multiple devices or machines, are covered in specialized treatments of large-scale systems.
 
 [^fn-speculative-decoding]: **Speculative Decoding**\index{Speculative Decoding!throughput}: A small "draft" model generates $k$ candidate tokens autoregressively; the large target model then verifies the proposed block in parallel [@leviathan2023speculative]. When the draft model's proposals are accepted at rate $\alpha$, effective throughput can scale with the number of accepted tokens per verification step. This breaks the serial autoregressive bottleneck at the runtime layer, not the architecture layer.
 
@@ -4340,11 +4332,9 @@ The systems choice is where to pay compilation cost: JIT pays it in the serving 
 
 :::
 
-The JIT vs. AOT choice governs GPU compilation strategy; CPU inference faces its own optimization landscape, where vectorization and quantization replace graph compilation as the primary levers.
-
 ### CPU inference optimization {#sec-model-serving-cpu-inference-optimization-ae86}
 
-GPUs dominate the narrative, yet CPUs remain the workhorse for many inference workloads, especially small models, latency-insensitive batch jobs, and cost-constrained environments. CPU optimization starts from a different machine model. Modern CPUs[^fn-simd-cpu-serving]\index{SIMD!CPU vectorization} (Intel Xeon, AMD EPYC) contain vector units such as AVX-512 and AMX, but a scalar Python loop cannot use them. Specialized runtimes like OpenVINO or Intel Extension for PyTorch (IPEX) map neural network operators directly to these vector instructions, substantially improving performance over naive scalar implementations [@openvinoDocs].
+The JIT vs. AOT choice governs GPU compilation strategy; CPU inference faces its own optimization landscape, where vectorization and quantization replace graph compilation as the primary levers. GPUs dominate the narrative, yet CPUs remain the workhorse for many inference workloads, especially small models, latency-insensitive batch jobs, and cost-constrained environments. CPU optimization starts from a different machine model. Modern CPUs[^fn-simd-cpu-serving]\index{SIMD!CPU vectorization} (Intel Xeon, AMD EPYC) contain vector units such as AVX-512 and AMX, but a scalar Python loop cannot use them. Specialized runtimes like OpenVINO or Intel Extension for PyTorch (IPEX) map neural network operators directly to these vector instructions, substantially improving performance over naive scalar implementations [@openvinoDocs].
 
 [^fn-simd-cpu-serving]: **SIMD (Single Instruction, Multiple Data)**\index{SIMD!CPU inference}: From Michael Flynn's 1966 taxonomy of computer architectures, SIMD enables one instruction to operate on multiple data elements simultaneously. Intel's AVX-512 processes 512 bits (16 floats) per instruction; AMX extends this to matrix tile operations. For CPU inference, SIMD exploitation is the primary optimization lever: naive scalar matrix multiplication achieves ~1 percent of theoretical peak, while SIMD-optimized kernels approach 80--90 percent utilization---a gap that determines whether CPU-only serving is economically viable.
 
@@ -4802,9 +4792,11 @@ The fixed workload assumptions below define the reference case used throughout t
 *   **Request characteristics**: 1,000-token input prompt (Prefill), 256-token generated response (Decode).
 *   **Target SLOs**: TTFT $<$ 200 ms, TPOT $<$ 20 ms.
 
+These assumptions make the case study narrow enough to calculate while preserving the two serving constraints that matter most: the prefill budget for time to first token and the decode budget for each generated token.
+
 #### Latency deconstruction {#sec-model-serving-latency-deconstruction-217e}
 
-The end-to-end request latency is governed by the two-phase execution model of autoregressive transformers, applying the TTFT and TPOT metrics defined in @sec-model-serving-performance-metrics-ttft-tpot-b009.
+The end-to-end request latency is governed by the two-phase execution model of autoregressive transformers, applying the TTFT and TPOT metrics defined in @sec-model-serving-performance-metrics-ttft-tpot-b009. Prefill determines whether the user sees a prompt response quickly; decode determines whether the generated stream keeps moving after it starts.
 
 ##### Prefill phase (time to first token) {.unnumbered}
 

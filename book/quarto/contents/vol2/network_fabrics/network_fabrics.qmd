@@ -253,11 +253,11 @@ ML training workloads are the complete opposite: synchronous, periodic, and domi
 
 As @tbl-network-assumptions summarizes, the synchronicity inversion is the most fundamental. Web traffic is asynchronous; one user's slow connection does not affect another's. The Bulk Synchronous Parallel (BSP)[^fn-bsp-valiant] model governs distributed training: all 1,024 GPUs in a training job must complete their gradient exchange before any of them can proceed to the next step. The slowest link therefore dictates the performance of the entire cluster. A single congested switch port that delays one GPU's packets by 100 ms effectively wastes 100 ms of compute time for all 1,024 GPUs. *Tail latency is not an outlier; it is the bottleneck.*
 
-[^fn-bsp-valiant]: **BSP (Bulk Synchronous Parallel)**\index{Bulk Synchronous Parallel!origin}: Proposed by @valiant1990 as a "bridging model" between parallel hardware and software, analogous to von Neumann's model for sequential machines. Synchronous data-parallel training has the same barrier shape: workers compute local gradients, exchange them, and update from a shared step boundary, preserving the semantics of large-batch synchronous optimization while making the network fabric's tail latency a binding constraint on cluster throughput [@goyal2017accurate; @li2020pytorch].
+[^fn-bsp-valiant]: [offset=-14mm] **BSP (Bulk Synchronous Parallel)**\index{Bulk Synchronous Parallel!origin}: Proposed by @valiant1990 as a "bridging model" between parallel hardware and software, analogous to von Neumann's model for sequential machines. Synchronous data-parallel training has the same barrier shape: workers compute local gradients, exchange them, and update from a shared step boundary, preserving the semantics of large-batch synchronous optimization while making the network fabric's tail latency a binding constraint on cluster throughput [@goyal2017accurate; @li2020pytorch].
 
 The flow inversion compounds this problem. Traditional networks are designed for fairness among millions of "mice flows"[^fn-elephant-mice-flows], yet ML training is dominated by a few "elephant flows" corresponding to the gradient AllReduce. A single AllReduce on a 175B parameter model can involve exchanging 350 GB of data. Standard flow control and routing mechanisms like Equal-Cost Multi-Path (ECMP), which hash each flow onto one of several equal-cost paths, are poorly suited to this traffic pattern. A static hash cannot subdivide one elephant flow across all available links, and it can inadvertently map multiple elephant flows to the same link, creating massive congestion while other links sit idle.
 
-[^fn-elephant-mice-flows]: [offset=-21mm] **Elephant and Mice Flows**\index{Elephant and Mice Flows}: From network measurement literature, where "mice" denote the millions of short-lived flows (web requests, DNS lookups) that traditional switches are optimized to handle fairly, and "elephants" denote the rare massive flows that dominate aggregate bandwidth. In ML clusters, a single AllReduce elephant flow\index{Elephant Flows!network traffic} can carry 350 GB---more data than millions of mice combined---and ECMP's static hash cannot subdivide it, turning one unlucky hash collision into a cluster-wide straggler.
+[^fn-elephant-mice-flows]: [offset=-40mm] **Elephant and Mice Flows**\index{Elephant and Mice Flows}: From network measurement literature, where "mice" denote the millions of short-lived flows (web requests, DNS lookups) that traditional switches are optimized to handle fairly, and "elephants" denote the rare massive flows that dominate aggregate bandwidth. In ML clusters, a single AllReduce elephant flow\index{Elephant Flows!network traffic} can carry 350 GB---more data than millions of mice combined---and ECMP's static hash cannot subdivide it, turning one unlucky hash collision into a cluster-wide straggler.
 
 The loss inversion completes the picture. TCP/IP was designed for unreliable networks and handles packet loss gracefully through retransmission. RDMA-based protocols used in ML clusters (InfiniBand, RoCE) assume a lossless fabric. A single dropped packet can trigger Go-Back-N recovery, which restarts transmission from the missing packet rather than only repairing the one lost frame, and can stall the sender for milliseconds, creating a catastrophic straggler that delays the entire synchronous training step. ML fabrics must therefore be engineered for zero packet loss. InfiniBand uses credit-based flow control; Ethernet-based RoCE deployments use carefully tuned Priority Flow Control (PFC), a link-layer backpressure mechanism that pauses senders before buffers overflow and therefore depends on sufficient switch buffering.
 
@@ -357,11 +357,9 @@ The choice of physical medium determines how far a link can reach before latency
 
 : **Cable and Optics Placement Trade-Offs**: Common interconnect media occupy different reach, latency, and cost points, so cluster designers use copper inside racks and optics as distance begins to dominate placement. {#tbl-network-fabrics-link-media tbl-colwidths="[18,20,20,20,22]"}
 
-For optical links, Forward Error Correction (FEC)[^fn-fec-latency] is part of the latency budget that makes reach a topology decision rather than a simple cable choice.
+For optical links, Forward Error Correction (FEC)[^fn-fec-latency] is part of the latency budget that makes reach a topology decision rather than a simple cable choice. The comparison in @tbl-network-fabrics-link-media is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical Interconnect} extend a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
 
 [^fn-fec-latency]: **FEC (Forward Error Correction)**\index{FEC!latency tax}: At 400G and 800G speeds, signal integrity is fragile enough that Ethernet PHY designs rely on FEC to reconstruct corrupted bits [@anslow2016rsFec; @ethernetAlliance2025roadmap]. The exact latency depends on the PHY and module architecture; for ML fabric modeling, treating FEC as a per-hop latency budget is the conservative point, because a multi-hop path accumulates that budget before software can hide it.
-
-The comparison in @tbl-network-fabrics-link-media is the cluster-geometry trade-off in miniature: copper is cheap and low latency but keeps accelerators close together, optical interconnects\index{Optical Interconnect} extend a row or pod at higher power and latency, and pluggable optics reaches the core only when the topology needs distance more than it needs minimum per-hop cost.
 
 ```{python}
 #| echo: false
@@ -539,11 +537,9 @@ This stack choice is visible at the protocol boundary. @Fig-ib-roce-stack compar
 
 :::
 
-The critical takeaway from @fig-ib-roce-stack is that the Verbs API provides a uniform programming model, but the reliability guarantees beneath it differ fundamentally: InfiniBand enforces losslessness in hardware, while RoCE must construct it from Ethernet's best-effort foundations using PFC and ECN.
-
 ### Losslessness and the go-back-n problem {#sec-network-fabrics-losslessness}
 
-ML collectives assume in-order, lossless delivery, but the hardware implementation of this reliability introduces a critical fragility. TCP handles packet loss gracefully via Selective Acknowledgement, retransmitting only the specific missing segment. RDMA protocols like RoCEv2, by contrast, typically rely on simpler recovery paths such as **Go-Back-N**\index{Go-Back-N} retransmission when rare packet drops occur [@gangidi2024rdma]. The NIC's physical constraints drive this choice: implementing complex reassembly logic for out-of-order packets requires substantial on-chip SRAM, which consumes precious die area needed for SerDes blocks and packet processing engines. The NIC hardware is optimized for throughput, not state management.
+The critical takeaway from @fig-ib-roce-stack is that the Verbs API provides a uniform programming model, but the reliability guarantees beneath it differ fundamentally: InfiniBand enforces losslessness in hardware, while RoCE must construct it from Ethernet's best-effort foundations using PFC and ECN. ML collectives assume in-order, lossless delivery, but the hardware implementation of this reliability introduces a critical fragility. TCP handles packet loss gracefully via Selective Acknowledgement, retransmitting only the specific missing segment. RDMA protocols like RoCEv2, by contrast, typically rely on simpler recovery paths such as **Go-Back-N**\index{Go-Back-N} retransmission when rare packet drops occur [@gangidi2024rdma]. The NIC's physical constraints drive this choice: implementing complex reassembly logic for out-of-order packets requires substantial on-chip SRAM, which consumes precious die area needed for SerDes blocks and packet processing engines. The NIC hardware is optimized for throughput, not state management.
 
 The trade-off is a severe penalty upon failure. If a network switch drops a single packet 900 MB into a 1 GB gradient transfer, the receiver discards all subsequent packets, forcing the sender to retransmit the entire tail of the message, potentially 100 MB of data for a single missed frame. At `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str`, this retransmission triggers a latency spike orders of magnitude larger than the wire delay. In a synchronous training loop where thousands of GPUs wait for the slowest member, a single dropped packet idles the entire cluster. The network fabric must therefore behave as a lossless medium, pushing the complexity of flow control into the switches via Priority Flow Control (PFC) to ensure buffers never overflow.
 
@@ -1229,9 +1225,11 @@ Bisection bandwidth ($\text{BW}_{\text{bisect}}$) is the minimum pipe diameter b
 
 :::
 
+This oversubscription calculation turns the topology definition into a design rule: the subscription ratio at each tier determines whether a fat-tree can sustain global collectives.
+
 ::: {#chk-network-fabrics-fat-tree-topologies .callout-checkpoint title="Fat-tree topologies"}
 
-The oversubscription calculation turns the topology definition into a design rule: the subscription ratio at each tier determines whether a fat-tree can sustain global collectives. These questions check whether hierarchical switch-fabric trade-offs are clear:
+These questions check whether hierarchical switch-fabric trade-offs are clear:
 
 - [ ] **Radix and scale**: Compute the maximum number of GPUs a Radix-64 two-tier fat-tree can connect without core switches.
 - [ ] **Non-blocking ratio**: Explain why a Non-blocking fabric requires a 1:1 subscription ratio at every tier of the network.
@@ -1838,11 +1836,9 @@ Your 175B model training job has been running for 3 days on 512 GPUs. You notice
 
 :::
 
-Monitoring keeps deployed fabrics honest, but observability cannot push past a physical ceiling that copper approaches at high signaling rates.
-
 ## Network Technologies That Move the Ceiling {#sec-network-fabrics-emerging}
 
-The physical ceiling that monitoring exposes is the reason new fabrics deserve attention: they matter only when they move a bound the synchronization backbone cannot cross. As clusters scale toward 100,000 nodes, the durable design variables are power per bit, reach, and the ratio of compute to memory to network capacity, not the product names attached to a particular roadmap.
+Monitoring keeps deployed fabrics honest, but observability cannot push past a physical ceiling that copper approaches at high signaling rates. The physical ceiling that monitoring exposes is the reason new fabrics deserve attention: they matter only when they move a bound the synchronization backbone cannot cross. As clusters scale toward 100,000 nodes, the durable design variables are power per bit, reach, and the ratio of compute to memory to network capacity, not the product names attached to a particular roadmap.
 
 ### Protocol convergence and link density {#sec-network-fabrics-protocol-convergence}
 

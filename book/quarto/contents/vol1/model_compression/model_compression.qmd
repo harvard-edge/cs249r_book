@@ -209,7 +209,7 @@ The bottom layer, *efficient hardware implementation*, ensures operations run ef
 
 These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers. For practitioners seeking immediate guidance on which techniques to apply, @sec-model-compression-decision-framework-0d69 provides a decision framework that maps deployment constraints to specific technique recommendations. The intervening sections provide the technical foundation needed to apply that framework effectively.
 
-To understand *why* numerics matter so deeply, move from the algorithm to silicon-level energy and data movement\index{Iron Law!quantization impact}.
+To understand *why* numerics matter so deeply, move from the algorithm to silicon-level energy and data movement\index{Iron Law!quantization impact}. At that level, each bit is both a storage choice and an energy cost.
 
 ```{python}
 #| echo: false
@@ -458,9 +458,7 @@ The engineering decision is where to stop. Compression should halt at the "knee"
 
 : **The Optimization Trade-Offs**: Region 1 = Free Lunch, Region 2 = Efficient Trade, Region 3 = Danger Zone. Batch size affects training dynamics rather than model quality directly. These are representative engineering ranges synthesized from published work on inference runtimes, quantization, pruning, low-bit LLM quantization, and distillation [@nvidia2024tensorrt; @jacob2018; @han2015deep; @lin2023awq; @hinton2015distilling]; actual results vary with architecture, task, calibration data, and implementation quality. {#tbl-optimization-tradeoffs tbl-colwidths="[22,27,17,25,9]"}
 
-The table reveals a pattern: techniques that preserve model structure (fusion, precision reduction) tend to be "free" or cheap, while techniques that alter structure (pruning, distillation) extract more savings but require careful tuning.
-
-Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization stack follows those constraints downward. Structural methods modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. Precision techniques reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Architectural approaches improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
+The table reveals a pattern: techniques that preserve model structure (fusion, precision reduction) tend to be "free" or cheap, while techniques that alter structure (pruning, distillation) extract more savings but require careful tuning. Each deployment context imposes a binding constraint: memory capacity on mobile devices, latency on real-time systems, energy on battery-powered sensors. The optimization stack follows those constraints downward. Structural methods modify *what* computations occur, reducing the model's parameter count and operation count to fit tighter memory and compute budgets. Precision techniques reduce how many bits represent each value, directly shrinking memory footprint and accelerating arithmetic. Architectural approaches improve how efficiently the remaining operations execute on physical hardware, closing the gap between theoretical savings and measured performance.
 
 ::: {#chk-model-compression-efficiency-frontier .callout-checkpoint title="The efficiency frontier"}
 
@@ -1888,11 +1886,9 @@ The hypothesis further reinforces the effectiveness of iterative pruning over on
 
 Despite its promise, applying LTH in practice remains computationally expensive because identifying winning tickets requires multiple cycles of pruning and retraining. Ongoing research explores whether winning subnetworks can be detected early without full training, potentially enabling more efficient sparse training. If such methods become practical, LTH could reshape model training, shifting the focus from pruning large networks after training to discovering and training only the important components from the beginning.
 
-While LTH presents a compelling theoretical perspective on pruning, practical implementations must still produce runtime artifacts that deployment systems can exploit.
-
 #### Pruning in practice {#sec-model-compression-pruning-practice-8059}
 
-Framework pruning is only useful when it produces a deployment artifact the runtime can exploit: a smaller dense model, a structured sparse model, or a sparse format with matching kernels. Training-time pruning often begins as mask application: the original tensor remains present, but a binary mask zeros selected weights during the forward pass. That mechanism can guide learning, yet by itself it does not guarantee lower latency or memory use. Deployment savings appear only after the masked structure is materialized into the artifact that the serving runtime actually loads.
+LTH presents a compelling theoretical perspective on pruning, but practical implementations must still produce runtime artifacts that deployment systems can exploit. Framework pruning is only useful when it produces a deployment artifact the runtime can exploit: a smaller dense model, a structured sparse model, or a sparse format with matching kernels. Training-time pruning often begins as mask application: the original tensor remains present, but a binary mask zeros selected weights during the forward pass. That mechanism can guide learning, yet by itself it does not guarantee lower latency or memory use. Deployment savings appear only after the masked structure is materialized into the artifact that the serving runtime actually loads.
 
 This artifact boundary separates the pruning strategies. Unstructured pruning removes individual weights and needs sparse kernels plus an appropriate storage format to translate zeros into speed. Structured pruning removes whole channels, heads, neurons, or blocks, which can reshape tensors into smaller dense operations that ordinary accelerators already execute well. Gradual pruning during fine-tuning adds a training schedule: sparsity increases over time so the remaining weights can recover accuracy as capacity is removed. The systems audit is therefore concrete: identify what is pruned, identify the runtime format, and verify that the target hardware has kernels that make the sparsity useful.
 
@@ -2168,9 +2164,11 @@ class LowRankFactorization:
 $$
 A \approx UV
 $$
-where $k \ll m, n$ is the approximation rank. This is typically computed via singular value decomposition (SVD)\index{Singular Value Decomposition}[^fn-svd-rank-tradeoff], retaining only the top $k$ singular values. This factorization reveals a fundamental trade-off that recurs throughout systems design: spending more arithmetic to move less data, which is profitable whenever the original tensor was dominating memory bandwidth.
+where $k \ll m, n$ is the approximation rank. This is typically computed via singular value decomposition (SVD)\index{Singular Value Decomposition}[^fn-svd-rank-tradeoff], retaining only the top $k$ singular values.
 
 [^fn-svd-rank-tradeoff]: **Singular Value Decomposition (SVD)**: The Eckart-Young theorem\index{Eckart-Young Theorem!SVD optimality} (1936) proves that retaining the top $k$ singular values yields the optimal rank-$k$ approximation, minimizing information loss. The key systems trade-off is whether the high, one-time compute cost of this factorization—$\mathcal{O}(mn \cdot \min(m,n))$—is amortized by the memory and bandwidth savings from using the smaller model in repeated inference calls. \index{SVD!rank-bandwidth trade-off}
+
+This factorization reveals a fundamental trade-off that recurs throughout systems design: spending more arithmetic to move less data, which is profitable whenever the original tensor was dominating memory bandwidth.
 
 ::: {#nbk-model-compression-bandwidth-compute-tradeoff .callout-notebook title="The bandwidth-compute trade-off"}
 
@@ -2768,7 +2766,7 @@ The framework section established the gap that compression must close: a `{pytho
 
 :::
 
-Quantization[^fn-quantization-shannon] affects every neural network weight and activation stored at some numerical precision: FP32 (32 bits), FP16 (16 bits), INT8 (8 bits), or lower.
+Quantization[^fn-quantization-shannon] affects every neural network weight and activation stored at some numerical precision: FP32 (32 bits), FP16 (16 bits), INT8 (8 bits), or lower. The bit width therefore becomes a systems parameter, not just a numerical representation.
 
 [^fn-quantization-shannon]: **Quantization**: Rooted in Shannon's theory of representing continuous signals with discrete values [@shannon1948], reducing FP32 to INT8 collapses over four billion representable values to just 256. Neural networks often tolerate this because trained weights concentrate information in relative magnitudes, not absolute precision: INT8 inference can stay close to the full-precision baseline with appropriate calibration or quantization-aware training, while INT4 and lower-bit methods become more architecture- and method-dependent [@jacob2018; @gholami2022; @shen2020; @lin2023awq]. The systems consequence is that quantization viability must be validated per-model and per-task, not assumed from aggregate benchmarks.
 
@@ -3023,7 +3021,7 @@ class EnergyDividend:
 
 The memory reduction of quantization is often the primary motivation, but the **Energy Dividend**\index{Energy Dividend!quantization efficiency} is the most significant systems consequence. While moving from FP32 to INT8 precision reduces the model's footprint by exactly 4$\times$, the energy required to perform the math drops much more precipitously.
 
-The framework section's energy hierarchy already exposed this asymmetry; here it becomes the dividend. Consider the energy per operation $(E_{\text{op}})$ for an addition, the backbone of the accumulators in matrix multiplication. An FP32 addition requires `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition requires only `{python} EnergyDividend.energy_add_int8_pj_per_op_str`. The resulting efficiency gain is `{python} EnergyDividend.energy_dividend_factor_mult_str`. We call this the "Dividend" because the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, quantization is often mandatory to stay within the power envelope even if a model could fit in memory at higher precision. This disparity reinforces why the machine axis of the D·A·M taxonomy has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware. These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint\index{DLRM!embedding quantization}.
+The framework section's energy hierarchy already exposed this asymmetry; here it becomes the dividend. Consider the energy per operation $(E_{\text{op}})$ for an addition, the backbone of the accumulators in matrix multiplication. An FP32 addition requires `{python} EnergyDividend.energy_add_fp32_pj_per_op_str`, while an INT8 addition requires only `{python} EnergyDividend.energy_add_int8_pj_per_op_str`. The resulting efficiency gain is `{python} EnergyDividend.energy_dividend_factor_mult_str`. We call this the "Dividend" because the system pays a 4$\times$ "price" in bits but receives a 30$\times$ "return" in energy efficiency. For a battery-powered edge device or a megawatt-scale data center, quantization is often mandatory to stay within the power envelope even if a model could fit in memory at higher precision. This disparity reinforces why the machine axis of the D·A·M taxonomy has moved toward specialized INT8 and INT4 integer units rather than general-purpose floating-point hardware.
 
 ::: {.column-margin}
 ```{=latex}
@@ -3033,6 +3031,8 @@ The framework section's energy hierarchy already exposed this asymmetry; here it
 
 *Quantization pays off only when the machine axis has the right integer units.*
 :::
+
+These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint\index{DLRM!embedding quantization}.
 
 ::: {#lhs-model-compression-dlrm-embedding-quantization .callout-lighthouse title="DLRM and embedding quantization"}
 
@@ -4586,9 +4586,7 @@ Quantization granularity\index{Quantization!granularity} is the control knob tha
 
 : **Quantization Granularity Levels**: Granularity trades calibration overhead for accuracy, from a single per-layer range to per-filter sub-ranges. {#tbl-quantization-granularity tbl-colwidths="[22,33,45]"}
 
-Channelwise quantization has become the dominant approach, providing significant accuracy improvements over layerwise quantization with minimal computational overhead.
-
-With granularity determined, the next consideration is what to quantize. Neural networks contain two primary numerical components: the static weights learned during training and the dynamic activations computed during inference. Each presents distinct quantization challenges.
+Channelwise quantization has become the dominant approach, providing significant accuracy improvements over layerwise quantization with minimal computational overhead. With granularity determined, the next consideration is what to quantize. Neural networks contain two primary numerical components: the static weights learned during training and the dynamic activations computed during inference. Each presents distinct quantization challenges.
 
 ##### Weights vs. activations {#sec-model-compression-weights-vs-activations-5efb}
 
@@ -4985,11 +4983,9 @@ These responses interact. Reducing convolutional FLOPs with depthwise separable 
 
 [^fn-depthwise-separable-mobile]: **Depthwise Separable Convolutions**: This technique directly reduces computation by factorizing a standard convolution into separate depthwise (per-channel) and pointwise $(1{\times}1)$ operations. This factorization underpins the core trade-off for on-device vision, allowing a model like MobileNetV2 to accept a 4-point accuracy drop on ImageNet in exchange for a $13.7\times$ reduction in operations vs. a ResNet-50. \index{Depthwise Separable Convolution!mobile efficiency}
 
-The first response is therefore global: decide whether the model's depth, width, and input resolution match the deployment envelope before tuning individual operators.
-
 #### Scaling optimization {#sec-model-compression-scaling-optimization-6ad9}
 
-When every stage of the profile is over budget, the problem is not one bad layer; the model is scaled incorrectly for the deployment envelope. The design task is then to distribute capacity across depth, width, and input resolution rather than choose a single parameter count. Depth increases sequential work and activation storage. Width exposes more parallel work but raises memory use. Resolution improves spatial detail while increasing the number of positions each convolution must process. The right balance depends on the machine: a highly parallel accelerator can often exploit width, while a small edge device may be dominated by memory capacity and energy per access.
+The first architectural response is global: when every stage of the profile is over budget, the problem is not one bad layer; the model is scaled incorrectly for the deployment envelope. The design task is then to distribute capacity across depth, width, and input resolution rather than choose a single parameter count. Depth increases sequential work and activation storage. Width exposes more parallel work but raises memory use. Resolution improves spatial detail while increasing the number of positions each convolution must process. The right balance depends on the machine: a highly parallel accelerator can often exploit width, while a small edge device may be dominated by memory capacity and energy per access.
 
 Mathematically, the total FLOPs for a convolutional model can be approximated as:
 $$
@@ -6836,11 +6832,9 @@ Unlike software functions that compose predictably, optimization techniques inte
 
 :::
 
-Knowing *how* each technique works is necessary but not sufficient; the practical question is *which* techniques to apply for a given deployment target and how to sequence them.
-
 ## Technique Selection {#sec-model-compression-technique-selection-ba16}
 
-An engineer deploying a transformer model faces a concrete decision: the model exceeds the target device's memory by 3$\times$, inference latency is 4$\times$ above the SLO, and the power budget allows no more than 2 W sustained. The choice of whether to quantize first, prune first, distill to a smaller architecture, or combine techniques depends on which constraint is binding, what accuracy loss is tolerable, and how much engineering time is available. The following framework structures that decision.
+Knowing *how* each technique works is necessary but not sufficient; the practical question is *which* techniques to apply for a given deployment target and how to sequence them. An engineer deploying a transformer model faces a concrete decision: the model exceeds the target device's memory by 3$\times$, inference latency is 4$\times$ above the SLO, and the power budget allows no more than 2 W sustained. The choice of whether to quantize first, prune first, distill to a smaller architecture, or combine techniques depends on which constraint is binding, what accuracy loss is tolerable, and how much engineering time is available. The following framework structures that decision.
 
 Before choosing a sequence, separate the major levers by what they change. Pruning changes the operation pattern and only becomes fast when the resulting structure maps to kernels. Quantization changes bit width and is usually the first memory and bandwidth lever. Distillation changes the model itself by training a smaller dense student. @Tbl-optimization-comparison summarizes the first-order trade-offs; the sections that follow then refine the choice by constraint, hardware support, and engineering budget.
 
@@ -7159,9 +7153,7 @@ With dozens of techniques across three optimization dimensions, rigorous measure
 
 ## Efficiency Measurement {#sec-model-compression-efficiency-measurement-2424}
 
-@Sec-model-compression-architectural-efficiency-8dd3 traced the gap between a compression ratio on paper and the speedup a model actually realizes. That gap now becomes a measurement obligation: a model quantized to INT8 should be 4$\times$ smaller and roughly 3$\times$ faster, but only profiling on target hardware confirms how much of that the deployment keeps. Real speedups depend on memory hierarchy effects, kernel implementations, and hardware utilization patterns that theory alone cannot predict, so translating compression ratios into measurable improvements requires systematic profiling and evaluation.
-
-Three questions structure this analysis: *where* optimization efforts should focus, *how* to measure whether optimizations achieve their intended goals, and *how* to validate that combined techniques deliver expected benefits.
+@Sec-model-compression-architectural-efficiency-8dd3 traced the gap between a compression ratio on paper and the speedup a model actually realizes. That gap now becomes a measurement obligation: a model quantized to INT8 should be 4$\times$ smaller and roughly 3$\times$ faster, but only profiling on target hardware confirms how much of that the deployment keeps. Real speedups depend on memory hierarchy effects, kernel implementations, and hardware utilization patterns that theory alone cannot predict, so translating compression ratios into measurable improvements requires systematic profiling and evaluation. Three questions structure this analysis: *where* optimization efforts should focus, *how* to measure whether optimizations achieve their intended goals, and *how* to validate that combined techniques deliver expected benefits.
 
 ### Profiling and opportunity analysis {#sec-model-compression-profiling-opportunity-analysis-477f}
 

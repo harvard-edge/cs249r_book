@@ -380,9 +380,7 @@ ML workloads make bin packing multi-dimensional in ways that traditional schedul
 
 Locality constraints further restrict placement beyond simple resource availability. A training job using tensor parallelism requires GPUs connected via NVLink within the same node, since cross-node communication over InfiniBand is an order of magnitude slower (`{python} FleetFragmentation.nvlink_h100_gb_per_s_str` per direction intra-node vs. `{python} FleetFragmentation.ib_ndr_gb_per_s_str` per port inter-node). A job requesting "4 GPUs with NVLink connectivity" cannot use 2 GPUs from node A and 2 from node B, even if all 4 GPUs are individually available and the total capacity is sufficient. These topology constraints transform a packing problem into a placement problem where which specific resources matter as much as how many resources are available. The placement problem is strictly harder than the packing problem because it adds spatial constraints to the existing capacity constraints.
 
-Schedulers address fragmentation through several complementary strategies, each targeting a different aspect of the problem.
-
-Backfill scheduling allows smaller jobs to fill gaps while larger jobs wait for contiguous resources, improving utilization without violating priority ordering. The insight is that small jobs can execute and complete in the gaps, freeing those resources before the large job's target start time. Backfill scheduling requires estimating when current jobs will complete (to determine whether a backfill candidate will finish before the large job can start), which is why accurate runtime estimates are so important.
+Schedulers address fragmentation through several complementary strategies, each targeting a different aspect of the problem. Backfill scheduling allows smaller jobs to fill gaps while larger jobs wait for contiguous resources, improving utilization without violating priority ordering. The insight is that small jobs can execute and complete in the gaps, freeing those resources before the large job's target start time. Backfill scheduling requires estimating when current jobs will complete (to determine whether a backfill candidate will finish before the large job can start), which is why accurate runtime estimates are so important.
 
 Periodic **defragmentation**\index{Defragmentation} migrates or preempts low-priority jobs to consolidate free resources into contiguous blocks, analogous to memory compaction in operating systems. The scheduler identifies nodes where partial allocations leave stranded resources, preempts the jobs occupying those resources, and re-schedules them on nodes where they can be packed more efficiently. The cost of defragmentation (preempting running work, which wastes compute between the last checkpoint and the preemption event) must be weighed against the benefit (enabling large jobs to start sooner, improving overall throughput). Operators often schedule defragmentation during low-demand periods when the impact of preemption is lower.
 
@@ -821,9 +819,11 @@ The sharp distinction between HPC and cloud-native scheduling is rapidly blurrin
 
 :::
 
+This convergence turns the paradigm choice into a workload-specific design decision: teams must decide which scheduling guarantees matter before layering on topology constraints.
+
 ::: {#chk-fleet-orchestration-scheduling-paradigm-trade-offs .callout-checkpoint title="Scheduling paradigm trade-offs"}
 
-The convergence of HPC and cloud-native scheduling turns the paradigm choice into a workload-specific design decision. Before the chapter turns to topology-aware scheduling, review the core trade-offs:
+Before the chapter turns to topology-aware scheduling, review the core trade-offs:
 
 - [ ] **Gang scheduling**: Explain why gang scheduling is essential for distributed training but not for inference workloads, including the property of synchronous data parallelism that creates the all-or-nothing requirement.
 - [ ] **Slurm vs. Kubernetes**: Identify the CAP theorem trade-off Slurm makes differently from Kubernetes, and describe how this difference appears during a network partition between the scheduler and a subset of nodes.
@@ -915,11 +915,9 @@ The scheduler must therefore model the cluster not as a flat list of compute slo
 
 :::
 
-The bandwidth gap shown in @fig-topology-placement-paths is the key constraint: the roughly 4$\times$ reduction from intra-rack leaf paths to cross-rack leaf-spine-leaf paths means that scattered placement forces tensor parallel groups to spend more time communicating than computing, a penalty that compounds at every transformer layer in the model.
-
 ### Placement algorithms {#sec-fleet-orchestration-placement-algorithms}
 
-Topology-aware placement algorithms assign jobs to nodes that minimize communication cost, transforming the abstract bin packing problem into a graph optimization problem on the cluster's physical topology. The simplest approach uses a **locality cost**\index{Locality Cost}, defined in @eq-fleet-orchestration-locality-score, that penalizes allocations spanning multiple topology domains:
+The bandwidth gap shown in @fig-topology-placement-paths is the key constraint: the roughly 4$\times$ reduction from intra-rack leaf paths to cross-rack leaf-spine-leaf paths means that scattered placement forces tensor parallel groups to spend more time communicating than computing, a penalty that compounds at every transformer layer in the model. Topology-aware placement algorithms assign jobs to nodes that minimize communication cost, transforming the abstract bin packing problem into a graph optimization problem on the cluster's physical topology. The simplest approach uses a **locality cost**\index{Locality Cost}, defined in @eq-fleet-orchestration-locality-score, that penalizes allocations spanning multiple topology domains:
 
 $$ \text{Cost}_{\text{locality}} = \sum_{i < j} w(d(g_i, g_j)) $$ {#eq-fleet-orchestration-locality-score}
 
@@ -1467,9 +1465,7 @@ The strategic insight is that fault tolerance infrastructure has a double return
 
 ### Spot instance strategies for ML training {#sec-fleet-orchestration-spot-strategies}
 
-To maximize spot instance utility while minimizing disruption, sophisticated schedulers employ diversification and predictive strategies that go beyond simple "retry on failure" logic.
-
-Availability zone diversification reduces the probability of simultaneous fleet-wide reclamation. Cloud providers typically manage spot pools independently per availability zone (AZ). If a training job requires 1,024 GPUs, allocating them as a single block in one zone exposes the job to a complete stop if that specific zone's spot pool is reclaimed. Spreading the job across multiple AZs ensures that a reclamation event in one zone affects only a fraction of the fleet. The scheduler still must model correlation carefully: independent per-instance interruptions make large simultaneous losses unlikely, but pool-level or AZ-level reclamations can remove hundreds of GPUs at once and must be treated as elastic-shrink or failover events rather than ordinary isolated failures.
+To maximize spot instance utility while minimizing disruption, sophisticated schedulers employ diversification and predictive strategies that go beyond simple "retry on failure" logic. Availability zone diversification reduces the probability of simultaneous fleet-wide reclamation. Cloud providers typically manage spot pools independently per availability zone (AZ). If a training job requires 1,024 GPUs, allocating them as a single block in one zone exposes the job to a complete stop if that specific zone's spot pool is reclaimed. Spreading the job across multiple AZs ensures that a reclamation event in one zone affects only a fraction of the fleet. The scheduler still must model correlation carefully: independent per-instance interruptions make large simultaneous losses unlikely, but pool-level or AZ-level reclamations can remove hundreds of GPUs at once and must be treated as elastic-shrink or failover events rather than ordinary isolated failures.
 
 Instance type diversification exploits independent spot markets across GPU SKUs. A job that strictly requests one instance type competes in a single, crowded market. A job that accepts multiple equivalent instance types dramatically increases its scheduling probability. The scheduler should maintain a priority-ordered list of acceptable instance types, falling back to larger-memory instances when the primary type is unavailable. While this mix requires careful peer-to-peer bandwidth management, it effectively uses the "upgrade" to maintain progress at a blended cost still far below on-demand rates.
 
@@ -1629,9 +1625,7 @@ General-purpose schedulers treat training jobs as opaque boxes, so they cannot t
 
 ### Tiresias: Duration-agnostic scheduling {#sec-fleet-orchestration-tiresias}
 
-**Tiresias**\index{Tiresias} [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and scheduling policies that rely on exact duration estimates can make poor decisions when those estimates are unavailable or unreliable.
-
-Rather than fighting this information asymmetry, Tiresias eliminates the requirement for duration estimates entirely. It uses a **two-dimensional attained service**\index{Attained Service Scheduling!two-dimensional}[^fn-attained-service-scheduling] scheduler that makes priority decisions based on what a job has *already consumed*, not what it *claims it will consume*. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. The two dimensions are time (how long the job has been running) and resources (how many GPUs the job uses), capturing both elapsed duration and resource intensity.
+**Tiresias**\index{Tiresias} [@gu2019tiresias] addresses the fundamental problem identified in @sec-fleet-orchestration-gang-scheduling: ML job durations are unpredictable, and scheduling policies that rely on exact duration estimates can make poor decisions when those estimates are unavailable or unreliable. Rather than fighting this information asymmetry, Tiresias eliminates the requirement for duration estimates entirely. It uses a **two-dimensional attained service**\index{Attained Service Scheduling!two-dimensional}[^fn-attained-service-scheduling] scheduler that makes priority decisions based on what a job has *already consumed*, not what it *claims it will consume*. Jobs accumulate "service" based on GPU-time consumed, with priority decreasing as service increases. The two dimensions are time (how long the job has been running) and resources (how many GPUs the job uses), capturing both elapsed duration and resource intensity.
 
 [^fn-attained-service-scheduling]: **Attained Service Scheduling**\index{Attained Service Scheduling}: A discipline from OS queuing theory where priority decreases with cumulative resource consumption, approximating the theoretically optimal Shortest Remaining Processing Time (SRPT) policy without requiring the future knowledge that SRPT demands. In ML clusters, this approximation is particularly effective because job durations are heavy-tailed: the majority of submitted jobs are short experiments, so deprioritizing high-service jobs correctly identifies the long-running outliers without requiring users to provide runtime estimates they cannot accurately compute.
 
@@ -2181,9 +2175,7 @@ Network policies extend isolation to the network layer, preventing cross-namespa
 
 : **GPU Virtualization Isolation Spectrum**: GPU sharing mechanisms trade isolation against packing efficiency, so the right mechanism depends on both the trust boundary and the workload's tolerance for interference. {#tbl-gpu-virtualization-isolation-spectrum tbl-colwidths="[23,27,23,27]"}
 
-The choice depends on the trust boundary between colocated workloads and the performance sensitivity of each workload type.
-
-Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In highly sensitive environments, hardware isolation mechanisms like MIG or strictly dedicating entire GPU nodes to single tenants become mandatory requirements.
+The choice depends on the trust boundary between colocated workloads and the performance sensitivity of each workload type. Security in multi-tenant environments extends beyond simple resource fairness. Side-channel attacks on shared GPUs are a documented vulnerability; by monitoring contention on shared caches or memory controllers, a malicious tenant can infer the architecture or even data properties of a co-resident model. In highly sensitive environments, hardware isolation mechanisms like MIG or strictly dedicating entire GPU nodes to single tenants become mandatory requirements.
 
 ### Priority preemption cascades {#sec-fleet-orchestration-preemption-cascades}
 
@@ -2584,11 +2576,9 @@ The debugging example illustrates a broader principle that applies to every syst
 
 This principle connects scheduling mechanics to fleet governance. Technical policies (GPU type matching, gang scheduling timeouts, preemption grace periods) interact with organizational policies (team quotas, priority hierarchies, cost allocation) and human behavior (job template reuse, resource request habits, queue submission patterns). Effective fleet orchestration requires attending to all three layers simultaneously.
 
-Those policy-infrastructure mismatches recur as a small set of misconceptions that can make an apparently healthy scheduler waste expensive fleet capacity.
-
 ## Fallacies and Pitfalls {#sec-fleet-orchestration-fallacies}
 
-It is tempting to look at a cluster running at 98 percent utilization and declare victory, only to discover that researchers have stopped submitting jobs entirely because wait times have stretched into weeks. Cluster orchestration is riddled with counterintuitive traps like this, where optimizing a single metric destroys overall system value.
+Those policy-infrastructure mismatches recur as a small set of misconceptions that can make an apparently healthy scheduler waste expensive fleet capacity. It is tempting to look at a cluster running at 98 percent utilization and declare victory, only to discover that researchers have stopped submitting jobs entirely because wait times have stretched into weeks. Cluster orchestration is riddled with counterintuitive traps like this, where optimizing a single metric destroys overall system value.
 
 **Fallacy**: *More sophisticated scheduling algorithms always improve utilization.*
 

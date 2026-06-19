@@ -2169,11 +2169,9 @@ Metrics are not interchangeable; each answers a different bottleneck question. M
 
 : **Performance Metrics and Their Diagnostic Use**: Each metric measures a different layer of the system, so choosing the wrong metric can hide the real bottleneck. {#tbl-performance-engineering-key-metrics tbl-colwidths="[18,32,28,22]"}
 
-The metric choice in @tbl-performance-engineering-key-metrics reflects the fundamental bottleneck shift between training and inference: MFU is usually the right training-efficiency lens, while MBU is often the right inference-efficiency lens when decode is limited by HBM traffic.
-
 ### Using the roofline for diagnosis {#sec-performance-engineering-roofline-diagnosis}
 
-The roofline model from @sec-performance-engineering-roofline becomes a diagnostic tool when combined with profiling data. Diagnosis follows three steps:
+The metric choice in @tbl-performance-engineering-key-metrics reflects the fundamental bottleneck shift between training and inference: MFU is usually the right training-efficiency lens, while MBU is often the right inference-efficiency lens when decode is limited by HBM traffic. The roofline model from @sec-performance-engineering-roofline becomes a diagnostic tool when combined with profiling data. Diagnosis follows three steps:
 
 1. **Measure** the achieved FLOP/s and memory bandwidth for a kernel using Nsight Compute.
 2. **Compute** the operational arithmetic intensity from the algorithm (FLOP/byte).
@@ -2270,11 +2268,9 @@ The resulting trace, viewable in TensorBoard or Chrome's trace viewer, matters o
 
 : **Profiler Views and Interventions**: PyTorch profiler views are useful when each visual signal points to a concrete next experiment. {#tbl-performance-engineering-profiler-views tbl-colwidths="[24,38,38]"}
 
-The profiler is therefore a triage tool, not the final performance proof: it identifies whether the next experiment should target fusion, memory planning, CUDA Graphs, or overlap.
-
 ### Nsight systems: Reading the timeline {#sec-performance-engineering-nsight-systems}
 
-NVIDIA Nsight Systems\index{Nsight Systems} answers the trace-level question raised by higher-level profiling: whether the GPU timeline is continuous, whether the CPU is feeding it fast enough, and whether communication overlaps compute. The tool captures every GPU kernel launch, CUDA memory operation, NCCL communication, and CPU thread activity onto a unified timeline.
+The profiler is therefore a triage tool, not the final performance proof: it identifies whether the next experiment should target fusion, memory planning, CUDA Graphs, or overlap. NVIDIA Nsight Systems\index{Nsight Systems} answers the trace-level question raised by higher-level profiling: whether the GPU timeline is continuous, whether the CPU is feeding it fast enough, and whether communication overlaps compute. The tool captures every GPU kernel launch, CUDA memory operation, NCCL communication, and CPU thread activity onto a unified timeline.
 
 Nsight Systems becomes useful when the question has shifted from which layer is slow to why the full timeline has gaps. A typical workflow begins with capturing a trace of a few training or inference iterations:
 
@@ -2492,6 +2488,9 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 **Problem**: A `{python} FleetEfficiencyCalc.fleet_params_b_str` parameter model achieves `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU on a single 8-GPU node. When training scales to `{python} FleetEfficiencyCalc.fleet_nodes_str`, how much MFU does inter-node communication overhead consume?
 
 ::: {.column-margin}
+```{=latex}
+\vspace*{-22mm}
+```
 ![](images/svg/vol2_performance_engineering_margin_004.svg){width="100%" fig-alt="Two-point trend showing high kernel efficiency falling to lower fleet efficiency because of synchronization tax."}
 
 *The communication tax erodes local MFU into fleet MFU.*
@@ -2614,10 +2613,7 @@ The first optimization targets the largest opportunity: reducing the bytes per w
 
 Simultaneously, applying INT8 quantization to the KV cache reduces per-request cache size by 2$\times$. The combined effect on memory budget is dramatic: each GPU now has approximately `{python} KVCacheAnalysis.avail_int8_gb_str` available for KV cache, up from `{python} KVCacheAnalysis.avail_fp16_gb_str`. Under the `{python} KVCacheAnalysis.context_len_str`-token GQA cache calculation from @sec-performance-engineering-quant-strategies, this would permit much larger batches; in this deployment, the serving policy reserves memory for longer contexts, fragmentation headroom, and tail-latency protection. With that policy cap, the maximum admitted batch size increases from `{python} KVCacheAnalysis.baseline_policy_batch_size_str` to approximately `{python} KVCacheAnalysis.optimized_policy_batch_size_str`.
 
-Postoptimization metrics at batch size 1:
-
-- **ITL**: 48 ms (meets the 50 ms target)
-- **Throughput at batch size 32**: 720 tokens/second (still below target)
+Postoptimization metrics show that batch-1 ITL reaches 48 ms, meeting the 50 ms target, while throughput at batch size 32 reaches 720 tokens/second and remains below target.
 
 The Nsight Systems trace shows that GEMM time decreased by approximately 45 percent due to reduced weight reads, but attention and element-wise operations remain unchanged. The bottleneck has partially shifted.
 
@@ -2627,11 +2623,7 @@ The second round targets the 14 percent of step time consumed by element-wise op
 
 For the decode phase, FlashAttention's impact is more modest because decode attention is dominated by KV cache reads rather than the $S{\times}S$ score matrix. However, the combination of INT8 KV cache compression and FlashAttention's efficient PagedAttention kernel reduces attention decode time by approximately 30 percent. The `reduce-overhead` mode in `torch.compile` wraps the decode step in a CUDA Graph, eliminating the 12 percent kernel launch overhead almost entirely.
 
-Postoptimization metrics:
-
-- **TTFT**: 380 ms (meets the 500 ms target)
-- **ITL**: 32 ms at batch size 1 (well below the 50 ms target)
-- **Throughput at batch size 32**: 1,050 tokens/second (meets the target)
+Postoptimization metrics show TTFT at 380 ms, meeting the 500 ms target; ITL at 32 ms for batch size 1, well below the 50 ms target; and throughput at batch size 32 at 1,050 tokens/second, meeting the throughput target.
 
 #### Optimization round 3: Speculative decoding {#sec-performance-engineering-case-round3}
 
@@ -2643,9 +2635,7 @@ $$
 \text{ITL}_{\text{effective}} = \frac{4 + 32}{3.5} \approx 10.3 \text{ ms per token}
 $$
 
-The result is a 3.1$\times$ improvement over the Round 2 ITL of 32 ms.
-
-However, speculative decoding interacts with batching. At batch size `{python} KVCacheAnalysis.optimized_policy_batch_size_str`, the verification step is no longer "free" because the GPU is closer to compute saturation. The system therefore applies speculation only when the current batch size is below `{python} KVCacheAnalysis.speculation_policy_batch_size_str`, falling back to standard autoregressive decoding at higher loads. This adaptive policy maintains both the latency benefit at low load and the throughput benefit at high load.
+The result is a 3.1$\times$ improvement over the Round 2 ITL of 32 ms. However, speculative decoding interacts with batching. At batch size `{python} KVCacheAnalysis.optimized_policy_batch_size_str`, the verification step is no longer "free" because the GPU is closer to compute saturation. The system therefore applies speculation only when the current batch size is below `{python} KVCacheAnalysis.speculation_policy_batch_size_str`, falling back to standard autoregressive decoding at higher loads. This adaptive policy maintains both the latency benefit at low load and the throughput benefit at high load.
 
 #### Lessons from the case study {#sec-performance-engineering-case-lessons}
 
@@ -2701,8 +2691,6 @@ ML system performance is nonstationary. GPU thermal throttling reduces clock spe
 
 A serving system may achieve excellent average inter-token latency (30 ms) while exhibiting P99 latency of 500 ms due to garbage collection pauses in the Python runtime, CUDA memory allocation stalls, or occasional AllReduce delays from network congestion. For interactive applications, the user experience is dominated by the worst case, not the average. Performance engineering for production systems must profile and optimize tail latency specifically, often through techniques orthogonal to the throughput optimizations in this chapter: preallocated memory pools, CUDA graph replay (which eliminates allocation variance), and priority scheduling for latency-sensitive requests.
 
-Recognizing these pitfalls saves teams from wasting months optimizing the wrong layer of the stack.
-
 ## Summary {#sec-performance-engineering-summary}
 
 ```{python}
@@ -2714,9 +2702,7 @@ class RooflineSummaryRecap:
     h100_fp16_ridge = Hardware.Cloud.H100.ridge_point().to(flop / byte)
     h100_fp16_ridge_str = fmt_arithmetic_intensity(h100_fp16_ridge, unit=flop / byte, precision=1, commas=False)
 ```
-Performance engineering transforms a model that should be efficient into one that is, by attacking a fundamental bottleneck of accelerator-based ML systems: the memory wall.
-
-The Roofline Model provides the diagnostic framework, classifying operations as compute-bound or memory-bound based on their arithmetic intensity relative to the hardware's ridge point. For the NVIDIA H100, this ridge point is approximately `{python} RooflineSummaryRecap.h100_fp16_ridge_str` at FP16, meaning most transformer operations fall in the memory-bound regime.
+Recognizing these pitfalls saves teams from wasting months optimizing the wrong layer of the stack. Performance engineering transforms a model that should be efficient into one that is, by attacking a fundamental bottleneck of accelerator-based ML systems: the memory wall. The Roofline Model provides the diagnostic framework, classifying operations as compute-bound or memory-bound based on their arithmetic intensity relative to the hardware's ridge point. For the NVIDIA H100, this ridge point is approximately `{python} RooflineSummaryRecap.h100_fp16_ridge_str` at FP16, meaning most transformer operations fall in the memory-bound regime.
 
 ```{python}
 #| echo: false
