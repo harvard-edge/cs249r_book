@@ -492,7 +492,8 @@ class ValidateCommand:
                   note="pre-/non- close-up (§10.8)"),
             Scope("concept-caps", "_run_mitpress_concept_term_capitalization",
                   note="iron law, memory wall lowercase (§10.3)"),
-            # abbreviation-first-use currently noisy; default=False until tuned.
+            # abbreviation-first-use currently opt-in because some findings
+            # require editorial judgment.
             Scope("abbreviation-first-use", "_run_mitpress_abbreviation_first_use", default=False),
             Scope("latin-abbrevs", "_run_mitpress_latin_running_text",
                   note="viz./e.g./etc. in running text (§10.6)"),
@@ -677,6 +678,13 @@ class ValidateCommand:
             # Scans _build/pdf-vol*/ artifact via pdftotext. Requires
             # --vol1 or --vol2 (or run both explicitly).
             Scope("verify", "_run_pdf_verify"),
+            # Narrow rendered-PDF counter regression gate. Useful after
+            # chapter-only builds, where full cross-reference verification can
+            # be noisy because other chapters are intentionally absent.
+            Scope("numbering", "_run_pdf_numbering"),
+            # Narrow rendered-layout gate for table/prose crowding. Useful
+            # after chapter-only builds where `verify` can be noisy.
+            Scope("table-spacing", "_run_pdf_table_spacing"),
             # Added 2026-05-26: scan PDF text for "UserWarning" strings that
             # may indicate a Python warning leaked into the rendered output.
             # Default=False — post-build audit, not a pre-commit gate.
@@ -954,6 +962,10 @@ class ValidateCommand:
                 results.append(method(root, fix=getattr(ns, 'fix', False)))
             elif method_name == "_run_pdf_verify":
                 results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, log_path=getattr(ns, 'pdf_log', None)))
+            elif method_name == "_run_pdf_numbering":
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2))
+            elif method_name == "_run_pdf_table_spacing":
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2))
             else:
                 results.append(method(root))
         return results
@@ -4080,7 +4092,7 @@ class ValidateCommand:
         div_def_pat = re.compile(r":::\s*\{[^}]*#((?:fig|tbl)-[\w-]+)")
         img_def_pat = re.compile(r"!\[.*?\]\(.*?\)\s*\{[^}]*#((?:fig|tbl)-[\w-]+)")
         tbl_cap_pat = re.compile(r"^:\s+.*\{[^}]*#((?:fig|tbl)-[\w-]+)")
-        ref_pat = re.compile(r"@((?:fig|tbl)-[\w-]+)")
+        ref_pat = re.compile(r"@((?:fig|tbl)-[\w-]+)", re.IGNORECASE)
 
         for file in files:
             lines = self._read_text(file).splitlines()
@@ -4139,6 +4151,7 @@ class ValidateCommand:
                     continue
                 for m in ref_pat.finditer(line):
                     label = m.group(1)
+                    label = label.split("-", 1)[0].lower() + "-" + label.split("-", 1)[1]
                     if in_float and label == float_label:
                         continue
                     refs[label].append(idx)
@@ -6635,14 +6648,15 @@ class ValidateCommand:
     # (.callout-example, .callout-perspective carry many valid shapes) and are
     # not schema-enforced. "«term»" is the sentinel for a ***Term*** head.
     #
-    # War-stories come in two archetypes: a disaster, where the third beat is
-    # the damage and folds into Failure mode (Context / Failure mode / Systems
-    # lesson), and a constraint→response, where the third beat is the
-    # engineering fix and stays visible as **Resolution** (Context / Failure
-    # mode / Resolution / Systems lesson).
+    # War-stories come in three compact archetypes: a short disaster where the
+    # damage folds into Failure mode (Context / Failure mode / Systems lesson),
+    # a failure with a distinct downstream impact (**Consequence**), and a
+    # constraint-response story where the engineering fix stays visible as
+    # **Resolution**.
     _CALLOUT_LABEL_SCHEMAS = {
         "callout-war-story": (
             ("Context", "Failure mode", "Systems lesson"),
+            ("Context", "Failure mode", "Consequence", "Systems lesson"),
             ("Context", "Failure mode", "Resolution", "Systems lesson"),
         ),
         "callout-definition": (("«term»",),),
@@ -8084,6 +8098,98 @@ class ValidateCommand:
         return ValidationRunResult(
             name="pdf-verify",
             description=f"Built PDF verification ({', '.join(volumes)})",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_pdf_numbering(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+    ) -> ValidationRunResult:
+        from cli.commands._pdf_checks import default_pdf_path, scan_pdf_numbering
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "book" / "quarto"
+
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if not volumes:
+            volumes = ["vol1", "vol2"]
+
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            checked += 1
+            for issue in scan_pdf_numbering(pdf_path):
+                issues.append(ValidationIssue(
+                    file=str(pdf_path.relative_to(repo_root))
+                    if pdf_path.is_absolute()
+                    else str(pdf_path),
+                    line=0,
+                    code=issue.code,
+                    message=issue.message,
+                    severity="error",
+                    context=f"count={issue.count}" if issue.count > 1 else "",
+                ))
+
+        return ValidationRunResult(
+            name="pdf-numbering",
+            description=f"Built PDF object-numbering regression scan ({', '.join(volumes)})",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_pdf_table_spacing(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+    ) -> ValidationRunResult:
+        from cli.commands._pdf_checks import default_pdf_path, scan_table_prose_spacing
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "book" / "quarto"
+
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if not volumes:
+            volumes = ["vol1", "vol2"]
+
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            checked += 1
+            for issue in scan_table_prose_spacing(pdf_path):
+                issues.append(ValidationIssue(
+                    file=str(pdf_path.relative_to(repo_root))
+                    if pdf_path.is_absolute()
+                    else str(pdf_path),
+                    line=0,
+                    code=issue.code,
+                    message=issue.message,
+                    severity=issue.severity,
+                    context=f"count={issue.count}" if issue.count > 1 else "",
+                ))
+
+        return ValidationRunResult(
+            name="pdf-table-spacing",
+            description=f"Rendered PDF table/prose spacing scan ({', '.join(volumes)})",
             files_checked=checked,
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
@@ -9687,16 +9793,19 @@ class ValidateCommand:
         )
 
     def _run_mitpress_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
-        """Expand abbreviations on first use per chapter per §10.5.
+        """Expand abbreviations on first use per §10.5.
 
-        Enforces the specialized-abbreviation list (DLRM, XLA, MMLU,
-        HELM, HIS, KWS, OTA, CTM, V2X, RFM, etc.). Baseline CS/ML
+        Enforces the specialized-abbreviation list (XLA, MMLU, HELM,
+        HIS, KWS, OTA, CTM, V2X, RFM, etc.). Baseline CS/ML
         abbreviations (CNN, GPU, JIT, NVMe, SLA, ...) are exempt per
-        §10.5's expanded Special Cases.
+        §10.5's expanded Special Cases. Ordinary specialized acronyms
+        reset by chapter. Formal model names and recurring lighthouse
+        labels are governed by the lighthouse roster rules, not this
+        abbreviation check.
         """
         return self._run_audit_check(
             root, "audit.checks.abbreviation_first_use",
-            "abbreviation-first-use", "expand abbreviations on first use per chapter (§10.5)",
+            "abbreviation-first-use", "expand abbreviations on first use (§10.5)",
         )
 
     def _run_notation_consistency(self, root: Path) -> ValidationRunResult:

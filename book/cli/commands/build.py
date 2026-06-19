@@ -898,6 +898,14 @@ class BuildCommand:
 
                     progress.update(task, completed=True)
 
+                if cwd:
+                    build_output = "".join(part for part in (result.stdout, result.stderr) if part)
+                    if build_output:
+                        build_log = Path(cwd) / "_build" / "last-build.log"
+                        build_log.parent.mkdir(parents=True, exist_ok=True)
+                        build_log.write_text(build_output, encoding="utf-8")
+                        self._last_build_log = build_log
+
                 if result.returncode == 0:
                     return True
                 else:

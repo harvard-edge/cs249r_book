@@ -25,6 +25,16 @@ XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|alg)"
 RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
 BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
 LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
+MALFORMED_OBJECT_NUMBER = re.compile(
+    r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|War Story|"
+    r"Systems Perspective)\s+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
+)
+TABLE_CAPTION = re.compile(r"\bTable\s+(\d+\.\d+):\s+([^\n]+)")
+NUMBERING_ISSUE_CODES = {
+    "malformed-object-number",
+    "duplicate-table-number",
+}
+TABLE_PROSE_MIN_GAP_PT = 6.0
 PYTHON_LEAK = re.compile(
     r"(?:Traceback \(most recent call last\)|"
     r"NameError:|AttributeError:|ModuleNotFoundError:|Error rendering|"
@@ -98,6 +108,176 @@ def _pdftotext(pdf_path: Path) -> str:
     return proc.stdout or ""
 
 
+def _x_overlap(a: dict, b: dict) -> float:
+    return max(0.0, min(a["x1"], b["x1"]) - max(a["x0"], b["x0"]))
+
+
+def _pdf_line_text(chars: list[dict]) -> str:
+    """Reconstruct a line of PDF text with approximate word gaps."""
+    if not chars:
+        return ""
+    parts: list[str] = []
+    prev: dict | None = None
+    for char in chars:
+        if prev is not None:
+            gap = float(char.get("x0", 0.0) or 0.0) - float(prev.get("x1", 0.0) or 0.0)
+            size = max(
+                float(char.get("size", 0.0) or 0.0),
+                float(prev.get("size", 0.0) or 0.0),
+                6.0,
+            )
+            if gap > max(1.2, size * 0.25):
+                parts.append(" ")
+        parts.append(str(char.get("text", "")))
+        prev = char
+    return re.sub(r"\s+", " ", "".join(parts)).strip()
+
+
+def _pdf_main_text_lines(page) -> list[dict]:
+    """Cluster main-flow PDF chars into line boxes."""
+    page_h = float(getattr(page, "height", 0.0) or 0.0)
+    page_w = float(getattr(page, "width", 0.0) or 0.0)
+    if page_h <= 0 or page_w <= 0:
+        return []
+    header_y = page_h * 0.06
+    footer_y = page_h * 0.94
+    main_x = page_w * 0.88
+    groups: list[list[dict]] = []
+    for char in sorted(getattr(page, "chars", []) or [], key=lambda c: (c["top"], c["x0"])):
+        if not (header_y < char.get("top", 0) < footer_y):
+            continue
+        if char.get("x0", 0) > main_x:
+            continue
+        for group in groups:
+            if abs(group[0]["top"] - char["top"]) < 2.0:
+                group.append(char)
+                break
+        else:
+            groups.append([char])
+
+    lines: list[dict] = []
+    for group in groups:
+        group = sorted(group, key=lambda c: c["x0"])
+        text = _pdf_line_text(group)
+        if not text:
+            continue
+        lines.append(
+            {
+                "text": text,
+                "x0": min(c["x0"] for c in group),
+                "x1": max(c["x1"] for c in group),
+                "top": min(c["top"] for c in group),
+                "bottom": max(c["bottom"] for c in group),
+                "size": sum(float(c.get("size", 0.0) or 0.0) for c in group) / len(group),
+            }
+        )
+    return lines
+
+
+def _pdf_horizontal_rules(page) -> list[dict]:
+    """Return rendered horizontal rules in the main text area."""
+    page_h = float(getattr(page, "height", 0.0) or 0.0)
+    page_w = float(getattr(page, "width", 0.0) or 0.0)
+    if page_h <= 0 or page_w <= 0:
+        return []
+    header_y = page_h * 0.06
+    footer_y = page_h * 0.94
+    main_x = page_w * 0.88
+    rules: list[dict] = []
+    for line in getattr(page, "lines", []) or []:
+        x0 = float(line.get("x0", 0.0) or 0.0)
+        x1 = float(line.get("x1", 0.0) or 0.0)
+        top = float(line.get("top", 0.0) or 0.0)
+        height = abs(float(line.get("height", 0.0) or 0.0))
+        width = x1 - x0
+        if width < 120 or height > 1.0:
+            continue
+        if not (header_y < top < footer_y):
+            continue
+        if x0 > main_x:
+            continue
+        rules.append({"x0": x0, "x1": x1, "top": top, "bottom": top, "width": width})
+    return rules
+
+
+def _pdf_table_rule_clusters(page) -> list[list[dict]]:
+    """Return horizontal-rule clusters that look like booktabs tables."""
+    rules = _pdf_horizontal_rules(page)
+    groups: list[list[dict]] = []
+    for rule in sorted(rules, key=lambda r: (r["x0"], r["x1"], r["top"])):
+        for group in groups:
+            if abs(group[0]["x0"] - rule["x0"]) <= 6.0 and abs(group[0]["x1"] - rule["x1"]) <= 6.0:
+                group.append(rule)
+                break
+        else:
+            groups.append([rule])
+
+    return [
+        sorted(group, key=lambda r: r["top"])
+        for group in groups
+        if len(group) >= 3
+    ]
+
+
+def _line_is_between_table_rules(
+    line: dict,
+    bottom_rule: dict,
+    rules: list[dict],
+) -> bool:
+    """Return true when the next line is probably a table row, not prose."""
+    for later in rules:
+        if later["top"] <= bottom_rule["top"] + 1.0:
+            continue
+        overlap = _x_overlap(later, bottom_rule)
+        min_width = min(float(later.get("width", 0.0) or 0.0), float(bottom_rule.get("width", 0.0) or 0.0))
+        if overlap < max(80.0, min_width * 0.55):
+            continue
+        # Header/body rules are often separated by one table row. If the next
+        # text line sits in that band, the rule is internal to the table.
+        if line["top"] < later["top"] and later["top"] - line["top"] <= 90.0:
+            return True
+    return False
+
+
+def _looks_like_post_table_prose(text: str) -> bool:
+    """Filter out tick labels, legends, and table rows from spacing warnings."""
+    normalized = re.sub(r"\s+", " ", text).strip()
+    if not normalized:
+        return False
+    if re.match(r"^(?:Table|Figure|Listing|Algorithm)\s+\d", normalized):
+        return False
+    if re.match(r"^[\d.,%~$×+−–—<>=/()\\s-]+$", normalized):
+        return False
+    if re.match(r"^\d", normalized):
+        return False
+    label_prefixes = (
+        "Challenge:",
+        "Consequence:",
+        "Context:",
+        "Failure mode:",
+        "Given:",
+        "Insight:",
+        "Lesson:",
+        "Problem:",
+        "Resolution:",
+        "Systems insight:",
+        "Systemsinsight:",
+        "Systems lesson:",
+        "Systemslesson:",
+        "Takeaway:",
+        "Why it matters:",
+    )
+    if normalized.startswith(label_prefixes):
+        return True
+    words = re.findall(r"[A-Za-z][A-Za-z0-9_-]*", normalized)
+    if len(words) < 7:
+        return False
+    digit_chars = sum(ch.isdigit() for ch in normalized)
+    if digit_chars > len(normalized) * 0.35:
+        return False
+    return bool(re.search(r"[a-z]", normalized))
+
+
 def scan_pdf_text(pdf_path: Path) -> list[PdfIssue]:
     """Return issues found in extracted PDF text."""
     body = _pdftotext(pdf_path)
@@ -130,6 +310,49 @@ def scan_pdf_text(pdf_path: Path) -> list[PdfIssue]:
                 code="undefined-latex-ref",
                 message=f'"{text}" appears in PDF text (LaTeX reference undefined)',
                 count=count,
+            )
+        )
+
+    malformed_counts = Counter(m.group(0) for m in MALFORMED_OBJECT_NUMBER.finditer(body))
+    for text, count in sorted(malformed_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="malformed-object-number",
+                message=(
+                    f'"{text}" appears in PDF text. Numbered objects should use '
+                    "chapter-local numbering such as Table 8.2, not subsection-shaped "
+                    "numbering such as Table 8.2.1."
+                ),
+                count=count,
+            )
+        )
+
+    # A renderer/counter regression can make several distinct in-callout tables
+    # reuse one number. Repeated occurrences of the same number are fine when the
+    # caption text is identical (for example a longtable continuation or repeated
+    # list entry). The failure is one table number attached to multiple captions.
+    table_captions: dict[str, Counter[str]] = {}
+    for match in TABLE_CAPTION.finditer(body):
+        number = match.group(1)
+        caption = re.sub(r"\s+", " ", match.group(2)).strip()
+        if not caption:
+            continue
+        table_captions.setdefault(number, Counter())[caption] += 1
+    duplicate_numbers = {
+        number: captions
+        for number, captions in table_captions.items()
+        if len(captions) > 1
+    }
+    for number, captions in sorted(duplicate_numbers.items()):
+        examples = "; ".join(list(captions.keys())[:3])
+        issues.append(
+            PdfIssue(
+                code="duplicate-table-number",
+                message=(
+                    f"Table {number} is attached to multiple distinct captions in "
+                    f"the PDF text: {examples}"
+                ),
+                count=sum(captions.values()),
             )
         )
 
@@ -235,8 +458,8 @@ def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
 
     # Overfull vbox: vertical overflow — a tall table/callout, or (the case this
     # was added for) a margin note/figure that overran its column and pushed off
-    # the page. Warning-level: surfaced in the build but non-blocking. Keyed by
-    # shipped-out page number rather than source line.
+    # the page. Severe rows are blocking because they correspond to rendered
+    # content exceeding the available page geometry.
     vbox_items: list[tuple[float, str]] = []
     for m in OVERFULL_VBOX.finditer(text):
         pts = float(m.group(1))
@@ -256,11 +479,83 @@ def scan_build_log(log_path: Path | None) -> list[PdfIssue]:
                     f"Run `binder layout margins <pdf>` to localize margin overflow."
                 ),
                 count=len(vbox_items),
-                severity="warning",
             )
         )
 
     return issues
+
+
+def scan_table_prose_spacing(
+    pdf_path: Path,
+    *,
+    min_gap_pt: float = TABLE_PROSE_MIN_GAP_PT,
+) -> list[PdfIssue]:
+    """Warn when rendered table bottom rules are jammed against following text."""
+    if not pdf_path.is_file():
+        return []
+    try:
+        import pdfplumber  # type: ignore
+    except ImportError:
+        return []
+
+    findings: list[tuple[int, float, str]] = []
+    try:
+        with pdfplumber.open(str(pdf_path)) as pdf:
+            for page_idx, page in enumerate(pdf.pages, start=1):
+                text_lines = _pdf_main_text_lines(page)
+                if not text_lines:
+                    continue
+                rules = _pdf_horizontal_rules(page)
+                for cluster in _pdf_table_rule_clusters(page):
+                    bottom_rule = cluster[-1]
+                    after = [
+                        line for line in text_lines
+                        if line["top"] > bottom_rule["top"] + 0.5
+                        and _x_overlap(line, bottom_rule) >= 20.0
+                    ]
+                    if not after:
+                        continue
+                    next_line = min(after, key=lambda line: line["top"])
+                    # Plot gridlines can look like table rules to PDF geometry;
+                    # their next "line" is often numeric tick labels. This
+                    # check is for prose/semantic labels jammed after tables.
+                    if float(next_line.get("size", 0.0) or 0.0) < 8.5:
+                        continue
+                    if not _looks_like_post_table_prose(next_line["text"]):
+                        continue
+                    if _line_is_between_table_rules(next_line, bottom_rule, rules):
+                        continue
+                    gap = next_line["top"] - bottom_rule["top"]
+                    if 0 < gap < min_gap_pt:
+                        findings.append((page_idx, gap, next_line["text"][:80]))
+    except Exception as exc:
+        return [
+            PdfIssue(
+                code="table-prose-spacing-scan-error",
+                message=f"Could not scan rendered table/prose spacing: {exc}",
+                severity="warning",
+            )
+        ]
+
+    if not findings:
+        return []
+
+    examples = "; ".join(
+        f"sheet {page}: {gap:.1f}pt before \"{snippet}\""
+        for page, gap, snippet in findings[:3]
+    )
+    return [
+        PdfIssue(
+            code="table-prose-crowding",
+            message=(
+                f"{len(findings)} rendered table bottom rule(s) are followed "
+                f"by text with less than {min_gap_pt:.1f}pt of spacing. "
+                f"Examples: {examples}"
+            ),
+            count=len(findings),
+            severity="warning",
+        )
+    ]
 
 
 def verify_pdf(
@@ -281,8 +576,34 @@ def verify_pdf(
         ]
 
     issues = scan_pdf_text(pdf_path)
+    issues.extend(scan_table_prose_spacing(pdf_path))
     issues.extend(scan_build_log(log_path))
     return issues
+
+
+def scan_pdf_numbering(pdf_path: Path) -> list[PdfIssue]:
+    """Return rendered-PDF object-numbering regressions only.
+
+    This narrower scan is useful after chapter-only PDF builds, where ordinary
+    cross-reference checks can fail because other chapters are intentionally
+    absent from the temporary render.
+    """
+    if not pdf_path.is_file():
+        return [PdfIssue(code="missing-pdf", message=f"PDF not found: {pdf_path}")]
+
+    if shutil.which("pdftotext") is None:
+        return [
+            PdfIssue(
+                code="pdftotext-missing",
+                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
+            )
+        ]
+
+    return [
+        issue
+        for issue in scan_pdf_text(pdf_path)
+        if issue.code in NUMBERING_ISSUE_CODES
+    ]
 
 
 def scan_margin_geometry_summary(pdf_path: Path):
@@ -352,6 +673,22 @@ def verify_volume_pdf(
             not any(i.code == "undefined-latex-ref" for i in issues),
         ),
         PdfCheckItem(
+            "malformed-object-number",
+            "No subsection-shaped object numbers such as Table 8.2.1",
+            not any(i.code == "malformed-object-number" for i in issues),
+        ),
+        PdfCheckItem(
+            "duplicate-table-number",
+            "No duplicate table numbers with different captions",
+            not any(i.code == "duplicate-table-number" for i in issues),
+        ),
+        PdfCheckItem(
+            "table-prose-crowding",
+            "No cramped text immediately after rendered table rules",
+            not any(i.code == "table-prose-crowding" for i in issues),
+            is_warning=True,
+        ),
+        PdfCheckItem(
             "python-traceback",
             "No Python tracebacks or UserWarnings in PDF text",
             not any(i.code == "python-traceback" for i in issues),
@@ -373,7 +710,6 @@ def verify_volume_pdf(
             "No vertical/margin overflow (Overfull vbox >= 20pt)",
             not any(i.code == "overfull-vbox" for i in issues),
             skipped=log_path is None,
-            is_warning=True,
         ),
         PdfCheckItem(
             "margin-geometry",
