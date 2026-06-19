@@ -136,7 +136,7 @@ class TrainingScenarios:
 
 ## Training Systems Fundamentals {#sec-model-training-training-systems-fundamentals-05d2}
 
-Frameworks provide the execution substrate: computational graphs schedule operations, automatic differentiation computes gradients, and hardware abstractions target diverse accelerators. Those mechanisms make a single training step possible; training systems make it repeatable at scale. The same forward/backward/update loop must now run billions of times while retaining activations, feeding accelerators, and staying within practical memory, time, and budget limits.
+Running a model once and training it from scratch live on opposite sides of the systems cost curve. Frameworks provide the execution substrate: computational graphs schedule operations, automatic differentiation computes gradients, and hardware abstractions target diverse accelerators. Those mechanisms make a single training step possible; training systems make it repeatable at scale. The same forward/backward/update loop must now run billions of times while retaining activations, feeding accelerators, and staying within practical memory, time, and budget limits.
 
 ::: {.column-margin}
 ![](images/svg/training_cost_asymmetry.svg){width="100%" fig-alt="A cost curve that stays nearly flat across model scale, then rises almost vertically at the right, with a marked knee point and a shaded danger zone past it. Training cost explodes at large scale."}
@@ -325,7 +325,7 @@ class GPT2LighthouseSpecs:
 
 ### Running example: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
 
-To ground the abstract principles of training systems in concrete engineering decisions, we use GPT-2 as a recurring worked example throughout this chapter. This lighthouse model is large enough to expose real systems bottlenecks yet small enough to reason about without massive cluster infrastructure. In inference, GPT-2 serves as the Bandwidth Hog lighthouse; in training, the same model exposes a different constraint mix: activation memory, accelerator utilization, and data-pipeline throughput.
+GPT-2 is large enough to expose real training bottlenecks yet small enough to reason about without trillion-parameter infrastructure. In inference, GPT-2 serves as the Bandwidth Hog lighthouse; in training, the same model exposes a different constraint mix: activation memory, accelerator utilization, and data-pipeline throughput. We use it as a recurring worked example so each optimization has a concrete model, dataset, and hardware target.
 
 ::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
 
@@ -346,7 +346,7 @@ Training GPT-2 is primarily memory-bound (due to activation storage) and compute
 
 :::
 
-Not all training workloads are compute bound. Recommendation models like Deep Learning Recommendation Model (DLRM) are dominated by massive embedding tables\index{Embedding Table!capacity bottleneck} (`{python} GPT2LighthouseSpecs.dlrm_params_min_b_str` to `{python} GPT2LighthouseSpecs.dlrm_params_max_t_str` parameters, mostly embeddings) that make them memory bandwidth bound rather than compute bound. For such workloads, the first scaling problem is often capacity: splitting the embedding tables across devices so the model fits at all. The remainder of this chapter focuses on dense, compute-intensive training using GPT-2 as the primary worked example.
+Not all training workloads are compute bound. Recommendation models like DLRM are dominated by massive embedding tables\index{Embedding Table!capacity bottleneck} (`{python} GPT2LighthouseSpecs.dlrm_params_min_b_str` to `{python} GPT2LighthouseSpecs.dlrm_params_max_t_str` parameters, mostly embeddings) that make them memory bandwidth bound rather than compute bound. For such workloads, the first scaling problem is often capacity: splitting the embedding tables across devices so the model fits at all. The remainder of this chapter focuses on dense, compute-intensive training using GPT-2 as the primary worked example.
 
 Training systems occupy a critical position in the machine learning pipeline: they consume prepared data from upstream engineering (@sec-data-engineering) and produce trained model artifacts that later systems must deploy and monitor. Data quality directly impacts training stability, while training efficiency determines iteration velocity during model development. The same pressure appears at three scales. At data scale, petabyte datasets require efficient I/O pipelines and distributed storage. At model scale, billion-parameter models force the system to decide whether to replicate the model across batches with data parallelism\index{Distributed Training!data parallelism}[^fn-training-data-parallelism] or split the model across devices with model parallelism\index{Distributed Training!model parallelism}[^fn-training-model-parallelism]. At infrastructure scale, coordinating thousands of accelerators introduces communication overhead that can dominate training time. These challenges are why the workflow contracts from @sec-ml-workflow matter during training: orchestration decisions shape both scientific iteration and systems cost.
 
@@ -374,7 +374,7 @@ These scaling challenges share a common thread: every bottleneck traces back to 
 
 ## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
 
-@Sec-neural-computation established *what* neural network operations compute and *why* they enable learning. The question for a systems engineer is *what they cost*\index{Training!mathematical foundations}\index{Training!computational cost}---the FLOPs consumed, the memory required, and the bandwidth demanded when these conceptually simple operations execute at scale. A matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between rectified linear unit (ReLU) and sigmoid determines whether Tensor Cores can accelerate computation.
+Matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between rectified linear unit (ReLU) and sigmoid determines whether Tensor Cores can accelerate computation. @Sec-neural-computation established *what* neural network operations compute and *why* they enable learning; the systems question is *what they cost*\index{Training!mathematical foundations}\index{Training!computational cost} in FLOPs, memory, and bandwidth when those operations execute at scale.
 
 Four dimensions structure this cost analysis:
 
@@ -682,7 +682,7 @@ class ActivationBenchmarks:
 
 #### Activation functions {#sec-model-training-activation-functions-faa7}
 
-In @sec-neural-computation, we established the mathematical properties of activation functions\index{Activation Function!training efficiency} like sigmoid, tanh, ReLU\index{ReLU!hardware efficiency}, and softmax. While their role is to introduce nonlinearity, their implementation characteristics significantly impact training system performance. From a systems perspective, the choice of activation function determines computational cost, hardware utilization, and memory access patterns during backpropagation.
+Activation functions\index{Activation Function!training efficiency} like sigmoid, tanh, ReLU\index{ReLU!hardware efficiency}, and softmax introduce nonlinearity, but their implementation characteristics also shape training system performance. From a systems perspective, the choice of activation function determines computational cost, hardware utilization, and memory access patterns during backpropagation.
 
 The critical question for ML systems engineers is not *what* these functions do mathematically, but *how* their cost behaves at scale. The benchmarks and trade-offs that follow build toward one systems thesis: because element-wise activations move many more bytes than they compute, the choice of activation is ultimately bounded by memory bandwidth rather than by arithmetic, so the per-operation differences below matter less than their magnitudes first suggest.
 
@@ -2566,7 +2566,7 @@ class TrainingDimensions:
 
 ### Forward pass {#sec-model-training-forward-pass-9695}
 
-With the data pipeline providing prepared batches, we can now examine how the training loop processes this data. The forward pass\index{Forward Pass!compute operations}\index{Forward Pass!memory management} implements the mathematical operations described in @sec-model-training-mathematical-operations-neural-networks-ddac, where input data propagates through the model to generate predictions. While the conceptual flow follows the layer-by-layer transformation $\mathbf{A}^{(\ell)} = f\left(\mathbf{A}^{(\ell-1)}\mathbf{W}^{(\ell)} + \mathbf{b}^{(\ell)}\right)$ established earlier, the system-level implementation poses several challenges critical for efficient execution.
+Prepared batches enter the training loop through the forward pass\index{Forward Pass!compute operations}\index{Forward Pass!memory management}, where input data propagates through the model to generate predictions. The conceptual flow follows the layer-by-layer transformation $\mathbf{A}^{(\ell)} = f\left(\mathbf{A}^{(\ell-1)}\mathbf{W}^{(\ell)} + \mathbf{b}^{(\ell)}\right)$ established earlier, but the system-level implementation must schedule kernels, move activations, and preserve enough state for backpropagation.
 
 #### Compute operations {#sec-model-training-compute-operations-83ee}
 
@@ -3153,7 +3153,7 @@ The preceding pipeline architecture established the structural *what* of trainin
 
 ## Identifying Bottlenecks {#sec-model-training-identifying-bottlenecks-f57f}
 
-The previous sections established what the training system does at each stage and how much each operation costs. That picture, however, is a blueprint, not a diagnosis\index{Training Bottleneck!profiling}. Knowing that attention operations consume 50 percent of FLOPs and data loading takes 25 percent of wall-clock time does not reveal which constraint to attack first---that depends on *which resource is actually saturated*\index{Training Bottleneck!compute-bound vs. memory-bound} during execution.
+Blueprint knowledge is not diagnosis\index{Training Bottleneck!profiling}. Knowing that attention operations consume 50 percent of FLOPs and data loading takes 25 percent of wall-clock time does not reveal which constraint to attack first; that depends on *which resource is actually saturated*\index{Training Bottleneck!compute-bound vs. memory-bound} during execution.
 
 The diagnostic methodology that transforms blueprint knowledge into actionable optimization decisions begins with a meaningful measure of training efficiency. Raw accelerator utilization percentages can be misleading because they include overhead from recomputation and padding. A more precise metric captures only the useful training work performed per second. That metric is Model FLOPs Utilization (MFU)\index{Model FLOPs Utilization!origin}[^fn-mfu], the fraction of peak hardware throughput spent on useful training work rather than lost to stalls and overhead.
 
@@ -3216,8 +3216,6 @@ Training bottlenecks fall into three categories that map directly to the D·A·M
 
 : **D·A·M Taxonomy Applied to Training Bottlenecks**: Each axis of the D·A·M taxonomy (Data, Algorithm, Machine) maps to a distinct training bottleneck with characteristic symptoms. Profiling reveals which axis is the limiting factor, guiding practitioners to the appropriate optimization technique. {#tbl-dam-training-bottlenecks tbl-colwidths="[13,18,44,35]"}
 
-Profiling tools reveal which bottleneck dominates a given workload. @Fig-tf-bottleneck-trace captures a data-bound pathology through TensorFlow's profiler: the gaps in GPU activity (white regions between compute blocks) reveal that the device frequently waits for input data, with utilization dropping to zero during data loading phases.
-
 The data-bound category is the most commonly misdiagnosed bottleneck in practice. A training job with 40 percent MFU and a GPU utilization trace full of idle gaps looks like a hardware problem, but the root cause is often a software serialization bottleneck in the input pipeline. When the CPU-side data loader cannot prepare batches faster than the accelerator consumes them, no amount of GPU tuning can close the gap.
 
 ::: {#exmp-training-gil-locked-gpu .callout-example title="The GIL-locked GPU"}
@@ -3229,6 +3227,8 @@ The data-bound category is the most commonly misdiagnosed bottleneck in practice
 **Systems insight**: Amdahl's Law is brutal. A serial data pipeline renders a parallel accelerator useless. High-performance training requires multiprocessing to bypass Python-side serialization or offloading preprocessing to the accelerator, as in systems such as NVIDIA DALI, to keep the compute units fed.
 
 :::
+
+Profiling tools reveal which bottleneck dominates a given workload. @Fig-tf-bottleneck-trace captures the data-bound pathology from the callout: the gaps in GPU activity (white regions between compute blocks) show the device waiting for input data while utilization drops to zero during loading phases.
 
 ::: {#fig-tf-bottleneck-trace fig-env="figure" fig-pos="htb" fig-cap="**Data-Bound Profiler Trace**: TensorFlow profiler output capturing a data loading bottleneck during training. The gaps in GPU activity (white regions between compute blocks) indicate periods where the device idles while waiting for input data, with utilization dropping to zero during data loading phases." fig-alt="TensorFlow profiler screenshot showing GPU activity timeline. Colored blocks indicate computation periods with white gaps revealing idle time when GPU waits for data loading to complete."}
 
@@ -3331,7 +3331,7 @@ These bottlenecks interact, illustrating the conservation of complexity thesis f
 
 ### Systematic optimization framework {#sec-model-training-systematic-optimization-framework-83b0}
 
-The pipeline architecture established earlier creates opportunities for targeted optimizations. Effective optimization follows a systematic methodology that applies regardless of system scale or model architecture. This three-phase framework provides the foundation for all optimization work: profile to identify bottlenecks, select appropriate techniques for the identified constraints, and compose solutions that address multiple bottlenecks simultaneously without creating conflicts.
+The profile example shows why optimization must start from evidence rather than preference. Effective optimization follows a systematic methodology that applies regardless of system scale or model architecture: profile to identify bottlenecks, select appropriate techniques for the identified constraints, and compose solutions that address multiple bottlenecks simultaneously without creating conflicts.
 
 The profiling phase employs tools like PyTorch Profiler, TensorFlow Profiler, or NVIDIA Nsight Systems to reveal where time is spent during training iterations. These are the same profiling approaches introduced in the overview, now applied systematically to quantify which bottleneck dominates. A profile might show `{python} ProfilingScenarios.profile_data_pct_str` of time in data loading, `{python} ProfilingScenarios.profile_compute_pct_str` in computation, and `{python} ProfilingScenarios.profile_mem_pct_str` in memory operations, indicating data loading as the primary target for optimization.
 
@@ -5048,6 +5048,8 @@ These four techniques (prefetching, mixed precision, FlashAttention, and gradien
 
 : **Optimization Strategies**: Prefetching, mixed-precision training, and gradient accumulation address distinct bottlenecks in AI training pipelines: data transfer, memory consumption, and backpropagation. Selecting an appropriate strategy balances implementation complexity against gains in speed and resource utilization, depending on hardware and workload characteristics. {#tbl-optimization}
 
+The table compares techniques in isolation; the GPT-2 walkthrough shows how those techniques combine when one model must fit in memory, run fast enough, and stay within a realistic cost envelope.
+
 ### GPT-2 optimization walkthrough {#sec-model-training-putting-together-gpt2-optimization-walkthrough-def7}
 
 To answer that question, let us walk through the memory-feasibility path for GPT-2 (1.5 billion parameters) training on a single V100 GPU, then summarize the time, energy, and cost implications for a 32-V100 training run.
@@ -6508,7 +6510,7 @@ class TrainingCarbonFootprint:
 
 :::
 
-The parallelism strategies introduced in this section (data parallelism for throughput, model parallelism for memory, pipeline parallelism for efficiency, and tensor parallelism for massive layers) provide the conceptual foundation for understanding how production training systems train trillion-parameter models in weeks rather than millennia. The implementation details of multi-node distributed training, including collective communication primitives, fault tolerance mechanisms, and elastic scheduling, build directly on the single-machine principles covered throughout this chapter and are treated in depth in advanced distributed systems texts.
+Scaling changes the binding constraint rather than removing it: data parallelism buys throughput, model parallelism buys memory capacity, pipeline parallelism buys utilization, and tensor parallelism buys layer-scale feasibility, but each adds communication and coordination cost. The implementation details of multi-node distributed training, including collective communication primitives, fault tolerance mechanisms, and elastic scheduling, build directly on the single-machine principles covered throughout this chapter and are treated in depth in advanced distributed systems texts.
 
 ::: {#chk-training-scaling-decisions .callout-checkpoint title="Scaling decisions"}
 

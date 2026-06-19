@@ -1353,11 +1353,11 @@ train_full_model(model, coreset)  # 10x faster training
 
 :::
 
-The code shows two functions: `compute_el2n_scores` trains a proxy model briefly and measures prediction confidence via L2 distance from one-hot labels, while `select_coreset` retains only the highest-uncertainty samples.
+Proxy scoring turns uncertainty into reusable selected indices: `compute_el2n_scores` measures which samples still confuse a briefly trained model, and `select_coreset` retains those high-information examples for the full training run.
 
 ### Data deduplication {#sec-data-selection-data-deduplication-6c20}
 
-While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets what to remove: exact and near-duplicates. Deduplication\index{Deduplication!data selection optimization} can provide immediate efficiency gains, especially for byte-for-byte duplicates, and requires no model training. This makes it one of the most accessible optimizations in data selection, but near-duplicate thresholds must be validated so the pipeline does not remove useful distributional signal.
+While coreset selection identifies which samples to keep based on their informativeness, a complementary approach targets duplicate samples that add compute without adding learning signal. Deduplication\index{Deduplication!data selection optimization} can provide immediate efficiency gains, especially for exact and near-duplicates, and requires no model training. This makes it one of the most accessible optimizations in data selection, but near-duplicate thresholds must be validated so the pipeline does not remove useful distributional signal.
 
 The simplest form of deduplication\index{Deduplication!hash-based, exact matching} (introduced as a data engineering pipeline stage in @sec-data-engineering-systematic-data-processing-aebc, and here elevated to an optimization lever) uses hash-based methods for exact matches. By computing a cryptographic hash (MD5 or SHA-256) for each sample and removing those with identical hashes, practitioners can eliminate byte-for-byte duplicates that inevitably accumulate in large web-scraped corpora. This process is computationally cheap, scaling linearly with dataset size, and can be parallelized trivially.
 
@@ -1375,7 +1375,7 @@ For images, perceptual hashing\index{Perceptual Hashing!image deduplication} pro
 
 Foundation model pretraining now treats deduplication as essential. Studies on GPT-3 and LLaMA training demonstrate that deduplicated data improves both training efficiency and downstream performance by preventing memorization of repeated content. Deduplication delivers two gains: fewer wasted FLOPs on redundant samples, and better generalization because the model sees more diverse examples per training token.
 
-Deduplication benefits extend beyond text corpora. The Deep Learning Recommendation Model (DLRM) lighthouse presents a unique variant of this challenge centered on embedding deduplication.
+Deduplication benefits extend beyond text corpora. The DLRM lighthouse presents a unique variant of this challenge centered on embedding deduplication.
 
 ::: {#lhs-data-selection-dlrm-embedding-deduplication .callout-lighthouse title="DLRM and embedding deduplication"}
 
@@ -1418,8 +1418,6 @@ $$
 where $n_{\text{epoch}}$ is the current epoch, $D$ is the full dataset size, and $N_{\text{warmup}}$ is the number of warmup epochs before the full dataset becomes available. Early epochs train on the easiest $D \cdot (n_{\text{epoch}}/N_{\text{warmup}})$ fraction; after warmup, training proceeds on the full dataset.
 
 The difficulty scorer is a systems choice because it trades probe-compute overhead against ordering quality, as @tbl-difficulty-scoring shows. Loss and confidence scoring buy better ordering with extra inference, heuristics avoid compute but require domain knowledge, and self-paced scoring moves adaptation into the training loop itself.
-
-From a systems perspective, curriculum learning improves convergence by reducing wasted gradient updates on samples the model cannot yet learn from. The information-compute ratio introduced in @sec-data-selection-informationcompute-ratio-8c0b is higher in early training because easy samples provide strong learning signal relative to their compute cost. The efficiency gains manifest as faster convergence to target accuracy, not higher final accuracy. @Tbl-curriculum-benchmarks summarizes measured speedups from curriculum learning across standard benchmarks.
 
 | **Strategy**          | **Difficulty Score**                      | **Best For**                                |
 |:----------------------|:------------------------------------------|:--------------------------------------------|
@@ -2391,7 +2389,7 @@ Self-supervised learning addresses the label bottleneck by learning from data st
 
 ## Synthetic Data Generation {#sec-data-selection-synthetic-data-generation-415c}
 
-Static pruning removed redundancy before training. Dynamic selection focused compute on the most informative samples during training, and self-supervised pretraining drove its label requirement to zero, reframing what counts as training data rather than adding a stage. The third and final stage of the data selection pipeline, synthetic data generation\index{Synthetic Data Generation!three-stage pipeline}, takes the opposite approach: rather than subtracting or selecting from existing data, it creates new high-value samples when real data is scarce, expensive, or lacks diversity. The strategy shifts from *curation* to *creation*.
+A robot fleet may need rare collision examples, a medical model may need cases a hospital cannot share, and a wake-word model may need thousands of noisy kitchens before the product exists. Static pruning removed redundancy before training. Dynamic selection focused compute on the most informative samples during training, and self-supervised pretraining drove its label requirement to zero, reframing what counts as training data rather than adding a stage. The third and final stage of the data selection pipeline, synthetic data generation\index{Synthetic Data Generation!three-stage pipeline}, takes the opposite approach: rather than subtracting or selecting from existing data, it creates new high-value samples when real data is scarce, expensive, or lacks diversity. The strategy shifts from *curation* to *creation*.
 
 ### Data augmentation: Transformation-based synthesis {#sec-data-selection-data-augmentation-transformationbased-synthesis-3aa7}
 
@@ -2487,7 +2485,7 @@ The choice among generative approaches is a cost-fidelity decision. Generative A
 
 ### Bridging the domain gap {#sec-data-selection-bridging-domain-gap-100b}
 
-[^fn-stable-diffusion-synthesis]: **Stable Diffusion**: Performs iterative denoising in a compressed latent space, making text-to-image synthesis more computationally efficient than pixel-space methods. This enables generating targeted training examples from natural language, but at a cost of 2--5 seconds per image on a single GPU. This is roughly 1,000$\times$ slower per sample than geometric augmentation, the trade-off for producing entirely novel scenes that data transformation cannot create. \index{Stable Diffusion!generation cost}
+[^fn-stable-diffusion-synthesis]: [offset=-31mm] **Stable Diffusion**: Performs iterative denoising in a compressed latent space, making text-to-image synthesis more computationally efficient than pixel-space methods. This enables generating targeted training examples from natural language, but at a cost of 2--5 seconds per image on a single GPU. This is roughly 1,000$\times$ slower per sample than geometric augmentation, the trade-off for producing entirely novel scenes that data transformation cannot create. \index{Stable Diffusion!generation cost}
 
 Synthetic data's greatest limitation is the **domain gap**\index{Domain Gap!synthetic vs. real data},[^fn-domain-gap-shift] the statistical difference between generated and real-world data, as illustrated in @fig-domain-gap. A model trained only on synthetic data learns a decision boundary optimized for the wrong distribution, potentially performing well on synthetic test data while failing on real deployment data.
 
@@ -2601,7 +2599,7 @@ The solution builds a usable dataset from almost nothing by layering five stages
 
 :::
 
-The optimal mix depends on simulation fidelity, domain complexity, and the cost differential between synthetic and real data. When synthetic data comes from ML models rather than simulators, there is a risk of *model collapse*\index{Model Collapse!recursive synthetic training}[^fn-model-collapse-mechanism]: training on model-generated data amplifies errors and reduces diversity over generations. This concern is particularly acute for foundation models, where synthetic data from earlier model generations may contaminate future training corpora. With appropriate safeguards, synthetic data generation remains an effective tool. A keyword-spotting deployment shows how to combine multiple data selection techniques (augmentation, noise injection, and simulation) into a coherent strategy for a real scenario.
+The keyword-spotting deployment shows how augmentation, noise injection, and simulation can turn a tiny seed set into a deployable dataset, but the same creation strategy becomes riskier when synthetic samples come from ML models rather than simulators. In that setting, *model collapse*\index{Model Collapse!recursive synthetic training}[^fn-model-collapse-mechanism] can amplify errors and reduce diversity over generations. This concern is particularly acute for foundation models, where synthetic data from earlier model generations may contaminate future training corpora. With appropriate safeguards, synthetic data generation remains an effective tool.
 
 [^fn-model-collapse-mechanism]: **Model Collapse**: Formally analyzed by @shumailov2024, this phenomenon occurs because generative models systematically underrepresent tail distributions -- rare but important patterns that appear infrequently in training data. When generation $n+1$ trains on output from generation $n$, each successive generation further compresses the tails, producing increasingly homogeneous data. The degradation can be rapid in recursive training settings, which is why the Fallacies section of this chapter warns against pure synthetic training. \index{Model Collapse!tail distribution compression}
 
@@ -2619,7 +2617,7 @@ Selecting the right combination of techniques from these three pipeline stages r
 
 ## Decision Framework {#sec-data-selection-decision-framework-0261}
 
-Each stage raises the information-compute ratio by a different mechanism: pruning removes low-value samples before training, dynamic selection focuses compute on high-value samples during training, and synthesis creates new high-value samples on demand (@tbl-data-selection).
+When labeling budget, redundancy, rare classes, privacy, and convergence speed all matter at once, the practitioner first has to identify which constraint is binding. Each stage raises the information-compute ratio by a different mechanism: pruning removes low-value samples before training, dynamic selection focuses compute on high-value samples during training, and synthesis creates new high-value samples on demand (@tbl-data-selection).
 
 | **Stage**                | **When Applied** | **Techniques**                                        |                                    **Typical Gains** |
 |:-------------------------|:-----------------|:------------------------------------------------------|-----------------------------------------------------:|
@@ -2629,7 +2627,7 @@ Each stage raises the information-compute ratio by a different mechanism: prunin
 
 : **Three-Stage Data Selection Pipeline**: When each stage applies, its representative techniques, and the efficiency gains typically reported for each. {#tbl-data-selection .striped .hover tbl-colwidths="[23,21,28,28]"}
 
-@Tbl-technique-selection provides a decision guide for selecting techniques based on the dominant constraint.
+Once the dominant constraint is named, @tbl-technique-selection compares which technique changes that constraint and why.
 
 | **Constraint**                 | **Best Technique**      | **Why**                                              |
 |:-------------------------------|:------------------------|:-----------------------------------------------------|
@@ -3092,7 +3090,7 @@ class RandomAccessPenalty:
 
 High-efficiency systems mitigate this penalty through several techniques. Small proxy models (a 10-million-parameter "student" scoring on behalf of a 7-billion-parameter "teacher") reduce selection cost by an order of magnitude while preserving ranking quality. Because proxy scoring is a pure inference workload, the inference runtime can execute it in lower-precision formats (INT8 or FP8) or dispatch it to inference-optimized runtimes, keeping the scoring pass well within the budget imposed by the selection inequality while the subsequent training pass retains the higher precision required for stable gradient updates. Embedding indices such as FAISS\index{Vector Index!embedding-based selection}[^fn-faiss-selection] reduce selection from full linear scans to approximate nearest-neighbor searches whose cost depends on the index family and accuracy target. Both approaches share a common principle: decoupling selection from training enables independent optimization.
 
-[^fn-faiss-selection]: [offset=-70mm] **FAISS (Facebook AI Similarity Search)**: Provides GPU-accelerated similarity search using exact, approximate, and compressed-domain index designs [@johnson2019billion]. Johnson, Douze, and Jegou report billion-vector graph construction on multiple GPUs, showing why vector-index infrastructure matters for web-scale selection. For data selection pipelines, FAISS-style indexing supports $k$-nearest-neighbor retrieval for coreset selection, embedding-based deduplication, and stratified clustering for balanced sampling. Without this infrastructure, embedding-based selection would often fall back to expensive full-corpus scans. \index{FAISS!selection infrastructure}
+[^fn-faiss-selection]: [offset=-110mm] **FAISS (Facebook AI Similarity Search)**: Provides GPU-accelerated similarity search using exact, approximate, and compressed-domain index designs [@johnson2019billion]. Johnson, Douze, and Jegou report billion-vector graph construction on multiple GPUs, showing why vector-index infrastructure matters for web-scale selection. For data selection pipelines, FAISS-style indexing supports $k$-nearest-neighbor retrieval for coreset selection, embedding-based deduplication, and stratified clustering for balanced sampling. Without this infrastructure, embedding-based selection would often fall back to expensive full-corpus scans. \index{FAISS!selection infrastructure}
 
 Data loaders\index{Data Loading!shard-based sequential I/O} also require architectural adaptation. Sharded dataset formats package many samples into sequentially readable chunks; WebDataset and FFCV are concrete examples. Shuffle buffers\index{Shuffle Buffer!approximate random sampling} are a data-machine co-design: the loader reads large sequential shards into memory and samples randomly within the buffer, preserving sequential I/O throughput while achieving the statistical benefits of random sampling. In multi-accelerator training, each worker maintains its own shuffle buffer over a non-overlapping shard, so the randomization is local rather than global; rare classes or boundary cases that appear in only a few shards receive uneven coverage across workers unless the coreset is first stratified and shards are balanced before distribution.
 
@@ -3723,7 +3721,7 @@ Data selection does not exist in isolation. A coreset-trained model may later be
 
 ### Model-level efficiency {#sec-data-selection-model-compression-9aef}
 
-Model-level efficiency reduces the size or arithmetic cost of the trained model through techniques such as pruning, lower-precision representation, and distillation. This section uses those techniques as a forward bridge to @sec-model-compression and @sec-hardware-acceleration; the local point is that data selection affects how compact the resulting model can become. Models trained on smaller, higher-quality datasets are often easier to simplify than those trained on larger, noisier ones.
+Model-level efficiency reduces the size or arithmetic cost of the trained model through techniques such as pruning, lower-precision representation, and distillation. Data selection affects that later simplification because the training corpus shapes which features the model learns and which redundancies compression can remove. Models trained on smaller, higher-quality datasets are often easier to simplify than those trained on larger, noisier ones; @sec-model-compression and @sec-hardware-acceleration return to the hardware consequences of that interaction.
 
 The mechanism relates to how models encode information. A model trained on repetitive data can learn redundant features that pruning later removes. The training compute required to learn those features was wasted, only to be discarded during compression. By contrast, a model trained on diverse, informative samples may learn compact, nonredundant representations from the start, making subsequent compression easier to evaluate and sometimes easier to apply. Treat this as an engineering hypothesis to measure after curation rather than a guaranteed property of every selected dataset.
 
