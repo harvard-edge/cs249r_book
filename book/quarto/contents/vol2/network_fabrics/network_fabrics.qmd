@@ -257,7 +257,7 @@ As @tbl-network-assumptions summarizes, the synchronicity inversion is the most 
 
 The flow inversion compounds this problem. Traditional networks are designed for fairness among millions of "mice flows"[^fn-elephant-mice-flows], yet ML training is dominated by a few "elephant flows" corresponding to the gradient AllReduce. A single AllReduce on a 175B parameter model can involve exchanging 350 GB of data. Standard flow control and routing mechanisms like Equal-Cost Multi-Path (ECMP), which hash each flow onto one of several equal-cost paths, are poorly suited to this traffic pattern. A static hash cannot subdivide one elephant flow across all available links, and it can inadvertently map multiple elephant flows to the same link, creating massive congestion while other links sit idle.
 
-[^fn-elephant-mice-flows]: **Elephant and Mice Flows**\index{Elephant and Mice Flows}: From network measurement literature, where "mice" denote the millions of short-lived flows (web requests, DNS lookups) that traditional switches are optimized to handle fairly, and "elephants" denote the rare massive flows that dominate aggregate bandwidth. In ML clusters, a single AllReduce elephant flow\index{Elephant Flows!network traffic} can carry 350 GB---more data than millions of mice combined---and ECMP's static hash cannot subdivide it, turning one unlucky hash collision into a cluster-wide straggler.
+[^fn-elephant-mice-flows]: [offset=-21mm] **Elephant and Mice Flows**\index{Elephant and Mice Flows}: From network measurement literature, where "mice" denote the millions of short-lived flows (web requests, DNS lookups) that traditional switches are optimized to handle fairly, and "elephants" denote the rare massive flows that dominate aggregate bandwidth. In ML clusters, a single AllReduce elephant flow\index{Elephant Flows!network traffic} can carry 350 GB---more data than millions of mice combined---and ECMP's static hash cannot subdivide it, turning one unlucky hash collision into a cluster-wide straggler.
 
 The loss inversion completes the picture. TCP/IP was designed for unreliable networks and handles packet loss gracefully through retransmission. RDMA-based protocols used in ML clusters (InfiniBand, RoCE) assume a lossless fabric. A single dropped packet can trigger Go-Back-N recovery, which restarts transmission from the missing packet rather than only repairing the one lost frame, and can stall the sender for milliseconds, creating a catastrophic straggler that delays the entire synchronous training step. ML fabrics must therefore be engineered for zero packet loss. InfiniBand uses credit-based flow control; Ethernet-based RoCE deployments use carefully tuned Priority Flow Control (PFC), a link-layer backpressure mechanism that pauses senders before buffers overflow and therefore depends on sufficient switch buffering.
 
@@ -906,9 +906,11 @@ class AllReduceBottleneck:
 
 Beyond classifying individual transfers, the same model identifies when communication overtakes computation. The $\alpha$-$\beta$ analysis above focused on the transfer time of individual messages across a single link, treating the network as a point-to-point channel. In a data-parallel training loop, however, the relevant question is whether the collective AllReduce across the full cluster finishes before the next compute step is ready to begin. When the gradient vector grows large enough, the aggregate transfer time for a ring AllReduce exceeds the per-step computation time, and the network becomes the pacing constraint for the entire training job.
 
-::: {#nbk-allreduce-bottleneck .callout-notebook title="When does AllReduce become the bottleneck?"}
+::: {#nbk-allreduce-bottleneck .callout-notebook title="AllReduce bottleneck threshold"}
 
-**Setup**: A cluster of `{python} AllReduceBottleneck.num_gpus_str` H100 GPUs training a GPT-2-scale model with `{python} AllReduceBottleneck.params_small_billion_str` parameters (`{python} AllReduceBottleneck.grad_small_gb_str` of FP32 gradients). Each GPU computes at `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` FP16/BF16 peak. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
+**Problem**: When does Ring AllReduce become the bottleneck for a `{python} AllReduceBottleneck.num_gpus_str`-GPU H100 cluster training models at GPT-2 scale and beyond?
+
+**Setup**: The baseline cluster trains a GPT-2-scale model with `{python} AllReduceBottleneck.params_small_billion_str` parameters (`{python} AllReduceBottleneck.grad_small_gb_str` of FP32 gradients). Each GPU computes at `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` FP16/BF16 peak. The network uses NDR InfiniBand (`{python} AllReduceBottleneck.alpha_math` and `{python} AllReduceBottleneck.beta_math` per link).
 
 **Step 1**: Compute time per iteration.
 Assume each GPU processes a synthetic microbatch requiring `{python} AllReduceBottleneck.flops_per_sample_math` FLOPs, chosen to produce a compute phase of about `{python} AllReduceBottleneck.compute_phase_ms_str` for this bottleneck example. At `{python} AllReduceBottleneck.h100_fp16_tflop_per_s_str` with `{python} AllReduceBottleneck.gpu_util_pct_str` utilization:
@@ -916,7 +918,7 @@ Assume each GPU processes a synthetic microbatch requiring `{python} AllReduceBo
 `{python} AllReduceBottleneck.t_comp_display_math`
 
 **Step 2**: Communication time for Ring AllReduce\index{Ring AllReduce}.
-With $N = 1{,}024$ and a gradient payload $M$ of about `{python} AllReduceBottleneck.grad_small_gb_str`:
+With $N$ = `{python} AllReduceBottleneck.num_gpus_str` and a gradient payload $M$ of about `{python} AllReduceBottleneck.grad_small_gb_str`:
 
 - Ring cost model: $T_{\text{ring}} \approx \frac{2(N-1)}{N}\frac{M}{\beta} + 2(N-1)\alpha$; @sec-collective-communication derives the algorithmic steps behind this expression.
 - Total Communication: `{python} AllReduceBottleneck.t_ring_small_math`
@@ -930,7 +932,7 @@ At `{python} AllReduceBottleneck.params_70b_billion_str` parameters (`{python} A
 
 `{python} AllReduceBottleneck.t_ring_70b_display_math`
 
-Now communication dominates computation by more than 100$\times$ under pure data parallelism. Our 175B model, at 2.5$\times$ this scale, would be even more severely bottlenecked. Models beyond a few billion parameters therefore require tensor and pipeline parallelism to partition the model, rather than relying solely on data parallelism, which must AllReduce the full gradient vector.
+Now communication dominates computation under pure data parallelism. Our 175B model, far larger than this scale, would be even more severely bottlenecked. Models beyond a few billion parameters therefore require tensor and pipeline parallelism to partition the model, rather than relying solely on data parallelism, which must AllReduce the full gradient vector.
 
 :::
 
@@ -1066,7 +1068,7 @@ Bisection bandwidth is a metric; the topology property that delivers full $\text
 
 :::
 
-Fat-trees build on Clos-style non-blocking network ideas to provide full $\text{BW}_{\text{bisect}}$ [@clos1953], rail-optimized networks trade some global flexibility for lower cost, and dragonflies reduce cabling while accepting workload-placement constraints [@kim2008]. This trade-off between guaranteed bandwidth and economic scalability drives every topology decision in large-scale ML clusters (@fig-network-topologies).
+Fat-trees build on Clos-style non-blocking network ideas to provide full $\text{BW}_{\text{bisect}}$ [@clos1953], rail-optimized networks trade some global flexibility for lower cost, and dragonflies reduce cabling while accepting workload-placement constraints [@kim2008]. This trade-off between guaranteed bandwidth and economic scalability drives every topology decision in large-scale ML clusters; the topology comparison later in this section makes that bandwidth-cost trade-off concrete.
 
 ### Top-of-rack (ToR) and the failure domain {#sec-network-fabrics-tor}
 
@@ -1162,31 +1164,38 @@ A concrete bisection estimate shows how quickly oversubscription turns into sync
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: "Bisection Bandwidth: The Cost of Oversubscription" .callout-notebook
 # │
-# │ Goal: Quantify the synchronization slowdown when moving from a
-# │       non-blocking (1:1) to an oversubscribed (4:1) network.
-# │ Show: slowdown_factor ≈ 4\times—inline in notebook result.
+# │ Goal: Quantify synchronization slowdown and idle-compute waste when moving
+# │       from a non-blocking (1:1) to an oversubscribed network.
+# │ Show: slowdown_factor, cluster cost, communication share, and wasted cost
+# │       inline in the notebook result.
 # │ How: T = M / BW_bisect; BW_bisect = N * BW_link / Oversub_Ratio.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_count, fmt_int, fmt_qty, fmt, check, fmt_time
+from mlsysim.fmt import fmt_count, fmt_int, fmt_qty, fmt, fmt_multiple, fmt_percent, fmt_usd, check, fmt_time
 
 class BisectionScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
     gradient = 100 * GB  # scenario assumption: per-GPU gradient shard
+    oversubscription_ratio = 4.0  # scenario assumption: cost-optimized spine
+    cluster_cost_m = 300  # scenario assumption: cluster cost in millions USD
+    comm_fraction = 0.30  # scenario assumption: training time spent communicating
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     gpus_per_side = n_gpus // 2
     bw_1_1_q = calc_bisection_bandwidth(gpus_per_side, beta)
-    bw_4_1_q = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=4.0)
+    bw_4_1_q = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=oversubscription_ratio)
     total_data = gpus_per_side * gradient
     time_1_1 = total_data / bw_1_1_q
     time_4_1 = total_data / bw_4_1_q
     slowdown = (time_4_1 / time_1_1).to_base_units().magnitude
+    _, throughput_loss = calc_oversubscription_effect(comm_fraction, oversubscription_ratio)
+    waste_m = throughput_loss * cluster_cost_m
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_gpus % 2 == 0, "Bisection model requires an even GPU count")
-    check(round(slowdown, 3) == 4.0, "Slowdown must match oversubscription ratio")
+    check(round(slowdown, 3) == round(oversubscription_ratio, 3), "Slowdown must match oversubscription ratio")
+    check(round(waste_m, 1) == 142.1, f"Expected oversubscription waste to be about $142.1M, got ${waste_m:.1f}M")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     bbs_n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
     bbs_gpus_per_side_value_str = fmt(gpus_per_side, precision=0, commas=False)
@@ -1195,9 +1204,13 @@ class BisectionScaling:
     bbs_total_data_gb_str = fmt_qty(total_data, GB, precision=0, commas=True)
     bbs_bw_1_1_gb_per_s_str = fmt_qty(bw_1_1_q, GB / second, precision=0, commas=True)
     bbs_bw_4_1_gb_per_s_str = fmt_qty(bw_4_1_q, GB / second, precision=0, commas=True)
+    bbs_oversubscription_ratio_str = fmt(oversubscription_ratio, precision=0, commas=False)
     bbs_slowdown_mult_str = fmt_multiple(slowdown, commas=False, precision=0)
     bbs_time_1_1_ms_str = fmt_time(time_1_1, millisecond, precision=0, commas=True)
     bbs_time_4_1_ms_str = fmt_time(time_4_1, millisecond, precision=0, commas=True)
+    bbs_cluster_cost_m_str = fmt_usd(cluster_cost_m * MILLION, precision=0, commas=False, scale="M")
+    bbs_comm_fraction_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
+    bbs_waste_m_str = fmt_usd(waste_m * MILLION, precision=1, commas=False, scale="M")
 ```
 
 ::: {#nbk-network-fabrics-bisection-bandwidth-cost-oversubscription .callout-notebook title="Bisection bandwidth: The cost of oversubscription"}
@@ -1209,10 +1222,10 @@ Bisection bandwidth ($\text{BW}_{\text{bisect}}$) is the minimum pipe diameter b
 
 1. **Non-blocking (1:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_gpus_per_side_value_str` $\times$ `{python} BisectionScaling.bbs_beta_gb_per_s_str` $=$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` per direction.
    - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_1_1_ms_str`.
-2. **Oversubscribed (4:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` divided by 4 = `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` per direction.
+2. **Oversubscribed (`{python} BisectionScaling.bbs_oversubscription_ratio_str`:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` divided by `{python} BisectionScaling.bbs_oversubscription_ratio_str` = `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` per direction.
    - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_4_1_ms_str`.
 
-**Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. For a \$300M supercomputer where training is 30 percent communication, this "saving" wastes approximately \$142 million in idle compute time (matching the bisection-bottleneck model in @sec-network-fabrics-fat-tree). For training, network oversubscription is a false economy.
+**Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. On a `{python} BisectionScaling.bbs_cluster_cost_m_str` supercomputer where training is `{python} BisectionScaling.bbs_comm_fraction_pct_str` communication, that bottleneck wastes approximately `{python} BisectionScaling.bbs_waste_m_str` in idle compute time, matching the bisection-bottleneck model in @sec-network-fabrics-fat-tree. For training, network oversubscription is a false economy.
 
 :::
 
@@ -1220,7 +1233,7 @@ This oversubscription calculation turns the topology definition into a design ru
 
 ::: {#chk-network-fabrics-fat-tree-topologies .callout-checkpoint title="Fat-tree topologies"}
 
-Verify your understanding of hierarchical switch fabrics:
+These questions check whether hierarchical switch-fabric trade-offs are clear:
 
 - [ ] **Radix and scale**: Compute the maximum number of GPUs a Radix-64 two-tier fat-tree can connect without core switches.
 - [ ] **Non-blocking ratio**: Explain why a Non-blocking fabric requires a 1:1 subscription ratio at every tier of the network.
@@ -1327,7 +1340,7 @@ For our cluster of `{python} NetworkRailRecap.n_gpus_str` spanning `{python} Net
 
 ::: {#chk-network-fabrics-rail-optimized-networks .callout-checkpoint title="Rail-optimized networks"}
 
-Verify your understanding of workload-specific network design:
+These questions check whether workload-specific network-design trade-offs are clear:
 
 - [ ] **Rail beneficiary**: Identify the dimension of 3D Parallelism (TP, PP, or DP) that benefits most from a Rail-Optimized design.
 - [ ] **Switch hops**: Explain why a rail-optimized network reduces the number of switch hops for gradient exchanges compared to a standard fat-tree.
@@ -1965,7 +1978,7 @@ class OpticalDividend:
 
 :::
 
-For a 10,000-GPU cluster, eliminating pluggable modules could save over 100 kW of power that can be redirected to computation. CPO also removes the transceiver as a discrete field-replaceable unit, eliminating a common point of mechanical failure.
+For a 10,000-GPU cluster, eliminating pluggable modules could save more than a megawatt of power that can be redirected to computation. CPO also removes the transceiver as a discrete field-replaceable unit, eliminating a common point of mechanical failure.
 
 For ML infrastructure, CPO could flatten the bandwidth hierarchy by narrowing the gap between intra-node and inter-node bandwidth. If inter-node links achieve bandwidth comparable to NVLink-class local fabrics (hundreds of GB/s per GPU), the constraint that confines tensor parallelism to within a single node would relax. This would enable new parallelism strategies where tensor parallelism spans two to four nodes rather than being confined to a single 8-GPU node, potentially improving scaling efficiency for very large models.
 

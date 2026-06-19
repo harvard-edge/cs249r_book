@@ -120,7 +120,7 @@ class FleetReliabilityRates:
 
 ## Failure Analysis at Scale {#sec-fault-tolerance-reliability-reliability-failure-analysis-scale-6b4b}
 
-Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The communication layer has done its job: thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the fleet stack shown in @fig-fleet-stack, fault tolerance acts as the resilience layer for distributed execution. The challenges span the full failure spectrum, from transient bit flips through intermittent aging-related errors to permanent component failures, as @fig-fault-tolerance-failure-spectrum illustrates. The per-category failure rates and the $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}}/N$ scaling annotated in that figure are previews; @eq-system-mtbf derives the inverse scaling and @tbl-cluster-mtbf-scaling tabulates the cluster rates. Gray failures and silent data corruption (SDC) add a second axis of difficulty: low detection rate, high blast radius.
+Imagine a 10,000-GPU cluster midway through a three-month training run for a new foundation model. The communication layer has done its job: thousands of devices exchange gradients through AllReduce, AllGather, and AllToAll as if they were one machine. Then the arithmetic of scale catches up. A GPU fails every few hours, and if the system cannot absorb that ordinary physical event, synchronized training halts and millions of dollars of compute sit idle. **Fault tolerance**\index{Fault Tolerance!definition} is the system property that lets distributed execution continue making useful progress when components fail, degrade, or disappear. In the fleet stack shown in @fig-fleet-stack, fault tolerance acts as the resilience layer for distributed execution. The challenges span the full failure spectrum, from transient bit flips through intermittent aging-related errors to permanent component failures, as @fig-fault-tolerance-failure-spectrum illustrates. The per-category failure rates and the mean time between failures (MTBF) scaling, $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{component}}/N$, annotated in that figure are previews; later analysis derives the inverse scaling and tabulates the cluster rates. Gray failures and silent data corruption (SDC) add a second axis of difficulty: low detection rate, high blast radius.
 
 ::: {#fig-fault-tolerance-failure-spectrum fig-env="figure" fig-pos="htb" fig-cap="**The ML Failure Spectrum**: Reliability challenges at scale span a temporal taxonomy from transient errors (bit flips, single-event upsets) through intermittent errors (aging, marginal components) to permanent errors (stuck-at faults, dead components). Each category demands different detection latency and recovery strategy, and fault tolerance engineering must address all three to maintain fleet-scale throughput." fig-alt="Continuum diagram showing failure characteristics across three categories: Transient, Intermittent, and Permanent. Each category labeled with characteristic frequency and detection profile."}
 ![](images/svg/failure-spectrum.svg)
@@ -148,7 +148,7 @@ System reliability engineering provides the foundational framework for understan
 
 $$ R_{\text{single}}(t) = e^{-\lambda t} $$ {#eq-single-component-reliability}
 
-The mean time between failures (MTBF) for this component equals $1/\lambda$. By the book's convention, mean time to failure (MTTF) names a single component's expected time to its first failure while MTBF names the repairable system's expected time between successive failures; under the constant-rate exponential model used here the two coincide numerically, and the fault-tolerance model uses MTTF for per-component constants and MTBF for composed system rates. Data center GPUs often use planning MTBF values in the tens of thousands of hours, with field behavior depending on operating conditions, cooling effectiveness, manufacturing variation, and workload stress.[^fn-gpu-mtbf-field] @sec-appdx-reliability-foundations-component-rates catalogs the canonical per-component MTTF values (H100, A100, TPU, PCIe, power, network) that anchor these $\lambda$ and FIT figures, so a reader can substitute the constant for any device and reproduce the rates used throughout the fault-tolerance analysis.
+MTBF for this component equals $1/\lambda$. By the book's convention, mean time to failure (MTTF) names a single component's expected time to its first failure while MTBF names the repairable system's expected time between successive failures; under the constant-rate exponential model used here the two coincide numerically, and the fault-tolerance model uses MTTF for per-component constants and MTBF for composed system rates. Data center GPUs often use planning MTBF values in the tens of thousands of hours, with field behavior depending on operating conditions, cooling effectiveness, manufacturing variation, and workload stress.[^fn-gpu-mtbf-field] @sec-appdx-reliability-foundations-component-rates catalogs the canonical per-component MTTF values (H100, A100, TPU, PCIe, power, network) that anchor these $\lambda$ and FIT figures, so a reader can substitute the constant for any device and reproduce the rates used throughout the fault-tolerance analysis.
 
 [^fn-gpu-mtbf-field]: **GPU MTBF Variation**\index{GPU!MTBF variation}\index{MTBF!GPU field variation}: This chapter uses 50,000 hours as an A100-class planning constant, not as a guarantee for every deployed GPU. Published fleet studies from Google TPUv4 pods and Meta GPU clusters report that field reliability depends on topology, cooling, workload, and operational practice [@zu2024tpuv4; @kokolis2025; @dubey2024llama]. The planning constant therefore anchors the arithmetic, while operators should substitute measured fleet rates when they have them.
 
@@ -246,12 +246,6 @@ The optimal interval balances the cost of writing checkpoints against the expect
 
 ::: {#fig-young-daly fig-env="figure" fig-pos="htb" fig-cap="**The Young-Daly Optimal Checkpoint**: Total wasted work is the sum of *checkpointing overhead* (which decreases with interval $\tau_{\text{ckpt}}$) and *rework cost* (which increases with $\tau_{\text{ckpt}}$). The minimum point defines the optimal interval $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$. For an illustrative cluster with a five-hour system MTBF and 15-minute write time, the optimal interval is approximately 1.6 hours." fig-alt="Plot of Overhead vs. Checkpoint Interval. A red curve for Rework Cost increases linearly. A blue curve for Checkpoint Overhead decreases hyperbolically. Their sum (green curve) shows a clear minimum point labeled Optimal Interval."}
 ![](images/svg/young-daly-optimization.svg)
-:::
-
-@Fig-checkpoint-tax decomposes that same U-curve into its two competing components, the view the Checkpointing section uses when it works the formula through on a concrete cluster.
-
-::: {#fig-checkpoint-tax fig-env="figure" fig-pos="htb" fig-cap="**The Checkpoint Tax Decomposition**: Time overhead as a function of checkpoint interval, separated into its two components: *save overhead* (blue) falls hyperbolically as intervals grow, while *expected rework* (red) rises linearly with failure probability. Their sum (green, *total overhead*) exhibits the U-shape whose minimum the Young-Daly formula locates. The total-overhead curve is the 'Checkpoint Tax' on compute capacity at any given interval; shorter-MTBF clusters shift this curve upward and push the optimum leftward." fig-alt="Plot of Time Overhead in percent vs. Checkpoint Interval in minutes, x-axis 0 to 80 and y-axis 0 to 35. A blue hyperbolic save-overhead curve decreases with interval. A red linear expected-rework curve increases with interval. A green total-overhead curve sums the two and shows a U-shape with a minimum."}
-![](images/svg/checkpoint-tax.svg)
 :::
 
 A quick availability calculation shows the same scaling pressure from another angle.
@@ -743,9 +737,9 @@ Google reported that SDC in TPU pods can manifest as sudden, inexplicable spikes
 
 :::
 
-Google addresses this class of failure with system-level mitigation, including spare capacity and sanity checks that can drain suspect chips when loss or gradient monitors flag anomalies (@fig-sdc-controller) [@dean2024mlsys]. This moves reliability from the *component* (which we cannot trust) to the *system* (which verifies the result).
+Google addresses this class of failure with system-level mitigation, including spare capacity and sanity checks that can drain suspect chips when loss or gradient monitors flag anomalies (@fig-sdc-controller) [@dean2024mlsys]. This moves reliability from the component, which we cannot trust, to the system, which verifies the result.
 
-::: {#fig-sdc-controller fig-env="figure" fig-pos="htb" fig-cap="**Hot Spare Redundancy**: Google's data-center examples use spare capacity and sanity checking to keep ML training moving despite hardware faults, transitioning work away from suspect resources when monitors flag anomalies. This approach contrasts with parallel redundancy techniques like DMR/TMR by providing a reactive fault-tolerance mechanism. Source: [@dean2024mlsys]." fig-alt="Four-panel sequence: normal training grid, defective machine marked red, SDC checker detecting fault, workload transferred to hot spare while defective unit sent for repair."}
+::: {#fig-sdc-controller fig-env="figure" fig-pos="htb" fig-cap="**Hot Spare Redundancy**: Google's data-center examples use spare capacity and sanity checking to keep ML training moving despite hardware faults, transitioning work away from suspect resources when monitors flag anomalies. This approach contrasts with parallel redundancy techniques such as dual modular redundancy and triple modular redundancy by providing a reactive fault-tolerance mechanism. Source: [@dean2024mlsys]." fig-alt="Four-panel sequence: normal training grid, defective machine marked red, SDC checker detecting fault, workload transferred to hot spare while defective unit sent for repair."}
 ![](images/svg/sdc-controller.svg)
 :::
 
@@ -812,6 +806,14 @@ Defending against correlated failures\index{Correlated Failure} requires underst
 
 The nesting of failure domains in @tbl-failure-domains has direct consequences for redundancy placement: placing replicas within the same domain provides zero protection against that domain's failure mode.
 
+::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of Failure Domains**: Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects 8 GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (for example, different racks or rows) to survive correlated failures." fig-alt="Nested rectangles showing failure domain hierarchy. Region contains Zone A and Zone B. Each zone contains a rack with switch and PDU. Each rack contains a node with OS and PCIe. Each node contains multiple GPUs. Annotation explains containment."}
+
+![](images/svg/failure-domains.svg)
+
+:::
+
+The key insight from @fig-failure-domains is that redundancy is effective only when replicas span independent failure domains: placing three model replicas on the same rack provides no protection against the rack switch or PDU that all three share.
+
 ::: {#chk-fault-tolerance-mapping-failure-domains .callout-checkpoint title="Mapping failure domains"}
 
 Verify your understanding of how failure domains nest and their operational impact:
@@ -822,14 +824,6 @@ Verify your understanding of how failure domains nest and their operational impa
 - [ ] **Nested domains**: Explain **Hierarchical Containment** and decide whether the corresponding Rack failure domain still matters when a Zone fails.
 
 :::
-
-::: {#fig-failure-domains fig-env="figure" fig-pos="htb" fig-cap="**Hierarchy of Failure Domains**: Failure domains are often nested or overlapping. A GPU failure affects one device. A node failure affects 8 GPUs. A rack switch failure affects 32-64 GPUs. A power distribution unit (PDU) failure may affect multiple racks. Effective fault tolerance requires placing replicas across independent domains (for example, different racks or rows) to survive correlated failures." fig-alt="Nested rectangles showing failure domain hierarchy. Region contains Zone A and Zone B. Each zone contains a rack with switch and PDU. Each rack contains a node with OS and PCIe. Each node contains multiple GPUs. Annotation explains containment."}
-
-![](images/svg/failure-domains.svg)
-
-:::
-
-The key insight from @fig-failure-domains is that redundancy is effective only when replicas span independent failure domains: placing three model replicas on the same rack provides no protection against the rack switch or PDU that all three share.
 
 ::: {#ws-fault-tolerance-google-tpuv4-routing .callout-war-story title="The supercomputer that rerouted around faults (2024)"}
 
@@ -903,7 +897,7 @@ Large Language Models experience the highest absolute failure costs due to their
 
 Recommendation Systems present unique challenges because their training is often continuous rather than episodic. The value of a RecSys model derives partly from its freshness. Embeddings that capture recent user behavior outperform stale embeddings. A failure that loses hours of embedding updates may degrade recommendation quality in ways that directly impact revenue. Meta has documented that recommendation model freshness directly correlates with engagement metrics, making recovery time a business-critical metric.[^fn-recsys-freshness-cost]
 
-[^fn-recsys-freshness-cost]: **RecSys Freshness**\index{RecSys Freshness}\index{Recommendation System!freshness fault tolerance}: Meta's Deep Learning Recommendation Model (DLRM) infrastructure documents that embedding staleness measured in hours produces measurable degradation in recommendation relevance and engagement metrics. This inverts the typical fault tolerance priority: for recommendation systems, minimizing recovery time matters more than minimizing checkpoint overhead, because stale embeddings directly reduce revenue.
+[^fn-recsys-freshness-cost]: **RecSys Freshness**\index{RecSys Freshness}\index{Recommendation System!freshness fault tolerance}: Meta's DLRM infrastructure documents that embedding staleness measured in hours produces measurable degradation in recommendation relevance and engagement metrics. This inverts the typical fault tolerance priority: for recommendation systems, minimizing recovery time matters more than minimizing checkpoint overhead, because stale embeddings directly reduce revenue.
 
 Vision Models occupy a middle ground with moderate training durations and manageable checkpoint sizes. The relatively small checkpoints enable frequent checkpointing with minimal overhead. A ViT-Large checkpoint in the 1–2 GB range imposes little overhead compared with large language or embedding-heavy recommendation workloads. Data augmentation state represents the primary state beyond model weights that must be preserved for reproducible recovery. The augmentation parameters and data shuffling seed must be captured.
 
@@ -1120,7 +1114,7 @@ The bandwidth table should not be read as a universal ranking of memory error ra
 
 @Fig-transient-fault shows the same charge-disturbance mechanism the failure taxonomy introduced (@sec-fault-tolerance-reliability-physics-silent-corruption-5d5d), now at the device level: a cosmic ray strikes a memory cell or transistor and the induced charge alters stored or transmitted data.\index{Transient Fault!mechanism} What this pass adds is the downstream effect on the model rather than the physics.
 
-::: {#fig-transient-fault fig-env="figure" fig-pos="htb" fig-cap="**Transient Fault Mechanism**: Cosmic rays and electromagnetic interference induce bit flips within hardware by altering electrical charges in memory cells and transistors, potentially corrupting data and causing system errors. Understanding these fault sources is critical for building robust AI systems that can tolerate unpredictable hardware behavior. Source: [NTT](HTTPS://group.ntt/en/newsrelease/2018/11/22/181122a.HTML)." fig-alt="Diagram showing cosmic ray particle striking a memory cell transistor. Electrical charge disruption causes bit value to flip from 0 to 1, illustrated with circuit schematic."}
+::: {#fig-transient-fault fig-env="figure" fig-pos="htb" fig-cap="**Transient Fault Mechanism**: Cosmic rays and electromagnetic interference induce bit flips within hardware by altering electrical charges in memory cells and transistors, potentially corrupting data and causing system errors. Understanding these fault sources is critical for building robust AI systems that can tolerate unpredictable hardware behavior. Source: [NTT](https://group.ntt/en/newsrelease/2018/11/22/181122a.html)." fig-alt="Diagram showing cosmic ray particle striking a memory cell transistor. Electrical charge disruption causes bit value to flip from 0 to 1, illustrated with circuit schematic."}
 
 ![](./images/png/transient_fault.png)
 
@@ -1128,7 +1122,7 @@ The bandwidth table should not be read as a universal ranking of memory error ra
 
 During training, transient faults in the memory storing model weights or gradients can lead to incorrect updates that compromise convergence and accuracy [@he2023]. During inference, a bit flip in the activation values of a neural network can alter the final classification or regression output [@mahmoud2020]. In safety-critical applications, these faults can result in incorrect decisions that compromise safety [@li2017; @jha2019; @wan2021]. Resource-constrained environments amplify these vulnerabilities: Binarized Neural Networks (BNNs) [@courbariaux2016binarized], which represent weights in single-bit precision, suffer performance degradation from 98 percent to 70 percent test accuracy when random bit-flipping soft errors are inserted with 10 percent probability [@aygun2021]. In distributed training, network partitions[^fn-network-partition-training][^fn-ib-sm] can isolate ranks, and in synchronous training, even a single partitioned rank blocks the entire AllReduce collective.
 
-[^fn-ib-sm]: **InfiniBand Subnet Manager (SM)**\index{Subnet Manager!reliability}: A centralized software entity that discovers all nodes and switches, assigns Local Identifiers (LIDs), and calculates routing tables. In a network partition, the SM's role is critical: it must re-discover the new topology and update routing before training can safely resume. If the SM itself is partitioned, the fabric can enter a "zombie" state where nodes are physically connected but cannot route messages, a common cause of $T_{\text{detect}}$ delays in large training runs.
+[^fn-ib-sm]: [offset=-20mm] **InfiniBand Subnet Manager (SM)**\index{Subnet Manager!reliability}: A centralized software entity that discovers all nodes and switches, assigns Local Identifiers (LIDs), and calculates routing tables. In a network partition, the SM's role is critical: it must re-discover the new topology and update routing before training can safely resume. If the SM itself is partitioned, the fabric can enter a "zombie" state where nodes are physically connected but cannot route messages, a common cause of $T_{\text{detect}}$ delays in large training runs.
 
 [^fn-network-partition-training]: **Network Partition**\index{Network Partition!distributed training}: A network partition leaves one subset of workers unable to communicate with another. In synchronous training, even a single partitioned rank blocks the entire AllReduce collective, making partition tolerance a prerequisite for training jobs that run long enough to encounter routine fabric or control-plane disruptions.
 
@@ -1152,7 +1146,7 @@ The Intel Pentium FDIV bug\index{Pentium FDIV Bug!error regions}, discovered in 
 
 @Fig-stuck-fault visualizes how stuck-at faults propagate through logic gates and interconnects, causing incorrect computations or persistent data corruption that affects downstream model behavior.\index{Stuck-at Fault Model}
 
-::: {#fig-stuck-fault fig-env="figure" fig-pos="htb" fig-cap="**Stuck-at Fault Model**: Digital circuits can experience permanent faults where a signal line becomes fixed at a logical 0 or 1, regardless of input; this figure represents a simplified depiction of a stuck-at-0 fault, where a signal is persistently low, potentially leading to incorrect computations or system failures. Source: [accendo reliability](HTTPS://accendoreliability.com/digital-circuits-stuck-fault-model/)." fig-alt="Logic gate circuit diagram showing signal propagation through inverters and AND gates. One input line marked stuck-at-0 with X symbol, causing incorrect output regardless of input."}
+::: {#fig-stuck-fault fig-env="figure" fig-pos="htb" fig-cap="**Stuck-at Fault Model**: Digital circuits can experience permanent faults where a signal line becomes fixed at a logical 0 or 1, regardless of input; this figure represents a simplified depiction of a stuck-at-0 fault, where a signal is persistently low, potentially leading to incorrect computations or system failures. Source: [accendo reliability](https://accendoreliability.com/digital-circuits-stuck-fault-model/)." fig-alt="Logic gate circuit diagram showing signal propagation through inverters and AND gates. One input line marked stuck-at-0 with X symbol, causing incorrect output regardless of input."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
@@ -1234,7 +1228,7 @@ For ML systems, the recovery decision is to stop trusting the component. A perma
 
 Intermittent faults are the hardest category because they create evidence, then disappear. A node may pass a reboot test, rejoin the fleet, and fail again only when the next training job drives the package into the same thermal, voltage, or communication regime. Physical degradation (cracks in solder joints, aging ball grid arrays, residue-induced electrical connections) creates those load-dependent conditions (@fig-intermittent-fault) [@constantinescu2008; @rashid2015]. Voltage-underscaling studies such as ThUnderVolt show a separate timing-error route: reduced voltage margins can make signal propagation unreliable and cause incorrect computations that are difficult to reproduce [@zhang2018thundervolt].\index{Intermittent Fault!mechanism}
 
-::: {#fig-intermittent-fault fig-env="figure" fig-pos="htb" fig-cap="**Intermittent Fault Mechanism**: Increased resistance from cracks between copper bumps and package solder represents a common source of intermittent faults, disrupting signal transmission and potentially causing unpredictable system behavior. Microscopic material defects like these highlight the vulnerability of hardware to latent failures that are difficult to detect during testing but can manifest during operation. Source: [constantinescu](HTTPS://ieeexplore.ieee.org/document/4925824)." fig-alt="Cross-section diagram of chip package showing crack between copper bump and solder joint. Arrows indicate increased resistance path causing intermittent signal failures."}
+::: {#fig-intermittent-fault fig-env="figure" fig-pos="htb" fig-cap="**Intermittent Fault Mechanism**: Increased resistance from cracks between copper bumps and package solder represents a common source of intermittent faults, disrupting signal transmission and potentially causing unpredictable system behavior. Microscopic material defects like these highlight the vulnerability of hardware to latent failures that are difficult to detect during testing but can manifest during operation. Source: [constantinescu](https://ieeexplore.ieee.org/document/4925824)." fig-alt="Cross-section diagram of chip package showing crack between copper bump and solder joint. Arrows indicate increased resistance path causing intermittent signal failures."}
 
 ![](./images/png/intermittent_fault.png)
 
@@ -1242,7 +1236,7 @@ Intermittent faults are the hardest category because they create evidence, then 
 
 @Fig-intermittent-fault-dram reveals how residue-induced intermittent faults in DRAM chips create unreliable electrical connections that lead to sporadic failures.\index{DRAM!residue fault}
 
-::: {#fig-intermittent-fault-dram fig-env="figure" fig-pos="htb" fig-cap="**DRAM Residue Fault**: Intermittent failures in DRAM chips commonly arise from microscopic residue accumulation and create unreliable electrical connections. Physical defects can induce sporadic errors and highlight the need for fault-tolerant system design and hardware testing. Source: [Constantinescu](HTTPS://ieeexplore.ieee.org/document/4925824)." fig-alt="Microscope image of DRAM chip showing particle residue accumulation between memory cell contacts. Magnified view reveals contamination causing intermittent electrical connection failures."}
+::: {#fig-intermittent-fault-dram fig-env="figure" fig-pos="htb" fig-cap="**DRAM Residue Fault**: Intermittent failures in DRAM chips commonly arise from microscopic residue accumulation and create unreliable electrical connections. Physical defects can induce sporadic errors and highlight the need for fault-tolerant system design and hardware testing. Source: [Constantinescu](https://ieeexplore.ieee.org/document/4925824)." fig-alt="Microscope image of DRAM chip showing particle residue accumulation between memory cell contacts. Magnified view reveals contamination causing intermittent electrical connection failures."}
 
 ![](./images/png/intermittent_fault_dram.png)
 
@@ -1382,7 +1376,7 @@ Hardware redundancy uses component duplication and voting to detect and mask fau
 ![](images/svg/error-masking.svg)
 :::
 
-At the software level, the same decision tree continues, with each fault signature routed to the one evidence stream that exposes it most cheaply. A silent statistical drift, gradients, losses, activations, or latencies that no longer match the expected distribution, is caught by runtime monitoring and anomaly detection (statistical outlier tests, One-Class SVM) [@francalanza2017; @chandola2009], the cheapest layer because it rides on metrics the training loop already emits. A corrupted-but-live state or checkpoint is caught by data-consistency checks that confirm it still corresponds to trusted data [@lindholm2019]. A fail-stop node is separated from a merely slow one by heartbeat mechanisms [@kawazoe_aguilera1997], and a task that stalls without crashing is caught by watchdog timers [@pont2002using] that trigger recovery on lost progress. Only when none of these passive signals suffice, because the computation itself may be wrong with no statistical tell, does the system pay for software-implemented redundancy (SWIFT-style instruction duplication, N-version programming, Reed-Solomon reconstruction) [@reis2005swift; @avizienis2004basic; @plank1997; @reed1960], whose duplicated or reconstructed computation is the most expensive layer and so is reserved for the highest-value state.
+At the software level, the same decision tree continues, with each fault signature routed to the one evidence stream that exposes it most cheaply. Silent statistical drift appears when gradients, losses, activations, or latencies no longer match the expected distribution, and runtime monitoring plus anomaly detection (statistical outlier tests, One-Class SVM) catches it at the cheapest layer because those checks ride on metrics the training loop already emits [@francalanza2017; @chandola2009]. A corrupted-but-live state or checkpoint is caught by data-consistency checks that confirm it still corresponds to trusted data [@lindholm2019]. A fail-stop node is separated from a merely slow one by heartbeat mechanisms [@kawazoe_aguilera1997], and a task that stalls without crashing is caught by watchdog timers [@pont2002using] that trigger recovery on lost progress. Only when none of these passive signals suffice, because the computation itself may be wrong with no statistical tell, does the system pay for software-implemented redundancy (SWIFT-style instruction duplication, N-version programming, Reed-Solomon reconstruction) [@reis2005swift; @avizienis2004basic; @plank1997; @reed1960], whose duplicated or reconstructed computation is the most expensive layer and so is reserved for the highest-value state.
 
 These mechanisms reduce the unreliable substrate risk, but they do not protect against faults introduced by the software stack itself. The next layer must reason about bugs that look like valid computation while corrupting the ML pipeline.
 
@@ -1393,7 +1387,7 @@ Verify your understanding of the transient, permanent, and intermittent fault ca
 - [ ] **Transient fault**: Classify a GPU that produces a wrong result once after a cosmic-ray strike and then computes correctly for the rest of the run, and justify why error correction codes, not node replacement, match that fault.
 - [ ] **Intermittent vs. permanent**: Distinguish an **intermittent** fault from a **permanent** one when both can produce a stuck-at value, including the diagnostic signal that separates them.
 - [ ] **Fault-error-failure chain**: Trace a single bit flip through the fault, error, failure chain, identifying where error correction codes and checkpoint-restart each intervene.
-- [ ] **Silent corruption**: Explain why silent corruption sits apart from the other manifestations in @tbl-fault_types even when its underlying fault is an ordinary transient bit flip.
+- [ ] **Silent corruption**: Explain why silent corruption sits apart from the other fault manifestations even when its underlying fault is an ordinary transient bit flip.
 
 :::
 
@@ -1474,15 +1468,15 @@ Because many software faults leave the pipeline running while corrupting gradien
 
 : **Fault Mitigation Strategies**: Software faults in ML systems require layered gates that catch different corruption modes: tokenizer boundary errors, batch-shape drift, unsafe slicing, dependency incompatibility, and runtime anomalies. {#tbl-software-faults-summary-ft}
 
-These safeguards matter only when each gate targets a concrete corruption path. A unit test that checks only whether the tokenizer runs is too weak; it must assert that system prompts, labels, masks, and sequence-length metadata survive preprocessing with the intended semantics. Integration tests then follow one batch through loading, sharding, collation, and model input construction, while regression tests preserve representative prompts and edge cases before they enter distributed execution (@fig-regression-testing-ft). The CI/CD structure in @fig-CI-CD-procedure-ft is useful only when the release pipeline treats model, data, and preprocessing changes as ML artifacts that can corrupt the training objective; otherwise, it is just a generic software-delivery diagram. Automated gates make those checks release requirements instead of optional habits.\index{Pipeline!ci/cd}\index{Regression Test Automation}
+These safeguards matter only when each gate targets a concrete corruption path. A unit test that checks only whether the tokenizer runs is too weak; it must assert that system prompts, labels, masks, and sequence-length metadata survive preprocessing with the intended semantics. Integration tests then follow one batch through loading, sharding, collation, and model input construction, while regression tests preserve representative prompts and edge cases before they enter distributed execution (@fig-regression-testing-ft). The continuous integration/continuous deployment (CI/CD) structure in @fig-CI-CD-procedure-ft is useful only when the release pipeline treats model, data, and preprocessing changes as ML artifacts that can corrupt the training objective; otherwise, it is just a generic software-delivery diagram. Automated gates make those checks release requirements instead of optional habits.\index{Pipeline!ci/cd}\index{Regression Test Automation}
 
-::: {#fig-regression-testing-ft fig-env="figure" fig-pos="htb" fig-cap="**Automated Regression Testing**: The recurring concerns of regression testing, spanning platform coverage, risk-based selection, parallel execution, unit and API coverage, performance impact, and continuous methodologies. For ML pipelines, these same gates must preserve tokenizer behavior, feature semantics, and batch construction across code changes. Source: [UTOR](HTTPS://u-tor.com/topic/regression-vs.-integration)." fig-alt="Six-spoke wheel labeled Automated Regression Testing with spokes for multiple platform automation, risk-based regression, parallel execution, faster functionality coverage with unit and API tests, performance impact analysis, and continuous testing methodologies."}
+::: {#fig-regression-testing-ft fig-env="figure" fig-pos="htb" fig-cap="**Automated Regression Testing**: The recurring concerns of regression testing, spanning platform coverage, risk-based selection, parallel execution, unit and API coverage, performance impact, and continuous methodologies. For ML pipelines, these same gates must preserve tokenizer behavior, feature semantics, and batch construction across code changes. Source: [UTOR](https://u-tor.com/topic/regression-vs.-integration)." fig-alt="Six-spoke wheel labeled Automated Regression Testing with spokes for multiple platform automation, risk-based regression, parallel execution, faster functionality coverage with unit and API tests, performance impact analysis, and continuous testing methodologies."}
 
 ![](images/png/regression_testing.png)
 
 :::
 
-::: {#fig-CI-CD-procedure-ft fig-env="figure" fig-pos="htb" fig-cap="**A CI/CD Pipeline**: The standard software-delivery flow, from developer commit through version control, build, automated unit and UI testing, packaging, and release to general availability, grouped into a continuous-integration build pipeline and a continuous-delivery release pipeline. The accompanying text explains the additional gates, on model artifacts, data contracts, dependency versions, and preprocessing semantics, that this structure must add to become fault-tolerant for ML. Source: [geeksforgeeks](HTTPS://www.geeksforgeeks.org/ci-cd-continuous-integration-and-continuous-delivery/)." fig-alt="CI/CD pipeline diagram: developers commit to version control, then a build pipeline compiles, packages, and runs automated unit and UI tests, and a release pipeline packages, deploys via an operations team, tests, and ships to general availability."}
+::: {#fig-CI-CD-procedure-ft fig-env="figure" fig-pos="htb" fig-cap="**A CI/CD Pipeline**: The standard software-delivery flow, from developer commit through version control, build, automated unit and UI testing, packaging, and release to general availability, grouped into a continuous-integration build pipeline and a continuous-delivery release pipeline. The accompanying text explains the additional gates, on model artifacts, data contracts, dependency versions, and preprocessing semantics, that this structure must add to become fault-tolerant for ML. Source: [geeksforgeeks](https://www.geeksforgeeks.org/ci-cd-continuous-integration-and-continuous-delivery/)." fig-alt="CI/CD pipeline diagram: developers commit to version control, then a build pipeline compiles, packages, and runs automated unit and UI tests, and a release pipeline packages, deploys via an operations team, tests, and ships to general availability."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\large]
@@ -2874,7 +2868,7 @@ Loss spike\index{Loss Spike} detection catches the most insidious failure mode: 
 
 Training dynamics monitoring extends detection beyond explicit errors. Monitoring loss values, gradient norms, and activation statistics can detect Byzantine failures that produce incorrect results without triggering exceptions. Sudden loss spikes, gradient explosions, or statistical anomalies in per-rank gradient distributions may indicate silent corruption that would otherwise go undetected for hours.
 
-In practice, the gap between theoretical heartbeat timeouts and actual detection latencies is substantial, because distinguishing genuine failures from temporary stragglers remains an inherently difficult problem.
+The operational question is therefore how long detection really takes once these layers interact.
 
 ::: {#psp-fault-tolerance-realistic-detection-latencies .callout-perspective title="Realistic failure detection latencies"}
 
@@ -3422,12 +3416,12 @@ Feature fallback controls how much input quality the model may lose before the r
 
 The key design step is prioritizing features by their contribution to prediction quality. @Tbl-feature-degradation-tiers summarizes a four-level policy in which critical features block the request, important features use defaults, useful features use cached values, and optional features can be omitted with bounded quality impact:
 
-| **Tier**      |      **Example Features**     | **Missing Action** |  **Quality Impact**  |
-|:--------------|:-----------------------------:|:------------------:|:--------------------:|
-| **Critical**  |        User ID, Item ID       |   Block request    |     Cannot serve     |
-| **Important** | User history, Item attributes |    Use defaults    |  5–10% quality loss  |
-| **Useful**    |       Real-time context       |     Use cached     |  2–5% quality loss   |
-| **Optional**  |       Secondary signals       |        Omit        | &lt; 2% quality loss |
+| **Tier**      |      **Example Features**     | **Missing Action** | **Quality Impact** |
+|:--------------|:-----------------------------:|:------------------:|:------------------:|
+| **Critical**  |        User ID, Item ID       |   Block request    |    Cannot serve    |
+| **Important** | User history, Item attributes |    Use defaults    | 5–10% quality loss |
+| **Useful**    |       Real-time context       |     Use cached     | 2–5% quality loss  |
+| **Optional**  |       Secondary signals       |        Omit        | < 2% quality loss  |
 
 : **Graceful Feature Degradation Tiers**: Features classified by importance to prediction quality, with the corresponding response when each tier is unavailable. Critical features block the request entirely; lower tiers allow the system to fall back to defaults, cached values, or omission with bounded quality impact. The tiers convert a binary "feature available or not" question into a four-step degradation ladder. {#tbl-feature-degradation-tiers}
 
@@ -3657,11 +3651,9 @@ Cascade failures are particularly insidious because the root cause is obscured b
 
 :::
 
-The production examples that follow show how failure detection, state preservation, and observability are orchestrated together at scale.
-
 ## Case Studies {#sec-fault-tolerance-reliability-reliability-case-studies-927f}
 
-Published production systems make the chapter's scale lesson concrete: the same failure arithmetic reappears as checkpoint tax, topology reconfiguration, chaos testing, and elastic recovery. The cases below use public reports from Meta, Google, Netflix, and Microsoft to show representative engineering patterns. Treat the operational numbers as reported magnitudes that reveal the design pressure, not as universal constants. Meta's OPT-175B training run on a 992-GPU cluster provides the first example: dozens of hardware failures had to be absorbed without aborting training.
+Published production systems make the chapter's scale lesson concrete: failure detection, state preservation, and observability reappear as checkpoint tax, topology reconfiguration, chaos testing, and elastic recovery. The cases below use public reports from Meta, Google, Netflix, and Microsoft to show representative engineering patterns. Treat the operational numbers as reported magnitudes that reveal the design pressure, not as universal constants. Meta's OPT-175B training run on a 992-GPU cluster provides the first example: dozens of hardware failures had to be absorbed without aborting training.
 
 ### Large-scale LLM training at Meta {#sec-fault-tolerance-reliability-reliability-largescale-llm-training-fault-tolerance-f4aa}
 

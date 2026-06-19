@@ -145,7 +145,7 @@ The critical term is the **communication-computation ratio**\index{Communication
 *Past a communication-to-compute threshold, scaling stops being ideal.*
 :::
 
-Two regimes follow from this ratio. A compute-bound cluster, where $T_{\text{compute}}/N \gg T_{\text{comm}}(N)$, spends most of its time multiplying matrices; this is the ideal state, typical for large batch sizes on dense models such as ResNet. A communication-bound cluster, where $T_{\text{comm}}(N) \approx T_{\text{compute}}/N$, spends significant time waiting for gradients or activations to arrive, the common state for large language models (LLMs) and deep learning recommendation models (DLRMs), where parameter synchronization saturates the network.
+Two regimes follow from this ratio. A compute-bound cluster, where $T_{\text{compute}}/N \gg T_{\text{comm}}(N)$, spends most of its time multiplying matrices; this is the ideal state, typical for large batch sizes on dense models such as ResNet. A communication-bound cluster, where $T_{\text{comm}}(N) \approx T_{\text{compute}}/N$, spends significant time waiting for gradients or activations to arrive, the common state for large language models (LLMs) and DLRM-style recommendation models, where parameter synchronization saturates the network.
 
 @Sec-appdx-c3-taxonomy-bottleneck-table works this ratio into a diagnostic framework that classifies a workload as compute-bound, memory-bound, or communication-bound from its measured bandwidth and arithmetic intensity, turning the qualitative regimes above into a repeatable test.
 
@@ -185,7 +185,7 @@ Choosing the right parallelism strategy is not a matter of preference; it is a c
 | **Tensor Parallel (TP)**   |   AllReduce Activations   |              $\propto B \times N_L$ (Layers)               | Critical: Needs NVLink          |
 | **Pipeline Parallel (PP)** |    Point-to-Point (P2P)   | $\propto B \times S \times d_{\text{model}}$ (Activations) | Low BW (Ethernet is sufficient) |
 
-: **Parallelism Communication Costs**: Tensor parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data parallelism sits in the middle but scales poorly as communicated gradient bytes $M_{\text{grad}}$ grow, necessitating ZeRO optimizations. {#tbl-parallelism-tradeoffs}
+: **Parallelism Communication Costs**: Tensor parallelism has the highest communication frequency (per layer), confining it to intra-node (NVLink) usage. Pipeline parallelism has the lowest communication volume (boundary activations only), making it suitable for inter-node (Ethernet/InfiniBand) scaling. Data parallelism sits in the middle but scales poorly as communicated gradient bytes $M_{\text{grad}}$ grow, eventually requiring memory-efficient sharding. {#tbl-parallelism-tradeoffs}
 
 The bandwidth requirements impose a hard constraint on hardware placement: each parallelism strategy must be matched to the interconnect available between the GPUs that need to communicate, or the design fails before it leaves the whiteboard. A quick back-of-envelope bandwidth feasibility check catches that mismatch before any code is written.
 
@@ -266,7 +266,7 @@ The simplest approach gives each GPU a complete, identical copy of the model and
 ***Data Parallelism***\index{Data Parallelism!definition} is a distributed training strategy in which each worker holds a complete replica of the model and processes an independent shard of the minibatch, then synchronizes gradient updates via AllReduce so all replicas apply identical parameter changes each step.
 
 1.  **Significance**: With $N$ workers each processing batch size $B$, the effective global batch size is $N \times B$, scaling throughput linearly while keeping per-worker memory constant. For a 1B-parameter model at 2 GB in BF16, 1,024 workers achieve 1,024$\times$ the single-GPU throughput—until the gradient AllReduce (2 GB per step at ring-optimal $2(N-1)/N$ per worker) exceeds backward compute time and creates the communication bottleneck.
-2.  **Distinction**: Unlike model parallelism, where parameters are partitioned so no single worker holds the full model, data parallelism requires every worker to have sufficient memory capacity to store the complete model state—making it inapplicable for models larger than a single accelerator's memory without combining it with model sharding (ZeRO, FSDP).
+2.  **Distinction**: Unlike model parallelism, where parameters are partitioned so no single worker holds the full model, data parallelism requires every worker to have sufficient memory capacity to store the complete model state—making it inapplicable for models larger than a single accelerator's memory without combining it with optimizer-state or parameter sharding.
 3.  **Common pitfall**: A frequent misconception is that data parallelism scales indefinitely with worker count. Scaling the effective batch size $B$ beyond the workload-dependent critical batch size degrades statistical efficiency, requiring more training steps to reach target loss and eroding the throughput gains from adding more workers [@Shallue2019measuring].
 
 :::
@@ -2137,8 +2137,7 @@ The interconnect topology dictates which form of model parallelism is viable at 
 ```{=latex}
 \vspace*{-4mm}
 ```
-<!-- TODO(nvlink-convention 2026-06-10): regenerate SVG to show the per-direction cliff (NVLink 450 GB/s one-way versus NDR 50 GB/s per port, a factor of nine) to match the body; the baked-in annotation compares NVLink's 900 GB/s bidirectional total against a per-port rate, mixing conventions and showing a factor of eighteen. No matplotlib source in repo; flagged for regeneration. -->
-![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Violet bandwidth ladder comparing NVLink with NDR InfiniBand, illustrating the order-of-magnitude bandwidth drop from intra-node to inter-node links."}
+![](images/svg/vol2_distributed_training_margin_004.svg){width="100%" fig-alt="Violet bandwidth ladder comparing per-direction NVLink bandwidth with NDR InfiniBand, illustrating the order-of-magnitude bandwidth drop from intra-node to inter-node links."}
 
 *Tensor parallelism needs NVLink bandwidth; pipeline parallelism tolerates slower fabric.*
 :::
@@ -2216,7 +2215,7 @@ While AllReduce dominates dense model training, the **Parameter Server (PS)**\in
 
 For dense models (like ResNet or BERT), the PS architecture creates a bottleneck: with $N$ workers, the server's inbound bandwidth must absorb $N$ gradient streams simultaneously, saturating the server's network bandwidth and making it the communication chokepoint. This "incast" problem drove the adoption of Ring AllReduce, where each worker sends and receives at its own link rate, achieving $N$-fold higher aggregate bandwidth by distributing the load across all nodes. For dense models beyond 4--8 GPUs, decentralized AllReduce wins decisively.
 
-However, for **Recommendation Systems**\index{Recommendation System}—specifically the Deep Learning Recommendation Model (DLRM)—the model parameters are dominated by massive Embedding Tables (often 10 TB+) that cannot fit on any single GPU. Furthermore, the updates are sparse: a batch of users interacts with only a tiny fraction (e.g., 0.001 percent) of the items.
+However, for **Recommendation Systems**\index{Recommendation System}—specifically DLRM—the model parameters are dominated by massive Embedding Tables (often 10 TB+) that cannot fit on any single GPU. Furthermore, the updates are sparse: a batch of users interacts with only a tiny fraction (e.g., 0.001 percent) of the items.
 
 In this sparse regime, the parameter server avoids dense synchronization by moving only the rows that a batch touches:
 
@@ -2267,7 +2266,7 @@ The sparse communication pattern distinguishes recommendation and MoE workloads 
 Archetype B (DLRM at Scale) and Archetype A (GPT-4/Llama-3) scale differently.
 
 *   **LLMs (Dense)**: Scale via Tensor/Pipeline Parallelism. Constraint: compute and interconnect bandwidth (NVLink).
-*   **DLRMs (Sparse)**: Scale via Embedding Sharding (Parameter Servers). Constraint: memory capacity and interconnect latency (Random Access).
+*   **DLRM-style models (Sparse)**: Scale via Embedding Sharding (Parameter Servers). Constraint: memory capacity and interconnect latency (Random Access).
 
 The distinction dictates fundamentally different cluster designs: dense GPU pods for LLMs vs. memory-rich CPU/GPU hybrids for RecSys.
 
@@ -2294,9 +2293,9 @@ The advantages come at the cost of three fundamental limitations. Pipeline bubbl
 
 ## FP8 for distributed training {#sec-distributed-training-fp8}
 
-Numerical precision is itself a distribution lever: halving the bytes per value halves the gradient and activation payloads that the AllReduce and tensor-parallel collectives move, shrinking the $T_{\text{comm}}(N)$ term that dominates step time at scale. FP8 exploits this lever by reducing the numerical precision of computation while trying to preserve enough range for stable optimization.
+Numerical precision is itself a distribution lever: halving the bytes per value halves the gradient and activation payloads that the AllReduce and tensor-parallel collectives move, shrinking the $T_{\text{comm}}(N)$ term that dominates step time at scale. The 8-bit floating point (FP8) format exploits this lever by reducing the numerical precision of computation while trying to preserve enough range for stable optimization.
 
-FP8 matters to distributed training when its narrower formats reduce communication without destabilizing optimization. Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. FP8-capable accelerators such as the NVIDIA H100 add support for 8-bit floating point (FP8), offering two formats optimized for different phases of training [@micikevicius2022fp8].
+FP8 matters to distributed training when its narrower formats reduce communication without destabilizing optimization. Traditional mixed-precision training uses FP32 master weights with FP16 forward and backward passes. FP8-capable accelerators such as the NVIDIA H100 add support for FP8, offering two formats optimized for different phases of training [@micikevicius2022fp8].
 
 The choice between the two FP8 formats is therefore not an instruction-set detail; it decides which tensors can be narrowed without breaking the optimizer. E4M3 (4-bit exponent, 3-bit mantissa) provides a range of approximately $\pm 448$ with moderate precision, making it suitable for *weights and activations* in the forward pass where values cluster in predictable distributions. E5M2 (5-bit exponent, 2-bit mantissa) provides a much larger range of approximately $\pm 57344$ but coarser precision, which is why it is used for *gradients* that can span many orders of magnitude during backpropagation. Using E4M3 for gradients would cause frequent overflow and underflow, while E5M2 captures the full gradient distribution at the cost of slightly noisier updates. Read @tbl-precision-formats as a distribution constraint map: each row changes the balance among range, precision, memory traffic, and trainability.
 
@@ -3094,7 +3093,7 @@ The table and flowchart are intentionally coarse, but their purpose is precise: 
 
 ## From Principles to Systems {#sec-distributed-training-systems-systems-framework-integration-cf71}
 
-The parallelism strategies examined throughout this chapter (gradient averaging, AllReduce synchronization, tensor splitting, pipeline scheduling) translate into deployed training systems through a layered abstraction hierarchy. Understanding this hierarchy matters because the abstraction level determines which constraints the engineer must manage directly and which are delegated to the runtime.
+Choosing DDP, FSDP/ZeRO-style sharding, tensor parallelism, or pipeline parallelism is a decision about which constraints the runtime owns and which constraints the engineer must manage directly. The parallelism strategies examined throughout this chapter (gradient averaging, AllReduce synchronization, tensor splitting, pipeline scheduling) translate into deployed training systems through this layered abstraction hierarchy.
 
 At the data-parallel layer, the simplest distributed training abstraction wraps a model so that the framework automatically replicates it across available accelerators, splits each batch, and averages gradients after the backward pass. Historically, parameter-server systems organized this work with server nodes that store shared parameters while workers push and pull updates [@li2014]. As @sec-distributed-training-systems-systems-parameter-servers-embedding-sharding-8821 established, that design concentrates gradient bandwidth at the server tier, so dense synchronous training favors the decentralized collectives below.
 
@@ -3154,7 +3153,7 @@ Engineers see that a 70B model exceeds `{python} A100CapacityFallacies.a100_mem_
 
 **Pitfall**: *Applying FSDP or ZeRO without measuring efficiency trade-offs.*
 
-Engineers adopt FSDP (Fully Sharded Data Parallel) universally after reading that it "reduces memory and enables larger models". In a deployed run, sharding introduces 10--25 percent communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-`{python} A100CapacityFallacies.a100_mem_gb_str` with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19 percent slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on `{python} A100CapacityFallacies.a100_mem_gb_str` becomes trainable with FSDP ZeRO-3, accepting 15 percent throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
+Engineers adopt FSDP universally after reading that it "reduces memory and enables larger models". In a deployed run, sharding introduces 10--25 percent communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-`{python} A100CapacityFallacies.a100_mem_gb_str` with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19 percent slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on `{python} A100CapacityFallacies.a100_mem_gb_str` becomes trainable with FSDP ZeRO-3, accepting 15 percent throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
 
 **Fallacy**: *Parallelism overhead is roughly constant regardless of model size.*
 
