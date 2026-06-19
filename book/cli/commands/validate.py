@@ -7375,7 +7375,10 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        fn_def_pat = re.compile(r"\[\^(fn-[^\]]+)\]:\s*(.+?)(?=\n\n|\n\[\^|\Z)", re.DOTALL)
+        fn_def_pat = re.compile(
+            r"^\[\^(fn-[^\]]+)\]:\s*(.+?)(?=\n\n|\n\[\^|\Z)",
+            re.DOTALL | re.MULTILINE,
+        )
 
         # Collect all footnotes by ID
         footnotes_by_id: Dict[str, List[Tuple[Path, str]]] = defaultdict(list)
