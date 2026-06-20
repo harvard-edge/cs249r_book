@@ -3,8 +3,8 @@
 Scans rendered PDF text (via ``pdftotext``) for defects Quarto/LuaLaTeX can
 emit without failing the render: unresolved cross-refs (``?@sec-foo``), literal
 unrendered cross-refs (``@sec-foo``), undefined LaTeX references
-(``Figure ??``), leaked Python tracebacks, and matplotlib/Python
-``UserWarning`` text that escaped into the rendered output.
+(``Figure ??``), leaked layout-control tokens, leaked Python tracebacks, and
+matplotlib/Python ``UserWarning`` text that escaped into the rendered output.
 """
 
 from __future__ import annotations
@@ -41,6 +41,7 @@ PYTHON_LEAK = re.compile(
     r"UserWarning:)",
     re.I,
 )
+LAYOUT_OFFSET_LEAK = re.compile(r"\[(?:[+-]?\d+(?:\.\d+)?)mm\]")
 QUARTO_XREF_WARN = re.compile(
     r"Unable to resolve crossref (@(?:sec|fig|tbl|eq|lst)-[\w.-]+)"
 )
@@ -361,6 +362,16 @@ def scan_pdf_text(pdf_path: Path) -> list[PdfIssue]:
             PdfIssue(
                 code="python-traceback",
                 message="Python error/traceback text leaked into PDF output",
+            )
+        )
+
+    layout_offset_counts = Counter(m.group(0) for m in LAYOUT_OFFSET_LEAK.finditer(body))
+    for token, count in sorted(layout_offset_counts.items()):
+        issues.append(
+            PdfIssue(
+                code="layout-offset-leak",
+                message=f"{token} appears in PDF text (margin offset marker rendered literally)",
+                count=count,
             )
         )
 
@@ -692,6 +703,11 @@ def verify_volume_pdf(
             "python-traceback",
             "No Python tracebacks or UserWarnings in PDF text",
             not any(i.code == "python-traceback" for i in issues),
+        ),
+        PdfCheckItem(
+            "layout-offset-leak",
+            "No margin offset markers such as [-20mm] in PDF text",
+            not any(i.code == "layout-offset-leak" for i in issues),
         ),
         PdfCheckItem(
             "quarto-crossref-warning",

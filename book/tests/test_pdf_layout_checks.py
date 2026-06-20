@@ -1,8 +1,8 @@
 """Tests for PDF overfull-box and margin-overflow detection.
 
 Covers:
-  * Log-based vertical-overflow gate (Overfull \\vbox) — warning-level, so it
-    surfaces in the build without flipping result.ok (book build stays green).
+  * Log-based vertical-overflow gate (Overfull \\vbox) — blocking when severe,
+    because it corresponds to rendered content exceeding page geometry.
   * The pure margin-overflow geometry used by `binder layout margins`.
 
 The log-based hbox gate and the cross-ref/traceback scans predate this change
@@ -36,7 +36,7 @@ def _write_log(tmp_path, text):
     return p
 
 
-def test_vbox_overflow_emitted_as_warning(tmp_path):
+def test_vbox_overflow_emitted_as_error(tmp_path):
     log = _write_log(
         tmp_path,
         "Overfull \\vbox (48.5pt too high) has occurred while \\output is active [17]\n"
@@ -46,7 +46,7 @@ def test_vbox_overflow_emitted_as_warning(tmp_path):
     issues = scan_build_log(log)
     vbox = [i for i in issues if i.code == "overfull-vbox"]
     assert len(vbox) == 1
-    assert vbox[0].severity == "warning"
+    assert vbox[0].severity == "error"
     # 48.5 and 22.0 are >= 20pt; 5.0 is excluded.
     assert vbox[0].count == 2
     assert "17" in vbox[0].message and "33" in vbox[0].message
@@ -147,6 +147,21 @@ def test_pdf_text_scan_flags_question_mark_crossrefs_once(monkeypatch, tmp_path)
 
     assert len([i for i in issues if i.code == "unresolved-crossref"]) == 1
     assert not [i for i in issues if i.code == "literal-crossref"]
+
+
+def test_pdf_text_scan_flags_layout_offset_leaks(monkeypatch, tmp_path):
+    pdf = tmp_path / "artifact.pdf"
+    pdf.write_bytes(b"%PDF placeholder")
+    monkeypatch.setattr(
+        "book.cli.commands._pdf_checks._pdftotext",
+        lambda _: "Roofline position10[-25mm] depends on the workload.",
+    )
+
+    issues = scan_pdf_text(pdf)
+
+    leaked_offsets = [i for i in issues if i.code == "layout-offset-leak"]
+    assert len(leaked_offsets) == 1
+    assert "[-25mm]" in leaked_offsets[0].message
 
 
 # --------------------------------------------------------------------------
