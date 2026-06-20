@@ -36,6 +36,7 @@ from cli.commands.headings import HeadingsCommand
 from cli.commands.layout import LayoutCommand
 from cli.commands.audit import AuditCommand
 from cli.commands.reset import ResetCommand
+from cli.commands.pre_release import PreReleaseCommand
 
 console = Console()
 
@@ -80,6 +81,7 @@ class MLSysBookCLI:
         self.layout_command = LayoutCommand(self.config_manager, self.chapter_discovery)
         self.audit_command = AuditCommand(self.config_manager, self.chapter_discovery)
         self.reset_command = ResetCommand(self.build_command)
+        self.pre_release_command = PreReleaseCommand(self.config_manager, self.chapter_discovery)
 
     def show_banner(self):
         """Display the CLI banner."""
@@ -143,6 +145,7 @@ class MLSysBookCLI:
         quality_table.add_row(_cmd("check pdf --vol1|--vol2"), "Verify built PDF cross-refs", _cmd("./binder check pdf --vol1"))
         quality_table.add_row(_cmd("check registry"), "Registry migration gates", _cmd("./binder check registry"))
         quality_table.add_row(_cmd("audit chapter-pdf|html"), "Per-chapter build audit ledger", _cmd("./binder audit chapter-pdf --vol1 training"))
+        quality_table.add_row(_cmd("pre-release [--vol1|--vol2]"), "Run release gate and emit AI-native report", _cmd("./binder pre-release --dry-run --json"))
         quality_table.add_row(_cmd("fix <topic> <action>"), "Fix/manage content", _cmd("./binder fix headers add"))
         quality_table.add_row(_cmd("format <target>"), "Auto-format content", _cmd("./binder format tables"))
         quality_table.add_row(_cmd("info stats [--by-chapter]"), "Book statistics (words, figs, ...)", _cmd("./binder info stats --vol1"))
@@ -491,6 +494,10 @@ class MLSysBookCLI:
         """Handle reset command group."""
         return self.reset_command.run(args)
 
+    def handle_pre_release_command(self, args):
+        """Handle pre-release orchestration."""
+        return self.pre_release_command.run(args)
+
 
     def handle_debug_command(self, args):
         """Handle debug command.
@@ -610,6 +617,8 @@ class MLSysBookCLI:
             "layout": self.handle_layout_command,
             "render": self.handle_render_command,
             "reset": self.handle_reset_command,
+            "pre-release": self.handle_pre_release_command,
+            "prerelease": self.handle_pre_release_command,
             "newsletter": self.handle_newsletter_command,
             "setup": self.handle_setup_command,
             "hello": self.handle_hello_command,

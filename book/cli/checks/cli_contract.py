@@ -70,6 +70,7 @@ CASES: tuple[ContractCase, ...] = (
             "MLSysBook CLI",
             "build [fmt]",
             "check <group>",
+            "pre-release",
             "reset <fmt|all>",
             "[--vol1|--vol2]",
         ),
@@ -190,6 +191,32 @@ CASES: tuple[ContractCase, ...] = (
         argv=("clean", "help"),
         expected_exit=0,
         must_include=("binder clean", "artifacts"),
+    ),
+    ContractCase(
+        name="pre-release help documents AI-native release gate",
+        argv=("pre-release", "--help"),
+        expected_exit=0,
+        must_include=(
+            "binder pre-release",
+            "--dry-run",
+            "--json",
+            "--include-network",
+            "--skip-build",
+        ),
+    ),
+    ContractCase(
+        name="pre-release dry-run emits machine-readable stage plan",
+        argv=("pre-release", "--dry-run", "--json"),
+        expected_exit=0,
+        must_include=(
+            '"schema_version": "binder-pre-release/v1"',
+            '"status": "planned"',
+            '"stages"',
+            '"labels-vol1"',
+            '"build-vol1-pdf"',
+            '"pdf-vol2-verify"',
+            '"final-check-all"',
+        ),
     ),
 )
 
