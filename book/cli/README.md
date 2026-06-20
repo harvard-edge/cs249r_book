@@ -194,7 +194,7 @@ The pre-commit hook triggers on `book/quarto/contents/**/*.qmd` and `.bib`
 changes because citation integrity depends on both prose and bibliography
 source. `hygiene` and `style` use reviewed baselines under `book/tools/` so
 known debt is documented but new debt fails. Use `./binder check bib --json`
-for LLM-actionable output.
+for structured fix output.
 
 #### Default vs. opt-in: the contract
 

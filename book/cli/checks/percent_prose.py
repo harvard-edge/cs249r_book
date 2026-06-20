@@ -56,7 +56,7 @@ _CAPTION_ATTRS = ("fig-cap=", "tbl-cap=", "fig-alt=", "tbl-alt=", "alt=", "title
 class Hit:
     line: int            # 1-based line number
     match: str           # the matched text, e.g. "98.5%"
-    replacement: str     # the exact fix, e.g. "98.5 percent" (LLM-actionable)
+    replacement: str     # the exact fix, e.g. "98.5 percent"
     context: str         # trimmed surrounding text (from the masked line)
     is_range: bool       # True if part of a number range (needs "X to Y percent")
 

@@ -1,8 +1,8 @@
-"""Pre-release orchestration for Binder.
+"""Release orchestration for Binder.
 
-`binder pre-release` is the high-level release gate: it runs the checks that a
+`binder release` is the high-level release gate: it runs the checks that a
 human release audit currently remembers by hand, classifies build/layout
-outcomes, and writes one machine-readable report for agents.
+outcomes, and writes one structured report for follow-up fixes.
 """
 
 from __future__ import annotations
@@ -24,7 +24,7 @@ from rich.table import Table
 
 console = Console()
 
-SCHEMA_VERSION = "binder-pre-release/v1"
+SCHEMA_VERSION = "binder-release/v1"
 DEFAULT_TIMEOUT_SECONDS = 1800
 DEFAULT_OUTPUT_LIMIT = 5000
 NETWORK_TIMEOUT_SECONDS = 900
@@ -264,8 +264,8 @@ PDF_VERIFY_SCOPES: tuple[tuple[str, str, str], ...] = (
 )
 
 
-class PreReleaseCommand:
-    """Run the Binder-native pre-release workflow.
+class ReleaseCommand:
+    """Run the Binder-native release workflow.
 
     Report contract:
         - stdout is pure JSON when --json is set.
@@ -284,11 +284,10 @@ class PreReleaseCommand:
 
     def run(self, args: list[str]) -> bool:
         parser = argparse.ArgumentParser(
-            prog="binder pre-release",
+            prog="binder release",
             description=(
-                "Run the AI-native release gate: curated source checks, "
-                "volume PDF builds, PDF verification, and optional network "
-                "advisory checks."
+                "Run the release gate: curated source checks, volume PDF builds, "
+                "PDF verification, and optional network advisory checks."
             ),
         )
         volume_group = parser.add_mutually_exclusive_group()
@@ -304,11 +303,11 @@ class PreReleaseCommand:
             help="Print the ordered workflow without running stages.",
         )
         parser.add_argument(
-            "--json", action="store_true", help="Emit a machine-readable report to stdout."
+            "--json", action="store_true", help="Emit a structured JSON report to stdout."
         )
         parser.add_argument(
             "--output",
-            help="Write JSON report to this path. Defaults under book/quarto/_build/release-audit/.",
+            help="Write JSON report to this path. Defaults under book/quarto/_build/release/.",
         )
         parser.add_argument(
             "--source-only",
@@ -367,7 +366,7 @@ class PreReleaseCommand:
         for index, stage in enumerate(stages, start=1):
             if not ns.json:
                 console.print(
-                    f"[cyan]pre-release[/cyan] [{index}/{len(stages)}] "
+                    f"[cyan]release[/cyan] [{index}/{len(stages)}] "
                     f"{stage.id}: {stage.title}"
                 )
             result = self._run_stage(stage, ns)
@@ -565,8 +564,8 @@ class PreReleaseCommand:
             report_path = (
                 self.config_manager.book_dir
                 / "_build"
-                / "release-audit"
-                / f"pre-release-{stamp}.json"
+                / "release"
+                / f"release-{stamp}.json"
             )
 
         if report_path is not None:
@@ -587,17 +586,17 @@ class PreReleaseCommand:
             value = payload["summary"]["counts"].get(key, 0)
             if value:
                 table.add_row(key, str(value))
-        console.print(Panel(table, title="binder pre-release summary", border_style="cyan"))
+        console.print(Panel(table, title="binder release summary", border_style="cyan"))
         if report_path is not None:
             console.print(f"[dim]JSON report: {report_path}[/dim]")
         if payload["status"] == "failed":
             console.print(
-                "[red]Pre-release failed. Inspect failed stage output in the JSON report.[/red]"
+                "[red]Release gate failed. Inspect failed stage output in the JSON report.[/red]"
             )
         elif payload["status"] == "planned":
-            console.print("[green]Pre-release plan generated. No stages were run.[/green]")
+            console.print("[green]Release plan generated. No stages were run.[/green]")
         else:
-            console.print("[green]Pre-release passed.[/green]")
+            console.print("[green]Release gate passed.[/green]")
 
     def _git(self, args: Iterable[str]) -> str:
         try:

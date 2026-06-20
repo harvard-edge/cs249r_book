@@ -15,7 +15,7 @@ Deliberately EXCLUDED (context-sensitive — a naive rule false-positives):
   one-word error "datacenter" is flagged; the n/adj choice is left to the
   author.
 
-Every hit carries an exact `replacement`, so output is LLM-actionable
+Every hit carries an exact `replacement`, so output is structured for fixes
 ("tradeoff → trade-off"). Matching happens on a MASKED copy of each line
 (inline code, math, link targets, and Quarto attributes blanked to spaces of
 equal length), so positions map 1:1 back onto the original and verbatim code

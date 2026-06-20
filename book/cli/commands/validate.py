@@ -287,18 +287,18 @@ class ValidateCommand:
         3. If the scope needs new flags, add them to the argparse block in
            `run()` and dispatch them in `_run_group`.
 
-    LLM-actionable output (REQUIRED for every ValidationIssue). The check
+    Structured fix output (REQUIRED for every ValidationIssue). The check
     output is consumed by automated fixers via `binder check <group> --json`,
     so each issue must be machine-fixable on its own:
         - `file` + `line`  — exact location.
         - `code`           — a stable snake_case identifier (never reword it;
-                             agents key on it).
+                             tools key on it).
         - `suggestion`     — the EXACT fix as `"<wrong> → <right>"`. Always set
                              it when the fix is deterministic. When it needs
                              human judgment (e.g. a prose range), still give the
                              best concrete form and say so in `message`; never
-                             leave the agent with only "fix this".
-        - `context`        — the surrounding text so the agent can locate the
+                             leave callers with only "fix this".
+        - `context`        — the surrounding text so a fixer can locate the
                              span within the line.
     The human-readable text and `--json` both render from the same
     ValidationIssue, so populating `suggestion` serves both.

@@ -21,8 +21,7 @@ Examples of what it catches:
   the live catalogue, which makes pre-commit failures harder to debug.
 
 Every failure includes the command, expected condition, and a short output
-excerpt so a human or LLM can fix the router/docs without reverse-engineering
-the test.
+excerpt so the router/docs can be fixed without reverse-engineering the test.
 """
 
 from __future__ import annotations
@@ -70,7 +69,7 @@ CASES: tuple[ContractCase, ...] = (
             "MLSysBook CLI",
             "build [fmt]",
             "check <group>",
-            "pre-release",
+            "release",
             "reset <fmt|all>",
             "[--vol1|--vol2]",
         ),
@@ -193,11 +192,11 @@ CASES: tuple[ContractCase, ...] = (
         must_include=("binder clean", "artifacts"),
     ),
     ContractCase(
-        name="pre-release help documents AI-native release gate",
-        argv=("pre-release", "--help"),
+        name="release help documents the release gate",
+        argv=("release", "--help"),
         expected_exit=0,
         must_include=(
-            "binder pre-release",
+            "binder release",
             "--dry-run",
             "--json",
             "--include-network",
@@ -205,11 +204,11 @@ CASES: tuple[ContractCase, ...] = (
         ),
     ),
     ContractCase(
-        name="pre-release dry-run emits machine-readable stage plan",
-        argv=("pre-release", "--dry-run", "--json"),
+        name="release dry-run emits structured stage plan",
+        argv=("release", "--dry-run", "--json"),
         expected_exit=0,
         must_include=(
-            '"schema_version": "binder-pre-release/v1"',
+            '"schema_version": "binder-release/v1"',
             '"status": "planned"',
             '"stages"',
             '"labels-vol1"',

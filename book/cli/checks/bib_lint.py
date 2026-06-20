@@ -29,23 +29,23 @@ What it does:
        indentation, quote style, trailing commas, en-dash in pages.
     4. Reports unfixable violations (missing required fields,
        abbreviated journal names, initial-only authors) as warnings
-       so the Pass 16+ sweep can address them via agent verification.
+       so the Pass 16+ sweep can address them through source verification.
 
 What it does NOT do:
     - Invent missing field values. If `publisher` is absent, it is
       reported, not filled.
     - Verify metadata against external sources. That's the job of the
-      parallel-agent sweep + (future) Crossref refresh tool.
+      batch review sweep + (future) Crossref refresh tool.
     - Rewrite or paraphrase content. All field VALUES are preserved
       byte-exact across --fix runs; only FORMATTING changes.
 
 Integration points:
     - Binder: imported by `./book/binder check bib`, which owns the
-      publication gate and emits LLM-actionable JSON.
+      publication gate and emits structured JSON.
     - Compatibility CLI: `book/tools/bib_lint.py` is a thin wrapper for
       ad-hoc reports, formatting, and baseline regeneration.
-    - Apply pipeline: parallel-agent sweep calls `apply_fields()` on
-      each .bib file after agents return verified metadata. This
+    - Apply pipeline: the batch review sweep calls `apply_fields()` on
+      each .bib file after verified metadata is returned. This
       function is the SAFE way to insert new fields into an entry —
       no regex, no brace-counting bugs.
 
@@ -890,7 +890,7 @@ def format_file(text: str) -> tuple[str, list[Violation]]:
     return result, all_violations
 
 
-# ─── Apply helper (used by the parallel-agent sweep apply step) ──────────────
+# ─── Apply helper (used by the batch review sweep apply step) ────────────────
 
 def apply_fields(
     file_text: str,
