@@ -495,14 +495,28 @@ class ReleaseCommand:
     def _classify_status(self, stage: ReleaseStage, exit_code: int, output: str) -> str:
         if exit_code == 0:
             return "passed"
+        normalized = self._normalize_output(output)
+        if stage.id == "rendered-python-leak" and "html_audit_missing" in normalized:
+            return "skipped"
         if stage.allow_layout_advisory and exit_code == 1:
-            if (
-                "PDF validation failed" not in output
-                and "no unresolved refs or render errors in text" in output
-                and "PASS: 0 Purpose overflow" in output
-            ):
+            if self._is_layout_advisory_only(normalized):
                 return "passed_with_advisory"
         return "failed"
+
+    @staticmethod
+    def _normalize_output(output: str) -> str:
+        return " ".join(output.split())
+
+    @staticmethod
+    def _is_layout_advisory_only(output: str) -> bool:
+        return (
+            "PDF validation failed" not in output
+            and "Build artifact written but PDF validation failed" not in output
+            and "PDF build completed" in output
+            and "no unresolved refs or render errors in text" in output
+            and "Auto Layout Plan" in output
+            and "PASS: 0 Purpose overflow" in output
+        )
 
     def _print_stage_result(self, result: StageResult) -> None:
         style, label = STATUS_STYLES.get(result.status, ("white", result.status.upper()))

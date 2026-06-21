@@ -711,9 +711,7 @@ class ValidateCommand:
             Scope("hallucinator", "_run_check_references", default=False),
         ],
         "content": [
-            # Currently fails on this checkout (contents/shared/ structure
-            # not present on every branch). Was never wired to pre-commit.
-            # Run on demand via --scope tree.
+            # Release-only structure check for the canonical two-volume tree.
             Scope("tree", "_run_content_tree", default=False),
         ],
     }
@@ -8293,18 +8291,21 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Content tree: require shared/ and frontmatter/ (not only vol1/vol2)
+    # Content tree: require the canonical two-volume frontmatter shape.
     # ------------------------------------------------------------------
 
-    # Required paths under contents/ so that scripts don't assume only vol1/vol2 exist.
+    # Required paths under contents/ so scripts can rely on the volume-local
+    # notation files and the shared top-level frontmatter tree.
     CONTENT_TREE_REQUIRED: List[tuple] = [
-        ("shared", True),           # (path relative to contents, is_dir)
-        ("shared/notation.qmd", False),
-        ("frontmatter", True),
+        ("frontmatter", True),  # (path relative to contents, is_dir)
+        ("vol1/frontmatter", True),
+        ("vol1/frontmatter/notation.qmd", False),
+        ("vol2/frontmatter", True),
+        ("vol2/frontmatter/notation.qmd", False),
     ]
 
     def _run_content_tree(self, root: Path) -> ValidationRunResult:
-        """Ensure contents/ has shared/ and frontmatter/; fail if they are missing."""
+        """Ensure contents/ has the expected release-time volume structure."""
         t0 = time.time()
         # Resolve to contents dir: root may be contents, or contents/vol1, or contents/vol2
         if root.name in ("vol1", "vol2") and root.parent.name == "contents":
@@ -8330,7 +8331,7 @@ class ValidateCommand:
                             file=str(path),
                             line=0,
                             code="content-tree",
-                            message=f"Required directory missing: contents/{rel} (shared content used by both volumes)",
+                            message=f"Required directory missing: contents/{rel}",
                             severity="error",
                         )
                     )
@@ -8348,7 +8349,7 @@ class ValidateCommand:
         elapsed = int((time.time() - t0) * 1000)
         return ValidationRunResult(
             name="content-tree",
-            description="Content tree (shared/frontmatter required)",
+            description="Content tree (two-volume frontmatter required)",
             files_checked=len(self.CONTENT_TREE_REQUIRED),
             issues=issues,
             elapsed_ms=elapsed,
