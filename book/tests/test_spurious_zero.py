@@ -16,3 +16,18 @@ def test_unit_bearing_dot_zero_is_not_blanket_suppressed():
 
 def test_product_versions_remain_false_positives():
     assert find_spurious_zeros("PyTorch 2.0 introduced compiler support.") == []
+
+
+def test_crisp_dm_version_title_is_false_positive():
+    text = "CRISP-DM 1.0: Step-by-Step Data Mining Guide."
+    assert find_spurious_zeros(text) == []
+
+
+def test_standards_version_is_false_positive():
+    text = "The MPI Forum's standards history records Version 1.0 in May 1994."
+    assert find_spurious_zeros(text) == []
+
+
+def test_reference_family_identifier_is_false_positive():
+    text = "Hardware Requirements for a Device Identifier Composition Engine. Family 2.0, Level 00, Revision 78."
+    assert find_spurious_zeros(text) == []
