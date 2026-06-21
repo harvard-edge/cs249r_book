@@ -844,11 +844,12 @@ class MultiHeadAttention:
         K = self._split_heads(K, batch_size, seq_len)
         V = self._split_heads(V, batch_size, seq_len)
 
-        # Step 4: Apply attention (reshape mask for head broadcasting)
+        # Step 4: Apply attention -- reshape mask (batch, seq_q, seq_k) to
+        # (batch, 1, seq_q, seq_k) for broadcasting across heads.
         mask_reshaped = mask
         if mask is not None and len(mask.shape) == 3:
-            batch_size_mask, seq_len_mask, _ = mask.shape
-            mask_reshaped = mask.reshape(batch_size_mask, 1, seq_len_mask, seq_len_mask)
+            batch_size_mask, seq_q_mask, seq_k_mask = mask.shape
+            mask_reshaped = mask.reshape(batch_size_mask, 1, seq_q_mask, seq_k_mask)
 
         attended, _ = scaled_dot_product_attention(Q, K, V, mask=mask_reshaped)
 
