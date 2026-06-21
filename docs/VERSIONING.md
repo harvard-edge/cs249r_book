@@ -33,7 +33,7 @@ Each `<project>-publish-live` workflow run produces:
    `https://mlsysbook.ai/staffml/release-manifest.json`. Cacheable,
    readable by anyone, parseable by tools.
 3. **A draft GitHub Release** — for the human-facing changelog with
-   auto-generated commit list (Tier A also runs AI-enhanced notes).
+   generated commit context and curated release notes.
 4. **A footer pill on the live site** — small inline "v0.1.1 · Apr 28,
    2026" element. Click to copy hash. Best-effort chrome.
 
@@ -100,8 +100,8 @@ Tier A and Tier B share the workflow UX. They differ in:
   index in `release.json` (Merkle-ish: lets a consumer verify a single
   question without downloading the whole corpus). Tier B uses a flat
   SHA-256.
-- **Release notes**: Tier A runs AI-enhanced summarization. Tier B
-  uses plain auto-generated commit lists.
+- **Release notes**: Tier A uses curated summaries backed by commit
+  context. Tier B uses plain auto-generated commit lists.
 
 ## Architecture in one paragraph
 

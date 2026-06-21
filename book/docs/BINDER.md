@@ -508,7 +508,7 @@ When called with arguments, `publish` triggers the GitHub Actions workflow direc
 
 **Options:**
 - `--type patch|minor|major` - Release type (default: minor)
-- `--no-ai` - Disable AI release notes
+- `--no-ai` - Disable enhanced release notes
 - `--yes` - Skip confirmation prompts
 
 **Requirements:**

@@ -208,7 +208,7 @@ builds — restore from git if the render list shrinks.
 ### Phase 4 — Per-chapter replayable verify (PASS bar)
 
 One chapter at a time: binder HTML build, every LEGO cell, every inline ref in
-rendered HTML prose, optional LLM coherence review. Writes a certificate under
+rendered HTML prose, optional coherence review. Writes a certificate under
 `book/tools/audit/artifacts/lego_chapter_reports/`.
 
 ```bash
@@ -217,7 +217,7 @@ rendered HTML prose, optional LLM coherence review. Writes a certificate under
 ```
 
 **PASS requires:** HTML build clean; cells `N/N`; rendered prose refs `N/N` (value
-+ HTML context); LLM coherence not `FAIL`. Re-run the same command after fixes.
++ HTML context); coherence review not `FAIL`. Re-run the same command after fixes.
 
 Corpus sweep (sequential, resumable):
 

@@ -108,7 +108,7 @@ The `./binder setup` command provides a complete environment configuration:
 
 **What it does:**
 1. **Checks environment** - Verifies all required tools and versions
-2. **Installs dependencies** - Auto-installs missing tools (Quarto, GitHub CLI, Ollama)
+2. **Installs dependencies** - Auto-installs missing tools (Quarto, GitHub CLI, release-note helpers)
 3. **Configures Git** - Sets up user name, email, and GitHub username
 4. **Sets preferences** - Configures build format and browser behavior
 5. **Tests setup** - Builds a test chapter to verify everything works
@@ -152,11 +152,11 @@ The `./binder publish` command provides a complete publishing workflow:
 2. **Branch management** - Merges `dev` to `main` with confirmation
 3. **Release planning** - Suggests version bump based on changes
 4. **Build process** - PDF first, then HTML (ensures PDF availability)
-5. **Release creation** - Git tag, AI-generated release notes, GitHub release
+5. **Release creation** - Git tag, curated release notes, GitHub release
 6. **Deployment** - Copies PDF to assets, commits, pushes to production
 
 **Features:**
-- 🤖 **AI-powered release notes** (requires Ollama)
+- 📝 **Curated release notes**
 - 📊 **Smart version suggestions** (patch/minor/major)
 - 🛡️ **Safety checks** and confirmations
 - 🎯 **Step-by-step wizard** with clear progress
