@@ -209,89 +209,6 @@ The bottom layer, *efficient hardware implementation*, ensures operations run ef
 
 These dimensions are interdependent. Pruning reduces complexity but may require architectural changes for hardware efficiency. Quantization reduces precision but impacts execution logic. The most effective strategies combine techniques across all three layers. For practitioners seeking immediate guidance on which techniques to apply, @sec-model-compression-decision-framework-0d69 provides a decision framework that maps deployment constraints to specific technique recommendations. The intervening sections provide the technical foundation needed to apply that framework effectively.
 
-To understand *why* numerics matter so deeply, move from the algorithm to silicon-level energy and data movement\index{Iron Law!quantization impact}. At that level, each bit is both a storage choice and an energy cost.
-
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Goal: Horowitz energy hierarchy for quantization physics callout.
-from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_energy_per_op, fmt_qty, fmt_time
-from mlsysim.core.units import pJ, byte, flop
-
-class QuantizationEnergyPhysics:
-    # Energy values sourced from the mlsysim registry (Hardware.Tech).
-    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
-    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
-    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
-    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
-    ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
-
-    int8_energy_reduction = 20
-    bytes_fp32 = BYTES_FP32.to(byte).magnitude
-    bytes_int8 = BYTES_INT8.to(byte).magnitude
-
-    energy_dram = ENERGY_DRAM_ACCESS_PJ
-    energy_dram_per_byte = ENERGY_DRAM_PJ_PER_BYTE
-    energy_int8_fetch = energy_dram_per_byte * BYTES_INT8
-    energy_dram_read_bytes = energy_dram.to(pJ).magnitude / energy_dram_per_byte.to(pJ / byte).magnitude
-    energy_dram_read_bits = energy_dram_read_bytes * 8
-    energy_flop_fp32 = ENERGY_FLOP_FP32_PJ
-    energy_op_int8 = ENERGY_OP_INT8_PJ
-    energy_add_fp32 = ENERGY_ADD_FP32_PJ.to(pJ / flop).magnitude
-    energy_add_int8 = ENERGY_ADD_INT8_PJ.to(pJ / flop).magnitude
-    energy_float_add_ratio = energy_add_fp32 / energy_add_int8
-    energy_dram_read_ratio = energy_dram.to(pJ).magnitude / energy_add_int8
-
-    check(bytes_fp32 / bytes_int8 == 4, "FP32-to-INT8 memory reduction should be 4x.")
-    check(energy_dram_read_ratio > 10_000, "DRAM reads should exceed INT8 add energy by more than four orders of magnitude.")
-    check(abs(energy_dram_read_bits - 32) < 1e-9, "The 640 pJ DRAM access should correspond to a 32-bit read under the per-byte constant.")
-    check(
-        abs(energy_int8_fetch.to(pJ).magnitude - energy_dram_per_byte.to(pJ / byte).magnitude) < 1e-9,
-        "One INT8 weight fetch should equal one byte of DRAM energy.",
-    )
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    energy_dram_pj_str = fmt_qty(energy_dram, pJ, precision=0, commas=False)
-    energy_int8_fetch_pj_str = fmt_qty(energy_int8_fetch, pJ, precision=0, commas=False)
-    energy_dram_read_bits_value_str = fmt(energy_dram_read_bits, precision=0, commas=False)
-    energy_flop_fp32_pj_per_op_str = fmt_energy_per_op(energy_flop_fp32, precision=1, commas=False)
-    energy_op_int8_pj_per_op_str = fmt_energy_per_op(energy_op_int8, precision=1, commas=False)
-    energy_float_add_ratio_mult_str = fmt_multiple(energy_float_add_ratio, precision=0, commas=False)
-    energy_dram_read_ratio_mult_str = fmt_multiple(energy_dram_read_ratio, precision=1, commas=True)
-    int8_energy_reduction_mult_str = fmt_multiple(int8_energy_reduction, precision=0, commas=False)
-    mem_reduction_ratio_mult_str = fmt_multiple(bytes_fp32 / bytes_int8, precision=0, commas=False)
-    baseline_battery_hours_str = fmt_time(1, 'hour', precision=0, commas=False, style='word')
-    int8_battery_hours_str = fmt_time(int8_energy_reduction, 'hour', precision=0, commas=False, style='word')
-```
-
-::: {#nbk-model-compression-physics-quantization .callout-notebook title="The physics of quantization"}
-
-The energy-movement invariant $(E_{\text{move}} \gg E_{\text{compute}})$ means that, in the physics of silicon, every fetched bit carries an energy cost [@horowitz2014]. @Sec-appdx-machine-foundations-numbers-know-b531 collects the reference energy ratios, and @sec-appdx-machine-foundations-numerical-representations-c889 compares numerical format trade-offs.
-
-According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, which decomposes execution time into data volume moved, operations performed, and fixed latency, reducing the bit-width of a weight has a roughly proportional effect on efficiency:
-
-1.  **Memory movement $(D_{\text{vol}} \times E_{\text{move}})$**: Fetching a 32-bit float from DRAM costs ≈ `{python} QuantizationEnergyPhysics.energy_dram_pj_str`. Fetching one 8-bit weight costs ≈ `{python} QuantizationEnergyPhysics.energy_int8_fetch_pj_str`.
-2.  **Compute work $(O \times E_{\text{compute}})$**: A 32-bit multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_flop_fp32_pj_per_op_str`. An INT8 multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_op_int8_pj_per_op_str`.
-
-@Tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access.
-
-For inference workloads, moving from FP32 to INT8 saves `{python} QuantizationEnergyPhysics.mem_reduction_ratio_mult_str` memory and can reduce the energy per inference by up to `{python} QuantizationEnergyPhysics.int8_energy_reduction_mult_str` on hardware with dedicated INT8 units. The size of that gain depends on whether the workload is mostly moving bytes or mostly doing arithmetic. @Sec-appdx-machine-foundations-roofline-model-2529 gives this relationship a formal shape: workloads with little arithmetic per byte are memory-bound, so shrinking data movement dominates; workloads with more arithmetic per byte are compute-bound, so arithmetic savings matter more. The practical impact is the difference between a battery lasting `{python} QuantizationEnergyPhysics.baseline_battery_hours_str` or `{python} QuantizationEnergyPhysics.int8_battery_hours_str`.
-
-These same physics apply at data center scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-model-training-mixedprecision-training-9218. @Sec-hardware-acceleration returns to the silicon mechanisms that exploit these energy differences.
-
-:::
-
-| **Operation**   |                              **Bit-Width**                               |                         **Relative Energy**                          |
-|:----------------|:------------------------------------------------------------------------:|:--------------------------------------------------------------------:|
-| **Integer Add** |                                  8-bit                                   |                              1$\times$                               |
-| **Float Add**   |                                  32-bit                                  | `{python} QuantizationEnergyPhysics.energy_float_add_ratio_mult_str` |
-| **DRAM Read**   | `{python} QuantizationEnergyPhysics.energy_dram_read_bits_value_str`-bit | `{python} QuantizationEnergyPhysics.energy_dram_read_ratio_mult_str` |
-
-: **The Energy Hierarchy**: Relative energy cost of representative arithmetic and memory operations, normalized to an 8-bit integer add. A 32-bit float add costs `{python} QuantizationEnergyPhysics.energy_float_add_ratio_mult_str` more than its 8-bit integer counterpart, but a single `{python} QuantizationEnergyPhysics.energy_dram_read_bits_value_str`-bit DRAM read costs `{python} QuantizationEnergyPhysics.energy_dram_read_ratio_mult_str` more, placing DRAM access more than four orders of magnitude above on-chip compute. This gap is why bit-width reductions that shrink data movement dominate the energy budget of inference far more than the arithmetic savings alone would suggest [@horowitz2014]. {#tbl-model-compression-energy-hierarchy tbl-colwidths="[33,33,33]"}
-
-These savings explain why neural networks tolerate aggressive quantization: the energy cost of higher precision exceeds the accuracy benefit for most applications, and reduced precision turns capacity pressure into bandwidth relief on the target device. How much precision a model can shed before accuracy collapses, and how large the resulting speedup proves to be, are the questions the quantization section develops in full.
-
 The relative importance of each dimension varies by deployment target. Cloud systems may tolerate larger models but demand throughput; mobile devices prioritize memory and energy; embedded systems face hard constraints on all resources simultaneously. Understanding these deployment contexts shapes which optimization dimensions to prioritize.
 
 ## Deployment Context {#sec-model-compression-deployment-context-0d88}
@@ -2832,6 +2749,89 @@ plt.close()
 ### Precision and energy {#sec-model-compression-precision-energy-cc8e}
 
 Precision is an energy decision\index{Energy Efficiency!numerical precision impact} as much as a storage decision. Efficient numerical representations reduce storage requirements, computation latency, and power usage, benefiting mobile AI, embedded systems, and cloud inference alike. Precision levels can be tuned to specific hardware capabilities, maximizing throughput on AI accelerators such as GPUs, TPUs, NPUs, and edge AI chips.
+
+To understand *why* numerics matter so deeply, move from the algorithm to silicon-level energy and data movement\index{Iron Law!quantization impact}. At that level, each bit is both a storage choice and an energy cost.
+
+```{python}
+#| echo: false
+# ┌── LEGO ───────────────────────────────────────────────
+# │ Goal: Horowitz energy hierarchy for quantization physics callout.
+from mlsysim.fmt import fmt, check, fmt_energy_per_byte, fmt_energy_per_op, fmt_qty, fmt_time
+from mlsysim.core.units import pJ, byte, flop
+
+class QuantizationEnergyPhysics:
+    # Energy values sourced from the mlsysim registry (Hardware.Tech).
+    ENERGY_DRAM_ACCESS_PJ = Hardware.Tech.Memory.DRAM.energy_per_access
+    ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
+    ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
+    ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
+    ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
+    ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
+
+    int8_energy_reduction = 20
+    bytes_fp32 = BYTES_FP32.to(byte).magnitude
+    bytes_int8 = BYTES_INT8.to(byte).magnitude
+
+    energy_dram = ENERGY_DRAM_ACCESS_PJ
+    energy_dram_per_byte = ENERGY_DRAM_PJ_PER_BYTE
+    energy_int8_fetch = energy_dram_per_byte * BYTES_INT8
+    energy_dram_read_bytes = energy_dram.to(pJ).magnitude / energy_dram_per_byte.to(pJ / byte).magnitude
+    energy_dram_read_bits = energy_dram_read_bytes * 8
+    energy_flop_fp32 = ENERGY_FLOP_FP32_PJ
+    energy_op_int8 = ENERGY_OP_INT8_PJ
+    energy_add_fp32 = ENERGY_ADD_FP32_PJ.to(pJ / flop).magnitude
+    energy_add_int8 = ENERGY_ADD_INT8_PJ.to(pJ / flop).magnitude
+    energy_float_add_ratio = energy_add_fp32 / energy_add_int8
+    energy_dram_read_ratio = energy_dram.to(pJ).magnitude / energy_add_int8
+
+    check(bytes_fp32 / bytes_int8 == 4, "FP32-to-INT8 memory reduction should be 4x.")
+    check(energy_dram_read_ratio > 10_000, "DRAM reads should exceed INT8 add energy by more than four orders of magnitude.")
+    check(abs(energy_dram_read_bits - 32) < 1e-9, "The 640 pJ DRAM access should correspond to a 32-bit read under the per-byte constant.")
+    check(
+        abs(energy_int8_fetch.to(pJ).magnitude - energy_dram_per_byte.to(pJ / byte).magnitude) < 1e-9,
+        "One INT8 weight fetch should equal one byte of DRAM energy.",
+    )
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    energy_dram_pj_str = fmt_qty(energy_dram, pJ, precision=0, commas=False)
+    energy_int8_fetch_pj_str = fmt_qty(energy_int8_fetch, pJ, precision=0, commas=False)
+    energy_dram_read_bits_value_str = fmt(energy_dram_read_bits, precision=0, commas=False)
+    energy_flop_fp32_pj_per_op_str = fmt_energy_per_op(energy_flop_fp32, precision=1, commas=False)
+    energy_op_int8_pj_per_op_str = fmt_energy_per_op(energy_op_int8, precision=1, commas=False)
+    energy_float_add_ratio_mult_str = fmt_multiple(energy_float_add_ratio, precision=0, commas=False)
+    energy_dram_read_ratio_mult_str = fmt_multiple(energy_dram_read_ratio, precision=1, commas=True)
+    int8_energy_reduction_mult_str = fmt_multiple(int8_energy_reduction, precision=0, commas=False)
+    mem_reduction_ratio_mult_str = fmt_multiple(bytes_fp32 / bytes_int8, precision=0, commas=False)
+    baseline_battery_hours_str = fmt_time(1, 'hour', precision=0, commas=False, style='word')
+    int8_battery_hours_str = fmt_time(int8_energy_reduction, 'hour', precision=0, commas=False, style='word')
+```
+
+::: {#nbk-model-compression-physics-quantization .callout-notebook title="The physics of quantization"}
+
+The energy-movement invariant $(E_{\text{move}} \gg E_{\text{compute}})$ means that, in the physics of silicon, every fetched bit carries an energy cost [@horowitz2014]. @Sec-appdx-machine-foundations-numbers-know-b531 collects the reference energy ratios, and @sec-appdx-machine-foundations-numerical-representations-c889 compares numerical format trade-offs.
+
+According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$, which decomposes execution time into data volume moved, operations performed, and fixed latency, reducing the bit-width of a weight has a roughly proportional effect on efficiency:
+
+1.  **Memory movement $(D_{\text{vol}} \times E_{\text{move}})$**: Fetching a 32-bit float from DRAM costs ≈ `{python} QuantizationEnergyPhysics.energy_dram_pj_str`. Fetching one 8-bit weight costs ≈ `{python} QuantizationEnergyPhysics.energy_int8_fetch_pj_str`.
+2.  **Compute work $(O \times E_{\text{compute}})$**: A 32-bit multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_flop_fp32_pj_per_op_str`. An INT8 multiply-add costs ≈ `{python} QuantizationEnergyPhysics.energy_op_int8_pj_per_op_str`.
+
+@Tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access.
+
+For inference workloads, moving from FP32 to INT8 saves `{python} QuantizationEnergyPhysics.mem_reduction_ratio_mult_str` memory and can reduce the energy per inference by up to `{python} QuantizationEnergyPhysics.int8_energy_reduction_mult_str` on hardware with dedicated INT8 units. The size of that gain depends on whether the workload is mostly moving bytes or mostly doing arithmetic. @Sec-appdx-machine-foundations-roofline-model-2529 gives this relationship a formal shape: workloads with little arithmetic per byte are memory-bound, so shrinking data movement dominates; workloads with more arithmetic per byte are compute-bound, so arithmetic savings matter more. The practical impact is the difference between a battery lasting `{python} QuantizationEnergyPhysics.baseline_battery_hours_str` or `{python} QuantizationEnergyPhysics.int8_battery_hours_str`.
+
+These same physics apply at data center scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-model-training-mixedprecision-training-9218. @Sec-hardware-acceleration returns to the silicon mechanisms that exploit these energy differences.
+
+:::
+
+| **Operation**   |                              **Bit-Width**                               |                         **Relative Energy**                          |
+|:----------------|:------------------------------------------------------------------------:|:--------------------------------------------------------------------:|
+| **Integer Add** |                                  8-bit                                   |                              1$\times$                               |
+| **Float Add**   |                                  32-bit                                  | `{python} QuantizationEnergyPhysics.energy_float_add_ratio_mult_str` |
+| **DRAM Read**   | `{python} QuantizationEnergyPhysics.energy_dram_read_bits_value_str`-bit | `{python} QuantizationEnergyPhysics.energy_dram_read_ratio_mult_str` |
+
+: **The Energy Hierarchy**: Relative energy cost of representative arithmetic and memory operations, normalized to an 8-bit integer add. A 32-bit float add costs `{python} QuantizationEnergyPhysics.energy_float_add_ratio_mult_str` more than its 8-bit integer counterpart, but a single `{python} QuantizationEnergyPhysics.energy_dram_read_bits_value_str`-bit DRAM read costs `{python} QuantizationEnergyPhysics.energy_dram_read_ratio_mult_str` more, placing DRAM access more than four orders of magnitude above on-chip compute. This gap is why bit-width reductions that shrink data movement dominate the energy budget of inference far more than the arithmetic savings alone would suggest [@horowitz2014]. {#tbl-model-compression-energy-hierarchy tbl-colwidths="[33,33,33]"}
+
+These savings explain why neural networks tolerate aggressive quantization: the energy cost of higher precision exceeds the accuracy benefit for most applications, and reduced precision turns capacity pressure into bandwidth relief on the target device. How much precision a model can shed before accuracy collapses, and how large the resulting speedup proves to be, are the questions the quantization section develops in full.
 
 ```{python}
 #| echo: false
