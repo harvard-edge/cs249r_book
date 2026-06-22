@@ -45,10 +45,15 @@ for (const name of targets) {
   const siteResult = { url: cfg.url, checks: {}, warnings: [], errors: [] };
 
   try {
-    const resp = await page.goto(cfg.url, { waitUntil: cfg.waitUntil || 'networkidle', timeout: 30000 });
+    const resp = await page.goto(cfg.url, { waitUntil: cfg.waitUntil || 'domcontentloaded', timeout: 30000 });
     siteResult.checks.httpStatus = resp ? resp.status() : null;
     if (!resp || resp.status() !== 200) {
       siteResult.errors.push(`HTTP ${resp?.status() ?? 'n/a'} on landing`);
+    }
+
+    const settleMs = cfg.settleMs ?? 1000;
+    if (settleMs > 0) {
+      await page.waitForTimeout(settleMs);
     }
 
     const title = await page.title();

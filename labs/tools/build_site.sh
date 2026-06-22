@@ -134,8 +134,10 @@ fi
 
 (cd "${LABS_DIR}" && quarto render && touch _build/.nojekyll)
 
-cp -r "${LABS_DIR}/_wasm_build/vol1" "${LABS_DIR}/_build/vol1"
-cp -r "${LABS_DIR}/_wasm_build/vol2" "${LABS_DIR}/_build/vol2"
+rm -rf "${LABS_DIR}/_build/vol1" "${LABS_DIR}/_build/vol2"
+mkdir -p "${LABS_DIR}/_build/vol1" "${LABS_DIR}/_build/vol2"
+cp -R "${LABS_DIR}/_wasm_build/vol1/." "${LABS_DIR}/_build/vol1/"
+cp -R "${LABS_DIR}/_wasm_build/vol2/." "${LABS_DIR}/_build/vol2/"
 cp -r "${LABS_DIR}/_wasm_build/wheels" "${LABS_DIR}/_build/wheels"
 # Duplicate wheels into vol directories to satisfy Pyodide worker relative paths
 cp -r "${LABS_DIR}/_wasm_build/wheels" "${LABS_DIR}/_build/vol1/wheels"
@@ -185,6 +187,21 @@ wasm_count="$(find "${LABS_DIR}/_build/vol1" "${LABS_DIR}/_build/vol2" -name "in
 echo "WASM notebooks in final build: ${wasm_count}"
 if [ "${wasm_count}" -ne "${expected}" ]; then
   echo "ERROR: Expected ${expected} WASM notebooks in build output, got ${wasm_count}" >&2
+  exit 1
+fi
+
+missing_routes=""
+for vol in vol1 vol2; do
+  for lab in "${LABS_DIR}/${vol}"/lab_*.py; do
+    name="$(basename "${lab}" .py)"
+    route="${LABS_DIR}/_build/${vol}/${name}/index.html"
+    if [ ! -f "${route}" ]; then
+      missing_routes="${missing_routes} ${vol}/${name}"
+    fi
+  done
+done
+if [ -n "${missing_routes}" ]; then
+  echo "ERROR: Missing direct WASM routes in build output:${missing_routes}" >&2
   exit 1
 fi
 
