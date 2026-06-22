@@ -1,0 +1,1 @@
+import{s as n}from"./chunk-LvLJmgfZ.js";import{s as o}from"./useEvent-D91BmmQi.js";import{t as e}from"./react-Bj1aDYRI.js";var s=n(e(),1);function m(r){let t=s.useRef(r);return o(r,t.current)||(t.current=r),t.current}export{m as t};
