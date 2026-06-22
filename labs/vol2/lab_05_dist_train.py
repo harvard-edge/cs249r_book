@@ -3,1466 +3,1710 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-# ─────────────────────────────────────────────────────────────────────────────
-# LAB V2-05: THE PARALLELISM PUZZLE
-#
-# Chapter: Distributed Training Systems (@sec-distributed-training-systems)
-# Core Invariant: Each parallelism strategy (DP, ZeRO, PP) solves one
-#                 constraint while creating another. The Conservation of
-#                 Overhead governs every choice. 3D parallelism maps
-#                 strategies to the bandwidth hierarchy.
-#
-# 3-Part + Synthesis Structure (35-40 minutes):
-#   Part A — The Communication Wall (12-15 min)
-#             Pure DP on 256 GPUs with IB NDR: 175B model achieves only
-#             ~50-55% efficiency because AllReduce consumes half the step.
-#
-#   Part B — The ZeRO Memory Trap (8-10 min)
-#             ZeRO-3 alone cannot train 175B — activations push OOM.
-#
-#   Part C — 3D Parallelism Design Challenge (15-18 min)
-#             Design the full 3D config for 175B on 256 H100s. Pipeline
-#             bubbles impose a minimum microbatch count. 3D parallelism is
-#             the only viable approach.
-#
-# Deployment Contexts:
-#   DP:         Data Parallel — replicate model, sync gradients via AllReduce
-#   3D Parallel: TP x PP x DP — within-node TP (NVLink), cross-node PP/DP
-#
-# Hardware Constants (sourced from mlsysim registry):
-#   H100_TFLOPS_FP16  = 989     TFLOPS (NVIDIA H100 SXM5 spec)
-#   H100_BW_GBS       = 3350    GB/s HBM3e
-#   H100_RAM_GB       = 80      GB HBM3e
-#   NVLINK4_BW_GBS    = 900     GB/s NVLink 4 (DGX H100)
-#   IB_NDR_BW_GBS     = 50      GB/s InfiniBand NDR per port
-#   GPUS_PER_NODE     = 8       Standard DGX H100 node
-# ─────────────────────────────────────────────────────────────────────────────
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── CELL 0: SETUP ─────────────────────────────────────────────────────────────
 @app.cell
 async def _():
-    import marimo as mo
-    import sys
+    import html as html_lib
     import math
+    import sys
     from pathlib import Path
-    import numpy as np
 
-    # WASM bootstrap
+    import marimo as mo
+
     if sys.platform == "emscripten":
         import micropip
-        await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install(
-            "../../wheels/mlsysim-0.1.1-py3-none-any.whl", keep_going=False
-        )
-    elif "mlsysim" not in sys.modules:
-        _root = Path(__file__).resolve().parents[2]
-        if str(_root) not in sys.path:
-            sys.path.insert(0, str(_root))
 
-    # plotly must be imported AFTER micropip install, since it's installed at runtime on WASM
-    from plotly.subplots import make_subplots
+        await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
+        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
+    else:
+        _labs_dir = Path(__file__).resolve().parents[1]
+        if str(_labs_dir) not in sys.path:
+            sys.path.insert(0, str(_labs_dir))
+        from bootstrap import native_bootstrap
+
+        native_bootstrap(__file__)
+
     import plotly.graph_objects as go
+    from mlsysim import Hardware, Models, Systems
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
-    import mlsysim
-    from mlsysim import Hardware
-    from mlsysim.core.defaults import INFINIBAND_NDR_BW_GBS
-    from mlsysim.core.constants import (
-        A100_FLOPS_FP16_TENSOR, T4_FLOPS_FP16_TENSOR,
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        MathPeek,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        report_export_panel,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
     )
-
-    # ── Hardware registry ─────────────────────────────────────────────────
-    H100 = Hardware.Cloud.H100
-    A100 = Hardware.Cloud.A100
-
-    # ── Hardware constants (from registry) ──────────────────────────────
-    H100_TFLOPS_FP16  = H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS       = H100.memory.bandwidth.m_as("GB/s")
-    H100_RAM_GB       = H100.memory.capacity.m_as("GB")
-    A100_RAM_GB       = A100.memory.capacity.m_as("GB")
-    A100_TFLOPS_FP16  = A100_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
-    T4_TFLOPS_FP16    = T4_FLOPS_FP16_TENSOR.m_as("TFLOPs/s")
-    # Interconnect specs (from defaults — not in per-device registry)
-    NVLINK4_BW_GBS    = 900.0     # GB/s NVLink 4 (DGX H100)
-    IB_NDR_BW_GBS     = INFINIBAND_NDR_BW_GBS  # 50 GB/s, alias for consistent naming
-    IB_HDR_BW_GBS     = 25.0      # GB/s InfiniBand HDR per port
-    ETH_100G_BW_GBS   = 12.5      # GB/s 100GbE
-    GPUS_PER_NODE     = 8
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, LAB_CSS, apply_plotly_theme, go, ledger, math, mo, np,
-        make_subplots, mlsysim, DecisionLog, Hardware, H100, A100,
-        H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, A100_RAM_GB,
-        A100_TFLOPS_FP16, T4_TFLOPS_FP16,
-        NVLINK4_BW_GBS, IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS,
-        GPUS_PER_NODE,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        Hardware,
+        LAB_CSS,
+        MathPeek,
+        Models,
+        Systems,
+        apply_plotly_theme,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        html_lib,
+        ledger,
+        math,
+        mo,
+        report_export_panel,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
     )
 
 
-# ─── CELL 1: HEADER ────────────────────────────────────────────────────────────
+@app.cell
+def _(get_lab_metadata):
+    v2_05_lab_path = "vol2/lab_05_dist_train.py"
+    v2_05_chapter = 5
+    v2_05_metadata = get_lab_metadata(v2_05_lab_path)
+    return v2_05_chapter, v2_05_lab_path, v2_05_metadata
+
+
 @app.cell(hide_code=True)
-def _(COLORS, LAB_CSS, mo):
-    _c_dp   = COLORS["BlueLine"]
-    _c_3d   = COLORS["Cloud"]
-    _c_s0   = COLORS["Surface0"]
-    _c_s1   = COLORS["Surface1"]
-    _header = mo.Html(f"""
-    {LAB_CSS}
-    <div style="background: linear-gradient(135deg, {_c_s0} 0%, {_c_s1} 100%);
-                border-radius: 16px; padding: 32px 40px; margin-bottom: 8px;
-                border: 1px solid #2d3748;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; gap: 16px;">
-            <div>
-                <div style="font-size: 0.72rem; font-weight: 700; color: #94a3b8;
-                            text-transform: uppercase; letter-spacing: 0.14em; margin-bottom: 8px;">
-                    Vol 2 &middot; Lab 05 &middot; Distributed Training Systems
-                </div>
-                <div style="font-size: 2.0rem; font-weight: 800; color: #f1f5f9; line-height: 1.15; margin-bottom: 10px;">
-                    The Parallelism Puzzle
-                </div>
-                <div style="font-size: 0.95rem; color: #94a3b8; max-width: 600px; line-height: 1.6;">
-                    Each parallelism strategy solves one constraint while creating another.
-                    Data parallelism hits a communication wall. ZeRO trades memory for
-                    communication. Pipeline parallelism creates bubbles. Only 3D parallelism,
-                    mapped to the bandwidth hierarchy, can train frontier models.
-                </div>
-            </div>
-            <div style="display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
-                <span class="badge badge-info">Communication Wall</span>
-                <span class="badge badge-info">ZeRO Memory Sharding</span>
-                <span class="badge badge-info">Pipeline Bubbles</span>
-                <span class="badge badge-info">3D Parallel: TP &times; PP &times; DP</span>
-                <span class="badge badge-warn">35&ndash;40 minutes &middot; 3 Parts + Synthesis</span>
-            </div>
-        </div>
-        <div style="display: flex; gap: 16px; margin-top: 20px; flex-wrap: wrap;">
-            <div style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.35);
-                        border-radius: 8px; padding: 10px 16px; font-size: 0.82rem;">
-                <span style="color: {_c_dp}; font-weight: 700;">Context A &mdash; Data Parallel</span>
-                <span style="color: #94a3b8;"> &mdash; 175B model &middot; 1&ndash;512 GPUs &middot; AllReduce via IB NDR</span>
-            </div>
-            <div style="background: rgba(99,102,241,0.12); border: 1px solid rgba(99,102,241,0.35);
-                        border-radius: 8px; padding: 10px 16px; font-size: 0.82rem;">
-                <span style="color: {_c_3d}; font-weight: 700;">Context B &mdash; 3D Parallel</span>
-                <span style="color: #94a3b8;"> &mdash; 175B model &middot; 256 H100s &middot; TP&times;PP&times;DP design</span>
-            </div>
-        </div>
-    </div>
-    """)
-    _header
-    return
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "cloud_fleet"
+    v2_05_track_picker = track_selector(default=_default_track)
+    v2_05_track_picker
+    return (v2_05_track_picker,)
 
 
-# ─── CELL 2: BRIEFING ────────────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, COLORS):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the communication wall:</strong> calculate Ring-AllReduce time for a 175B model and explain why DP efficiency collapses to ~50% at 256 GPUs on IB NDR.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Diagnose why ZeRO-3 alone cannot train 175B:</strong> compute per-GPU memory with and without activation sharding to identify the OOM boundary.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Design a 3D parallelism configuration:</strong> select TP, PP, and DP degrees that satisfy memory, bubble, and bandwidth constraints simultaneously.</div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; margin-bottom: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Ring-AllReduce bandwidth model from the Communication chapter &middot;
-                    Data parallelism and scaling efficiency from the Distributed Training chapter
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>35-40 min</strong><br/>
-                    Part A: ~12 min &middot; Part B: ~10 min &middot; Part C: ~15 min
-                </div>
-            </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="margin-top: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                "If data parallelism, ZeRO, and pipeline parallelism each solve part of the scaling
-                puzzle, why does every frontier model require all three simultaneously &mdash; and what
-                determines the correct ratio?"
-            </div>
-        </div>
-    </div>
-    """)
-    return
+@app.cell
+def _(get_lab_track_variant, get_track_profile, v2_05_metadata, v2_05_track_picker):
+    v2_05_track_id = v2_05_track_picker.value
+    v2_05_profile = get_track_profile(v2_05_track_id)
+    v2_05_variant = get_lab_track_variant(v2_05_metadata.lab_id, v2_05_profile.track_id)
+    return v2_05_profile, v2_05_track_id, v2_05_variant
 
 
-# ─── CELL 3: RECOMMENDED READING ───────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
+@app.cell
+def _(Hardware, Models, Systems, apply_plotly_theme, go, html_lib, math, mo):
+    def v2_05_qty_to_float(value, unit, default):
+        if value is None:
+            return float(default)
+        if hasattr(value, "m_as"):
+            try:
+                return float(value.m_as(unit))
+            except Exception:
+                return float(default)
+        if hasattr(value, "to"):
+            try:
+                return float(value.to(unit).magnitude)
+            except Exception:
+                return float(default)
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return float(default)
 
-    - **The Distributed Training chapter** -- Data parallelism, the Communication-Computation Ratio,
-      and the Iron Law of Scale: `T_step(N) = T_compute/N + T_comm(N) - T_overlap`
-    - **The Communication chapter** -- Ring-AllReduce bandwidth formula, gradient bucketing
-    - The ZeRO section -- Memory sharding stages (ZeRO-1/2/3), activation memory
-    - The Pipeline Parallelism section -- Microbatching, bubble fraction `B = (PP-1)/(PP*m)`
-    - The 3D Parallelism section -- TP within NVLink, PP across IB, DP for throughput
-    """), kind="info")
-    return
+    def v2_05_escape(value):
+        return html_lib.escape(str(value))
+
+    def v2_05_fmt(value, digits=1, suffix=""):
+        value = float(value)
+        if abs(value) >= 1000:
+            text = f"{value:,.{digits}f}"
+        else:
+            text = f"{value:.{digits}f}"
+        if digits == 0:
+            text = text.split(".")[0]
+        return f"{text}{suffix}"
+
+    def v2_05_pct(value, digits=0):
+        return f"{100 * float(value):.{digits}f}%"
+
+    def v2_05_status(condition):
+        return "PASS" if condition else "FAIL"
+
+    def v2_05_safe_div(num, den, default=0.0):
+        if den == 0:
+            return default
+        return num / den
+
+    def v2_05_bar_color(colors, condition):
+        return colors["GreenLine"] if condition else colors["RedLine"]
+
+    def v2_05_table(rows, columns, caption=""):
+        header = "".join(f"<th>{v2_05_escape(label)}</th>" for label, _key in columns)
+        body = []
+        for row in rows:
+            cells = []
+            for _label, key in columns:
+                value = row.get(key, "")
+                cells.append(f"<td>{v2_05_escape(value)}</td>")
+            body.append(f"<tr>{''.join(cells)}</tr>")
+        caption_html = f"<div class='v2-05-table-caption'>{v2_05_escape(caption)}</div>" if caption else ""
+        return mo.Html(
+            f"""
+<div style="overflow-x:auto; margin:12px 0;">
+  {caption_html}
+  <table class="v2-05-table">
+    <thead><tr>{header}</tr></thead>
+    <tbody>{''.join(body)}</tbody>
+  </table>
+</div>
+<style>
+.v2-05-table {{
+  border-collapse: collapse;
+  min-width: 780px;
+  width: 100%;
+  font-size: 0.9rem;
+}}
+.v2-05-table td, .v2-05-table th {{
+  border: 1px solid #d9dee8;
+  padding: 8px 10px;
+  text-align: left;
+  vertical-align: top;
+}}
+.v2-05-table th {{
+  color: #344054;
+  font-weight: 700;
+  background: #f8fafc;
+}}
+.v2-05-table-caption {{
+  font-weight: 700;
+  margin-bottom: 8px;
+}}
+</style>
+"""
+        )
+
+    def v2_05_callout(ok, pass_text, fail_text):
+        return mo.callout(mo.md(pass_text if ok else fail_text), kind="success" if ok else "danger")
+
+    def v2_05_prediction_feedback(predicted, actual, correct_text, miss_text):
+        if predicted is None:
+            return mo.callout(
+                mo.md("Commit to a structured prediction before using the instrument."),
+                kind="warn",
+            )
+        if predicted == actual:
+            return mo.callout(mo.md(correct_text), kind="success")
+        return mo.callout(mo.md(miss_text), kind="warn")
+
+    def v2_05_model_constants():
+        return {
+            "gpt2_b": v2_05_qty_to_float(Models.Language.GPT2.parameters, "param", 1.5e9) / 1e9,
+            "llama2_7b": v2_05_qty_to_float(Models.Language.Llama2_7B.parameters, "param", 7.0e9) / 1e9,
+            "gpt3_b": v2_05_qty_to_float(Models.Language.GPT3.parameters, "param", 175.0e9) / 1e9,
+            "a100_gib": v2_05_qty_to_float(Hardware.Cloud.A100.memory.capacity, "GiB", 80.0),
+            "h100_gib": v2_05_qty_to_float(Hardware.Cloud.H100.memory.capacity, "GiB", 80.0),
+            "h100_nvlink_gb_s": v2_05_qty_to_float(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, "GB/s", 450.0),
+            "ib_ndr_gb_s": v2_05_qty_to_float(Systems.Fabrics.InfiniBand_NDR.bandwidth, "GB/s", 50.0),
+            "ethernet_10g_gb_s": v2_05_qty_to_float(Systems.Fabrics.Ethernet_10G.bandwidth, "GB/s", 1.25),
+            "gpus_per_node": int(getattr(Systems.Nodes.DGX_H100, "accelerators_per_node", 8)),
+        }
+
+    def v2_05_track_lenses():
+        constants = v2_05_model_constants()
+        return {
+            "iphone": {
+                "scenario": "A mobile ML product lead must decide where personalization training happens for an on-device feature.",
+                "stakeholder": "mobile ML product lead",
+                "decision_frame": "Keep the phone responsive while using consented evidence to improve the model.",
+                "training_location": "backend fine-tune with on-device adapter update",
+                "model_name": "1.5B personalization backbone",
+                "model_b": constants["gpt2_b"],
+                "memory_cap_gb": 6.0,
+                "activation_base_gb": 2.5,
+                "default_strategy": "adapter_offdevice",
+                "default_scale": 8,
+                "max_scale": 64,
+                "part_b_default_gpus": 8,
+                "part_b_max_gpus": 64,
+                "step_budget_ms": 1800.0,
+                "time_target_hours": 8.0,
+                "baseline_hours": 54.0,
+                "efficiency_floor": 0.62,
+                "comm_share_limit": 0.30,
+                "bubble_limit": 0.18,
+                "critical_batch": 16384,
+                "local_batch_default": 2,
+                "local_batch_max": 16,
+                "accum_default": 8,
+                "evidence_floor": 0.82,
+                "failure_mode": "local memory, battery/radio, or privacy evidence miss",
+                "rejected_alternative": "full on-device training",
+                "report_prompt": "Frame the memo around where personalization happens and what evidence leaves the phone.",
+                "collective_implication": "V2-06 should treat phone-originated updates as staged summaries before any backend AllReduce.",
+            },
+            "oura_ring": {
+                "scenario": "A TinyML firmware lead must package training updates for a wearable with intermittent sync.",
+                "stakeholder": "TinyML firmware lead",
+                "decision_frame": "Train off-device while keeping the wearable update small enough for flash, SRAM, and duty cycle.",
+                "training_location": "off-device training plus tiny calibration package",
+                "model_name": "750M sleep-stage teacher with tiny deployed student",
+                "model_b": 0.75,
+                "memory_cap_gb": 0.45,
+                "activation_base_gb": 0.9,
+                "default_strategy": "adapter_offdevice",
+                "default_scale": 4,
+                "max_scale": 32,
+                "part_b_default_gpus": 4,
+                "part_b_max_gpus": 32,
+                "step_budget_ms": 2400.0,
+                "time_target_hours": 12.0,
+                "baseline_hours": 36.0,
+                "efficiency_floor": 0.58,
+                "comm_share_limit": 0.22,
+                "bubble_limit": 0.16,
+                "critical_batch": 8192,
+                "local_batch_default": 1,
+                "local_batch_max": 8,
+                "accum_default": 8,
+                "evidence_floor": 0.88,
+                "failure_mode": "SRAM, OTA, or intermittent-sync miss",
+                "rejected_alternative": "ring-local full training",
+                "report_prompt": "Frame the memo around off-device training and the update artifact that can reach the ring.",
+                "collective_implication": "V2-06 should assume wearable updates are asynchronous and delay tolerant, not synchronous collectives.",
+            },
+            "robotaxi": {
+                "scenario": "A safety/perception platform lead must turn fleet evidence into a central training run without weakening validation.",
+                "stakeholder": "safety/perception platform lead",
+                "decision_frame": "Use fleet data centrally while preserving vehicle-local validation and release evidence.",
+                "training_location": "central fleet-data training with edge validation",
+                "model_name": "7B perception foundation model",
+                "model_b": constants["llama2_7b"],
+                "memory_cap_gb": constants["h100_gib"],
+                "activation_base_gb": 18.0,
+                "default_strategy": "fsdp_hybrid",
+                "default_scale": 32,
+                "max_scale": 128,
+                "part_b_default_gpus": 32,
+                "part_b_max_gpus": 128,
+                "step_budget_ms": 2200.0,
+                "time_target_hours": 10.0,
+                "baseline_hours": 210.0,
+                "efficiency_floor": 0.70,
+                "comm_share_limit": 0.34,
+                "bubble_limit": 0.20,
+                "critical_batch": 32768,
+                "local_batch_default": 4,
+                "local_batch_max": 32,
+                "accum_default": 4,
+                "evidence_floor": 0.92,
+                "failure_mode": "safety validation evidence or training turnaround miss",
+                "rejected_alternative": "raw scale-out without validation gate",
+                "report_prompt": "Frame the memo around training throughput plus safety evidence before deployment.",
+                "collective_implication": "V2-06 should inspect the AllReduce path for central training and the delayed evidence-upload path separately.",
+            },
+            "cloud_fleet": {
+                "scenario": "A training platform owner must schedule a large-model run on a GPU fleet without wasting accelerators.",
+                "stakeholder": "training platform owner",
+                "decision_frame": "Choose the 3D/sharded strategy that meets time, HBM, and network guardrails.",
+                "training_location": "multi-node GPU cluster",
+                "model_name": "175B frontier language model",
+                "model_b": constants["gpt3_b"],
+                "memory_cap_gb": constants["h100_gib"],
+                "activation_base_gb": 46.0,
+                "default_strategy": "fsdp_hybrid",
+                "default_scale": 64,
+                "max_scale": 512,
+                "part_b_default_gpus": 128,
+                "part_b_max_gpus": 512,
+                "step_budget_ms": 3200.0,
+                "time_target_hours": 24.0,
+                "baseline_hours": 6200.0,
+                "efficiency_floor": 0.68,
+                "comm_share_limit": 0.38,
+                "bubble_limit": 0.24,
+                "critical_batch": 1_000_000,
+                "local_batch_default": 4,
+                "local_batch_max": 32,
+                "accum_default": 16,
+                "evidence_floor": 0.86,
+                "failure_mode": "HBM, communication wall, or pipeline bubble miss",
+                "rejected_alternative": "pure data parallel scale-out",
+                "report_prompt": "Frame the memo around the scheduled 3D/sharded plan and the bottleneck that remains.",
+                "collective_implication": "V2-06 should focus on gradient AllReduce plus FSDP AllGather/ReduceScatter placement.",
+            },
+        }
+
+    def v2_05_strategy_specs(lens):
+        scale = int(lens["default_scale"])
+        return {
+            "local_full": {
+                "label": "Full local/single-replica training",
+                "family": "single",
+                "dp": 1,
+                "tp": 1,
+                "pp": 1,
+                "scale": 1,
+                "evidence": 0.52,
+                "note": "Useful baseline; often invalid for device tracks and large models.",
+            },
+            "data_parallel": {
+                "label": "Pure data parallel",
+                "family": "data",
+                "dp": max(2, scale),
+                "tp": 1,
+                "pp": 1,
+                "scale": max(2, scale),
+                "evidence": 0.70,
+                "note": "Replicates state and synchronizes gradients once per optimizer step.",
+            },
+            "tensor_parallel": {
+                "label": "Tensor parallel",
+                "family": "tensor",
+                "dp": 1,
+                "tp": max(2, min(8, scale)),
+                "pp": 1,
+                "scale": max(2, min(8, scale)),
+                "evidence": 0.74,
+                "note": "Splits layers but puts frequent AllReduce on NVLink-class links.",
+            },
+            "pipeline_parallel": {
+                "label": "Pipeline parallel",
+                "family": "pipeline",
+                "dp": 1,
+                "tp": 1,
+                "pp": max(2, min(32, scale)),
+                "scale": max(2, min(32, scale)),
+                "evidence": 0.76,
+                "note": "Splits layers and pays fill/drain bubble cost.",
+            },
+            "fsdp_hybrid": {
+                "label": "FSDP plus tensor/pipeline hybrid",
+                "family": "hybrid",
+                "dp": max(1, scale // 8),
+                "tp": min(8, max(2, scale)),
+                "pp": max(1, min(16, scale // 8)),
+                "scale": max(8, scale),
+                "evidence": 0.88,
+                "note": "Combines sharding and 3D placement to buy memory with multiple collective paths.",
+            },
+            "adapter_offdevice": {
+                "label": "Off-device training plus adapter/update",
+                "family": "adapter",
+                "dp": max(2, min(16, scale)),
+                "tp": 1,
+                "pp": 1,
+                "scale": max(2, min(16, scale)),
+                "evidence": 0.90,
+                "note": "Track device receives a small update while backend training uses staged data parallelism.",
+            },
+        }
+
+    def v2_05_update_spec_scale(spec, scale):
+        spec = dict(spec)
+        scale = max(1, int(scale))
+        family = spec["family"]
+        if family == "data":
+            spec.update({"dp": scale, "tp": 1, "pp": 1, "scale": scale})
+        elif family == "tensor":
+            tp = max(2, min(8, scale))
+            spec.update({"dp": 1, "tp": tp, "pp": 1, "scale": tp})
+        elif family == "pipeline":
+            pp = max(2, min(32, scale))
+            spec.update({"dp": 1, "tp": 1, "pp": pp, "scale": pp})
+        elif family == "hybrid":
+            tp = min(8, max(2, scale))
+            pp = max(1, min(16, scale // max(tp, 1)))
+            dp = max(1, scale // max(tp * pp, 1))
+            spec.update({"dp": dp, "tp": tp, "pp": pp, "scale": max(1, dp * tp * pp)})
+        elif family == "adapter":
+            dp = max(2, min(16, scale))
+            spec.update({"dp": dp, "tp": 1, "pp": 1, "scale": dp})
+        else:
+            spec.update({"dp": 1, "tp": 1, "pp": 1, "scale": 1})
+        return spec
+
+    def v2_05_ring_factor(n):
+        n = max(1, int(n))
+        return 0.0 if n == 1 else 2 * (n - 1) / n
+
+    def v2_05_strategy_result(lens, strategy_id, scale, microbatches=None, bandwidth_gb_s=None):
+        specs = v2_05_strategy_specs(lens)
+        spec = v2_05_update_spec_scale(specs[strategy_id], scale)
+        constants = v2_05_model_constants()
+        model_b = float(lens["model_b"])
+        state_gb_full = model_b * 16.0
+        weight_gb = model_b * 2.0
+        activation_gb = float(lens["activation_base_gb"])
+        microbatches = int(microbatches or 16)
+        bandwidth_gb_s = float(bandwidth_gb_s or constants["ib_ndr_gb_s"])
+        family = spec["family"]
+
+        if family == "single":
+            memory_gb = state_gb_full + activation_gb
+            comm_ms = 0.0
+            bubble_pct = 0.0
+            convergence_risk = 0.10
+        elif family == "data":
+            memory_gb = state_gb_full + activation_gb
+            comm_gb = weight_gb * v2_05_ring_factor(spec["dp"])
+            comm_ms = comm_gb / max(bandwidth_gb_s, 0.1) * 1000.0
+            bubble_pct = 0.0
+            convergence_risk = min(0.55, spec["dp"] / max(lens["critical_batch"] / 256.0, 1.0))
+        elif family == "tensor":
+            memory_gb = state_gb_full / spec["tp"] + activation_gb / max(spec["tp"], 1)
+            comm_gb = activation_gb * 0.45 * spec["tp"]
+            comm_ms = comm_gb / max(constants["h100_nvlink_gb_s"], 0.1) * 1000.0
+            bubble_pct = 0.0
+            convergence_risk = 0.12
+        elif family == "pipeline":
+            memory_gb = state_gb_full / spec["pp"] + activation_gb / max(spec["pp"], 1)
+            comm_gb = activation_gb * 0.35 * max(spec["pp"] - 1, 1) / max(spec["pp"], 1)
+            comm_ms = comm_gb / max(bandwidth_gb_s, 0.1) * 1000.0
+            bubble_pct = (spec["pp"] - 1) / (microbatches + spec["pp"] - 1)
+            convergence_risk = 0.16
+        elif family == "hybrid":
+            shards = max(1, spec["dp"] * spec["tp"] * spec["pp"])
+            memory_gb = state_gb_full / shards + activation_gb / max(spec["pp"], 1) + weight_gb / max(spec["tp"], 1) * 0.15
+            dp_comm = weight_gb * v2_05_ring_factor(spec["dp"]) / max(bandwidth_gb_s, 0.1) * 1000.0
+            fsdp_comm = weight_gb * 1.5 / max(bandwidth_gb_s, 0.1) * 1000.0
+            tp_comm = activation_gb * 0.25 * spec["tp"] / max(constants["h100_nvlink_gb_s"], 0.1) * 1000.0
+            comm_ms = 0.35 * dp_comm + 0.20 * fsdp_comm + tp_comm
+            bubble_pct = (spec["pp"] - 1) / (microbatches + spec["pp"] - 1) if spec["pp"] > 1 else 0.0
+            convergence_risk = 0.18
+        else:
+            memory_gb = min(lens["memory_cap_gb"] * 0.35, 1.2)
+            comm_ms = 80.0 + 6.0 * model_b
+            bubble_pct = 0.0
+            convergence_risk = 0.20
+
+        memory_ok = memory_gb <= lens["memory_cap_gb"]
+        comm_ok = comm_ms <= lens["step_budget_ms"] * lens["comm_share_limit"]
+        bubble_ok = bubble_pct <= lens["bubble_limit"]
+        ratios = {
+            "memory": v2_05_safe_div(memory_gb, lens["memory_cap_gb"], 99.0),
+            "communication": v2_05_safe_div(comm_ms, lens["step_budget_ms"] * lens["comm_share_limit"], 99.0),
+            "pipeline bubble": v2_05_safe_div(bubble_pct, lens["bubble_limit"], 99.0),
+            "convergence": convergence_risk,
+        }
+        binding_amount = max(ratios.items(), key=lambda item: item[1])[0]
+        if family == "adapter" and memory_ok and comm_ok:
+            binding_amount = "evidence/update communication"
+        return {
+            **spec,
+            "strategy_id": strategy_id,
+            "memory_gb": memory_gb,
+            "state_gb_full": state_gb_full,
+            "comm_ms": comm_ms,
+            "bubble_pct": bubble_pct,
+            "convergence_risk": convergence_risk,
+            "memory_ok": memory_ok,
+            "comm_ok": comm_ok,
+            "bubble_ok": bubble_ok,
+            "feasible": memory_ok and comm_ok and bubble_ok,
+            "binding_amount": binding_amount,
+            "ratios": ratios,
+        }
+
+    def v2_05_network_options():
+        constants = v2_05_model_constants()
+        return {
+            "nvlink": {
+                "label": "NVLink island",
+                "bandwidth_gb_s": constants["h100_nvlink_gb_s"],
+                "latency_ms": 0.004,
+                "overlap": 0.70,
+            },
+            "ib_ndr": {
+                "label": "InfiniBand NDR",
+                "bandwidth_gb_s": constants["ib_ndr_gb_s"],
+                "latency_ms": 0.030,
+                "overlap": 0.55,
+            },
+            "ethernet_10g": {
+                "label": "10G Ethernet / staged edge",
+                "bandwidth_gb_s": constants["ethernet_10g_gb_s"],
+                "latency_ms": 0.600,
+                "overlap": 0.15,
+            },
+        }
+
+    def v2_05_step_for_n(lens, strategy_id, n_gpus, network_id, microbatches):
+        network = v2_05_network_options()[network_id]
+        strategy = v2_05_strategy_result(
+            lens,
+            strategy_id,
+            n_gpus,
+            microbatches=microbatches,
+            bandwidth_gb_s=network["bandwidth_gb_s"],
+        )
+        n_gpus = max(1, int(n_gpus))
+        compute_ms = lens["step_budget_ms"] * 0.72 / n_gpus
+        exposed_comm_ms = strategy["comm_ms"] * (1 - network["overlap"])
+        sync_ms = network["latency_ms"] * max(1.0, math.log2(n_gpus + 1)) * (1 + 0.05 * n_gpus)
+        bubble_ms = compute_ms * strategy["bubble_pct"]
+        step_ms = compute_ms + exposed_comm_ms + sync_ms + bubble_ms
+        t_compute = lens["step_budget_ms"] * 0.72
+        efficiency = v2_05_safe_div(t_compute, n_gpus * step_ms, 0.0)
+        useful_speedup = n_gpus * efficiency
+        comm_share = v2_05_safe_div(exposed_comm_ms + sync_ms, step_ms, 0.0)
+        bubble_share = v2_05_safe_div(bubble_ms, step_ms, 0.0)
+        return {
+            **strategy,
+            "n_gpus": n_gpus,
+            "network_id": network_id,
+            "network_label": network["label"],
+            "compute_ms": compute_ms,
+            "exposed_comm_ms": exposed_comm_ms,
+            "sync_ms": sync_ms,
+            "bubble_ms": bubble_ms,
+            "step_ms": step_ms,
+            "efficiency": efficiency,
+            "useful_speedup": useful_speedup,
+            "comm_share": comm_share,
+            "bubble_share": bubble_share,
+            "scaling_ok": efficiency >= lens["efficiency_floor"] and bubble_share <= lens["bubble_limit"],
+        }
+
+    def v2_05_sharding_options():
+        return {
+            "ddp": {"label": "DDP replicated state", "bpp": 16.0, "overhead": 0.00, "evidence": 0.72},
+            "zero1": {"label": "ZeRO-1 optimizer sharding", "bpp": 7.0, "overhead": 0.04, "evidence": 0.78},
+            "zero2": {"label": "ZeRO-2 grad + optimizer sharding", "bpp": 4.0, "overhead": 0.08, "evidence": 0.83},
+            "zero3": {"label": "FSDP / ZeRO-3 full sharding", "bpp": 1.2, "overhead": 0.18, "evidence": 0.90},
+        }
+
+    def v2_05_batch_result(lens, n_gpus, batch_per_device, accumulation, sharding_id, step_reference_ms):
+        sharding = v2_05_sharding_options()[sharding_id]
+        model_b = lens["model_b"]
+        state_gb = model_b * sharding["bpp"]
+        activation_gb = lens["activation_base_gb"] * (batch_per_device / max(lens["local_batch_default"], 1)) * 0.45
+        memory_gb = state_gb + activation_gb
+        global_batch = int(n_gpus) * int(batch_per_device) * int(accumulation)
+        batch_ratio = global_batch / lens["critical_batch"]
+        convergence_ok = batch_ratio <= 1.0
+        memory_ok = memory_gb <= lens["memory_cap_gb"]
+        step_ms = step_reference_ms * (1 + sharding["overhead"]) * (1 + 0.015 * max(accumulation - 1, 0))
+        step_ok = step_ms <= lens["step_budget_ms"] * 1.35
+        if not memory_ok:
+            binding = "memory"
+        elif not convergence_ok:
+            binding = "convergence"
+        elif not step_ok:
+            binding = "step time"
+        else:
+            binding = "optimizer/evidence headroom"
+        return {
+            "sharding_id": sharding_id,
+            "sharding_label": sharding["label"],
+            "batch_per_device": int(batch_per_device),
+            "accumulation": int(accumulation),
+            "global_batch": global_batch,
+            "critical_batch": lens["critical_batch"],
+            "batch_ratio": batch_ratio,
+            "state_gb": state_gb,
+            "activation_gb": activation_gb,
+            "memory_gb": memory_gb,
+            "memory_ok": memory_ok,
+            "convergence_ok": convergence_ok,
+            "step_ms": step_ms,
+            "step_ok": step_ok,
+            "binding_amount": binding,
+            "evidence": sharding["evidence"],
+        }
+
+    def v2_05_plan_result(lens, candidate_id, strategy_id, scale, network_id, microbatches, batch_result, overlap_pct, evidence_mode):
+        evidence_thresholds = {"minimum": 0.76, "release": lens["evidence_floor"], "audit": min(0.96, lens["evidence_floor"] + 0.05)}
+        candidate_adjust = {
+            "naive_scaleout": {"strategy": "data_parallel", "scale_mult": 2.0, "evidence_delta": -0.16, "name": "Naive pure data-parallel scale-out"},
+            "student_strategy": {"strategy": strategy_id, "scale_mult": 1.0, "evidence_delta": 0.00, "name": "Student-selected Part A strategy"},
+            "memory_first_fsdp": {"strategy": "fsdp_hybrid", "scale_mult": 1.0, "evidence_delta": 0.03, "name": "Memory-first FSDP/hybrid plan"},
+            "bandwidth_matched": {"strategy": "fsdp_hybrid" if lens["model_b"] >= 7 else "adapter_offdevice", "scale_mult": 0.75, "evidence_delta": 0.08, "name": "Bandwidth-matched staged plan"},
+        }[candidate_id]
+        candidate_scale = max(1, int(scale * candidate_adjust["scale_mult"]))
+        step = v2_05_step_for_n(lens, candidate_adjust["strategy"], candidate_scale, network_id, microbatches)
+        exposed_step_ms = step["step_ms"] * (1 - float(overlap_pct) / 100.0)
+        training_hours = lens["baseline_hours"] / max(step["useful_speedup"], 0.1)
+        memory_ok = batch_result["memory_ok"] if candidate_id != "naive_scaleout" else step["memory_ok"]
+        time_ok = training_hours <= lens["time_target_hours"]
+        comm_ok = step["comm_share"] <= lens["comm_share_limit"] and step["efficiency"] >= lens["efficiency_floor"]
+        evidence_score = max(0.0, min(1.0, step["evidence"] + candidate_adjust["evidence_delta"]))
+        evidence_ok = evidence_score >= evidence_thresholds[evidence_mode]
+        ratios = {
+            "time": v2_05_safe_div(training_hours, lens["time_target_hours"], 99.0),
+            "memory": 0.80 if memory_ok else 1.35,
+            "communication": v2_05_safe_div(step["comm_share"], lens["comm_share_limit"], 99.0),
+            "evidence": v2_05_safe_div(evidence_thresholds[evidence_mode], max(evidence_score, 0.01), 99.0),
+        }
+        binding = max(ratios.items(), key=lambda item: item[1])[0]
+        return {
+            **step,
+            "candidate_id": candidate_id,
+            "candidate_label": candidate_adjust["name"],
+            "candidate_strategy": candidate_adjust["strategy"],
+            "candidate_scale": candidate_scale,
+            "exposed_step_ms": exposed_step_ms,
+            "training_hours": training_hours,
+            "time_ok": time_ok,
+            "memory_ok": memory_ok,
+            "comm_ok": comm_ok,
+            "evidence_score": evidence_score,
+            "evidence_threshold": evidence_thresholds[evidence_mode],
+            "evidence_ok": evidence_ok,
+            "valid_plan": time_ok and memory_ok and comm_ok and evidence_ok,
+            "binding_guardrail": binding,
+        }
+
+    def v2_05_strategy_chart(colors, result):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=["memory ratio", "comm ratio", "bubble ratio", "convergence risk"],
+                y=[
+                    result["ratios"]["memory"],
+                    result["ratios"]["communication"],
+                    result["ratios"]["pipeline bubble"],
+                    result["ratios"]["convergence"],
+                ],
+                marker_color=[
+                    v2_05_bar_color(colors, result["memory_ok"]),
+                    v2_05_bar_color(colors, result["comm_ok"]),
+                    v2_05_bar_color(colors, result["bubble_ok"]),
+                    colors["OrangeLine"],
+                ],
+                text=[
+                    f"{result['ratios']['memory']:.2f}x",
+                    f"{result['ratios']['communication']:.2f}x",
+                    f"{result['ratios']['pipeline bubble']:.2f}x",
+                    f"{result['ratios']['convergence']:.2f}",
+                ],
+                textposition="auto",
+            )
+        )
+        fig.add_hline(y=1.0, line_dash="dash", line_color=colors["RedLine"], annotation_text="failure boundary")
+        fig.update_layout(
+            title="Part A - shifted amount ratios",
+            yaxis_title="ratio to track limit",
+            xaxis_title="amount system term",
+            height=360,
+            showlegend=False,
+        )
+        apply_plotly_theme(fig)
+        return fig
+
+    def v2_05_scaling_chart(colors, rows, current_n):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Scatter(
+                x=[row["n_gpus"] for row in rows],
+                y=[row["efficiency"] for row in rows],
+                mode="lines+markers",
+                name="scaling efficiency",
+                line={"color": colors["BlueLine"]},
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[row["n_gpus"] for row in rows],
+                y=[row["comm_share"] for row in rows],
+                mode="lines+markers",
+                name="communication share",
+                line={"color": colors["OrangeLine"]},
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=[row["n_gpus"] for row in rows],
+                y=[row["bubble_share"] for row in rows],
+                mode="lines+markers",
+                name="bubble share",
+                line={"color": colors.get("VioletLine", colors["BlueLine"])},
+            )
+        )
+        fig.add_vline(x=current_n, line_dash="dot", line_color=colors["Text"], annotation_text="current")
+        fig.update_layout(
+            title="Part B - efficiency falls as overhead takes over",
+            xaxis_title="accelerators",
+            yaxis_title="fraction of ideal or step",
+            height=380,
+        )
+        apply_plotly_theme(fig)
+        return fig
+
+    def v2_05_memory_chart(colors, batch_result, lens):
+        fig = go.Figure()
+        fig.add_trace(
+            go.Bar(
+                x=["state", "activations", "headroom"],
+                y=[
+                    batch_result["state_gb"],
+                    batch_result["activation_gb"],
+                    max(lens["memory_cap_gb"] - batch_result["memory_gb"], 0.0),
+                ],
+                marker_color=[colors["BlueLine"], colors["OrangeLine"], colors["GreenLine"]],
+                text=[
+                    f"{batch_result['state_gb']:.1f} GB",
+                    f"{batch_result['activation_gb']:.1f} GB",
+                    f"{max(lens['memory_cap_gb'] - batch_result['memory_gb'], 0.0):.1f} GB",
+                ],
+                textposition="auto",
+            )
+        )
+        fig.add_hline(y=lens["memory_cap_gb"], line_dash="dash", line_color=colors["RedLine"], annotation_text="device cap")
+        fig.update_layout(
+            title="Part C - per-device memory ledger",
+            yaxis_title="GB",
+            height=360,
+            showlegend=False,
+        )
+        apply_plotly_theme(fig)
+        return fig
+
+    def v2_05_plan_chart(colors, selected, rejected):
+        labels = ["time", "memory", "communication", "evidence"]
+        selected_values = [
+            selected["training_hours"] / selected["time_target_hours"] if "time_target_hours" in selected else 0,
+            0.80 if selected["memory_ok"] else 1.30,
+            selected["comm_share"] / max(selected["comm_share_limit"] if "comm_share_limit" in selected else 1, 0.01),
+            selected["evidence_threshold"] / max(selected["evidence_score"], 0.01),
+        ]
+        rejected_values = [
+            rejected["training_hours"] / max(rejected.get("time_target_hours", selected.get("time_target_hours", 1)), 1),
+            0.80 if rejected["memory_ok"] else 1.30,
+            rejected["comm_share"] / max(rejected.get("comm_share_limit", selected.get("comm_share_limit", 1)), 0.01),
+            rejected["evidence_threshold"] / max(rejected["evidence_score"], 0.01),
+        ]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=labels, y=selected_values, name="selected", marker_color=colors["GreenLine"]))
+        fig.add_trace(go.Bar(x=labels, y=rejected_values, name="rejected", marker_color=colors["RedLine"]))
+        fig.add_hline(y=1.0, line_dash="dash", line_color=colors["Text"], annotation_text="guardrail")
+        fig.update_layout(
+            title="Part D - simultaneous guardrail ratios",
+            yaxis_title="ratio to limit",
+            barmode="group",
+            height=380,
+        )
+        apply_plotly_theme(fig)
+        return fig
+
+    return (
+        v2_05_batch_result,
+        v2_05_callout,
+        v2_05_escape,
+        v2_05_fmt,
+        v2_05_memory_chart,
+        v2_05_network_options,
+        v2_05_pct,
+        v2_05_plan_chart,
+        v2_05_plan_result,
+        v2_05_prediction_feedback,
+        v2_05_scaling_chart,
+        v2_05_status,
+        v2_05_strategy_chart,
+        v2_05_strategy_result,
+        v2_05_strategy_specs,
+        v2_05_step_for_n,
+        v2_05_table,
+        v2_05_track_lenses,
+    )
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE B: WIDGET DEFINITIONS
-# ═══════════════════════════════════════════════════════════════════════════════
+@app.cell
+def _(v2_05_profile, v2_05_track_lenses):
+    _lenses = v2_05_track_lenses()
+    v2_05_lens = _lenses.get(v2_05_profile.track_id, _lenses["cloud_fleet"])
+    return (v2_05_lens,)
 
 
-# ─── CELL 4: PART A WIDGETS ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo):
+@app.cell
+def _(mo, v2_05_lens, v2_05_network_options, v2_05_strategy_specs):
+    _strategy_options = {value["label"]: key for key, value in v2_05_strategy_specs(v2_05_lens).items()}
+    _network_options = {value["label"]: key for key, value in v2_05_network_options().items()}
+    _sharding_options = {
+        "DDP replicated state": "ddp",
+        "ZeRO-1 optimizer sharding": "zero1",
+        "ZeRO-2 grad + optimizer sharding": "zero2",
+        "FSDP / ZeRO-3 full sharding": "zero3",
+    }
+    _candidate_options = {
+        "Naive pure data-parallel scale-out": "naive_scaleout",
+        "Student-selected Part A strategy": "student_strategy",
+        "Memory-first FSDP/hybrid plan": "memory_first_fsdp",
+        "Bandwidth-matched staged plan": "bandwidth_matched",
+    }
+
     partA_prediction = mo.ui.radio(
         options={
-            "A) ~90% -- InfiniBand is fast enough to handle the gradients": "A",
-            "B) ~70% -- moderate communication overhead": "B",
-            "C) ~50-55% -- communication is nearly half of step time": "C",
-            "D) ~25% -- communication dominates": "D",
+            "memory": "Memory becomes binding",
+            "communication": "Communication becomes binding",
+            "pipeline bubble": "Pipeline bubbles become binding",
+            "evidence/update communication": "Evidence or update traffic becomes binding",
         },
-        label="You train a 175B model with pure data parallelism on 256 GPUs with InfiniBand NDR. What scaling efficiency do you achieve?",
+        label="Prediction: which amount will the first strategy shift into?",
     )
-    a1_model_select = mo.ui.dropdown(
-        options={"1B": 1.0, "7B": 7.0, "70B": 70.0, "175B": 175.0},
-        value="175B",
-        label="Model size (parameters)",
+    partA_strategy = mo.ui.dropdown(
+        options=_strategy_options,
+        value=v2_05_strategy_specs(v2_05_lens)[v2_05_lens["default_strategy"]]["label"],
+        label="Strategy to test",
     )
-    a1_gpu_slider = mo.ui.slider(
-        start=1, stop=512, value=256, step=1,
-        label="Number of GPUs (DP degree)",
+    partA_scale = mo.ui.slider(
+        start=1,
+        stop=int(v2_05_lens["max_scale"]),
+        step=1,
+        value=int(v2_05_lens["default_scale"]),
+        label="parallel workers/stages",
     )
-    a1_interconnect = mo.ui.dropdown(
+    partA_checkpoint = mo.ui.radio(
         options={
-            "IB NDR (50 GB/s)": 50.0,
-            "IB HDR (25 GB/s)": 25.0,
-            "100GbE (12.5 GB/s)": 12.5,
+            "carry": "Carry this strategy forward",
+            "revise": "Revise before scaling",
+            "reject": "Reject for this track",
         },
-        value="IB NDR (50 GB/s)",
-        label="Interconnect",
+        label="Checkpoint decision",
     )
-    partA_reflection = mo.ui.radio(
-        options={
-            "A) Use faster GPUs -- reduce compute time so communication is a smaller fraction": "A",
-            "B) Shard the model across GPUs so each holds only a fraction -- this is ZeRO or model parallelism": "B",
-            "C) Use gradient compression to reduce AllReduce volume by 4-8x": "C",
-            "D) Accept the wall -- 55% efficiency is good enough for production": "D",
-        },
-        label="What is the most effective strategy to overcome the DP communication wall for frontier models?",
-    )
-    return (a1_gpu_slider, a1_interconnect, a1_model_select, partA_prediction, partA_reflection)
 
-
-# ─── CELL 5: PART B WIDGETS ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, partA_prediction):
     partB_prediction = mo.ui.radio(
         options={
-            "A) TP=1, PP=1, DP=256 -- Pure DP: maximize data parallelism": "A",
-            "B) TP=8, PP=4, DP=8 -- Full 3D parallelism mapped to bandwidth hierarchy": "B",
-            "C) TP=8, PP=1, DP=32 -- TP within node + DP only": "C",
-            "D) TP=8, PP=32, DP=1 -- Aggressive pipeline, no DP": "D",
+            "communication": "Communication wall",
+            "pipeline bubble": "Pipeline bubble",
+            "synchronization": "Synchronization latency",
+            "compute": "Compute remains dominant",
         },
-        label="Which 3D configuration (TP x PP x DP = 256) best trains a 175B model on 256 H100s?",
+        label="Prediction: which term drops scaling efficiency first?",
     )
-    return (partB_prediction,)
-
-
-# ─── CELL 6: PART C WIDGETS ───────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, partB_prediction):
-    a2_tp = mo.ui.slider(start=1, stop=16, value=8, step=1, label="Tensor Parallelism (TP)")
-    a2_pp = mo.ui.slider(start=1, stop=32, value=4, step=1, label="Pipeline Parallelism (PP)")
-    a2_microbatches = mo.ui.slider(start=1, stop=64, value=16, step=1, label="Microbatches per flush (m)")
-    a2_zero_stage = mo.ui.dropdown(
-        options={"ZeRO-0 (no sharding)": 0, "ZeRO-1 (optimizer)": 1, "ZeRO-2 (+gradients)": 2, "ZeRO-3 (+parameters)": 3},
-        value="ZeRO-3 (+parameters)",
-        label="ZeRO Stage",
+    partB_gpus = mo.ui.slider(
+        start=1,
+        stop=int(v2_05_lens["part_b_max_gpus"]),
+        step=1,
+        value=int(v2_05_lens["part_b_default_gpus"]),
+        label="accelerators",
     )
-    partC_reflection = mo.ui.radio(
+    partB_network = mo.ui.dropdown(options=_network_options, value="InfiniBand NDR", label="communication tier")
+    partB_microbatches = mo.ui.slider(start=1, stop=64, step=1, value=16, label="pipeline microbatches")
+    partB_checkpoint = mo.ui.radio(
         options={
-            "A) TP handles inter-layer communication, PP handles intra-layer, DP handles gradient sync": "A",
-            "B) TP maps to NVLink (highest BW), PP maps to IB (moderate BW), DP AllReduce uses remaining BW": "B",
-            "C) The mapping is arbitrary -- any assignment of TP/PP/DP to the hierarchy works equally well": "C",
-            "D) TP and PP should both use NVLink; DP should use Ethernet for cost savings": "D",
+            "scale": "Scale out",
+            "accumulate": "Stay smaller and accumulate",
+            "change_parallelism": "Change parallelism mix",
         },
-        label="Why must TP map to NVLink, PP to InfiniBand, and DP to the remaining bandwidth?",
+        label="Checkpoint decision",
     )
-    return (a2_microbatches, a2_pp, a2_tp, a2_zero_stage, partC_reflection)
 
+    partC_prediction = mo.ui.radio(
+        options={
+            "memory": "Optimizer state or activations exceed memory",
+            "convergence": "Global batch exceeds useful convergence range",
+            "step time": "Sharding overhead pushes step time over budget",
+            "optimizer/evidence headroom": "All constraints keep headroom",
+        },
+        label="Prediction: what binds after batch and sharding choices?",
+    )
+    partC_batch = mo.ui.slider(
+        start=1,
+        stop=int(v2_05_lens["local_batch_max"]),
+        step=1,
+        value=int(v2_05_lens["local_batch_default"]),
+        label="per-device batch",
+    )
+    partC_accumulation = mo.ui.slider(
+        start=1,
+        stop=64,
+        step=1,
+        value=int(v2_05_lens["accum_default"]),
+        label="gradient accumulation steps",
+    )
+    partC_sharding = mo.ui.dropdown(options=_sharding_options, value="ZeRO-2 grad + optimizer sharding", label="optimizer/sharding policy")
+    partC_checkpoint = mo.ui.radio(
+        options={
+            "keep": "Keep batch and sharding",
+            "reduce_batch": "Reduce batch/accumulation",
+            "deepen_shard": "Increase sharding",
+        },
+        label="Checkpoint decision",
+    )
 
-# ─── CELL 6b: PART D WIDGETS ─────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(mo, partC_reflection,
-      H100_TFLOPS_FP16, A100_TFLOPS_FP16, T4_TFLOPS_FP16,
-      IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS):
     partD_prediction = mo.ui.radio(
         options={
-            "A) A100 80GB -- same HBM so same result": "A",
-            "B) A100 achieves ~35% efficiency -- slower interconnect (IB HDR 25 GB/s) doubles the communication wall": "B",
-            "C) A100 achieves ~70% -- slower compute means comm/compute ratio improves": "C",
-            "D) A100 cannot train 175B at all -- insufficient memory": "D",
+            "time": "Time-to-train rejects the naive plan",
+            "memory": "Memory rejects the naive plan",
+            "communication": "Communication efficiency rejects the naive plan",
+            "evidence": "Evidence threshold rejects the naive plan",
         },
-        label="You switch from H100 + IB NDR (50 GB/s) to A100 + IB HDR (25 GB/s) for 175B DP training on 256 GPUs. What happens to scaling efficiency?",
+        label="Prediction: which guardrail rejects the naive plan?",
     )
-    d1_hw_tier = mo.ui.dropdown(
+    partD_candidate = mo.ui.dropdown(options=_candidate_options, value="Bandwidth-matched staged plan", label="candidate plan")
+    partD_overlap = mo.ui.slider(start=0, stop=80, step=5, value=35, label="extra communication overlap (%)")
+    partD_evidence = mo.ui.dropdown(
         options={
-            f"H100 + IB NDR ({IB_NDR_BW_GBS} GB/s, {H100_TFLOPS_FP16:.0f} TFLOPS)": ("H100", H100_TFLOPS_FP16, IB_NDR_BW_GBS),
-            f"A100 + IB HDR ({IB_HDR_BW_GBS} GB/s, {A100_TFLOPS_FP16:.0f} TFLOPS)": ("A100", A100_TFLOPS_FP16, IB_HDR_BW_GBS),
-            f"T4 + 100GbE ({ETH_100G_BW_GBS} GB/s, {T4_TFLOPS_FP16:.0f} TFLOPS)": ("T4", T4_TFLOPS_FP16, ETH_100G_BW_GBS),
+            "Minimum lab evidence": "minimum",
+            "Release review evidence": "release",
+            "Audit-grade evidence": "audit",
         },
-        value=f"H100 + IB NDR ({IB_NDR_BW_GBS} GB/s, {H100_TFLOPS_FP16:.0f} TFLOPS)",
-        label="Hardware tier",
+        value="Release review evidence",
+        label="evidence threshold",
     )
-    d1_model_size = mo.ui.dropdown(
-        options={"7B": 7.0, "70B": 70.0, "175B": 175.0},
-        value="175B",
-        label="Model size",
-    )
-    d1_gpu_count = mo.ui.slider(start=8, stop=512, value=256, step=8, label="GPU count")
-    partD_reflection = mo.ui.radio(
+    partD_final = mo.ui.radio(
         options={
-            "A) Always use the fastest GPUs regardless of model size": "A",
-            "B) Match hardware tier to model scale -- small models on T4, large models require H100": "B",
-            "C) Use A100 for everything -- best price/performance": "C",
-            "D) Interconnect does not matter -- only GPU compute speed determines efficiency": "D",
+            "approve": "Approve selected plan",
+            "revise": "Revise and remeasure",
+            "reject": "Reject for this track",
         },
-        label="What principle governs hardware tier selection for distributed training?",
+        label="Final decision",
     )
-    return (d1_gpu_count, d1_hw_tier, d1_model_size, partD_prediction, partD_reflection)
 
-
-# ─── CELL 7: SYNTHESIS WIDGETS ────────────────────────────────────────────────
-@app.cell(hide_code=True)
-def _(DecisionLog, mo, partD_reflection):
-    synth_decision_input, synth_decision_ui = DecisionLog(
-        placeholder="Based on what I learned in this lab, the most important insight about "
-                    "distributed training parallelism is..."
+    student_id = mo.ui.text(label="Optional student/team id")
+    memo_note = mo.ui.text_area(
+        label="Memo note",
+        placeholder="Selected parallelism, binding bottleneck, rejected alternative, and V2-06 implication.",
     )
-    return (synth_decision_input, synth_decision_ui)
+    return (
+        memo_note,
+        partA_checkpoint,
+        partA_prediction,
+        partA_scale,
+        partA_strategy,
+        partB_checkpoint,
+        partB_gpus,
+        partB_microbatches,
+        partB_network,
+        partB_prediction,
+        partC_accumulation,
+        partC_batch,
+        partC_checkpoint,
+        partC_prediction,
+        partC_sharding,
+        partD_candidate,
+        partD_evidence,
+        partD_final,
+        partD_overlap,
+        partD_prediction,
+        student_id,
+    )
 
 
-
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE C: SINGLE TABS CELL
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── CELL 8: ALL PARTS + TABS COMPOSITION ─────────────────────────────────────
 @app.cell(hide_code=True)
 def _(
-    COLORS, apply_plotly_theme, go, math,
-    mo, np, H100_TFLOPS_FP16, H100_RAM_GB,
-    A100_TFLOPS_FP16, T4_TFLOPS_FP16,
-    IB_NDR_BW_GBS, IB_HDR_BW_GBS, ETH_100G_BW_GBS,
-    NVLINK4_BW_GBS, GPUS_PER_NODE, synth_decision_input, synth_decision_ui,
-    a1_gpu_slider, a1_interconnect, a1_model_select, a2_microbatches,
-    a2_pp, a2_tp, a2_zero_stage, d1_gpu_count,
-    d1_hw_tier, d1_model_size, partA_prediction, partA_reflection,
-    partB_prediction, partC_reflection, partD_prediction, partD_reflection,
+    ACADEMIC_LAB_CSS,
+    COLORS,
+    LAB_CSS,
+    MathPeek,
+    build_lab_report,
+    ledger,
+    memo_note,
+    mo,
+    partA_checkpoint,
+    partA_prediction,
+    partA_scale,
+    partA_strategy,
+    partB_checkpoint,
+    partB_gpus,
+    partB_microbatches,
+    partB_network,
+    partB_prediction,
+    partC_accumulation,
+    partC_batch,
+    partC_checkpoint,
+    partC_prediction,
+    partC_sharding,
+    partD_candidate,
+    partD_evidence,
+    partD_final,
+    partD_overlap,
+    partD_prediction,
+    report_export_panel,
+    source_trace,
+    student_id,
+    track_arc_context,
+    track_context,
+    v2_05_batch_result,
+    v2_05_callout,
+    v2_05_chapter,
+    v2_05_fmt,
+    v2_05_lens,
+    v2_05_memory_chart,
+    v2_05_metadata,
+    v2_05_network_options,
+    v2_05_pct,
+    v2_05_plan_chart,
+    v2_05_plan_result,
+    v2_05_prediction_feedback,
+    v2_05_profile,
+    v2_05_scaling_chart,
+    v2_05_status,
+    v2_05_strategy_chart,
+    v2_05_strategy_result,
+    v2_05_strategy_specs,
+    v2_05_step_for_n,
+    v2_05_table,
+    v2_05_variant,
 ):
-    # ─────────────────────────────────────────────────────────────────────
-    # PART A BUILDER -- The Communication Wall
-    # ─────────────────────────────────────────────────────────────────────
+    _network = v2_05_network_options()[partB_network.value]
+    _part_a = v2_05_strategy_result(
+        v2_05_lens,
+        partA_strategy.value,
+        partA_scale.value,
+        microbatches=partB_microbatches.value,
+        bandwidth_gb_s=_network["bandwidth_gb_s"],
+    )
+    _part_b = v2_05_step_for_n(
+        v2_05_lens,
+        partA_strategy.value,
+        partB_gpus.value,
+        partB_network.value,
+        partB_microbatches.value,
+    )
+    _part_c = v2_05_batch_result(
+        v2_05_lens,
+        partB_gpus.value,
+        partC_batch.value,
+        partC_accumulation.value,
+        partC_sharding.value,
+        _part_b["step_ms"],
+    )
+    _part_d = v2_05_plan_result(
+        v2_05_lens,
+        partD_candidate.value,
+        partA_strategy.value,
+        partB_gpus.value,
+        partB_network.value,
+        partB_microbatches.value,
+        _part_c,
+        partD_overlap.value,
+        partD_evidence.value,
+    )
+    _rejected = v2_05_plan_result(
+        v2_05_lens,
+        "naive_scaleout",
+        partA_strategy.value,
+        partB_gpus.value,
+        partB_network.value,
+        partB_microbatches.value,
+        _part_c,
+        0,
+        partD_evidence.value,
+    )
+    _part_d["time_target_hours"] = v2_05_lens["time_target_hours"]
+    _part_d["comm_share_limit"] = v2_05_lens["comm_share_limit"]
+    _rejected["time_target_hours"] = v2_05_lens["time_target_hours"]
+    _rejected["comm_share_limit"] = v2_05_lens["comm_share_limit"]
+
+    _scale_values = sorted(
+        set(
+            [
+                1,
+                max(2, int(v2_05_lens["part_b_max_gpus"]) // 16),
+                max(2, int(v2_05_lens["part_b_max_gpus"]) // 8),
+                max(2, int(v2_05_lens["part_b_max_gpus"]) // 4),
+                max(2, int(v2_05_lens["part_b_max_gpus"]) // 2),
+                int(v2_05_lens["part_b_max_gpus"]),
+                int(partB_gpus.value),
+            ]
+        )
+    )
+    _scaling_rows = [
+        v2_05_step_for_n(v2_05_lens, partA_strategy.value, value, partB_network.value, partB_microbatches.value)
+        for value in _scale_values
+    ]
+
+    def _part_a_table():
+        rows = [
+            {
+                "Metric": "Strategy",
+                "Value": _part_a["label"],
+                "Limit or meaning": _part_a["note"],
+            },
+            {
+                "Metric": "Per-device memory",
+                "Value": f"{_part_a['memory_gb']:.1f} GB ({v2_05_status(_part_a['memory_ok'])})",
+                "Limit or meaning": f"<= {v2_05_lens['memory_cap_gb']:.1f} GB",
+            },
+            {
+                "Metric": "Communication time",
+                "Value": f"{_part_a['comm_ms']:.1f} ms ({v2_05_status(_part_a['comm_ok'])})",
+                "Limit or meaning": f"<= {v2_05_lens['step_budget_ms'] * v2_05_lens['comm_share_limit']:.0f} ms exposed budget",
+            },
+            {
+                "Metric": "Pipeline bubble",
+                "Value": f"{v2_05_pct(_part_a['bubble_pct'], 1)} ({v2_05_status(_part_a['bubble_ok'])})",
+                "Limit or meaning": f"<= {v2_05_pct(v2_05_lens['bubble_limit'], 0)}",
+            },
+            {
+                "Metric": "Binding amount",
+                "Value": _part_a["binding_amount"],
+                "Limit or meaning": v2_05_lens["failure_mode"],
+            },
+        ]
+        return v2_05_table(
+            rows,
+            [("Metric", "Metric"), ("Value", "Value"), ("Limit or meaning", "Limit or meaning")],
+            caption="Part A strategy evidence table",
+        )
+
+    def _part_b_table():
+        rows = [
+            {
+                "Metric": "Accelerators",
+                "Value": _part_b["n_gpus"],
+                "Limit or meaning": _part_b["network_label"],
+            },
+            {
+                "Metric": "Step time",
+                "Value": f"{_part_b['step_ms']:.1f} ms",
+                "Limit or meaning": "compute/N + exposed communication + synchronization + bubble",
+            },
+            {
+                "Metric": "Scaling efficiency",
+                "Value": f"{v2_05_pct(_part_b['efficiency'], 1)} ({v2_05_status(_part_b['efficiency'] >= v2_05_lens['efficiency_floor'])})",
+                "Limit or meaning": f">= {v2_05_pct(v2_05_lens['efficiency_floor'], 0)}",
+            },
+            {
+                "Metric": "Communication share",
+                "Value": f"{v2_05_pct(_part_b['comm_share'], 1)}",
+                "Limit or meaning": f"guardrail <= {v2_05_pct(v2_05_lens['comm_share_limit'], 0)}",
+            },
+            {
+                "Metric": "Bubble share",
+                "Value": f"{v2_05_pct(_part_b['bubble_share'], 1)}",
+                "Limit or meaning": f"guardrail <= {v2_05_pct(v2_05_lens['bubble_limit'], 0)}",
+            },
+        ]
+        return v2_05_table(
+            rows,
+            [("Metric", "Metric"), ("Value", "Value"), ("Limit or meaning", "Limit or meaning")],
+            caption="Part B scaling evidence table",
+        )
+
+    def _part_c_table():
+        rows = [
+            {
+                "Metric": "Sharding policy",
+                "Value": _part_c["sharding_label"],
+                "Limit or meaning": "memory is bought with additional collectives",
+            },
+            {
+                "Metric": "Per-device memory",
+                "Value": f"{_part_c['memory_gb']:.1f} GB ({v2_05_status(_part_c['memory_ok'])})",
+                "Limit or meaning": f"<= {v2_05_lens['memory_cap_gb']:.1f} GB",
+            },
+            {
+                "Metric": "Global batch",
+                "Value": f"{_part_c['global_batch']:,} ({v2_05_status(_part_c['convergence_ok'])})",
+                "Limit or meaning": f"critical batch ~= {_part_c['critical_batch']:,}",
+            },
+            {
+                "Metric": "Critical-batch ratio",
+                "Value": f"{_part_c['batch_ratio']:.2f}x",
+                "Limit or meaning": "above 1.0 means diminishing convergence returns",
+            },
+            {
+                "Metric": "Binding amount",
+                "Value": _part_c["binding_amount"],
+                "Limit or meaning": v2_05_lens["failure_mode"],
+            },
+        ]
+        return v2_05_table(
+            rows,
+            [("Metric", "Metric"), ("Value", "Value"), ("Limit or meaning", "Limit or meaning")],
+            caption="Part C memory, batch, and convergence table",
+        )
+
+    def _part_d_table(selected, rejected):
+        rows = [
+            {
+                "Guardrail": "Time-to-train",
+                "Selected plan": f"{selected['training_hours']:.1f} h ({v2_05_status(selected['time_ok'])})",
+                "Rejected alternative": f"{rejected['training_hours']:.1f} h ({v2_05_status(rejected['time_ok'])})",
+                "Limit": f"<= {v2_05_lens['time_target_hours']:.1f} h",
+            },
+            {
+                "Guardrail": "Memory",
+                "Selected plan": v2_05_status(selected["memory_ok"]),
+                "Rejected alternative": v2_05_status(rejected["memory_ok"]),
+                "Limit": f"<= {v2_05_lens['memory_cap_gb']:.1f} GB",
+            },
+            {
+                "Guardrail": "Communication",
+                "Selected plan": f"{v2_05_pct(selected['comm_share'], 1)} ({v2_05_status(selected['comm_ok'])})",
+                "Rejected alternative": f"{v2_05_pct(rejected['comm_share'], 1)} ({v2_05_status(rejected['comm_ok'])})",
+                "Limit": f"<= {v2_05_pct(v2_05_lens['comm_share_limit'], 0)} and efficiency >= {v2_05_pct(v2_05_lens['efficiency_floor'], 0)}",
+            },
+            {
+                "Guardrail": "Evidence",
+                "Selected plan": f"{selected['evidence_score']:.2f} ({v2_05_status(selected['evidence_ok'])})",
+                "Rejected alternative": f"{rejected['evidence_score']:.2f} ({v2_05_status(rejected['evidence_ok'])})",
+                "Limit": f">= {selected['evidence_threshold']:.2f}",
+            },
+        ]
+        return v2_05_table(
+            rows,
+            [
+                ("Guardrail", "Guardrail"),
+                ("Selected plan", "Selected plan"),
+                ("Rejected alternative", "Rejected alternative"),
+                ("Limit", "Limit"),
+            ],
+            caption="Part D simultaneous guardrail matrix",
+        )
+
+    def build_opening():
+        return mo.vstack(
+            [
+                LAB_CSS,
+                ACADEMIC_LAB_CSS,
+                mo.md("# V2-05 Distributed Training: The Parallelism Puzzle"),
+                track_context(v2_05_profile),
+                track_arc_context(v2_05_profile, v2_05_metadata.lab_id),
+                mo.callout(
+                    mo.md(
+                        f"**Chapter invariant.** Distributed training trades compute for communication, "
+                        f"memory, synchronization, and convergence cost. For **{v2_05_profile.label}**, "
+                        f"you are acting as the {v2_05_lens['stakeholder']} deciding: "
+                        f"{v2_05_lens['decision_frame']}"
+                    ),
+                    kind="info",
+                ),
+                mo.md(
+                    f"""
+**Scenario.** {v2_05_lens['scenario']}
+
+**Track constraint lens.** Model/update workload: **{v2_05_lens['model_name']}**. Training location: **{v2_05_lens['training_location']}**. Natural failure: **{v2_05_lens['failure_mode']}**.
+
+**Concept sequence.**
+
+1. Part A: data/model/pipeline parallelism shifts the binding amount.
+2. Part B: scaling efficiency falls when communication or bubbles dominate.
+3. Part C: batch size and optimizer state change memory, convergence, and step time.
+4. Part D: a distributed training plan must satisfy time, memory, communication, and evidence constraints.
+"""
+                ),
+            ]
+        )
 
     def build_part_a():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['BlueLine']}; background: {COLORS['BlueLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; Training Infrastructure Lead
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "We are scaling a 175B parameter model with pure data parallelism on 256 H100s
-                connected via InfiniBand NDR (50 GB/s per port). InfiniBand is the fastest
-                interconnect money can buy. I expect scaling efficiency above 90%. Am I wrong?"
-            </div>
-        </div>
-        """))
-
-        # Concept framing
-        items.append(mo.md("""
-    The stakeholder's expectation sounds reasonable: InfiniBand NDR is the fastest
-    datacenter interconnect. But the critical variable is not the absolute bandwidth
-    -- it is the **ratio** of communication time to compute time.
-
-    For a 175B model in FP16, the gradient tensor is ~350 GB. Ring-AllReduce transfers
-    approximately `2 x (N-1)/N x gradient_bytes` per step. At N=256, this saturates
-    at ~700 GB of data traversing 50 GB/s InfiniBand -- a transfer that takes ~14 seconds.
-
-    If the compute step (forward + backward) on each GPU takes ~10 seconds, the
-    communication/compute ratio is 1.4. Efficiency = 1 / (1 + ratio) = ~42%.
-    Even with 50% overlap via gradient bucketing, efficiency reaches only ~55%.
-
-    Before seeing the numbers, commit to your prediction.
-        """))
-
-        # Prediction lock
-        items.append(mo.md("### Your Prediction"))
-        items.append(partA_prediction)
-        items.append(mo.stop(
-            partA_prediction.value is None,
+        _actual = _part_a["binding_amount"]
+        items = [
+            mo.md("## Part A - Concept Module: Parallelism Moves The Binding Amount"),
             mo.callout(
-                mo.md("Select your prediction above to unlock the Part A instruments."),
-                kind="warn",
+                mo.md(
+                    f"**Scenario.** The {v2_05_lens['stakeholder']} tries **{_part_a['label']}** "
+                    f"for **{v2_05_lens['model_name']}**. The decision is not whether more devices "
+                    "exist; it is which amount becomes binding after the split."
+                ),
+                kind="info",
             ),
-        ))
-
-        # Instruments header
-        items.append(mo.md("""
-    ### Data Parallel Scaling Explorer
-
-    Adjust GPU count and model size to see how AllReduce communication time
-    compares to compute time -- and how the ratio determines efficiency.
-        """))
-
-        # Controls
-        items.append(mo.hstack([a1_model_select, a1_gpu_slider, a1_interconnect], justify="center", gap=2))
-
-        # ── Physics: Ring-AllReduce ────────────────────────────────────────
-        _params_b   = a1_model_select.value
-        _n_gpus     = a1_gpu_slider.value
-        _bw_gbs     = a1_interconnect.value
-
-        _grad_bytes     = _params_b * 1e9 * 2                    # FP16 gradients
-        _grad_gb        = _grad_bytes / 1e9
-        _ring_factor    = 2.0 * (_n_gpus - 1) / max(_n_gpus, 1)  # saturates at ~2
-        _allreduce_gb   = _ring_factor * _grad_gb
-        _allreduce_s    = _allreduce_gb / _bw_gbs if _bw_gbs > 0 else 999
-
-        # Compute time: 6 * params * tokens_per_batch / (peak_flops * MFU_ref)
-        _flops_per_step = 6.0 * _params_b * 1e9 * 2048         # 6PD with seq_len=2048, micro_batch=1
-        _compute_s      = _flops_per_step / (_n_gpus * H100_TFLOPS_FP16 * 1e12 * 0.50)
-
-        # Overlap: gradient bucketing hides ~50% of AllReduce
-        _overlap_frac   = 0.50
-        _effective_comm = _allreduce_s * (1 - _overlap_frac)
-        _step_time_s    = _compute_s + _effective_comm
-        _efficiency     = _compute_s / _step_time_s if _step_time_s > 0 else 0
-        _efficiency_pct = _efficiency * 100
-
-        # ── Sweep: efficiency vs GPU count ────────────────────────────────
-        _gpu_range = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512]
-        _eff_curve = []
-        for _g in _gpu_range:
-            _c_s = _flops_per_step / (_g * H100_TFLOPS_FP16 * 1e12 * 0.50)
-            _ar_s = (2.0 * (_g - 1) / max(_g, 1) * _grad_gb) / _bw_gbs
-            _st = _c_s + _ar_s * (1 - _overlap_frac)
-            _eff_curve.append((_c_s / _st * 100) if _st > 0 else 100)
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_gpu_range, y=_eff_curve,
-            mode="lines+markers",
-            line=dict(color=COLORS["BlueLine"], width=2.5),
-            marker=dict(size=7),
-            name="Scaling efficiency",
-            hovertemplate="<b>%{x} GPUs</b><br>Efficiency: %{y:.1f}%<extra></extra>",
-        ))
-        _fig.add_trace(go.Scatter(
-            x=[_n_gpus], y=[_efficiency_pct],
-            mode="markers",
-            marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond",
-                        line=dict(color="white", width=2)),
-            name="Current config",
-        ))
-        _fig.add_hline(y=50, line=dict(color=COLORS["OrangeLine"], width=1.5, dash="dash"),
-                       annotation_text="50% efficiency", annotation_position="bottom right")
-        _fig.update_layout(
-            height=320,
-            xaxis=dict(title="GPU Count (DP degree)", type="log",
-                       tickvals=[1, 2, 4, 8, 16, 32, 64, 128, 256, 512]),
-            yaxis=dict(title="Scaling Efficiency (%)", range=[0, 105]),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(t=40, b=50, l=50, r=20),
+            partA_prediction,
+            v2_05_prediction_feedback(
+                partA_prediction.value,
+                _actual,
+                f"Correct. The modeled binding amount is **{_actual}**.",
+                f"The modeled binding amount is **{_actual}**. Parallelism moved the pressure instead of removing it.",
+            ),
+        ]
+        if partA_prediction.value is None:
+            return mo.vstack(items)
+        items.extend(
+            [
+                mo.hstack([partA_strategy, partA_scale], justify="start"),
+                mo.as_html(v2_05_strategy_chart(COLORS, _part_a)),
+                _part_a_table(),
+                v2_05_callout(
+                    _part_a["feasible"],
+                    f"Consequence: {_part_a['label']} stays inside the current memory, communication, and bubble thresholds.",
+                    f"Boundary: {_part_a['label']} violates a track threshold. Binding amount: {_part_a['binding_amount']}. Mitigation is to change the split, reduce scale, or move training off the constrained endpoint.",
+                ),
+                MathPeek(
+                    "N_total=d*p*t; each axis changes state placement and traffic",
+                    {
+                        "data parallel": "replicate model, shard data, AllReduce gradients",
+                        "tensor parallel": "split layers, frequent intra-layer collectives",
+                        "pipeline parallel": "split layer depth, pay bubble=(p-1)/(m+p-1)",
+                        "chapter source": "3D parallelism cube and strategy decision tree",
+                    },
+                ),
+                partA_checkpoint,
+            ]
         )
-        apply_plotly_theme(_fig)
-
-        # Color coding
-        _eff_color = COLORS["GreenLine"] if _efficiency_pct >= 70 else (COLORS["OrangeLine"] if _efficiency_pct >= 40 else COLORS["RedLine"])
-        _comm_color = COLORS["GreenLine"] if _effective_comm < _compute_s * 0.3 else (COLORS["OrangeLine"] if _effective_comm < _compute_s else COLORS["RedLine"])
-
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;
-                        font-family:sans-serif;">
-                Physics &mdash; Ring-AllReduce Communication Model
-            </div>
-            <div>Gradient size = {_params_b}B &times; 2 bytes (FP16) = <strong>{_grad_gb:.1f} GB</strong></div>
-            <div>Ring-AllReduce volume = 2 &times; ({_n_gpus}-1)/{_n_gpus} &times; {_grad_gb:.1f} GB = <strong>{_allreduce_gb:.1f} GB</strong></div>
-            <div>AllReduce time = {_allreduce_gb:.1f} GB / {_bw_gbs} GB/s = <strong>{_allreduce_s:.2f}s</strong> (raw)</div>
-            <div>Compute time per step = <strong>{_compute_s:.2f}s</strong> (at 50% MFU reference)</div>
-            <div>Effective comm (50% overlap) = <strong>{_effective_comm:.2f}s</strong></div>
-            <div>Efficiency = T_compute / (T_compute + T_comm_eff) = {_compute_s:.2f} / {_step_time_s:.2f} = <strong style="color:{_eff_color};">{_efficiency_pct:.1f}%</strong></div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Efficiency</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_eff_color};
-                            font-family:monospace;">{_efficiency_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">scaling efficiency</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">AllReduce</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_comm_color};
-                            font-family:monospace;">{_allreduce_s:.1f}s</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">per step (raw)</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Compute</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{COLORS['BlueLine']};
-                            font-family:monospace;">{_compute_s:.1f}s</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">per step</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:160px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600;
-                            text-transform:uppercase; letter-spacing:0.06em;">Comm/Compute</div>
-                <div style="font-size:2.2rem; font-weight:800; color:{_comm_color};
-                            font-family:monospace;">{_effective_comm / _compute_s:.2f}x</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']}; margin-top:2px;">ratio (lower = better)</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # Prediction reveal
-        _correct = partA_prediction.value == "C"
-        if _correct:
-            items.append(mo.callout(mo.md(
-                "**Correct.** At 256 GPUs on IB NDR, the 175B model's gradient AllReduce "
-                "transfers ~700 GB per step. Even at 50 GB/s, this takes ~14 seconds raw. "
-                "Compute per GPU (~10s at this scale) cannot hide such a large transfer. "
-                "With 50% overlap, efficiency reaches ~55%. The communication wall is real "
-                "even on the fastest interconnect."
-            ), kind="success"))
-        elif partA_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Too optimistic.** InfiniBand NDR is fast (50 GB/s), but 175B parameters "
-                "produce 350 GB of FP16 gradients. Ring-AllReduce transfers ~700 GB per step. "
-                "At 50 GB/s, that is ~14 seconds -- comparable to the compute time itself. "
-                "90% efficiency would require communication to be <11% of compute time."
-            ), kind="warn"))
-        elif partA_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Close, but still optimistic.** 70% efficiency requires comm/compute ratio "
-                "below 0.43. With 700 GB of AllReduce traffic and only 50% overlap, the "
-                "effective communication is ~7 seconds against ~10 seconds of compute. "
-                "The actual ratio is ~0.7, yielding ~55% efficiency."
-            ), kind="warn"))
-        elif partA_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Too pessimistic.** 25% would mean communication is 3x compute time. "
-                "InfiniBand NDR is genuinely fast -- the issue is that gradient size for "
-                "175B models is so large that even fast interconnects are overwhelmed, but "
-                "not to the point of 3x domination. With overlap, efficiency stabilizes ~55%."
-            ), kind="warn"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "The governing equations -- Ring-AllReduce and DP efficiency": mo.md("""
-        **Ring-AllReduce Transfer Volume**
-
-        ```
-        V_allreduce = 2 * (N-1)/N * gradient_bytes
-        T_allreduce = V_allreduce / BW_interconnect
-        ```
-
-        - For large N, the factor 2*(N-1)/N approaches 2
-        - 175B FP16 gradients = 350 GB; AllReduce volume = ~700 GB
-        - At IB NDR (50 GB/s): T_allreduce = 14.0 seconds
-
-        **DP Scaling Efficiency**
-
-        ```
-        eta = T_compute / (T_compute + T_comm_effective)
-        T_comm_effective = T_allreduce * (1 - overlap_fraction)
-        ```
-
-        - Gradient bucketing achieves ~50% overlap for large models
-        - At 256 GPUs: eta = 10s / (10s + 7s) = 58.8%
-        - The communication wall appears when T_comm approaches T_compute
-            """)
-        }))
-
-        # Reflection
-        items.append(mo.md("### Reflection"))
-        items.append(partA_reflection)
-        if partA_reflection.value is not None:
-            if partA_reflection.value == "B":
-                items.append(mo.callout(mo.md(
-                    "**Correct.** Model parallelism (TP, PP) and ZeRO sharding reduce the "
-                    "gradient AllReduce volume by distributing the model itself. With TP=8 "
-                    "within a node, each TP group handles 175B/8 parameters, and the DP "
-                    "AllReduce is over a smaller DP degree, dramatically reducing the "
-                    "communication wall. This is why 3D parallelism exists."
-                ), kind="success"))
-            elif partA_reflection.value == "A":
-                items.append(mo.callout(mo.md(
-                    "**Counterproductive.** Faster GPUs reduce T_compute, but the comm/compute "
-                    "ratio actually *worsens* because T_allreduce stays the same. Each GPU "
-                    "generation doubles compute TFLOPS but interconnect bandwidth grows slower. "
-                    "The communication wall gets *worse* with faster GPUs, not better."
-                ), kind="warn"))
-            elif partA_reflection.value == "C":
-                items.append(mo.callout(mo.md(
-                    "**Partially effective but not the primary solution.** INT8 gradient compression "
-                    "can halve AllReduce volume, but it introduces convergence risk for sensitive "
-                    "training runs. The standard approach is to restructure the parallelism itself "
-                    "(TP/PP) rather than compromise gradient fidelity."
-                ), kind="warn"))
-            elif partA_reflection.value == "D":
-                items.append(mo.callout(mo.md(
-                    "**Not viable at frontier scale.** At 55% efficiency, you are paying for 256 "
-                    "H100s but getting the throughput of ~140. At $3/GPU-hour, the wasted compute "
-                    "costs ~$350/hour. Over a 90-day training run, that is $756,000 in idle GPUs."
-                ), kind="warn"))
-
         return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART B BUILDER -- The ZeRO Memory Trap
-    # ─────────────────────────────────────────────────────────────────────
 
     def build_part_b():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['Cloud']}; background: {COLORS['BlueLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['Cloud']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; MLOps Architect
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "My team says ZeRO-3 can shard everything across 64 A100 GPUs (80 GB each).
-                The static memory math works: 175B x 14 bytes / 64 = 38 GB per GPU. That
-                fits in 80 GB HBM. So ZeRO-3 alone should handle this model. Right?"
-            </div>
-        </div>
-        """))
-
-        # Concept framing
-        items.append(mo.callout(mo.md(
-            "**Systems Bridge:** ZeRO (Zero Redundancy Optimizer) shards optimizer state across GPUs — "
-            "analogous to how a distributed database shards table partitions across nodes. ZeRO Stage 1 "
-            "shards optimizer state, Stage 2 adds gradient sharding, Stage 3 adds parameter sharding. "
-            "Each stage trades communication for memory."
-        ), kind="info"))
-
-        items.append(mo.md("""
-    The stakeholder computed only **static memory**: parameters + gradients + optimizer states.
-    ZeRO-3 shards all three across workers, reducing per-GPU static memory to ~38 GB.
-
-    But **activation memory is NOT sharded** by ZeRO. Each GPU stores activations for its
-    own micro-batch during the forward pass, needed for the backward pass. For a 175B
-    Transformer at seq_len=2048 and batch_size=1, activations consume ~50 GB per GPU.
-
-    Total per-GPU memory: 38 GB (ZeRO-3 static) + 50 GB (activations) = **88 GB > 80 GB HBM**.
-
-    This is the OOM trap: ZeRO-3 is necessary but not sufficient for frontier models.
-    Pipeline parallelism (PP) reduces per-GPU layers, reducing activation memory.
-    Tensor parallelism (TP) shards each layer's activations across the TP group.
-    Only the combination (3D parallelism) makes training feasible.
-        """))
-
-        # Prediction lock
-        items.append(mo.md("### Your Prediction"))
-        items.append(partB_prediction)
-        items.append(mo.stop(
-            partB_prediction.value is None,
+        if _part_b["comm_share"] >= max(_part_b["bubble_share"], 0.08):
+            _actual = "communication"
+        elif _part_b["bubble_share"] > 0.08:
+            _actual = "pipeline bubble"
+        elif _part_b["sync_ms"] > _part_b["compute_ms"] * 0.25:
+            _actual = "synchronization"
+        else:
+            _actual = "compute"
+        items = [
+            mo.md("## Part B - Concept Module: Scaling Efficiency Falls When Overhead Dominates"),
             mo.callout(
-                mo.md("Select your configuration prediction above to unlock the Part B instruments."),
-                kind="warn",
+                mo.md(
+                    f"**Scenario.** The team asks whether **{_part_b['n_gpus']} accelerators** "
+                    f"on **{_part_b['network_label']}** still buy useful work for {v2_05_profile.label}."
+                ),
+                kind="info",
             ),
-        ))
-
-        # Prediction reveal
-        _correct = partB_prediction.value == "B"
-        if _correct:
-            items.append(mo.callout(mo.md(
-                "**Correct.** TP=8 maps to one DGX node (8 GPUs on NVLink at 900 GB/s), keeping "
-                "the per-layer AllReduce fast. PP=4 assigns 96/4=24 layers per stage, cutting "
-                "activation memory by 4x. With m=16 microbatches, bubble = 3/64 = 4.7%. "
-                "DP=8 replicates across 8 groups for throughput. This matches Megatron-LM practice."
-            ), kind="success"))
-        elif partB_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Pure DP cannot train 175B.** Each of 256 GPUs must hold the full model "
-                "(175B x 2 bytes = 350 GB in FP16 weights alone), which exceeds 80 GB HBM "
-                "by 4.4x. Even ZeRO-3 sharding across 256 GPUs leaves 38 GB static + 50 GB "
-                "activations = 88 GB > 80 GB. TP or PP must reduce per-GPU model size."
-            ), kind="warn"))
-        elif partB_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Memory infeasible.** Without PP, each GPU holds all 96 layers' activations. "
-                "TP=8 reduces weights to 175B/8 = 21.9B per GPU, but activation memory "
-                "remains ~50/8 = 6.25 GB (TP partitions activations). Static memory: "
-                "21.9B x 14 bytes / 32 (ZeRO-3) = 9.6 GB. Total ~16 GB -- feasible, "
-                "but DP=32 means AllReduce of 21.9B x 2 bytes across 32 nodes, still a "
-                "significant communication wall. PP would reduce this further."
-            ), kind="warn"))
-        elif partB_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**DP=1 wastes the cluster.** With DP=1, there is no data parallelism for "
-                "throughput scaling. PP=32 requires m >> 32 microbatches to keep bubble "
-                "fraction below 10%, implying an enormous global batch size. This is "
-                "an over-pipelined design that wastes most of the cluster on bubbles."
-            ), kind="warn"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Governing equations -- ZeRO memory and the OOM boundary": mo.md("""
-        **ZeRO-3 Per-GPU Memory**
-
-        ```
-        Static memory = (P / (TP * PP)) * (2 + 2/DP + 12/DP) bytes
-                       = params_per_gpu * (2 + 14/DP) bytes
-        Activation memory = base_activation / (TP * PP)
-        Total = static + activation
-        ```
-
-        For 175B, TP=1, PP=1, DP=64, ZeRO-3:
-        - params_per_gpu = 175B
-        - Static = 175B * (2 + 14/64) = 175B * 2.22 = 38.3 GB
-        - Activations = 50 GB (NOT sharded by ZeRO)
-        - Total = 88.3 GB > 80 GB HBM -- **OOM**
-
-        The fix: TP and PP reduce activations per GPU. With TP=8, PP=4:
-        - Activations = 50 / (8*4) = 1.56 GB
-        - Static = 5.47B * (2 + 14/8) = 20.5 GB
-        - Total = ~22 GB -- fits comfortably
-            """)
-        }))
-
+            partB_prediction,
+            v2_05_prediction_feedback(
+                partB_prediction.value,
+                _actual,
+                f"Correct. The dominant scaling limiter is **{_actual}**.",
+                f"The dominant scaling limiter is **{_actual}**. The fleet law shows why useful speedup diverges from raw GPU count.",
+            ),
+        ]
+        if partB_prediction.value is None:
+            return mo.vstack(items)
+        items.extend(
+            [
+                mo.hstack([partB_gpus, partB_network, partB_microbatches], justify="start"),
+                mo.as_html(v2_05_scaling_chart(COLORS, _scaling_rows, _part_b["n_gpus"])),
+                _part_b_table(),
+                v2_05_callout(
+                    _part_b["scaling_ok"],
+                    f"Consequence: scaling efficiency is {v2_05_pct(_part_b['efficiency'], 1)}, above the {v2_05_pct(v2_05_lens['efficiency_floor'], 0)} track threshold.",
+                    f"Boundary: scaling efficiency is {v2_05_pct(_part_b['efficiency'], 1)} against a {v2_05_pct(v2_05_lens['efficiency_floor'], 0)} threshold, or bubble share is too high. Mitigation is fewer workers, faster fabric, more microbatches, or a different parallelism axis.",
+                ),
+                MathPeek(
+                    "T_step(N)=T_compute/N+T_comm(N)+T_sync(N)-T_overlap; eta=T_compute/(N*T_step)",
+                    {
+                        "compute term": f"{_part_b['compute_ms']:.1f} ms",
+                        "exposed communication": f"{_part_b['exposed_comm_ms'] + _part_b['sync_ms']:.1f} ms",
+                        "bubble term": f"{_part_b['bubble_ms']:.1f} ms",
+                        "chapter source": "scaling efficiency and Amdahl with communication",
+                    },
+                ),
+                partB_checkpoint,
+            ]
+        )
         return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART C BUILDER -- 3D Parallelism Design Challenge
-    # ─────────────────────────────────────────────────────────────────────
 
     def build_part_c():
-        items = []
-
-        items.append(mo.md("""
-    ### 3D Parallelism Configurator
-
-    Adjust TP and PP degrees below. DP is computed automatically from `TP x PP x DP = 256`.
-    The configurator enforces per-GPU memory and pipeline bubble constraints.
-        """))
-
-        # Controls
-        items.append(mo.hstack([
-            mo.vstack([a2_tp, a2_pp]),
-            mo.vstack([a2_microbatches, a2_zero_stage]),
-        ], justify="center", gap=2))
-
-        # ── Model constants: 175B ──────────────────────────────────────────
-        _PARAMS_B        = 175.0
-        _LAYERS          = 96
-        _TOTAL_GPUS      = 256
-        _BYTES_WEIGHT    = 2          # FP16
-        _BYTES_OPTIMIZER = 12         # FP32 m1+m2+master = 4+4+4 = 12 bytes/param
-        _BYTES_GRADIENT  = 2          # FP16
-        _ACTIVATION_BASE = 50.0       # GB base activation for 175B at seq=2048, batch=1
-
-        _tp = a2_tp.value
-        _pp = a2_pp.value
-        _m  = a2_microbatches.value
-        _zero = a2_zero_stage.value
-
-        # ── DP degree ──────────────────────────────────────────────────────
-        _tp_pp = _tp * _pp
-        _dp = _TOTAL_GPUS // _tp_pp if _tp_pp <= _TOTAL_GPUS and _TOTAL_GPUS % _tp_pp == 0 else 0
-        _config_valid = _dp > 0
-
-        # ── Memory analysis per GPU ────────────────────────────────────────
-        _params_per_gpu_b = _PARAMS_B / (_tp * _pp)
-
-        # ZeRO sharding of static memory across DP workers
-        _dp_shard = max(_dp, 1)
-        if _zero == 0:
-            _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT
-            _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT
-            _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER
-        elif _zero == 1:
-            _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT
-            _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT
-            _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER / _dp_shard
-        elif _zero == 2:
-            _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT
-            _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT / _dp_shard
-            _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER / _dp_shard
-        else:  # ZeRO-3
-            _weight_gb = _params_per_gpu_b * _BYTES_WEIGHT / _dp_shard
-            _grad_gb = _params_per_gpu_b * _BYTES_GRADIENT / _dp_shard
-            _optim_gb = _params_per_gpu_b * _BYTES_OPTIMIZER / _dp_shard
-
-        # Activations: reduced by TP (partitioned across TP group) and PP (fewer layers)
-        _act_gb = _ACTIVATION_BASE / (_tp * (_pp if _pp > 1 else 1))
-        _total_mem_gb = _weight_gb + _grad_gb + _optim_gb + _act_gb
-        _oom = _total_mem_gb > H100_RAM_GB
-
-        # ── Pipeline bubble ────────────────────────────────────────────────
-        _bubble_frac = (_pp - 1) / (_pp * _m) if _pp > 1 else 0.0
-        _bubble_pct = _bubble_frac * 100
-
-        # ── TP bandwidth penalty ───────────────────────────────────────────
-        _tp_crosses_node = _tp > GPUS_PER_NODE
-        _tp_penalty_x = 1.0 if not _tp_crosses_node else (NVLINK4_BW_GBS / 50.0)
-
-        # ── Effective MFU ──────────────────────────────────────────────────
-        _mfu_base = 0.52
-        _tp_eff = 1.0 - (0.04 * math.log2(max(_tp, 1)) * (1 if not _tp_crosses_node else 2.25))
-        _pp_eff = 1.0 - _bubble_frac
-        _dp_eff = 1.0 - (0.02 * math.log2(max(_dp, 1)))
-        _mfu_eff = max(0.0, min(_mfu_base * _tp_eff * _pp_eff * _dp_eff, _mfu_base))
-        _mfu_pct = _mfu_eff * 100
-
-        # ── Colors ─────────────────────────────────────────────────────────
-        _mem_color = COLORS["RedLine"] if _oom else (COLORS["OrangeLine"] if _total_mem_gb > 60 else COLORS["GreenLine"])
-        _bubble_color = COLORS["RedLine"] if _bubble_pct > 10 else (COLORS["OrangeLine"] if _bubble_pct > 5 else COLORS["GreenLine"])
-        _mfu_color = COLORS["RedLine"] if _mfu_pct < 25 else (COLORS["OrangeLine"] if _mfu_pct < 40 else COLORS["GreenLine"])
-        _cfg_color = COLORS["GreenLine"] if _config_valid else COLORS["RedLine"]
-
-        # ── Failure banners ────────────────────────────────────────────────
-        _oom_banner = ""
-        if _oom:
-            _oom_banner = f"""
-            <div style="background:{COLORS['RedLL']}; border:2px solid {COLORS['RedLine']};
-                        border-radius:10px; padding:14px 18px; margin:10px 0;">
-                <div style="font-size:0.88rem; font-weight:800; color:{COLORS['RedLine']}; margin-bottom:4px;">
-                    OOM &mdash; Configuration Infeasible
-                </div>
-                <div style="font-size:0.85rem; color:#7f1d1d; line-height:1.6;">
-                    <strong>Required per GPU: {_total_mem_gb:.1f} GB</strong> &mdash; exceeds H100 limit: {H100_RAM_GB:.0f} GB.<br>
-                    Weights: {_weight_gb:.1f} GB | Gradients: {_grad_gb:.1f} GB | Optimizer: {_optim_gb:.1f} GB | Activations: {_act_gb:.1f} GB<br>
-                    Increase TP or PP to reduce per-GPU memory, or enable a higher ZeRO stage.
-                </div>
-            </div>
-            """
-
-        _tp_banner = ""
-        if _tp_crosses_node:
-            _tp_banner = f"""
-            <div style="background:{COLORS['OrangeLL']}; border:1px solid {COLORS['OrangeLine']};
-                        border-radius:8px; padding:12px 16px; margin:8px 0;">
-                <div style="font-size:0.85rem; font-weight:700; color:{COLORS['OrangeLine']};">
-                    TP Crosses Node Boundary &mdash; {_tp_penalty_x:.1f}x bandwidth penalty on every layer's AllReduce
-                </div>
-            </div>
-            """
-
-        _cfg_banner = ""
-        if not _config_valid:
-            _cfg_banner = f"""
-            <div style="background:{COLORS['RedLL']}; border:1px solid {COLORS['RedLine']};
-                        border-radius:8px; padding:12px 16px; margin:8px 0;">
-                <div style="font-size:0.85rem; font-weight:700; color:{COLORS['RedLine']};">
-                    Invalid: TP({_tp}) &times; PP({_pp}) = {_tp_pp} does not divide 256 evenly.
-                </div>
-            </div>
-            """
-
-        # ── Stacked memory bar chart ───────────────────────────────────────
-        _fig_mem = go.Figure()
-        _categories = ["Weights", "Gradients", "Optimizer", "Activations"]
-        _values = [_weight_gb, _grad_gb, _optim_gb, _act_gb]
-        _bar_colors = [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"], COLORS["Cloud"]]
-        if _oom:
-            _bar_colors = [COLORS["RedLine"]] * 4
-
-        for _cat, _val, _clr in zip(_categories, _values, _bar_colors):
-            _fig_mem.add_trace(go.Bar(
-                x=[_cat], y=[_val], name=_cat,
-                marker_color=_clr,
-                hovertemplate=f"{_cat}: %{{y:.1f}} GB<extra></extra>",
-            ))
-        _fig_mem.add_hline(y=H100_RAM_GB, line=dict(color=COLORS["RedLine"], width=2, dash="dash"),
-                           annotation_text=f"H100 HBM: {H100_RAM_GB:.0f} GB", annotation_position="top right")
-        _fig_mem.update_layout(
-            height=280, barmode="stack",
-            xaxis=dict(title=""), yaxis=dict(title="Per-GPU Memory (GB)", range=[0, max(_total_mem_gb * 1.2, 90)]),
-            showlegend=False, margin=dict(t=30, b=40, l=50, r=20),
+        _actual = _part_c["binding_amount"]
+        items = [
+            mo.md("## Part C - Concept Module: Batch And Optimizer State Couple Memory, Convergence, And Step Time"),
+            mo.callout(
+                mo.md(
+                    f"**Scenario.** The strategy now needs an optimizer setup. "
+                    f"Per-device batch **{_part_c['batch_per_device']}**, accumulation **{_part_c['accumulation']}**, "
+                    f"and **{_part_c['sharding_label']}** create a global batch of **{_part_c['global_batch']:,}**."
+                ),
+                kind="info",
+            ),
+            partC_prediction,
+            v2_05_prediction_feedback(
+                partC_prediction.value,
+                _actual,
+                f"Correct. The modeled binding amount is **{_actual}**.",
+                f"The modeled binding amount is **{_actual}**. Memory fit, convergence, and step time are coupled.",
+            ),
+        ]
+        if partC_prediction.value is None:
+            return mo.vstack(items)
+        items.extend(
+            [
+                mo.hstack([partC_batch, partC_accumulation, partC_sharding], justify="start"),
+                mo.as_html(v2_05_memory_chart(COLORS, _part_c, v2_05_lens)),
+                _part_c_table(),
+                v2_05_callout(
+                    _part_c["memory_ok"] and _part_c["convergence_ok"] and _part_c["step_ok"],
+                    f"Consequence: memory is {_part_c['memory_gb']:.1f} GB and critical-batch ratio is {_part_c['batch_ratio']:.2f}x.",
+                    f"Boundary: {_part_c['binding_amount']} fails first. Memory {_part_c['memory_gb']:.1f} GB vs {v2_05_lens['memory_cap_gb']:.1f} GB, critical-batch ratio {_part_c['batch_ratio']:.2f}x, step {_part_c['step_ms']:.1f} ms.",
+                ),
+                MathPeek(
+                    "M_state ~= params*bytes_per_param; B_global=N*b*accum; B* ~= tr(Sigma)/||grad L||^2",
+                    {
+                        "state": f"{_part_c['state_gb']:.1f} GB",
+                        "activations": f"{_part_c['activation_gb']:.1f} GB",
+                        "global batch": f"{_part_c['global_batch']:,}",
+                        "chapter source": "ZeRO/FSDP memory and critical batch size sections",
+                    },
+                ),
+                partC_checkpoint,
+            ]
         )
-        apply_plotly_theme(_fig_mem)
-
-        # ── Bubble chart ───────────────────────────────────────────────────
-        _pp_range = list(range(1, 33))
-        _fig_bubble = go.Figure()
-        for _mval, _label, _clr in [(4, "m=4", COLORS["OrangeLine"]), (8, "m=8", COLORS["BlueLine"]),
-                                      (16, "m=16", COLORS["GreenLine"]), (32, "m=32", COLORS["Grey"])]:
-            _bvals = [(_p - 1) / (_p * _mval) * 100 for _p in _pp_range]
-            _fig_bubble.add_trace(go.Scatter(x=_pp_range, y=_bvals, mode="lines", name=_label,
-                                              line=dict(color=_clr, width=2)))
-        _fig_bubble.add_trace(go.Scatter(x=[_pp], y=[_bubble_pct], mode="markers", name="Current",
-                                          marker=dict(size=14, color=COLORS["RedLine"], symbol="diamond")))
-        _fig_bubble.add_hline(y=10, line=dict(color=COLORS["Surface1"], width=1.5, dash="dash"),
-                              annotation_text="10% ceiling", annotation_position="top right")
-        _fig_bubble.update_layout(
-            height=260, xaxis=dict(title="Pipeline Stages (PP)"), yaxis=dict(title="Bubble %", range=[0, 55]),
-            legend=dict(orientation="h", yanchor="bottom", y=1.02, xanchor="right", x=1),
-            margin=dict(t=40, b=50, l=50, r=20),
-        )
-        apply_plotly_theme(_fig_bubble)
-
-        # ── Render instruments ─────────────────────────────────────────────
-        items.append(mo.Html(f"""
-        {_oom_banner}{_tp_banner}{_cfg_banner}
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; 3D Parallel Memory + Bubble Analysis
-            </div>
-            <div>Config: TP={_tp} &times; PP={_pp} &times; DP={_dp if _config_valid else 'N/A'} {'= 256' if _config_valid else ''} | ZeRO Stage {_zero}</div>
-            <div>Params/GPU = 175B / (TP={_tp} &times; PP={_pp}) = <strong>{_params_per_gpu_b:.2f}B</strong></div>
-            <div>Per-GPU memory = <strong style="color:{_mem_color};">{_total_mem_gb:.1f} GB</strong> / {H100_RAM_GB:.0f} GB limit</div>
-            <div>Bubble = (PP-1)/(PP&times;m) = ({_pp}-1)/({_pp}&times;{_m}) = <strong style="color:{_bubble_color};">{_bubble_pct:.1f}%</strong></div>
-            <div>Effective MFU = <strong style="color:{_mfu_color};">{_mfu_pct:.1f}%</strong></div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:150px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Per-GPU Mem</div>
-                <div style="font-size:2rem; font-weight:800; color:{_mem_color}; font-family:monospace;">{_total_mem_gb:.0f}GB</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">/ {H100_RAM_GB:.0f} GB</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:150px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Bubble</div>
-                <div style="font-size:2rem; font-weight:800; color:{_bubble_color}; font-family:monospace;">{_bubble_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">ceiling: 10%</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:150px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">MFU</div>
-                <div style="font-size:2rem; font-weight:800; color:{_mfu_color}; font-family:monospace;">{_mfu_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">3D parallel</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:150px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">DP degree</div>
-                <div style="font-size:2rem; font-weight:800; color:{_cfg_color}; font-family:monospace;">{_dp if _config_valid else 'N/A'}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">= 256/(TP&times;PP)</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig_mem))
-        items.append(mo.ui.plotly(_fig_bubble))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Governing equations -- ZeRO memory, bubble fraction, 3D parallelism": mo.md("""
-        **ZeRO-3 Per-GPU Memory**
-
-        ```
-        Static memory = (P / (TP * PP)) * (2 + 2/DP + 12/DP) bytes
-                       = params_per_gpu * (2 + 14/DP) bytes
-        Activation memory = base_activation / (TP * PP)
-        Total = static + activation
-        ```
-
-        For 175B, TP=8, PP=4, DP=8, ZeRO-3:
-        - params_per_gpu = 175B/(8*4) = 5.47B
-        - Static = 5.47B * (2 + 14/8) = 5.47B * 3.75 = 20.5 GB
-        - Activations = 50 GB / (8*4) = 1.56 GB
-        - Total = ~22 GB -- fits in 80 GB HBM
-
-        **Pipeline Bubble Fraction**
-
-        ```
-        B = (PP - 1) / (PP * m)
-        ```
-
-        At PP=4, m=16: B = 3/64 = 4.7% (under 10% ceiling)
-
-        **Conservation of Overhead**: Each parallelism dimension eliminates one
-        bottleneck while introducing another. 3D parallelism is not overhead-free;
-        it distributes overhead across the bandwidth hierarchy where each type
-        can be absorbed most efficiently.
-            """)
-        }))
-
-        # Reflection
-        items.append(mo.md("### Reflection"))
-        items.append(partC_reflection)
-        if partC_reflection.value is not None:
-            if partC_reflection.value == "B":
-                items.append(mo.callout(mo.md(
-                    "**Correct.** TP performs AllReduce after every layer (96 times per forward pass). "
-                    "This requires the highest bandwidth -- NVLink at 900 GB/s. PP transfers only "
-                    "small activation tensors (~200 MB) between pipeline stages -- IB's 50 GB/s "
-                    "handles this in milliseconds. DP AllReduce is performed once per step on the "
-                    "reduced model shard (after TP+PP partitioning), so the smaller DP degree and "
-                    "reduced gradient volume can tolerate the remaining bandwidth."
-                ), kind="success"))
-            else:
-                items.append(mo.callout(mo.md(
-                    "**Not quite.** The key insight is that TP has the highest communication frequency "
-                    "(once per layer), PP has moderate frequency (once per pipeline stage), and DP has "
-                    "the lowest frequency (once per step). The bandwidth hierarchy must match: "
-                    "highest frequency -> highest bandwidth. TP -> NVLink, PP -> IB, DP -> remaining."
-                ), kind="warn"))
-
         return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART D BUILDER -- Hardware Tier Comparison
-    # ─────────────────────────────────────────────────────────────────────
 
     def build_part_d():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left: 4px solid {COLORS['OrangeLine']}; background: {COLORS['OrangeLL']};
-                    border-radius: 0 10px 10px 0; padding: 16px 22px; margin: 12px 0;">
-            <div style="font-size: 0.72rem; font-weight: 700; color: {COLORS['OrangeLine']};
-                        text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 6px;">
-                Incoming Message &middot; VP of Infrastructure
-            </div>
-            <div style="font-style: italic; font-size: 1.0rem; color: #1e293b; line-height: 1.65;">
-                "Our budget team says we can save 40% by using A100s instead of H100s for
-                distributed training. The A100 has the same 80 GB HBM. Since the model fits
-                on both, switching should be straightforward. Can you verify the efficiency
-                impact before we commit?"
-            </div>
-        </div>
-        """))
-
-        # Concept framing
-        items.append(mo.md("""
-    The VP is right that both GPUs have 80 GB HBM -- but memory capacity is only
-    one constraint. Distributed training efficiency depends on the **ratio** of
-    communication time to compute time. Switching hardware changes both:
-
-    - **A100**: 312 TFLOPS FP16 (vs H100's 989) -- 3.2x slower compute
-    - **IB HDR**: 25 GB/s (vs NDR's 50 GB/s) -- 2x slower interconnect
-
-    Slower compute *helps* the comm/compute ratio (more time to hide AllReduce).
-    Slower interconnect *hurts* it. The net effect depends on the model size.
-
-    For small models (7B), the gradient is only 14 GB -- even 25 GB/s handles it.
-    For 175B, the gradient is 350 GB -- halving bandwidth is devastating.
-        """))
-
-        # Prediction lock
-        items.append(mo.md("### Your Prediction"))
-        items.append(partD_prediction)
-
-        items.append(mo.stop(partD_prediction.value is None,
-            mo.callout(mo.md("Select your prediction above to unlock the Part D instruments."), kind="warn")))
-
-        # Controls
-        items.append(mo.md("### Hardware Tier Comparison"))
-        items.append(mo.hstack([d1_hw_tier, d1_model_size, d1_gpu_count], justify="center", gap=2))
-
-        # Physics
-        _hw_name, _hw_tflops, _hw_bw = d1_hw_tier.value
-        _params_b = d1_model_size.value
-        _n_gpus = d1_gpu_count.value
-
-        _grad_gb = _params_b * 1e9 * 2 / 1e9
-        _ring_factor = 2.0 * (_n_gpus - 1) / max(_n_gpus, 1)
-        _allreduce_gb = _ring_factor * _grad_gb
-        _allreduce_s = _allreduce_gb / _hw_bw if _hw_bw > 0 else 999
-
-        _flops_per_step = 6.0 * _params_b * 1e9 * 2048
-        _compute_s = _flops_per_step / (_n_gpus * _hw_tflops * 1e12 * 0.50)
-
-        _overlap_frac = 0.50
-        _effective_comm = _allreduce_s * (1 - _overlap_frac)
-        _step_time_s = _compute_s + _effective_comm
-        _efficiency = _compute_s / _step_time_s if _step_time_s > 0 else 0
-        _efficiency_pct = _efficiency * 100
-
-        # Compare all three tiers
-        _tiers = [
-            ("H100 + IB NDR", H100_TFLOPS_FP16, IB_NDR_BW_GBS),
-            ("A100 + IB HDR", A100_TFLOPS_FP16, IB_HDR_BW_GBS),
-            ("T4 + 100GbE", T4_TFLOPS_FP16, ETH_100G_BW_GBS),
+        _actual = _rejected["binding_guardrail"]
+        items = [
+            mo.md("## Part D - Concept Module: Training Plan Guardrails"),
+            mo.callout(
+                mo.md(
+                    f"**Scenario.** The final plan must pass time, memory, communication, and evidence guardrails. "
+                    f"{v2_05_lens['report_prompt']}"
+                ),
+                kind="info",
+            ),
+            partD_prediction,
+            v2_05_prediction_feedback(
+                partD_prediction.value,
+                _actual,
+                f"Correct. The rejected alternative is primarily blocked by **{_actual}**.",
+                f"The rejected alternative is primarily blocked by **{_actual}**. A throughput-looking plan still needs every guardrail.",
+            ),
         ]
-        _tier_effs = []
-        for _tname, _tflops, _tbw in _tiers:
-            _ar = _ring_factor * _grad_gb / _tbw
-            _cs = _flops_per_step / (_n_gpus * _tflops * 1e12 * 0.50)
-            _ec = _ar * (1 - _overlap_frac)
-            _st = _cs + _ec
-            _eff = (_cs / _st * 100) if _st > 0 else 0
-            _tier_effs.append((_tname, _eff, _tflops, _tbw))
-
-        # Bar chart
-        _fig = go.Figure()
-        _colors_bar = [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["RedLine"]]
-        for _i, (_tname, _eff, _, _) in enumerate(_tier_effs):
-            _fig.add_trace(go.Bar(
-                x=[_tname], y=[_eff],
-                marker_color=_colors_bar[_i],
-                text=[f"{_eff:.1f}%"],
-                textposition="auto",
-                hovertemplate=f"{_tname}<br>Efficiency: %{{y:.1f}}%<extra></extra>",
-                showlegend=False,
-            ))
-        _fig.add_hline(y=50, line=dict(color=COLORS["TextMuted"], width=1, dash="dot"),
-                       annotation_text="50% threshold", annotation_position="top right")
-        _fig.update_layout(
-            height=300,
-            xaxis=dict(title="Hardware Tier"),
-            yaxis=dict(title="DP Scaling Efficiency (%)", range=[0, 105]),
-            margin=dict(t=30, b=50, l=50, r=20),
+        if partD_prediction.value is None:
+            return mo.vstack(items)
+        items.extend(
+            [
+                mo.hstack([partD_candidate, partD_overlap, partD_evidence], justify="start"),
+                mo.as_html(v2_05_plan_chart(COLORS, _part_d, _rejected)),
+                _part_d_table(_part_d, _rejected),
+                v2_05_callout(
+                    _part_d["valid_plan"],
+                    f"Consequence: selected plan passes all guardrails. Binding guardrail is {_part_d['binding_guardrail']}.",
+                    f"Boundary: selected plan fails at least one guardrail. Binding guardrail is {_part_d['binding_guardrail']}; revise parallelism, evidence threshold, or overlap.",
+                ),
+                MathPeek(
+                    "valid=time_ok and memory_ok and communication_ok and evidence_ok",
+                    {
+                        "time": f"{_part_d['training_hours']:.1f} h vs {v2_05_lens['time_target_hours']:.1f} h",
+                        "communication": f"{v2_05_pct(_part_d['comm_share'], 1)} vs {v2_05_pct(v2_05_lens['comm_share_limit'], 0)}",
+                        "evidence": f"{_part_d['evidence_score']:.2f} vs {_part_d['evidence_threshold']:.2f}",
+                        "V2-06 implication": v2_05_lens["collective_implication"],
+                    },
+                ),
+                partD_final,
+            ]
         )
-        apply_plotly_theme(_fig)
-
-        _eff_color = COLORS["GreenLine"] if _efficiency_pct >= 70 else (COLORS["OrangeLine"] if _efficiency_pct >= 40 else COLORS["RedLine"])
-
-        items.append(mo.Html(f"""
-        <div style="background:{COLORS['Surface2']}; border:1px solid {COLORS['Border']};
-                    border-radius:12px; padding:16px 20px; margin:8px 0; font-family:monospace;
-                    font-size:0.83rem; line-height:1.8;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['TextMuted']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px; font-family:sans-serif;">
-                Physics &mdash; Hardware Tier Scaling Comparison
-            </div>
-            <div>Hardware: <strong>{_hw_name}</strong> &mdash; {_hw_tflops} TFLOPS &middot; {_hw_bw} GB/s interconnect</div>
-            <div>Model: {_params_b}B params &times; {_n_gpus} GPUs</div>
-            <div>Compute time: <strong>{_compute_s:.2f}s</strong> &mdash; AllReduce: <strong>{_allreduce_s:.2f}s</strong></div>
-            <div>Effective comm (50% overlap): <strong>{_effective_comm:.2f}s</strong></div>
-            <div>Efficiency: <strong style="color:{_eff_color};">{_efficiency_pct:.1f}%</strong></div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:16px; justify-content:center; margin:8px 0; flex-wrap:wrap;">
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:150px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Efficiency</div>
-                <div style="font-size:2rem; font-weight:800; color:{_eff_color}; font-family:monospace;">{_efficiency_pct:.1f}%</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">{_hw_name}</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:150px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Compute</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['BlueLine']}; font-family:monospace;">{_hw_tflops:.0f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">TFLOPS FP16</div>
-            </div>
-            <div style="padding:18px 24px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        width:150px; text-align:center; background:white;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.82rem; font-weight:600; text-transform:uppercase;">Network</div>
-                <div style="font-size:2rem; font-weight:800; color:{COLORS['OrangeLine']}; font-family:monospace;">{_hw_bw:.0f}</div>
-                <div style="font-size:0.72rem; color:{COLORS['TextMuted']};">GB/s</div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.ui.plotly(_fig))
-
-        # Prediction reveal
-        if partD_prediction.value == "B":
-            items.append(mo.callout(mo.md(
-                "**Correct.** A100 compute is 3.2x slower (312 vs 989 TFLOPS), which increases "
-                "compute time from ~10s to ~32s per step. But IB HDR is 2x slower (25 vs 50 GB/s), "
-                "doubling AllReduce time from ~14s to ~28s. With overlap, effective comm is ~14s. "
-                "Efficiency = 32 / (32 + 14) = ~69%. Wait -- that is *higher* than H100's 55%! "
-                "The slower GPU gives more time to hide communication. But throughput (steps/second) "
-                "drops 3x, so training takes 3x longer. Efficiency != throughput."
-            ), kind="success"))
-        elif partD_prediction.value == "A":
-            items.append(mo.callout(mo.md(
-                "**Wrong metric.** Same HBM capacity means the model fits, but efficiency depends "
-                "on the comm/compute ratio, not memory capacity. The A100's slower compute actually "
-                "improves the ratio, but the slower interconnect partially offsets this gain."
-            ), kind="warn"))
-        elif partD_prediction.value == "C":
-            items.append(mo.callout(mo.md(
-                "**Directionally correct!** Slower compute does improve the comm/compute ratio. "
-                "But 70% may overestimate -- the halved interconnect bandwidth (25 vs 50 GB/s) "
-                "partially offsets the benefit. The actual efficiency depends on the exact model "
-                "size and GPU count."
-            ), kind="warn"))
-        elif partD_prediction.value == "D":
-            items.append(mo.callout(mo.md(
-                "**Incorrect.** A100 has 80 GB HBM, same as H100. With ZeRO-3 or 3D parallelism, "
-                "175B trains on either GPU. The question is about efficiency, not feasibility."
-            ), kind="warn"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Governing equations -- hardware tier scaling": mo.md("""
-        **Comm/Compute Ratio Across Tiers**
-
-        ```
-        R = T_comm_effective / T_compute
-        eta = 1 / (1 + R)
-        ```
-
-        When you switch hardware, both numerator and denominator change:
-        - Slower GPU: T_compute increases (R decreases -> higher eta)
-        - Slower network: T_comm increases (R increases -> lower eta)
-
-        **Key insight**: Efficiency is scale-dependent. A T4 training a 7B model
-        may achieve higher *efficiency* than an H100, but H100 has 15x higher
-        *throughput*. The cost-optimal choice depends on total training time
-        x cost-per-GPU-hour, not efficiency alone.
-
-        **Hardware-Bandwidth Matching Rule**
-
-        ```
-        Optimal tier: min(cost_per_hour * T_step(N) * total_steps)
-        ```
-
-        Large models on slow interconnects have low efficiency AND low throughput.
-        Small models on fast GPUs have high efficiency but waste expensive hardware.
-            """)
-        }))
-
-        # Reflection
-        items.append(mo.md("### Reflection"))
-        items.append(partD_reflection)
-        if partD_reflection.value is not None:
-            if partD_reflection.value == "B":
-                items.append(mo.callout(mo.md(
-                    "**Correct.** Hardware tier selection is a matching problem: the comm/compute "
-                    "ratio depends on both model size (gradient volume) and hardware capabilities "
-                    "(compute TFLOPS and network bandwidth). Small models (7B) have small gradients "
-                    "that even 100GbE handles; large models (175B) need IB NDR + NVLink. "
-                    "Over-provisioning wastes budget; under-provisioning wastes GPU cycles on communication."
-                ), kind="success"))
-            else:
-                items.append(mo.callout(mo.md(
-                    "**Not quite.** The correct principle is matching hardware tier to model scale. "
-                    "Both compute speed and interconnect bandwidth must be considered together. "
-                    "A 7B model does not need H100 + IB NDR; a 175B model cannot efficiently use T4 + 100GbE."
-                ), kind="warn"))
-
         return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # SYNTHESIS BUILDER
-    # ─────────────────────────────────────────────────────────────────────
 
     def build_synthesis():
-        items = []
+        _completed = all(
+            value is not None
+            for value in (
+                partA_prediction.value,
+                partA_checkpoint.value,
+                partB_prediction.value,
+                partB_checkpoint.value,
+                partC_prediction.value,
+                partC_checkpoint.value,
+                partD_prediction.value,
+                partD_final.value,
+            )
+        )
+        _binding = _part_d["binding_guardrail"] if not _part_d["valid_plan"] else _part_c["binding_amount"]
+        _memo = memo_note.value or (
+            f"Select {_part_d['candidate_label']} for {v2_05_profile.label}; "
+            f"binding bottleneck: {_binding}; reject {v2_05_lens['rejected_alternative']}; "
+            f"{v2_05_lens['collective_implication']}"
+        )
+        _snapshot = {
+            "track_id": v2_05_profile.track_id,
+            "scenario_id": v2_05_variant.scenario_id,
+            "selected_parallelism": _part_d["candidate_label"],
+            "training_location": v2_05_lens["training_location"],
+            "binding_bottleneck": _binding,
+            "memory_per_device_gb": round(_part_c["memory_gb"], 3),
+            "scaling_efficiency": round(_part_b["efficiency"], 4),
+            "critical_batch_ratio": round(_part_c["batch_ratio"], 4),
+            "rejected_alternative": v2_05_lens["rejected_alternative"],
+            "collective_implication": v2_05_lens["collective_implication"],
+            "completed": _completed,
+        }
+        _design = {
+            "lab_id": v2_05_metadata.lab_id,
+            "track_id": v2_05_profile.track_id,
+            "scenario_id": v2_05_variant.scenario_id,
+            "selected_parallelism": _part_d["candidate_label"],
+            "training_location": v2_05_lens["training_location"],
+            "binding_bottleneck": _binding,
+            "memory_per_device_gb": _part_c["memory_gb"],
+            "scaling_efficiency": _part_b["efficiency"],
+            "critical_batch_ratio": _part_c["batch_ratio"],
+            "rejected_alternative": v2_05_lens["rejected_alternative"],
+            "collective_implication": v2_05_lens["collective_implication"],
+            "completed": _completed,
+            "result_snapshot": _snapshot,
+        }
+        ledger.save(track=v2_05_profile.track_id, chapter=v2_05_chapter, design=_design)
 
-        items.append(mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. The communication wall caps pure DP at ~55% efficiency for 175B models on IB NDR.</strong>
-                    Ring-AllReduce transfers ~700 GB per step. Even at 50 GB/s with 50% overlap,
-                    communication consumes nearly half the step time. No interconnect upgrade
-                    eliminates this wall for frontier model sizes.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. ZeRO-3 is necessary but not sufficient: activation memory pushes OOM.</strong>
-                    ZeRO-3 shards static memory to ~38 GB per GPU, but activations (~50 GB)
-                    are not sharded. Total = 88 GB > 80 GB HBM. Pipeline or tensor parallelism
-                    must reduce per-GPU activation memory.
-                </div>
-                <div>
-                    <strong>3. 3D parallelism maps each strategy to its natural bandwidth tier.</strong>
-                    TP (per-layer AllReduce) -> NVLink (900 GB/s). PP (inter-stage activation transfer)
-                    -> IB (50 GB/s). DP (per-step gradient AllReduce) -> remaining bandwidth.
-                    This mapping is physics, not convention.
-                </div>
-            </div>
-        </div>
-        """))
+        _incomplete = []
+        if partA_prediction.value is None:
+            _incomplete.append("Part A binding prediction")
+        if partA_checkpoint.value is None:
+            _incomplete.append("Part A strategy checkpoint")
+        if partB_prediction.value is None:
+            _incomplete.append("Part B scaling prediction")
+        if partB_checkpoint.value is None:
+            _incomplete.append("Part B scaling checkpoint")
+        if partC_prediction.value is None:
+            _incomplete.append("Part C batch/sharding prediction")
+        if partC_checkpoint.value is None:
+            _incomplete.append("Part C optimizer checkpoint")
+        if partD_prediction.value is None:
+            _incomplete.append("Part D guardrail prediction")
+        if partD_final.value is None:
+            _incomplete.append("Final distributed training decision")
 
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab V2-06: When Failure is Routine</strong> &mdash; You designed a 256-GPU
-                    training configuration. But at this scale, hardware fails every few hours.
-                    The next lab asks: how often should you checkpoint, and what happens when the
-                    checkpoint storm itself becomes the bottleneck?
-                </div>
-            </div>
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> the Distributed Training chapter for the full 3D parallelism
-                    derivation and the Conservation of Overhead principle.<br/>
-                    <strong>Build:</strong> TinyTorch distributed module &mdash; implement data parallelism
-                    with gradient accumulation in <code>tinytorch/src/distributed/</code>.
-                </div>
-            </div>
-        </div>
-        """))
+        _report = build_lab_report(
+            v2_05_metadata,
+            student_id=student_id.value or "",
+            track=v2_05_profile.label,
+            scenario=v2_05_lens["scenario"],
+            learning_objectives=(
+                "Diagnose how data, tensor, and pipeline parallelism shift the binding amount.",
+                "Use scaling efficiency and bubble terms to decide whether more accelerators help.",
+                "Connect batch size and optimizer state to memory, convergence, and step time.",
+                "Approve a distributed training plan only when all guardrails pass.",
+            ),
+            predictions={
+                "partA_binding": partA_prediction.value,
+                "partB_scaling": partB_prediction.value,
+                "partC_batch_optimizer": partC_prediction.value,
+                "partD_guardrail": partD_prediction.value,
+            },
+            knob_settings={
+                "partA_strategy": partA_strategy.value,
+                "partA_scale": partA_scale.value,
+                "partB_gpus": partB_gpus.value,
+                "partB_network": partB_network.value,
+                "partB_microbatches": partB_microbatches.value,
+                "partC_batch": partC_batch.value,
+                "partC_accumulation": partC_accumulation.value,
+                "partC_sharding": partC_sharding.value,
+                "partD_candidate": partD_candidate.value,
+                "partD_overlap_pct": partD_overlap.value,
+                "partD_evidence": partD_evidence.value,
+            },
+            binding_constraints={
+                "partA_binding_amount": _part_a["binding_amount"],
+                "partB_efficiency": f"{v2_05_pct(_part_b['efficiency'], 1)}",
+                "partC_binding_amount": _part_c["binding_amount"],
+                "partD_binding_guardrail": _part_d["binding_guardrail"],
+            },
+            decisions={
+                "partA_checkpoint": partA_checkpoint.value,
+                "partB_checkpoint": partB_checkpoint.value,
+                "partC_checkpoint": partC_checkpoint.value,
+                "partD_final": partD_final.value,
+            },
+            residual_risk="Teaching estimates should be replaced with target workload traces, measured fabric bandwidth, memory profiling, convergence pilots, and current cluster reliability before production scheduling.",
+            evidence_summary={
+                "memory_per_device_gb": round(_part_c["memory_gb"], 3),
+                "scaling_efficiency": round(_part_b["efficiency"], 4),
+                "global_batch": _part_c["global_batch"],
+                "critical_batch_ratio": round(_part_c["batch_ratio"], 4),
+                "selected_training_hours": round(_part_d["training_hours"], 3),
+                "selected_evidence_score": round(_part_d["evidence_score"], 3),
+            },
+            final_decision=_memo,
+            big_takeaways=(
+                "Parallelism relocates overhead; it does not erase it.",
+                "Scaling efficiency falls when exposed communication or pipeline bubbles consume useful compute.",
+                "Batch and sharding choices are systems choices because they affect memory, step time, and convergence.",
+                "V2-06 must inspect the collective pattern implied by the chosen V2-05 plan.",
+            ),
+            reflections={
+                "binding_bottleneck": _binding,
+                "rejected_alternative": v2_05_lens["rejected_alternative"],
+                "collective_implication": v2_05_lens["collective_implication"],
+                "residual_risk": "Teaching estimates need workload traces, fabric measurements, memory profiling, and convergence pilots before production scheduling.",
+            },
+            source_trace={
+                "chapter": "Distributed Training, sections on step-time law, parallelism strategies, ZeRO/FSDP, critical batch size, and summary.",
+                "formulas": "T_step(N), eta_scaling, bubble=(p-1)/(m+p-1), B*=tr(Sigma)/||grad L||^2, Adam state bytes/parameter.",
+                "local assumptions": "Track budgets, evidence scores, and edge/mobile update thresholds are notebook-local teaching assumptions.",
+            },
+            result_snapshot=_snapshot,
+            incomplete_fields=tuple(_incomplete),
+        )
 
-        items.append(mo.accordion({
-            "Self-Assessment": mo.md("""
-1. Why does pure DP efficiency collapse for 175B models even on InfiniBand NDR?
-2. Why can ZeRO-3 on 64 A100s not train a 175B model despite static memory fitting?
-3. For TP=8, PP=4, DP=8 on 256 H100s, what is the pipeline bubble fraction at m=16?
-4. Why must TP be confined within a single DGX node?
+        _status = "SAVED" if _completed else "INCOMPLETE"
+        _status_kind = "success" if _completed else "warn"
+        return mo.vstack(
+            [
+                mo.md("## Synthesis - Distributed Training Memo"),
+                mo.callout(mo.md(f"**Status:** {_status}. Complete all predictions and checkpoints before final submission."), kind=_status_kind),
+                memo_note,
+                mo.md(
+                    f"""
+**Memo draft**
 
-*If you cannot answer all four from memory, revisit Parts A, B, and C.*
-""")
-        }))
+{_memo}
 
-        items.append(mo.md("---"))
-        items.append(mo.md("### Decision Log"))
-        items.append(mo.md("Record the single most important insight from this lab. "
-                           "This entry carries forward to Lab 06 and beyond via the Design Ledger."))
-        items.append(synth_decision_ui)
+**Evidence to cite**
 
-        return mo.vstack(items)
+- Selected plan: **{_part_d['candidate_label']}**
+- Binding bottleneck: **{_binding}**
+- Rejected alternative: **{v2_05_lens['rejected_alternative']}**
+- Memory per device: **{_part_c['memory_gb']:.1f} GB**
+- Scaling efficiency: **{v2_05_pct(_part_b['efficiency'], 1)}**
+- Critical-batch ratio: **{_part_c['batch_ratio']:.2f}x**
+- V2-06 implication: **{v2_05_lens['collective_implication']}**
+"""
+                ),
+                source_trace(
+                    {
+                        "Distributed step-time law": "T_step(N)=T_compute/N+T_comm(N)+T_sync(N)-T_overlap",
+                        "Scaling efficiency": "eta_scaling=T_compute/(N*T_step(N))",
+                        "Pipeline bubble": "bubble=(p-1)/(m+p-1)",
+                        "Critical batch": "B* ~= tr(Sigma)/||grad L||^2",
+                        "Scenario thresholds": "Notebook-local teaching assumptions by track.",
+                    },
+                    summary="Formula and source trace for the distributed training memo.",
+                ),
+                report_export_panel(_report),
+            ]
+        )
 
-    # ─────────────────────────────────────────────────────────────────────
-    # COMPOSE TABS
-    # ─────────────────────────────────────────────────────────────────────
-
-    tabs = mo.ui.tabs({
-        "Part A -- The Communication Wall":         build_part_a(),
-        "Part B -- The ZeRO Memory Trap":            build_part_b(),
-        "Part C -- 3D Parallelism Design Challenge": build_part_c(),
-        "Part D -- Hardware Tier Comparison":        build_part_d(),
-        "Synthesis":                                  build_synthesis(),
-    })
-    tabs
+    _tabs = mo.ui.tabs(
+        {
+            "Opening": build_opening(),
+            "Part A - Binding Amount": build_part_a(),
+            "Part B - Scaling Tax": build_part_b(),
+            "Part C - Batch And State": build_part_c(),
+            "Part D - Guardrails": build_part_d(),
+            "Synthesis": build_synthesis(),
+        }
+    )
+    _tabs
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════════
-
-
-# ─── CELL 9: LEDGER_HUD ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, partA_prediction, partB_prediction, partA_reflection, partC_reflection,
-      partD_prediction, partD_reflection,
-      a2_tp, a2_pp, a2_microbatches, ledger, mo, synth_decision_input):
-    _tp = a2_tp.value
-    _pp = a2_pp.value
-    _m = a2_microbatches.value
-    _tp_pp = _tp * _pp
-    _dp = 256 // _tp_pp if _tp_pp <= 256 and 256 % _tp_pp == 0 else 0
-    _config_valid = _dp > 0
-    _bubble_pct = ((_pp - 1) / (_pp * _m) * 100) if _pp > 1 else 0.0
-
-    # Effective MFU (simplified recalc for HUD)
-    import math as _math
-    _mfu_base = 0.52
-    _tp_crosses_node = _tp > 8
-    _tp_eff = 1.0 - (0.04 * _math.log2(max(_tp, 1)) * (1 if not _tp_crosses_node else 2.25))
-    _pp_eff = 1.0 - ((_pp - 1) / (_pp * _m) if _pp > 1 else 0.0)
-    _dp_eff = 1.0 - (0.02 * _math.log2(max(_dp, 1))) if _dp > 0 else 0
-    _mfu_eff = max(0.0, min(_mfu_base * _tp_eff * _pp_eff * _dp_eff, _mfu_base))
-    _mfu_pct = _mfu_eff * 100
-
-    _context = "3d_parallel" if _tp > 1 or _pp > 1 else "data_parallel"
-
-    ledger.save(
-        chapter=5,
-        design={
-            "context": _context,
-            "tp_degree": _tp,
-            "pp_degree": _pp,
-            "dp_degree": _dp,
-            "total_gpus": 256,
-            "mfu_percent": round(_mfu_pct, 2),
-            "partA_prediction": partA_prediction.value or "no_selection",
-            "partA_correct": partA_prediction.value == "C",
-            "partA_reflection": partA_reflection.value or "no_selection",
-            "partB_prediction": partB_prediction.value or "no_selection",
-            "partB_correct": partB_prediction.value == "B",
-            "partC_reflection": partC_reflection.value or "no_selection",
-            "partD_prediction": partD_prediction.value or "no_selection",
-            "partD_correct": partD_prediction.value == "B",
-            "partD_reflection": partD_reflection.value or "no_selection",
-            "student_justification": str(synth_decision_input.value),
-        },
+def _(
+    COLORS,
+    ledger,
+    mo,
+    partA_prediction,
+    partB_gpus,
+    partB_prediction,
+    partC_prediction,
+    partD_final,
+    partD_prediction,
+    v2_05_chapter,
+    v2_05_lens,
+    v2_05_profile,
+):
+    _complete = all(
+        value is not None
+        for value in (
+            partA_prediction.value,
+            partB_prediction.value,
+            partC_prediction.value,
+            partD_prediction.value,
+            partD_final.value,
+        )
     )
-
-    _a1_ok = partA_prediction.value == "C"
-    _a2_ok = partB_prediction.value == "B"
-    _tier = "Optimal" if (_a1_ok and _a2_ok) else ("Partial" if (_a1_ok or _a2_ok) else "Developing")
-    _tier_color = COLORS["GreenLine"] if _tier == "Optimal" else (COLORS["OrangeLine"] if _tier == "Partial" else COLORS["TextMuted"])
-
-    mo.Html(f"""
-    <div class="lab-hud">
-        <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab 05</span></div>
-        <div><span class="hud-label">CHAPTER</span> <span class="hud-value">v2_05 &middot; Distributed Training</span></div>
-        <div><span class="hud-label">CONFIG</span> <span class="hud-value">TP={_tp}&times;PP={_pp}&times;DP={_dp}</span></div>
-        <div><span class="hud-label">MFU</span> <span style="color:{COLORS['GreenLine'] if _mfu_pct >= 40 else COLORS['OrangeLine']}; font-family:var(--font-mono);">{_mfu_pct:.1f}%</span></div>
-        <div><span class="hud-label">PART A</span> <span class="{'hud-active' if _a1_ok else 'hud-none'}">{"CORRECT" if _a1_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">PART B</span> <span class="{'hud-active' if _a2_ok else 'hud-none'}">{"CORRECT" if _a2_ok else "REVIEW"}</span></div>
-        <div><span class="hud-label">TIER</span> <span style="color:{_tier_color}; font-family:var(--font-mono);">{_tier.upper()}</span></div>
-    </div>
-    """)
+    _status = "SAVED" if _complete else "INCOMPLETE"
+    _status_color = COLORS["GreenLine"] if _complete else COLORS["OrangeLine"]
+    mo.Html(
+        f"""
+<div class="lab-hud">
+  <div><span class="hud-label">LAB</span> <span class="hud-value">Vol2 &middot; Lab {v2_05_chapter}</span></div>
+  <div><span class="hud-label">TRACK</span> <span class="hud-value">{v2_05_profile.label}</span></div>
+  <div><span class="hud-label">TRAINING</span> <span class="hud-value">{v2_05_lens['training_location']}</span></div>
+  <div><span class="hud-label">SCALE</span> <span class="hud-value">{partB_gpus.value} accelerators</span></div>
+  <div><span class="hud-label">STATUS</span> <span style="color:{_status_color}; font-family:var(--font-mono);">{_status}</span></div>
+</div>
+"""
+    )
     return
 
 

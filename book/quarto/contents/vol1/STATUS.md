@@ -18,7 +18,7 @@
 - PIPO structure now consistent for reviewed blocks.
 
 ## Next suggested actions {#sec-vol1-formatting-status-next-suggested-actions-78b7}
-- Optional: add `md_math` / `md_frac` where prose embeds LaTeX-style fractions.
+- Optional: add `fmt_math` / `fmt_frac` where prose embeds LaTeX-style fractions.
 - Add a small lint script to enforce PIPO headers + blank-line rule.
 - Apply the figure/plot PURPOSE template for consistency.
 

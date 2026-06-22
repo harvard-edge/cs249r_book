@@ -8,6 +8,8 @@ draft: true
 image: "figures/essay-03-stack-overlay.png"
 ---
 
+<!-- buttondown-editor-mode: plaintext -->
+
 <!--
   STATUS: DRAFT v5
   Thesis: "failures propagate upward, understanding flows downward"

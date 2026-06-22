@@ -1,0 +1,549 @@
+chapter: vol2/performance_engineering
+source_file: book/quarto/contents/vol2/performance_engineering/performance_engineering.qmd
+status: migrated
+python_cells:
+- label: chapter-start
+  start_line: 51
+  end_line: 69
+  lego_class: chapter_start
+  purpose: Initialize shared MLSysIM constants, formatting helpers, and formulas for
+    the chapter.
+  constants:
+  - name: shared_imports
+    value: mlsysim.core.units.*, fmt/check, calc_bottleneck, model_memory
+    kind: shared_import
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim
+    preserves_rendered_value: true
+    narrative_check: No rendered values are produced directly by this setup cell.
+- label: memory-wall-scenario
+  start_line: 178
+  end_line: 230
+  lego_class: LEGO
+  purpose: Expose H100 FP8 compute, HBM bandwidth/capacity/TDP, and DRAM-vs-SRAM energy
+    ratio for memory-wall prose.
+  constants:
+  - name: H100_FLOPS_FP8_TENSOR
+    value: 1979 TFLOP/s
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The FP8 ridge-point and memory-wall prose remain MLSysIM-driven.
+  - name: H100_MEM_BW / H100_MEM_CAPACITY / H100_TDP
+    value: 3.35 TB/s, 80 GiB, 700 W
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Rendered H100 bandwidth, capacity, and TDP claims remain canonical.
+  - name: ENERGY_DRAM_ACCESS_PJ / ENERGY_SRAM_L1_PJ
+    value: 640 pJ and 0.5 pJ
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The approximately 1280x energy-ratio prose remains valid.
+- label: roofline-ridge-calc
+  start_line: 324
+  end_line: 381
+  lego_class: LEGO
+  purpose: Compute A100/H100 FP16 and H100 FP8 ridge points for roofline prose.
+  constants:
+  - name: A100_FLOPS_FP16_TENSOR / A100_MEM_BW
+    value: 312 TFLOP/s and 2.039 TB/s
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: A100 ridge-point comparison remains canonical.
+  - name: H100_FLOPS_FP16_TENSOR / H100_FLOPS_FP8_TENSOR / H100_MEM_BW
+    value: 989 TFLOP/s, 1979 TFLOP/s, 3.35 TB/s
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: H100 FP16 and FP8 ridge-point prose remains canonical.
+- label: null
+  start_line: 389
+  end_line: 514
+  lego_class: figure
+  purpose: Plot V100/A100/H100/B200 FP16 rooflines and ridge points.
+  constants:
+  - name: gpus
+    value: V100 125/0.900, A100 312/2.039, H100 989/3.350, B200 2250/8.000
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The figure, table, and ridge-shift prose should remain unchanged
+      if the same MLSysIM constants are used.
+  - name: ai_range / label_pos / ops
+    value: 1..10000 FLOP/byte; label offsets; illustrative operation markers at 5,
+      10, 200 FLOP/byte
+    kind: figure_metadata
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are local plotting and illustrative placement choices.
+- label: workload-intensity-calc
+  start_line: 522
+  end_line: 586
+  lego_class: LEGO
+  purpose: Compute arithmetic intensity for an illustrative FP16 GEMM, GELU, and batch-1
+    decode step.
+  constants:
+  - name: BYTES_FP16
+    value: 2 bytes
+    kind: precision_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Precision-byte assumptions are canonical.
+  - name: M_dim / K_dim / C_dim / decode_hidden
+    value: '4096'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The chapter explicitly frames these as illustrative operation
+      shapes.
+  - name: elem_flops_per_val / decode_batch
+    value: 5 FLOPs per element, batch size 1
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The GELU and batch-1 decode examples remain local pedagogical
+      assumptions.
+- label: roofline-diagnostic
+  start_line: 645
+  end_line: 677
+  lego_class: notebook
+  purpose: Estimate per-GPU FP16 weight-read time and token rate for a 70B model sharded
+    over 8 H100s.
+  constants:
+  - name: params_per_gpu_B
+    value: 70 / 8
+    kind: model_architecture_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The 8.75B-shard, 17.5 GB, 5.2 ms, and 191 token/s values should
+      remain the same for the current 70B convention.
+  - name: bytes_fp16
+    value: '2'
+    kind: precision_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Rendered arithmetic intensity and weight size remain unchanged.
+  - name: H100_MEM_BW
+    value: 3.35 TB/s
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: H100 bandwidth limit remains canonical.
+- label: fusion-traffic-calc
+  start_line: 733
+  end_line: 784
+  lego_class: LEGO
+  purpose: Calculate HBM traffic from materializing two FP16 intermediates in an unfused
+    4096-by-2048 layer block.
+  constants:
+  - name: hidden_dim / batch_size / intermediates
+    value: 4096, 2048, 2
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose introduces these as the illustrative tensor shape and
+      two intermediates.
+  - name: bytes_fp16
+    value: '2'
+    kind: precision_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Per-tensor MB, materialized MB, and traffic MB stay unchanged.
+  - name: num_layers
+    value: '80'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The 80-layer rollup is a local forward-pass scenario; if the
+      example is later tied to a named Llama model, use LLAMA2_70B_LAYERS or LLAMA3_70B_LAYERS.
+- label: flash-attention-savings-refactor
+  start_line: 832
+  end_line: 900
+  lego_class: LEGO
+  purpose: Compare naive and FlashAttention materialized attention state for an 8192-token,
+    32-head, 128-wide FP16 attention layer.
+  constants:
+  - name: BYTES_FP16
+    value: 2 bytes
+    kind: precision_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Precision-byte accounting is canonical.
+  - name: seq_len / head_dim / num_heads
+    value: 8192, 128, 32
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are the chapter's explicit FlashAttention example dimensions.
+- label: null
+  start_line: 958
+  end_line: 1055
+  lego_class: figure
+  purpose: Plot FlashAttention memory savings as sequence length grows.
+  constants:
+  - name: bytes_per_element_fp16
+    value: '2'
+    kind: precision_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The quadratic standard-attention curve and 8K/65K annotations
+      remain unchanged.
+  - name: S_vals / num_heads / batch_size / markers
+    value: 512..131072, 32 heads, batch 1, markers at 8192 and 65536
+    kind: figure_metadata
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These values define the illustrative plot range and labels.
+- label: kv-cache-size
+  start_line: 1126
+  end_line: 1196
+  lego_class: LEGO
+  purpose: Compute KV cache per request and max batch sizes for a 70B Llama-style
+    GQA model before and after INT4/INT8 compression.
+  constants:
+  - name: num_layers / num_kv_heads / head_dim
+    value: 80, 8, 128
+    kind: model_architecture_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The 1.34 GB total FP16 KV cache and per-GPU values remain valid
+      for the current Llama2-70B constants.
+  - name: bytes_fp16 / bytes_int8
+    value: 2, 1
+    kind: precision_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: FP16/INT8 KV cache sizes stay unchanged.
+  - name: gpu_total_gb
+    value: '80'
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The H100 capacity budget remains unchanged under the book's branded-GB
+      display convention.
+  - name: weight_fp16_shard_gb / weight_int4_shard_gb
+    value: 35 GB and 8.75 GB
+    kind: model_memory_derived_constant
+    current_source: local_literal
+    should_change: false
+    target_source: Derive from LLAMA2_70B_PARAMS with BYTES_FP16/BYTES_INT4 and the
+      local 4-GPU tensor-parallel degree, or use model_memory
+    preserves_rendered_value: true
+    narrative_check: Available KV memory and max batch values should stay unchanged
+      if the same 70B/4-way-shard convention is preserved.
+  - name: seq_len
+    value: '4096'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The 4K context is a local serving-scenario assumption.
+- label: compilation-dividend
+  start_line: 1381
+  end_line: 1421
+  lego_class: notebook
+  purpose: Estimate speedup from torch.compile by reducing element-wise and launch-overhead
+    shares.
+  constants:
+  - name: base_tps / time_shares / reduction_factors
+    value: 120 tps; 35/15/50 percent; 70/80 percent reductions
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are profile-derived scenario assumptions for the callout.
+- label: moe-economics
+  start_line: 1453
+  end_line: 1499
+  lego_class: LEGO
+  purpose: Compare dense and MoE decode memory/compute economics for an illustrative
+    1T dense model and 370B/37B-active MoE model.
+  constants:
+  - name: dense_params_b / moe_total_params_b / moe_active_params_b
+    value: 1000, 370, 37
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The MoE values are intentionally local because the prose frames
+      them as a representative economic example, not a named model.
+  - name: bytes_fp16
+    value: '2'
+    kind: precision_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Dense/MoE memory bandwidth and reduction ratios remain unchanged.
+  - name: experts_per_layer / active_experts
+    value: 8 experts, 1 active
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are local architecture assumptions and are not rendered
+      by the cell.
+- label: nvlink-h100-bw
+  start_line: 1511
+  end_line: 1543
+  lego_class: LEGO
+  purpose: Expose H100 NVLink bandwidth for communication-overlap prose.
+  constants:
+  - name: NVLINK_H100_BW
+    value: 900 GB/s
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: NVLink bandwidth prose remains canonical.
+- label: overlap-calc
+  start_line: 1553
+  end_line: 1638
+  lego_class: LEGO
+  purpose: Estimate communication-computation overlap speedup for a 7B model on 8
+    H100s over NVLink.
+  constants:
+  - name: NVLINK_H100_BW / H100_FLOPS_FP16_TENSOR
+    value: 900 GB/s and 989 TFLOP/s
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Hardware performance inputs remain canonical.
+  - name: bytes_per_param_fp16
+    value: '2'
+    kind: precision_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Gradient GB and communication time remain unchanged.
+  - name: ring_allreduce_factor
+    value: 2 * (num_gpus - 1) / num_gpus
+    kind: formula_constant
+    current_source: local_formula
+    should_change: false
+    target_source: mlsysim.physics.calc_ring_allreduce_time
+    preserves_rendered_value: unknown
+    narrative_check: Rendered AllReduce time and speedup should be rechecked if the
+      canonical helper includes latency; the overlap narrative remains valid.
+  - name: model_params / num_gpus / tokens_per_gpu / mfu
+    value: 7e9, 8, 2048, 0.40
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These define the local overlap scenario.
+- label: null
+  start_line: 1646
+  end_line: 1741
+  lego_class: figure
+  purpose: Plot normalized overlap budget and overlap efficiency from 8 to 1024 GPUs.
+  constants:
+  - name: gpus / compute_budget / comm_scale_factor / target_efficiency
+    value: 8..1024 GPUs; 100 normalized compute; 35 base communication; 92%..38% target
+      efficiency
+    kind: figure_metadata
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The chart is illustrative and not consumed as a hardware/model
+      constant.
+- label: fleet-efficiency-calc
+  start_line: 1984
+  end_line: 2038
+  lego_class: LEGO
+  purpose: Compute local and fleet MFU for a 70B model on H100s and expose the scaling
+    tax.
+  constants:
+  - name: LLAMA2_70B_PARAMS / H100_FLOPS_FP16_TENSOR
+    value: 70B params and 989 TFLOP/s
+    kind: model_and_hardware_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The 70B H100 MFU example is already sourced from MLSysIM.
+  - name: local_flops_per_step / fleet_flops_per_step
+    value: 6 * params * tokens
+    kind: formula_constant
+    current_source: local_formula
+    should_change: false
+    target_source: mlsysim.physics.calc_transformer_training_flops
+    preserves_rendered_value: true
+    narrative_check: Local/fleet MFU percentages and scaling-tax prose should remain
+      unchanged if the helper implements the same 6PN convention.
+  - name: n_gpus / tokens_per_step / observed_step_times
+    value: 128 GPUs; 2204 and 35446 tokens; 180 ms and 245 ms
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These values define the local fleet-measurement scenario.
+findings:
+- id: vol2-performance-engineering-shifting-roofline-gpu-specs
+  severity: medium
+  cell_labels:
+  - null
+  lines:
+  - 416
+  - 417
+  - 418
+  - 419
+  issue: The shifting-roofline figure hardcodes V100/A100/H100/B200 peak FP16 throughput
+    and HBM bandwidth even though MLSysIM already defines these hardware constants.
+  recommendation: Build the figure GPU list from MLSysIM V100/A100/H100/B200 FLOPS_FP16_TENSOR
+    and MEM_BW constants, or from the Hardware registry.
+  target_source: mlsysim.core.units V100/A100/H100/B200 FLOPS_FP16_TENSOR and
+    MEM_BW
+  preserves_rendered_value: true
+  narrative_check: The ridge points and ridge-shift prose should remain unchanged
+    with the current constants.
+- id: vol2-performance-engineering-roofline-diagnostic-70b-and-fp16
+  severity: medium
+  cell_labels:
+  - roofline-diagnostic
+  lines:
+  - 655
+  - 656
+  issue: The 70B model size and FP16 byte width are local literals in the decode roofline
+    diagnostic.
+  recommendation: Derive the parameter shard from LLAMA2_70B_PARAMS or Models.Language.Llama2_70B
+    and use BYTES_FP16 for the byte width; keep the 8-way tensor-parallel degree local.
+  target_source: mlsysim.core.units.LLAMA2_70B_PARAMS and mlsysim.core.units.BYTES_FP16
+  preserves_rendered_value: true
+  narrative_check: The 17.5 GB shard, 5.2 ms decode limit, and 191 tokens/s value
+    should render the same.
+- id: vol2-performance-engineering-local-fp16-byte-literals
+  severity: low
+  cell_labels:
+  - fusion-traffic-calc
+  - null
+  - moe-economics
+  - overlap-calc
+  lines:
+  - 762
+  - 987
+  - 1478
+  - 1584
+  issue: Several cells hardcode FP16 as 2 bytes instead of using MLSysIM's precision
+    byte constant.
+  recommendation: Use BYTES_FP16 in these calculations and convert with byte units
+    as needed.
+  target_source: mlsysim.core.units.BYTES_FP16
+  preserves_rendered_value: true
+  narrative_check: Fusion traffic, FlashAttention plot memory, MoE bandwidth, and
+    overlap gradient-size outputs remain unchanged.
+- id: vol2-performance-engineering-kv-cache-llama-and-h100-constants
+  severity: high
+  cell_labels:
+  - kv-cache-size
+  lines:
+  - 1152
+  - 1153
+  - 1154
+  - 1156
+  - 1157
+  - 1160
+  - 1161
+  - 1162
+  issue: The KV-cache sizing cell describes a 70B Llama-style GQA/H100 scenario but
+    hardcodes model architecture, precision widths, H100 capacity, and model-shard
+    memory.
+  recommendation: Use the Llama2-70B constants or model registry for layers/KV heads/head
+    dimension and get_kv_cache_size/calc_kv_cache_size; use BYTES_FP16, BYTES_INT8,
+    BYTES_INT4, H100_MEM_CAPACITY, and model_memory for weight shards.
+  target_source: Models.Language.Llama2_70B, mlsysim.physics.calc_kv_cache_size/model_memory,
+    BYTES_FP16/BYTES_INT8/BYTES_INT4, H100_MEM_CAPACITY
+  preserves_rendered_value: true
+  narrative_check: The rendered KV cache sizes and max batch numbers should stay the
+    same if the current 70B, 4-way shard, 4K-context convention is preserved.
+- id: vol2-performance-engineering-overlap-ring-allreduce-helper
+  severity: medium
+  cell_labels:
+  - overlap-calc
+  lines:
+  - 1587
+  - 1604
+  issue: The overlap calculation embeds the ring-AllReduce factor and time formula
+    locally even though MLSysIM has a calc_ring_allreduce_time helper.
+  recommendation: Use calc_ring_allreduce_time for the AllReduce time; pass zero or
+    explicit latency if the chapter wants to preserve the current bandwidth-only result.
+  target_source: mlsysim.physics.calc_ring_allreduce_time
+  preserves_rendered_value: unknown
+  narrative_check: If helper latency is included, rendered AllReduce time and overlap
+    speedup need rechecking; the qualitative overlap lesson remains valid.
+- id: vol2-performance-engineering-fleet-training-flops-helper
+  severity: medium
+  cell_labels:
+  - fleet-efficiency-calc
+  lines:
+  - 2019
+  - 2020
+  issue: The fleet MFU cell repeats the Transformer training FLOPs convention as a
+    local 6 * parameters * tokens formula.
+  recommendation: Use calc_transformer_training_flops for both local and fleet useful-FLOP
+    calculations.
+  target_source: mlsysim.physics.calc_transformer_training_flops
+  preserves_rendered_value: true
+  narrative_check: MFU and scaling-tax prose should remain unchanged under the same
+    6PN convention.

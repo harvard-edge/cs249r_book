@@ -65,7 +65,7 @@ print(f'mlsysim v{mlsysim.__version__}')
 
 # Quick smoke test: ResNet-50 on A100
 from mlsysim import Engine, Hardware, Models
-p = Engine.solve(Models.ResNet50, Hardware.A100, batch_size=1)
+p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
 print(f'ResNet-50 on A100: {p.latency:~P.2f}, bottleneck={p.bottleneck}')
 
 # Verify registries

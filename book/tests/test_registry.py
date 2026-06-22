@@ -3,12 +3,12 @@
 
 import unittest
 from mlsysim import Hardware, Models
-from mlsysim.core.constants import ureg
+from mlsysim.core.units import ureg
 
 class TestMLSysRegistry(unittest.TestCase):
     def test_hardware_ridge_points(self):
         """Test that ridge points are calculated correctly and are positive."""
-        h100 = Hardware.H100
+        h100 = Hardware.Cloud.H100
         ridge = h100.ridge_point()
         self.assertGreater(ridge.magnitude, 0)
         self.assertIn('flop', str(ridge.units))
@@ -20,8 +20,8 @@ class TestMLSysRegistry(unittest.TestCase):
 
     def test_model_size(self):
         """Test model weight storage calculations."""
-        gpt3 = Models.GPT3
-        from mlsysim.core.constants import BYTES_FP16, BYTES_INT4
+        gpt3 = Models.Language.GPT3
+        from mlsysim.core.units import BYTES_FP16, BYTES_INT4
         
         # GPT-3 175B @ FP16 (2 bytes) = 350 GB
         size_fp16 = gpt3.size_in_bytes(BYTES_FP16)

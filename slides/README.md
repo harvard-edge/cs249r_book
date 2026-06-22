@@ -38,8 +38,8 @@ xelatex 01_introduction.tex   # Compile (run twice for navigation)
     </tr>
     <tr>
       <td><b>Volume II</b></td>
-      <td align="center">9 decks</td>
-      <td>Course overview, Compute Infrastructure through Inference</td>
+      <td align="center">18 decks</td>
+      <td>Course overview, Introduction through Responsible AI, Conclusion</td>
     </tr>
   </tbody>
 </table>
@@ -58,7 +58,7 @@ slides/
 │   │   ├── 01_introduction.tex
 │   │   └── images/
 │   └── ...
-└── vol2/                       # Volume II decks (9 chapters)
+└── vol2/                       # Volume II decks (18 chapters)
     ├── 01_introduction/
     └── ...
 ```
@@ -71,7 +71,7 @@ Adopting instructors who want a different look can create their own variant by c
 
 ## Contributing
 
-Agent instructions and production guidelines live in `.claude/docs/slides/`.
+Agent instructions and production guidelines live in the project slides docs.
 
 ## Contributors
 

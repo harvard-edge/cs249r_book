@@ -13,19 +13,18 @@ To ensure mathematical rigor and prevent "spaghetti code," all extensions must a
 
 Before you write code, ask yourself: *What kind of math am I doing?*
 
-### 1. `BaseModel`: The Physics Engine
+### 1. `ForwardModel`: The Physics Engine
 *   **The Math:** $Y = f(X)$. Forward propagation.
 *   **When to use:** You want to evaluate a physical or logical state. You have a fixed hardware config and a fixed workload, and you want to predict latency, cost, memory footprint, or energy.
 *   **Rule:** A Model **cannot** make decisions or loop through options. It must be a deterministic calculation of a single state.
 
 ### 2. `BaseSolver`: The Math Engine
-*   **The Math:** $X = f^{-1}(Y)$ or $
-abla f$. Algebraic inversion or calculus.
+*   **The Math:** $X = f^{-1}(Y)$ or $\nabla f$. Algebraic inversion or calculus.
 *   **When to use:** You have a specific target (like a latency SLA or a memory budget) and you want to algebraically solve for the exact hardware or model parameter required to hit it.
 *   **Rule:** A Solver should yield a mathematically precise answer derived from inverting a Model's equations.
 
 ### 3. `BaseOptimizer`: The Engineering Engine
-*   **The Math:** $\max_{x \in X} f(x) 	ext{ s.t. } g(x) \le c$. Constrained optimization.
+*   **The Math:** $\max_{x \in X} f(x) \text{ s.t. } g(x) \le c$. Constrained optimization.
 *   **When to use:** You want to search a design space (discrete or continuous) to find the "best" configuration, balancing competing trade-offs (e.g., maximizing throughput while minimizing carbon).
 *   **Rule:** An Optimizer must internally call `Models` to evaluate candidates. It must return an `OptimizerResult` tracking the objective value and the size of the search space.
 
@@ -38,9 +37,9 @@ Every resolver follows the same pattern: declare inputs (`requires`), declare ou
 Let's build a custom `PowerEfficiencyModel` that calculates TFLOPs per Watt.
 
 ```python
-from mlsysim.core.solver import BaseModel
-from mlsysim.core.results import SolverResult
-from mlsysim.core.constants import Q_
+from mlsysim.solvers import ForwardModel
+from mlsysim.engine.results import SolverResult
+from mlsysim.core.units import Q_
 from mlsysim.hardware.types import HardwareNode
 from mlsysim.core.types import Quantity
 
@@ -50,7 +49,7 @@ class PowerEfficiencyResult(SolverResult):
     is_efficient: bool
 
 # 2. Implement the Model
-class PowerEfficiencyModel(BaseModel):
+class PowerEfficiencyModel(ForwardModel):
     """Evaluates the compute efficiency per watt of an accelerator."""
     requires = ("hardware",)
     produces = PowerEfficiencyResult
@@ -77,8 +76,8 @@ class PowerEfficiencyModel(BaseModel):
 A solver algebraically inverts an equation. For example, if $T = \frac{W}{BW}$, and we have a target $T$, we solve for $BW = \frac{W}{T}$.
 
 ```python
-from mlsysim.core.solver import BaseSolver
-from mlsysim.core.results import SolverResult
+from mlsysim.solvers import BaseSolver
+from mlsysim.engine.results import SolverResult
 from mlsysim.models.types import Workload
 from mlsysim.core.types import Quantity
 
@@ -109,8 +108,8 @@ An Optimizer explores a design space. It MUST inherit from `BaseOptimizer` and i
 Let's build a `CheapestHardwareOptimizer` that searches the `HardwareZoo` for the cheapest chip that satisfies a minimum TFLOP requirement.
 
 ```python
-from mlsysim.core.solver import BaseOptimizer
-from mlsysim.core.results import OptimizerResult
+from mlsysim.solvers import BaseOptimizer
+from mlsysim.engine.results import OptimizerResult
 from mlsysim.hardware.registry import Hardware
 from typing import Dict, Any
 
@@ -162,8 +161,8 @@ class CheapestHardwareOptimizer(BaseOptimizer):
 MLSys·im doesn't just evaluate models in a vacuum. It uses a **Composable Pipeline** architecture. You can snap your custom solvers into a pipeline and execute them sequentially, with outputs from earlier stages passing automatically to later stages.
 
 ```python
-from mlsysim.core.pipeline import Pipeline
-from mlsysim.core.solver import DistributedModel, EconomicsModel
+from mlsysim.engine.pipeline import Pipeline
+from mlsysim.solvers import DistributedModel, EconomicsModel
 
 # Build a pipeline with your custom solver in the middle
 my_pipeline = Pipeline([
@@ -174,7 +173,7 @@ my_pipeline = Pipeline([
 
 # Run the pipeline
 results = my_pipeline.run(
-    model=mlsysim.Models.Llama3_8B,
+    model=mlsysim.Models.Language.Llama3_8B,
     fleet=mlsysim.Systems.Clusters.Frontier_8K,
     duration_days=30
 )
@@ -213,7 +212,7 @@ cheapest_hardware = "my_custom_package.solvers:CheapestHardwareOptimizer"
 Once installed via `pip install .`, you can check that `mlsysim` has discovered your models by running:
 
 ```python
-from mlsysim.core.resolver_factory import ResolverFactory
+from mlsysim.engine.resolver_factory import ResolverFactory
 
 # This will now include 'PowerEfficiencyModel', etc.
 print(ResolverFactory.list_available().keys())
@@ -240,7 +239,7 @@ def test_power_efficiency_h100():
 def test_power_efficiency_no_tdp():
     """Hardware without TDP should raise ValueError."""
     from mlsysim.hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
-    from mlsysim.core.constants import Q_
+    from mlsysim.core.units import Q_
 
     hw = HardwareNode(
         name="NoTDP",
@@ -270,4 +269,4 @@ This means your custom extension automatically works with:
 - **`Engine.sweep()`** — sweep your model across hardware
 - **`SystemEvaluator.evaluate()`** — include your model in the full scorecard
 - **The CLI** — expose your extension via `mlsysim eval` with YAML input
-- **MCP agents** — AI agents can discover and invoke your extension
+- **Schema tooling** — validate configuration files before they reach the solver

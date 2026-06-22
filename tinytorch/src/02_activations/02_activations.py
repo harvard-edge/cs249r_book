@@ -92,7 +92,6 @@ If you see import errors, ensure you've run `tito export` after completing Modul
 import numpy as np
 rng = np.random.default_rng(7)
 from typing import Optional
-import warnings
 
 # Import from TinyTorch package (previous modules must be completed and exported)
 from tinytorch.core.tensor import Tensor
@@ -244,8 +243,17 @@ class Sigmoid:
         HINT: Use np.exp(-x.data) for numerical stability
         """
         ### BEGIN SOLUTION
-        # Apply sigmoid: 1 / (1 + exp(-x))
-        result = 1.0 / (1.0 + np.exp(-x.data))
+        # Numerically stable sigmoid. Each branch keeps its exponent <= 0, so the
+        # selected value never overflows for large |x|. np.where still evaluates
+        # both branches, so errstate silences the harmless overflow in the
+        # discarded branch (whose result is thrown away).
+        x_data = x.data
+        with np.errstate(over="ignore", invalid="ignore"):
+            result = np.where(
+                x_data >= 0,
+                1.0 / (1.0 + np.exp(-x_data)),
+                np.exp(x_data) / (1.0 + np.exp(x_data)),
+            )
         return Tensor(result)
         ### END SOLUTION
 
@@ -281,16 +289,11 @@ def test_unit_sigmoid():
     result = sigmoid.forward(x)
     assert np.all(result.data > 0) and np.all(result.data < 1), "All sigmoid outputs should be in (0, 1)"
 
-    # Test specific values
-    # Temporarily suppress overflow warning, expected
-    warnings.filterwarnings('ignore', category=RuntimeWarning)
-    print("Suppressed expected warning about exp overflow...")
-
+    # Test extreme values: the stable form must stay finite without overflow.
     x = Tensor([-1000, 1000])  # Extreme values
     result = sigmoid.forward(x)
     assert np.allclose(result.data[0], 0, atol=TOLERANCE), "sigmoid(-∞) should approach 0"
     assert np.allclose(result.data[1], 1, atol=TOLERANCE), "sigmoid(+∞) should approach 1"
-    warnings.filterwarnings('default', category=RuntimeWarning)
 
     print("✅ Sigmoid works correctly!")
 

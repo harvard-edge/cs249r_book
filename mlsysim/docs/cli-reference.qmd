@@ -3,11 +3,12 @@ title: "CLI Reference"
 subtitle: "Every command, every flag, with real examples."
 ---
 
-MLSys·im ships an agent-ready CLI built on [Typer](https://typer.tiangolo.com/) and [Rich](https://rich.readthedocs.io/). It follows the [3-Tier Command Mapping](architecture.qmd): `eval` maps to Models, `optimize` maps to Optimizers, and `zoo` maps to the registries.
+MLSys·im ships an automation-friendly CLI built on [Typer](https://typer.tiangolo.com/) and [Rich](https://rich.readthedocs.io/). It follows the [3-Tier Command Mapping](architecture.qmd): `eval` maps to Models, `optimize` maps to Optimizers, and `zoo` maps to the registries.
 
 ::: {.callout-tip}
 ## Output Formats
-Every command supports `-o json` for machine-parseable output and `-o markdown` for reports. The default is `text` (human-readable Rich tables). AI agents should always use `-o json`.
+Commands support `-o json` for machine-parseable output; report-oriented commands also support `-o markdown`. The default is `text` (human-readable Rich tables). Use `-o json` in scripts and CI jobs.
+You can place the output flag before the command (`mlsysim -o json eval ...`) or on the command itself (`mlsysim eval ... -o json`).
 :::
 
 ---
@@ -45,14 +46,25 @@ The CLI uses semantic exit codes so scripts and CI pipelines can react programma
 |:-----|:--------|:--------|
 | `0` | Success | Analysis completed, all assertions passed |
 | `1` | Bad input | Unknown model name, malformed YAML, missing required flag |
-| `2` | Physics violation | OOM — model does not fit in memory at the given precision |
+| `2` | Physics violation | A hard `OOMError` raised during evaluation |
 | `3` | SLA violation | A `constraints.assert` check in the YAML failed |
 
 ```bash
-mlsysim eval Llama3_70B T4 --batch-size 1
-# Exit code 2: OOM — 140 GB model weights exceed 16 GB T4 memory
-echo $?  # → 2
+mlsysim eval NoSuchModel H100
+echo $?  # → 1 (unknown model name)
+
+mlsysim eval cluster.yaml   # with a constraints.assert block that fails
+echo $?  # → 3
 ```
+
+::: {.callout-note}
+## Feasibility failures exit 0
+A quick evaluation of an infeasible configuration (e.g. `mlsysim eval Llama3_70B T4`)
+renders the scorecard with `Feasibility [FAIL]` and exits `0` — the analysis itself
+succeeded. Exit code `2` is reserved for hard out-of-memory errors raised inside the
+engine. To gate CI on feasibility, use a YAML plan with a `constraints.assert` block
+(exit code `3` on violation) or parse the `-o json` output.
+:::
 
 ---
 
@@ -64,7 +76,7 @@ mlsysim [OPTIONS] COMMAND [ARGS]...
 
 | Flag | Description | Default |
 |:-----|:-----------|:--------|
-| `-o, --output` | Output format: `text`, `json`, `markdown` | `text` |
+| `-o, --output` | Output format: `text`, `json`, `markdown`; `html` is available for `eval` and `optimize` | `text` |
 | `--install-completion` | Install shell completion (bash, zsh, fish) | — |
 | `--show-completion` | Print completion script to stdout | — |
 | `--help` | Show help and exit | — |
@@ -83,7 +95,7 @@ mlsysim zoo [CATEGORY]
 
 | Argument | Description |
 |:---------|:-----------|
-| `CATEGORY` | `hardware` or `models` |
+| `CATEGORY` | `hardware` or `models`; omit to list both registries |
 
 **Examples:**
 
@@ -122,6 +134,7 @@ mlsysim eval [OPTIONS] TARGET [HARDWARE]
 | `-b, --batch-size` | Batch size | `1` |
 | `-p, --precision` | Numerical precision: `fp32`, `fp16`, `fp8`, `int8`, `int4` | `fp16` |
 | `-e, --efficiency` | Model FLOPs Utilization (0.0–1.0) | `0.5` |
+| `-o, --output` | Output format: `text`, `json`, `markdown`, or `html` | `text` |
 
 **Examples:**
 
@@ -148,26 +161,71 @@ When `TARGET` is a YAML file, `eval` runs the full 3-lens scorecard (Feasibility
 
 ```yaml
 version: "1.0"
+name: "llama70b-cluster"
 workload:
   name: "Llama3_70B"
   batch_size: 4096
 hardware:
   name: "H100"
-  nodes: 64
+  accelerators: 64
 ops:
   region: "Quebec"
   duration_days: 14.0
 constraints:
   assert:
-    - metric: "performance.latency"
+    - metric: "performance.step_latency"
       max: 50.0
+```
+
+Both `version` and `name` are required top-level fields. Assertion metrics are
+addressed as `<lens>.<metric>`; the available keys are `performance.step_latency`,
+`performance.comm_overhead`, `performance.fleet_throughput`, `performance.mfu`,
+`performance.node_mfu`, `performance.scaling_efficiency`, `macro.tco_usd`,
+`macro.carbon_footprint`, `macro.energy_cost`, and `macro.capex`.
+
+---
+
+## `mlsysim serve`
+
+Analyze LLM serving performance directly. Use this when you care about the two-phase serving lifecycle rather than generic single-node roofline throughput.
+
+```
+mlsysim serve [OPTIONS] MODEL HARDWARE
+```
+
+**Arguments:**
+
+| Argument | Description | Required |
+|:---------|:-----------|:---------|
+| `MODEL` | Transformer model name (e.g., `Llama3_8B`) | Yes |
+| `HARDWARE` | Hardware name (e.g., `H100`) | Yes |
+
+**Options:**
+
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `-s, --seq-len` | Sequence length / context window | `2048` |
+| `-b, --batch-size` | Batch size | `1` |
+| `-p, --precision` | Numerical precision: `fp32`, `fp16`, `fp8`, `int8`, `int4` | `fp16` |
+| `-e, --efficiency` | Compute efficiency (0.0-1.0) | `0.5` |
+| `--prefill-chunk-tokens` | Chunk prefill by this token budget to estimate a max decode-stall proxy | none |
+| `-o, --output` | Output format: `text`, `json`, or `markdown` | `text` |
+
+**Examples:**
+
+```bash
+# TTFT, ITL, KV-cache, and memory feasibility
+mlsysim serve Llama3_8B H100 --seq-len 4096
+
+# Sarathi-Serve-style chunked prefill proxy for long prompts
+mlsysim serve Llama3_8B H100 --seq-len 8192 --prefill-chunk-tokens 512 -o json
 ```
 
 ---
 
 ## `mlsysim schema`
 
-Export JSON Schema for configuration files. Feed these to your IDE for autocompletion or to an LLM agent for structured generation.
+Export JSON Schema for configuration files. Feed these to your IDE or validation tooling for autocompletion and static checks.
 
 ```
 mlsysim schema [OPTIONS]
@@ -175,9 +233,10 @@ mlsysim schema [OPTIONS]
 
 **Options:**
 
-| Flag | Description |
-|:-----|:-----------|
-| `--type` | Schema type: `hardware`, `workload`, or `plan` |
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `-t, --type` | Schema type: `hardware`, `workload`, or `plan` | `plan` |
+| `-o, --output` | Accepted values: `text` or `json`; schema output is always JSON | `text` |
 
 **Examples:**
 
@@ -270,9 +329,9 @@ Profile a workload against the Iron Law and report which wall binds.
 mlsysim audit [OPTIONS]
 ```
 
-| Flag | Description |
-|:-----|:-----------|
-| `--workload` | Workload name to audit |
+| Flag | Description | Default |
+|:-----|:-----------|:--------|
+| `-w, --workload` | Workload name to audit against (e.g. `Llama3_8B`, `ResNet50`) | `Llama3_8B` |
 
 ---
 

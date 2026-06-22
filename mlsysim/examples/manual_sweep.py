@@ -10,7 +10,7 @@ import pandas as pd # Optional, but common for students
 
 def main():
     print("Scenario: Autonomous Vehicle Perception on Jetson Orin NX")
-    scenario = mlsysim.Applications.AutoDrive
+    scenario = mlsysim.Scenarios.AutonomousVehicle
     
     results = []
     

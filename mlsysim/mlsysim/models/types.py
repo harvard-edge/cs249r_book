@@ -1,14 +1,23 @@
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional
-from ..core.constants import ureg, BYTES_FP16
-from ..core.types import Quantity, Metadata
+from ..core.units import ureg, BYTES_FP16
+from ..core.types import (
+    Quantity,
+    Metadata,
+    require_dimensionality,
+    require_unit_family,
+    require_unit_families,
+)
 
 class ComputationGraph(BaseModel):
     """
     Hardware-Agnostic representation of a Workload.
-    The 'Intermediate Representation' (IR) of demand.
+    
+    This is the 'Intermediate Representation' (IR) of computational demand. 
+    It strips away high-level architectural details (like "Transformer" or 
+    "CNN") and reduces the workload to pure math: Operations and Bytes.
     """
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     
     name: str
     total_ops: Quantity
@@ -18,19 +27,95 @@ class ComputationGraph(BaseModel):
     
     # Optional metadata
     layers: Optional[int] = None
+
+    @field_validator("total_ops", mode="after")
+    @classmethod
+    def _validate_total_ops(cls, v):
+        return require_unit_family(v, ureg.flop, "total_ops", "operation")
+
+    @field_validator("parameter_count", mode="after")
+    @classmethod
+    def _validate_parameter_count(cls, v):
+        return require_unit_family(v, ureg.count, "parameter_count", "count")
+
+    @field_validator("weight_bytes", mode="after")
+    @classmethod
+    def _validate_weight_bytes(cls, v):
+        return require_unit_family(v, ureg.byte, "weight_bytes", "data")
+
+    @field_validator("arithmetic_intensity", mode="after")
+    @classmethod
+    def _validate_arithmetic_intensity(cls, v):
+        return require_unit_families(v, ureg.flop / ureg.byte, "arithmetic_intensity", ("operation", "data"))
     
     def __repr__(self):
         return f"ComputationGraph({self.name}, {self.total_ops:~P})"
 
 class Workload(BaseModel):
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    """
+    Layer A (Workload Demand): Base representation of an ML model or task.
+    
+    A Workload defines the computational requirements of a task without any
+    knowledge of the hardware it will run on. It must implement `lower()`
+    to project its architectural definition down into a `ComputationGraph`.
+
+    ``inference_flops`` semantics — the unit of work DIFFERS BY MODEL FAMILY
+    (documented 2026-06-06; the field is dimensioned only as ``flop``, so the
+    family convention is the contract):
+
+    - Autoregressive LMs (``TransformerWorkload`` decoder-only,
+      ``SparseTransformerWorkload``): FLOPs **per generated token**, following
+      the 2 x params convention — 2 x TOTAL params for dense models, 2 x
+      ACTIVE params for MoE.
+    - Encoder models (BERT-family): FLOPs **per sequence** at the reference
+      sequence length recorded in the entry's provenance (BERT-Base: 22 GFLOP
+      at seq=128).
+    - Vision / CNN / recommendation models: FLOPs **per input** (one image /
+      one query forward pass).
+
+    NEVER compare ``inference_flops`` across families without normalizing —
+    the magnitudes differ by orders of magnitude purely from the work unit.
+    """
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid", frozen=True)
     name: str
     architecture: str
     metadata: Metadata = Field(default_factory=Metadata)
     parameters: Optional[Quantity] = None
     model_size: Optional[Quantity] = None
+    embedding_entries: Optional[Quantity] = None
+    # Per-token (LMs) / per-sequence (encoders) / per-input (vision) — see
+    # class docstring before comparing across model families.
     inference_flops: Optional[Quantity] = None
+    inference_energy: Optional[Quantity] = None  # per-inference energy (e.g. mobile on-device)
     data_rate: Optional[Quantity] = None # e.g., TB/hour for autonomous driving
+    training_dataset_size: Optional[Quantity] = None
+    parameter_range_min: Optional[Quantity] = None
+    parameter_range_max: Optional[Quantity] = None
+
+    @field_validator("parameters", "embedding_entries", mode="after")
+    @classmethod
+    def _validate_count_fields(cls, v, info):
+        return require_unit_family(v, ureg.count, info.field_name, "count")
+
+    @field_validator("model_size", mode="after")
+    @classmethod
+    def _validate_model_size(cls, v):
+        return require_unit_family(v, ureg.byte, "model_size", "data")
+
+    @field_validator("inference_flops", mode="after")
+    @classmethod
+    def _validate_inference_flops(cls, v):
+        return require_unit_family(v, ureg.flop, "inference_flops", "operation")
+
+    @field_validator("inference_energy", mode="after")
+    @classmethod
+    def _validate_inference_energy(cls, v):
+        return require_dimensionality(v, ureg.joule, "inference_energy")
+
+    @field_validator("data_rate", mode="after")
+    @classmethod
+    def _validate_data_rate(cls, v):
+        return require_unit_family(v, ureg.byte / ureg.second, "data_rate", "data")
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         """
@@ -76,13 +161,35 @@ class Workload(BaseModel):
         raise NotImplementedError("Workload must define either parameters or model_size to calculate size in bytes.")
 
 class TransformerWorkload(Workload):
+    """Workload representation of an autoregressive Transformer (e.g., LLMs)."""
     parameters: Quantity
     layers: int
     hidden_dim: Optional[int] = None
     heads: Optional[int] = None
     kv_heads: Optional[int] = None
     training_ops: Optional[Quantity] = None
+    training_tokens: Optional[Quantity] = None
+    training_accelerators_ref: Optional[Quantity] = None
+    training_days_ref: Optional[Quantity] = None
+    training_energy_mwh: Optional[Quantity] = None
+    training_gpu_days: Optional[float] = None
+    training_hardware_label: Optional[str] = None
     inference_flops: Optional[Quantity] = None
+
+    @field_validator("training_ops", mode="after")
+    @classmethod
+    def _validate_training_ops(cls, v):
+        return require_unit_family(v, ureg.flop, "training_ops", "operation")
+
+    @field_validator("training_tokens", "training_accelerators_ref", mode="after")
+    @classmethod
+    def _validate_training_count_fields(cls, v, info):
+        return require_unit_family(v, ureg.count, info.field_name, "count")
+
+    @field_validator("training_days_ref", mode="after")
+    @classmethod
+    def _validate_training_days_ref(cls, v):
+        return require_dimensionality(v, ureg.day, "training_days_ref")
     
     def size_in_bytes(self, precision: Quantity = BYTES_FP16) -> Quantity:
         param_count = self.parameters.to(ureg.count).magnitude
@@ -90,7 +197,7 @@ class TransformerWorkload(Workload):
         return (param_count * bpp * ureg.byte).to(ureg.byte)
 
     def get_kv_cache_size(self, seq_len: int, batch_size: int, precision: Quantity = BYTES_FP16) -> Quantity:
-        from ..core.formulas import calc_kv_cache_size
+        from ..physics import calc_kv_cache_size
         h_dim = self.hidden_dim or 4096
         n_heads = self.heads or 32
         head_dim = h_dim // n_heads
@@ -118,11 +225,11 @@ class TransformerWorkload(Workload):
         Returns:
             Quantity[byte]: Total training memory per GPU
         """
-        from ..core.constants import BYTES_FP32, BYTES_FP16, BYTES_INT8, BYTES_INT4
-        from ..core.formulas import calc_activation_memory
+        from ..core.units import resolve_precision
+        from ..physics import calc_activation_memory
         
-        prec_map = {"fp32": BYTES_FP32, "fp16": BYTES_FP16, "int8": BYTES_INT8, "int4": BYTES_INT4}
-        bpp = prec_map.get(precision, BYTES_FP16).to(ureg.byte).magnitude
+        _, precision_bytes = resolve_precision(precision)
+        bpp = precision_bytes.to(ureg.byte).magnitude
         
         n_params = self.parameters.to(ureg.count).magnitude
         
@@ -158,28 +265,19 @@ class TransformerWorkload(Workload):
         if zero_stage >= 3:
             weight_mem = weight_mem / dp_size
             
-        # 3. Activation Memory (proportional to B, S, H)
+        # 3. Activation Memory (proportional to B, S, H; quadratic attention
+        # term needs the head count when strategy='none')
         act_mem = calc_activation_memory(
             n_layers=self.layers,
             seq_len=seq_len,
             batch_size=batch_size,
             hidden_dim=self.hidden_dim or 4096,
+            n_heads=self.heads,
             precision_bytes=bpp,
             strategy=strategy
         )
         
         return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GB)
-
-    @property
-    def training_gpu_days(self):
-        """
-        Backward-compatibility alias for older book chapters.
-        """
-        if self.training_ops is not None:
-            return self.training_ops
-        raise AttributeError(
-            f"{type(self).__name__!r} object has no attribute 'training_gpu_days'"
-        )
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)
@@ -194,9 +292,15 @@ class TransformerWorkload(Workload):
         )
 
 class SparseTransformerWorkload(TransformerWorkload):
+    """Workload representation of a Mixture-of-Experts (MoE) Transformer."""
     active_parameters: Quantity
     experts: int
     active_experts_per_token: int = 1
+
+    @field_validator("active_parameters", mode="after")
+    @classmethod
+    def _validate_active_parameters(cls, v):
+        return require_unit_family(v, ureg.count, "active_parameters", "count")
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         # For MoE, total parameters define the memory footprint,
@@ -213,6 +317,7 @@ class SparseTransformerWorkload(TransformerWorkload):
         )
 
 class CNNWorkload(Workload):
+    """Workload representation of a Convolutional Neural Network (e.g., Vision)."""
     parameters: Quantity
     inference_flops: Quantity
     layers: Optional[int] = None
@@ -234,6 +339,7 @@ class CNNWorkload(Workload):
         )
 
 class SSMWorkload(Workload):
+    """Workload representation of a State Space Model (e.g., Mamba)."""
     parameters: Quantity
     layers: int
     state_size: int
@@ -267,6 +373,7 @@ class SSMWorkload(Workload):
 
 
 class DiffusionWorkload(Workload):
+    """Workload representation of a Diffusion generative model."""
     parameters: Quantity
     denoising_steps: int
     resolution: int

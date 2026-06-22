@@ -1,5 +1,5 @@
-// Curated study plans — ordered question sequences for targeted prep
-import { getQuestionsByFilter, Question } from './corpus';
+// Curated study plans + custom learning paths
+import { getQuestionsByFilter, getCompetencyAreas, Question } from './corpus';
 
 export interface StudyPlan {
   id: string;
@@ -175,4 +175,128 @@ export function markPlanQuestionComplete(planId: string, questionId: string): vo
     }
     window.localStorage.setItem(PLAN_PROGRESS_KEY, JSON.stringify(all));
   } catch {}
+}
+
+// ─── Custom Learning Paths ──────────────────────
+
+const CUSTOM_PATHS_KEY = 'staffml_custom_paths';
+const LEVEL_ORDER = ['L1', 'L2', 'L3', 'L4', 'L5', 'L6+'];
+
+export interface CustomPath {
+  id: string;
+  title: string;
+  track: string;
+  area: string | null;
+  startLevel: string;
+  targetDate?: number;
+  dailyQuota?: number;
+  createdAt: number;
+}
+
+export function getCustomPaths(): CustomPath[] {
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_PATHS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function saveCustomPath(path: CustomPath): void {
+  try {
+    const paths = getCustomPaths().filter(p => p.id !== path.id);
+    paths.unshift(path);
+    window.localStorage.setItem(CUSTOM_PATHS_KEY, JSON.stringify(paths));
+  } catch {}
+}
+
+export function deleteCustomPath(id: string): void {
+  try {
+    const paths = getCustomPaths().filter(p => p.id !== id);
+    window.localStorage.setItem(CUSTOM_PATHS_KEY, JSON.stringify(paths));
+    const all = JSON.parse(window.localStorage.getItem(PLAN_PROGRESS_KEY) || '{}');
+    delete all[id];
+    window.localStorage.setItem(PLAN_PROGRESS_KEY, JSON.stringify(all));
+  } catch {}
+}
+
+export function generateCustomPathQuestions(path: CustomPath): Question[] {
+  const startIdx = LEVEL_ORDER.indexOf(path.startLevel);
+  const levels = startIdx >= 0 ? LEVEL_ORDER.slice(startIdx) : LEVEL_ORDER;
+  const areas = path.area ? [path.area] : getCompetencyAreas();
+  const result: Question[] = [];
+  const usedIds = new Set<string>();
+
+  for (const level of levels) {
+    for (const area of areas) {
+      const pool = getQuestionsByFilter({ track: path.track, level, competency_area: area })
+        .filter(q => !usedIds.has(q.id));
+      pool.sort((a, b) => a.topic.localeCompare(b.topic) || a.id.localeCompare(b.id));
+      for (const q of pool) {
+        result.push(q);
+        usedIds.add(q.id);
+      }
+    }
+  }
+
+  return result;
+}
+
+export function countCustomPathQuestions(track: string, area: string | null, startLevel: string): number {
+  const startIdx = LEVEL_ORDER.indexOf(startLevel);
+  const levels = startIdx >= 0 ? LEVEL_ORDER.slice(startIdx) : LEVEL_ORDER;
+  const areas = area ? [area] : getCompetencyAreas();
+  let count = 0;
+  for (const level of levels) {
+    for (const a of areas) {
+      count += getQuestionsByFilter({ track, level, competency_area: a }).length;
+    }
+  }
+  return count;
+}
+
+// ─── Interview Prep Stats ───────────────────────
+
+export interface PrepStats {
+  totalQuestions: number;
+  completed: number;
+  daysRemaining: number;
+  dailyTarget: number;
+  todayCompleted: number;
+  onTrack: boolean;
+  projectedCompletion: number;
+}
+
+export function getPrepStats(path: CustomPath, questions: Question[]): PrepStats | null {
+  if (!path.targetDate) return null;
+  const progress = getPlanProgress(path.id);
+  const completed = progress.completedIds.length;
+  const total = questions.length;
+  const remaining = total - completed;
+  const msRemaining = path.targetDate - Date.now();
+  const daysRemaining = Math.max(0, Math.ceil(msRemaining / 86400000));
+  const dailyTarget = daysRemaining > 0 ? Math.ceil(remaining / daysRemaining) : remaining;
+
+  const today = new Date().toISOString().split('T')[0];
+  let todayCompleted = 0;
+  try {
+    const { getAttempts } = require('./progress') as typeof import('./progress');
+    const attempts = getAttempts();
+    const completedSet = new Set(progress.completedIds);
+    todayCompleted = attempts.filter(a =>
+      new Date(a.timestamp).toISOString().split('T')[0] === today &&
+      completedSet.has(a.questionId)
+    ).length;
+  } catch {}
+
+  const daysSinceStart = Math.max(1, Math.ceil((Date.now() - (progress.startedAt || path.createdAt)) / 86400000));
+  const pace = completed / daysSinceStart;
+  const projectedDays = pace > 0 ? Math.ceil(remaining / pace) : Infinity;
+  const projectedCompletion = Date.now() + projectedDays * 86400000;
+
+  const totalDays = Math.max(1, Math.ceil((path.targetDate - (progress.startedAt || path.createdAt)) / 86400000));
+  const expectedByNow = Math.round((daysSinceStart / totalDays) * total);
+  const onTrack = completed >= expectedByNow;
+
+  return { totalQuestions: total, completed, daysRemaining, dailyTarget, todayCompleted, onTrack, projectedCompletion };
 }

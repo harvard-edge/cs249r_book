@@ -2,10 +2,10 @@ import pytest
 import subprocess
 import sys
 from pathlib import Path
-from mlsysim.core.evaluation import SystemEvaluator
+from mlsysim.engine.evaluation import SystemEvaluator
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
-from mlsysim import Applications, Q_, plot_evaluation_scorecard
+from mlsysim import Q_, Scenarios, plot_evaluation_scorecard
 from mlsysim.systems.registry import Systems
 
 
@@ -38,8 +38,8 @@ def test_system_evaluation_json_contract_includes_tco():
     """Machine-readable scorecards expose flat m_* economics keys."""
     evaluation = SystemEvaluator.evaluate(
         scenario_name="contract",
-        model_obj=Models.Llama3_8B,
-        hardware_obj=Hardware.H100,
+        model_obj=Models.Language.Llama3_8B,
+        hardware_obj=Hardware.Cloud.H100,
         batch_size=8,
         precision="fp16",
         efficiency=0.4,
@@ -57,8 +57,8 @@ def test_system_evaluation_json_contract_includes_tco():
 def test_distributed_evaluation_exposes_real_effective_mfu():
     evaluation = SystemEvaluator.evaluate(
         scenario_name="distributed-mfu",
-        model_obj=Models.Llama3_8B,
-        hardware_obj=Hardware.H100,
+        model_obj=Models.Language.Llama3_8B,
+        hardware_obj=Hardware.Cloud.H100,
         batch_size=512,
         precision="fp16",
         efficiency=0.4,
@@ -74,8 +74,8 @@ def test_distributed_evaluation_exposes_real_effective_mfu():
 def test_single_node_evaluation_passed_all_with_skipped_macro():
     evaluation = SystemEvaluator.evaluate(
         scenario_name="single-node",
-        model_obj=Models.ResNet50,
-        hardware_obj=Hardware.A100,
+        model_obj=Models.Vision.ResNet50,
+        hardware_obj=Hardware.Cloud.A100,
         batch_size=1,
         precision="fp16",
         efficiency=0.5,
@@ -87,8 +87,8 @@ def test_single_node_evaluation_passed_all_with_skipped_macro():
 def test_infeasible_single_node_marks_performance_failed():
     evaluation = SystemEvaluator.evaluate(
         scenario_name="oom",
-        model_obj=Models.GPT4,
-        hardware_obj=Hardware.ESP32,
+        model_obj=Models.Language.GPT4,
+        hardware_obj=Hardware.Tiny.ESP32_S3,
         batch_size=1,
         precision="fp16",
         efficiency=0.5,
@@ -100,7 +100,7 @@ def test_infeasible_single_node_marks_performance_failed():
 def test_scorecard_plot_accepts_scenario_evaluation_quantities():
     """Scenario evaluations expose Pint quantities; plots normalize them."""
     pytest.importorskip("matplotlib")
-    evaluation = Applications.Doorbell.evaluate()
+    evaluation = Scenarios.SmartDoorbell.evaluate()
     fig, ax = plot_evaluation_scorecard(evaluation)
     try:
         assert len(ax.patches) == 2

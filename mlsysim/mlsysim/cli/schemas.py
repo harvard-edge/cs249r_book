@@ -1,8 +1,11 @@
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, PrivateAttr, field_validator, model_validator
 from typing import Optional, Any, List
 import yaml
 from pathlib import Path
 
+from mlsysim.core.units import Q_, ureg
+from mlsysim.core.types import Quantity, require_unit_family
+from mlsysim.core.units import normalize_precision
 from mlsysim.models.registry import Models
 from mlsysim.hardware.registry import Hardware
 from mlsysim.core.registry import Registry
@@ -68,7 +71,7 @@ def _resolve_model(name_or_path: str) -> Workload:
 
 class EvalNodeSchema(BaseModel):
     """Schema for evaluating a single node (Gate 1: Schema Validation)."""
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
     
     model_name: str = Field(..., description="The name of the workload (e.g. Llama3_8B) or path to YAML")
     hardware_name: str = Field(..., description="The name of the hardware (e.g. H100) or path to YAML")
@@ -76,42 +79,103 @@ class EvalNodeSchema(BaseModel):
     precision: str = Field(default="fp16")
     efficiency: float = Field(default=0.5, gt=0.0, le=1.0)
     
-    # Hidden resolved objects populated during validation
-    model_obj: Optional[Any] = None
-    hardware_obj: Optional[Any] = None
+    # Resolved objects are runtime-only and must not appear in public schemas.
+    _model_obj: Any = PrivateAttr(default=None)
+    _hardware_obj: Any = PrivateAttr(default=None)
+
+    @property
+    def model_obj(self) -> Any:
+        return self._model_obj
+
+    @property
+    def hardware_obj(self) -> Any:
+        return self._hardware_obj
+
+    @field_validator("precision", mode="after")
+    @classmethod
+    def _validate_precision(cls, v):
+        return normalize_precision(v)
 
     @model_validator(mode='after')
     def resolve_and_validate(self) -> 'EvalNodeSchema':
         """Gate 2: Registry Resolution."""
-        self.model_obj = _resolve_model(self.model_name)
-        self.hardware_obj = _resolve_hardware(self.hardware_name)
+        self._model_obj = _resolve_model(self.model_name)
+        self._hardware_obj = _resolve_hardware(self.hardware_name)
         return self
 
 
 class WorkloadConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     name: str
-    batch_size: int = 1
-    seq_len: int = 2048
+    batch_size: int = Field(default=1, gt=0)
+    seq_len: int = Field(default=2048, gt=0)
 
 class HardwareConfig(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
     name: str
-    nodes: int = 1
+    accelerators: Optional[int] = Field(default=None, gt=0)
+    node_count: Optional[int] = Field(default=None, gt=0)
+    accelerators_per_node: Optional[int] = Field(default=None, gt=0)
+    intra_node_bw: Optional[Quantity] = None
+    fabric_bandwidth: Quantity = Field(default_factory=lambda: Q_("50 GB/s"))
     precision: str = "fp16"
-    efficiency: float = 0.5
+    efficiency: float = Field(default=0.5, gt=0.0, le=1.0)
+
+    @field_validator("precision", mode="after")
+    @classmethod
+    def _validate_precision(cls, v):
+        return normalize_precision(v)
+
+    @field_validator("intra_node_bw", "fabric_bandwidth", mode="after")
+    @classmethod
+    def _validate_bandwidth_fields(cls, v, info):
+        return require_unit_family(v, ureg.bit / ureg.second, info.field_name, "data")
+
+    @property
+    def total_accelerators(self) -> int:
+        if self.node_count is not None and self.accelerators_per_node is not None:
+            return self.node_count * self.accelerators_per_node
+        if self.accelerators is not None:
+            return self.accelerators
+        return 1
+
+    @model_validator(mode="after")
+    def _validate_topology_consistency(self) -> "HardwareConfig":
+        if self.node_count is not None and self.accelerators_per_node is None:
+            raise ValueError("hardware.node_count requires hardware.accelerators_per_node")
+
+        derived_total = None
+        if self.node_count is not None and self.accelerators_per_node is not None:
+            derived_total = self.node_count * self.accelerators_per_node
+
+        explicit_total = self.accelerators
+        if derived_total is not None and explicit_total is not None and derived_total != explicit_total:
+            raise ValueError("hardware.node_count * hardware.accelerators_per_node must equal hardware.accelerators")
+        return self
 
 class OpsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     region: str = "US_Avg"
-    duration_days: float = 30.0
+    duration_days: float = Field(default=30.0, gt=0.0)
 
 class AssertionConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     metric: str
     max: Optional[float] = None
     min: Optional[float] = None
 
 class ConstraintsConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     asserts: List[AssertionConfig] = Field(default_factory=list, alias="assert")
 
 class MlsysPlanSchema(BaseModel):
+    model_config = ConfigDict(arbitrary_types_allowed=True, extra="forbid")
+
     version: str
     name: str
     workload: WorkloadConfig
@@ -119,34 +183,66 @@ class MlsysPlanSchema(BaseModel):
     ops: Optional[OpsConfig] = None
     constraints: Optional[ConstraintsConfig] = None
     
-    model_obj: Optional[Any] = None
-    hardware_obj: Optional[Any] = None
-    fleet_obj: Optional[Any] = None
+    # Resolved objects are runtime-only and must not appear in public schemas.
+    _model_obj: Any = PrivateAttr(default=None)
+    _hardware_obj: Any = PrivateAttr(default=None)
+    _fleet_obj: Any = PrivateAttr(default=None)
+
+    @property
+    def model_obj(self) -> Any:
+        return self._model_obj
+
+    @property
+    def hardware_obj(self) -> Any:
+        return self._hardware_obj
+
+    @property
+    def fleet_obj(self) -> Any:
+        return self._fleet_obj
     
     @model_validator(mode='after')
     def resolve_and_validate(self) -> 'MlsysPlanSchema':
-        self.model_obj = _resolve_model(self.workload.name)
-        self.hardware_obj = _resolve_hardware(self.hardware.name)
+        self._model_obj = _resolve_model(self.workload.name)
+        self._hardware_obj = _resolve_hardware(self.hardware.name)
         
-        # 3. Resolve Fleet if nodes > 1
-        if self.hardware.nodes > 1:
+        # 3. Resolve Fleet if total accelerators > 1.
+        total_accelerators = self.hardware.total_accelerators
+        if total_accelerators > 1:
             from mlsysim.systems.types import Fleet, Node, NetworkFabric
-            from mlsysim.core.constants import Q_
-            
-            # Simple automatic fleet construction for now
-            # In a full implementation, fabric would be configurable in the YAML
-            self.fleet_obj = Fleet(
+
+            # Step 1: prefer an explicit plan topology, then hardware aggregate
+            # metadata such as GB200 NVL72, then single-accelerator nodes.
+            accelerators_per_node = (
+                self.hardware.accelerators_per_node
+                or self._hardware_obj.accelerator_count
+                or 1
+            )
+            # Step 2: refuse to floor partial nodes; that would silently change
+            # the number of accelerators represented by the plan.
+            if total_accelerators % accelerators_per_node != 0:
+                raise ValueError(
+                    "hardware total accelerators must be divisible by hardware.accelerators_per_node "
+                    f"(got {total_accelerators} and {accelerators_per_node})"
+                )
+            # Step 3: use the most specific bandwidth source available.
+            intra_node_bw = (
+                self.hardware.intra_node_bw
+                or (self._hardware_obj.nvlink.bandwidth if self._hardware_obj.nvlink else None)
+                or (self._hardware_obj.interconnect.bandwidth if self._hardware_obj.interconnect else None)
+                or self.hardware.fabric_bandwidth
+            )
+            # Step 4: compile the declarative plan into the Fleet object used by
+            # distributed solvers.
+            self._fleet_obj = Fleet(
                 name=f"{self.hardware.name} Fleet",
                 node=Node(
                     name=f"{self.hardware.name} Node",
-                    accelerator=self.hardware_obj,
-                    accelerators_per_node=8,
-                    intra_node_bw=Q_("900 GB/s")
+                    accelerator=self._hardware_obj,
+                    accelerators_per_node=accelerators_per_node,
+                    intra_node_bw=intra_node_bw,
                 ),
-                count=max(self.hardware.nodes // 8, 1),
-                fabric=NetworkFabric(name="Default IB", bandwidth=Q_("50 GB/s"))
+                count=total_accelerators // accelerators_per_node,
+                fabric=NetworkFabric(name="Default Fabric", bandwidth=self.hardware.fabric_bandwidth),
             )
             
         return self
-
-

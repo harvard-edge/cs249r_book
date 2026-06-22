@@ -79,8 +79,14 @@ def create_draft(
     subject: str,
     body: str,
     description: str | None = None,
+    image_url: str | None = None,
 ) -> dict[str, Any]:
     """Create a draft email. The draft is NOT sent.
+
+    Args:
+        image_url: Optional CDN URL to set as the email's cover image
+            (the ``image`` field in the Buttondown API). Used for web
+            archive previews and some email-client preview cards.
 
     Returns:
         The Buttondown email object, including `id` and `creation_url`.
@@ -92,6 +98,8 @@ def create_draft(
     }
     if description:
         payload["description"] = description
+    if image_url:
+        payload["image"] = image_url
 
     logger.debug("Creating Buttondown draft: %r", subject)
     response = requests.post(

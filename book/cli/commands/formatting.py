@@ -6,7 +6,7 @@ list spacing, div spacing, and table formatting.
 
 Usage:
     binder format blanks   — Collapse extra blank lines
-    binder format python   — Format Python code blocks (Black, 70 chars)
+    binder format python   — Format Python code blocks (Black; display 70, LEGO 150)
     binder format lists    — Fix bullet list spacing
     binder format divs     — Fix div/callout spacing
     binder format tables   — Prettify grid tables
@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import List, Optional
 
 from rich.console import Console
+from rich.markup import escape as _rich_escape
 from rich.panel import Panel
 from rich.table import Table
 
@@ -38,7 +39,7 @@ _SCRIPT_PATHS = {
 class FormatCommand:
     """Auto-format QMD content."""
 
-    TARGETS = ["blanks", "python", "lists", "divs", "tables", "prettify", "all"]
+    TARGETS = ["blanks", "python", "lists", "divs", "percent-tables", "mitpress-terms", "tables", "prettify", "all"]
 
     def __init__(self, config_manager, chapter_discovery):
         self.config_manager = config_manager
@@ -46,7 +47,7 @@ class FormatCommand:
 
     def run(self, args: List[str]) -> bool:
         """Entry point — parse args and dispatch."""
-        if not args or args[0] in ("-h", "--help"):
+        if not args or args[0] in ("help", "-h", "--help"):
             self._print_help()
             return True
 
@@ -68,6 +69,8 @@ class FormatCommand:
             "python": self._run_python,
             "lists": self._run_lists,
             "divs": self._run_divs,
+            "percent-tables": self._run_percent_tables,
+            "mitpress-terms": self._run_mitpress_terms,
             "tables": self._run_tables,
             "prettify": self._run_prettify,
         }
@@ -117,14 +120,20 @@ class FormatCommand:
         table.add_column("Description", style="white", width=45)
 
         table.add_row("blanks", "Collapse extra blank lines (native)")
-        table.add_row("python", "Format Python code blocks via Black (70 chars)")
+        table.add_row("python", "Format Python via Black (display 70, LEGO cells 150)")
         table.add_row("lists", "Fix bullet list spacing (blank line before lists)")
         table.add_row("divs", "Fix div/callout spacing (paragraph ↔ list gaps)")
+        table.add_row("percent-tables", "Rewrite 'percent' → % inside pipe tables (native)")
+        table.add_row("mitpress-terms", "Apply §10.7 canonical spellings (trade-off, Wi-Fi, …)")
         table.add_row("tables", "Prettify grid tables (align columns, bold headers)")
         table.add_row("prettify", "Prettify pipe tables (align columns)")
         table.add_row("all", "Run all formatters")
 
-        console.print(Panel(table, title="binder format <target> [files...] [--check]", border_style="cyan"))
+        console.print(Panel(
+            table,
+            title=_rich_escape("binder format <target> [files...] [--check]"),
+            border_style="cyan",
+        ))
         console.print("[dim]Examples:[/dim]")
         console.print("  [cyan]./binder format blanks[/cyan]                [dim]# fix all files[/dim]")
         console.print("  [cyan]./binder format tables --check[/cyan]        [dim]# check only, no writes[/dim]")
@@ -137,13 +146,16 @@ class FormatCommand:
 
     def _run_all(self, files: List[str], check_only: bool) -> bool:
         results = []
-        for target in ("blanks", "lists", "divs", "python", "tables", "prettify"):
+        for target in ("blanks", "lists", "divs", "python", "percent-tables", "mitpress-terms", "tables", "prettify"):
             dispatch = {
                 "blanks": self._run_blanks,
                 "python": self._run_python,
                 "lists": self._run_lists,
                 "divs": self._run_divs,
+                "percent-tables": self._run_percent_tables,
+                "mitpress-terms": self._run_mitpress_terms,
                 "tables": self._run_tables,
+                "prettify": self._run_prettify,
             }
             ok = dispatch[target](files, check_only)
             results.append((target, ok))
@@ -161,6 +173,73 @@ class FormatCommand:
     # ------------------------------------------------------------------
     # Blanks  (native — ported from format_blank_lines.py)
     # ------------------------------------------------------------------
+
+    def _run_mitpress_terms(self, file_args: List[str], check_only: bool) -> bool:
+        """Apply the MIT Press canonical spelling dictionary (§10.7).
+
+        Rewrites unambiguous spelling/hyphenation errors and proper-noun
+        miscapitalizations (tradeoff → trade-off, datacenter → data center,
+        WiFi → Wi-Fi, …). Shares its detection/rewrite with the
+        ``spelling-dict`` validator scope via ``cli.checks.mitpress_terms`` so
+        the fixer fixes exactly what the check flags; skips glossary files.
+        """
+        from cli.checks.mitpress_terms import fix_text, should_skip_file
+
+        qmd_files = self._resolve_files(file_args)
+        modified = []
+        for path in qmd_files:
+            if should_skip_file(path):
+                continue
+            content = path.read_text(encoding="utf-8")
+            new_content, n = fix_text(content)
+            if n:
+                if not check_only:
+                    path.write_text(new_content, encoding="utf-8")
+                modified.append(path)
+
+        if modified:
+            label = "Would modify" if check_only else "Modified"
+            console.print(f"[yellow]mitpress-terms: {label} {len(modified)} file(s)[/yellow]")
+            for p in modified[:10]:
+                console.print(f"  {self._rel(p)}")
+            if len(modified) > 10:
+                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
+            return False
+        console.print("[green]mitpress-terms: All files clean[/green]")
+        return True
+
+    def _run_percent_tables(self, file_args: List[str], check_only: bool) -> bool:
+        """Rewrite the word 'percent' to the % symbol inside pipe tables.
+
+        Tables invert the prose convention: dense cells use the % symbol
+        ('86.4%') where body prose spells out 'percent'. Shares its detection
+        and rewrite with the ``percent-in-tables`` validator scope via
+        ``cli.checks.percent_tables`` so the fixer fixes exactly what the
+        check flags. Must run BEFORE ``prettify`` so columns realign after the
+        substitution shortens cells.
+        """
+        from cli.checks.percent_tables import fix_text
+
+        qmd_files = self._resolve_files(file_args)
+        modified = []
+        for path in qmd_files:
+            content = path.read_text(encoding="utf-8")
+            new_content, n = fix_text(content)
+            if n:
+                if not check_only:
+                    path.write_text(new_content, encoding="utf-8")
+                modified.append(path)
+
+        if modified:
+            label = "Would modify" if check_only else "Modified"
+            console.print(f"[yellow]percent-tables: {label} {len(modified)} file(s)[/yellow]")
+            for p in modified[:10]:
+                console.print(f"  {self._rel(p)}")
+            if len(modified) > 10:
+                console.print(f"  [dim]... {len(modified) - 10} more[/dim]")
+            return False  # pre-commit convention: modified = exit 1
+        console.print("[green]percent-tables: All files clean[/green]")
+        return True
 
     def _run_blanks(self, file_args: List[str], check_only: bool) -> bool:
         """Collapse multiple consecutive blank lines into single blank lines."""
@@ -191,14 +270,35 @@ class FormatCommand:
     def _collapse_blank_lines(content: str) -> str:
         """Replace multiple consecutive blank lines with a single blank line.
 
-        Preserves content inside code blocks.
+        Preserves content inside code blocks and HTML comments. Fence
+        tracking must ignore HTML comments: commented-out figures often
+        contain partial code blocks whose unbalanced ``` lines would
+        otherwise desync the toggle, making the formatter treat real
+        code cells as prose for the rest of the file.
         """
         lines = content.split("\n")
         result = []
         in_code_block = False
+        in_html_comment = False
         blank_count = 0
 
         for line in lines:
+            if in_html_comment:
+                # Leave commented-out regions verbatim; their fences
+                # (often unbalanced) must not toggle code-block state.
+                result.append(line)
+                if "-->" in line:
+                    in_html_comment = False
+                continue
+
+            if not in_code_block and "<!--" in line and "-->" not in line:
+                if blank_count > 0:
+                    result.append("")
+                    blank_count = 0
+                result.append(line)
+                in_html_comment = True
+                continue
+
             if line.strip().startswith("```"):
                 in_code_block = not in_code_block
                 if blank_count > 0:

@@ -71,8 +71,9 @@ Students built serving infrastructure in Part III. This chapter asks:
 what happens when you manage not one model, but a hundred?
 
 % -- NARRATE: What to SAY
-Read each objective aloud, pausing on ``platform ROI'' and ``TCO framework.''
-These two anchor the quantitative reasoning for the entire chapter.
+Read each objective aloud, pausing on ``platform ROI,'' ``feature store
+architectures'' (LO 7 --- new this year), and ``TCO framework.'' These three
+anchor the quantitative and architectural reasoning for the entire chapter.
 
 % -- ENGAGE: Specific question
 Ask: ``How many of you have deployed more than one model to production?
@@ -97,6 +98,7 @@ IF SHORT: Read objectives without elaboration, move on.
   \item Architect \textbf{hierarchical monitoring} that prevents alert fatigue
   \item Quantify \textbf{ML technical debt} using deployment velocity and toil metrics
   \item Compare \textbf{centralized}, \textbf{embedded}, and \textbf{hybrid} organizational patterns
+  \item Evaluate \textbf{feature store architectures} for freshness SLOs and point-in-time correctness
   \item Apply the \textbf{TCO framework} to make infrastructure investment decisions
 \end{enumerate}
 
@@ -428,10 +430,43 @@ IF SHORT: Show diagram, state the cascade failure mode, move on.
 \end{frame}
 
 \begin{frame}{Ensemble Management}
-\note{[3 min] Recommendation systems invoke 10--50 models per request.
-Updating any component requires understanding interactions with all others.
-Key patterns: compensation effects, distribution shift propagation, feedback
-loops. If short: focus on the staged deployment table.}
+\note{
+% -- LINK: Connect to prior concept
+The Dependency-Aware Model Registry showed that cascades happen when the
+embedding model updates silently. Ensemble management is the operational
+answer: how do you safely update one component of a 10--50 model pipeline?
+
+% -- NARRATE: What to SAY
+[3 min] Walk through the deployment stages: ``Shadow logs but does not
+serve---this is where you verify the new component does not produce
+garbage outputs. Canary routes 1\% of live traffic. Staged ramps from
+5\% to 100\% while monitoring business metrics. Soak watches for
+delayed effects: a personalization model may look fine at 100\% traffic
+for three days but start degrading on day seven as feedback loops kick in.''
+Point to the interaction effects callout: ``A component update that
+improves its local metric---say, the retrieval model improves recall by
+5\%---might degrade the full system because the ranking model was trained
+on the old retrieval distribution. The ranking model has never seen
+the new set of candidates.''
+
+% -- ENGAGE: Specific question
+Ask: ``What happens if the ranking model updates but the retrieval model
+does not?'' Give 15 seconds. Expected: the ranking model now scores
+candidates from a distribution it was never trained on, potentially
+producing low-quality or unsafe rankings despite passing all unit tests.
+
+% -- WARN: Specific misconception
+Students assume updating one model in an ensemble is safe as long as
+individual model metrics improve. Correct: the ensemble is a joint
+distribution. Changing one component changes the joint, and the other
+components were trained on the old joint. System-level metrics
+(engagement, revenue, safety) are the only reliable signal.
+
+% -- FLEX: [OPTIONAL]
+[OPTIONAL] Ensemble interaction effects are important for RecSys heavy courses.
+IF SHORT: Show staged deployment table; state the interaction-effects warning; advance.
+IF AHEAD: Ask ``How would you use shadow mode to safely test a new retrieval model?''
+}
 
 \footnotesize
 \textbf{A single recommendation request invokes 10--50 models:}
@@ -502,9 +537,42 @@ is most likely to catch a silent regression?''}
 \end{frame}
 
 \begin{frame}{Staged Rollout Strategy}
-\note{[3 min] Walk through the four-phase rollout. Emphasize the 20$\times$
-risk reduction from 5\% canary. The canary duration formula connects sample
-size to traffic percentage. If short: focus on the risk reduction number.}
+\note{
+% -- LINK: Connect to prior concept
+The ML CI/CD pipeline showed the stages that gate a model before promotion.
+This slide shows what happens after the gate opens: how to release safely
+when unit tests cannot guarantee real-world behavior.
+
+% -- NARRATE: What to SAY
+[3 min] Walk through the rollout diagram: ``Shadow logs but does not serve.
+Canary routes 1\% of live traffic. Staged ramps from 5\% to 25\% to 100\%.
+Soak watches for delayed effects at full traffic over 7--14 days.''
+Point to the canary duration formula: ``At 1M req/hr with a 1\% canary,
+you need 10,000 samples to detect a statistically significant regression,
+which takes a minimum of 1 hour. The total confident rollout is about
+4 hours. An instant blue-green deployment skips all of this.''
+State the 20$\times$ risk reduction: ``A 5\% canary limits blast radius
+by 20$\times$ relative to full rollout. If the model is broken, only 5\%
+of users see the failure, not 100\%.''
+
+% -- ENGAGE: Specific question
+Ask: ``What does the 20$\times$ risk reduction protect against?'' Give 10
+seconds. Expected: it limits the blast radius of a regression -- it does
+NOT prevent the regression from occurring, it only controls how many users
+are affected before detection.
+
+% -- WARN: Specific misconception
+Students assume canary deployment prevents regressions. Correct: canary
+only limits blast radius -- it reduces the percentage of users exposed to
+a bad model before rollback, but it does not make detection faster.
+The regression still occurs; canary just contains it. Fast detection
+requires good monitoring (alert system from the previous section).
+
+% -- FLEX: [CORE]
+[CORE] Staged rollouts are a quantitative safety argument, not just best practice.
+IF SHORT: Show diagram, state 20$\times$ blast radius reduction; skip formula.
+IF AHEAD: Ask ``What if your 1\% canary is demographically unrepresentative of the full user base?''
+}
 
 % --- Full-width diagram ---
 \centering
@@ -658,6 +726,77 @@ lower-level metrics serve investigation only. Walk through the pyramid.}
 
 \end{frame}
 
+\begin{frame}{The Control Plane That Disappeared (2021)}
+\note{
+% -- LINK: Connect to prior concept
+The hierarchical monitoring pyramid showed how to detect problems. This war
+story shows what happens when the control plane that runs your monitoring
+shares the same failure domain as the systems it watches.
+
+% -- NARRATE: What to SAY
+[2 min] Walk through the four fields: ``On October 4, 2021, a single
+misconfigured BGP command disconnected Facebook's data centers from each
+other. The routing withdrawal also took down the DNS servers and internal
+management tools needed for remote recovery. Engineers could not use
+standard SSH or web consoles to fix the outage because those tools depended
+on the same network plane that had just failed. Teams restored connectivity
+over hours using constrained out-of-band paths.'' Point to the Systems
+lesson: ``This is not just a Facebook problem. Your ML platform has the
+same trap: training schedulers, model registries, feature stores, and
+inference routers all share the same auth, DNS, and network plane. When
+that plane fails, so does your ability to diagnose and recover.''
+
+% -- ENGAGE: Specific question
+Ask: ``If your model registry becomes unreachable during an incident, can
+your on-call engineer still roll back a bad model without it? Do you have
+runbooks that work when your tools are down?''
+Give 15 seconds. Expected: most students have not thought through
+out-of-band recovery for ML platform failures.
+
+% -- WARN: Specific misconception
+Students assume the control plane and data plane fail independently.
+Correct: in shared cloud infrastructure, they often share DNS, auth, and
+network fabric. An incident that takes down one can take down both.
+Recovery tooling must be physically isolated to survive the same failure
+mode it is designed to fix.
+
+% -- FLEX: [CORE]
+[CORE] War stories anchor abstract monitoring principles in real cost.
+IF SHORT: Read Context and Systems lesson only; skip Consequence details.
+IF AHEAD: Ask ``What would you isolate first to prevent this in your ML platform?''
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \textbf{Context:} Meta's global services depended on a backbone network
+    carrying internal control traffic for Facebook, Instagram, and WhatsApp.
+
+    \vspace{0.15cm}
+    \textbf{Failure:} Oct 4, 2021 --- a BGP command intended to assess
+    backbone capacity unintentionally disconnected data centers from each
+    other. The routing withdrawal also broke DNS and internal recovery tools.
+
+    \vspace{0.15cm}
+    \textbf{Consequence:} Major services unavailable globally for hours;
+    recovery required constrained out-of-band paths because standard
+    management tools depended on the failed network plane.
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\footnotesize\textbf{Systems lesson:}\\[0.1cm]
+    The control plane is a dependency with its own blast radius. ML
+    platforms expose the same trap: training schedulers, model registries,
+    feature stores, and inference routers share the auth, DNS, and network
+    plane that an incident can take down.\\[0.1cm]
+    \textbf{Required:} explicit isolation between the control plane and
+    the ML systems that depend on it.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 \begin{frame}{Drift Detection: PSI}
 \note{[2 min] Two types of drift: covariate (input $P(X)$ changes) and
 concept ($P(Y|X)$ changes). PSI is cheap to compute and serves as a leading
@@ -694,16 +833,16 @@ The answer depends on the failure mode: infrastructure failures show at L4 first
 while data drift shows at L3 then propagates to L2/L1.}
 
 \centering
-\vspace{0.8cm}
+\vspace{0.5cm}
 {\large\bfseries Turn and Talk \textcolor{midgray}{(90 seconds)}}
 
-\vspace{0.6cm}
+\vspace{0.45cm}
 {\large An upstream feature pipeline silently starts\\
-returning null values for 3\% of users.\\[0.3cm]
+returning null values for 3\% of users.\\[0.25cm]
 \alert{Which monitoring level detects this first?\\
 How long until the business metric dashboard shows a dip?}}
 
-\vspace{0.6cm}
+\vspace{0.45cm}
 \begin{columns}[c]
   \begin{column}{0.22\textwidth}\centering\small L1\\Business\end{column}
   \begin{column}{0.22\textwidth}\centering\small L2\\Portfolio\end{column}
@@ -718,28 +857,188 @@ How long until the business metric dashboard shows a dip?}}
 % =============================================================================
 
 \begin{frame}{Feature Freshness: Batch vs.\ Streaming}
-\note{[3 min] Feature freshness latency determines recommendation quality.
-Batch: 12--24 hours. Streaming: 1--5 seconds. The 10,000$\times$ improvement
-yields 10--20\% engagement lift. Ask: ``For fraud detection, how stale can
-features be before adversaries exploit the window?''}
+\note{
+% -- LINK: Connect to prior concept
+The monitoring section showed how to detect when model behavior drifts.
+Feature freshness is one of the fastest ways to cause that drift without
+changing the model at all.
+
+% -- NARRATE: What to SAY
+[3 min] Point to the diagram: ``Freshness latency $L_{\text{freshness}}$
+is the gap between when an event happens and when the model can use a
+feature derived from it. Batch: 12--24 hours. Streaming: 1--5 seconds.
+That is a 10,000$\times$ improvement, which translates to 10--20\%
+engagement lift in recommendation systems because the model can react
+to what users just did rather than what they did yesterday.'' Then pivot
+to fraud: ``For fraud detection the same gap gives adversaries a 24-hour
+window to exploit patterns the model does not yet see.''
+
+% -- ENGAGE: Specific question
+Ask: ``For fraud detection, how stale can features be before adversaries
+exploit the window?'' Give 15 seconds. Expected: any lag beyond a few
+minutes is exploitable for high-velocity card fraud.
+
+% -- WARN: Specific misconception
+Students assume streaming is always better and always worth the cost.
+Correct: streaming is expensive to build, operate, and maintain. Batch
+is cheaper and adequate for the majority of features (user demographics,
+long-term preferences, slowly-changing signals). The right question is
+not ``should we stream?'' but ``which features need freshness SLOs under
+5 minutes, and for which can we tolerate 12 hours?'' Most features fall
+in the batch category; streaming the wrong ones wastes engineering budget.
+
+% -- FLEX: [OPTIONAL]
+[OPTIONAL] Freshness motivates the dual-store architecture on the next slide.
+IF SHORT: State the $L_{\text{freshness}}$ formula and the 24-hour fraud window; advance.
+}
 
 % --- Full-width diagram ---
 \centering
-\safeimg[width=0.88\textwidth,height=4.5cm,keepaspectratio]{feature-freshness.pdf}
+\safeimg[width=0.88\textwidth,height=4.2cm,keepaspectratio]{feature-freshness.pdf}
 
-\vspace{0.1cm}
+\vspace{0.05cm}
 \small
 $L_{\text{freshness}} = T_{\text{available}} - T_{\text{event}}$
 
-\vspace{0.1cm}
+\vspace{0.05cm}
 {\footnotesize Streaming: \textbf{10--20\% engagement lift}. For fraud detection, day-old features give adversaries a 24-hour exploitation window.}
 
 \end{frame}
 
+\begin{frame}{Feature Store: Dual-Store Architecture (1/2)}
+\note{
+% -- LINK: Connect to prior concept
+The Feature Freshness slide showed the latency gap between batch and
+streaming. This slide explains the architectural pattern that solves it:
+why you need two separate stores, not one clever database.
+
+% -- NARRATE: What to SAY
+[2 min] Walk through the architecture: ``Training needs high-throughput
+batch scans over years of history. Serving needs sub-10-ms point lookups
+for individual requests. No single database efficiently satisfies both
+constraints. The dual-store pattern resolves this: an offline store
+(BigQuery, Snowflake, data lake) handles the terabyte-scale analytical
+scans for training. An online store (Redis, DynamoDB, Bigtable) handles
+the millisecond key-value lookups for inference. A materialization layer
+keeps them in sync.''
+
+% -- ENGAGE: Specific question
+Ask: ``Why can't one database serve both training and inference?''
+Give 10 seconds. Expected: training needs sequential scans over TB,
+serving needs single-key lookups under 10 ms --- no DB optimizes both.
+
+% -- WARN: Specific misconception
+Common error: students assume streaming features into a single DB is
+``simpler'' than two stores. Correct: a single DB suffers from impedance
+mismatch -- either too slow for serving or too expensive for training.
+
+% -- FLEX: [CORE]
+[CORE] This slide covers LO 7 (feature store architectures). Do not skip.
+IF SHORT: Focus on the invariant $f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$.
+IF AHEAD: Ask ``What is the role of the materialization layer?''
+}
+
+\footnotesize
+\textbf{The core conflict:}
+\begin{itemize}\setlength\itemsep{0pt}
+  \item Training: TB-scale sequential scans, hours latency OK
+  \item Serving: single-entity lookups, $<$10 ms p99
+  \item One DB cannot efficiently satisfy both
+\end{itemize}
+
+\vspace{0.08cm}
+\textbf{Dual-store pattern:}
+\begin{itemize}\setlength\itemsep{0pt}
+  \item \textcolor{datastroke}{\textbf{Offline store}} (BigQuery/S3/Iceberg): training data, high throughput
+  \item \textcolor{computestroke}{\textbf{Online store}} (Redis/DynamoDB): serving, low latency
+  \item \textbf{Materialization layer}: keeps both stores in sync
+\end{itemize}
+
+\vspace{0.08cm}
+\mlsysconcept{Invariant:}{$f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$ ---
+{\footnotesize training-serving skew silently destroys accuracy when this breaks.}}
+
+\end{frame}
+
+\begin{frame}{Feature Store: Point-in-Time Correctness (2/2)}
+\note{
+% -- LINK: Connect to prior concept
+The dual-store architecture ensures training and serving use the same
+feature pipeline. This slide covers the subtlest correctness requirement:
+point-in-time joins. Even with the right architecture, naive time handling
+causes data leakage.
+
+% -- NARRATE: What to SAY
+[1 min] Explain point-in-time correctness: ``Training must join features
+as they existed \emph{at the event timestamp}, not current values. A user
+had 4 clicks at noon; a naive join supplies the end-of-day value of 10 ---
+2.5$\times$ inflation and guaranteed production failure. At 10,000 models
+sharing the same feature platform, data leakage risk multiplies. Point-in-time
+joins must be an infrastructure guarantee, not a per-team check.''
+
+% -- ENGAGE: Specific question
+Ask: ``What happens to the fraud model if the online store's user
+transaction feature is 10 minutes stale but training used 1-minute windows?''
+Expected: the model scores stale features --- adversaries exploit the window.
+
+% -- FLEX: [CORE]
+[CORE] Point-in-time correctness is the key correctness invariant for feature stores.
+IF SHORT: State the 2.5$\times$ inflation example and advance.
+}
+
+\begin{mlsyscard}{routingstroke}
+{\small\textbf{Point-in-time correctness:}\\[0.1cm]
+Training must join features as they existed \emph{at the event timestamp},
+not current values.
+
+\vspace{0.1cm}
+\textbf{Example}: A user had 4 clicks at noon; a naive join supplies the
+end-of-day value of 10 --- \textbf{2.5$\times$ inflation} and guaranteed
+production failure.
+
+\vspace{0.1cm}
+At 10,000 models sharing the same feature platform, data leakage risk
+multiplies. Point-in-time joins are an \textbf{infrastructure guarantee},
+not a per-team check.}
+\end{mlsyscard}
+
+\end{frame}
+
 \begin{frame}{Organizational Patterns for ML Platforms}
-\note{[2 min] Three patterns: centralized (consistency but bottleneck),
-embedded (velocity but fragmentation), hybrid (balanced). Most mature
-organizations adopt hybrid. If short: just show the comparison table.}
+\note{
+% -- LINK: Connect to prior concept
+The Feature Store architecture requires a shared platform team to maintain
+consistency guarantees. This slide asks: what organizational structure
+should own and operate that platform?
+
+% -- NARRATE: What to SAY
+[2 min] Walk column by column: ``Centralized gives you consistency but
+creates a bottleneck --- every model team waits for platform approvals.
+Embedded gives velocity but fragments your feature store, monitoring, and
+CI/CD into per-team silos that can't talk to each other. Hybrid is the
+practical answer for 50--100 models: a core platform team owns shared
+infrastructure (the dual-store feature store, hierarchical monitoring,
+CI/CD gates) while domain leads embedded in product teams handle
+domain-specific needs.''
+
+% -- ENGAGE: Specific question
+Ask: ``At 75 models across 3 product lines, which pattern would you choose
+and why?'' Give 15 seconds. Expected: hybrid is the right answer, because
+centralized would bottleneck 75 model teams and embedded would produce
+75 inconsistent feature pipelines.
+
+% -- WARN: Specific misconception
+Students assume centralized is always better because consistency is good.
+Correct: centralized works well above 100 models where the platform team
+is fully staffed and specialized. Below that threshold, a two-person
+platform team is a constant bottleneck for 75 model teams trying to ship.
+
+% -- FLEX: [OPTIONAL]
+[OPTIONAL] Organizational patterns are contextual.
+IF SHORT: Show the table; state the 50--100 model hybrid threshold; advance.
+IF AHEAD: Discuss what happens to organizational patterns when a startup
+acquires a large ML platform --- how do embedded engineers integrate?
+}
 
 \footnotesize
 \renewcommand{\arraystretch}{1.15}
@@ -757,6 +1056,100 @@ organizations adopt hybrid. If short: just show the comparison table.}
 \vspace{0.15cm}
 \begin{mlsyscard}{computestroke}
 {\footnotesize \textbf{Decision factors:} Model count, model similarity, org size, regulatory requirements, and infrastructure maturity determine the optimal pattern.}
+\end{mlsyscard}
+
+\end{frame}
+
+\begin{frame}{Edge Fleet MLOps: Version Skew (1/2)}
+\note{
+% -- LINK: Connect to prior concept
+The data-center MLOps patterns just covered assume controlled infrastructure.
+This slide extends the same framework to millions of heterogeneous edge devices
+where you cannot force an immediate rollout.
+
+% -- NARRATE: What to SAY
+[2 min] Walk through the two challenges: ``In a data center, a rollout
+completes in hours. In an edge fleet, it takes weeks because devices
+are offline, battery-saving, or on restricted networks. At any moment,
+an organization may have 50 different model versions active. Every
+upstream data pipeline must be backwards-compatible with models deployed
+months ago.'' Then federated monitoring: ``You cannot stream raw predictions
+back due to privacy and bandwidth --- devices compute local error rates and
+transmit only aggregated, anonymized metrics. Fleet health must be reconstructed
+from fragmented signals.''
+
+% -- ENGAGE: Specific question
+Ask: ``If you have 50 model versions active and want to add a new feature
+to your upstream data pipeline, what constraints does version skew impose?''
+Give 20 seconds. Expected: the new pipeline must produce outputs compatible
+with all 50 active versions, or you must maintain parallel pipelines until
+the oldest versions retire.
+
+% -- WARN: Specific misconception
+Students assume edge MLOps is just data-center MLOps with lower power.
+Correct: the operational contract is fundamentally different. Recovery
+is probabilistic, not deterministic.
+
+% -- FLEX: [CORE]
+[CORE] Covers Key Takeaways bullet on edge fleet management.
+IF SHORT: State the 50-version-skew number; advance to HIL CI/CD slide.
+IF AHEAD: Ask ``How would you design a canary rollout when 10\% of devices
+are always offline?''
+}
+
+\footnotesize
+\textbf{Challenge 1: Extreme version skew}
+\begin{itemize}\setlength\itemsep{0pt}
+  \item Data-center rollout: hours; edge fleet rollout: weeks to months
+  \item Up to \textbf{50 concurrent model versions} active simultaneously
+  \item Upstream data pipelines must stay backwards-compatible across all versions
+\end{itemize}
+
+\vspace{0.12cm}
+\textbf{Challenge 3: Federated monitoring}
+\begin{itemize}\setlength\itemsep{0pt}
+  \item Cannot stream raw predictions back (privacy + bandwidth constraints)
+  \item Devices compute local error rates; transmit only aggregated, anonymized metrics
+  \item Fleet health must be reconstructed from fragmented signals
+\end{itemize}
+
+\vspace{0.1cm}
+\mlsysalert{Key difference:}{Edge recovery is probabilistic, not deterministic --- a bad model takes weeks to roll back, not seconds.}
+
+\end{frame}
+
+\begin{frame}{Edge Fleet MLOps: HIL CI/CD (2/2)}
+\note{
+% -- LINK: Connect to prior concept
+Version skew showed that edge rollouts take weeks. This slide covers the
+quality gate that prevents bad models from entering that slow propagation path.
+
+% -- NARRATE: What to SAY
+[1 min] ``Passing accuracy gates is not enough for edge. A model must also
+be validated on physical or emulated target hardware: specific NPU architectures,
+microcontrollers, DSPs. A model that passes accuracy but exceeds the 1 MB memory
+limit of a budget microcontroller, or triggers thermal throttling on a specific
+SoC, is rejected at the HIL stage, not in production. Edge failures discovered
+in production cannot be rolled back in seconds --- they take weeks to propagate.''
+
+% -- FLEX: [CORE]
+[CORE] HIL CI/CD is the key distinction between edge and data-center MLOps.
+IF SHORT: State the three rejection criteria and the weeks-to-rollback cost.
+}
+
+\begin{mlsyscard}{computestroke}
+{\footnotesize\textbf{Challenge 2: Hardware-in-the-Loop (HIL) CI/CD}\\[0.05cm]
+Accuracy gates are \textbf{necessary but not sufficient} for edge deployments.\\[0.05cm]
+CI/CD must include a \textbf{HIL stage}: validate on physical or emulated fleet hardware
+\emph{before} promotion.\\[0.05cm]
+A model is \textbf{rejected} if it:
+\begin{itemize}\setlength\itemsep{0pt}
+  \item Exceeds 1 MB memory on a budget microcontroller
+  \item Triggers thermal throttling on a specific SoC
+  \item Exceeds latency budget on a target NPU/DSP
+\end{itemize}
+Edge failures discovered in production cannot be rolled back in seconds ---
+they take \textbf{weeks to propagate} through the fleet.}
 \end{mlsyscard}
 
 \end{frame}
@@ -1001,8 +1394,9 @@ anchors: 56\% savings, 14,400 alerts, 20$\times$ risk reduction,
   \item \textbf{Risk profile determines cadence}: LLMs: months. Fraud: hours. One-size CI/CD fails.
   \item \textbf{Alert fatigue is mathematical}: 100 models $\times$ 10 metrics $\to$ 14,400 false alerts/day. Use hierarchical monitoring.
   \item \textbf{Staged rollouts reduce risk 20$\times$}: 5\% canary limits blast radius.
-  \item \textbf{TCO shifts with scale}: Early = iteration-dominated; production = inference-dominated (70--80\%).
-  \item \textbf{Feature freshness matters}: Streaming yields 10--20\% engagement lift over batch.
+  \item \textbf{Feature stores enforce the invariant} $f_{\text{train}}(x) \equiv f_{\text{serve}}(x)$: dual offline/online architecture prevents training-serving skew at platform scale.
+  \item \textbf{Edge fleet demands HIL CI/CD}: Up to 50 concurrent model versions; accuracy gates alone are insufficient --- validate on physical NPU/DSP before promotion.
+  \item \textbf{TCO shifts with scale}: Early = iteration-dominated; production = inference-dominated.
 \end{itemize}
 
 \end{frame}

@@ -2,7 +2,7 @@
 ``binder headings`` — Heading-case enforcement for MIT Press style.
 
 Enforces the H1/H2 headline-case + H3+ sentence-case policy documented in
-`.claude/rules/book-prose.md` §10.3.1. Preserves ten documented exceptions:
+the project prose style guide §10.3.1. Preserves ten documented exceptions:
 acronyms, hyphenated-acronym compounds, digit-letter models (70B, 3D),
 single-letter labels (Archetype A, N-models, S-curve), slash acronyms
 (I/O, A/B, M/G/c/K), CamelCase product names (ResNet, FlashAttention),
@@ -21,7 +21,7 @@ script. Invoked from:
     - ``./book/binder headings {check,dry-run,apply}`` (CLI)
     - ``validate.py:_run_heading_case`` (imports ``find_violations``
       and emits ``ValidationIssue`` objects for the rich check table)
-    - ``.pre-commit-config.yaml`` → ``./book/binder headings check``
+    - Pre-commit: ``./book/binder check headers`` (includes ``ids`` + ``case`` scopes)
 """
 
 from __future__ import annotations
@@ -47,21 +47,21 @@ console = Console()
 ACRONYMS = set("""
 AI ML AIOps MLOps DevOps ClinAIOps MLSys
 GPU GPUs CPU CPUs TPU TPUs NPU DSP ASIC FPGA SoC MCU HBM DRAM SRAM ROM EPROM NVRAM VRAM
-NVMe PCIe PCI NVLink NVSwitch DMA MMIO RDMA CUDA ROCm OpenCL OpenMP MPI NCCL RCCL OpenACC
-CNN CNNs RNN RNNs LSTM GRU MLP MLPs NN DNN BLAS cuBLAS cuDNN GEMM MAC MACs SIMD SIMT VLIW RISC CISC BatchNorm LayerNorm GroupNorm ReLU GELU SiLU PReLU LeakyReLU Sigmoid Softmax Tanh
+NVMe PCIe PCI NVLink NVSwitch GPUDirect DMA MMIO RDMA CUDA ROCm OpenCL OpenMP MPI NCCL RCCL OpenACC
+CNN CNNs RNN RNNs LSTM GRU MLP MLPs NN DNN LLM LLMs BLAS cuBLAS cuDNN GEMM MAC MACs SIMD SIMT VLIW RISC CISC BatchNorm LayerNorm GroupNorm ReLU GELU SiLU PReLU LeakyReLU Sigmoid Softmax Tanh
 FLOPs FLOP TFLOPs PFLOPs FLOPS TFLOPS PFLOPS TOPS IOPS MIPS FP32 FP16 FP8 FP4 BF16 INT8 INT4 TF32 FP64
 GB TB KB MB PB EB GiB TiB KiB MiB Gbps Mbps Tbps ns μs ms kHz MHz GHz THz Hz Wh kWh MWh W kW MW
 IO OS RTOS VM JVM JIT AOT RPC REST RESTful HTTP HTTPS TCP UDP IP DNS CDN TLS SSL SSH gRPC IPC UX UI
 API APIs SDK CLI IDE GUI SLA SLAs SLI SLO SLOs RAID SSD HDD EEPROM SRE QA KPI
 US UK EU USA FAA FDA IRB NHTSA DARPA NSF NIH IEEE ACM OSDI NSDI NeurIPS ICML ICLR CVPR ECCV ICCV ACL EMNLP NAACL KDD SIGMOD SIGCOMM SOSP FAST ATC HotOS MICRO ISCA HPCA SC
-ImageNet BERT GPT PaLM T5 BART ViT CLIP ResNet AlexNet MobileNet MobileNets EfficientNet VGG Inception YOLO DLRM BLOOM Gemini Claude Mistral Qwen Kaplan Chinchilla LLaMA Llama
-PyTorch TensorFlow JAX NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang
+ImageNet BERT GPT PaLM T5 BART ViT CLIP ResNet AlexNet GoogLeNet MobileNet MobileNets EfficientNet VGG Inception YOLO DLRM BLOOM Gemini Claude Mistral Qwen Kaplan Chinchilla LLaMA Llama
+PyTorch TensorFlow JAX NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM MLflow OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang Michelangelo FBLearner Vertex Kubeflow Sagemaker
 AllReduce AllGather ReduceScatter AllToAll Broadcast Scatter Gather FlashAttention PagedAttention RoPE ALiBi MoE KV
 MLPerf MLCommons LAPACK LINPACK D·A·M DAM C³ C^3 CCC C3
 TinyML AutoML AutoAugment RandAugment NAS
 NVIDIA AMD Intel ARM Apple Google Amazon Microsoft Meta Facebook IBM Qualcomm TSMC Samsung Uber Tesla DeepSeek Anthropic Cerebras Groq Graphcore SambaNova Tenstorrent Oura Jeep Cherokee Rényi Teton Slurm
 MIT Stanford Berkeley CMU UIUC EPFL ETH Caltech Harvard Princeton Yale Columbia
-Hennessy Patterson Amdahl Gustafson Turing Sutton Karpathy Kuhn Goodhart Horowitz Williams Waterman Knuth Tanenbaum Dean Chintala Huang LeCun Han Reddi Stoica Huyen Emer
+Hennessy Patterson Amdahl Gustafson Turing Sutton Karpathy Kuhn Goodhart Horowitz Williams Waterman Knuth Tanenbaum Dean Chintala Huang LeCun Han Reddi Stoica Huyen Emer Kullback Leibler Kolmogorov Smirnov Shannon Bayes Markov Bellman Boltzmann
 HIPAA GDPR COPPA CCPA FERPA SOX HITRUST ISO SOC NAND NOR SLC MLC TLC QLC NaN Inf
 HBM2 HBM3 HBM3e DDR4 DDR5 GDDR5 GDDR6 GDDR6X LPDDR4 LPDDR5
 V100 A100 H100 H200 B100 B200 GB200 T4 L4 L40 RTX Xeon Epyc Ryzen M1 M2 M3 M4 Grace Hopper Blackwell Ampere Volta Pascal
@@ -84,6 +84,8 @@ COMPOUND_NAMES = {
     ("EU", "Act"), ("AI", "Act"),
     # Geographic and product proper-noun pairs
     ("Grand", "Teton"), ("Jeep", "Cherokee"), ("Meta", "Grand"),
+    # Cloud / MLOps platform compound product names
+    ("FBLearner", "Flow"), ("Vertex", "AI"), ("Amazon", "SageMaker"),
 }
 
 # Exact-match headings to skip entirely. For paper-title conventions that
@@ -93,7 +95,9 @@ SKIP_HEADINGS = {
     "1-bit Adam: Compression-aware optimization",
 }
 
-DAM_AXES = {"Data", "Algorithm", "Machine", "Computation", "Communication", "Coordination"}
+# "Compute" added 2026-06: the C³ first axis was unified from "Computation"
+# to "Compute" (the c3-taxonomy figure / part-principles / prose-triad form).
+DAM_AXES = {"Data", "Algorithm", "Machine", "Compute", "Computation", "Communication", "Coordination"}
 
 # Concept terms from §10.3 that stay lowercase even at heading sentence start.
 CONCEPT_TERMS_LOWER = {
@@ -412,6 +416,10 @@ class HeadingsCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder headings",
             description="Heading-case enforcement (MIT Press §10.3.1)",
@@ -462,7 +470,7 @@ class HeadingsCommand:
         console.print("  [cyan]./binder headings dry-run[/cyan]")
         console.print("  [cyan]./binder headings apply[/cyan]")
         console.print()
-        console.print("[dim]Rule reference: .claude/rules/book-prose.md §10.3.1[/dim]")
+        console.print("[dim]Rule reference: the project prose style guide §10.3.1[/dim]")
         console.print()
 
     # ------------------------------------------------------------------
@@ -509,7 +517,7 @@ class HeadingsCommand:
             "   The MIT Press style requires: H1/H2 headline case; H3+ sentence case."
         )
         console.print(
-            "   See [cyan].claude/rules/book-prose.md §10.3.1[/cyan] for the rule + exceptions.\n"
+            "   See [cyan]the project prose style guide §10.3.1[/cyan] for the rule + exceptions.\n"
         )
         for fpath, viols in by_file.items():
             short = fpath.replace("book/quarto/contents/", "")

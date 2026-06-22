@@ -2,6 +2,8 @@
 
 Command-line interface for authoring and publishing the ML Systems newsletter. Do everything from the terminal: draft in the repo, push to Buttondown for preview, send from the Buttondown UI, pull the sent version back into the repo.
 
+> **Before you push:** review the project's internal newsletter authoring notes (maintained outside this repo) for Buttondown gotchas — especially the editor-mode magic comment, SmartyPants conversions, and image alt-text limits. They are not obvious from the CLI surface and will bite you the first time you try to edit a pushed draft in the Buttondown UI.
+
 ## Install
 
 ```bash

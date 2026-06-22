@@ -1,0 +1,948 @@
+chapter: vol2/fleet_orchestration
+source_file: book/quarto/contents/vol2/fleet_orchestration/fleet_orchestration.qmd
+status: migrated
+python_cells:
+- label: chapter-start
+  start_line: 49
+  end_line: 74
+  lego_class: chapter_start
+  purpose: Import shared MLSysIM hardware, model, unit, and formatting constants for
+    later cells.
+  constants:
+  - name: hardware_and_network_imports
+    value: A100/H100 memory/compute, NVLink, InfiniBand HDR/NDR
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: No prose consumes this cell directly; it establishes canonical
+      imports.
+  - name: GPT3_PARAMS
+    value: 175B parameters
+    kind: model_architecture_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Later 175B examples remain tied to MLSysIM.
+  - name: unit_imports
+    value: GB, TB, second, Gbps, TFLOPs, param, BILLION, BITS_PER_BYTE, SEC_PER_HOUR,
+      SEC_PER_DAY
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Unit imports are canonical and do not render directly.
+- label: fleet-setup
+  start_line: 76
+  end_line: 137
+  lego_class: FleetSetup
+  purpose: Define chapter-wide cluster scale, GPU-hour pricing, fragmentation, and
+    interconnect display values.
+  constants:
+  - name: cluster_size
+    value: 10000 GPUs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The introduction explicitly uses a 10,000-GPU illustrative cluster.
+  - name: hourly_rate
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Add a named MLSysIM fleet-orchestration GPU-hour economics baseline,
+      or expose a chapter helper, initialized to 2.0 USD/GPU-hour.
+    preserves_rendered_value: true
+    narrative_check: All daily/annual cost statements remain true if the canonical
+      value is 2.0; using existing CLOUD_GPU_TRAINING_PER_HOUR would not preserve
+      the chapter's values.
+  - name: hours_per_day
+    value: '24'
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units.HOURS_PER_DAY
+    preserves_rendered_value: true
+    narrative_check: Daily and annual cost prose remains unchanged.
+  - name: days_per_year
+    value: '365'
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units.DAYS_PER_YEAR or mlsysim.core.units.HOURS_PER_YEAR
+    preserves_rendered_value: true
+    narrative_check: Annual cost remains $175M at the current precision.
+  - name: n_nodes
+    value: '64'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The fragmentation example explicitly uses a 64-node cluster.
+  - name: gpus_per_node
+    value: '8'
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: 64 nodes still render as 512 total GPUs and 75 percent effective
+      capacity.
+  - name: job_request
+    value: 6 GPUs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose frames this as a fragmentation scenario.
+  - name: interconnect_values
+    value: NVLINK_H100_BW, NVLINK_A100_BW, INFINIBAND_NDR_BW
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.Hardware.Cloud.H100.nvlink.bandwidth, mlsysim.Hardware.Cloud.A100.nvlink.bandwidth,
+      mlsysim.Systems.Fabrics.InfiniBand_NDR.bandwidth
+    preserves_rendered_value: true
+    narrative_check: Topology and debugging prose remains accurate.
+  - name: spot_price_str
+    value: 0.50 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Add named fleet spot/on-demand pricing assumptions alongside the
+      orchestration GPU-hour baseline if reused.
+    preserves_rendered_value: true
+    narrative_check: Spot-instance paragraph continues to render $0.50 versus $2.00.
+- label: cluster-economics-context
+  start_line: 147
+  end_line: 207
+  lego_class: ClusterEconomicsContext
+  purpose: Compute chapter-opening cluster cost, waste, utilization improvement, and
+    A100/H100 memory displays.
+  constants:
+  - name: cluster_size
+    value: 10000 GPUs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Same illustrative 10,000-GPU cluster as FleetSetup.
+  - name: gpu_hour_cost_usd
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named MLSysIM fleet-orchestration GPU-hour economics baseline
+      as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: Daily cost, daily waste, and debugging value remain narratively
+      valid at $2/GPU-hour.
+  - name: idle_fraction
+    value: '0.30'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose explicitly discusses 30 percent idle capacity.
+  - name: util_low_high
+    value: 0.50 to 0.80
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The utilization-improvement example intentionally uses 50 to
+      80 percent.
+  - name: hours_and_days
+    value: 24 hours/day, 365 days/year
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units.HOURS_PER_DAY, mlsysim.core.units.DAYS_PER_YEAR,
+      or mlsysim.core.units.HOURS_PER_YEAR
+    preserves_rendered_value: true
+    narrative_check: Annual waste and annual cost displays are preserved.
+  - name: A100_MEM_CAPACITY
+    value: 80 GiB
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: A100 vs H100 memory prose remains true.
+  - name: H100_MEM_CAPACITY
+    value: 80 GiB
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: H100 memory prose remains true.
+- label: gang-scheduling-deadlock-notebook
+  start_line: 215
+  end_line: 249
+  lego_class: GangSchedulingDeadlock
+  purpose: Quantify idle cost for a conceptual non-gang scheduling deadlock.
+  constants:
+  - name: n_total_gpus
+    value: '1024'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The deadlock example explicitly uses a 1,024-GPU cluster.
+  - name: n_jobs
+    value: '2'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Two-team deadlock narrative remains valid.
+  - name: gpus_per_job
+    value: '1024'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Each job requires the full cluster by construction.
+  - name: gpu_hour_cost
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named fleet-orchestration GPU-hour economics baseline as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: The rendered $2,048/hour waste remains valid.
+- label: lego-queuing-theory
+  start_line: 322
+  end_line: 353
+  lego_class: QueuingTheory
+  purpose: Compute Pollaczek-Khinchine waiting-time multipliers for uniform and heavy-tailed
+    ML workloads.
+  constants:
+  - name: rho
+    value: '0.8'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly evaluates 80 percent utilization.
+  - name: cs_uniform
+    value: '1'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose defines exponential-like service variability.
+  - name: cs_ml
+    value: '3'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose says ML cluster service-time variation is typically
+      between 3 and 5.
+- label: null
+  start_line: 391
+  end_line: 485
+  lego_class: figure
+  purpose: Plot an 8-by-8 fragmented GPU allocation heatmap.
+  constants:
+  - name: n_nodes
+    value: '8'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The figure caption explicitly uses an 8-node illustrative snapshot.
+  - name: gpus_per_node
+    value: '8'
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The heatmap remains 8 columns and continues to depict one full-node
+      8-GPU request.
+  - name: row_patterns
+    value: 8 rows, 64 slots, 45 allocated, 19 free
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The figure is an intentionally hand-crafted fragmentation state.
+  - name: status_text_numbers
+    value: 64 total, 45 allocated, 19 free, 30 percent free, 8-GPU pending request
+    kind: derived_quantity
+    current_source: local_literal
+    should_change: false
+    target_source: Derive from row_patterns, n_nodes, and Systems.Nodes.DGX_H100.accelerators_per_node instead of
+      duplicating status literals.
+    preserves_rendered_value: true
+    narrative_check: Caption and status panel stay synchronized with the plotted grid.
+- label: null
+  start_line: 783
+  end_line: 844
+  lego_class: figure
+  purpose: Plot AllReduce latency by placement strategy.
+  constants:
+  - name: times
+    value: 120, 85, 40, 25 ms
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The caption and callout mark these as placement-impact assumptions.
+  - name: gradient_size
+    value: 1.0 GB
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The figure title explicitly says 1 GB gradient sync.
+  - name: ms_second
+    value: ms and second units
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Bandwidth labels remain derived from canonical time units.
+- label: lego-topology-placement
+  start_line: 850
+  end_line: 878
+  lego_class: TopologyPlacement
+  purpose: Compute the random-to-optimal placement speedup used in the topology placement
+    callout.
+  constants:
+  - name: placement_latencies
+    value: 120, 85, 40, 25 ms
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Matches the preceding figure and callout assumptions.
+- label: null
+  start_line: 1065
+  end_line: 1119
+  lego_class: figure
+  purpose: Plot annual wasted cost as cluster size and utilization vary.
+  constants:
+  - name: gpu_cost_per_hour
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named fleet-orchestration GPU-hour economics baseline as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: The figure caption's $87.6M at 10K GPUs and 50 percent utilization
+      is preserved.
+  - name: cluster_sizes
+    value: 1000..100000 GPUs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Figure range is illustrative.
+  - name: util_configs
+    value: 30, 50, 70, 90 percent utilization
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The caption names these utilization curves.
+  - name: HOURS_PER_YEAR
+    value: '8760'
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Annual waste conversion is already canonical.
+  - name: philly_utilization
+    value: 52 percent
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: This is a cited measurement used as an annotation, not a system
+      constant.
+- label: lego-elastic-scaling
+  start_line: 1147
+  end_line: 1271
+  lego_class: ElasticScaling
+  purpose: Compare three elastic-scaling strategies over a 24-hour training window.
+  constants:
+  - name: window_h
+    value: 24 hours
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly evaluates a 24-hour window.
+  - name: wait_h
+    value: 4 hours
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Queue wait is a local scenario assumption.
+  - name: rescale_min
+    value: 10 minutes
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Re-scaling cost is stated in the callout.
+  - name: minutes_per_hour
+    value: '60'
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units.MINUTES_PER_HOUR
+    preserves_rendered_value: true
+    narrative_check: The rendered 0.17-hour rescale value is preserved.
+  - name: throughput_at_scale
+    value: 1.0, 1.8, 3.2 epochs/hour
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout marks these throughput and efficiency values as input
+      assumptions.
+- label: lego-spot-training-economics
+  start_line: 1329
+  end_line: 1378
+  lego_class: SpotTrainingEconomics
+  purpose: Compare on-demand and spot costs for a 512-GPU, 14-day training run.
+  constants:
+  - name: gpus
+    value: '512'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly uses a 512-GPU training run.
+  - name: run_days_and_hours
+    value: 14 days, 24 hours/day
+    kind: scenario_assumption
+    current_source: mixed
+    should_change: false
+    target_source: Keep 14 days local; source 24 hours/day from mlsysim.core.units.HOURS_PER_DAY.
+    preserves_rendered_value: true
+    narrative_check: The run remains 336 hours.
+  - name: on_demand_rate
+    value: 2.00 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named fleet-orchestration on-demand GPU-hour economics baseline
+      as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: On-demand cost remains $344,064.
+  - name: spot_rate
+    value: 0.70 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Add named fleet spot GPU-hour baseline or derive from on-demand
+      baseline and discount.
+    preserves_rendered_value: true
+    narrative_check: Spot base cost and 63 percent savings remain valid.
+  - name: checkpoint_overhead_fraction
+    value: '0.05'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout states 5 percent checkpoint overhead.
+  - name: interruptions
+    value: '14'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Derived from the local one-interruption-per-day scenario, but
+      kept explicit.
+  - name: restart_hours
+    value: '0.5'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout states 30-minute restart overhead.
+- label: lego-autoscaling-lag
+  start_line: 1579
+  end_line: 1630
+  lego_class: AutoscalingLag
+  purpose: Compare reactive and predictive autoscaling under a 60-second traffic ramp.
+  constants:
+  - name: replicas
+    value: '10'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly uses 10 replicas.
+  - name: qps_per_replica
+    value: '5'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Per-replica capacity is a local serving scenario.
+  - name: traffic_start_end
+    value: 40 to 80 QPS
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The traffic ramp is stated in the callout.
+  - name: ramp_sec
+    value: 60 seconds
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly uses a 60-second ramp.
+  - name: load_time_sec
+    value: 180 seconds
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout states a 3-minute model load time; the local seconds
+      value preserves the display.
+- label: lego-gpu-sharing-roi
+  start_line: 1674
+  end_line: 1735
+  lego_class: GpuSharingRoi
+  purpose: Compare exclusive and shared GPU hosting for fleets of small and large
+    inference models.
+  constants:
+  - name: n_small
+    value: 100 small models
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly uses 100 distinct 7B models.
+  - name: small_footprint_gb
+    value: 26 GB
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose derives this from 14 GB FP16 weights plus runtime KV/activation
+      overhead.
+  - name: n_large
+    value: 10 large models
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly uses 10 distinct 175B models.
+  - name: large_footprint_gb
+    value: GPT3_PARAMS * BYTES_FP16
+    kind: model_architecture_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.Models.Language.GPT3.parameters
+    preserves_rendered_value: true
+    narrative_check: The 175B FP16 footprint remains approximately 350 GB.
+  - name: A100_MEM_CAPACITY
+    value: 80 GiB
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: A100 memory-capacity prose remains true.
+  - name: gpus_per_large
+    value: '8'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout frames 4 to 8 GPUs as a placement strategy; 8 is
+      local to this ROI example.
+  - name: models_per_gpu_shared
+    value: '2'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: MPS packing density is a local scheduling policy assumption.
+  - name: gpu_rate
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named fleet-orchestration GPU-hour economics baseline as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: Annual savings remain about $876,000.
+  - name: HOURS_PER_YEAR
+    value: '8760'
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Annualization is already canonical.
+- label: lego-diurnal-gpu-shift
+  start_line: 1767
+  end_line: 1810
+  lego_class: DiurnalGpuShift
+  purpose: Compare static partitioning and dynamic sharing between training and serving
+    pools.
+  constants:
+  - name: fleet
+    value: 1000 GPUs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly uses a 1,000-GPU fleet.
+  - name: serving_peak_avg_training_reclaimed
+    value: 400 peak, 150 average, 600 fixed training, 130 reclaimed GPUs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These values define the static vs dynamic sharing scenario.
+  - name: gpu_rate
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named fleet-orchestration GPU-hour economics baseline as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: Recovered annual value remains $2.3M.
+  - name: HOURS_PER_YEAR
+    value: '8760'
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Annualization is already canonical.
+- label: lego-chargeback-example
+  start_line: 1864
+  end_line: 1894
+  lego_class: ChargebackExample
+  purpose: Quantify chargeback cost for a 64-GPU, 34-day run.
+  constants:
+  - name: gpus
+    value: '64'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose explicitly uses a 64-GPU run.
+  - name: days
+    value: '34'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose aligns with the GPT-3 reference duration.
+  - name: hours_per_day
+    value: '24'
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units.HOURS_PER_DAY
+    preserves_rendered_value: true
+    narrative_check: Chargeback hours remain 816.
+  - name: gpu_hour_rate
+    value: 2.50 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Add a named internal chargeback GPU-hour rate if this differs intentionally
+      from the $2.00 fleet cost baseline.
+    preserves_rendered_value: true
+    narrative_check: Chargeback cost remains about $130,000.
+- label: lego-preemption-tax
+  start_line: 1924
+  end_line: 1963
+  lego_class: PreemptionTax
+  purpose: Quantify wasted cost and GPU-hours from repeated preemptions.
+  constants:
+  - name: gpus
+    value: '64'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Matches the 64-GPU run in the surrounding prose.
+  - name: lost_reload_warmup_minutes
+    value: 15 lost, 20 reload, 10 warmup minutes
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose introduces these as preemption-tax assumptions.
+  - name: minutes_per_hour
+    value: '60'
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units.MINUTES_PER_HOUR
+    preserves_rendered_value: true
+    narrative_check: Recovery duration stays 45 minutes and 0.75 hours.
+  - name: gpu_hour_rate
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named fleet-orchestration GPU-hour economics baseline as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: Cost per event remains $96.
+  - name: preemptions_per_day
+    value: '12'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: This is a local policy failure scenario.
+- label: lego-quota-hoarding-cost
+  start_line: 1975
+  end_line: 2005
+  lego_class: QuotaHoardingCost
+  purpose: Quantify idle reservation cost for 500 GPUs over three weeks.
+  constants:
+  - name: gpus
+    value: '500'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The quota-hoarding example explicitly uses 500 GPUs.
+  - name: weeks
+    value: '3'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The example explicitly says three weeks.
+  - name: hours_per_week
+    value: 7 * 24
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units.DAYS_PER_WEEK plus HOURS_PER_DAY, or a new HOURS_PER_WEEK
+      export
+    preserves_rendered_value: true
+    narrative_check: Idle duration remains 504 hours.
+  - name: gpu_hour_rate
+    value: 2.0 USD/GPU-hour
+    kind: economics_baseline
+    current_source: local_literal
+    should_change: false
+    target_source: Same named fleet-orchestration GPU-hour economics baseline as FleetSetup.hourly_rate.
+    preserves_rendered_value: true
+    narrative_check: Idle-reservation cost remains $504,000.
+- label: null
+  start_line: 2041
+  end_line: 2117
+  lego_class: figure
+  purpose: Plot M/M/1-style wait-time growth as utilization approaches saturation.
+  constants:
+  - name: utilization_range
+    value: 0 to 0.98 over 500 points
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Figure range is illustrative and supports the utilization-paradox
+      caption.
+  - name: average_job_hours
+    value: 1, 4, 12 hours
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Curve labels explicitly define small, mixed, and large job durations.
+  - name: target_and_danger_utilization
+    value: 75 percent target, 80 percent danger-zone threshold
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The caption and nearby prose use these as operational guidance,
+      not MLSysIM system constants.
+- label: debug-value-calc
+  start_line: 2121
+  end_line: 2168
+  lego_class: DebugValueCalc
+  purpose: Compute recovered capacity value from improving a 1,000-GPU cluster from
+    60 to 84 percent utilization.
+  constants:
+  - name: debug_cluster
+    value: 1000 GPUs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The debugging worked example explicitly uses a 1,000-GPU cluster.
+  - name: debug_util_before_after
+    value: 60 percent to 84 percent
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The worked example describes this exact utilization recovery.
+  - name: _gpu_rate
+    value: ClusterEconomicsContext.gpu_hour_cost_usd
+    kind: economics_baseline
+    current_source: derived
+    should_change: false
+    target_source: Same named fleet-orchestration GPU-hour economics baseline as ClusterEconomicsContext.gpu_hour_cost_usd.
+    preserves_rendered_value: true
+    narrative_check: Debugging value remains about $7M/year.
+  - name: hours_per_year
+    value: '8760'
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Annual dollar value remains unchanged.
+findings:
+- id: fo-001-gpu-hour-economics-baseline-duplicated
+  severity: medium
+  lines: 76-207,215-249,1065-1119,1329-1378,1674-1810,1924-2005,2121-2168
+  issue: The chapter repeatedly hard-codes a $2.00/GPU-hour fleet economics baseline,
+    plus related spot and chargeback rates, while MLSysIM's existing CLOUD_GPU_TRAINING_PER_HOUR
+    and CLOUD_GPU_INFERENCE_PER_HOUR use different values and therefore cannot be
+    substituted without changing rendered prose.
+  recommended_change: Add a named MLSysIM fleet-orchestration economics profile/helper
+    for this chapter's cloud-equivalent GPU-hour baseline, spot price/discount, and
+    internal chargeback rate, or centralize the profile in one chapter helper that
+    all cells import.
+  mlsysim_target: New MLSysIM fleet orchestration economics profile, Infrastructure.Pricing / Systems.Orchestration
+    or mlsysim.core.scenarios, initialized with on_demand_gpu_hour_usd=2.0, spot examples
+    0.50/0.70 as scenario values, and chargeback_gpu_hour_usd=2.50.
+  render_impact: 'Rendered values should be preserved if initialized to the current
+    rates: $480K/day, $87.6M/year waste at 10K/50%, $876K sharing savings, $504K hoarding
+    cost, and ~$7M debugging value.'
+  prose_validation: The economic narrative remains valid; directly using the current
+    4.0 USD/hour MLSysIM training price would invalidate the displayed dollar amounts.
+- id: fo-002-time-conversions-local
+  severity: low
+  lines: 76-207,1147-1271,1329-1378,1864-2005,2121-2168
+  issue: Several cells use local 24, 365, 60, 7*24, or 8760 conversion literals even
+    though MLSysIM exports canonical time conversions such as HOURS_PER_DAY, DAYS_PER_YEAR,
+    MINUTES_PER_HOUR, and HOURS_PER_YEAR.
+  recommended_change: Import the relevant MLSysIM time constants and use them for
+    daily, annual, minute-to-hour, and weekly conversions; add DAYS_PER_WEEK/HOURS_PER_WEEK
+    if the project wants a named weekly conversion.
+  mlsysim_target: mlsysim.core.units.HOURS_PER_DAY, DAYS_PER_YEAR, MINUTES_PER_HOUR,
+    HOURS_PER_YEAR; optional new DAYS_PER_WEEK or HOURS_PER_WEEK
+  render_impact: No rendered change expected; all current hour/day/year calculations
+    are standard conversions.
+  prose_validation: Adjacent prose remains narratively valid because only unit conversions
+    change.
+- id: fo-003-gpus-per-host-local
+  severity: low
+  lines: 76-137,391-485
+  issue: The fragmentation setup and figure hard-code 8 GPUs per node even though
+    MLSysIM already exports Systems.Nodes.DGX_H100.accelerators_per_node and system node registry entries expose
+    accelerators_per_node.
+  recommended_change: Use Systems.Nodes.DGX_H100.accelerators_per_node
+    for gpus_per_node, while keeping local node counts and job shapes as scenario
+    assumptions.
+  mlsysim_target: mlsysim.Systems.Nodes.DGX_H100.accelerators_per_node or mlsysim.Systems.Nodes.DGX_H100.accelerators_per_node
+  render_impact: 'No rendered change expected: the examples still show 512 total GPUs
+    in the 64-node scenario and an 8-column heatmap.'
+  prose_validation: Fragmentation and topology prose remains true because it assumes
+    standard 8-GPU nodes.
+- id: fo-004-fragmentation-figure-status-duplicates-grid
+  severity: low
+  lines: 391-485
+  issue: The fragmentation figure status panel duplicates total, allocated, free,
+    free-percent, and request-size values as string literals rather than deriving
+    them from the grid and node topology.
+  recommended_change: Compute status_text values from row_patterns/grid, n_nodes,
+    and Systems.Nodes.DGX_H100.accelerators_per_node so the figure annotation cannot drift from the plotted allocation.
+  mlsysim_target: Local helper using Systems.Nodes.DGX_H100.accelerators_per_node; no new MLSysIM constant required
+    beyond the node GPU count.
+  render_impact: 'No rendered change expected: the panel should still show 64 total,
+    45 allocated, 19 free, and 30 percent free.'
+  prose_validation: The caption's 19 free GPUs and 30 percent fragmentation statement
+    stays aligned with the figure.
+- id: fo-005-cost-idle-comment-conflicts-with-mlsysim-price
+  severity: low
+  lines: 1065-1119
+  issue: The cost-of-idle-GPUs figure comments say the $2/GPU-hour literal comes from
+    constants.py CLOUD_GPU_TRAINING_PER_HOUR, but MLSysIM currently defines CLOUD_GPU_TRAINING_PER_HOUR
+    as 4.0 USD/hour.
+  recommended_change: Either update the comment to describe the $2 value as the fleet-orchestration
+    economics baseline, or add the new named baseline from fo-001 and import it here.
+  mlsysim_target: New fleet-orchestration economics baseline from fo-001; do not use
+    CLOUD_GPU_TRAINING_PER_HOUR unless the rendered cost curve is intentionally changed.
+  render_impact: Preserved if the figure continues using 2.0 USD/GPU-hour.
+  prose_validation: The figure caption's $87.6M annual waste claim remains true only
+    under the $2/GPU-hour baseline.
+notes:
+- All 19 Python cells in the assigned chapter are included.
+- No code or prose files were edited; only this assigned YAML audit packet was written.
+- Most non-MLSysIM literals are intentionally local scenario assumptions, especially
+  job counts, utilization targets, scheduling latencies, workload mix, and traffic
+  shapes.

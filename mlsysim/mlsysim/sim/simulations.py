@@ -8,14 +8,14 @@ Each simulation class implements the 'Physics' of a specific engineering domain.
 
 from dataclasses import dataclass
 from typing import Dict, Any
-from ..core.constants import Q_
+from ..core.units import Q_
 from .ledger import SystemLedger, PerformanceMetrics, SustainabilityMetrics, EconomicMetrics, ReliabilityMetrics
 from .personas import Persona
-from ..core.scenarios import Scenario
-from ..core.engine import Engine
-from ..core.solver import SustainabilityModel, EconomicsModel, ReliabilityModel
+from ..engine.scenarios import Scenario
+from ..engine.engine import Engine
+from ..engine.solvers import SustainabilityModel, EconomicsModel, ReliabilityModel
 from ..systems.types import Fleet
-from ..infra.registry import Infra
+from ..infrastructure.registry import Infrastructure
 
 @dataclass
 class SimulationResult:
@@ -69,7 +69,7 @@ class ResourceSimulation(BaseSimulation):
         
         # 2. EXTRACT USER CHOICES
         region_name = choice.get("region", "US_Avg")
-        grid = getattr(Infra.Grids, region_name, Infra.Grids.US_Avg)
+        grid = getattr(Infrastructure.Grids, region_name, Infrastructure.Grids.US_Avg)
         duration_days = float(choice.get("duration_days", 365.0))
         
         # 3. SCALE TO FLEET (Persona Context)

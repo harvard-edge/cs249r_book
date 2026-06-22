@@ -17,7 +17,7 @@
  * don't fit the practice column at default size.
  *
  * The component is deliberately minimal. The SVG itself carries the
- * semantic content (see `.claude/rules/svg-style.md` for the book's
+ * semantic content (see the project SVG style rules for the book's
  * SVG style system, which authors should follow). Styling of the
  * frame, caption, and responsive sizing lives here.
  */
@@ -39,6 +39,11 @@ export interface QuestionVisualProps {
 
 export default function QuestionVisual({ track, visual }: QuestionVisualProps) {
   const [failed, setFailed] = useState(false);
+  const [prevPath, setPrevPath] = useState(visual.path);
+  if (visual.path !== prevPath) {
+    setPrevPath(visual.path);
+    setFailed(false);
+  }
 
   if (visual.kind !== "svg") return null;
 

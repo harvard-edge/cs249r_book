@@ -102,7 +102,7 @@ This document summarizes key organizational decisions and learnings from TinyTor
 **Evolution**: Recognized that unit tests alone insufficient; added dedicated integration test suite for cross-module validation.
 
 **Key Decision**:
-- **Critical Integration Test**: `tests/integration/test_gradient_flow.py` validates gradients flow through entire training stack
+- **Critical Integration Test**: `tests/integration/test_integration_gradient_flow.py` validates gradients flow through entire training stack
 - **Cross-Module Validation**: Tests verify modules compose correctly (e.g., autograd + layers + optimizers)
 - **Failure Patterns**: Integration tests catch interface contract violations (e.g., operations must preserve Tensor types)
 

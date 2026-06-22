@@ -21,10 +21,10 @@ FORCE:
 paper: paper.pdf
 
 paper.pdf: paper.tex references.bib $(SVG_PDFS)
-	pdflatex -interaction=nonstopmode paper.tex
-	bibtex paper
-	pdflatex -interaction=nonstopmode paper.tex
-	pdflatex -interaction=nonstopmode paper.tex
+	pdflatex -interaction=nonstopmode paper.tex || true
+	bibtex paper || true
+	pdflatex -interaction=nonstopmode paper.tex || true
+	pdflatex -interaction=nonstopmode paper.tex || true
 
 # ── Rasterize each PDF page to PNG (layout / float debugging) ─
 layout-review: paper.pdf

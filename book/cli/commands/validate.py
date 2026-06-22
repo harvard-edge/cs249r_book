@@ -16,9 +16,9 @@ no YAML edit needed. Ad-hoc audits use `--all-scopes` or `--scope <name>`.
 
 Some checks still delegate to scripts under book/tools/scripts/ (tables,
 spelling, epub, sources, grid-tables, images) and to standalone audit
-scripts under book/tools/audit/index/. The dispatch pattern uses
-`_delegate_script` for subprocess wrappers; preserve that pattern for new
-script-backed scopes.
+scripts under book/tools/audit/index/. Prefer new logic in cli/checks/
+with normal imports; see book/cli/README.md "Check implementation layout".
+Legacy `_delegate_script` / importlib paths are being phased out.
 """
 
 from __future__ import annotations
@@ -53,9 +53,10 @@ class ValidationIssue:
     message: str
     severity: str = "error"
     context: str = ""
+    suggestion: str = ""
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
+        payload = {
             "file": self.file,
             "line": self.line,
             "code": self.code,
@@ -63,6 +64,9 @@ class ValidationIssue:
             "severity": self.severity,
             "context": self.context,
         }
+        if self.suggestion:
+            payload["suggestion"] = self.suggestion
+        return payload
 
 
 @dataclass
@@ -90,6 +94,7 @@ class ValidationRunResult:
 
 
 INLINE_REF_PATTERN = re.compile(r"`\{python\}\s+(\w+(?:\.\w+)?)`")
+INLINE_EXPR_PATTERN = re.compile(r"`\{python\}\s+([^`]+?)`")
 CELL_START_PATTERN = re.compile(r"^```\{python\}|^```python")
 CELL_END_PATTERN = re.compile(r"^```\s*$")
 ASSIGN_PATTERN = re.compile(r"^([A-Za-z_]\w*)\s*=")
@@ -97,8 +102,88 @@ ASSIGN_PATTERN = re.compile(r"^([A-Za-z_]\w*)\s*=")
 TUPLE_ASSIGN_PATTERN = re.compile(r"^((?:[A-Za-z_]\w*\s*,\s*)+[A-Za-z_]\w*)\s*=")
 CLASS_DEF_PATTERN = re.compile(r"^class\s+(\w+)\s*[:(]")
 GRID_TABLE_SEP_PATTERN = re.compile(r"^\+[-:=+]+\+$")
-LATEX_INLINE_PATTERN = re.compile(r"(?<!\\)\$\s*`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`|`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*(?<!\\)\$")
-LATEX_ADJACENT_PATTERN = re.compile(r"`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$")
+# NOTE: The old LATEX_INLINE_PATTERN regex could treat the closing `$` of one
+# math span as the opening `$` of the next, producing false positives on lines
+# such as `$P_0$: `{python} x_str`. $P_t$`. Use a scanner so only actual
+# `$...$` and `\(...\)` spans are checked for inline Python.
+
+
+def _is_escaped(text: str, idx: int) -> bool:
+    backslashes = 0
+    j = idx - 1
+    while j >= 0 and text[j] == "\\":
+        backslashes += 1
+        j -= 1
+    return backslashes % 2 == 1
+
+
+def _inline_math_spans(text: str) -> List[str]:
+    """Return inline math spans from one Markdown source line."""
+    spans: List[str] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text.startswith(r"\(", i) and not _is_escaped(text, i):
+            end = text.find(r"\)", i + 2)
+            if end == -1:
+                i += 2
+                continue
+            spans.append(text[i:end + 2])
+            i = end + 2
+            continue
+
+        if text[i] == "$" and not _is_escaped(text, i):
+            if (i + 1 < n and text[i + 1] == "$") or (i > 0 and text[i - 1] == "$"):
+                i += 1
+                continue
+            j = i + 1
+            while j < n:
+                if text[j] == "$" and not _is_escaped(text, j):
+                    if (j + 1 < n and text[j + 1] == "$") or text[j - 1] == "$":
+                        j += 1
+                        continue
+                    spans.append(text[i:j + 1])
+                    i = j + 1
+                    break
+                j += 1
+            else:
+                i += 1
+            continue
+
+        i += 1
+    return spans
+
+
+def _inline_python_math_spans(text: str) -> List[str]:
+    return [span for span in _inline_math_spans(text) if "{python}" in span]
+
+
+LATEX_OPERATOR_AFTER_PATTERN = re.compile(
+    r"\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)"
+)
+CANONICAL_INLINE_SUFFIXES = ("_str", "_math", "_eq", "_frac")
+
+
+def _inline_python_latex_operator_warnings(text: str) -> List[str]:
+    """Refs adjacent to LaTeX operators without a canonical display suffix."""
+    refs: List[str] = []
+    for match in INLINE_EXPR_PATTERN.finditer(text):
+        after = text[match.end():]
+        if not LATEX_OPERATOR_AFTER_PATTERN.match(after):
+            continue
+        expr = match.group(1).strip()
+        name = expr.split("[", 1)[0].split("(", 1)[0].strip()
+        final = name.split(".")[-1]
+        if not final.endswith(CANONICAL_INLINE_SUFFIXES):
+            refs.append(match.group(0))
+    return refs
+
+# LATEX_ADJACENT_PATTERN checks were retired from validate_inline_refs.py along
+# with mlsysim.fmt's MarkdownStr migration. They had been guarding against
+# Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
+# mode — a bug class that no longer exists now that fmt() returns a Markdown-
+# rendering string that bypasses the escape. See mlsysim/mlsysim/fmt.py and
+# the project math rules.
 
 CITATION_REF_PATTERN = re.compile(r"@([A-Za-z0-9_:\-.]+)")
 CITATION_BRACKET_PATTERN = re.compile(r"\[-?@[A-Za-z0-9_:\-.]+(?:;\s*-?@[A-Za-z0-9_:\-.]+)*\]")
@@ -122,10 +207,25 @@ LABEL_DEF_PATTERNS = {
         re.compile(r"\{#(lst-[\w-]+)"),              # {#lst-xyz ...}
         re.compile(r"#\|\s*label:\s*(lst-[\w-]+)"),  # #| label: lst-xyz
     ],
+    # `alg-` is Quarto's native algorithm float; `algo-` is the
+    # mlsysbook-ext/pseudocode extension's prefix (native @alg- collides with
+    # Quarto's algorithm theorem env and FATALs the build, so the book uses
+    # @algo-). Accept both, including the pseudocode chunk-option label form.
+    "Algorithm": [
+        re.compile(r"\{#(algo?-[\w-]+)"),              # {#alg-xyz} / {#algo-xyz}
+        re.compile(r"#\|\s*label:\s*(algo?-[\w-]+)"),  # #| label: algo-xyz (pseudocode ext)
+    ],
 }
-LABEL_REF_PATTERN = re.compile(r"@((?:fig|tbl|sec|eq|lst)-[\w-]+)")
+LABEL_REF_PATTERN = re.compile(r"@((?:[Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lgo|[Aa]lg)-[\w-]+)")
+# Pseudocode algorithm label declared as a chunk option inside a ```pseudocode
+# fence (`#| label: algo-xyz`). Harvested even inside code fences so @algo-
+# references resolve (see _run_unreferenced_labels). Accepts alg-/algo-.
+PSEUDOCODE_LABEL_PATTERN = re.compile(r"#\|\s*label:\s*(algo?-[\w-]+)")
 
-EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-")
+EXCLUDED_CITATION_PREFIXES = (
+    "fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "algo-", "ch-", "nb-",
+    "Fig-", "Tbl-", "Sec-", "Eq-", "Lst-", "Alg-", "Algo-",
+)
 
 # Captionless float baseline: per-file counts of pre-existing violations
 # grandfathered when the caption-required / label-required scopes landed.
@@ -135,6 +235,13 @@ EXCLUDED_CITATION_PREFIXES = ("fig-", "tbl-", "sec-", "eq-", "lst-", "ch-", "nb-
 CAPTIONS_BASELINE_PATH = (
     Path(__file__).resolve().parent.parent.parent
     / "tools" / "audit" / "baselines" / "captions_baseline.json"
+)
+
+# Existing bibliography citations inside scaffolding blocks. New citations in
+# Purpose, learning objectives, or takeaways fail `refs.scaffold-citations`.
+SCAFFOLD_CITATION_BASELINE_PATH = (
+    Path(__file__).resolve().parent.parent.parent
+    / "tools" / "audit" / "baselines" / "scaffold_citation_baseline.json"
 )
 
 
@@ -180,10 +287,27 @@ class ValidateCommand:
         3. If the scope needs new flags, add them to the argparse block in
            `run()` and dispatch them in `_run_group`.
 
+    Structured fix output (REQUIRED for every ValidationIssue). The check
+    output is consumed by automated fixers via `binder check <group> --json`,
+    so each issue must be machine-fixable on its own:
+        - `file` + `line`  — exact location.
+        - `code`           — a stable snake_case identifier (never reword it;
+                             tools key on it).
+        - `suggestion`     — the EXACT fix as `"<wrong> → <right>"`. Always set
+                             it when the fix is deterministic. When it needs
+                             human judgment (e.g. a prose range), still give the
+                             best concrete form and say so in `message`; never
+                             leave callers with only "fix this".
+        - `context`        — the surrounding text so a fixer can locate the
+                             span within the line.
+    The human-readable text and `--json` both render from the same
+    ValidationIssue, so populating `suggestion` serves both.
+
     No new pre-commit hook needed. Pre-commit runs `./binder check <group>`
     and picks up the new scope automatically once it is `default=True`.
 
     Group catalogue:
+        cli        — public Binder command contract (help/error shape)
         refs       — refs / citations / cross-refs hygiene
         labels     — duplicate labels, orphaned/unreferenced labels
         headers    — section header IDs and headline-case policy
@@ -193,9 +317,9 @@ class ValidateCommand:
         markup     — low-level markup (patterns, div fences, dropcaps)
         prose      — prose style (contractions, dup words, ASCII, ...)
         punctuation — em-dash, slash, vs., e.g./i.e., en-dash ranges
-        numbers    — units / percent / binary units
+        numbers    — units / percent / binary units / currency notation
         math       — \\times spacing, attr-leaks, render-audit (manual)
-        structure  — heading levels, parts, Purpose-unnumbered
+        structure  — heading levels, H2 landings, parts, Purpose-unnumbered
         code       — python-echo, _str/_math LaTeX leak, LEGO dead code
         tables     — grid → pipe, table content
         index      — \\index{} placement, anti-patterns, tag-placement, xrefs
@@ -205,6 +329,8 @@ class ValidateCommand:
         notation   — iron-law symbol consistency (BW, R_peak, L_lat, D_vol)
         spelling   — prose + TikZ spell checks (requires aspell)
         epub       — source hygiene, smoke checks, epubcheck (built)
+        pdf        — post-build PDF cross-ref / leak scan (built artifact)
+        registry   — constants → registry migration gates
         sources    — source citation patterns
         references — bibliography vs. academic DBs (hallucinator; slow)
         content    — content tree (shared/, frontmatter/ required)
@@ -217,6 +343,13 @@ class ValidateCommand:
     # labels.orphans). default=False scopes are listed alongside their kin
     # so the file reads as a complete map of what *could* run.
     GROUPS: Dict[str, List[Scope]] = {
+        "cli": [
+            Scope("contract", "_run_cli_contract",
+                  note="public Binder command contract"),
+            Scope("binder-canonical", "_run_binder_canonical",
+                  note="book-content pre-commit hooks must dispatch through ./book/binder",
+                  default=True),
+        ],
         "refs": [
             # python-syntax: passes on dev but never wired to pre-commit historically;
             # leaving default=False to preserve current coverage exactly. Flip later
@@ -227,6 +360,8 @@ class ValidateCommand:
             Scope("inline-python", "_run_inline_python", default=False),
             Scope("cross-refs", "_run_refs"),
             Scope("citations", "_run_citations"),
+            Scope("scaffold-citations", "_run_scaffold_citations",
+                  note="no bibliography citations in Purpose, learning objectives, or takeaways; current debt baseline-ratcheted"),
             Scope("duplicate-year", "_run_duplicate_citation_year",
                   note='"[@foo1964] (1964)" — redundant year after citation'),
             Scope("duplicate-key", "_run_duplicate_citation_key",
@@ -242,6 +377,8 @@ class ValidateCommand:
             Scope("self-ref", "_run_self_referential", default=False),
             Scope("capitalized", "_run_mitpress_capitalized_refs",
                   note='"chapter 12" lowercase in prose (§10.3.2)'),
+            Scope("xref-case", "_run_xref_sentence_start_case",
+                  note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
         ],
         "labels": [
             # duplicates and orphans are both curated, but each carries its
@@ -260,14 +397,32 @@ class ValidateCommand:
             # ids: vol1 only (vol2 chapters are early-development; many
             # sections still missing IDs). YAML hook embeds --vol1.
             Scope("ids", "_run_headers"),
-            Scope("case", "_run_heading_case",
+            Scope("case", "_run_mitpress_heading_case",
                   note="MIT Press headline-case (§10.3.1)"),
         ],
         "bib": [
             Scope("hygiene", "_run_bib_hygiene"),
+            Scope("style", "_run_bib_style",
+                  note="baseline-ratcheted metadata style: title case, author initials, venues, publishers"),
+            Scope("integrity", "_run_bib_integrity",
+                  note="volume-scoped citation resolution: no missing keys or cross-volume leaks"),
+            Scope("orphans", "_run_bib_orphans", default=False,
+                  note="unused entries in volume BibTeX files; opt-in because current bibs retain legacy/canonical background"),
             # key-content fails on dev (legacy keys grandfathered).
             # Was never wired to pre-commit; default=False preserves status quo.
             Scope("key-content", "_run_bib_key_content", default=False),
+            # key-year: ERRORS-ONLY subset of key-content (key year vs entry year,
+            # >1yr gap = silent citation corruption). Gated at pre-commit; the
+            # surname WARNINGS (intentional project-name keys) stay opt-in above.
+            Scope("key-year", "_run_bib_key_year",
+                  note="key year must match entry year (errors-only; pre-commit gate)"),
+            # duplicate-keys: two entries sharing a citekey -> ambiguous citation.
+            Scope("duplicate-keys", "_run_bib_duplicate_keys",
+                  note="every citekey must be unique across the bibliography"),
+            # links: every doi/url field must resolve (MIT Press "confirm all
+            # URLs"). Network-bound -> opt-in, not a pre-commit gate.
+            Scope("links", "_run_bib_links", default=False,
+                  note="DOI/URL liveness: every locator resolves (network; opt-in)"),
         ],
         "footnotes": [
             Scope(
@@ -282,7 +437,7 @@ class ValidateCommand:
         ],
         "figures": [
             Scope("captions", "_run_figures"),
-            Scope("caption-heads", "_run_caption_head_style",
+            Scope("caption-heads", "_run_mitpress_caption_head_style",
                   note="fig-cap/tbl-cap/lst-cap use **Bold Title**: Explanation"),
             Scope("div-syntax", "_run_figure_div_syntax"),
             Scope("label-required", "_run_figure_label_required",
@@ -293,7 +448,7 @@ class ValidateCommand:
             # Re-enable when we own figure placement again.
             Scope("flow", "_run_float_flow", default=False),
             Scope("files", "_run_images"),
-            Scope("alt-text-style", "_run_alt_text_style",
+            Scope("alt-text-style", "_run_mitpress_alt_text_style",
                   note="alt-text follows body-prose rules (§10.12)"),
         ],
         # ------------------------------------------------------------------
@@ -301,7 +456,7 @@ class ValidateCommand:
         # (markup patterns, prose style, punctuation, numbers, math, etc.),
         # not by where-the-rule-came-from. A rule's provenance belongs in
         # a comment, not a command name — hence no `mitpress-` prefix on
-        # scopes. See .claude/rules/book-prose.md for style provenance.
+        # scopes. See the project prose style guide for style provenance.
         # ------------------------------------------------------------------
         "markup": [
             Scope("patterns", "_run_rendering",
@@ -310,11 +465,18 @@ class ValidateCommand:
                   note=":::/ :::: balance and form"),
             Scope("callouts", "_run_callout_structure",
                   note="supported callout types, titles, and attributes"),
+            # default=False until vol2 narrative callouts are normalized to the
+            # same schema vol1 uses; flip to True once `--scope callout-schema`
+            # is clean on dev for both volumes.
+            Scope("callout-schema", "_run_callout_schema", default=False,
+                  note="per-type bold-label structure (war-story = Context/Failure mode/Systems lesson)"),
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
-            Scope("contractions", "_run_contractions",
+            Scope("contractions", "_run_mitpress_contractions",
                   note='no "can\'t", "it\'s" in body prose'),
+            Scope("spelling-dict", "_run_mitpress_spelling_dict",
+                  note="canonical spellings (§10.7): trade-off, dataset, data center, Wi-Fi, …"),
             Scope("duplicate-words", "_run_duplicate_words"),
             Scope("unblended-prose", "_run_unblended_prose",
                   note="space after period"),
@@ -326,13 +488,14 @@ class ValidateCommand:
             Scope("ascii", "_run_ascii", default=False),
             Scope("acknowledgements", "_run_mitpress_acknowledgements",
                   note="American spelling: Acknowledgments"),
-            Scope("compound-prefix", "_run_compound_prefix",
+            Scope("compound-prefix", "_run_mitpress_compound_prefix",
                   note="pre-/non- close-up (§10.8)"),
-            Scope("concept-caps", "_run_concept_term_capitalization",
+            Scope("concept-caps", "_run_mitpress_concept_term_capitalization",
                   note="iron law, memory wall lowercase (§10.3)"),
-            # abbreviation-first-use currently noisy; default=False until tuned.
-            Scope("abbreviation-first-use", "_run_abbreviation_first_use", default=False),
-            Scope("latin-abbrevs", "_run_latin_running_text",
+            # abbreviation-first-use currently opt-in because some findings
+            # require editorial judgment.
+            Scope("abbreviation-first-use", "_run_mitpress_abbreviation_first_use", default=False),
+            Scope("latin-abbrevs", "_run_mitpress_latin_running_text",
                   note="viz./e.g./etc. in running text (§10.6)"),
         ],
         "punctuation": [
@@ -354,8 +517,19 @@ class ValidateCommand:
                   note="GB/TB not GiB/TiB"),
             Scope("percent-spacing", "_run_percent_spacing",
                   note="no space before %"),
+            Scope("percent-word-before", "_run_percent_word_before",
+                  note="digits before 'percent', not spelled-out words (5 percent not five percent)"),
             Scope("percent-in-captions", "_run_mitpress_percent_in_captions",
                   note="spell out 'percent' in captions"),
+            Scope("percent-in-tables", "_run_mitpress_percent_in_tables",
+                  note="use % symbol inside tables, not the word 'percent'"),
+            Scope("percent-in-prose", "_run_mitpress_percent_in_prose",
+                  note="spell out 'percent' in body prose, not the % symbol"),
+            Scope("currency", "_run_currency_style",
+                  note="use $ in content; USD defined once in notation"),
+            Scope("rendered-currency", "_run_rendered_currency_style",
+                  note="post-render USD/$$/raw-LaTeX currency artifacts",
+                  default=False),
         ],
         "math": [
             Scope("times-spacing", "_run_times_spacing",
@@ -364,6 +538,24 @@ class ValidateCommand:
                   note="space before $\\times$ after inline code"),
             Scope("attr-leaks", "_run_attr_latex_leaks",
                   note="LaTeX in title=/fig-cap/tbl-cap/fig-alt/tbl-alt"),
+            Scope("canonical", "_run_math_canonical",
+                  note="fmt-family + _str/_math/_eq/_frac suffix discipline (LEGO)"),
+            Scope("prose-contract", "_run_fmt_prose_contract",
+                  note="formatter-owned glyphs/units are not duplicated in prose"),
+            # Added 2026-05-26: blocklist for banned suffix= values in fmt()
+            # calls (wrong unit conventions like TFLOPS, Gbps, etc.).
+            Scope("suffix-consistency", "_run_suffix_consistency",
+                  note='banned suffix= values (TFLOPS, Gbps, etc.)'),
+            Scope("multiplier-style", "_run_math_multiplier_style",
+                  note="body-prose multiplier suffixes, Unicode ×, product spacing",
+                  default=False),
+            # Typed-formatter migration gate: value-kind (percent/multiplier/
+            # percentage-points/count-scale) must be a typed formatter, not a
+            # free-text suffix= on fmt()/fmt_int(). default=False until the
+            # corpus migration completes; flip to gate on pre-commit.
+            Scope("suffix-semantics", "_run_fmt_semantic_suffix",
+                  note="value-kind in suffix= must be a typed formatter",
+                  default=False),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -371,6 +563,8 @@ class ValidateCommand:
         "structure": [
             Scope("heading-levels", "_run_heading_levels",
                   note="H1→H2→H3 hierarchy"),
+            Scope("h2-landings", "_run_h2_landings",
+                  note="## sections need prose before ### subsections"),
             Scope("parts", "_run_parts",
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
@@ -381,9 +575,27 @@ class ValidateCommand:
                   note="echo: false on python blocks"),
             Scope("str-latex-leak", "_run_str_latex_leak",
                   note="*_str exports must not contain raw LaTeX"),
-            # Migrated 2026-05-06: was scripts/check_lego_vars.py
             Scope("lego-dead-code", "_run_lego_dead_code",
                   note="LEGO variables defined but never referenced"),
+            Scope("lego-prose-literals", "_run_lego_prose_literals",
+                  note="hardcoded numbers in callout walkthroughs that share {python} refs"),
+            Scope("lego-prose-units", "_run_lego_prose_units",
+                  note="unit/currency tokens after {python} *_str refs", default=False),
+            Scope("lego-load-pint", "_run_lego_load_pint",
+                  note="physical *_value assignments must use ureg/registry", default=False),
+            Scope("lego-equations", "_run_lego_equations",
+                  note="A/B=C prose lines must match computed values", default=False),
+            Scope("lego-units", "_run_lego_units",
+                  note="LEGO unit discipline (warning-only + baseline)", default=True),
+            # Added 2026-05-26: \\${python} collision — escaped dollar before
+            # {python} silently fails to render; correct form is \\$\\`{python}.
+            Scope("python-dollar-collision", "_run_python_dollar_collision",
+                  note="\\${python} collision — escaped dollar silently kills inline expr"),
+            # Added 2026-05-26: scan built HTML for literal {python} text that
+            # leaked through Quarto (expression failed to evaluate). Requires
+            # a prior html-audit build. Default=False (opt-in audit).
+            Scope("rendered-python-leak", "_run_rendered_python_leak",
+                  note="literal {python} leaked into rendered HTML", default=False),
         ],
         "tables": [
             Scope("grid-tables", "_run_grid_tables",
@@ -392,6 +604,12 @@ class ValidateCommand:
                   note="bare pipes, fracs, HTML entities"),
             Scope("caption-required", "_run_table_caption_required",
                   note="body-prose pipe tables need : caption {#tbl-X}"),
+            Scope("caption-position", "_run_table_caption_position",
+                  note="pipe-table captions belong below the table"),
+            Scope("caption-orphan", "_run_table_caption_orphan",
+                  note="caption between two `:::` closes breaks EPUB"),
+            Scope("caption-detached", "_run_table_caption_detached",
+                  note="prose between pipe table and its `: caption {#tbl-}` breaks xref"),
         ],
         "listings": [
             # Listings in this book always use ::: {#lst-X lst-cap="..."} divs.
@@ -405,13 +623,19 @@ class ValidateCommand:
                   note='\\index{} not inline with headings/callouts'),
             # Migrated 2026-05-06: was book/tools/audit/index/check_anti_patterns.py
             Scope("anti-patterns", "_run_index_anti_patterns",
-                  note="anti-patterns from .claude/rules/index.md §9"),
+                  note="anti-patterns from the project index rules §9"),
             # Migrated 2026-05-06: was book/tools/audit/index/check_tag_placement.py
             Scope("tag-placement", "_run_index_tag_placement",
                   note='\\index{} not inside **bold**, *italic*, `code`, or headings'),
             # Migrated 2026-05-06: was book/tools/audit/index/check_xref_resolves.py
             Scope("xref-resolves", "_run_index_xref_resolves",
                   note="every |see / |seealso target resolves to a real main entry"),
+            # Added 2026-05-17: catches \index{} inside Python code fences,
+            # $..$ / $$..$$ math, and fig-cap/fig-alt/tbl-cap/lst-cap/title=
+            # attribute strings. Complements `placement` (which checks
+            # heading/div/footnote adjacency).
+            Scope("forbidden-contexts", "_run_index_placement_contexts",
+                  note='\\index{} not inside code / math / attribute strings'),
         ],
 
         "images": [
@@ -450,6 +674,34 @@ class ValidateCommand:
             # slow (~30s per volume). CI-only.
             Scope("epubcheck", "_run_epubcheck", default=False),
         ],
+        "pdf": [
+            # Scans _build/pdf-vol*/ artifact via pdftotext. Requires
+            # --vol1 or --vol2 (or run both explicitly).
+            Scope("verify", "_run_pdf_verify"),
+            # Narrow rendered-PDF counter regression gate. Useful after
+            # chapter-only builds, where full cross-reference verification can
+            # be noisy because other chapters are intentionally absent.
+            Scope("numbering", "_run_pdf_numbering"),
+            # Narrow rendered-layout gate for table/prose crowding. Useful
+            # after chapter-only builds where `verify` can be noisy.
+            Scope("table-spacing", "_run_pdf_table_spacing"),
+            # Added 2026-05-26: scan PDF text for "UserWarning" strings that
+            # may indicate a Python warning leaked into the rendered output.
+            # Default=False — post-build audit, not a pre-commit gate.
+            Scope("pdf-warnings", "_run_pdf_warnings", default=False),
+        ],
+        "registry": [
+            Scope("sources", "_run_registry_sources",
+                  note="QMD LEGO cells: banned legacy constant/registry imports"),
+            Scope("tests", "_run_registry_tests",
+                  note="mlsysim pytest registry gate tests"),
+            Scope("appendix", "_run_registry_appendix",
+                  note="appendix LEGO cells exec against live registry"),
+            Scope("anchors", "_run_registry_anchors",
+                  note="paper anchor validation"),
+            Scope("yaml-pending", "_run_registry_yaml_pending",
+                  note="audit YAML should_change=true count must be zero"),
+        ],
         "sources": [
             Scope("citations", "_run_sources"),
         ],
@@ -459,9 +711,7 @@ class ValidateCommand:
             Scope("hallucinator", "_run_check_references", default=False),
         ],
         "content": [
-            # Currently fails on this checkout (contents/shared/ structure
-            # not present on every branch). Was never wired to pre-commit.
-            # Run on demand via --scope tree.
+            # Release-only structure check for the canonical two-volume tree.
             Scope("tree", "_run_content_tree", default=False),
         ],
     }
@@ -471,6 +721,10 @@ class ValidateCommand:
         self.chapter_discovery = chapter_discovery
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_check_help()
+            return True
+
         # Per-group help: `./binder check <group> help` prints a
         # dedicated help panel for that group, including concrete
         # error codes. This lives above argparse because `help` is
@@ -493,7 +747,7 @@ class ValidateCommand:
             "subcommand",
             nargs="?",
             choices=all_group_names,
-            help="Check group to run (refs, labels, headers, footnotes, figures, rendering, references, content, all)",
+            help="Check group to run; use `binder check` to see the live catalogue",
         )
         parser.add_argument(
             "files",
@@ -568,6 +822,10 @@ class ValidateCommand:
             action="store_true",
             help="epub --scope epubcheck: rewrite --baseline file with current counts (requires --baseline)",
         )
+        parser.add_argument(
+            "--log", dest="pdf_log", type=str, default=None,
+            help="pdf --scope verify: optional Quarto render log to scan for crossref warnings",
+        )
 
         try:
             ns = parser.parse_args(args)
@@ -577,7 +835,7 @@ class ValidateCommand:
 
         if not ns.subcommand:
             self._print_check_help()
-            return False
+            return True
 
         root_path = self._resolve_path(ns.path, ns.vol1, ns.vol2)
         if not root_path.exists():
@@ -609,7 +867,7 @@ class ValidateCommand:
         }
 
         if ns.json:
-            print(json.dumps(summary, indent=2))
+            print(json.dumps(summary, indent=2, ensure_ascii=False))
         else:
             verbose = not getattr(ns, "quiet", False)
             self._print_human_summary(summary, verbose=verbose)
@@ -700,6 +958,12 @@ class ValidateCommand:
                 ))
             elif method_name == "_run_epub_hygiene":
                 results.append(method(root, fix=getattr(ns, 'fix', False)))
+            elif method_name == "_run_pdf_verify":
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2, log_path=getattr(ns, 'pdf_log', None)))
+            elif method_name == "_run_pdf_numbering":
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2))
+            elif method_name == "_run_pdf_table_spacing":
+                results.append(method(root, vol1=ns.vol1, vol2=ns.vol2))
             else:
                 results.append(method(root))
         return results
@@ -713,6 +977,7 @@ class ValidateCommand:
 
         descriptions = {
             "refs": "References, citations, inline Python, self-ref",
+            "cli": "Public Binder command contract (help, reset, removed aliases)",
             "labels": "Duplicate labels, orphans, fig-label underscores",
             "headers": "Section header IDs ({#sec-...}), H1-H5 case policy (MIT Press §10.3.1)",
             "bib": "Bibliography hygiene — schema + canonical forms (§5)",
@@ -721,9 +986,9 @@ class ValidateCommand:
             "markup": "Low-level markup (patterns, div-fences, dropcaps)",
             "prose": "Prose style (contractions, dup words, ASCII, above/below, Acknowledgments)",
             "punctuation": "Em-dash, slash, vs. period, e.g./i.e. comma, en-dash ranges",
-            "numbers": "Units + percent spacing, binary units, percent-in-captions",
-            "math": "\\times spacing, attribute-string LaTeX leaks, optional render audit",
-            "structure": "Heading levels, parts, Purpose-unnumbered",
+            "numbers": "Units + percent spacing, binary units, percent-in-captions, currency",
+            "math": "\\times spacing, attr-leaks, fmt/suffix discipline (LEGO), multiplier prose, optional render audit",
+            "structure": "Heading levels, H2 landings, parts, Purpose-unnumbered",
             "code": "Python code blocks (echo: false, _str/_math export hygiene)",
             "tables": "Grid tables → pipe, table content hygiene, caption-required",
             "listings": "Code listings carry lst-cap when labeled",
@@ -733,6 +998,8 @@ class ValidateCommand:
             "units": "Physics engine unit conversion tests",
             "spelling": "Prose and TikZ spell checking (requires aspell)",
             "epub": "EPUB hygiene (source), epubcheck (built), structure (legacy)",
+            "pdf": "Built PDF cross-ref / LaTeX undefined-ref / traceback scan",
+            "registry": "Constants → registry migration gates (sources, tests, appendix)",
             "sources": "Source citation analysis and validation",
             "references": "Bibliography vs academic DBs (hallucinator)",
             "content": "Content tree (shared/, frontmatter/ required)",
@@ -853,7 +1120,7 @@ class ValidateCommand:
              "Same as bib-url-* above"),
             ("RSC-012",
              "Broken fragment ID",
-             "fix_cross_references.py handles this"),
+             "resolve_cross_references.py handles this"),
             ("OPF-014",
              "Missing mathml / other OPF property",
              "epub_postprocess aligns nav mathml property"),
@@ -913,7 +1180,14 @@ class ValidateCommand:
     def _qmd_files(self, root: Path) -> List[Path]:
         if root.is_file():
             return [root] if root.suffix == ".qmd" else []
-        return sorted(root.rglob("*.qmd"))
+        return sorted(
+            p for p in root.rglob("*.qmd") if "_shelved" not in p.name
+        )
+
+    def _bib_files(self, root: Path) -> List[Path]:
+        if root.is_file():
+            return [root] if root.suffix == ".bib" else []
+        return sorted(root.rglob("*.bib"))
 
     def _read_text(self, path: Path) -> str:
         try:
@@ -926,6 +1200,60 @@ class ValidateCommand:
             return str(path.relative_to(self.config_manager.book_dir))
         except ValueError:
             return str(path)
+
+    def _run_cli_contract(self, root: Path) -> ValidationRunResult:
+        """Run read-only command-surface contract checks for Binder itself."""
+        start = time.time()
+        from cli.checks import cli_contract
+
+        repo_root = Path(__file__).resolve().parents[3]
+        violations = cli_contract.run_contract(repo_root)
+        issues = [
+            ValidationIssue(
+                file=violation.file,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            )
+            for violation in violations
+        ]
+        return ValidationRunResult(
+            name="cli-contract",
+            description="Public Binder CLI command contract",
+            files_checked=len(cli_contract.CASES),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_binder_canonical(self, root: Path) -> ValidationRunResult:
+        """Assert book-content pre-commit hooks dispatch through ./book/binder."""
+        start = time.time()
+        from cli.checks import binder_canonical
+
+        repo_root = Path(__file__).resolve().parents[3]
+        violations = binder_canonical.run_canonical(repo_root)
+        issues = [
+            ValidationIssue(
+                file=violation.file,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            )
+            for violation in violations
+        ]
+        return ValidationRunResult(
+            name="binder-canonical",
+            description="Book-content hooks must route through Binder",
+            files_checked=1,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_python_syntax(self, root: Path) -> ValidationRunResult:
         """Compile every ```{python} code block to catch syntax errors."""
@@ -994,9 +1322,6 @@ class ValidateCommand:
             ("missing_backtick", re.compile(r"(?<!`)(\{python\}\s+\w+`)"), "Missing opening backtick before {python}", "error"),
             ("dollar_as_backtick", re.compile(r"\$\{python\}\s+\w+`"), "Dollar sign used instead of backtick before {python}", "error"),
             ("display_math", re.compile(r"\$\$[^$]*`?\{python\}"), "Inline Python inside $$...$$ display math", "error"),
-            # NOTE: $\times$ adjacent to inline Python is the PREFERRED convention.
-            # Only flag non-_str variables inside $...$ math (decimal stripping risk).
-            ("latex_adjacent_raw", re.compile(r"`\{python\}\s+(?!\w+_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu|le|ge|neq|pm|cdot|div)"), "Non-_str inline Python adjacent to LaTeX operator (decimal stripping risk)", "warning"),
         ]
 
         for file in files:
@@ -1023,14 +1348,24 @@ class ValidateCommand:
                             context=match.group(0)[:160],
                         ))
 
-                if LATEX_INLINE_PATTERN.search(line):
+                for ref in _inline_python_latex_operator_warnings(line):
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="latex_adjacent_raw",
+                        message="Non-canonical inline Python adjacent to LaTeX operator",
+                        severity="warning",
+                        context=ref[:160],
+                    ))
+
+                for math_span in _inline_python_math_spans(line):
                     issues.append(ValidationIssue(
                         file=self._relative_file(file),
                         line=idx,
                         code="python_in_math",
                         message="Inline Python inside $...$ math can render incorrectly",
                         severity="error",
-                        context=line.strip()[:160],
+                        context=math_span[:160],
                     ))
 
                 if GRID_TABLE_SEP_PATTERN.match(stripped):
@@ -1246,18 +1581,15 @@ class ValidateCommand:
         )
 
     def _bibliography_for_qmd(self, file: Path) -> Optional[Path]:
-        """Resolve the volume backmatter references.bib for a .qmd from its path."""
+        """Resolve the shared book references.bib for a book .qmd."""
         try:
             rel = file.relative_to(self.config_manager.book_dir)
         except ValueError:
             return None
         parts = rel.parts
-        if "vol1" in parts:
-            bib_file = self.config_manager.book_dir / "contents" / "vol1" / "backmatter" / "references.bib"
-        elif "vol2" in parts:
-            bib_file = self.config_manager.book_dir / "contents" / "vol2" / "backmatter" / "references.bib"
-        else:
+        if not ({"vol1", "vol2", "frontmatter", "backmatter"} & set(parts)):
             return None
+        bib_file = self.config_manager.book_dir / "contents" / "references.bib"
         return bib_file if bib_file.exists() else None
 
     def _run_citations(self, root: Path) -> ValidationRunResult:
@@ -1299,6 +1631,124 @@ class ValidateCommand:
         return ValidationRunResult(
             name="citations",
             description="Validate citation keys against bibliography files",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _SCAFFOLD_CITATION_KIND_RE = re.compile(
+        r"^:::+\s*\{[^}]*\.(callout-learning-objectives|callout-takeaways)\b"
+    )
+    _SCAFFOLD_DIV_OPEN_RE = re.compile(r"^:::+\s*\{")
+    _SCAFFOLD_DIV_CLOSE_RE = re.compile(r"^:::+\s*$")
+    _SCAFFOLD_PURPOSE_RE = re.compile(r"^##\s+Purpose\b")
+    _SCAFFOLD_H2_RE = re.compile(r"^##\s+")
+
+    def _load_scaffold_citation_baseline(self) -> Set[Tuple[str, str, str]]:
+        try:
+            data = json.loads(SCAFFOLD_CITATION_BASELINE_PATH.read_text(encoding="utf-8"))
+        except (FileNotFoundError, json.JSONDecodeError):
+            return set()
+        return {
+            (entry.get("file", ""), entry.get("kind", ""), entry.get("key", ""))
+            for entry in data.get("allowed", [])
+        }
+
+    @staticmethod
+    def _scaffold_citation_kind(raw_kind: str) -> str:
+        if raw_kind == "callout-learning-objectives":
+            return "learning-objectives"
+        if raw_kind == "callout-takeaways":
+            return "takeaways"
+        return raw_kind
+
+    @classmethod
+    def _is_bibliography_citation_key(cls, key: str) -> bool:
+        key = key.rstrip(".,;:)")
+        return (
+            bool(key)
+            and not key.startswith(EXCLUDED_CITATION_PREFIXES)
+            and not key.lower().startswith(EXCLUDED_CITATION_PREFIXES)
+            and not re.match(r"^\d+\.\d+", key)
+        )
+
+    def _run_scaffold_citations(self, root: Path) -> ValidationRunResult:
+        """Block new bibliography citations in pedagogical scaffolding.
+
+        Purpose sections, learning objectives, and takeaways frame the chapter;
+        they should not carry provenance. Put source support in the body prose,
+        technical callout where the claim is taught, figure/table caption, or
+        appendix prose instead.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        baseline = self._load_scaffold_citation_baseline()
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            rel = self._relative_file(file)
+            lines = self._read_text(file).splitlines()
+            in_fence = False
+            in_purpose = False
+            callout_kind: Optional[str] = None
+            callout_depth = 0
+
+            for line_no, line in enumerate(lines, start=1):
+                if self._BIB_FENCE_RE.match(line):
+                    in_fence = not in_fence
+                    continue
+                if in_fence:
+                    continue
+
+                if self._SCAFFOLD_PURPOSE_RE.match(line):
+                    in_purpose = True
+                elif in_purpose and self._SCAFFOLD_H2_RE.match(line):
+                    in_purpose = False
+
+                if callout_kind:
+                    if self._SCAFFOLD_DIV_OPEN_RE.match(line):
+                        callout_depth += 1
+                    elif self._SCAFFOLD_DIV_CLOSE_RE.match(line):
+                        callout_depth -= 1
+                        if callout_depth <= 0:
+                            callout_kind = None
+                        continue
+                else:
+                    match = self._SCAFFOLD_CITATION_KIND_RE.match(line)
+                    if match:
+                        callout_kind = self._scaffold_citation_kind(match.group(1))
+                        callout_depth = 1
+
+                kind = "purpose" if in_purpose else callout_kind
+                if not kind:
+                    continue
+
+                for key in CITATION_REF_PATTERN.findall(line):
+                    key = key.rstrip(".,;:)")
+                    if not self._is_bibliography_citation_key(key):
+                        continue
+                    if (rel, kind, key) in baseline:
+                        continue
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=line_no,
+                        code="citation_in_scaffold",
+                        message=(
+                            f"Bibliography citation @{key} appears in {kind}. "
+                            "Purpose, learning objectives, and takeaways should not carry citations."
+                        ),
+                        severity="error",
+                        context=line.strip()[:220],
+                        suggestion=(
+                            f"Move @{key} to the body prose, a technical callout/caption, "
+                            "or appendix passage where the sourced claim is actually taught; "
+                            f"leave the {kind} text citation-free."
+                        ),
+                    ))
+
+        return ValidationRunResult(
+            name="scaffold-citations",
+            description="No bibliography citations in Purpose, learning objectives, or takeaways",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -1587,7 +2037,7 @@ class ValidateCommand:
         # "word[@cite]" — no space before the cite. A parenthetical citation
         # always takes a leading space in body prose. Excludes footnote
         # markers and reference labels.
-        no_space_before_bracket = re.compile(r"[a-zA-Z]\[@(?!sec-|fig-|tbl-|eq-|lst-|exr-|exm-|thm-|cor-|cnj-|def-|prp-|rem-|prf-|alg-)[A-Za-z]")
+        no_space_before_bracket = re.compile(r"[a-zA-Z]\[@(?![Ss]ec-|[Ff]ig-|[Tt]bl-|[Ee]q-|[Ll]st-|exr-|exm-|thm-|cor-|cnj-|def-|prp-|rem-|prf-|alg-)[A-Za-z]")
         # "[@a, @b]" — comma-separated multi-cite. Pandoc's citation syntax
         # requires semicolons: "[@a; @b]".
         comma_multicite = re.compile(r"\[@[A-Za-z][\w:.-]+,\s*@[A-Za-z]")
@@ -1636,7 +2086,7 @@ class ValidateCommand:
         # (@sec-, @fig-, etc.) so those are not mistaken for bibkeys.
         bracket_cite = re.compile(r"\[@[A-Za-z]")
         narrative_cite = re.compile(
-            r"@(?!sec-|fig-|tbl-|eq-|lst-|exr-|exm-|thm-|cor-|cnj-|"
+            r"@(?![Ss]ec-|[Ff]ig-|[Tt]bl-|[Ee]q-|[Ll]st-|exr-|exm-|thm-|cor-|cnj-|"
             r"def-|prp-|rem-|prf-|alg-)[A-Za-z][\w:-]*"
         )
 
@@ -2077,7 +2527,51 @@ class ValidateCommand:
 
         for file in files:
             lines = self._read_text(file).splitlines()
+            in_code_block = False
+            in_html_comment = False
             for idx, line in enumerate(lines, 1):
+                # Skip three forms of non-rendered content:
+                #   1. Fenced code blocks (```...```). `@xref` mentions in
+                #      Python cell box-comment headers (`# │ Context: @sec-foo`)
+                #      are documentation that never renders. Counting them as
+                #      references produces false-positive unresolved-reference
+                #      errors for refs that target intentional documentation.
+                #   2. HTML comments (`<!-- ... -->`). Commented-out tikz
+                #      examples often contain ``` fence-looking lines, which
+                #      desynchronize the naive in_code_block toggle if not
+                #      tracked separately. Track comment state explicitly.
+                #   3. Labels themselves are never defined inside fences or
+                #      HTML comments, so skipping the whole region is safe.
+                stripped = line.lstrip()
+
+                # Update HTML-comment state first — comment markers may sit
+                # on the same line as content (rare) or span many lines.
+                if not in_code_block:
+                    if "<!--" in line and "-->" not in line[line.index("<!--"):]:
+                        in_html_comment = True
+                        continue
+                    if in_html_comment:
+                        if "-->" in line:
+                            in_html_comment = False
+                        continue
+
+                # Pseudocode algorithm labels are declared as a chunk option
+                # (`#| label: algo-xyz`) INSIDE a ```pseudocode fence, so the
+                # code-block skip below would hide them and leave every
+                # @algo-/@Algo- reference unresolved. A chunk-option label is a
+                # genuine definition wherever it lives, so harvest it before the
+                # skip. (mlsysbook-ext/pseudocode; native @alg- collides with
+                # Quarto's algorithm theorem env, hence the algo- prefix.)
+                algo_def = PSEUDOCODE_LABEL_PATTERN.match(stripped)
+                if algo_def:
+                    defined.setdefault(algo_def.group(1), (file, idx, "Algorithm"))
+
+                if stripped.startswith("```"):
+                    in_code_block = not in_code_block
+                    continue
+                if in_code_block:
+                    continue
+
                 for label_type, patterns in label_types.items():
                     for pattern in patterns:
                         for match in pattern.finditer(line):
@@ -2085,6 +2579,8 @@ class ValidateCommand:
 
                 for match in LABEL_REF_PATTERN.finditer(line):
                     label = match.group(1)
+                    # Normalize capitalized Quarto prefix (@Fig- -> fig-)
+                    label = label[0].lower() + label[1:]
                     references.setdefault(label, []).append((file, idx))
 
         # unreferenced definitions (skip section defaults, consistent with legacy behavior)
@@ -2131,7 +2627,6 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         yaml_option_inline = re.compile(r"^#\|\s*(fig-cap|tbl-cap|lst-cap|fig-alt):\s*.*`\{python\}")
-        caption_syntax_inline = re.compile(r"^:\s+.*`\{python\}.*\{#(tbl|fig|lst)-")
         inline_fstring = re.compile(r"`\{python\}\s*f\"[^`]+`")
         inline_func_call = re.compile(r"`\{python\}\s*\w+\([^`]+\)`")
 
@@ -2184,24 +2679,6 @@ class ValidateCommand:
                 in_grid = False
                 for idx, line in enumerate(lines, 1):
                     stripped = line.strip()
-                    if LATEX_INLINE_PATTERN.search(line):
-                        issues.append(ValidationIssue(
-                            file=self._relative_file(file),
-                            line=idx,
-                            code="latex_math_inline_python",
-                            message="Inline Python inside LaTeX math can strip decimals",
-                            severity="warning",
-                            context=stripped[:160],
-                        ))
-                    if LATEX_ADJACENT_PATTERN.search(line):
-                        issues.append(ValidationIssue(
-                            file=self._relative_file(file),
-                            line=idx,
-                            code="latex_adjacent_inline_python",
-                            message="Inline Python adjacent to LaTeX operator is fragile",
-                            severity="warning",
-                            context=stripped[:160],
-                        ))
                     if GRID_TABLE_SEP_PATTERN.match(stripped):
                         in_grid = True
                     elif in_grid and stripped and not stripped.startswith("|"):
@@ -2242,16 +2719,6 @@ class ValidateCommand:
                             severity="error",
                             context=stripped[:160],
                         ))
-                    if caption_syntax_inline.search(line):
-                        issues.append(ValidationIssue(
-                            file=self._relative_file(file),
-                            line=idx,
-                            code="caption_inline_python",
-                            message="Inline Python in caption syntax will not render",
-                            severity="error",
-                            context=stripped[:160],
-                        ))
-
             if check_scope:
                 from book.tools.scripts.maintenance.validate_inline_refs import check_scope as _check_scope, BOOK_ROOT
                 try:
@@ -2372,7 +2839,9 @@ class ValidateCommand:
         issues: List[ValidationIssue] = []
 
         fn_pat = re.compile(r"\[\^fn-[\w-]+\]")
+        fn_def_pat = re.compile(r"^\[\^(fn-[\w-]+)\]:")
         inline_fn_pat = re.compile(r"\^\[[^\]]+\]")
+        list_item_pat = re.compile(r"^(?P<indent>\s*)(?P<marker>(?:[-+*]|\d+[.)]))\s+")
         table_sep_pat = re.compile(r"^\|[\s\-:+]+\|")
         # Citation-then-footnote: visually anchors the footnote to the
         # bibliographic reference instead of the concept term. \s*
@@ -2387,6 +2856,46 @@ class ValidateCommand:
             div_depth = 0
             div_start_line = 0
 
+            def previous_list_item(line_index: int) -> Optional[Tuple[int, int]]:
+                """Return (line, indent) for the list item immediately before a block."""
+                for prev_index in range(line_index - 1, -1, -1):
+                    prev_line = lines[prev_index]
+                    prev_stripped = prev_line.strip()
+                    if not prev_stripped:
+                        continue
+                    if fn_def_pat.match(prev_stripped):
+                        return None
+                    if (
+                        prev_stripped.startswith("#")
+                        or prev_stripped.startswith(":::")
+                        or prev_stripped.startswith("```")
+                        or prev_stripped.startswith("|")
+                    ):
+                        return None
+                    marker = list_item_pat.match(prev_line)
+                    if marker:
+                        return prev_index + 1, len(marker.group("indent"))
+                    if not prev_line.startswith((" ", "\t")):
+                        return None
+                return None
+
+            def next_list_item_after_footnote(line_index: int) -> Optional[Tuple[int, int]]:
+                """Return (line, indent) when a later list item follows before prose."""
+                for next_index in range(line_index + 1, len(lines)):
+                    next_line = lines[next_index]
+                    next_stripped = next_line.strip()
+                    if not next_stripped:
+                        continue
+                    if fn_def_pat.match(next_stripped):
+                        continue
+                    marker = list_item_pat.match(next_line)
+                    if marker:
+                        return next_index + 1, len(marker.group("indent"))
+                    if next_line.startswith((" ", "\t")):
+                        continue
+                    return None
+                return None
+
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
 
@@ -2400,6 +2909,27 @@ class ValidateCommand:
                         div_depth -= 1
                         if div_depth == 0:
                             div_start_line = 0
+
+                fn_def = fn_def_pat.match(stripped)
+                if fn_def:
+                    prev_list = previous_list_item(idx - 1)
+                    next_list = next_list_item_after_footnote(idx - 1)
+                    if prev_list and next_list:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_def_interrupts_list",
+                                message=(
+                                    f"Footnote definition [^{fn_def.group(1)}]: appears between "
+                                    f"list items (previous item line {prev_list[0]}, next item "
+                                    f"line {next_list[0]}). Move the definition after the complete "
+                                    f"Markdown list so Pandoc preserves the list structure."
+                                ),
+                                severity="error",
+                                context=stripped[:80],
+                            )
+                        )
 
                 # Check inline footnotes (always forbidden)
                 for m in inline_fn_pat.finditer(line):
@@ -2652,7 +3182,7 @@ class ValidateCommand:
         r"""^\*\*(?P<head>[^*\n]+)\*\*(?P<index>(?:\\index\{[^}\n]+\})*):\s+(?P<body>\S.*)$"""
     )
 
-    def _run_caption_head_style(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_caption_head_style(self, root: Path) -> ValidationRunResult:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
@@ -2966,12 +3496,17 @@ class ValidateCommand:
             yield idx, line, ("callout" in div_stack), False, "prose"
 
     def _run_table_caption_required(self, root: Path) -> ValidationRunResult:
-        """Flag pipe tables in body prose that lack `: caption {#tbl-X}`.
+        """Flag pipe tables (body prose AND inside callouts) lacking `: caption {#tbl-X}`.
 
-        Skips tables inside `::: {.callout-*}` divs (the callout title acts
-        as the contextual heading) and files under frontmatter/ or
-        backmatter/. Pre-existing violations are grandfathered via the
-        captions baseline; new ones error.
+        Per the policy codified after the 2026-05 release pass: every pipe
+        table that carries quantitative content needs a caption + ID,
+        regardless of whether it sits in body prose, inside a callout, or
+        inside a `{tbl-colwidths=...}` div. The MIT Press / H&P / CS:APP
+        convention is universal captioning.
+
+        Skips files under frontmatter/. Pre-existing violations (including
+        the ~93 captionless tables surfaced when this rule was extended)
+        are grandfathered via the captions baseline; new ones error.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -2992,9 +3527,11 @@ class ValidateCommand:
                 if kind != "prose":
                     i += 1
                     continue
-                if cal:
-                    i += 1
-                    continue
+                # NOTE: We used to skip tables inside ::: {.callout-*} divs
+                # ("the callout title acts as the contextual heading"). That
+                # exception was retired after the 2026-05 release pass — the
+                # callout title is not a citable reference, and tables that
+                # carry quantitative content need IDs in any context.
                 if (self._PIPE_ROW_RE.match(line)
                         and i + 1 < n
                         and self._PIPE_SEP_RE.match(lines[i + 1])):
@@ -3002,10 +3539,10 @@ class ValidateCommand:
                     j = i + 2
                     while j < n and self._PIPE_ROW_RE.match(lines[j]):
                         j += 1
-                    # Quarto pipe-table captions can sit on EITHER side of
-                    # the table: a `: caption {#tbl-X}` line up to ~3 non-
-                    # blank lines BEFORE the header row, or up to ~5 non-
-                    # blank lines AFTER the last data row. Look at both.
+                    # `caption-required` is intentionally permissive so it
+                    # can distinguish missing captions from misplaced ones.
+                    # `caption-position` below enforces the book convention:
+                    # pipe-table captions belong after the table body.
                     after: List[str] = []
                     k = j
                     while k < n and len(after) < 5:
@@ -3072,11 +3609,291 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _caption_is_after_pipe_table(
+        self,
+        lines: List[str],
+        caption_idx: int,
+    ) -> bool:
+        """Return True when a caption is already attached below a pipe table."""
+        j = caption_idx - 1
+        while j >= 0:
+            stripped = lines[j].strip()
+            if not stripped or stripped.startswith("\\index{"):
+                j -= 1
+                continue
+            # A caption may sit just after a closing div fence when a legacy
+            # colwidths wrapper is involved.
+            if stripped.startswith(":::"):
+                j -= 1
+                continue
+            return self._PIPE_ROW_LOOSE_RE.match(lines[j]) is not None
+        return False
+
+    def _pipe_table_start_after_caption(
+        self,
+        lines: List[str],
+        caption_idx: int,
+    ) -> Optional[int]:
+        """Return 0-indexed pipe-table header line after a top caption."""
+        j = caption_idx + 1
+        limit = min(len(lines), caption_idx + 8)
+        while j < limit:
+            stripped = lines[j].strip()
+            if not stripped:
+                j += 1
+                continue
+            # Allow a wrapper fence between a misplaced caption and table.
+            if stripped.startswith(":::"):
+                j += 1
+                continue
+            if (
+                self._PIPE_ROW_RE.match(lines[j])
+                and j + 1 < len(lines)
+                and self._PIPE_SEP_RE.match(lines[j + 1])
+            ):
+                return j
+            return None
+        return None
+
+    def _run_table_caption_position(self, root: Path) -> ValidationRunResult:
+        """Flag pipe-table captions placed before the table body.
+
+        MLSysBook convention is the Pandoc/Quarto pipe-table form:
+
+            | **Column** | **Column** |
+            |:-----------|:-----------|
+            | value      | value      |
+
+            : **Caption**: Explanation. {#tbl-id}
+
+        A caption placed above the pipe table still looks plausible in source,
+        but it is inconsistent with the corpus convention and makes later
+        table-moving/layout tooling ambiguous.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        for file in files:
+            # Frontmatter is allowed to contain non-book scaffolding; all book
+            # body/backmatter pipe tables use the same caption placement.
+            if "/frontmatter/" in str(file).replace("\\", "/"):
+                continue
+            lines = self._read_text(file).splitlines()
+            state = list(self._captions_iter_body_lines(lines))
+            meta = {idx: kind for idx, _, _, _, kind in state}
+            for i, line in enumerate(lines):
+                idx = i + 1
+                if meta.get(idx) != "prose":
+                    continue
+                if not self._TBL_CAP_LABELED_RE.match(line):
+                    continue
+                if self._caption_is_after_pipe_table(lines, i):
+                    continue
+                table_start = self._pipe_table_start_after_caption(lines, i)
+                if table_start is None:
+                    continue
+                raw_issues.append(ValidationIssue(
+                    file=self._relative_file(file),
+                    line=idx,
+                    code="table_caption_before_pipe_table",
+                    message=(
+                        "Pipe-table caption appears before the table "
+                        f"(table header starts at line {table_start + 1}). "
+                        "Move the caption below the final table row."
+                    ),
+                    severity="error",
+                    context=line.strip()[:120],
+                    suggestion=(
+                        "Use the canonical order: pipe table first, then "
+                        "`: **Title**: explanation. {#tbl-id}`."
+                    ),
+                ))
+        return ValidationRunResult(
+            name="table-caption-position",
+            description="Pipe-table captions must appear below the table body",
+            files_checked=len(files),
+            issues=raw_issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _CAPTION_ORPHAN_RE = re.compile(r"^\s*:\s+.*\{#tbl-[A-Za-z0-9_-]+[\s}]")
+    _CAPTION_CLOSE_FENCE_RE = re.compile(r"^\s*:{3,}\s*$")
+
+    def _run_table_caption_orphan(self, root: Path) -> ValidationRunResult:
+        """Flag `: caption {#tbl-...}` lines sandwiched between two `:::` close fences.
+
+        The pattern that broke vol1 EPUB on 2026-05-18 (commit 54ca22d7d7):
+
+            ::: {.content-visible when-format="html"}
+            ::: {tbl-colwidths="..."}
+
+            | row | row |
+
+            :::                              ← inner close
+
+            : **Caption**: ... {#tbl-foo}    ← orphan caption
+
+            :::                              ← outer close
+
+        Pandoc's EPUB writer cannot bind a caption across the inner-close
+        fence; the label never registers, `@tbl-` xrefs go unresolved, and
+        epubcheck reports ERRORs. PDF is unaffected because the PDF block
+        uses raw LaTeX `tabular`.
+
+        Safe form: move `tbl-colwidths` onto the caption attribute and drop
+        the inner nested div.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        in_code = False
+        in_raw = False
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_raw = False
+            n = len(lines)
+            for i, line in enumerate(lines):
+                # Toggle code-fence state.
+                if re.match(r"^\s*(```+|~~~+)", line):
+                    if re.match(r"^\s*```\s*\{\.?tikz|^\s*```\s*\{=latex\}", line):
+                        in_raw = not in_raw
+                    else:
+                        in_code = not in_code
+                    continue
+                if in_code or in_raw:
+                    continue
+                if not self._CAPTION_ORPHAN_RE.match(line):
+                    continue
+                # Walk backward to closest non-blank.
+                prev_idx = None
+                j = i - 1
+                while j >= 0:
+                    if lines[j].strip():
+                        prev_idx = j
+                        break
+                    j -= 1
+                # Walk forward to closest non-blank.
+                next_idx = None
+                k = i + 1
+                while k < n:
+                    if lines[k].strip():
+                        next_idx = k
+                        break
+                    k += 1
+                if prev_idx is None or next_idx is None:
+                    continue
+                prev_is_close = self._CAPTION_CLOSE_FENCE_RE.match(lines[prev_idx]) is not None
+                next_is_close = self._CAPTION_CLOSE_FENCE_RE.match(lines[next_idx]) is not None
+                if prev_is_close and next_is_close:
+                    raw_issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=i + 1,
+                        code="table_caption_orphan",
+                        message=(
+                            "Caption is sandwiched between two `:::` close "
+                            f"fences (prev close at line {prev_idx + 1}, "
+                            f"next close at line {next_idx + 1}). Pandoc's "
+                            "EPUB writer will orphan the caption and "
+                            "@tbl- refs will go unresolved. Move "
+                            "`tbl-colwidths` onto the caption attribute "
+                            "and drop the inner nested div."
+                        ),
+                        severity="error",
+                        context=line.strip()[:120],
+                    ))
+        return ValidationRunResult(
+            name="table-caption-orphan",
+            description=(
+                "Captions must not sit between two `:::` close fences "
+                "(EPUB build integrity)"
+            ),
+            files_checked=len(files),
+            issues=raw_issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    _TABLE_CAPTION_RE = re.compile(
+        r"^:\s+\*?\*?.*\{#tbl-[\w-]+",
+    )
+    _PIPE_ROW_LOOSE_RE = re.compile(r"^\s*\|.+\|")
+
+    def _run_table_caption_detached(self, root: Path) -> ValidationRunResult:
+        """Flag pipe tables whose `: caption {#tbl-}` is separated by prose.
+
+        Quarto only binds a pipe-table caption to the table when the
+        `: Caption {#tbl-X}` line is the first non-blank line after the
+        last data row.  Intervening prose breaks the binding and the
+        cross-reference renders as ``?@tbl-X`` in the PDF.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            n = len(lines)
+            in_code = False
+            i = 0
+            while i < n:
+                line = lines[i]
+                if re.match(r"^\s*```", line):
+                    in_code = not in_code
+                    i += 1
+                    continue
+                if in_code:
+                    i += 1
+                    continue
+                if (self._PIPE_ROW_RE.match(line)
+                        and i + 1 < n
+                        and self._PIPE_SEP_RE.match(lines[i + 1])):
+                    j = i + 2
+                    while j < n and self._PIPE_ROW_LOOSE_RE.match(lines[j]):
+                        j += 1
+                    table_end = j - 1
+                    k = j
+                    while k < n and not lines[k].strip():
+                        k += 1
+                    if k < n and self._TABLE_CAPTION_RE.match(lines[k]):
+                        i = k + 1
+                        continue
+                    cap_k = k
+                    while cap_k < n and cap_k < j + 8:
+                        if self._TABLE_CAPTION_RE.match(lines[cap_k]):
+                            raw_issues.append(ValidationIssue(
+                                file=self._relative_file(file),
+                                line=cap_k + 1,
+                                code="table_caption_detached",
+                                message=(
+                                    f"Caption with #tbl- label is separated "
+                                    f"from its pipe table (table ends line "
+                                    f"{table_end + 1}) by intervening prose. "
+                                    f"Move the caption immediately after the "
+                                    f"table or merge the prose into the caption."
+                                ),
+                                severity="error",
+                                context=lines[cap_k].strip()[:120],
+                            ))
+                            break
+                        cap_k += 1
+                    i = max(j, cap_k + 1)
+                else:
+                    i += 1
+        return ValidationRunResult(
+            name="table-caption-detached",
+            description=(
+                "Pipe-table captions must immediately follow the table "
+                "(no intervening prose)"
+            ),
+            files_checked=len(files),
+            issues=raw_issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     _FIG_DIV_OPEN_RE = re.compile(r"^:::+\s*\{[^}]*#fig-[\w-]+")
     # Chapter-opener cover images are decorative and not cross-referenced
     # by convention. They carry fig-alt for accessibility but no #fig-
     # label. Skip them in the label-required check.
-    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif)")
+    _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif|webp)")
 
     def _run_figure_label_required(self, root: Path) -> ValidationRunResult:
         """Flag `![](...)` markdown image figures with no `{#fig-X}` label.
@@ -3114,13 +3931,18 @@ class ValidateCommand:
                     div_stack.append("fig")
                     continue
                 if self._CAPTIONS_DIV_OPEN_RE.match(stripped):
-                    div_stack.append("other")
+                    # Unnumbered margin illustrations live in `.column-margin`
+                    # divs and are intentionally label-free marginalia
+                    # (figure-margin.md §1/§8): no `{#fig-X}`, never referenced
+                    # via `@fig-`. Tag them so their images are not flagged.
+                    kind = "margin" if ".column-margin" in stripped else "other"
+                    div_stack.append(kind)
                     continue
                 if self._CAPTIONS_DIV_CLOSE_RE.match(stripped):
                     if div_stack:
                         div_stack.pop()
                     continue
-                if "callout" in div_stack or "fig" in div_stack:
+                if "callout" in div_stack or "fig" in div_stack or "margin" in div_stack:
                     continue
                 if not self._MD_IMAGE_ANY_RE.search(line):
                     continue
@@ -3268,7 +4090,7 @@ class ValidateCommand:
         div_def_pat = re.compile(r":::\s*\{[^}]*#((?:fig|tbl)-[\w-]+)")
         img_def_pat = re.compile(r"!\[.*?\]\(.*?\)\s*\{[^}]*#((?:fig|tbl)-[\w-]+)")
         tbl_cap_pat = re.compile(r"^:\s+.*\{[^}]*#((?:fig|tbl)-[\w-]+)")
-        ref_pat = re.compile(r"@((?:fig|tbl)-[\w-]+)")
+        ref_pat = re.compile(r"@((?:fig|tbl)-[\w-]+)", re.IGNORECASE)
 
         for file in files:
             lines = self._read_text(file).splitlines()
@@ -3327,6 +4149,7 @@ class ValidateCommand:
                     continue
                 for m in ref_pat.finditer(line):
                     label = m.group(1)
+                    label = label.split("-", 1)[0].lower() + "-" + label.split("-", 1)[1]
                     if in_float and label == float_label:
                         continue
                     refs[label].append(idx)
@@ -3485,12 +4308,12 @@ class ValidateCommand:
         lowercase_x_mult_pat = re.compile(
             r"""`x\s+[a-z]"""    # `...`x word  (after inline python)
             r"""|"""
-            r"""\dx\s+[a-z]"""   # Nx word  (digit then x then lowercase)
+            r"""(?<![A-Z])\dx\s+[a-z]"""   # Nx word — but not after uppercase (excludes MI300X, H100x, etc.)
         )
         # Hex literal pattern to exclude matches like 0x61, 0xff
         hex_literal_pat = re.compile(r"0x[0-9a-fA-F]")
         # Cross-reference ID pattern: @tbl-foo300x, @fig-bar2x, @sec-baz1x — these are labels not multiplication
-        xref_id_pat = re.compile(r"@(?:tbl|fig|sec|eq|lst)-[a-z0-9_-]+x\b")
+        xref_id_pat = re.compile(r"@(?:tbl|fig|sec|eq|lst)-[a-z0-9_-]+x\b", re.IGNORECASE)
         # Quarto attribute blocks can contain IDs such as
         # {#tbl-assumptions-mi300x tbl-colwidths="[...]"}; those are
         # identifiers, not prose multiplication.
@@ -3531,11 +4354,9 @@ class ValidateCommand:
                         )
                     )
 
-                # Python inside $...$ math
-                for m in math_span_pat.finditer(line):
-                    inner = m.group(1)
-                    if "{python}" not in inner:
-                        continue
+                # Python inside $...$ or \(...\) math
+                for math_span in _inline_python_math_spans(line):
+                    inner = math_span[2:-2] if math_span.startswith(r"\(") else math_span[1:-1]
                     inner_clean = re.sub(r"\^\{[^}]*`\{python\}[^`]*`[^}]*\}", "", inner)
                     if "{python}" in inner_clean:
                         issues.append(
@@ -3545,7 +4366,7 @@ class ValidateCommand:
                                 code="python_in_dollar_math",
                                 message="Inline Python inside $...$ math block",
                                 severity="error",
-                                context=m.group(0)[:120],
+                                context=math_span[:120],
                             )
                         )
 
@@ -3951,6 +4772,121 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
+    # H2 landing prose  (detect ## followed immediately by ###)
+    # ------------------------------------------------------------------
+
+    def _run_h2_landings(self, root: Path) -> ValidationRunResult:
+        """Require H2 sections to orient readers before H3 subsections.
+
+        This catches the common source-shape problem:
+
+            ## Section
+            ### First subsection
+
+        Index markers and blank lines do not count as prose. A line that starts
+        with one or more ``\\index{...}`` markers and then continues with text
+        does count as prose, matching common chapter style.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        h2_pat = re.compile(r"^##\s+")
+        h3_pat = re.compile(r"^###\s+")
+        code_fence = re.compile(r"^```")
+        yaml_fence = re.compile(r"^---\s*$")
+        div_open_pat = re.compile(r"^(:{3,})\s*\{")
+        div_close_pat = re.compile(r"^(:{3,})\s*$")
+        index_prefix_pat = re.compile(r"^(?:\\index\{[^}]*\}\s*)+")
+
+        def visible_content(stripped: str) -> str:
+            """Return reader-visible content after ignorable leading markers."""
+            if not stripped or stripped.startswith("<!--"):
+                return ""
+            without_index = index_prefix_pat.sub("", stripped).strip()
+            return without_index
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_yaml = False
+            div_depth = 0
+
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+
+                if idx == 1 and yaml_fence.match(line):
+                    in_yaml = True
+                    continue
+                if in_yaml:
+                    if yaml_fence.match(line):
+                        in_yaml = False
+                    continue
+
+                if code_fence.match(stripped):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+
+                if div_open_pat.match(stripped):
+                    div_depth += 1
+                    continue
+                if div_close_pat.match(stripped) and div_depth > 0:
+                    div_depth -= 1
+                    continue
+                if div_depth > 0:
+                    continue
+
+                if not h2_pat.match(line) or line.startswith("###"):
+                    continue
+
+                first_line = None
+                first_text = ""
+                look = idx
+                while look < len(lines):
+                    candidate = visible_content(lines[look].strip())
+                    look += 1
+                    if not candidate:
+                        continue
+                    first_line = look
+                    first_text = candidate
+                    break
+
+                if first_line is None or not h3_pat.match(first_text):
+                    continue
+
+                heading_text = line.lstrip("#").strip()
+                if "{" in heading_text:
+                    heading_text = heading_text[: heading_text.index("{")].strip()
+                subsection_text = first_text.lstrip("#").strip()
+                if "{" in subsection_text:
+                    subsection_text = subsection_text[: subsection_text.index("{")].strip()
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="h2_missing_landing",
+                        message=(
+                            "H2 section drops directly into an H3 subsection "
+                            "without intervening prose"
+                        ),
+                        severity="error",
+                        context=(
+                            f"{heading_text[:60]} → {subsection_text[:60]}"
+                        ),
+                    )
+                )
+
+        return ValidationRunResult(
+            name="h2-landings",
+            description="Detect H2 sections that drop directly into H3 subsections",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
     # Duplicate consecutive words  (detect "the the", "is is", etc.)
     # ------------------------------------------------------------------
 
@@ -4299,6 +5235,20 @@ class ValidateCommand:
 
     PERCENT_SPACING_PATTERN = re.compile(r"`[^`]*`\s+%")
 
+    # Spelled-out number words immediately before "percent" — digits required per
+    # numbers-and-math-in-prose.md §Percent ("percent" acts as a unit; always digits).
+    # Covers one–one hundred, including common compounds (twenty-five, etc.).
+    _PERCENT_WORD_NUMS = (
+        r"\b(?:one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|thirteen|"
+        r"fourteen|fifteen|sixteen|seventeen|eighteen|nineteen|twenty|"
+        r"twenty-one|twenty-two|twenty-three|twenty-four|twenty-five|"
+        r"twenty-six|twenty-seven|twenty-eight|twenty-nine|"
+        r"thirty|forty|fifty|sixty|seventy|eighty|ninety|"
+        r"thirty-\w+|forty-\w+|fifty-\w+|sixty-\w+|seventy-\w+|eighty-\w+|ninety-\w+|"
+        r"one hundred)\s+percent\b"
+    )
+    PERCENT_WORD_BEFORE_PATTERN = re.compile(_PERCENT_WORD_NUMS, re.IGNORECASE)
+
     def _run_percent_spacing(self, root: Path) -> ValidationRunResult:
         """Flag space between inline expression and % (e.g. `{python} x` % → use `{python} x`%)."""
         start = time.time()
@@ -4331,6 +5281,154 @@ class ValidateCommand:
         return ValidationRunResult(
             name="percent-spacing",
             description="No space between inline value and % in QMD prose",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_percent_word_before(self, root: Path) -> ValidationRunResult:
+        """Flag spelled-out number words before 'percent' (e.g. 'five percent' → '5 percent').
+
+        MIT Press rule: 'percent' acts as a unit; always use digits with units regardless
+        of value (numbers-and-math-in-prose.md §Percent). 'five percent' is wrong;
+        '5 percent' is correct.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                for m in self.PERCENT_WORD_BEFORE_PATTERN.finditer(line):
+                    context = line[max(0, m.start() - 10) : min(len(line), m.end() + 20)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="percent_word_before",
+                            message=f"Use digit before 'percent', not spelled-out word: '{m.group().strip()}' → replace with digit form",
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="percent-word-before",
+            description="Digits required before 'percent' (percent acts as a unit)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_percent_in_tables(self, root: Path) -> ValidationRunResult:
+        """Flag the spelled-out word 'percent' used as a unit inside pipe tables.
+
+        House style inverts between prose and tables. In prose and captions,
+        'percent' is spelled out (the % symbol is banned — see
+        `_run_mitpress_percent_in_captions`). In TABLES, cells are dense
+        tabular data and the conventional form is the % symbol: '86.4%', not
+        '86.4 percent'.
+
+        Detection lives in ``cli.checks.percent_tables`` — the same module the
+        ``format percent-tables`` auto-fixer imports — so the check and the
+        fixer cannot drift. Header labels with no leading number and
+        'percentage points / pp' are never flagged; captions (prose) keep the
+        spelled-out word.
+
+        Auto-fixable: ``./book/binder format percent-tables``.
+        """
+        from cli.checks.percent_tables import find_in_text
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            for hit in find_in_text(self._read_text(file)):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="percent_in_table",
+                        message=(
+                            "Use the % symbol, not the word 'percent', inside "
+                            f"tables: '{hit.match}' → '{hit.replacement}'. Run "
+                            "'./book/binder format percent-tables' to auto-fix."
+                        ),
+                        severity="error",
+                        context=hit.context,
+                        suggestion=f"{hit.match} → {hit.replacement}",
+                    )
+                )
+
+        return ValidationRunResult(
+            name="percent-in-tables",
+            description="Tables use the % symbol, not the word 'percent' (prose keeps the word)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_percent_in_prose(self, root: Path) -> ValidationRunResult:
+        """Flag the % symbol where body prose should spell out 'percent'.
+
+        Symmetric inverse of ``_run_mitpress_percent_in_tables``. Per MIT Press
+        ``AU_QUERY_RESPONSES.md`` Category H (aligned with Chicago §9.18),
+        running prose spells out 'percent'; the % symbol is reserved for
+        tables, equations, code, and labels inside figures.
+
+        Detection lives in ``cli.checks.percent_prose`` and exempts every
+        legitimate non-prose context: code, math, attributes, link/image
+        targets, ``<style>`` CSS, HTML comments, caption / alt-text lines,
+        table rows, and quoted material (a `%` inside double quotes is a
+        verbatim quotation). Ranges need prose judgment ('30 to 50 percent'),
+        so there is no auto-fixer — fix flagged lines by hand.
+        """
+        from cli.checks.percent_prose import find_prose_percent
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            for hit in find_prose_percent(self._read_text(file)):
+                if hit.is_range:
+                    msg = (
+                        f"Spell out 'percent' in body prose: '{hit.match}' is "
+                        "part of a range — rewrite the whole range as "
+                        "'X to Y percent' (e.g. '30 to 50 percent')."
+                    )
+                    suggestion = f"{hit.match} → (range) X to Y percent"
+                else:
+                    msg = (
+                        "Spell out 'percent' in body prose, not the % symbol: "
+                        f"'{hit.match}' → '{hit.replacement}'. (% stays in "
+                        "tables, equations, code, and figures.)"
+                    )
+                    suggestion = f"{hit.match} → {hit.replacement}"
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="percent_in_prose",
+                        message=msg,
+                        severity="error",
+                        context=hit.context,
+                        suggestion=suggestion,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="percent-in-prose",
+            description="Body prose spells out 'percent'; % only in tables/equations/code/figures",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -4426,18 +5524,119 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_currency_style(self, root: Path) -> ValidationRunResult:
+        """Flag literal USD outside the single notation definition."""
+        from cli.checks.currency_style import audit, iter_target_files
+
+        start = time.time()
+        target_files = iter_target_files([root])
+        violations = audit([root])
+
+        issues: List[ValidationIssue] = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = violation.file
+            issues.append(
+                ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.message,
+                    severity="error",
+                    context=violation.context,
+                    suggestion=violation.suggestion,
+                )
+            )
+
+        return ValidationRunResult(
+            name="currency",
+            description="Use $ in content; define USD once in notation",
+            files_checked=len(target_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_rendered_currency_style(self, root: Path) -> ValidationRunResult:
+        """Scan cached rendered HTML for visible currency/math artifacts."""
+        from cli.checks.currency_style import audit_rendered_html, iter_html_files
+
+        start = time.time()
+        repo_root = self.config_manager.root_dir
+        html_root = root
+        if not root.is_file() and not list(iter_html_files([root])):
+            html_root = repo_root / "book" / "quarto" / "_build" / "html-audit"
+
+        issues: List[ValidationIssue] = []
+        if not html_root.exists():
+            return ValidationRunResult(
+                name="rendered-currency",
+                description=(
+                    "Skip rendered currency audit; no cached HTML audit "
+                    f"directory at {html_root.relative_to(repo_root)}"
+                ),
+                files_checked=0,
+                issues=issues,
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        html_files = iter_html_files([html_root])
+        for violation in audit_rendered_html([html_root]):
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(repo_root))
+            except ValueError:
+                rel = violation.file
+            issues.append(
+                ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.message,
+                    severity="error",
+                    context=violation.context,
+                    suggestion=violation.suggestion,
+                )
+            )
+
+        return ValidationRunResult(
+            name="rendered-currency",
+            description="Scan rendered HTML for USD/$$/raw-LaTeX currency artifacts",
+            files_checked=len(html_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     # ------------------------------------------------------------------
     # Contractions  (forbidden in body prose per book-prose.md)
     # ------------------------------------------------------------------
 
+    # Contraction → full form. Body prose forbids contractions as a deliberate
+    # register choice (.claude/rules/prose-craft.md), overriding the copy
+    # editor's permissive "OK unless excessive." The lone exception is quoted
+    # speech / direct dialogue, so we mask double-quoted spans before matching.
+    CONTRACTION_EXPANSIONS = {
+        "can't": "cannot", "don't": "do not", "it's": "it is", "we'll": "we will",
+        "won't": "will not", "hasn't": "has not", "haven't": "have not",
+        "isn't": "is not", "aren't": "are not", "wasn't": "was not",
+        "weren't": "were not", "doesn't": "does not", "didn't": "did not",
+        "wouldn't": "would not", "couldn't": "could not", "shouldn't": "should not",
+        "that's": "that is", "there's": "there is", "here's": "here is",
+        "what's": "what is", "you're": "you are", "we're": "we are",
+        "they're": "they are", "they've": "they have", "let's": "let us",
+        "who's": "who is",
+    }
     CONTRACTIONS_PATTERN = re.compile(
-        r"\b(can't|don't|it's|we'll|won't|hasn't|haven't|isn't|aren't|wasn't|weren't|"
-        r"doesn't|didn't|wouldn't|couldn't|shouldn't|that's|there's|here's|what's|"
-        r"you're|we're|they're|they've|let's|who's)\b",
+        r"\b(" + "|".join(re.escape(k) for k in CONTRACTION_EXPANSIONS) + r")\b",
         re.IGNORECASE,
     )
 
-    def _run_contractions(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_contractions(self, root: Path) -> ValidationRunResult:
         """Flag contractions in prose — use full forms (cannot, do not, etc.)."""
         start = time.time()
         files = self._qmd_files(root)
@@ -4455,22 +5654,80 @@ class ValidateCommand:
                     continue
                 if stripped.startswith("|") or stripped.startswith("<!--"):
                     continue
-                for m in self.CONTRACTIONS_PATTERN.finditer(line):
-                    context = line[max(0, m.start() - 2) : min(len(line), m.end() + 2)].strip()
+                # §10.11 exception: quoted speech / dialogue. Blank inline code
+                # and double-quoted spans so contractions there are not flagged.
+                masked = re.sub(r"`[^`]*`", "", line)
+                masked = re.sub(r'"[^"]*"', "", masked)
+                masked = re.sub(r"“[^”]*”", "", masked)
+                for m in self.CONTRACTIONS_PATTERN.finditer(masked):
+                    found = m.group()
+                    full = self.CONTRACTION_EXPANSIONS[found.lower()]
+                    if found[0].isupper():
+                        full = full[0].upper() + full[1:]
+                    context = masked[max(0, m.start() - 2): min(len(masked), m.end() + 2)].strip()
                     issues.append(
                         ValidationIssue(
                             file=self._relative_file(file),
                             line=idx,
                             code="contractions",
-                            message="Contractions forbidden in body prose — use full form (e.g. cannot, do not)",
+                            message=(
+                                f"Contractions forbidden in body prose (§10.11): "
+                                f"'{found}' → '{full}'."
+                            ),
                             severity="warning",
                             context=context,
+                            suggestion=f"{found} → {full}",
                         )
                     )
 
         return ValidationRunResult(
             name="contractions",
             description="No contractions in body prose (book-prose.md)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_mitpress_spelling_dict(self, root: Path) -> ValidationRunResult:
+        """Enforce the MIT Press canonical spelling dictionary (§10.7).
+
+        Flags the unambiguous spelling/hyphenation errors and proper-noun
+        miscapitalizations (trade-off, dataset, data center, Wi-Fi, GPUDirect,
+        TinyML, …). Detection lives in ``cli.checks.mitpress_terms`` — shared
+        with the ``mitpress-terms`` format auto-fixer — and masks code, math,
+        cross-references, footnotes, and attributes, and skips glossary files
+        (their keys follow the §10.14 lowercase convention). Context-sensitive
+        adj/predicate pairs (compute-bound, open-source, real-time) are out of
+        scope. Auto-fix: ``./book/binder format mitpress-terms``.
+        """
+        from cli.checks.mitpress_terms import find_in_text, should_skip_file
+
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        for file in files:
+            if should_skip_file(file):
+                continue
+            for hit in find_in_text(self._read_text(file)):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=hit.line,
+                        code="mitpress_spelling",
+                        message=(
+                            f"Canonical spelling (§10.7): '{hit.match}' → "
+                            f"'{hit.replacement}'. Auto-fix with "
+                            "'./book/binder format mitpress-terms'."
+                        ),
+                        severity="error",
+                        context=hit.context,
+                        suggestion=f"{hit.match} → {hit.replacement}",
+                    )
+                )
+
+        return ValidationRunResult(
+            name="spelling-dict",
+            description="MIT Press canonical spellings §10.7 (trade-off, dataset, Wi-Fi, …)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -4639,7 +5896,7 @@ class ValidateCommand:
     # bookmarks, screen readers, PDF outline). Any LaTeX inside them either
     # renders as literal `\command` / `^{N}` / `$..$` or, in the lightbox
     # case, leaks raw LaTeX into the hover tooltip. See the audit retrospective
-    # in `.claude/rules/book-prose.md` ("Anti-pattern: LaTeX inside attribute
+    # in the project prose style guide ("Anti-pattern: LaTeX inside attribute
     # strings"). Fix by switching to Unicode (×, ³, α, β, ρ, ≤, ≥, →, ∞, …).
     #
     # FAILURE MODES CAUGHT
@@ -4880,11 +6137,11 @@ class ValidateCommand:
     # `{python}` substitutions happen AFTER Pandoc's math parser runs, so any
     # raw LaTeX (`$...$`, `\\command`, `^{...}`) embedded in a `_str` export
     # survives into the rendered output as literal text. The fix is either:
-    #   - Wrap the export in md_math() / md() — and rename it `_math` so the
+    #   - Wrap the export in fmt_math() — and rename it `_math` so the
     #     suffix tells the next reader "this is a Markdown-wrapped LaTeX
     #     object, not a plain string."
     #   - Or compute and emit the value as plain text / Unicode.
-    # See `.claude/rules/book-prose.md` ("Anti-pattern: bare LaTeX inside a
+    # See the project prose style guide ("Anti-pattern: bare LaTeX inside a
     # `_str` export").
 
     # `_str` assignments inside Python code blocks. Capture the variable name
@@ -4944,15 +6201,15 @@ class ValidateCommand:
                 if self._STR_DOLLAR_MATH_RE.search(rhs):
                     hits.append(("str_export_dollar_math",
                                  f"`{lhs}` contains `$...$` math — `_str` exports must be plain text. "
-                                 f"Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)` (or `md(...)` for mixed prose+math)."))
+                                 f"Rename to `{lhs[:-4]}_math` and wrap in `fmt_math(...)`."))
                 if self._STR_LATEX_CMD_RE.search(rhs):
                     hits.append(("str_export_latex_cmd",
                                  f"`{lhs}` contains a LaTeX command (`\\\\times`, `\\\\frac`, `\\\\alpha`, …) — "
-                                 f"`_str` exports must be plain text. Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)`."))
+                                 f"`_str` exports must be plain text. Rename to `{lhs[:-4]}_math` and wrap in `fmt_math(...)`."))
                 if self._STR_CARET_BRACE_RE.search(rhs):
                     hits.append(("str_export_caret_brace",
                                  f"`{lhs}` contains `^{{...}}` / `_{{...}}` — `_str` exports must be plain text. "
-                                 f"Rename to `{lhs[:-4]}_math` and wrap in `md_math(...)`, or emit Unicode (³, ₂, …)."))
+                                 f"Rename to `{lhs[:-4]}_math` and wrap in `fmt_math(...)`, or emit Unicode (³, ₂, …)."))
 
                 for code, message in hits:
                     issues.append(ValidationIssue(
@@ -4966,7 +6223,7 @@ class ValidateCommand:
 
         return ValidationRunResult(
             name="str-latex-leak",
-            description="*_str Python exports must not contain raw LaTeX (use md()/md_math())",
+            description="*_str Python exports must not contain raw LaTeX (use fmt_math())",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
@@ -5043,6 +6300,145 @@ class ValidateCommand:
             name="render-audit",
             description="Full HTML build + leak scan (delegates to tools/audit/)",
             files_checked=0,
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_math_canonical(self, root: Path) -> ValidationRunResult:
+        """math --scope canonical: fmt-family and suffix discipline for LEGO cells."""
+        from cli.checks.math_canonical import audit
+
+        start = time.time()
+        qmd_files = sorted(root.rglob("*.qmd")) if root.is_dir() else ([root] if root.suffix == ".qmd" else [])
+        violations = audit([root] if root.is_dir() else qmd_files or [root])
+
+        issues: List[ValidationIssue] = []
+        for v in violations:
+            file_path = Path(v.file)
+            try:
+                rel = str(file_path.resolve().relative_to(root.resolve()))
+            except ValueError:
+                rel = v.file
+            issues.append(ValidationIssue(
+                file=rel,
+                line=v.line,
+                code=v.code,
+                message=v.message,
+                severity="error",
+                context=v.context,
+            ))
+
+        return ValidationRunResult(
+            name="math-canonical",
+            description="fmt-family + _str/_math/_eq/_frac suffix discipline",
+            files_checked=len(qmd_files) if qmd_files else len({v.file for v in violations}),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_fmt_prose_contract(self, root: Path) -> ValidationRunResult:
+        """math --scope prose-contract: formatter-owned glyphs match prose use."""
+        from cli.checks.fmt_prose_contract import check_file
+
+        start = time.time()
+        qmd_files = self._qmd_files(root)
+
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            for violation in check_file(qmd):
+                file_path = Path(violation.file)
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+                except ValueError:
+                    try:
+                        rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                    except ValueError:
+                        rel = violation.file
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.msg,
+                    severity="error",
+                    context=f"{{python}} {violation.ref}",
+                ))
+
+        return ValidationRunResult(
+            name="fmt-prose-contract",
+            description="Formatter-owned glyph/unit prose contract",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_math_multiplier_style(self, root: Path) -> ValidationRunResult:
+        """math --scope multiplier-style: multiplier and times typography."""
+        from cli.checks.math_multiplier_style import audit
+
+        start = time.time()
+        qmd_files = self._qmd_files(root)
+        violations = audit([root])
+
+        issues: List[ValidationIssue] = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = violation.file
+            issues.append(ValidationIssue(
+                file=rel,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            ))
+
+        return ValidationRunResult(
+            name="math-multiplier-style",
+            description="Multiplier suffixes, Unicode times, and product spacing",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_fmt_semantic_suffix(self, root: Path) -> ValidationRunResult:
+        """math --scope suffix-semantics: value-kind must be a typed formatter."""
+        from cli.checks.fmt_semantic_suffix import audit
+
+        start = time.time()
+        qmd_files = self._qmd_files(root)
+        violations = audit([root])
+
+        issues: List[ValidationIssue] = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.book_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+                except ValueError:
+                    rel = violation.file
+            issues.append(ValidationIssue(
+                file=rel,
+                line=violation.line,
+                code=violation.code,
+                message=violation.message,
+                severity="error",
+                context=violation.context,
+                suggestion=violation.suggestion,
+            ))
+
+        return ValidationRunResult(
+            name="fmt-semantic-suffix",
+            description="Value-kind (percent/multiplier/pp/scale) must be a typed formatter",
+            files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
         )
@@ -5244,6 +6640,112 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    # Per-type bold-label schema: a callout of this type must match one of the
+    # allowed sequences of bold paragraph-lead labels (**Label**:) and
+    # ***Term*** heads. Types not listed are heterogeneous by design
+    # (.callout-example, .callout-perspective carry many valid shapes) and are
+    # not schema-enforced. "«term»" is the sentinel for a ***Term*** head.
+    #
+    # War-stories come in three compact archetypes: a short disaster where the
+    # damage folds into Failure mode (Context / Failure mode / Systems lesson),
+    # a failure with a distinct downstream impact (**Consequence**), and a
+    # constraint-response story where the engineering fix stays visible as
+    # **Resolution**.
+    _CALLOUT_LABEL_SCHEMAS = {
+        "callout-war-story": (
+            ("Context", "Failure mode", "Systems lesson"),
+            ("Context", "Failure mode", "Consequence", "Systems lesson"),
+            ("Context", "Failure mode", "Resolution", "Systems lesson"),
+        ),
+        "callout-definition": (("«term»",),),
+    }
+
+    def _run_callout_schema(self, root: Path) -> ValidationRunResult:
+        """Enforce a uniform bold-label structure per callout type.
+
+        Some callout types carry a fixed narrative schema: every
+        ``.callout-war-story`` is Context / Failure mode / Systems lesson, and
+        every ``.callout-definition`` opens with a single ``***Term***`` head.
+        This scope flags any instance of an enforced type whose bold
+        paragraph-lead labels deviate, keeping the structure consistent across
+        the corpus. Heterogeneous types (example, perspective) are skipped.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        label_re = re.compile(r"^\*\*([^*]+?)\*\*:")
+        term_re = re.compile(r"^\*\*\*([^*]+?)\*\*\*")
+        close_re = re.compile(r"^(:{3,})\s*$")
+        id_re = re.compile(r"#([\w-]+)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            stack: List[list] = []  # [colons, callout_class, id, [labels], open_line]
+            for idx, raw in enumerate(lines, 1):
+                stripped = raw.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                opener = self._CALLOUT_OPEN_RE.match(stripped)
+                if opener:
+                    attrs = opener.group(1)
+                    cls = next(
+                        (c for c in self._ATTR_CLASS_RE.findall(attrs)
+                         if c.startswith("callout-")),
+                        "",
+                    )
+                    cid = id_re.search(attrs)
+                    colons = len(stripped) - len(stripped.lstrip(":"))
+                    stack.append([colons, cls, cid.group(1) if cid else "(no-id)", [], idx])
+                    continue
+                cm = close_re.match(stripped)
+                if cm and stack:
+                    colons = len(cm.group(1))
+                    for k in range(len(stack) - 1, -1, -1):
+                        if stack[k][0] == colons:
+                            _, cls, cid, labels, open_line = stack.pop(k)
+                            allowed = self._CALLOUT_LABEL_SCHEMAS.get(cls)
+                            if allowed is not None and tuple(labels) not in allowed:
+                                expected = " or ".join(
+                                    "[" + " / ".join(s) + "]" for s in allowed
+                                )
+                                issues.append(
+                                    ValidationIssue(
+                                        file=self._relative_file(file),
+                                        line=open_line,
+                                        code="callout_schema_mismatch",
+                                        message=(
+                                            f".{cls} {cid}: expected bold labels "
+                                            f"{expected}; found "
+                                            f"[{' / '.join(labels) if labels else '(none)'}]"
+                                        ),
+                                        severity="error",
+                                        suggestion=(
+                                            f"Fold or rename labels so every .{cls} "
+                                            "shares the same structure"
+                                        ),
+                                    )
+                                )
+                            break
+                    continue
+                if stack:
+                    lm = label_re.match(stripped)
+                    if lm:
+                        stack[-1][3].append(lm.group(1))
+                    elif term_re.match(stripped):
+                        stack[-1][3].append("«term»")
+
+        return ValidationRunResult(
+            name="callout-schema",
+            description="Per-type bold-label structure (war-story, definition)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     # ==================================================================
     # MIT PRESS CHECKS (§10 of book-prose-merged.md)
     # ==================================================================
@@ -5336,8 +6838,17 @@ class ValidateCommand:
         for file in files:
             lines = self._read_text(file).splitlines()
             in_code = False
+            in_html_comment = False
             for idx, line in enumerate(lines, 1):
                 stripped = line.strip()
+                if in_html_comment:
+                    if "-->" in stripped:
+                        in_html_comment = False
+                    continue
+                if stripped.startswith("<!--"):
+                    if "-->" not in stripped:
+                        in_html_comment = True
+                    continue
                 if stripped.startswith("```"):
                     in_code = not in_code
                     continue
@@ -5523,6 +7034,241 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - start) * 1000),
         )
 
+    def _run_xref_sentence_start_case(self, root: Path) -> ValidationRunResult:
+        """Flag crossref prefix casing that fights sentence position.
+
+        Crossref prefixes render lowercase, so the casing of the @-prefix is
+        purely a function of sentence position (.claude/rules/cross-references.md
+        -> Prefix Casing). This check enforces BOTH directions:
+
+          * Sentence start -- a lowercase @sec-/@fig-/@tbl-/@eq-/@lst-/@alg-
+            must be capitalized (@Sec-, @Fig-, ...) so the rendered prefix
+            ("Section", "Figure") leads the sentence with a capital.
+            semicolon, open paren, a lowercase word, or a plain-prose colon
+            renders a stray capital ("...as Table 2 shows") and must be
+            lowercased (@sec-, @fig-, ...). A colon is mid-sentence ONLY in
+            running prose ("...as follows: section 3 derives ..."), per
+            .claude/rules/cross-references.md prefix-casing style. A colon after
+            a bold structural label ("**Setup**: @Fig- shows ...") instead
+            begins a complete sentence (emphasis.md bold lead-in rule) and is
+            classified as a sentence start.
+          * Algorithm theorem refs -- direct @Alg-/@alg- refs follow the same
+            casing rule as other cross-refs. Bracketed [Algorithm @alg-id]
+            refs are unnecessary because the shared Quarto language file
+            renders native @alg- refs as "Algorithm N"; bare Algorithm @alg-id
+            is invalid Quarto prose.
+
+        Both halves share one is_sentence_start / is_mid_sentence computation so
+        they stay consistent by construction. Sentence position is
+        intentionally classified conservatively: clause boundaries
+        that are genuinely ambiguous (em-dash, a heading line, a preceding
+        acronym) are left unflagged in the mid-sentence direction rather than
+        risk a false positive.
+
+        Reverse (mid-sentence) direction + @alg- added 2026-06-04 to mirror the
+        documented Prefix Casing policy; algorithm bracket/bare-prefix checks
+        were added the same day. Colon handling corrected 2026-06-04: a plain-
+        prose colon is mid-sentence (lowercase) per MIT Press, not a sentence
+        start; only a bold-label lead-in colon capitalizes. Previously every
+        colon forced a capital, which matched the engineering-textbook habit the
+        book's MIT Press copyedit rejected.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        xref_re = re.compile(r"@([Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lg)-[\w-]+")
+        alg_bracket_re = re.compile(r"\[(Algorithm|algorithm)\s+(@[Aa]lg-[\w-]+)\]")
+        bare_alg_re = re.compile(r"(?<!\[)\b(Algorithm|algorithm)\s+@[Aa]lg-[\w-]+")
+        footnote_def = re.compile(r"^\s*\[\^fn-")
+
+        def classify_position(line: str, lines: List[str], idx: int, col: int, ref_end: int) -> tuple[bool, bool]:
+            """Return (is_sentence_start, is_mid_sentence) for a reference."""
+            before = line[:col].rstrip()
+            is_sentence_start = False
+            is_mid_sentence = False
+
+            if not before:
+                # Line-start ref: classify by the preceding non-blank line.
+                # A blank line, a sentence-final prev line, a heading, or a div
+                # close => sentence start. Only call mid-sentence when the prev
+                # line genuinely ends inside a clause (lowercase word, digit,
+                # comma, semicolon) -- a symmetric-conservative test that
+                # mirrors the same-line rule and avoids treating metadata (a
+                # standalone \index{} line) as running prose.
+                prev = ""
+                prev_blank = False
+                for pi in range(idx - 2, -1, -1):
+                    ps = lines[pi].strip()
+                    if not ps:
+                        prev_blank = True
+                        break
+                    prev = ps
+                    break
+                # Strip trailing \index{...} tags -- they are metadata
+                # appended to the paragraph, not sentence content.
+                prev = re.sub(r'(\s*\\index\{[^}]*\})+\s*$', '', prev)
+                if prev_blank or not prev:
+                    is_sentence_start = True
+                elif (prev[-1] in ".?!"
+                        or prev.startswith("#")
+                        or prev.endswith(":::")):
+                    is_sentence_start = True
+                elif prev[-1].islower() or prev[-1].isdigit() or prev[-1] in ",;":
+                    is_mid_sentence = True
+            else:
+                last = before[-1]
+                if re.search(r'[.?!]\s*$', before):
+                    is_sentence_start = True
+                elif last in ",;":
+                    is_mid_sentence = True
+                elif last == "(":
+                    # Parenthetical: "(see @sec-x)" lowercases, but
+                    # "Foo. (@Sec-x ...)" opens a sentence inside parens.
+                    head = before[:-1].rstrip()
+                    if head and head[-1] in ".?!":
+                        is_sentence_start = True
+                    else:
+                        is_mid_sentence = True
+                elif last.islower() or last.isdigit():
+                    # Preceded by a lowercase word or a number -> the ref
+                    # sits inside a clause. (Uppercase/acronym before is
+                    # left unflagged on purpose -- it may end a clause.)
+                    is_mid_sentence = True
+                elif re.search(r':\s*$', before):
+                    # A colon splits two ways (MIT Press house style):
+                    #   * after a bold structural label ("**Setup**: @Fig- shows
+                    #     ...") the colon introduces a complete sentence, so the
+                    #     ref is a sentence start and takes a capital prefix
+                    #     (emphasis.md bold lead-in rule).
+                    #   * in plain running prose ("...as follows: @sec-3 derives
+                    #     ...") the colon introduces a single clause, so the ref
+                    #     is mid-sentence and takes a lowercase prefix.
+                    # Drop any \index{} tag before testing the label shape.
+                    head = re.sub(r'\\index\{[^}]*\}', '', before[:-1]).strip()
+                    is_label_leadin = bool(
+                        re.fullmatch(r'(?:[-*+]\s+|\d+[.)]\s+)?\*\*[^*]+\*\*', head)
+                    )
+                    after_ref = line[ref_end:].strip()
+                    if after_ref and after_ref[0] not in ".,;:)]":
+                        if is_label_leadin:
+                            is_sentence_start = True
+                        else:
+                            is_mid_sentence = True
+                # otherwise (em-dash, other punctuation): neutral, no flag
+
+            return is_sentence_start, is_mid_sentence
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                if stripped.startswith("#|"):
+                    continue
+                if stripped.startswith(":::"):
+                    continue
+                if footnote_def.match(line):
+                    continue
+                # Heading lines are governed by heading-case (Title Case for
+                # H1/H2, sentence case for H3+), not by sentence position; their
+                # crossref casing is out of scope for the mid-sentence rule.
+                on_heading = stripped.startswith("#")
+
+                for m in xref_re.finditer(line):
+                    ref_type = m.group(1)
+                    is_capitalized = ref_type[0].isupper()
+                    type_lower = ref_type.lower()
+                    is_sentence_start, is_mid_sentence = classify_position(
+                        line, lines, idx, m.start(), m.end()
+                    )
+
+                    context = line.strip()[:100]
+                    if not is_capitalized and is_sentence_start:
+                        cap_form = f"@{type_lower[0].upper()}{type_lower[1:]}-"
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="xref_sentence_start_case",
+                                message=(
+                                    f"Lowercase @{type_lower}- at sentence start "
+                                    f"-- use {cap_form} for uppercase prefix"
+                                ),
+                                severity="warning",
+                                context=context,
+                            )
+                        )
+                    elif is_capitalized and is_mid_sentence and not on_heading:
+                        low_form = f"@{type_lower}-"
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="xref_midsentence_case",
+                                message=(
+                                    f"Capitalized @{ref_type}- mid-sentence "
+                                    f"-- use {low_form} for lowercase prefix"
+                                ),
+                                severity="warning",
+                                context=context,
+                            )
+                        )
+
+                for m in alg_bracket_re.finditer(line):
+                    direct_ref = m.group(2)
+                    is_sentence_start, _ = classify_position(
+                        line, lines, idx, m.start(), m.end()
+                    )
+                    ref_suffix = re.sub(r"^@[Aa]lg-", "", direct_ref)
+                    replacement = (
+                        f"@Alg-{ref_suffix}"
+                        if is_sentence_start
+                        else f"@alg-{ref_suffix}"
+                    )
+                    context = line.strip()[:100]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="algorithm_ref_bracketed_prefix",
+                            message=(
+                                "Use direct algorithm references such as "
+                                f"{replacement}, not bracketed [Algorithm @alg-id]"
+                            ),
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+                for m in bare_alg_re.finditer(line):
+                    context = line.strip()[:100]
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="algorithm_ref_bare_prefix",
+                            message=(
+                                "Use direct algorithm references such as @Alg-id "
+                                "or @alg-id, not bare Algorithm @alg-id"
+                            ),
+                            severity="warning",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="xref-sentence-start-case",
+            description="Flag crossref prefix casing that fights sentence position (MIT Press convention)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
     def _run_mitpress_above_below(self, root: Path) -> ValidationRunResult:
         """Flag 'above'/'below' spatial references — use @sec- cross-refs or 'earlier'/'later'."""
         start = time.time()
@@ -5572,8 +7318,12 @@ class ValidateCommand:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
-        # Two+ digit numbers separated by a single hyphen (not en dash)
-        hyphen_range = re.compile(r"(\d{2,})-(\d{2,})")
+        # Two+ digit numbers separated by a single hyphen (not en dash).
+        # Word boundary + negative lookbehind on `CVE-` so CVE IDs like
+        # CVE-2021-44228 aren't flagged (where 2021-44228 is part of the
+        # identifier, not a year range). The \b prevents finditer from
+        # advancing into the middle of the CVE number and re-matching.
+        hyphen_range = re.compile(r"(?<!CVE-)\b(\d{2,})-(\d{2,})")
 
         for file in files:
             lines = self._read_text(file).splitlines()
@@ -5623,7 +7373,10 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        fn_def_pat = re.compile(r"\[\^(fn-[^\]]+)\]:\s*(.+?)(?=\n\n|\n\[\^|\Z)", re.DOTALL)
+        fn_def_pat = re.compile(
+            r"^\[\^(fn-[^\]]+)\]:\s*(.+?)(?=\n\n|\n\[\^|\Z)",
+            re.DOTALL | re.MULTILINE,
+        )
 
         # Collect all footnotes by ID
         footnotes_by_id: Dict[str, List[Tuple[Path, str]]] = defaultdict(list)
@@ -5697,16 +7450,26 @@ class ValidateCommand:
         for f in files:
             for v in mod.scan_file(f, allowlist):
                 snippet = v.raw_line if len(v.raw_line) <= 160 else v.raw_line[:157] + "..."
+                if getattr(v, "kind", "") == "term_head_case":
+                    code = "footnote_term_head_case"
+                    message = (
+                        f"Footnote term head has lowercase significant word(s): "
+                        f"{v.detail}; use Title Case or preserve only canonical "
+                        f"lowercase API/math/unit tokens"
+                    )
+                else:
+                    code = "footnote_lowercase_first_letter"
+                    message = (
+                        f"Footnote opens with lowercase {v.first_char!r}; "
+                        f"capitalize, or add the id to footnote_caps_allowlist.txt "
+                        f"if the lowercase is canonical (brand/math/SI)"
+                    )
                 issues.append(
                     ValidationIssue(
                         file=self._relative_file(f),
                         line=v.line_no,
-                        code="footnote_lowercase_first_letter",
-                        message=(
-                            f"Footnote opens with lowercase {v.first_char!r}; "
-                            f"capitalize, or add the id to footnote_caps_allowlist.txt "
-                            f"if the lowercase is canonical (brand/math/SI)"
-                        ),
+                        code=code,
+                        message=message,
                         severity="error",
                         context=snippet,
                     )
@@ -5734,7 +7497,7 @@ class ValidateCommand:
         - **S1/S5** ``**Term**: `` — standard definitional head (incl. biography)
 
         Bare ``@sec-`` openers and plain prose (no bold head) are rejected.
-        Reference: ``.claude/rules/book-prose.md`` *Canonical definition-line shapes*.
+        Reference: the project prose style guide *Canonical definition-line shapes*.
         """
         start = time.time()
         files = self._qmd_files(root)
@@ -6288,18 +8051,261 @@ class ValidateCommand:
         )
 
     # ------------------------------------------------------------------
-    # Content tree: require shared/ and frontmatter/ (not only vol1/vol2)
+    # PDF: built-artifact verification (pdftotext cross-ref scan)
     # ------------------------------------------------------------------
 
-    # Required paths under contents/ so that scripts don't assume only vol1/vol2 exist.
+    def _run_pdf_verify(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+        log_path: Optional[str] = None,
+    ) -> ValidationRunResult:
+        from cli.commands._pdf_checks import format_checklist, verify_volume_pdf
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "book" / "quarto"
+        log = Path(log_path) if log_path else None
+
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if not volumes:
+            volumes = ["vol1", "vol2"]
+
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for vol in volumes:
+            result = verify_volume_pdf(quarto_dir, vol, log_path=log)
+            checked += 1
+            if not result.ok:
+                for issue in result.issues:
+                    issues.append(ValidationIssue(
+                        file=str(result.pdf_path.relative_to(repo_root)),
+                        line=0,
+                        code=issue.code,
+                        message=issue.message,
+                        severity="error",
+                        context=f"count={issue.count}" if issue.count > 1 else "",
+                    ))
+                # Surface checklist summary as context for the first failure
+                if issues:
+                    issues[-1].context = format_checklist(result)[:300]
+
+        return ValidationRunResult(
+            name="pdf-verify",
+            description=f"Built PDF verification ({', '.join(volumes)})",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_pdf_numbering(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+    ) -> ValidationRunResult:
+        from cli.commands._pdf_checks import default_pdf_path, scan_pdf_numbering
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "book" / "quarto"
+
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if not volumes:
+            volumes = ["vol1", "vol2"]
+
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            checked += 1
+            for issue in scan_pdf_numbering(pdf_path):
+                issues.append(ValidationIssue(
+                    file=str(pdf_path.relative_to(repo_root))
+                    if pdf_path.is_absolute()
+                    else str(pdf_path),
+                    line=0,
+                    code=issue.code,
+                    message=issue.message,
+                    severity="error",
+                    context=f"count={issue.count}" if issue.count > 1 else "",
+                ))
+
+        return ValidationRunResult(
+            name="pdf-numbering",
+            description=f"Built PDF object-numbering regression scan ({', '.join(volumes)})",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_pdf_table_spacing(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+    ) -> ValidationRunResult:
+        from cli.commands._pdf_checks import default_pdf_path, scan_table_prose_spacing
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "book" / "quarto"
+
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if not volumes:
+            volumes = ["vol1", "vol2"]
+
+        issues: List[ValidationIssue] = []
+        checked = 0
+        for vol in volumes:
+            pdf_path = default_pdf_path(quarto_dir, vol)
+            checked += 1
+            for issue in scan_table_prose_spacing(pdf_path):
+                issues.append(ValidationIssue(
+                    file=str(pdf_path.relative_to(repo_root))
+                    if pdf_path.is_absolute()
+                    else str(pdf_path),
+                    line=0,
+                    code=issue.code,
+                    message=issue.message,
+                    severity=issue.severity,
+                    context=f"count={issue.count}" if issue.count > 1 else "",
+                ))
+
+        return ValidationRunResult(
+            name="pdf-table-spacing",
+            description=f"Rendered PDF table/prose spacing scan ({', '.join(volumes)})",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Registry: constants → registry migration gates
+    # ------------------------------------------------------------------
+
+    def _run_registry_sources(self, root: Path) -> ValidationRunResult:
+        from cli.commands._registry_checks import check_registry_sources, repo_root_from_here
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_registry_sources(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="registry-sources",
+            description=f"QMD registry source scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_registry_tests(self, root: Path) -> ValidationRunResult:
+        from cli.commands._registry_checks import run_registry_pytest, repo_root_from_here
+
+        t0 = time.time()
+        raw = run_registry_pytest(repo_root_from_here())
+        issues = [
+            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="registry-tests",
+            description="mlsysim registry pytest gates",
+            files_checked=5,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_registry_appendix(self, root: Path) -> ValidationRunResult:
+        from cli.commands._registry_checks import verify_appendix_lego, repo_root_from_here
+
+        t0 = time.time()
+        raw = verify_appendix_lego(repo_root_from_here())
+        issues = [
+            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="registry-appendix",
+            description="Appendix LEGO verify against live registry",
+            files_checked=0,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_registry_anchors(self, root: Path) -> ValidationRunResult:
+        from cli.commands._registry_checks import verify_paper_anchors, repo_root_from_here
+
+        t0 = time.time()
+        raw = verify_paper_anchors(repo_root_from_here())
+        issues = [
+            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="registry-anchors",
+            description="Paper anchor validation",
+            files_checked=0,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_registry_yaml_pending(self, root: Path) -> ValidationRunResult:
+        from cli.commands._registry_checks import check_yaml_pending, repo_root_from_here
+
+        t0 = time.time()
+        raw = check_yaml_pending(repo_root_from_here())
+        issues = [
+            ValidationIssue(file=i.file, line=i.line, code=i.code, message=i.message, severity=i.severity)
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="registry-yaml-pending",
+            description="Audit YAML should_change=true count",
+            files_checked=0,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Content tree: require the canonical two-volume frontmatter shape.
+    # ------------------------------------------------------------------
+
+    # Required paths under contents/ so scripts can rely on the volume-local
+    # notation files and the shared top-level frontmatter tree.
     CONTENT_TREE_REQUIRED: List[tuple] = [
-        ("shared", True),           # (path relative to contents, is_dir)
-        ("shared/notation.qmd", False),
-        ("frontmatter", True),
+        ("frontmatter", True),  # (path relative to contents, is_dir)
+        ("vol1/frontmatter", True),
+        ("vol1/frontmatter/notation.qmd", False),
+        ("vol2/frontmatter", True),
+        ("vol2/frontmatter/notation.qmd", False),
     ]
 
     def _run_content_tree(self, root: Path) -> ValidationRunResult:
-        """Ensure contents/ has shared/ and frontmatter/; fail if they are missing."""
+        """Ensure contents/ has the expected release-time volume structure."""
         t0 = time.time()
         # Resolve to contents dir: root may be contents, or contents/vol1, or contents/vol2
         if root.name in ("vol1", "vol2") and root.parent.name == "contents":
@@ -6325,7 +8331,7 @@ class ValidateCommand:
                             file=str(path),
                             line=0,
                             code="content-tree",
-                            message=f"Required directory missing: contents/{rel} (shared content used by both volumes)",
+                            message=f"Required directory missing: contents/{rel}",
                             severity="error",
                         )
                     )
@@ -6343,7 +8349,7 @@ class ValidateCommand:
         elapsed = int((time.time() - t0) * 1000)
         return ValidationRunResult(
             name="content-tree",
-            description="Content tree (shared/frontmatter required)",
+            description="Content tree (two-volume frontmatter required)",
             files_checked=len(self.CONTENT_TREE_REQUIRED),
             issues=issues,
             elapsed_ms=elapsed,
@@ -6506,11 +8512,18 @@ class ValidateCommand:
                 line = issue["line"]
                 file = issue["file"]
                 msg = issue["message"]
+                code = issue.get("code", "")
                 sev = issue["severity"]
-                sev_icon = "❌" if sev == "error" else "⚠️"
-                console.print(f"  {sev_icon} {file}:{line} {msg}")
+                sev_label = "ERROR" if sev == "error" else "WARN"
+                sev_style = "red" if sev == "error" else "yellow"
+                safe_file = _rich_escape(str(file))
+                safe_msg = _rich_escape(str(msg))
+                code_label = f" {_rich_escape(f'[{code}]')}" if code else ""
+                console.print(f"  [{sev_style}]{sev_label}[/{sev_style}] {safe_file}:{line}{code_label} {safe_msg}")
                 if verbose and issue.get("context"):
-                    console.print(f"     [dim]{issue['context']}[/dim]")
+                    console.print(f"     [dim]source: {_rich_escape(str(issue['context']))}[/dim]")
+                if verbose and issue.get("suggestion"):
+                    console.print(f"     [dim]fix: {_rich_escape(str(issue['suggestion']))}[/dim]")
             if run["issue_count"] > 30:
                 console.print(f"  [dim]... {run['issue_count'] - 30} more[/dim]")
             console.print()
@@ -6521,11 +8534,11 @@ class ValidateCommand:
         if total_warnings:
             parts.append(f"{total_warnings} warning(s)")
         label = " and ".join(parts)
-        console.print(f"[red]❌ Validation failed with {label}.[/red]")
+        console.print(f"[red]Validation failed with {label}.[/red]")
 
     def _emit(self, as_json: bool, payload: Dict[str, Any], failed: bool) -> None:
         if as_json:
-            print(json.dumps(payload, indent=2))
+            print(json.dumps(payload, indent=2, ensure_ascii=False))
             return
         if failed:
             console.print(f"[red]{payload.get('message', 'Operation failed')}[/red]")
@@ -6644,7 +8657,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_heading_case(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_heading_case(self, root: Path) -> ValidationRunResult:
         """Enforce H1/H2 headline case + H3+ sentence case (MIT Press §10.3.1).
 
         Native implementation: imports from cli.commands.headings directly.
@@ -6670,34 +8683,402 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
+    @dataclass(frozen=True)
+    class _BibScope:
+        name: str
+        qmd_prefixes: Tuple[str, ...]
+        bib_paths: Tuple[Path, ...]
+
+    @dataclass(frozen=True)
+    class _BibEntryRef:
+        key: str
+        path: Path
+        line: int
+        entry_type: str
+
+    @dataclass(frozen=True)
+    class _CitationOccurrence:
+        key: str
+        path: Path
+        line: int
+        context: str
+        scope: "ValidateCommand._BibScope"
+
+    _BIB_CITE_RE = re.compile(r"(?<![=,(])\[?@([A-Za-z][\w:.-]*)\b")
+    _BIB_ENTRY_RE = re.compile(r"^@(?P<entry_type>\w+)\s*\{\s*(?P<key>[\w:.-]+)\s*,", re.M)
+    _BIB_FENCE_RE = re.compile(r"^\s*(```|~~~)")
+    _BIB_SINGLE_LETTER_RE = re.compile(r"^[A-Z](\.[A-Z])*$")
+    _BIB_NON_CITE_PREFIXES = (
+        "sec-", "fig-", "tbl-", "eq-", "lst-", "exr-", "exm-", "thm-",
+        "cor-", "cnj-", "def-", "prp-", "rem-", "prf-", "alg-", "algo-",
+        "ch-", "nb-",
+    )
+    _BIB_FALSE_POSITIVE_KEYS = {
+        "media", "keyframes", "import", "supports", "page", "font-face",
+        "charset", "namespace", "document",
+        "grad", "staticmethod", "classmethod", "property", "abstractmethod",
+        "dataclass", "cached_property", "wraps",
+        "eecs",
+    }
+
+    def _book_bib_scopes(self) -> List[_BibScope]:
+        contents = self.config_manager.book_dir / "contents"
+        shared_bib = contents / "references.bib"
+        return [
+            self._BibScope("vol1", ("contents/vol1/",), (shared_bib,)),
+            self._BibScope("vol2", ("contents/vol2/",), (shared_bib,)),
+            self._BibScope(
+                "book-shared",
+                ("contents/frontmatter/", "contents/backmatter/"),
+                (shared_bib,),
+            ),
+        ]
+
+    def _book_bib_scope_for_qmd(self, qmd_path: Path) -> Optional[_BibScope]:
+        try:
+            rel = qmd_path.relative_to(self.config_manager.book_dir).as_posix()
+        except ValueError:
+            return None
+        for scope in self._book_bib_scopes():
+            if any(rel.startswith(prefix) for prefix in scope.qmd_prefixes):
+                return scope
+        return None
+
+    def _book_bib_scope_for_bib(self, bib_path: Path) -> Optional[_BibScope]:
+        resolved = bib_path.resolve()
+        for scope in self._book_bib_scopes():
+            if any(path.resolve() == resolved for path in scope.bib_paths):
+                return scope
+        return None
+
+    def _book_qmd_files_for_bib_root(self, root: Path) -> List[Path]:
+        """Return book QMD files relevant to a bibliography check."""
+        contents = self.config_manager.book_dir / "contents"
+        if root.is_file() and root.suffix == ".qmd":
+            return [root] if self._book_bib_scope_for_qmd(root) is not None else []
+
+        if root.is_file() and root.suffix == ".bib":
+            resolved = root.resolve()
+            matched_scopes = [
+                scope for scope in self._book_bib_scopes()
+                if any(path.resolve() == resolved for path in scope.bib_paths)
+            ]
+            if not matched_scopes:
+                return []
+            prefixes = tuple(sorted({prefix for scope in matched_scopes for prefix in scope.qmd_prefixes}))
+            files: List[Path] = []
+            for prefix in prefixes:
+                rel_dir = prefix.removeprefix("contents/").rstrip("/")
+                qroot = contents / rel_dir
+                if qroot.exists():
+                    files.extend(self._qmd_files(qroot))
+            return sorted({f for f in files if self._book_bib_scope_for_qmd(f) is not None})
+
+        if root.exists():
+            files = self._qmd_files(root)
+            return [f for f in files if self._book_bib_scope_for_qmd(f) is not None]
+
+        return []
+
+    def _book_bib_files_for_root(self, root: Path) -> List[Path]:
+        if root.is_file() and root.suffix == ".bib":
+            return [root]
+
+        selected: Set[Path] = set()
+        for qmd in self._book_qmd_files_for_bib_root(root):
+            scope = self._book_bib_scope_for_qmd(qmd)
+            if scope is not None:
+                selected.update(path for path in scope.bib_paths if path.exists())
+        if selected:
+            return sorted(selected)
+
+        bibs: Set[Path] = set()
+        for scope in self._book_bib_scopes():
+            for bib in scope.bib_paths:
+                if not bib.exists():
+                    continue
+                try:
+                    if bib == root or bib.is_relative_to(root):
+                        bibs.add(bib)
+                except ValueError:
+                    continue
+        return sorted(bibs)
+
+    @classmethod
+    def _bib_should_skip_cite_key(cls, key: str) -> bool:
+        key = key.rstrip(".,;:)")
+        return (
+            not key
+            or key.lower().startswith(cls._BIB_NON_CITE_PREFIXES)
+            or key in cls._BIB_FALSE_POSITIVE_KEYS
+            or bool(cls._BIB_SINGLE_LETTER_RE.match(key))
+            or bool(re.match(r"^\d+\.\d+", key))
+        )
+
+    @staticmethod
+    def _strip_bib_inline_protected(line: str) -> str:
+        line = re.sub(r"`[^`]*`", "", line)
+        line = re.sub(r"<!--.*?-->", "", line)
+        return line
+
+    def _citation_occurrences_for_qmd(self, path: Path) -> List[_CitationOccurrence]:
+        scope = self._book_bib_scope_for_qmd(path)
+        if scope is None:
+            return []
+
+        lines = self._read_text(path).splitlines()
+        occurrences: List[ValidateCommand._CitationOccurrence] = []
+        in_yaml = bool(lines and lines[0].strip() == "---")
+        in_fence = False
+        in_html_comment = False
+        in_raw_block: Optional[str] = None
+
+        for line_no, line in enumerate(lines, start=1):
+            stripped = line.strip()
+
+            if line_no > 1 and in_yaml and stripped == "---":
+                in_yaml = False
+                continue
+            if in_yaml:
+                continue
+
+            if in_html_comment:
+                if "-->" in line:
+                    in_html_comment = False
+                continue
+            if "<!--" in line and "-->" not in line:
+                in_html_comment = True
+                continue
+
+            if in_raw_block:
+                if f"</{in_raw_block}>" in line.lower():
+                    in_raw_block = None
+                continue
+            lower = line.lower()
+            if "<style" in lower and "</style>" not in lower:
+                in_raw_block = "style"
+                continue
+            if "<script" in lower and "</script>" not in lower:
+                in_raw_block = "script"
+                continue
+
+            if self._BIB_FENCE_RE.match(line):
+                in_fence = not in_fence
+                continue
+            if in_fence:
+                continue
+
+            scan_line = self._strip_bib_inline_protected(line)
+            for match in self._BIB_CITE_RE.finditer(scan_line):
+                key = match.group(1).rstrip(".,;:)")
+                if self._bib_should_skip_cite_key(key):
+                    continue
+                occurrences.append(self._CitationOccurrence(
+                    key=key,
+                    path=path,
+                    line=line_no,
+                    context=line.strip()[:220],
+                    scope=scope,
+                ))
+        return occurrences
+
+    def _parse_bib_entries_for_integrity(self, bib_path: Path) -> Dict[str, _BibEntryRef]:
+        try:
+            text = self._read_text(bib_path)
+        except OSError:
+            return {}
+        entries: Dict[str, ValidateCommand._BibEntryRef] = {}
+        for match in self._BIB_ENTRY_RE.finditer(text):
+            key = match.group("key")
+            entries[key] = self._BibEntryRef(
+                key=key,
+                path=bib_path,
+                line=text.count("\n", 0, match.start()) + 1,
+                entry_type=match.group("entry_type").lower(),
+            )
+        return entries
+
+    def _book_bib_index(self) -> Dict[Path, Dict[str, _BibEntryRef]]:
+        index: Dict[Path, Dict[str, ValidateCommand._BibEntryRef]] = {}
+        for scope in self._book_bib_scopes():
+            for bib_path in scope.bib_paths:
+                if bib_path.exists() and bib_path not in index:
+                    index[bib_path] = self._parse_bib_entries_for_integrity(bib_path)
+        return index
+
+    def _run_bib_integrity(self, root: Path) -> ValidationRunResult:
+        """Validate citation keys against the shared book bibliography."""
+        t0 = time.time()
+        qmd_files = self._book_qmd_files_for_bib_root(root)
+        bib_index = self._book_bib_index()
+        all_bib_locations: Dict[str, List[ValidateCommand._BibEntryRef]] = defaultdict(list)
+        for entries in bib_index.values():
+            for entry in entries.values():
+                all_bib_locations[entry.key].append(entry)
+
+        issues: List[ValidationIssue] = []
+        for qmd in qmd_files:
+            for occ in self._citation_occurrences_for_qmd(qmd):
+                allowed_entries: Dict[str, ValidateCommand._BibEntryRef] = {}
+                for bib_path in occ.scope.bib_paths:
+                    allowed_entries.update(bib_index.get(bib_path, {}))
+                if occ.key in allowed_entries:
+                    continue
+
+                rel = self._relative_file(occ.path)
+                allowed = ", ".join(self._relative_file(path) for path in occ.scope.bib_paths)
+                elsewhere = all_bib_locations.get(occ.key, [])
+                if elsewhere:
+                    locations = ", ".join(
+                        f"{self._relative_file(entry.path)}:{entry.line}" for entry in elsewhere
+                    )
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=occ.line,
+                        code="bib_scope_violation",
+                        message=(
+                            f"Citation @{occ.key} is not in the allowed bibliography "
+                            f"for {occ.scope.name}; it exists in {locations}."
+                        ),
+                        severity="error",
+                        context=occ.context,
+                        suggestion=(
+                            f"Copy the reviewed @{occ.key} entry into {allowed}, "
+                            f"or replace @{occ.key} with a source already present in that volume."
+                        ),
+                    ))
+                else:
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=occ.line,
+                        code="bib_missing_citation",
+                        message=(
+                            f"Citation @{occ.key} is missing from the allowed "
+                            f"bibliography for {occ.scope.name}: {allowed}."
+                        ),
+                        severity="error",
+                        context=occ.context,
+                        suggestion=(
+                            f"Add a verified @{occ.key} BibTeX entry to {allowed}, "
+                            f"or replace/remove @{occ.key} if the local claim should use a different source."
+                        ),
+                    ))
+
+        return ValidationRunResult(
+            name="bib-integrity",
+            description="Shared book citation-to-BibTeX integrity",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_orphans(self, root: Path) -> ValidationRunResult:
+        """Report shared BibTeX entries that no book QMD cites."""
+        t0 = time.time()
+        selected_bibs = self._book_bib_files_for_root(root)
+        qmd_files = self._book_qmd_files_for_bib_root(root)
+        bib_index = self._book_bib_index()
+
+        cited_by_bib: Dict[Path, Set[str]] = {bib: set() for bib in selected_bibs}
+        for qmd in qmd_files:
+            for occ in self._citation_occurrences_for_qmd(qmd):
+                for bib_path in occ.scope.bib_paths:
+                    if bib_path in cited_by_bib and occ.key in bib_index.get(bib_path, {}):
+                        cited_by_bib[bib_path].add(occ.key)
+
+        issues: List[ValidationIssue] = []
+        for bib_path in selected_bibs:
+            entries = bib_index.get(bib_path, {})
+            cited = cited_by_bib.get(bib_path, set())
+            for key in sorted(set(entries) - cited):
+                entry = entries[key]
+                issues.append(ValidationIssue(
+                    file=self._relative_file(entry.path),
+                    line=entry.line,
+                    code="bib_orphan_entry",
+                    message=(
+                        f"@{entry.entry_type}{{{key}}} is not cited by any "
+                        "book QMD file in the shared book scope."
+                    ),
+                    severity="warning",
+                    context=f"@{entry.entry_type}{{{key},",
+                    suggestion=(
+                        f"Remove @{key}, cite it where it supports a local claim, "
+                        "or document it in a canonical-background allowlist before publication."
+                    ),
+                ))
+
+        return ValidationRunResult(
+            name="bib-orphans",
+            description="Unused shared bibliography entries",
+            files_checked=len(selected_bibs),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _bib_baseline_key_path(self, path: Path) -> str:
+        """Return the repo-relative path used by bib_lint baseline files."""
+        from cli.checks import bib_lint
+
+        return bib_lint.baseline_file_key(path, self.config_manager.root_dir)
+
+    @staticmethod
+    def _bib_style_suggestion(rule: str, key: str) -> str:
+        suggestions = {
+            "author-initials-only": (
+                f"Verify @{key}'s published byline and expand given names when "
+                "publicly attested; keep initials only when the source itself uses initials."
+            ),
+            "article-missing-volume": (
+                f"Add the journal volume for @{key}, or verify the entry is genuinely "
+                "preprint-style and adjust the metadata accordingly."
+            ),
+            "booktitle-suspect-acronym-only": (
+                f"Expand @{key}'s booktitle to the official full venue name plus "
+                "the acronym in parentheses when applicable."
+            ),
+            "publisher-not-canonical": (
+                f"Verify @{key}'s publisher against the official venue/source. "
+                "Use the canonical publisher name, or update the allow-list only after review."
+            ),
+            "title-appears-all-caps": (
+                f"Convert @{key}'s title to semantic sentence case and brace only "
+                "acronyms, mixed-case systems, and proper nouns."
+            ),
+            "booktitle-appears-all-caps": (
+                f"Convert @{key}'s booktitle to the official mixed-case venue name "
+                "and include the acronym in parentheses when applicable."
+            ),
+            "title-suspect-titlecase-function": (
+                f"Review @{key}'s title for semantic sentence case. Lowercase ordinary "
+                "mid-title function words and brace only terms whose capitalization must survive CSL."
+            ),
+            "title-trailing-period": f"Remove the trailing period from @{key}'s title field.",
+            "pages-single-hyphen": f"Use a BibTeX page range with double hyphen for @{key}, e.g. 123--145.",
+            "pages-has-prefix": f"Remove p./pp. from @{key}'s pages field; keep only the bare range.",
+            "doi-with-prefix": f"Store @{key}'s DOI as a bare DOI without https://doi.org/.",
+            "journal-abbreviated": f"Spell out @{key}'s journal title using the official full name.",
+            "forbidden-field": f"Remove or convert the forbidden field on @{key} per .claude/rules/bib-check.md.",
+        }
+        return suggestions.get(
+            rule,
+            f"Fix @{key} per .claude/rules/bib-check.md, then rerun ./book/binder check bib --json.",
+        )
+
     def _run_bib_hygiene(self, root: Path) -> ValidationRunResult:
         """Validate .bib files against §5 Bibliography Hygiene schema.
 
-        Native import of book/tools/bib_lint.py via importlib — no
-        subprocess. Mirrors the original `bib_lint --check` semantics:
+        Native import of cli.checks.bib_lint — no subprocess. Mirrors the
+        original `bib_lint --check` semantics:
         only NEW errors (not in book/tools/bib_lint_baseline.json) block;
-        baseline-grandfathered errors are silenced. The script itself
+        baseline-grandfathered errors are silenced. The compatibility script
         remains callable as a standalone CLI for its --fix / --baseline
         modes.
         """
-        import importlib.util
-        import sys as _sys
-
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "bib_lint.py"
-        )
-        mod_name = "mlsys_bib_lint"
-        if mod_name in _sys.modules:
-            mod = _sys.modules[mod_name]
-        else:
-            spec = importlib.util.spec_from_file_location(mod_name, script)
-            mod = importlib.util.module_from_spec(spec)
-            _sys.modules[mod_name] = mod
-            spec.loader.exec_module(mod)
+        from cli.checks import bib_lint
 
         t0 = time.time()
-        bib_files = sorted(root.rglob("*.bib"))
+        bib_files = self._bib_files(root)
         if not bib_files:
             return ValidationRunResult(
                 name="bib-hygiene", description="bib-hygiene",
@@ -6707,20 +9088,9 @@ class ValidateCommand:
 
         # Baseline (file, entry_key, rule) tuples — these errors are grandfathered.
         try:
-            baseline = mod.load_baseline()
+            baseline = bib_lint.load_baseline()
         except Exception:
             baseline = set()
-
-        # The baseline JSON was generated with file paths stripped of the
-        # canonical "MLSysBook/" prefix (bib_lint.py:798). Mirror that here
-        # so worktrees and the main checkout agree on the lookup key.
-        def _baseline_key_path(path: Path) -> str:
-            s = str(path)
-            for prefix in ("/Users/VJ/GitHub/MLSysBook/",
-                           "/Users/VJ/GitHub/MLSysBook-notation/"):
-                if s.startswith(prefix):
-                    return s[len(prefix):]
-            return s
 
         issues: List[ValidationIssue] = []
         for bib_path in bib_files:
@@ -6729,24 +9099,20 @@ class ValidateCommand:
             except (OSError, UnicodeDecodeError):
                 continue
             try:
-                entries, _ = mod.parse_bib(text)
+                entries, _ = bib_lint.parse_bib(text)
             except ValueError as exc:
-                rel = (str(bib_path.relative_to(root))
-                       if bib_path.is_relative_to(root) else str(bib_path))
+                rel = self._relative_file(bib_path)
                 issues.append(ValidationIssue(
                     file=rel, line=0, code="parse-error",
                     message=f"PARSE ERROR: {exc}", severity="error",
                 ))
                 continue
 
-            fp_key = _baseline_key_path(bib_path)
-            try:
-                rel = str(bib_path.relative_to(root))
-            except ValueError:
-                rel = str(bib_path)
+            fp_key = self._bib_baseline_key_path(bib_path)
+            rel = self._relative_file(bib_path)
 
             for entry in entries:
-                for v in mod.validate_entry(entry):
+                for v in bib_lint.validate_entry(entry):
                     # Mirror bib_lint.py --check semantics exactly:
                     # only NEW errors block the gate; warnings and
                     # baseline-grandfathered errors are silent. Run the
@@ -6770,9 +9136,90 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_bib_key_content(self, root: Path) -> ValidationRunResult:
+    def _run_bib_style(self, root: Path) -> ValidationRunResult:
+        """Fail on new warning/info BibTeX metadata debt.
+
+        This is intentionally separate from `bib hygiene`: hygiene is the hard
+        schema/error gate, while style is a ratchet over known metadata debt
+        such as suspicious title case, initials-only authors, missing journal
+        volumes, acronym-only venues, and non-canonical publisher names.
+        """
+        from cli.checks import bib_lint
+
+        t0 = time.time()
+        bib_files = self._bib_files(root)
+        if not bib_files:
+            return ValidationRunResult(
+                name="bib-style",
+                description="bib-style",
+                files_checked=0,
+                issues=[],
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        try:
+            baseline = bib_lint.load_style_baseline()
+        except Exception:
+            baseline = set()
+
+        issues: List[ValidationIssue] = []
+        style_severities = getattr(bib_lint, "STYLE_BASELINE_SEVERITIES", {"warning", "info"})
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                entries, _ = bib_lint.parse_bib(text)
+            except ValueError as exc:
+                rel = self._relative_file(bib_path)
+                issues.append(ValidationIssue(
+                    file=rel,
+                    line=0,
+                    code="bib_style_parse_error",
+                    message=f"PARSE ERROR: {exc}",
+                    severity="error",
+                    suggestion="Fix the BibTeX syntax before checking metadata style.",
+                ))
+                continue
+
+            fp_key = self._bib_baseline_key_path(bib_path)
+            rel = self._relative_file(bib_path)
+            for entry in entries:
+                for v in bib_lint.validate_entry(entry):
+                    if v.severity not in style_severities:
+                        continue
+                    if (fp_key, v.entry_key, v.rule) in baseline:
+                        continue
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=v.entry_line,
+                        code=f"bib_style_{v.rule}",
+                        message=(
+                            f"New bibliography style issue: @{entry.entry_type}{{{v.entry_key}}} "
+                            f"— {v.message}. Current debt is grandfathered in "
+                            "book/tools/bib_lint_style_baseline.json; new issues must be fixed "
+                            "or explicitly accepted by updating that baseline after review."
+                        ),
+                        severity="error",
+                        context=f"@{entry.entry_type}{{{v.entry_key},",
+                        suggestion=self._bib_style_suggestion(v.rule, v.entry_key),
+                    ))
+
+        return ValidationRunResult(
+            name="bib-style",
+            description="BibTeX warning/info metadata style ratchet (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_key_content(self, root: Path, errors_only: bool = False) -> ValidationRunResult:
         """Verify bib key surname/year tokens match the entry's actual
-        author and year fields.
+        author and year fields. With errors_only=True, emit only the
+        year-mismatch ERRORs (skip surname-mismatch WARNINGs) so the
+        key-year scope can gate pre-commit without the intentional
+        project-name-key warnings blocking every commit.
 
         The bib **key** is a contract: `surname[firstauthor]year[topicword]`.
         When the key drifts from the entry body, citing the key in prose
@@ -6837,6 +9284,17 @@ class ValidateCommand:
             "agency", "bureau", "commission", "service", "services",
         }
 
+        # Standards/specification keys are `body + standard-number + year +
+        # topic` (e.g. iso140402006lca, isoiec420012023ai, ieee8021ar2018), so
+        # the surname-year convention regex grabs the *standard number* as the
+        # "year" (iso14040 -> "1404"). These are not personal surname-year keys;
+        # skip them entirely. (added 2026-06-15 after the references.bib
+        # validation pass false-flagged the ISO/IEC/IEEE standards entries.)
+        STANDARDS_KEY_PREFIXES = {
+            "iso", "iec", "isoiec", "ieee", "ansi", "etsi", "itu", "ituT",
+            "rfc", "nist", "jedec", "gsma", "omg", "din", "fips", "w3c", "ietf",
+        }
+
         def author_list_surnames(author_field: str) -> List[str]:
             if not author_field:
                 return []
@@ -6862,7 +9320,7 @@ class ValidateCommand:
             return surnames
 
         t0 = time.time()
-        bib_files = sorted(root.rglob("*.bib"))
+        bib_files = self._bib_files(root)
         issues: List[ValidationIssue] = []
 
         entry_header_re = re.compile(r"^@(\w+)\s*\{\s*([\w:_-]+)\s*,", re.M)
@@ -6881,7 +9339,7 @@ class ValidateCommand:
             except (OSError, UnicodeDecodeError):
                 continue
             try:
-                rel = str(bib_path.relative_to(root))
+                rel = self._relative_file(bib_path)
             except ValueError:
                 rel = str(bib_path)
 
@@ -6918,6 +9376,11 @@ class ValidateCommand:
                 key_surname = cm.group(1)
                 key_year = cm.group(2)
 
+                # Standards/spec keys are not surname-year keys (the regex
+                # mis-reads the standard number as a year). Skip them.
+                if key_surname in STANDARDS_KEY_PREFIXES:
+                    continue
+
                 fields: Dict[str, str] = {}
                 for fm in field_re.finditer(body):
                     name = fm.group(1).lower()
@@ -6929,7 +9392,7 @@ class ValidateCommand:
 
                 surnames = author_list_surnames(author)
 
-                if surnames:
+                if surnames and not errors_only:
                     # Bidirectional prefix match: tolerates both
                     # `boroumandasplos2018` (key longer than surname,
                     # appended venue) AND `hebert2018multicalibration`
@@ -6957,7 +9420,12 @@ class ValidateCommand:
                                 f"match the work the key names."
                             ),
                             severity="warning",
-                            context="",
+                            context=f"@{entry_type}{{{key},",
+                            suggestion=(
+                                f"Verify @{key}. If the entry body is correct, "
+                                "rename the citekey to match an actual author and update all citations; "
+                                "if the citekey is correct, replace the entry body with the work the key names."
+                            ),
                         ))
 
                 if year_field and year_field != key_year:
@@ -6984,12 +9452,184 @@ class ValidateCommand:
                                 f"describes."
                             ),
                             severity="error",
-                            context="",
+                            context=f"@{entry_type}{{{key},",
+                            suggestion=(
+                                f"Verify @{key}. If year={year_field} is correct, "
+                                f"rename the citekey so it does not claim {key_year}; "
+                                f"if the citekey year {key_year} is correct, update the year field."
+                            ),
                         ))
 
         return ValidationRunResult(
             name="bib-key-content",
             description="Bib key prefix must match author surname + year (§5)",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_key_year(self, root: Path) -> ValidationRunResult:
+        """Errors-only subset of key-content: key year vs entry year (>1yr gap).
+        Pre-commit gate for the silent-citation-corruption class; the
+        surname-mismatch warnings stay in the opt-in key-content scope."""
+        res = self._run_bib_key_content(root, errors_only=True)
+        return ValidationRunResult(
+            name="bib-key-year",
+            description="Bib key year must match entry year (errors-only gate, §5)",
+            files_checked=res.files_checked,
+            issues=res.issues,
+            elapsed_ms=res.elapsed_ms,
+        )
+
+    def _run_bib_duplicate_keys(self, root: Path) -> ValidationRunResult:
+        """Every citekey must be unique. Two entries sharing a key make every
+        `[@key]` citation resolve to whichever entry the parser keeps — silent
+        ambiguity that no other check catches (bibtex-tidy only warns)."""
+        t0 = time.time()
+        bib_files = self._bib_files(root)
+        issues: List[ValidationIssue] = []
+        header_re = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = self._relative_file(bib_path)
+            except ValueError:
+                rel = str(bib_path)
+            seen: Dict[str, int] = {}
+            for hm in header_re.finditer(text):
+                etype = hm.group(1).lower()
+                if etype in ("comment", "string", "preamble"):
+                    continue
+                key = hm.group(2)
+                line_no = text[:hm.start()].count("\n") + 1
+                if key in seen:
+                    issues.append(ValidationIssue(
+                        file=rel,
+                        line=line_no,
+                        code="bib_duplicate_key",
+                        message=(
+                            f"Duplicate citekey @{key} (first defined at line "
+                            f"{seen[key]}). Every [@{key}] citation resolves "
+                            f"ambiguously to one of the two entries. Rename one "
+                            f"key to be unique and update its citations."
+                        ),
+                        severity="error",
+                        context=f"@{etype}{{{key},",
+                        suggestion=(
+                            f"Give the second entry a distinct key (e.g. @{key}b "
+                            f"or @{key}web) and repoint the prose cites that "
+                            f"belong to it."
+                        ),
+                    ))
+                else:
+                    seen[key] = line_no
+        return ValidationRunResult(
+            name="bib-duplicate-keys",
+            description="Every citekey must be unique across the bibliography",
+            files_checked=len(bib_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_bib_links(self, root: Path) -> ValidationRunResult:
+        """DOI/URL liveness for the shared bibliography (MIT Press: confirm all
+        URLs). Network-bound and opt-in. 404/410/DNS = error (dead locator);
+        403/401 = warning (bot-block, ambiguous); 2xx/3xx = pass. DOIs are
+        checked via https://doi.org/<doi>."""
+        import ssl, urllib.request, urllib.error, urllib.parse
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        t0 = time.time()
+        ua = "MLSysBook-binder-bibcheck/1.0 (mailto:jvijay@gmail.com)"
+        ctx = ssl.create_default_context()
+        field_re = re.compile(r"\b(doi|url)\s*=\s*\{([^{}]*)\}", re.I)
+        header_re = re.compile(r"^@(\w+)\s*\{\s*([^,\s]+)\s*,", re.M)
+
+        def resolve(u):
+            for method in ("HEAD", "GET"):
+                try:
+                    r = urllib.request.urlopen(urllib.request.Request(
+                        u, method=method, headers={"User-Agent": ua}), timeout=25, context=ctx)
+                    return r.status, None
+                except urllib.error.HTTPError as e:
+                    # Many servers (and doi.org for some DataCite DOIs, e.g.
+                    # NIST) answer HEAD with 404/403/405 but GET with 200.
+                    # Retry GET before trusting a HEAD failure.
+                    if e.code in (403, 401, 405, 400, 404, 410, 501) and method == "HEAD":
+                        continue
+                    return e.code, None
+                except Exception as e:
+                    if method == "GET":
+                        return None, type(e).__name__
+            return None, "error"
+
+        # collect (key, line, kind, target_url) for the shared book bib only
+        targets = []
+        shared = root / "book" / "quarto" / "contents" / "references.bib"
+        bib_files = [shared] if shared.exists() else self._bib_files(root)
+        for bib_path in bib_files:
+            try:
+                text = bib_path.read_text(encoding="utf-8")
+            except (OSError, UnicodeDecodeError):
+                continue
+            try:
+                rel = self._relative_file(bib_path)
+            except ValueError:
+                rel = str(bib_path)
+            # map each entry's char span to (key, line)
+            entries = [(m.group(2), text[:m.start()].count("\n") + 1, m.start())
+                       for m in header_re.finditer(text)]
+            for fm in field_re.finditer(text):
+                kind = fm.group(1).lower()
+                val = fm.group(2).strip()
+                if not val:
+                    continue
+                url = ("https://doi.org/" + re.sub(r"^https?://(dx\.)?doi\.org/", "", val, flags=re.I)
+                       if kind == "doi" else val)
+                pos = fm.start()
+                key, line = "?", text[:pos].count("\n") + 1
+                for k, ln, st in entries:
+                    if st <= pos:
+                        key, line = k, ln
+                    else:
+                        break
+                targets.append((rel, key, line, kind, url))
+
+        issues: List[ValidationIssue] = []
+        def check(t):
+            rel, key, line, kind, url = t
+            st, err = resolve(url)
+            return (rel, key, line, kind, url, st, err)
+        with ThreadPoolExecutor(max_workers=8) as ex:
+            for fut in as_completed({ex.submit(check, t): t for t in targets}):
+                rel, key, line, kind, url, st, err = fut.result()
+                # Only a definitive HTTP 404/410 is "dead" (error). A timeout,
+                # DNS failure, 5xx, or 403/401 means "could not confirm" — a
+                # warning to check by hand, not proof the locator is dead.
+                if st in (404, 410):
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_dead_locator",
+                        message=(f"@{key} {kind} is dead ({st}): {url[:90]}"),
+                        severity="error", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Replace with a resolving DOI/URL or the canonical source page."))
+                elif st in (403, 401):
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_locator_forbidden",
+                        message=(f"@{key} {kind} returned {st} (bot-block; verify by hand): {url[:80]}"),
+                        severity="warning", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Likely a real page that blocks automated requests; confirm in a browser."))
+                elif err is not None or st is None or st >= 500:
+                    issues.append(ValidationIssue(
+                        file=rel, line=line, code="bib_locator_unconfirmed",
+                        message=(f"@{key} {kind} could not be confirmed ({err or st}): {url[:80]}"),
+                        severity="warning", context=f"{kind} = {{{url[:70]}}}",
+                        suggestion="Timeout/DNS/5xx — slow or transient; confirm in a browser."))
+        issues.sort(key=lambda i: (i.file, i.line))
+        return ValidationRunResult(
+            name="bib-links",
+            description="DOI/URL liveness (MIT Press: confirm all URLs)",
             files_checked=len(bib_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
@@ -7015,7 +9655,7 @@ class ValidateCommand:
     #   figures.alt-text-style          → audit.checks.alt_text_style
     #
     # These complement the existing native runners that reimplement a
-    # subset of the same rules in-tree (e.g. _run_heading_case,
+    # subset of the same rules in-tree (e.g. _run_mitpress_heading_case,
     # _run_mitpress_acknowledgements). Over time those should migrate to
     # use the audit package as the single source of truth.
     # ──────────────────────────────────────────────────────────────────────
@@ -7130,7 +9770,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_compound_prefix(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_compound_prefix(self, root: Path) -> ValidationRunResult:
         """Close up pre-/non- compound prefixes per §10.8 (strict 6-term list).
 
         Flags: pre-training, pre-trained, pre-deployment, pre-learning,
@@ -7142,7 +9782,7 @@ class ValidateCommand:
             "compound-prefix", "pre-/non- close-up (§10.8)",
         )
 
-    def _run_concept_term_capitalization(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_concept_term_capitalization(self, root: Path) -> ValidationRunResult:
         """Lowercase concept terms in body prose per §10.3.
 
         Flags Title Case appearances of iron law, memory wall, compute
@@ -7156,17 +9796,20 @@ class ValidateCommand:
             "concept-caps", "concept-term lowercase in prose (§10.3)",
         )
 
-    def _run_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
-        """Expand abbreviations on first use per chapter per §10.5.
+    def _run_mitpress_abbreviation_first_use(self, root: Path) -> ValidationRunResult:
+        """Expand abbreviations on first use per §10.5.
 
-        Enforces the specialized-abbreviation list (DLRM, XLA, MMLU,
-        HELM, HIS, KWS, OTA, CTM, V2X, RFM, etc.). Baseline CS/ML
+        Enforces the specialized-abbreviation list (XLA, MMLU, HELM,
+        HIS, KWS, OTA, CTM, V2X, RFM, etc.). Baseline CS/ML
         abbreviations (CNN, GPU, JIT, NVMe, SLA, ...) are exempt per
-        §10.5's expanded Special Cases.
+        §10.5's expanded Special Cases. Ordinary specialized acronyms
+        reset by chapter. Formal model names and recurring lighthouse
+        labels are governed by the lighthouse roster rules, not this
+        abbreviation check.
         """
         return self._run_audit_check(
             root, "audit.checks.abbreviation_first_use",
-            "abbreviation-first-use", "expand abbreviations on first use per chapter (§10.5)",
+            "abbreviation-first-use", "expand abbreviations on first use (§10.5)",
         )
 
     def _run_notation_consistency(self, root: Path) -> ValidationRunResult:
@@ -7229,7 +9872,7 @@ class ValidateCommand:
             elapsed_ms=int((time.time() - t0) * 1000),
         )
 
-    def _run_latin_running_text(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_latin_running_text(self, root: Path) -> ValidationRunResult:
         """Prefer English over Latin abbreviations in running prose (§10.6).
 
         Flags e.g., i.e., etc., viz. in body prose. Permitted inside
@@ -7240,7 +9883,7 @@ class ValidateCommand:
             "latin-abbrevs", "English over Latin in running text (§10.6)",
         )
 
-    def _run_alt_text_style(self, root: Path) -> ValidationRunResult:
+    def _run_mitpress_alt_text_style(self, root: Path) -> ValidationRunResult:
         """Alt-text inside `fig-alt=\"...\"` follows body-prose rules (§10.12).
 
         Flags: capitalized concept terms, `%` symbol, bare `vs`, LaTeX
@@ -7552,45 +10195,554 @@ class ValidateCommand:
     # ------------------------------------------------------------------
 
     def _run_index_anti_patterns(self, root: Path) -> ValidationRunResult:
-        """index --scope anti-patterns: \\index{} anti-patterns from §9.
+        """index --scope anti-patterns: \\index{} anti-patterns from §9."""
+        from cli.commands._index_checks import check_anti_patterns
 
-        Wraps book/tools/audit/index/check_anti_patterns.py.
-        """
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "audit" / "index" / "check_anti_patterns.py"
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        raw = check_anti_patterns(repo_root / "book")
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="index-anti-patterns",
+            description="\\index{} anti-patterns (corpus-level)",
+            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
-        return self._delegate_script(script, [], "index-anti-patterns")
 
     def _run_index_tag_placement(self, root: Path) -> ValidationRunResult:
-        """index --scope tag-placement: \\index{} not inside bold/italic/code/heading.
+        """index --scope tag-placement: \\index{} not inside bold/italic/code/heading."""
+        from cli.commands._index_checks import check_tag_placement
 
-        Wraps book/tools/audit/index/check_tag_placement.py.
-        """
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "audit" / "index" / "check_tag_placement.py"
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        raw = check_tag_placement(repo_root / "book")
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="index-tag-placement",
+            description="\\index{} forbidden placement (bold/code/headings)",
+            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
-        return self._delegate_script(script, [], "index-tag-placement")
 
     def _run_index_xref_resolves(self, root: Path) -> ValidationRunResult:
-        """index --scope xref-resolves: every |see / |seealso resolves.
+        """index --scope xref-resolves: every |see / |seealso resolves."""
+        from cli.commands._index_checks import check_xref_resolves
 
-        Wraps book/tools/audit/index/check_xref_resolves.py.
-        """
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "audit" / "index" / "check_xref_resolves.py"
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        raw = check_xref_resolves(repo_root / "book")
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="index-xref-resolves",
+            description="\\index{} see/seealso target resolution",
+            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
-        return self._delegate_script(script, [], "index-xref-resolves")
+
+    def _run_index_placement_contexts(self, root: Path) -> ValidationRunResult:
+        """index --scope forbidden-contexts: \\index{} in code / math / attribute strings.
+
+        Catches anti-patterns from index.md §1 + book-prose.md §7:
+
+          - \\index{} inside ```{python} ... ``` fences (LaTeX never indexes
+            code; leaks as literal text in displayed code).
+          - \\index{} inside $..$ or $$..$$ math (corrupts makeindex key
+            parsing; anti-pattern #4 'Math in key').
+          - \\index{} inside fig-cap=, fig-alt=, tbl-cap=, tbl-alt=,
+            lst-cap=, title= attribute strings (Quarto extracts as plain
+            text for HTML tooltips / PDF bookmarks / EPUB metadata; leaks
+            as literal text).
+
+        Wraps the native audit check at book/tools/audit/checks/index_placement.py.
+        """
+        return self._run_audit_check(
+            root, "audit.checks.index_placement",
+            "index-placement-contexts",
+            "\\index{} forbidden contexts (code / math / attribute strings)",
+        )
 
     def _run_lego_dead_code(self, root: Path) -> ValidationRunResult:
         """code --scope lego-dead-code: LEGO variables defined but never used.
 
-        Wraps scripts/check_lego_vars.py.
+        Native implementation backed by cli.checks.lego_dead_code.
         """
-        script = (
-            Path(__file__).resolve().parent.parent.parent.parent
-            / "scripts" / "check_lego_vars.py"
+        from cli.checks.lego_dead_code import audit_paths, qmd_files
+
+        t0 = time.time()
+        paths = [root]
+        files = qmd_files(paths)
+        violations = audit_paths(paths)
+        issues = []
+        for violation in violations:
+            file_path = Path(violation.file)
+            try:
+                rel = str(file_path.resolve().relative_to(self.config_manager.root_dir))
+            except ValueError:
+                try:
+                    rel = str(file_path.resolve().relative_to(root.resolve()))
+                except ValueError:
+                    rel = violation.file
+            issues.append(
+                ValidationIssue(
+                    file=rel,
+                    line=violation.line,
+                    code=violation.code,
+                    message=violation.message,
+                    severity="error",
+                    context=violation.context,
+                )
+            )
+        return ValidationRunResult(
+            name="lego-dead-code",
+            description="LEGO variables defined but never referenced",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
         )
-        return self._delegate_script(script, [], "lego-dead-code")
+
+    def _run_lego_prose_literals(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-prose-literals: walkthrough prose must not hardcode computed operands."""
+        from cli.commands._registry_checks import check_lego_prose_literals, repo_root_from_here
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_prose_literals(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="lego-prose-literals",
+            description=f"LEGO walkthrough prose literal scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_lego_prose_units(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-prose-units: units after {python} *_str in prose."""
+        from cli.commands._registry_checks import check_lego_prose_units, repo_root_from_here
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_prose_units(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="lego-prose-units",
+            description=f"LEGO prose unit-after-_str scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_lego_load_pint(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-load-pint: physical *_value must use ureg/registry."""
+        from cli.commands._registry_checks import check_lego_load_pint, repo_root_from_here
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_load_pint(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="lego-load-pint",
+            description=f"LEGO pint LOAD lint ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_lego_equations(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-equations: numeric A/B=C coherence in prose."""
+        from cli.commands._registry_checks import check_lego_equations, repo_root_from_here
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_lego_equations(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="lego-equations",
+            description=f"LEGO equation coherence ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_lego_units(self, root: Path) -> ValidationRunResult:
+        """code --scope lego-units: warning-only LEGO unit discipline linter."""
+        import json
+        from cli.checks.lego_units import lint_file
+
+        t0 = time.time()
+        repo = self.config_manager.root_dir
+        qmd_files = self._qmd_files(root)
+        baseline = repo / "book" / "tools" / "audit" / "lego_units_baseline.json"
+        allowed: set[tuple[str, str, str]] = set()
+        if baseline.exists():
+            for entry in json.loads(baseline.read_text(encoding="utf-8")):
+                allowed.add((entry["rule"], entry["file"], entry["message"]))
+
+        issues: list[ValidationIssue] = []
+        for qmd in qmd_files:
+            for issue in lint_file(qmd, repo):
+                key = (issue.rule, issue.file, issue.message)
+                if key in allowed:
+                    continue
+                issues.append(
+                    ValidationIssue(
+                        file=issue.file,
+                        line=issue.line,
+                        code=issue.rule,
+                        message=issue.message,
+                        severity=issue.severity,
+                    )
+                )
+        return ValidationRunResult(
+            name="lego-units",
+            description=f"LEGO unit discipline lint ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Check 1: \${python} collision detector  (code group)
+    # ------------------------------------------------------------------
+    #
+    # An escaped dollar immediately before {python} — i.e. \${python} —
+    # silently fails to render as an inline expression. The correct form
+    # is \$\`{python}  (backtick between \$ and {python}).
+    # Zero violations expected on the current corpus; this prevents
+    # regression.
+
+    # Pattern: backslash-dollar immediately before {python} WITHOUT a
+    # preceding backtick.  The negative lookbehind ensures we skip the
+    # correct form \$`{python}.
+    _DOLLAR_PYTHON_COLLISION = re.compile(
+        r"(?<!`)"           # not preceded by backtick (the correct form)
+        r"\\\$\{python\}"   # literal \${python}
+    )
+
+    def _run_python_dollar_collision(self, root: Path) -> ValidationRunResult:
+        r"""Flag \${python} in QMD prose — silently fails to render."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start = re.compile(r"^```")
+        raw_latex_start = re.compile(r"^\\\[|^\$\$|^\\begin\{")
+        raw_latex_end = re.compile(r"^\\\]|^\$\$|^\\end\{")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            in_raw_latex = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                # Toggle code fences
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code:
+                    continue
+                # Skip raw LaTeX blocks (display math, \begin{} environments)
+                if raw_latex_start.match(stripped):
+                    in_raw_latex = True
+                    continue
+                if in_raw_latex:
+                    if raw_latex_end.match(stripped):
+                        in_raw_latex = False
+                    continue
+
+                for m in self._DOLLAR_PYTHON_COLLISION.finditer(line):
+                    context = line[max(0, m.start() - 10): min(len(line), m.end() + 20)].strip()
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="python_dollar_collision",
+                            message=(
+                                r"\${python} silently fails to render — "
+                                r"use \$\`{python} (backtick between \$ and {python})"
+                            ),
+                            severity="error",
+                            context=context,
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="python-dollar-collision",
+            description=r"\${python} collision detector (prevents silent render failure)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Check 2: suffix-consistency blocklist  (math group)
+    # ------------------------------------------------------------------
+    #
+    # Scans suffix="..." values in fmt() calls inside {python} cells for
+    # banned unit conventions. This is a blocklist, not an allowlist:
+    # everything is allowed except the explicitly banned patterns.
+
+    _SUFFIX_VALUE = re.compile(r"""suffix\s*=\s*(?:"([^"]*)"|'([^']*)')""")
+
+    # Banned patterns: wrong unit conventions for rate/throughput suffixes.
+    _BANNED_SUFFIXES: Set[str] = {
+        # Wrong pluralization of /s rate units
+        " TFLOPS/s", " GFLOPS/s",
+        # Wrong conventions — should use slash-s form
+        " TFLOPS", " TFLOPs",
+        " Gbps", " Mbps", " GBps", " TBps",
+    }
+
+    def _run_suffix_consistency(self, root: Path) -> ValidationRunResult:
+        """Flag banned suffix= values in fmt() calls (wrong unit conventions)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        block_start = re.compile(r"^```\{python\}")
+        block_end = re.compile(r"^```\s*$")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_python = False
+            for idx, line in enumerate(lines, 1):
+                if block_start.match(line):
+                    in_python = True
+                    continue
+                if block_end.match(line):
+                    in_python = False
+                    continue
+                if not in_python:
+                    continue
+
+                for m in self._SUFFIX_VALUE.finditer(line):
+                    val = m.group(1) if m.group(1) is not None else m.group(2)
+                    if val in self._BANNED_SUFFIXES:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="suffix_banned_convention",
+                                message=(
+                                    f'suffix="{val}" uses a banned unit convention. '
+                                    f"Rate units should use TFLOP/s, PFLOP/s, GB/s, etc. "
+                                    f"(slash-s form, no trailing S pluralization)."
+                                ),
+                                severity="error",
+                                context=line.strip()[:160],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="suffix-consistency",
+            description="Blocklist for banned suffix= unit conventions in fmt() calls",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Check 3: PDF UserWarning check  (pdf group, default=False)
+    # ------------------------------------------------------------------
+    #
+    # Post-build: scan extracted PDF text for "UserWarning" strings that
+    # may indicate a Python warning leaked into the rendered output.
+
+    def _run_pdf_warnings(
+        self,
+        root: Path,
+        *,
+        vol1: bool = False,
+        vol2: bool = False,
+        log_path: Optional[str] = None,
+    ) -> ValidationRunResult:
+        """Scan PDF text for UserWarning strings (post-build audit)."""
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        quarto_dir = repo_root / "book" / "quarto"
+        issues: List[ValidationIssue] = []
+
+        volumes: List[str] = []
+        if vol1:
+            volumes.append("vol1")
+        if vol2:
+            volumes.append("vol2")
+        if not volumes:
+            volumes = ["vol1", "vol2"]
+
+        import shutil
+        if shutil.which("pdftotext") is None:
+            issues.append(ValidationIssue(
+                file="", line=0, code="pdftotext_missing",
+                message="pdftotext not installed; install poppler (e.g. brew install poppler)",
+                severity="warning",
+            ))
+            return ValidationRunResult(
+                name="pdf-warnings",
+                description="PDF UserWarning scan",
+                files_checked=0,
+                issues=issues,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        from cli.commands._pdf_checks import PDF_BY_VOLUME
+
+        checked = 0
+        for vol in volumes:
+            pdf_name = PDF_BY_VOLUME.get(vol)
+            if not pdf_name:
+                continue
+            pdf_path = quarto_dir / "_build" / f"pdf-{vol}" / pdf_name
+            if not pdf_path.is_file():
+                continue
+            checked += 1
+            try:
+                proc = subprocess.run(
+                    ["pdftotext", "-layout", str(pdf_path), "-"],
+                    capture_output=True, text=True,
+                )
+                body = proc.stdout or ""
+            except Exception:
+                continue
+
+            for line_num, line in enumerate(body.splitlines(), 1):
+                if "UserWarning" in line:
+                    context = line.strip()[:200]
+                    issues.append(ValidationIssue(
+                        file=str(pdf_path.relative_to(repo_root)),
+                        line=line_num,
+                        code="pdf_userwarning",
+                        message=f"UserWarning text found in {vol} PDF output",
+                        severity="warning",
+                        context=context,
+                    ))
+
+        return ValidationRunResult(
+            name="pdf-warnings",
+            description=f"PDF UserWarning scan ({', '.join(volumes)})",
+            files_checked=checked,
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Check 6: rendered {python} leak check  (code group, default=False)
+    # ------------------------------------------------------------------
+    #
+    # Post-render: scan all HTML files in _build/html-audit/ for literal
+    # {python} text that escaped Quarto inline-expression evaluation.
+    # Excludes {python} inside <code> tags (legitimate code listings).
+
+    _RENDERED_PYTHON_LEAK = re.compile(r"\{python\}")
+    # Match {python} inside <code>...</code> — these are legitimate.
+    _CODE_TAG_PYTHON = re.compile(r"<code[^>]*>.*?\{python\}.*?</code>", re.DOTALL)
+
+    def _run_rendered_python_leak(self, root: Path) -> ValidationRunResult:
+        """Scan built HTML for literal {python} that leaked through Quarto."""
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        html_audit_dir = repo_root / "book" / "quarto" / "_build" / "html-audit"
+        issues: List[ValidationIssue] = []
+
+        if not html_audit_dir.is_dir():
+            issues.append(ValidationIssue(
+                file="", line=0, code="html_audit_missing",
+                message=(
+                    "html-audit build directory not found at "
+                    f"{html_audit_dir.relative_to(repo_root)}. "
+                    "Run a build first."
+                ),
+                severity="warning",
+            ))
+            return ValidationRunResult(
+                name="rendered-python-leak",
+                description="Literal {python} leak scan (no build found)",
+                files_checked=0,
+                issues=issues,
+                elapsed_ms=int((time.time() - t0) * 1000),
+            )
+
+        html_files = sorted(html_audit_dir.rglob("*.html"))
+        for html_file in html_files:
+            try:
+                content = html_file.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+
+            # Remove {python} occurrences inside <code> tags (legitimate)
+            cleaned = self._CODE_TAG_PYTHON.sub("", content)
+
+            for m in self._RENDERED_PYTHON_LEAK.finditer(cleaned):
+                # Find approximate line number
+                line_num = content[:m.start()].count("\n") + 1
+                start_ctx = max(0, m.start() - 40)
+                end_ctx = min(len(cleaned), m.end() + 40)
+                context = cleaned[start_ctx:end_ctx].replace("\n", " ").strip()[:120]
+                issues.append(ValidationIssue(
+                    file=str(html_file.relative_to(repo_root)),
+                    line=line_num,
+                    code="rendered_python_leak",
+                    message=(
+                        "Literal {python} found in rendered HTML — "
+                        "Quarto failed to evaluate an inline expression"
+                    ),
+                    severity="error",
+                    context=context,
+                ))
+
+        return ValidationRunResult(
+            name="rendered-python-leak",
+            description=f"Literal {{python}} leak scan ({len(html_files)} HTML files)",
+            files_checked=len(html_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )

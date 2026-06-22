@@ -1,0 +1,2456 @@
+# Lab Implementation Notes
+
+This is the living implementation log for the track-aware lab migration. Update it whenever a lab is implemented or improved.
+
+The purpose is to prevent one-off improvements from staying isolated. If a better component, track assumption, solver API, report field, or instructor workflow emerges while improving one lab, record it here and propagate it to the rest of the plans/labs.
+
+## Current Planning Baseline
+
+- Canonical tracks: iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+- Hardware and model facts must come from MLSysIM.
+- Track identity and lab scenarios should live in typed `mlsysbook_labs` metadata.
+- V1-10 Compression is the pilot for the detailed track-plan template.
+- All other track plans should be upgraded to the V1-10 structure before notebook implementation.
+
+## Entry Template
+
+```text
+Date:
+Lab:
+Track(s):
+Files touched:
+What changed:
+MLSysIM facts/APIs needed:
+Notebook-local constants removed:
+Reusable component or modality improved:
+Plan updates needed in other labs:
+Tests or checks run:
+Follow-up:
+```
+
+## Notes
+
+### 2026-06-13 - Final Full Playwright UX Audit And Worktree Classification
+
+Lab:
+- All Volume I and Volume II labs.
+- Static planning/catalog pages: `lab-plan-dashboard.html` and `lab-modality-catalog.html`.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `labs/tools/interaction_lab_smoke.py`
+- All migrated lab notebooks and `.track-plan.md` files under `labs/vol1` and `labs/vol2`.
+
+What changed:
+- Re-ran the full Playwright-driven Marimo UX audit across all 34 notebooks in four parallel batches.
+- The smoke harness started a Marimo server for each notebook, loaded it in Chromium, scrolled the page, switched canonical tracks, clicked visible tabs, clicked safe radio options, checked page and console errors, checked stale output, measured horizontal overflow/offscreen elements, and wrote screenshots plus JSON reports.
+- Visually inspected representative screenshots for V1-02, V1-10, V2-05, V2-17, and the modality catalog.
+- Classified MLSysBook worktrees before merge/retirement:
+  - Protected dev checkout: `/Users/VJ/GitHub/MLSysBook`.
+  - Lab integration worktree: `/Users/VJ/GitHub/MLSysBook-labs`.
+  - Lab pilot worktrees: `/Users/VJ/GitHub/MLSysBook-lab-v1-02`, `/Users/VJ/GitHub/MLSysBook-lab-v1-10`, `/Users/VJ/GitHub/MLSysBook-lab-v2-10`.
+  - Unrelated worktrees left untouched: autolayout, betterbib, cover-assets, cover-labels, readthrough-fixes, and vol3-sketch.
+- Compared the three pilot notebooks against the integrated lab branch. The integrated notebooks supersede the pilots: V1-02 adds prediction/consequence scaffolding, V1-10 adds the deeper distillation storyline, and V2-10 adds phase accounting, rejected-alternative logic, and edge carry-forward.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM APIs were required.
+- Direct source-of-truth audit resolved all catalog variants through MLSysIM-backed references: 136 hardware refs, 136 model refs, 34 system refs, and 17 fleet-profile refs with zero resolution failures.
+
+Notebook-local constants removed:
+- None in this final audit pass. The pass verified behavior and merge readiness.
+
+Reusable component or modality improved:
+- `interaction_lab_smoke.py` now handles Lab 00 orientation copy variants, final-body readiness, generic non-track Marimo radio clicks, and fallback part-text slicing for shared-renderer labs.
+- V2-08 prediction labels were normalized to A/B/C style so the UX smoke can safely exercise them.
+
+Plan updates needed in other labs:
+- Keep `LAB_PART_STORYLINE_DEPTH_BLUEPRINT_2026_06_13.md` as the detailed per-lab concept/part plan.
+- Keep `LAB_INTERACTION_DEVICE_CATALOG.md` and `LAB_REALIZATION_MODALITY_CATALOG.md` as the implementation catalog for controls, plots, evidence devices, and report artifacts.
+- Future work should move more notebook-local formulas into typed storyline metadata and MLSysIM solvers where reuse appears.
+
+Tests or checks run:
+- Playwright/Marimo batch G1, V1-00 through V1-08: 9/9 notebooks passed and 2/2 HTML pages passed.
+- Playwright/Marimo batch G2, V1-09 through V1-16: 8/8 notebooks passed and 2/2 HTML pages passed.
+- Playwright/Marimo batch G3, V2-01 through V2-09: 9/9 notebooks passed and 2/2 HTML pages passed.
+- Playwright/Marimo batch G4, V2-10 through V2-17: 8/8 notebooks passed and 2/2 HTML pages passed.
+- Aggregate Playwright result: 34/34 notebooks passed; dashboard/catalog passed; no page errors, console errors, stale output, horizontal overflow, offscreen elements, or overflowing fields reported.
+- Screenshots written under `/tmp/mlsysbook-interaction-smoke-final-g1`, `g2`, `g3`, and `g4`.
+- After merging current `dev` into `codex/labs`, re-ran the same four Playwright batches:
+  - Post-merge G1, V1-00 through V1-08: 9/9 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge G2, V1-09 through V1-16: 8/8 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge G3, V2-01 through V2-09: 9/9 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge G4, V2-10 through V2-17: 8/8 notebooks passed and 2/2 HTML pages passed.
+  - Post-merge aggregate: 34/34 notebooks passed; dashboard/catalog passed; no page errors, console errors, stale output, horizontal overflow, offscreen elements, or overflowing fields reported.
+  - Post-merge screenshots written under `/tmp/mlsysbook-interaction-smoke-postmerge-g1`, `g2`, `g3`, and `g4`.
+- Full lab tests from the prior final audit: `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q --tb=short` -> 1569 passed, 80 skipped, 123 xfailed.
+- Full lab tests after merging current `dev`: `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q --tb=short` -> 1569 passed, 80 skipped, 123 xfailed.
+- Targeted MLSysIM tests after merging current `dev`: `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_hardware.py mlsysim/tests/test_compression_candidates.py mlsysim/tests/test_solver_module_exports.py -q` -> 19 passed.
+- `git diff --check` -> passed.
+
+Follow-up:
+- Merge `codex/labs` into the protected `dev` checkout only after committing this final audited state and reconciling current `dev`.
+- Retire only the lab integration/pilot worktrees after verifying exact absolute paths and confirming the protected `/Users/VJ/GitHub/MLSysBook` checkout is not targeted.
+
+### 2026-06-13 - Parallel Concept-Module Pilot Implementation
+
+Lab:
+- V1-02 ML Systems
+- V1-10 Model Compression
+- V2-10 Inference
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_02_ml_systems.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/vol2/lab_10_inference.py`
+
+What changed:
+- Ran the first parallel concept-module implementation wave from private AIConfigs packets.
+- Converted V1-02 from a linear deployment-envelope lab into four tabbed concept modules plus synthesis: Physics Before Preference, Iron Law And The Bottleneck, Operating Envelope And First Wall, and Placement And Hybrid Design Review.
+- Reworked V1-10 so the main learning path is solver-backed by `CompressionModel.candidate()` and `CompressionModel.sweep()`, with modules for feasibility, precision cliff/calibration, sparsity/distillation, and recipe release gate.
+- Reworked V2-10 around serving cost inversion, state/KV cache wall, batching under variance, and serving design challenge. Removed the overclaim that continuous batching is universally better and fixed the throughput/waste formula consistency.
+- Kept implementation changes notebook-local for this pilot wave; no shared renderer or broad registry refactor was introduced.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required for this wave.
+- V1-10 continues to rely on `CompressionModel` for sourced compression candidates. Dense-student distillation remains a validation-backed recommendation/fallback rather than fabricated solver physics.
+
+Notebook-local constants removed:
+- V1-10 removed several direct H100/iPhone/Jetson/model constant bindings from the setup cell and routes track/model/hardware facts through MLSysIM refs and typed lab variants.
+
+Reusable component or modality improved:
+- Established a working implementation pattern for concept modules using notebook-local reveal cards, failure cards, Math Peek/source accordions, report export, and ledger fields.
+- Browser smoke caught a Marimo runtime scoping issue in V2-10 where underscore-prefixed helpers were treated as cell-private. The fix is to expose cross-cell notebook helpers with stable public `v2_10_*` names.
+
+Plan updates needed in other labs:
+- Future parallel waves should use frozen concept packets before launching implementation agents.
+- Shared helpers can be extracted after one or two more pilots confirm the stable card/reveal/failure/report pattern.
+- Avoid underscore-prefixed helper names for functions that must cross Marimo cells.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_02_ml_systems.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py` -> passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_deployment_helpers.py labs/tests/test_inference_helpers.py labs/tests/test_track_profiles.py labs/tests/test_lab_variants.py labs/tests/test_report_contract.py labs/tests/test_ui_helpers.py labs/tests/test_track_arcs.py -q` -> 52 passed.
+- `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_compression_candidates.py -q` -> 3 passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_static.py -q --tb=short` -> 803 passed, 4 skipped, 17 xfailed.
+- `python3 -m marimo check labs/vol1/lab_02_ml_systems.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py` -> passed.
+- `PYTHONPATH=labs:mlsysim python3 labs/tools/interaction_lab_smoke.py --labs labs/vol1/lab_02_ml_systems.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py --output-dir labs/dist/interaction-smoke-pilots-2026-06-13-rerun --max-tabs 8 --max-radios 8` -> 3/3 labs and 2/2 HTML pages passed.
+
+Follow-up:
+- Review the three pilot notebooks manually for narrative polish and source trace wording.
+- Decide whether to extract the repeated reveal/failure/report card helpers into `mlsysbook_labs.ui` after the next wave.
+- Launch the next parallel wave only after creating frozen concept packets with file ownership boundaries.
+
+### 2026-06-13 - Dev Merge, Runtime Audit, And Depth Expansion Plan
+
+Lab:
+- All Volume I and Volume II labs, with merge conflicts resolved in MLSysIM compression and hardware tests.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `mlsysim/mlsysim/engine/solvers/compression.py`
+- `mlsysim/mlsysim/engine/results.py`
+- `mlsysim/tests/test_hardware.py`
+- `mlsysim/tests/test_compression_candidates.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/LAB_DEPTH_AUDIT_AND_EXPANSION_PLAN_2026_06_13.md`
+
+What changed:
+- Merged local `dev` into `codex/labs`.
+- Preserved the lab branch's compression candidate/sweep API while aligning imports with the refactored `mlsysim.solvers` public path.
+- Preserved both the lab-track Oura/RoboTaxi hardware checks and the newer H100 registry-backed die-area/unit-cost checks from `dev`.
+- Added `CompressionCandidate` and `CompressionSweepResult` to the explicit `mlsysim.engine.results` export surface.
+- Audited the labs for runtime viability and instructional depth, then recorded a phased expansion plan.
+
+MLSysIM facts/APIs needed:
+- No new facts were added in this pass.
+- Follow-up work should continue moving notebook-local hardware/model constants into MLSysIM or typed lab metadata when they are reused.
+
+Notebook-local constants removed:
+- None in this pass. The merge/audit focused on compatibility, runtime checks, and depth planning.
+
+Reusable component or modality improved:
+- Identified `render_system_design_lab()` as the highest-leverage upgrade point for 14 shared Volume II labs.
+- Identified a need for shared storyline metadata, Math Peek/source-model helpers, prediction gates, synthesis panels, and static-test-visible lab structure.
+
+Plan updates needed in other labs:
+- Use `labs/LAB_DEPTH_AUDIT_AND_EXPANSION_PLAN_2026_06_13.md` as the implementation roadmap.
+- Prioritize shared Volume II renderer/storyline upgrades before hand-editing individual shared-shell labs.
+- Convert V1-02 through V1-09 from inline partial migrations to explicit part/synthesis structures.
+- Add Math Peek/source-model sections to V1-01, V1-13 through V1-16, and V2-06.
+
+Tests or checks run:
+- `python3 -m py_compile` on labs and MLSysIM Python files.
+- `PYTHONPATH=mlsysim python3 -m pytest mlsysim/tests/test_hardware.py mlsysim/tests/test_compression_candidates.py mlsysim/tests/test_solver_module_exports.py -q` -> 17 passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_track_profiles.py labs/tests/test_lab_variants.py labs/tests/test_report_contract.py labs/tests/test_ui_helpers.py labs/tests/test_track_arcs.py -q` -> 43 passed.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q` -> 121 failed, 1372 passed, 99 skipped, 180 xfailed. Failures cluster around instructional/protocol depth.
+- Representative browser smoke on V1-10, V2-01, V2-10, V2-17 plus dashboard/catalog -> 4/4 labs and 2/2 HTML pages passed.
+
+Follow-up:
+- Implement Phase 1 of the depth plan: shared storyline metadata, renderer tabs, Math Peek/source helpers, ledger HUD, and tests that understand shared-renderer metadata.
+
+### 2026-06-13 - Part Storyline Depth Blueprint
+
+Lab:
+- All Volume I and Volume II labs, analysis layer only.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/LAB_PART_STORYLINE_DEPTH_BLUEPRINT_2026_06_13.md`
+- `labs/LAB_DEPTH_AUDIT_AND_EXPANSION_PLAN_2026_06_13.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Extended the depth audit from a structural checklist into a chapter-by-chapter teaching blueprint.
+- Defined the within-part narrative contract: scenario, prediction, experiment, evidence, source model, reflection, and checkpoint.
+- Mapped all Volume I and Volume II labs to deeper Part A-D storylines, including subpieces of student work inside each part.
+- Identified new support primitives needed for implementation: `LabStoryline`, `PartStory`, `PartBeat`, `TrackPartLens`, `EvidenceContract`, `MathPeekSpec`, and synthesis/checkpoint helpers.
+
+MLSysIM facts/APIs needed:
+- This pass did not add facts or APIs.
+- The blueprint identifies where future implementation should route formulas and quantitative evidence through MLSysIM solvers or typed lab metadata.
+
+Notebook-local constants removed:
+- None. This was a planning and analysis pass.
+
+Reusable component or modality improved:
+- Proposed a typed storyline registry and renderer-driven part tabs so shared-renderer labs can become deep without duplicating notebook code.
+- Proposed tests that validate part beat roles instead of relying only on literal notebook function names.
+
+Plan updates needed in other labs:
+- Before expanding individual notebooks, implement the storyline metadata layer and renderer hooks.
+- Use the blueprint as the source for Part D additions, Math Peek coverage, and report checkpoint fields.
+
+Tests or checks run:
+- Documentation-only pass; no runtime tests required after the prior merge/audit verification.
+
+Follow-up:
+- Start with a small implementation slice: add the typed storyline schema plus one shared-renderer Volume II lab, likely V2-01, as the pilot.
+
+### 2026-06-05 - Full Volume I/II Browser Pilot And Workflow Scaffolding
+
+Lab:
+- All Volume I and Volume II labs, with targeted fixes in V1-03, V1-04, V1-05, and V1-11.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tools/interaction_lab_smoke.py`
+- `labs/vol1/lab_03_ml_workflow.py`
+- `labs/vol1/lab_04_data_engr.py`
+- `labs/vol1/lab_05_nn_compute.py`
+- `labs/vol1/lab_11_hw_accel.py`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added reusable `part_workflow()` scaffolding so labs can consistently show the prediction, controls, evidence, decision, and reflection loop without duplicating HTML.
+- Added the shared workflow scaffold to early single-page Volume I labs where students saw the work but not the explicit sequence.
+- Added per-tab workflow scaffolding to V1-11 so each hardware-roofline part ties the incoming message to controls, evidence, and the decision.
+- Improved `interaction_lab_smoke.py` so browser smoke scrolls Marimo's real scroll containers and accumulates visible text across the page instead of judging only the first viewport.
+- Expanded the smoke category detector to recognize the learner-facing vocabulary now used by the shared scaffold.
+
+MLSysIM facts/APIs needed:
+- No new hardware/model facts were added.
+- The pass continued to keep device/model facts in MLSysIM or typed `mlsysbook_labs` registries.
+
+Notebook-local constants removed:
+- None. This pass changed learner flow and validation rather than computation.
+
+Reusable component or modality improved:
+- `part_workflow()` is now the reusable formula for part-level pedagogy: scenario, prediction, controls, evidence, decision, and reflection.
+- `interaction_lab_smoke.py` now exercises real scrolling, track selection, tab clicks, answer clicks where safe, layout overflow, page errors, and HTML dashboard/catalog checks.
+
+Plan updates needed in other labs:
+- Future bespoke lab parts should use `part_workflow()` or a higher-level wrapper before adding custom HTML.
+- Single-page labs can still be valid, but they need an explicit workflow bridge because students otherwise see a long worksheet rather than a sequence of learning moves.
+
+Tests or checks run:
+- `python3 -m py_compile` on touched notebooks, shared UI files, and the smoke harness.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_track_arcs.py -q` -> 10 passed.
+- `python3 labs/tools/interaction_lab_smoke.py` chunks:
+  - V1-00 through V1-11 -> 12 labs passed, dashboard/catalog passed.
+  - V1-12 through V1-16 -> 5 labs passed, dashboard/catalog passed.
+  - V2-01 through V2-05 -> 5 labs passed, dashboard/catalog passed.
+  - V2-06 through V2-11 -> 6 labs passed, dashboard/catalog passed.
+  - V2-12 through V2-17 -> 6 labs passed, dashboard/catalog passed.
+- Total browser pilot result: 34/34 labs passed with all four track clicks, scroll checks, tab/part checks where present, no page/console errors, and no horizontal overflow.
+- Full aspirational suite check: `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests -q` -> 120 failed, 1385 passed, 99 skipped, 167 xfailed. The failures are broad protocol/widget expectations that predate this pass: missing `build_synthesis()` functions, missing Synthesis tabs or ledger HUDs in shared-renderer labs, missing prediction reveal/stop gates, and missing Math Peek sections.
+
+Follow-up:
+- Promote the chunked interaction smoke command to a documented release checklist.
+- Consider adding `part_workflow()` to more bespoke tabs where the local prose is strong but the learner loop is implicit.
+- Address the broad aspirational protocol/widget failures separately from this browser-pilot pass.
+
+### 2026-06-04 - Whole-Track Arc Coherence Pass
+
+Lab:
+- All Volume I and Volume II labs.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/track_arcs.py`
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/migration.py`
+- `labs/mlsysbook_labs/system_design.py`
+- Direct hand-written lab notebooks in `labs/vol1` plus V2-06, V2-10, and V2-11.
+- `labs/lab-plan-dashboard.html`
+- `labs/LAB_TRACK_COHERENCE_AUDIT_2026_06_04.md`
+- `labs/LAB_USER_ACTIVITY_FEEDBACK_LOOP.md`
+- `labs/LAB_OVERNIGHT_FEEDBACK_AUDIT.md`
+
+What changed:
+- Added a reusable `TrackArc` registry and `LabArcStep` sequence covering all 34 catalog labs.
+- Added `track_arc_context()` as the shared student-facing "Where This Fits" panel.
+- Wired the arc panel into direct labs, shared migration panels, and the shared Volume II system-design renderer.
+- Removed visible source-trace/source-ref panels from hand-written lab launch flows while preserving internal report provenance.
+- Updated the dashboard with a new Volume Track Arcs section and smoke-test coverage for 4 arc cards.
+- Recorded simulated instructor, TA, student, and domain-expert feedback in the coherence audit.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were added in this pass.
+- The pass reinforces that hardware/model/system facts stay in MLSysIM or typed `mlsysbook_labs` registries; learner-facing copy should describe device/model families and decisions rather than implementation refs.
+
+Notebook-local constants removed:
+- No computational constants were removed in this pass.
+- Visible provenance/source-trace panels were removed from launch flows where they distracted from the case narrative.
+
+Reusable component or modality improved:
+- `track_arc_context()` gives every lab a shared, testable cross-volume journey panel.
+- `track_arc_context_summary()` gives docs/tests/UI the same arc copy from one registry.
+- The dashboard now exposes the track arc before the 34-row lab coverage table.
+
+Plan updates needed in other labs:
+- Future deep migrations should use `track_arc_context()` after `track_context()`.
+- When a lab needs a new device/model fact, add it to MLSysIM or a typed registry before putting it in notebook prose.
+- Preserve provenance in report snapshots and tests; keep student launch copy scenario-focused.
+
+Tests or checks run:
+- `python3 -m py_compile` on the edited shared files and direct notebooks.
+- `PYTHONPATH=labs:mlsysim python3 -m pytest labs/tests/test_track_arcs.py labs/tests/test_ui_helpers.py labs/tests/test_static.py labs/tests/test_lab_variants.py labs/tests/test_report_contract.py labs/tests/test_migration_shell.py -q` -> 856 passed, 4 skipped, 5 xfailed.
+
+Follow-up:
+- Browser-smoke the updated dashboard and representative/all lab pages after rebuilding the labs wheel.
+- Add release-mode browser smoke to CI or a documented pre-release command.
+- Specialize the highest-value remaining shared Volume II labs after the arc baseline is stable.
+
+### 2026-06-03 - Planning Baseline
+
+Lab:
+- All labs, planning layer only.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/*.md`
+- `labs/vol1/*.track-plan.md`
+- `labs/vol2/*.track-plan.md`
+
+What changed:
+- Added per-lab track plans and a modality catalog.
+- Upgraded V1-10 Compression into the pilot detailed plan format.
+- Added this implementation notes log and the single-source-of-truth policy.
+
+MLSysIM facts/APIs needed:
+- `Hardware.Tiny.OuraRing`
+- `Hardware.Edge.RoboTaxi`
+- Cloud Fleet profile or system registry entry beyond a single H100.
+- Compression candidate/sweep/Pareto result schema.
+
+Notebook-local constants removed:
+- None yet. No notebook code edited in this pass.
+
+Reusable component or modality improved:
+- Defined reusable modality catalog for track selector, scenario strip, prediction locks, sliders, strategy selectors, stack builders, constraint budgets, frontiers, source traces, failure boundaries, decision cards, and reports.
+
+Plan updates needed in other labs:
+- All plans should include assignment modes, completion path, expected track outcomes, misconceptions, assumptions, accessibility/fallback requirements, data contracts, and rubric sketch.
+
+Tests or checks run:
+- Counted 34 lab notebooks and 34 track plans.
+- Checked all track plans mention iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.
+- ASCII scan clean for new detailed planning docs.
+
+Follow-up:
+- Upgrade the remaining track plans to the detailed template.
+- Implement track profile registry.
+- Add Oura Ring and RoboTaxi hardware registry entries.
+
+### 2026-06-03 - Detailed Plan Propagation
+
+Lab:
+- All labs, planning layer only.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/*.track-plan.md`
+- `labs/vol2/*.track-plan.md`
+- `labs/LAB_SINGLE_SOURCE_OF_TRUTH_POLICY.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Propagated the V1-10 detailed planning structure across every per-lab track plan.
+- Every plan now includes instructor assignment modes, expected track outcomes, common misconceptions, data/solver contracts, single-source-of-truth requirements, accessibility/fallback requirements, a rubric sketch, and continuous-improvement notes.
+
+MLSysIM facts/APIs needed:
+- Same baseline needs remain: `Hardware.Tiny.OuraRing`, `Hardware.Edge.RoboTaxi`, a Cloud Fleet profile/system abstraction, and typed solver/result APIs for track-aware lab computations.
+
+Notebook-local constants removed:
+- None yet. No notebook code edited in this pass.
+
+Reusable component or modality improved:
+- Planning now treats every lab as pedagogy kernel + track realization + modality stack + typed result/report contract.
+
+Plan updates needed in other labs:
+- No missing detailed sections remain in the track-plan files.
+- Future refinements should be driven by actual implementation discoveries and recorded here.
+
+Tests or checks run:
+- Verified all 34 plans include the required detailed sections.
+- Verified all 34 plans mention iPhone, Oura Ring, RoboTaxi, Cloud Fleet, and MLSysIM.
+- ASCII scan clean across the planning docs.
+
+Follow-up:
+- Start implementation by adding MLSysIM registry entries for missing canonical hardware.
+- Add `TrackProfile` and `LabTrackVariant` registries before notebook refactors.
+- Migrate Lab 00 first, then the V1-10 pilot, then one Volume 2 pilot such as V2-11 Edge Thermodynamics.
+
+### 2026-06-03 - Lab Structure And Local Report Contract
+
+Lab:
+- All labs, implementation contract only.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/LAB_STRUCTURE_AND_REPORT_CONTRACT.md`
+- `labs/LAB_REALIZATION_MODALITY_CATALOG.md`
+- `labs/LAB_SINGLE_SOURCE_OF_TRUTH_POLICY.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added the formal lab-level and part-level structure contract.
+- Required every part to include a part header, "What You Need To Know", scenario slice, prediction, controls, evidence, source trace, reflection, and checkpoint/decision.
+- Required every lab to end with synthesis, big takeaways, and a local-first downloadable report.
+- Added explicit student-facing header labels for lab sections, part sections, synthesis, and downloaded reports.
+
+MLSysIM facts/APIs needed:
+- No new hardware/model facts from this contract.
+- Report snapshots need typed result objects from MLSysIM/lab variants so source traces and evidence can be serialized cleanly.
+
+Notebook-local constants removed:
+- None. No notebook code edited in this pass.
+
+Reusable component or modality improved:
+- Standard part recipe now includes the micro-brief, reflection, checkpoint, and report artifact requirements.
+- Header names are now part of the contract: `Learning Objectives`, `Chapter Recap`, `Your Track`, `Scenario Brief`, `Lab Map`, `Your Prediction`, `Try It`, `Evidence`, `Constraint Check`, `Source Trace`, `Reflection`, `Checkpoint`, `Synthesis`, `Big Takeaways`, and `Download Report`.
+- Simulated structure feedback added compact rendering, completion-state, and incomplete-report guidance.
+
+Plan updates needed in other labs:
+- During implementation, every lab plan should be checked against `LAB_STRUCTURE_AND_REPORT_CONTRACT.md`.
+- If one lab develops a better report field, reflection prompt, or source-trace layout, update the contract and propagate it.
+
+Tests or checks run:
+- Documentation-only update.
+
+Follow-up:
+- Add or update `mlsysbook_labs` helpers for local report export, fallback report text area, part checkpoints, and structured reflections.
+- Add tests that verify report export can be produced locally without a backend.
+
+### 2026-06-03 - Structure Feedback Pass
+
+Lab:
+- All labs, structure feedback only.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/LAB_STRUCTURE_FEEDBACK_SIMULATION.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Recorded simulated instructor and student feedback on the lab header, part header, synthesis, and local report structure.
+- Marked which feedback items were folded into the structure contract.
+- Added a second-pass verdict that the structure is ready to become the standard, with implementation discipline around compact rendering.
+
+MLSysIM facts/APIs needed:
+- None from this feedback pass.
+
+Notebook-local constants removed:
+- None. No notebook code edited in this pass.
+
+Reusable component or modality improved:
+- Confirmed the need for reusable components for progress state, report completeness, source trace summaries, structured reflections, and rubric-aligned report sections.
+
+Plan updates needed in other labs:
+- Pilot implementation should produce one completed exemplar report and a rubric mapping before broad notebook migration.
+
+Tests or checks run:
+- Documentation-only update.
+
+Follow-up:
+- Build one pilot report artifact from Lab 00 or V1-10.
+- Add a reusable rubric component that maps to the downloaded report headers.
+- Define expected time-on-task for compact, default, and extended assignment modes.
+
+### 2026-06-03 - Belts And Knobs Catalog Page
+
+Lab:
+- All labs, planning/UI reference only.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/lab-modality-catalog.html`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added a static HTML companion page for the modality catalog.
+- The page shows reusable belts for lab flow and reusable knobs for controls, visuals, evidence, decisions, and reports.
+- Added a track-aware demo showing how the same controls and evidence panels change narrative by track.
+
+MLSysIM facts/APIs needed:
+- None added by this page. Demo values are explicitly illustrative placeholders.
+- Real implementation should replace demo values with MLSysIM registry facts, solver outputs, and typed lab variants.
+
+Notebook-local constants removed:
+- None. No notebook code edited in this pass.
+
+Reusable component or modality improved:
+- Made the catalog easier to inspect visually before implementing notebook components.
+- Reinforced the distinction between belts as repeatable lab flows and knobs as reusable interactive/rendering devices.
+
+Plan updates needed in other labs:
+- Use this catalog as a reference when choosing modality stacks for each lab plan.
+- When implementing a new reusable device, add it to the Markdown catalog and keep the HTML companion aligned.
+
+Tests or checks run:
+- Static HTML validation pending after this note.
+
+Follow-up:
+- After the first pilot implementation, update the page with actual component names from `mlsysbook_labs`.
+- Add an exemplar report link once a pilot report artifact exists.
+
+### 2026-06-03 - Track Foundation Implementation Pass
+
+Lab:
+- Lab 00, plus shared MLSysIM and `mlsysbook_labs` foundation.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `mlsysim/mlsysim/hardware/data/tiny/OuraRing.yaml`
+- `mlsysim/mlsysim/hardware/data/edge/RoboTaxi.yaml`
+- `labs/mlsysbook_labs/schemas.py`
+- `labs/mlsysbook_labs/tracks.py`
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/reports.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/vol1/lab_00_introduction.py`
+- `labs/tests/test_track_profiles.py`
+- `mlsysim/tests/test_hardware.py`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+- `wheels/mlsysim-0.1.2-py3-none-any.whl`
+
+What changed:
+- Added MLSysIM hardware registry entries for `Hardware.Tiny.OuraRing` and `Hardware.Edge.RoboTaxi`.
+- Added canonical lab track profiles for iPhone, Oura Ring, RoboTaxi, and Cloud Fleet.
+- Mapped legacy category inputs (`mobile`, `tinyml`, `edge`, `cloud`) to canonical track IDs.
+- Updated the shared track selector to show the four student-facing tracks.
+- Added a reusable `track_context()` renderer for source-traced track cards.
+- Updated `build_lab_report()` to emit the contract headers: Lab, Track And Scenario, Learning Objectives, Predictions, Evidence Summary, Final Decision, Big Takeaways, Reflections, Residual Risk, and Source Trace.
+- Added `Incomplete Fields` reporting for missing required report sections.
+- Added `report_text_fallback()` and `report_export_panel()` so labs can expose a local Markdown fallback if browser download fails.
+- Updated Lab 00 so the selected regime saves a canonical track ID and MLSysIM source references to the Design Ledger.
+- Rebuilt the browser wheels so Lab 00's WASM path can import the new track helpers and hardware registry entries.
+
+MLSysIM facts/APIs needed:
+- `Hardware.Tiny.OuraRing` now exists as an estimate-backed wearable reference profile.
+- `Hardware.Edge.RoboTaxi` now exists as an estimate-backed DRIVE AGX Orin-class reference profile.
+- Cloud Fleet uses existing `Hardware.Cloud.H100` and `Systems.Clusters.Lab_64_H100`.
+
+Notebook-local constants removed:
+- None removed yet. Lab 00 still contains legacy explanatory copy and demo constants; it now records canonical source references for downstream labs.
+
+Reusable component or modality improved:
+- Track selection, track context display, report completeness, and report fallback are now reusable helper APIs.
+
+Plan updates needed in other labs:
+- Future lab migrations should read the selected canonical track from the Design Ledger and call `get_track_profile()` before choosing scenario variants.
+- Pilot labs should pass learning objectives, big takeaways, source trace, and evidence summary into `build_lab_report()`.
+- Compression pilot should use `Hardware.Tiny.OuraRing`, `Hardware.Edge.RoboTaxi`, `Hardware.Mobile.iPhone15Pro`, and Cloud Fleet refs rather than notebook-local hardware constants.
+
+Tests or checks run:
+- `python3 -m pytest labs/tests/test_track_profiles.py -q`
+- `python3 -m pytest mlsysim/tests/test_hardware.py -q`
+- `python3 -m pytest mlsysim/tests/test_provenance_audit.py mlsysim/tests/test_system_registry.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestLabCatalog -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency::test_mlsysbook_labs_wheel_present_when_imported labs/tests/test_static.py::TestRequiredImports::test_imports_design_ledger --tb=short -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3` AST parse check for `labs/vol1/lab_00_introduction.py`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `mlsysbook_labs/tracks.py`.
+- Verified `wheels/mlsysim-0.1.2-py3-none-any.whl` contains the Oura Ring and RoboTaxi hardware YAML entries.
+
+Follow-up:
+- Migrate the Lab 00 visible structure to the full header contract in a separate pass.
+- Build the V1-10 Compression pilot on the new profile/report APIs.
+- Add typed `LabTrackVariant` entries for each pilot lab before broad notebook migration.
+
+### 2026-06-03 - Lab 00 Structure Pass
+
+Lab:
+- V1-00 The Architect's Portal.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_00_introduction.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added explicit Lab 00 metadata and learning-objective tuples.
+- Added visible contract headers for `Learning Objectives`, `Chapter Recap`, `Scenario Brief`, `Your Track`, `Lab Map`, `Big Takeaways`, and `Download Report`.
+- Added the reusable `track_context()` panel after track selection so Lab 00 shows the selected canonical track and MLSysIM source references.
+- Added local report generation with `build_lab_report()` and `report_export_panel()`.
+- The downloaded report records the selected track, hardware reference, optional system reference, check answers, big takeaways, source trace, and residual risk.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts. Lab 00 now consumes canonical track profiles and source references created in the foundation pass.
+
+Notebook-local constants removed:
+- None. This was a structure/report pass; the remaining Lab 00 explanatory constants will be handled only if they become active solver inputs.
+
+Reusable component or modality improved:
+- Proved that Lab 00 can use `track_context()` and the local report export panel without rewriting the existing concept checks.
+
+Plan updates needed in other labs:
+- V1-10 should follow the same local report pattern but with solver-backed evidence instead of orientation-only evidence.
+- The report should be complete only when predictions, evidence summary, final decision, big takeaways, reflections, residual risk, and source trace are present.
+
+Tests or checks run:
+- `python3` AST parse check for `labs/vol1/lab_00_introduction.py`
+- `python3 -m pytest labs/tests/test_track_profiles.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency labs/tests/test_static.py::TestRequiredImports::test_imports_design_ledger --tb=short -q`
+- `rg` check for required Lab 00 contract headers and helper calls.
+
+Follow-up:
+- Start the Lab Variant Registry pass.
+- Then migrate V1-10 Compression as the first content-heavy pilot.
+
+### 2026-06-03 - Pilot Lab Variant Registry
+
+Lab:
+- V1-00 The Architect's Portal.
+- V1-10 Compression Paradox.
+- V2-11 Edge Thermodynamics.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/variants.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added typed `LabTrackVariant` entries for the first three pilot labs.
+- Each pilot lab now has one scenario variant per canonical track.
+- Variants carry stakeholder, workload summary, objective, primary metric, guardrail metric, hardware ref, optional system ref, model ref, defaults, and assumptions.
+- Added lookup helpers: `list_lab_variants()`, `get_lab_track_variant()`, `variant_coverage()`, and `canonical_track_ids()`.
+- Exported the variant registry from `mlsysbook_labs`.
+- Updated the wheel contract test so browser wheels must include `tracks.py` and `variants.py`.
+- Rebuilt the `mlsysbook_labs` browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new hardware or model facts. Variants reference existing MLSysIM model paths:
+  - `Models.Vision.MobileNetV2`
+  - `Models.Tiny.DS_CNN`
+  - `Models.Tiny.AnomalyDetector`
+  - `Models.Vision.YOLOv8_Nano`
+  - `Models.Language.BERT_Base`
+
+Notebook-local constants removed:
+- None. This was a metadata foundation pass before notebook migration.
+
+Reusable component or modality improved:
+- Scenario defaults and assumptions now have a typed home before V1-10 and V2-11 implementation.
+
+Plan updates needed in other labs:
+- After V1-10 and V2-11 prove the registry shape, extend `variants.py` or split it into per-volume modules for the remaining labs.
+- Add source-trace rendering from `LabTrackVariant` during notebook migration.
+
+Tests or checks run:
+- `python3 -m pytest labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_track_profiles.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `mlsysbook_labs/tracks.py` and `mlsysbook_labs/variants.py`.
+
+Follow-up:
+- Implement shared modality helpers needed by V1-10.
+- Begin V1-10 Compression pilot migration using `get_lab_track_variant()`.
+
+### 2026-06-03 - Shared Modality Helper Layer
+
+Lab:
+- All labs, shared `mlsysbook_labs` UI layer.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_ui_helpers.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added reusable helpers for the contract sections: `learning_objectives()`, `lab_map()`, `part_header()`, `what_you_need_to_know()`, `scenario_slice()`, `constraint_check()`, `source_trace()`, `evidence_summary()`, `checkpoint_card()`, and `big_takeaways()`.
+- Added `COMPLETION_STATES` with the required lab-map order: not started, prediction saved, evidence viewed, checkpoint saved, and decision complete.
+- Added compact shared CSS for lists, status pills, part titles, and collapsed source traces.
+- Exported the helpers from `mlsysbook_labs` so browser notebooks can import the same structure vocabulary.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts. The helpers are renderers; they expect hardware, model, system, solver, and scenario values to come from MLSysIM registries or typed lab variant metadata.
+
+Notebook-local constants removed:
+- None. This pass creates the shared target APIs before migrating content-heavy notebooks.
+
+Reusable component or modality improved:
+- Lab-level structure, part-level structure, source trace, constraint check, evidence summary, checkpoint, big takeaways, and completion-state rendering now have one package-level implementation.
+
+Plan updates needed in other labs:
+- V1-10 should consume these helpers directly instead of writing notebook-local section HTML.
+- Future pilots should add missing helper APIs here first if a new modality is genuinely reusable.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py labs/mlsysbook_labs/__init__.py labs/tests/test_ui_helpers.py`
+- `python3 -m pytest labs/tests/test_ui_helpers.py -q`
+- `python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_track_profiles.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains the shared helper API in `mlsysbook_labs/ui.py`.
+
+Follow-up:
+- Begin V1-10 Compression pilot migration using the shared helper layer.
+
+### 2026-06-03 - V1-10 Track-Aware Outer Contract Pass
+
+Lab:
+- V1-10 The Compression Paradox.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added the `mlsysbook_labs` browser wheel install to the V1-10 WASM bootstrap.
+- Imported the shared lab metadata, track, structure, source-trace, and report helpers.
+- Added V1-10 `LabMetadata`, `ChapterRecap`, learning objectives, and big takeaways.
+- Added a canonical track selector that defaults from the local Design Ledger when Lab 00 has already stored a track.
+- Loaded the V1-10 `LabTrackVariant` for the selected canonical track.
+- Replaced the old opening hero/briefing with the shared academic header, `Learning Objectives`, `Chapter Recap`, `Your Track`, `Scenario Brief`, `Lab Map`, and `Source Trace` blocks.
+- Added a local `Download Report` section that records selected track, scenario variant, source trace, and prediction values while marking solver-backed evidence and the final recipe as incomplete.
+- Updated the ledger save payload to include canonical `track_id`, `scenario_id`, `hardware_ref`, `system_ref`, `model_ref`, primary metric, guardrail metric, and completion state.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts. This pass consumes existing track profiles and pilot variants.
+- The remaining V1-10 calculation code still needs a source-traced compression candidate/sweep API before notebook-local constants can be removed safely.
+
+Notebook-local constants removed:
+- None yet. H100, iPhone, Jetson, ResNet-50, MobileNetV2, and Llama constants are still used by the legacy Parts A-E calculations.
+
+Reusable component or modality improved:
+- V1-10 now proves the shared helper layer can drive a content-heavy lab opening and a local report skeleton.
+
+Plan updates needed in other labs:
+- Later migrations should copy this outer-contract pattern before changing part internals.
+- The compression solver pass should determine whether reusable compression result types belong in MLSysIM or `mlsysbook_labs` metadata before moving formulas out of the notebook.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_10_model_compress.py`
+- `python3 -m pytest labs/tests/test_static.py::TestSyntax::test_ast_parse labs/tests/test_static.py::TestWheelConsistency::test_mlsysbook_labs_wheel_present_when_imported labs/tests/test_static.py::TestWheelConsistency::test_micropip_url_matches_pyproject_version --tb=short -q labs/vol1/lab_10_model_compress.py`
+- `rg` check for `mlsysbook_labs`, `Scenario Brief`, `Lab Map`, `Source Trace`, `Download Report`, `build_lab_report`, and `ledger.save`.
+
+Follow-up:
+- Implement a shared compression candidate/frontier result layer before changing Parts A-E.
+- Migrate Parts A-C first because they are the core compression pedagogy and report evidence path.
+
+### 2026-06-03 - MLSysIM Compression Candidate Layer
+
+Lab:
+- V1-10 The Compression Paradox, shared MLSysIM solver layer.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `mlsysim/mlsysim/engine/results.py`
+- `mlsysim/mlsysim/engine/solvers/compression.py`
+- `mlsysim/tests/test_compression_candidates.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysim-0.1.2-py3-none-any.whl`
+
+What changed:
+- Added typed `CompressionCandidate` and `CompressionSweepResult` result models.
+- Extended `CompressionModel` with `candidate()` for one source-traced compression configuration and `sweep()` for a candidate list with Pareto status.
+- Candidate evaluation now records method, bit width, sparsity, compressed size, compression ratio, estimated accuracy delta, memory savings, speedup, hardware-support status, feasibility, binding constraint, guardrail violations, and source trace.
+- Sweep evaluation now marks candidates as `frontier` or `dominated` and selects a best feasible frontier candidate for the default objective.
+- Rebuilt the MLSysIM browser wheel so lab notebooks can use the new methods in WASM.
+
+MLSysIM facts/APIs needed:
+- This pass adds the reusable solver API needed by V1-10 Parts A-C.
+- Track-specific guardrail thresholds still need to be supplied by typed lab variants or a dedicated scenario contract.
+- Hardware support currently uses explicit precision entries and sparsity conventions from the hardware object; if a device needs INT8/NPU support represented, it must be added to the hardware registry rather than a notebook.
+
+Notebook-local constants removed:
+- None yet. This pass creates the MLSysIM API that will replace notebook-local compression candidate calculations in the next V1-10 pass.
+
+Reusable component or modality improved:
+- Compression candidate, feasibility, source trace, and Pareto metadata now have a single typed source in MLSysIM.
+
+Plan updates needed in other labs:
+- V1-10 should migrate Parts A-C to call `CompressionModel.candidate()` and `CompressionModel.sweep()`.
+- Any future compression, serving, or hardware lab that needs candidate/frontier reporting should consume these typed results instead of rebuilding the logic.
+
+Tests or checks run:
+- `python3 -m py_compile mlsysim/mlsysim/engine/results.py mlsysim/mlsysim/engine/solvers/compression.py mlsysim/tests/test_compression_candidates.py`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py -q`
+- `python3 -m pytest mlsysim/tests/test_solver_suite.py::TestCompressionModel -q`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py mlsysim/tests/test_solver_suite.py::TestCompressionModel mlsysim/tests/test_solver_module_exports.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency::test_micropip_url_matches_pyproject_version -q`
+- Verified `wheels/mlsysim-0.1.2-py3-none-any.whl` contains `CompressionModel.candidate()`, `CompressionModel.sweep()`, `CompressionCandidate`, and `CompressionSweepResult`.
+
+Follow-up:
+- Migrate V1-10 Parts A-C to use the new MLSysIM compression candidate and sweep APIs.
+- Decide whether iPhone INT8 fast-path support should be encoded in `Hardware.Mobile.iPhone15Pro` before making iPhone-specific V1-10 feasibility claims.
+
+### 2026-06-03 - MLSysIM Registry Reference Resolver
+
+Lab:
+- All labs, shared `mlsysbook_labs` helper layer.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/registry_refs.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_registry_refs.py`
+- `labs/tests/test_static.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `resolve_mlsysim_ref()` to resolve canonical strings such as `Hardware.Tiny.OuraRing`, `Models.Tiny.DS_CNN`, and `Systems.Clusters.Lab_64_H100`.
+- Exported the resolver from `mlsysbook_labs`.
+- Added tests for hardware, model, system, unsupported-root, and missing-path behavior.
+- Updated the browser-wheel contract so `registry_refs.py` must ship in `mlsysbook_labs`.
+- Rebuilt the `mlsysbook_labs` browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new facts. This helper resolves existing MLSysIM registry objects from typed lab variant references.
+
+Notebook-local constants removed:
+- None yet. The next V1-10 notebook pass can use this resolver instead of local maps from reference strings to objects.
+
+Reusable component or modality improved:
+- Track variants can now carry canonical registry strings while notebooks resolve the actual MLSysIM object through one shared helper.
+
+Plan updates needed in other labs:
+- Future lab migrations should call `resolve_mlsysim_ref()` when turning typed variant refs into MLSysIM objects.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/registry_refs.py labs/mlsysbook_labs/__init__.py labs/tests/test_registry_refs.py`
+- `python3 -m pytest labs/tests/test_registry_refs.py -q`
+- `python3 -m pytest labs/tests/test_registry_refs.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `mlsysbook_labs/registry_refs.py` and exports `resolve_mlsysim_ref`.
+
+Follow-up:
+- Use `resolve_mlsysim_ref()` in V1-10 when building compression candidates from the selected track variant.
+
+### 2026-06-03 - V1-10 MLSysIM Candidate Evidence Pass
+
+Lab:
+- V1-10 The Compression Paradox.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added V1-10 compression guardrail defaults to each track variant: size-limit source, maximum accuracy drop, minimum speedup, and hardware-support requirement.
+- Updated V1-10 to resolve the selected variant's `model_ref` and `hardware_ref` with `resolve_mlsysim_ref()`.
+- Added a reactive `CompressionModel.sweep()` cell that evaluates quantization and pruning candidates for the selected track.
+- Added a visible MLSysIM-backed `Evidence Summary` with best feasible frontier candidate, frontier candidates, dominated candidates, feasible count, size limit, and guardrail source.
+- Updated the local report export to include compression candidate rows, best candidate, frontier labels, dominated labels, and solver source trace.
+- Updated the Design Ledger payload to save the same plain candidate snapshot.
+- Rebuilt the `mlsysbook_labs` browser wheel so the updated variant defaults are available in WASM.
+
+MLSysIM facts/APIs needed:
+- This pass consumes `CompressionModel.sweep()` and `resolve_mlsysim_ref()`.
+- iPhone fast-path support remains conservative because `Hardware.Mobile.iPhone15Pro` has no explicit `int8` precision entry. The lab records that through hardware-support feasibility rather than adding a notebook override.
+
+Notebook-local constants removed:
+- The report and opening evidence path no longer depend on notebook-local compression candidate calculations.
+- Legacy Parts A-E still contain their original calculation snippets and will be migrated part-by-part.
+
+Reusable component or modality improved:
+- V1-10 now demonstrates the intended flow: typed track variant -> MLSysIM registry objects -> MLSysIM compression sweep -> evidence summary -> ledger/report snapshot.
+
+Plan updates needed in other labs:
+- Other labs with typed variants should follow this ref-resolution pattern when turning `hardware_ref`, `model_ref`, or `system_ref` into solver inputs.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_10_model_compress.py labs/mlsysbook_labs/variants.py labs/tests/test_lab_variants.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py -q`
+- `python3 -m pytest labs/tests/test_static.py::TestSyntax::test_ast_parse labs/tests/test_static.py::TestWheelConsistency::test_mlsysbook_labs_wheel_present_when_imported labs/tests/test_static.py::TestWheelConsistency::test_micropip_url_matches_pyproject_version --tb=short -q labs/vol1/lab_10_model_compress.py`
+- Runtime sweep check across all four V1-10 variants with `PYTHONPATH=mlsysim:labs`.
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains the V1-10 guardrail defaults.
+
+Follow-up:
+- Migrate the internals of Parts A-C so the interactive controls and visuals read from the MLSysIM candidate/sweep outputs instead of legacy notebook formulas.
+- Add structured reflection/checkpoint widgets for the final recipe so the report can become complete.
+
+### 2026-06-03 - V1-10 Synthesis And Complete Report Pass
+
+Lab:
+- V1-10 The Compression Paradox.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added track-specific validation-test options to the V1-10 variant defaults.
+- Added a structured `Synthesis` block with final recipe choice, validation-test choice, diagnosis reflection, tradeoff reflection, and residual-risk field.
+- Updated report generation so `Final Decision`, `Reflections`, and `Residual Risk` come from local widgets.
+- Updated the ledger payload to save final decision, validation test, reflections, and residual risk alongside the compression candidate snapshot.
+- Rebuilt the `mlsysbook_labs` browser wheel so validation-test defaults ship to WASM notebooks.
+
+MLSysIM facts/APIs needed:
+- No new facts. This pass uses existing candidate evidence and typed variant defaults.
+
+Notebook-local constants removed:
+- None. This pass completes the report contract around the solver-backed evidence.
+- Legacy Part A-C internals still need migration from local formulas to `CompressionModel.candidate()` and `CompressionModel.sweep()`.
+
+Reusable component or modality improved:
+- V1-10 now has the local-first report loop: prediction values, solver-backed evidence, final decision, structured reflection, residual risk, and downloadable report.
+
+Plan updates needed in other labs:
+- Future lab migrations should add structured synthesis widgets before claiming the report is complete.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_10_model_compress.py labs/mlsysbook_labs/variants.py labs/tests/test_lab_variants.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_static.py::TestSyntax::test_ast_parse labs/tests/test_static.py::TestWheelConsistency::test_mlsysbook_labs_wheel_present_when_imported --tb=short -q labs/vol1/lab_10_model_compress.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest mlsysim/tests/test_compression_candidates.py -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains the V1-10 validation-test defaults.
+- Note: a combined labs-plus-MLSysIM pytest invocation was split into separate commands because both suites expose a top-level `tests.conftest`.
+
+Follow-up:
+- Migrate Part A, Part B, and Part C internals to render directly from MLSysIM candidate/sweep outputs.
+- Consider adding a reusable structured synthesis widget helper if V2-11 repeats this pattern.
+
+### 2026-06-03 - All-Lab Baseline Variant Coverage
+
+Lab:
+- All 34 cataloged labs.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/variants.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `ALL_LAB_IDS` from the lab catalog.
+- Kept hand-authored variants for Lab 00, V1-10, and V2-11.
+- Added generated baseline variants for every non-pilot catalog lab and every canonical track.
+- Baseline variants use canonical track profiles for stakeholder, hardware/system refs, primary metrics, guardrails, dominant constraints, and source policy.
+- Baseline variants use stable model refs by track: MobileNetV2 for iPhone, DS-CNN for Oura Ring, YOLOv8-Nano for RoboTaxi, and BERT-Base for Cloud Fleet.
+- Updated variant coverage tests to require all 34 labs to expose all four canonical track variants.
+- Rebuilt the `mlsysbook_labs` browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new facts. Baseline variants point to existing MLSysIM model, hardware, and system registries.
+- Lab-specific solver thresholds still need hand-authored defaults when a notebook migration needs more than the baseline variant.
+
+Notebook-local constants removed:
+- None. This pass creates source-of-truth track/scenario coverage before batch notebook edits.
+
+Reusable component or modality improved:
+- Every lab now has a typed track variant entry that can drive track context, scenario brief, source trace, ledger metadata, and report exports.
+
+Plan updates needed in other labs:
+- Batch notebook migrations can now depend on `get_lab_track_variant()` for every catalog lab.
+- Replace baseline variants with hand-authored variants as individual labs receive deeper solver-backed migrations.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py labs/tests/test_lab_variants.py`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py -q`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_registry_refs.py labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `ALL_LAB_IDS`, `_baseline_variants`, and `baseline_variant_pending_notebook_migration`.
+
+Follow-up:
+- Add a compact shared migration shell for legacy notebooks so batch migration does not duplicate outer-contract/report boilerplate.
+
+### 2026-06-03 - Legacy Migration Shell Helper
+
+Lab:
+- All legacy notebooks pending batch migration.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/migration.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/tests/test_migration_shell.py`
+- `labs/tests/test_static.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `baseline_learning_objectives()` and `baseline_big_takeaways()` for not-yet-deep-migrated labs.
+- Added `variant_source_trace()` for serializable track/source metadata.
+- Added `build_migration_report()` to create a local report from metadata, track profile, and lab variant.
+- Added `legacy_migration_panel()` to render learning objectives, track context, scenario brief, source trace, big takeaways, and local report export from one shared helper.
+- Exported the migration helpers from `mlsysbook_labs`.
+- Added tests for baseline copy, source trace, and incomplete-field behavior.
+- Updated the wheel contract and rebuilt the browser wheel.
+
+MLSysIM facts/APIs needed:
+- No new facts. The helper consumes `LabMetadata`, `TrackProfile`, and `LabTrackVariant` source-of-truth values.
+
+Notebook-local constants removed:
+- None. The next batch pass can import this helper instead of copy-pasting track/report boilerplate into every notebook.
+
+Reusable component or modality improved:
+- Legacy notebooks now have a compact path to become track-aware and report-capable before deeper part-level solver migration.
+
+Plan updates needed in other labs:
+- Batch migrations should call `legacy_migration_panel()` as the baseline outer-contract layer.
+- Deeper lab-specific migrations can replace the baseline report fields with solver-backed evidence and hand-authored reflections.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/migration.py labs/mlsysbook_labs/__init__.py labs/tests/test_migration_shell.py`
+- `python3 -m pytest labs/tests/test_migration_shell.py labs/tests/test_lab_variants.py labs/tests/test_ui_helpers.py -q`
+- `python3 -m pytest labs/tests/test_migration_shell.py labs/tests/test_lab_variants.py labs/tests/test_static.py::TestWheelConsistency -q`
+- Verified `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl` contains `mlsysbook_labs/migration.py` and exports `legacy_migration_panel`.
+
+Follow-up:
+- Batch-apply the migration shell to the remaining Volume I notebooks first.
+
+### 2026-06-03 - Volume I Baseline Migration Panels
+
+Lab:
+- Volume I labs 01-09 and 11-16.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_01_ml_intro.py`
+- `labs/vol1/lab_02_ml_systems.py`
+- `labs/vol1/lab_03_ml_workflow.py`
+- `labs/vol1/lab_04_data_engr.py`
+- `labs/vol1/lab_05_nn_compute.py`
+- `labs/vol1/lab_06_nn_arch.py`
+- `labs/vol1/lab_07_ml_frameworks.py`
+- `labs/vol1/lab_08_model_train.py`
+- `labs/vol1/lab_09_data_selection.py`
+- `labs/vol1/lab_11_hw_accel.py`
+- `labs/vol1/lab_12_perf_bench.py`
+- `labs/vol1/lab_13_model_serving.py`
+- `labs/vol1/lab_14_ml_ops.py`
+- `labs/vol1/lab_15_responsible_engr.py`
+- `labs/vol1/lab_16_ml_conclusion.py`
+
+What changed:
+- Installed the `mlsysbook_labs` browser wheel in each remaining Volume I notebook.
+- Added a track-aware migration panel to each remaining Volume I notebook.
+- Each panel resolves lab metadata from the catalog, reads the saved ledger track, falls back to iPhone when no track is set, resolves the canonical track profile and lab variant, and renders the shared legacy migration panel.
+- The panels add learning objectives, track context, scenario brief, source trace, big takeaways, and local report export without duplicating constants in each notebook.
+
+MLSysIM facts/APIs needed:
+- No new facts. The notebooks now consume the shared `mlsysbook_labs` catalog, track profiles, variants, and migration helper.
+
+Notebook-local constants removed:
+- None in this slice. Existing lab mechanics were preserved while adding the shared outer contract.
+
+Reusable component or modality improved:
+- The Volume I notebooks now exercise `legacy_migration_panel()` at notebook level, proving the shared shell can be applied across heterogeneous lab structures.
+
+Plan updates needed in other labs:
+- Apply the same baseline migration shell to Volume II labs that are not already deeply migrated.
+- Replace baseline panels with deeper part-level track variants as solver-backed evidence is added to each lab.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_01_ml_intro.py labs/vol1/lab_02_ml_systems.py labs/vol1/lab_03_ml_workflow.py labs/vol1/lab_04_data_engr.py labs/vol1/lab_05_nn_compute.py labs/vol1/lab_06_nn_arch.py labs/vol1/lab_07_ml_frameworks.py labs/vol1/lab_08_model_train.py labs/vol1/lab_09_data_selection.py labs/vol1/lab_11_hw_accel.py labs/vol1/lab_12_perf_bench.py labs/vol1/lab_13_model_serving.py labs/vol1/lab_14_ml_ops.py labs/vol1/lab_15_responsible_engr.py labs/vol1/lab_16_ml_conclusion.py`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest labs/tests/test_static.py -q`
+
+Follow-up:
+- Batch-apply the migration shell to the remaining Volume II notebooks.
+
+### 2026-06-03 - Volume II Baseline Migration Panels
+
+Lab:
+- Volume II labs 01-17.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol2/lab_01_introduction.py`
+- `labs/vol2/lab_02_compute_infra.py`
+- `labs/vol2/lab_03_communication.py`
+- `labs/vol2/lab_04_data_storage.py`
+- `labs/vol2/lab_05_dist_train.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/vol2/lab_07_fault_tolerance.py`
+- `labs/vol2/lab_08_fleet_orch.py`
+- `labs/vol2/lab_09_perf_engineering.py`
+- `labs/vol2/lab_10_inference.py`
+- `labs/vol2/lab_11_edge_intelligence.py`
+- `labs/vol2/lab_12_ops_scale.py`
+- `labs/vol2/lab_13_security_privacy.py`
+- `labs/vol2/lab_14_robust_ai.py`
+- `labs/vol2/lab_15_sustainable_ai.py`
+- `labs/vol2/lab_16_responsible_ai.py`
+- `labs/vol2/lab_17_fleet_synthesis.py`
+
+What changed:
+- Installed the `mlsysbook_labs` browser wheel in Volume II notebooks that did not already include it.
+- Added the shared track-aware migration panel to every Volume II catalog notebook.
+- V2-06 keeps its existing richer `mlsysbook_labs` wrapper and now also has the common track/report panel.
+- Each panel resolves catalog metadata, ledger track, canonical track profile, and lab variant from shared helpers.
+- The added panels expose learning objectives, track context, scenario brief, source trace, big takeaways, and local report export from one shared implementation.
+
+MLSysIM facts/APIs needed:
+- No new facts. This slice consumes the existing shared track profile, variant, catalog, and migration helper APIs.
+
+Notebook-local constants removed:
+- None in this slice. Existing Volume II lab interactions and ledger saves were preserved.
+
+Reusable component or modality improved:
+- The full lab catalog now has a consistent notebook-level track/report surface.
+
+Plan updates needed in other labs:
+- The next implementation pass should start replacing baseline panels with deeper part-level track realization where a lab needs solver-backed evidence, specialized plots, or device-specific computed constraints.
+- Any new hardware/model/system facts discovered during those deeper migrations must be added to MLSysIM or `mlsysbook_labs`, not embedded as notebook-local constants.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol2/lab_01_introduction.py labs/vol2/lab_02_compute_infra.py labs/vol2/lab_03_communication.py labs/vol2/lab_04_data_storage.py labs/vol2/lab_05_dist_train.py labs/vol2/lab_06_collective_communication.py labs/vol2/lab_07_fault_tolerance.py labs/vol2/lab_08_fleet_orch.py labs/vol2/lab_09_perf_engineering.py labs/vol2/lab_10_inference.py labs/vol2/lab_11_edge_intelligence.py labs/vol2/lab_12_ops_scale.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_14_robust_ai.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_16_responsible_ai.py labs/vol2/lab_17_fleet_synthesis.py`
+- `python3 -m pytest labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest labs/tests/test_static.py -q`
+
+Follow-up:
+- Run catalog-wide checks that every `.py` lab has the common track/report surface, then decide which labs should receive deeper part-level migrations after V1-10.
+
+### 2026-06-03 - V2-11 Edge Thermodynamics Deep Track Migration
+
+Lab:
+- `labs/vol2/lab_11_edge_intelligence.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/edge.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/ui.py`
+- `labs/tests/test_edge_helpers.py`
+- `labs/tests/test_ui_helpers.py`
+- `labs/tests/test_static.py`
+- `labs/vol2/lab_11_edge_intelligence.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added shared edge helper dataclasses and calculations for edge device profiles, training memory amplification, adaptation storage, energy budget use, and federated communication.
+- Built V2-11 edge profiles from canonical track profiles, hand-authored lab variants, and MLSysIM hardware references.
+- Replaced V2-11 notebook-local smartphone constants with shared `mlsysbook_labs.edge` calculations.
+- Added a track selector, track context, source trace, track-aware widget defaults, track-specific memory/energy/communication plots, and a local report export.
+- Replaced the baseline migration panel in V2-11 with a deep report that records predictions, knob settings, evidence, final decision, reflections, residual risk, and source trace.
+- Fixed a shared `track_selector()` bug where Marimo dictionary radio options require the selected display label as the initial value while returning the canonical track ID.
+- Corrected stale V2-10 labels in the V2-11 notebook.
+- Marked V2-11 complete in the deep migration checklist.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware facts were required. Existing refs supply memory, TDP, and battery where available:
+  - `Hardware.Mobile.iPhone15Pro`
+  - `Hardware.Tiny.OuraRing`
+  - `Hardware.Edge.RoboTaxi`
+  - `Hardware.Cloud.H100`
+- Shared edge teaching thresholds, such as active memory budget and per-session energy budget, live in `mlsysbook_labs.edge`.
+
+Notebook-local constants removed:
+- Phone-only memory, battery, CPU/NPU power, NPU speedup, LoRA fraction, bias fraction, and FedAvg payload constants were removed from the V2-11 notebook path.
+
+Reusable component or modality improved:
+- `track_selector()` is now safe for Marimo radio dictionaries and can be reused by later deep-migrated labs.
+- `mlsysbook_labs.edge` is the reusable edge-device calculation layer for V2-11 and likely future V2-10/V1-11 work.
+
+Plan updates needed in other labs:
+- Use V2-11 as the reference pattern for track selector plus shared helper plus report export.
+- V1-11 Hardware Roofline is the next recommended deep migration target because it should reuse the same hardware-source discipline.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol2/lab_11_edge_intelligence.py`
+- `python3 -m pytest labs/tests/test_edge_helpers.py labs/tests/test_static.py::TestSyntax labs/tests/test_static.py::TestWheelConsistency labs/tests/test_static.py::TestLabCatalog -q`
+- `python3 -m pytest labs/tests/test_static.py -q`
+- `python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_edge_helpers.py labs/tests/test_static.py::TestWheelConsistency -q`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol2/lab_11 or lab_11_edge" -q`
+
+Follow-up:
+- Deep-migrate V1-11 Hardware Roofline next, reusing the source-traced hardware profile pattern.
+
+### 2026-06-03 - V1-11 Hardware Roofline Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_11_hw_accel.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_11_hw_accel.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+
+What changed:
+- Replaced the baseline migration shell in V1-11 with a full track selector, track context, source trace, and local report export.
+- Wired the selected track into the lab narrative, widget defaults, roofline plot, fusion calculation, hardware comparison, energy discussion, tiling estimate, synthesis, ledger payload, and downloadable report.
+- Removed stale notebook-local H100/Jetson/iPhone roofline constants from the setup path.
+- Report export now records predictions, knob settings, selected hardware ref, model ref, ridge point, workload arithmetic intensity, MFU, fusion speedup, comparison regime, final decision, reflections, residual risk, and source trace.
+- V1-11 uses the previously added `mlsysbook_labs.roofline` helpers and hand-authored `v1_11_hardware_roofline` track variants.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required for this slice. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro`
+  - `Hardware.Tiny.OuraRing`
+  - `Hardware.Edge.RoboTaxi`
+  - `Hardware.Cloud.H100`
+- Shared teaching calculations live in `mlsysbook_labs.roofline`: hardware roofline profiles, GEMM workload arithmetic intensity, roofline point evaluation, and fusion traffic.
+
+Notebook-local constants removed:
+- H100, Jetson, and iPhone peak/BW/TDP/ridge constants were removed from the V1-11 notebook setup. Displayed roofline facts now come from the selected track variant and MLSysIM hardware ref.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.roofline` is now exercised by a real notebook and should be reused for benchmarking, inference economy, and serving labs when they need source-traced hardware ceilings.
+
+Plan updates needed in other labs:
+- V2-10 should reuse roofline and edge helper patterns for deployment-target economics instead of introducing notebook-local latency/cost constants.
+- V1-12 and V1-13 should follow the same pattern: add shared solver/helper APIs first, then wire part-level plots and report evidence to those helpers.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_11_hw_accel.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol1/lab_11 or lab_11_hw" -q`
+- `python3 -m pytest labs/tests/test_static.py::TestSyntax labs/tests/test_static.py::TestLabCatalog -q`
+
+### 2026-06-03 - V2-10 Inference Economy Deep Track Migration
+
+Lab:
+- `labs/vol2/lab_10_inference.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/inference.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_inference_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol2/lab_10_inference.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.inference`, a shared helper layer for cost crossover, state/cache capacity, batching speedup, and serving-plan sizing.
+- Added hand-authored V2-10 track variants with track-specific cost units, demand, setup budgets, state/cache assumptions, SLOs, batching defaults, serving policies, and validation tests.
+- Replaced the V2-10 baseline migration shell with a track selector, track context, source trace, track-aware widget defaults, track-neutral part narrative, ledger payload, and local report export.
+- Converted the old cloud-only H100/70B notebook calculations into selected-track calculations using MLSysIM hardware/model refs plus `mlsysbook_labs.inference`.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/inference.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.Llama2_70B`
+- Scenario-specific cost units, demand, state/cache teaching assumptions, SLOs, and validation tests live in typed V2-10 variants.
+
+Notebook-local constants removed:
+- H100 RAM/cost, T4, Jetson, `TRAINING_COST_2M`, `LLAMA2_70B`, `calc_kv_cache_size`, and `Engine.solve` notebook-local paths were removed from V2-10 setup and tab calculations.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.inference` is reusable for V1-12 benchmarking, V1-13 serving, V2-09 performance engineering, and later fleet synthesis labs whenever they need cost, state/cache, batching, or serving-plan evidence.
+
+Plan updates needed in other labs:
+- V1-12 should reuse the cost/state/batching result objects when constructing benchmark traps.
+- V1-13 should reuse `state_capacity` and `serving_plan` for tail-latency serving choices instead of rebuilding concurrency math locally.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/inference.py`
+- `python3 -m py_compile labs/vol2/lab_10_inference.py`
+- `python3 -m pytest labs/tests/test_inference_helpers.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol2/lab_10 or lab_10_inference" -q`
+- `python3 -m pytest labs/tests/test_inference_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py::TestWheelConsistency -q`
+
+### 2026-06-03 - V1-12 Benchmarking Trap Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_12_perf_bench.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/benchmarking.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_benchmarking_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_12_perf_bench.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.benchmarking` with source-traced helpers for Amdahl speedup, sustained/burst benchmark behavior, multi-metric SLO gates, and log-normal tail latency.
+- Added hand-authored V1-12 variants with track-specific bad benchmark claims, hidden failure metrics, benchmark durations, cooling/ambient defaults, SLO gates, tail-latency defaults, and validation tests.
+- Replaced the baseline migration shell with track selector, track context, source trace, selected-track widget defaults, ledger metadata, and local report export.
+- Removed notebook-local H100/A100/Jetson/ResNet benchmark constants from setup and routed displayed evidence through selected MLSysIM hardware/model refs plus `mlsysbook_labs.benchmarking`.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/benchmarking.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves the same canonical track hardware refs and model refs from the V1-12 variants.
+- Track-specific benchmark protocol assumptions live in typed variant defaults, not notebook-local constants.
+
+Notebook-local constants removed:
+- H100/A100 peak and bandwidth constants, Jetson TDP/TFLOPS, and ResNet-50 FLOP/parameter constants were removed from the V1-12 notebook setup path.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.benchmarking` can be reused by V1-13 tail latency, V2-09 performance engineering, and any lab that needs benchmark claims, guardrail gates, or tail-distribution evidence.
+
+Plan updates needed in other labs:
+- V1-13 should reuse `tail_latency` and add queueing-specific helpers rather than duplicating tail distribution code.
+- V2-09 should reuse `amdahl_speedup` and `metric_gate` for optimization-trap evidence.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/benchmarking.py`
+- `python3 -m py_compile labs/vol1/lab_12_perf_bench.py`
+- `python3 -m pytest labs/tests/test_benchmarking_helpers.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -k "vol1/lab_12 or lab_12_perf" -q`
+
+### 2026-06-03 - V1-13 Tail Latency Trap Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_13_model_serving.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/serving.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_serving_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_13_model_serving.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.serving`, a shared helper layer for queueing p50/p95/p99/p999, static batching formation delay, state/cache capacity, and cold-start exposure.
+- Added hand-authored V1-13 variants with track-specific arrival rates, service times, replicas, SLOs, service variability, batching policy, state/cache assumptions, cold-start settings, serving policy, and validation tests.
+- Replaced the old cloud-only notebook constants with a track selector, track context, source trace, selected-track widget defaults, helper-backed plots, ledger metadata, and local report export.
+- Converted Part A-D into track-aware narratives: queueing explosion, batching tax, state/cache wall, and cold-start scale-out.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/serving.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.Llama2_70B`
+- Scenario-specific request patterns, SLOs, batching defaults, state/cache teaching assumptions, and warm-pool policy live in typed V1-13 variants.
+
+Notebook-local constants removed:
+- H100/A100/Jetson hardware constants, ResNet/Llama constants, PCIe/NVMe/network storage constants, and notebook-local KV/cache formulas were removed from V1-13.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.serving` is now reusable by V2-09 performance engineering, V2-10 inference economy, V2-12 operations at scale, and any future lab that needs source-traced serving/SLA evidence.
+
+Plan updates needed in other labs:
+- V1-14 should reuse the report and source-trace structure when adding drift/degradation evidence.
+- V2-06 and V2-12 can reuse the queueing helper for collective/fleet overload narratives when p99 or backpressure is a teaching target.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_13_model_serving.py labs/mlsysbook_labs/serving.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_13_model_serving" -q`
+- `python3 -m pytest labs/tests/test_serving_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`
+
+### 2026-06-03 - V1-14 Silent Degradation Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_14_ml_ops.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ops.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_ops_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_14_ml_ops.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.ops`, a shared helper layer for drift visibility with delayed labels, retraining cadence, operations policy scoring, and technical debt cascade.
+- Added hand-authored V1-14 variants with track-specific drift sources, monitoring signals, label delays, quality floors, retraining economics, rollback/escalation policies, downstream dependency counts, and validation tests.
+- Replaced the old fraud-only notebook constants with a track selector, track context, source trace, selected-track defaults, helper-backed plots, ledger metadata, and local report export.
+- Converted Part A-D into track-aware narratives: drift visibility, retraining cadence, ops policy, and debt cascade.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/ops.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Scenario-specific drift, monitoring, cadence, rollback, and escalation assumptions live in typed V1-14 variants.
+
+Notebook-local constants removed:
+- H100/Jetson retraining hardware constants, PayGuard-only drift values, hard-coded retraining cost examples, and notebook-local debt formulas were removed from V1-14.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.ops` can be reused by V2-07 fault tolerance, V2-08 fleet orchestration, V2-12 operations at scale, V2-14 robust AI, and V2-16 responsible AI whenever labs need drift, delayed labels, rollback, or debt-cascade evidence.
+
+Plan updates needed in other labs:
+- V1-15 should reuse the operations-policy report structure when defining responsibility/fairness mitigation and residual risk.
+- V2-12 should reuse the ops helper for fleet-scale monitoring, escalation, and rollback policies.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_14_ml_ops.py labs/mlsysbook_labs/ops.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_14_ml_ops" -q`
+- `python3 -m pytest labs/tests/test_ops_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`
+
+### 2026-06-03 - V2-06 Collective Communication Deep Track Migration
+
+Lab:
+- `labs/vol2/lab_06_collective_communication.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added hand-authored V2-06 variants with track-specific operations, payload sizes, participants, fabric/link analogies, topology assumptions, overlap, compression, residual risk, and validation tests.
+- Replaced the previous cloud-only wrapper with a canonical track selector, track context, source trace, selected-track widget defaults, ledger payload, and local report export.
+- Kept the core timing calculations in MLSysIM physics (`calc_ring_allreduce_time`, `calc_tree_allreduce_time`, `calc_hierarchical_allreduce_time`) instead of duplicating collective formulas in `mlsysbook_labs`.
+- Converted the lab narrative from GPU-only collectives to a track-aware communication design review: mobile federated aggregation, wearable intermittent sync, RoboTaxi depot hierarchy, and Cloud Fleet GPU collectives.
+- Rebuilt the browser helper wheel so the new V2-06 variants are available in WASM.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves canonical track hardware/model refs through variants and uses MLSysIM collective physics plus existing fabric entries:
+  - `Systems.Fabrics.InfiniBand_NDR`
+  - `Systems.Fabrics.Ethernet_100G`
+  - `Hardware.Cloud.H100.nvlink`
+
+Notebook-local constants removed:
+- Manual H100/Jetson/NVLink/IB/Ethernet constants and hard-coded Cloud Fleet report fields were removed from the V2-06 setup and report path. Track payload/topology defaults now live in typed variants.
+
+Reusable component or modality improved:
+- V2-06 demonstrates the "use MLSysIM physics directly when it already owns the equations" pattern. `mlsysbook_labs` owns track variants, source trace, report structure, and UI composition.
+
+Plan updates needed in other labs:
+- V2-07 and V2-08 should follow the same pattern when MLSysIM already has the underlying solver/fact surface: add variants first, then keep notebook code as composition and reporting.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol2/lab_06_collective_communication.py labs/mlsysbook_labs/variants.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_06_collective_communication" -q`
+- `python3 -m pytest labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`
+
+### 2026-06-03 - V1-15 Responsible Engineering Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_15_responsible_engr.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/responsibility.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_responsibility_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_15_responsible_engr.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.responsibility`, a shared helper layer for metric conflict, responsibility budget scoring, explanation overhead, and carbon accounting.
+- Added hand-authored V1-15 variants with track-specific harmed parties, obligations, audit signals, subgroup/context labels, metric gap targets, explanation defaults, latency SLOs, retraining energy, carbon intensity, governance delay, validation tests, and residual harm.
+- Replaced the old loan-only notebook with a track selector, track context, source trace, selected-track defaults, helper-backed plots/tables, ledger metadata, and local report export.
+- Converted Part A-D into track-aware narratives: metric conflict, responsibility budget, explainability tax, and carbon ledger.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/responsibility.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Scenario-specific harmed-party text, subgroup/context assumptions, audit signals, and responsibility thresholds live in typed V1-15 variants.
+
+Notebook-local constants removed:
+- Loan-only fairness assumptions, H100/Jetson carbon constants, grid constants, SHAP formulas, and notebook-local responsibility/carbon formulas were removed from V1-15.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.responsibility` can be reused by V2-14 robust AI, V2-16 responsible AI, V2-17 future systems, and any lab that needs source-traced harmed-party, audit, explanation, or carbon evidence.
+
+Plan updates needed in other labs:
+- V2-16 should reuse the V1-15 helper rather than reintroducing local fairness/responsibility formulas.
+- V1-16 can include V1-15's responsible decision memo as one of the capstone constraints in the ledger synthesis.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_15_responsible_engr.py labs/mlsysbook_labs/responsibility.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_15_responsible_engr" -q`
+- `python3 -m pytest labs/tests/test_responsibility_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`
+
+### 2026-06-03 - V1-16 Architect's Audit Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_16_ml_conclusion.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/capstone.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_capstone_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_16_ml_conclusion.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.capstone`, a shared helper layer for ledger replay with track presets, sensitivity audits, and architecture memo packaging.
+- Added hand-authored V1-16 variants with track-specific architecture components, prior-decision presets, sensitivity thresholds, revision options, top risks, durable principles, and validation tests.
+- Replaced the old H100/Llama-only capstone with a selected-track architecture audit: ledger replay, architecture map, sensitivity audit, final revision memo, ledger metadata, and local report export.
+- Missing ledger entries now degrade gracefully by using labeled track presets instead of pretending the evidence exists.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/capstone.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.Llama2_70B`
+- Track-specific prior decisions, capstone sensitivity thresholds, and memo risks live in typed V1-16 variants.
+
+Notebook-local constants removed:
+- H100/Jetson/Llama capstone constants, class-median prediction profiles, notebook-local constraint cascade formulas, and the legacy migration shell were removed from V1-16.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.capstone` can be reused by Volume II capstones or any lab that needs ledger replay, preset fallback labeling, sensitivity scoring, or memo packaging.
+
+Plan updates needed in other labs:
+- Volume II labs should keep ledger/report fields structured enough for future capstones to replay them.
+- V2-17 can reuse the capstone helper rather than creating a separate ledger summarizer.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_16_ml_conclusion.py labs/mlsysbook_labs/capstone.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_16_ml_conclusion" -q`
+- `python3 -m pytest labs/tests/test_capstone_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`
+
+### 2026-06-03 - V1-00 Orientation Track Contract Cleanup
+
+Lab:
+- `labs/vol1/lab_00_introduction.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/vol1/lab_00_introduction.py`
+- `labs/vol1/lab_00_introduction.track-plan.md`
+- `labs/tests/test_track_profiles.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Made the Lab 00 track selector return canonical track IDs directly: `iphone`, `oura_ring`, `robotaxi`, and `cloud_fleet`.
+- Replaced the old physical-regime display cards with profile-derived canonical track cards using `CANONICAL_TRACKS`.
+- Changed the track reveal copy to pull label, stakeholder, narrative, constraints, hardware ref, system ref, and source policy from the resolved `TrackProfile`.
+- Confirmed the ledger save writes the canonical track ID and profile-derived refs that later labs consume.
+- Added a regression test that Lab 00 exposes all four canonical track IDs and that its report/source trace include track, hardware, system, and source policy fields.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. Lab 00 references track profiles; later labs resolve the hardware/system refs through MLSysIM.
+
+Notebook-local constants removed:
+- Old selector aliases and several hard-coded track reveal facts were replaced with canonical track profile fields.
+
+Reusable component or modality improved:
+- Lab 00 is now explicitly documented as the canonical track-selection surface for the course.
+
+Plan updates needed in other labs:
+- Later labs should continue to use `ledger.get_track()` plus `get_track_profile()`/`get_lab_track_variant()` rather than their own selector aliases.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_00_introduction.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_00_introduction" -q`
+- `python3 -m pytest labs/tests/test_track_profiles.py labs/tests/test_ui_helpers.py labs/tests/test_static.py -q`
+- `git diff --check`
+
+### 2026-06-03 - V1-01 AI Triad Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_01_ml_intro.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/triad.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_triad_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_01_ml_intro.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.triad`, a shared helper layer for Data-Algorithm-Machine track profiles, binding-axis diagnosis, and fixed-budget intervention frontier scoring.
+- Added hand-authored V1-01 variants with track-specific failure stories, Data/Algorithm/Machine axis meanings, readiness thresholds, defaults, intervention options, validation tests, and report artifact metadata.
+- Replaced the old H100/Jetson/ESP32/ResNet fixed notebook with a selected-track D-A-M diagnosis, intervention frontier, defensible first-fix memo, ledger metadata, and local report export.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/triad.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific D-A-M axis text, thresholds, and validation tests live in typed V1-01 variants.
+
+Notebook-local constants removed:
+- H100/A100/Jetson/iPhone/ESP32/Himax hardware constants, ResNet-50 constants, and local cross-target formulas were removed from V1-01.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.triad` can be reused by V1-02, V1-03, V1-09, and later labs that need first-intervention diagnosis across Data, Algorithm, and Machine axes.
+
+Plan updates needed in other labs:
+- V1-02 can reuse the triad helper's track profile pattern while adding physics/deployment-envelope evidence.
+- V1-09 can reuse or extend the intervention-frontier pattern for candidate selection.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_01_ml_intro.py labs/mlsysbook_labs/triad.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_01_ml_intro" -q`
+- `python3 -m pytest labs/tests/test_triad_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `git diff --check`
+
+### 2026-06-03 - V1-02 Physics Of Deployment Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_02_ml_systems.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/deployment.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_deployment_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_02_ml_systems.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.deployment`, a shared helper layer for deployment envelope profiles, unitful constraint checks, workload sweeps, first-wall detection, and mitigation notes.
+- Added hand-authored V1-02 variants with track-specific workload knobs, budgets, placement choices, mitigation options, and report artifact metadata.
+- Replaced the old H100/A100/Jetson/iPhone/ESP32 fixed notebook with a selected-track physics-of-deployment flow: first-wall prediction, workload sweep, placement comparison, ledger save, and local report export.
+- Rebuilt the browser helper wheel and extended the wheel contract to include `mlsysbook_labs/deployment.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific envelope thresholds, workload knobs, and placement risk text live in typed V1-02 variants.
+
+Notebook-local constants removed:
+- H100/A100/Jetson/iPhone/ESP32 hardware constants, ResNet-50 constants, speed-of-light examples, and energy constants were removed from V1-02.
+- Displayed memory, flash, latency, energy, power, bandwidth, and cost evidence now comes from `mlsysbook_labs.deployment` results.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.deployment` can be reused by V1-03, V1-04, V1-05, V1-07, and Volume II placement labs whenever a track needs source-traced physical envelope evidence.
+
+Plan updates needed in other labs:
+- V1-03 should refer back to the V1-02 first wall as the constraint tax that appears when deployment physics is discovered late.
+- V1-05 can reuse the memory/activation budget pattern while adding neural activation formulas.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_02_ml_systems.py labs/mlsysbook_labs/deployment.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_02_ml_systems" -q`
+- `python3 -m pytest labs/tests/test_deployment_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+
+### 2026-06-03 - V1-03 Constraint Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_03_ml_workflow.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/workflow.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_workflow_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_03_ml_workflow.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.workflow`, a shared helper layer for workflow gate metadata, constraint-tax rework costs, iteration-time versus residual-risk estimates, and workflow policy packaging.
+- Added hand-authored V1-03 variants with track-specific late-discovery stories, lifecycle stage names, gate options, release policies, rollback rules, and report artifact metadata.
+- Replaced the old DR/ESP32-only notebook with a selected-track workflow policy lab: gate timing prediction, rework cost table, iteration frontier, release policy choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/workflow.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific workflow gates, late-discovery stories, and release/rollback policies live in typed V1-03 variants.
+
+Notebook-local constants removed:
+- ESP32/ResNet fixed scenario constants, generic lifecycle costs, and local feedback-loop formulas were removed from V1-03.
+- Rework, iteration risk, and policy evidence now come from `mlsysbook_labs.workflow`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.workflow` can be reused by operations, monitoring, and capstone labs that need workflow gates, late-discovery cost, release policy, or rollback evidence.
+
+Plan updates needed in other labs:
+- V1-14 operations can reuse workflow policy naming for rollback and retraining gates.
+- V1-16 capstone can interpret V1-03 ledger entries as workflow-policy evidence rather than generic predictions.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_03_ml_workflow.py labs/mlsysbook_labs/workflow.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_03_ml_workflow" -q`
+
+### 2026-06-03 - V1-04 Data Gravity Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_04_data_engr.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/data_pipeline.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_data_pipeline_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_04_data_engr.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.data_pipeline`, a shared helper layer for data source/rate profiles, stage utilization, bottleneck detection, movement frontier estimates, and pipeline architecture memos.
+- Added hand-authored V1-04 variants with track-specific data sources, data rates, stage capacities, local storage/retention policies, privacy stance, movement strategies, and report artifact metadata.
+- Replaced the old A100/SSD/egress-only notebook with a selected-track data pipeline lab: bottleneck prediction, stage utilization chart, movement strategy comparison, retention policy choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/data_pipeline.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific data rates, retention goals, stage capacities, and movement strategy assumptions live in typed V1-04 variants.
+
+Notebook-local constants removed:
+- A100/SSD/ResNet/DS-CNN fixed data examples, local egress formulas, cascade formulas, and false-positive trap constants were removed from V1-04.
+- Displayed data rates, stage utilizations, movement costs, quality retention, and residual data risk now come from `mlsysbook_labs.data_pipeline`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.data_pipeline` can be reused by V2 data storage/pipeline labs and by any lab that needs data-rate, movement, retention, or pipeline bottleneck evidence.
+
+Plan updates needed in other labs:
+- V1-09 data selection should reuse the movement/retention risk language when selection discards rare evidence.
+- V2-04 Data Pipeline Wall should reuse or extend `data_pipeline.py` rather than introducing a second pipeline model.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_04_data_engr.py labs/mlsysbook_labs/data_pipeline.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_04_data_engr" -q`
+
+### 2026-06-03 - V1-05 Activation Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_05_nn_compute.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/neural_compute.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_neural_compute_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_05_nn_compute.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.neural_compute`, a shared helper layer for operation ledgers, activation memory cliffs, and operator design decisions.
+- Added hand-authored V1-05 variants with track-specific tensor shapes, activation/bandwidth/latency/power budgets, precision defaults, and operator design options.
+- Replaced the old transistor-tax-only notebook with a selected-track Activation Tax lab: dominant-resource prediction, operation ledger, activation cliff sweep, operator design choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/neural_compute.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific tensor shapes, budgets, and operator design trade-offs live in typed V1-05 variants.
+
+Notebook-local constants removed:
+- Transistor-cost tables, memory-tier tables, width-scaling examples, and forward/backward memory examples were removed from V1-05.
+- Displayed weights, activations, operations, bytes moved, arithmetic intensity, activation cliffs, and design risks now come from `mlsysbook_labs.neural_compute`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.neural_compute` can be reused by V1-06 architecture, V1-10 compression, V1-11 roofline, and Volume II attention/memory labs.
+
+Plan updates needed in other labs:
+- V1-06 should reuse operation-ledger evidence when comparing model families.
+- V1-10 can use activation cliff and operator-design language when a compression recipe changes runtime memory rather than only parameter size.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_05_nn_compute.py labs/mlsysbook_labs/neural_compute.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_05_nn_compute" -q`
+
+### 2026-06-03 - V1-06 Architecture Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_06_nn_arch.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/architecture.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_architecture_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_06_nn_arch.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.architecture`, a shared helper layer for architecture candidate descriptors, signature evaluation, scaling curves, failure boundaries, and recommendation memos.
+- Added hand-authored V1-06 variants with track-specific architecture stories, scaling variables, resource budgets, quality/kernel floors, validation tests, and candidate architecture families.
+- Replaced the old architecture notebook with a selected-track Architecture Tax lab: architecture-risk prediction, candidate signature table, scaling-shape curve, recommendation choice, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/architecture.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific architecture candidates, budgets, quality floors, and validation requirements live in typed V1-06 variants.
+
+Notebook-local constants removed:
+- Fixed H100/Jetson/iPhone constants, MLP/CNN/attention formulas, and generic architecture lists were removed from V1-06.
+- Displayed parameters, operations, activation memory, latency, power, kernel support, feasibility, scaling failures, and residual risk now come from `mlsysbook_labs.architecture`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.architecture` can be reused by V1-10 compression, V1-11 roofline, V2-10 inference, and any lab that needs architecture-family comparisons or scaling-failure curves.
+
+Plan updates needed in other labs:
+- V1-07 framework/runtime choices should reuse architecture kernel-support language when deciding whether a runtime is viable.
+- V1-10 compression should reference architecture-family residual risk when a compression method changes not only size but kernel support or inductive bias.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_06_nn_arch.py labs/mlsysbook_labs/architecture.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_06_nn_arch" -q`
+
+### 2026-06-03 - V1-07 Framework Tax Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_07_ml_frameworks.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/frameworks.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_framework_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_07_ml_frameworks.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.frameworks`, a shared helper layer for runtime/delegate options, dispatch stack decomposition, compile break-even, and runtime recommendation memos.
+- Added hand-authored V1-07 variants with track-specific runtime stories, operation profiles, latency/memory/kernel budgets, runtime options, unsupported-op consequences, validation tests, and report artifact metadata.
+- Replaced the old H100/ESP32 framework table notebook with a selected-track Framework Tax lab: overhead prediction, dispatch-stack chart, compile break-even chart, runtime recommendation, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/frameworks.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific runtime options, operation profiles, delegate/fallback assumptions, and validation requirements live in typed V1-07 variants.
+
+Notebook-local constants removed:
+- Fixed H100/ESP32 constants, framework footprint tables, latency multipliers, and generic dispatch/fusion/compile formulas were removed from V1-07.
+- Displayed dispatch stack components, runtime footprints, kernel support, compile break-even, unsupported-op warnings, and residual runtime risk now come from `mlsysbook_labs.frameworks`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.frameworks` can be reused by deployment, serving, edge, and fleet labs that need runtime/delegate support, graph-break, compile-amortization, or unsupported-op evidence.
+
+Plan updates needed in other labs:
+- V1-10 compression should use framework/runtime kernel-support checks when a compression recipe changes operator coverage.
+- V2-10 inference and V2-11 edge labs should reuse dispatch-stack and compile-amortization concepts rather than adding notebook-local runtime math.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_07_ml_frameworks.py labs/mlsysbook_labs/frameworks.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_07_ml_frameworks" -q`
+
+### 2026-06-03 - V1-08 Training Gauntlet Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_08_model_train.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/training.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_training_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_08_model_train.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.training`, a shared helper layer for training/adaptation strategies, memory stacks, batch feasibility frontiers, and training plan memos.
+- Added hand-authored V1-08 variants with track-specific training locations, strategy options, memory/throughput budgets, validation tests, deployment handoff text, and report artifact metadata.
+- Replaced the old H100/V100/A100/Jetson training notebook with a selected-track Training Gauntlet lab: dominant-memory prediction, memory stack chart, batch frontier, training/adaptation strategy recommendation, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/training.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.GPT2`
+- Track-specific training strategy assumptions, batch/frontier budgets, deployment handoff text, and validation requirements live in typed V1-08 variants.
+
+Notebook-local constants removed:
+- Fixed cloud accelerator constants, optimizer byte tables, GPT-only memory examples, and pipeline/communication formulas were removed from V1-08.
+- Displayed weights, gradients, optimizer state, activations, data batch memory, throughput, feasibility, hidden cost, and validation location now come from `mlsysbook_labs.training`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.training` can be reused by distributed training, collective communication, operations, and sustainability labs that need training memory, checkpointing, adaptation, or deployment handoff evidence.
+
+Plan updates needed in other labs:
+- V2-05 distributed training should reuse training strategy and memory-stack terminology when introducing data/model/pipeline parallelism.
+- V1-14 operations should reference V1-08 deployment handoff when retraining cadence decisions create release and validation risk.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_08_model_train.py labs/mlsysbook_labs/training.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_08_model_train" -q`
+
+### 2026-06-03 - V1-09 Selection Paradox Deep Track Migration
+
+Lab:
+- `labs/vol1/lab_09_data_selection.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/selection.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_selection_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- `labs/vol1/lab_09_data_selection.py`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.selection`, a shared helper layer for data policy options, utility/cost feasibility, subgroup coverage profiles, and data policy decision memos.
+- Added hand-authored V1-09 variants with track-specific dataset units, quality/coverage/rare-event floors, storage/cost budgets, subgroup coverage metadata, policy options, next-data recommendations, and validation tests.
+- Replaced the old A100/Jetson coreset notebook with a selected-track Selection Paradox lab: selection-pressure prediction, utility-cost frontier, subgroup coverage chart, data policy recommendation, ledger save, and local report export.
+- Extended the wheel contract to include `mlsysbook_labs/selection.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The lab resolves:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Track-specific dataset units, cost/storage budgets, subgroup coverage values, policy assumptions, and validation requirements live in typed V1-09 variants.
+
+Notebook-local constants removed:
+- Fixed A100/Jetson hardware constants, ResNet/MobileNet scoring examples, generic ICR curves, and preprocessing-tax formulas were removed from V1-09.
+- Displayed selected examples, quality, coverage, rare-event score, cost, storage, subgroup coverage, next data, and residual blind spots now come from `mlsysbook_labs.selection`.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.selection` can be reused by robustness, responsibility, operations, and capstone labs that need subgroup coverage, rare-event coverage, or data-policy evidence.
+
+Plan updates needed in other labs:
+- V1-15 responsible engineering should reuse subgroup coverage and accepted-blind-spot language when fairness or harm tradeoffs are data-driven.
+- V2-14 robustness should reuse rare-event coverage and next-data policy fields rather than creating separate notebook-local coverage math.
+
+Tests or checks run:
+- `python3 -m py_compile labs/vol1/lab_09_data_selection.py labs/mlsysbook_labs/selection.py labs/mlsysbook_labs/variants.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m pytest labs/tests/test_engine.py -k "lab_09_data_selection" -q`
+
+### 2026-06-03 - Remaining Volume II Shared System-Design Migration
+
+Labs:
+- `labs/vol2/lab_01_introduction.py`
+- `labs/vol2/lab_02_compute_infra.py`
+- `labs/vol2/lab_03_communication.py`
+- `labs/vol2/lab_04_data_storage.py`
+- `labs/vol2/lab_05_dist_train.py`
+- `labs/vol2/lab_07_fault_tolerance.py`
+- `labs/vol2/lab_08_fleet_orch.py`
+- `labs/vol2/lab_09_perf_engineering.py`
+- `labs/vol2/lab_12_ops_scale.py`
+- `labs/vol2/lab_13_security_privacy.py`
+- `labs/vol2/lab_14_robust_ai.py`
+- `labs/vol2/lab_15_sustainable_ai.py`
+- `labs/vol2/lab_16_responsible_ai.py`
+- `labs/vol2/lab_17_fleet_synthesis.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/system_design.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/mlsysbook_labs/variants.py`
+- `labs/tests/test_system_design_helpers.py`
+- `labs/tests/test_lab_variants.py`
+- `labs/tests/test_static.py`
+- the 14 Volume II notebooks listed above
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added `mlsysbook_labs.system_design`, a shared helper layer for remaining Volume II labs that resolves catalog metadata, canonical tracks, typed variants, MLSysIM hardware/model refs, decision options, feasibility frontiers, scaling curves, residual-risk memos, ledger saves, and local report exports.
+- Added generated-but-typed hand-authored variants for the remaining Volume II labs. Each lab has its own concept label, knob, track narrative, decision options, validation tests, and report artifact, while hardware/model refs and track budgets come from the canonical track registry.
+- Replaced the large standalone V2 notebooks with small Marimo shells that create track/control cells and render through the shared helper. This removes notebook-local hardware/model/system constants from those labs.
+- Added a shared prior-decision ledger summary used by V2-17 so the capstone can surface earlier Volume II decisions when they exist and degrade gracefully when the local ledger is empty.
+- Extended the wheel contract to include `mlsysbook_labs/system_design.py`.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM hardware or model facts were required. The labs resolve the canonical track refs:
+  - `Hardware.Mobile.iPhone15Pro` + `Models.Vision.MobileNetV2`
+  - `Hardware.Tiny.OuraRing` + `Models.Tiny.DS_CNN`
+  - `Hardware.Edge.RoboTaxi` + `Models.Vision.YOLOv8_Nano`
+  - `Hardware.Cloud.H100` + `Models.Language.BERT_Base`
+- Lab-specific knobs, budgets, decision options, validation tests, and report artifacts live in typed `mlsysbook_labs` variants.
+
+Notebook-local constants removed:
+- The remaining V2 notebooks no longer embed fixed H100/edge/device constants, ad hoc training/network/storage/failure/security/carbon/fairness formulas, or local decision-option tables.
+- Displayed stress ratios, latency/cost budgets, feasibility, validation requirements, residual risk, and report payloads now come from `mlsysbook_labs.system_design` and typed variants.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.system_design` provides a common Volume II decision lab modality: track context, source trace, prediction lock, frontier plot, scaling curve, decision memo, validation tests, reflection, ledger save, and download report.
+- The ledger summary helper is reusable by future Volume II capstone refinements.
+
+Plan updates needed in other labs:
+- Future refinements can specialize any shared-renderer V2 lab into a richer lab-specific helper without changing the track registry or notebook shell pattern.
+- Report schema validation should next assert that every deep lab includes track, scenario, source trace, evidence summary, final decision, reflection, and residual risk.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/system_design.py labs/mlsysbook_labs/__init__.py`
+- `python3 -m py_compile labs/vol2/lab_01_introduction.py labs/vol2/lab_02_compute_infra.py labs/vol2/lab_03_communication.py labs/vol2/lab_04_data_storage.py labs/vol2/lab_05_dist_train.py labs/vol2/lab_07_fault_tolerance.py labs/vol2/lab_08_fleet_orch.py labs/vol2/lab_09_perf_engineering.py labs/vol2/lab_12_ops_scale.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_14_robust_ai.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_16_responsible_ai.py labs/vol2/lab_17_fleet_synthesis.py`
+- `python3 -m pytest labs/tests/test_system_design_helpers.py labs/tests/test_lab_variants.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -q -k "lab_01_introduction or lab_02_compute_infra or lab_03_communication or lab_04_data_storage or lab_05_dist_train or lab_07_fault_tolerance or lab_08_fleet_orch or lab_09_perf_engineering or lab_12_ops_scale or lab_13_security_privacy or lab_14_robust_ai or lab_15_sustainable_ai or lab_16_responsible_ai or lab_17_fleet_synthesis"`
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+- `python3 -m pytest labs/tests/test_migration_shell.py -q`
+- `python3 -m pytest labs/tests/test_*_helpers.py -q`
+- `python3 -m pytest labs/tests/test_system_design_helpers.py labs/tests/test_lab_variants.py labs/tests/test_static.py -q`
+- `python3 -m pytest labs/tests/test_engine.py -q`
+- `git diff --check`
+
+### 2026-06-04 - Overnight Render Feedback and Browser Smoke Pass
+
+Labs:
+- All labs in `labs/vol1` and `labs/vol2`.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/tools/render_lab_smoke.py`
+- `labs/LAB_OVERNIGHT_FEEDBACK_AUDIT.md`
+- `labs/LAB_DEEP_MIGRATION_CHECKLIST.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+
+What changed:
+- Added a repeatable browser smoke tool that starts Marimo apps, opens them in Chromium, clicks through canonical tracks for non-orientation labs, checks runtime-error markers, checks duplicate track selectors, checks overflowing `.mlsysbook-field` cards, verifies four distinct rendered track states, and saves screenshots under `/tmp`.
+- Captured simulated instructor, TA, and student feedback in `LAB_OVERNIGHT_FEEDBACK_AUDIT.md`.
+- Recorded the render-found fixes from the preceding polish pass: duplicate selector removal and long registry-ref wrapping.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required. This pass tested rendering, source traces, and track switching behavior.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- `labs/tools/render_lab_smoke.py` can be used before future lab releases to check rendered behavior, not only notebook execution.
+
+Plan updates needed in other labs:
+- Future Volume II refinements should specialize the highest-value shared-renderer labs with richer evidence helpers, while keeping the source-of-truth registry contract unchanged.
+
+Tests or checks run:
+- `python3 -m py_compile labs/tools/render_lab_smoke.py`
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_01_ml_intro.py labs/vol1/lab_09_data_selection.py labs/vol2/lab_01_introduction.py labs/vol2/lab_17_fleet_synthesis.py --output-dir /tmp/mlsysbook-render-smoke`
+- `python3 labs/tools/render_lab_smoke.py --labs $(find labs/vol1 labs/vol2 -maxdepth 1 -name 'lab_*.py' | sort) --port-start 29700 --output-dir /tmp/mlsysbook-render-smoke-all-v2 > /tmp/mlsysbook-render-smoke-all-v2.json`
+- Full catalog browser smoke result: 34 passed, 0 failed; every non-orientation lab had four distinct rendered track states.
+- `python3 -m pytest labs/tests/test_static.py -q`
+
+### 2026-06-04 - First User Activity Feedback Execution Pass
+
+Labs:
+- `labs/vol1/lab_00_introduction.py`
+- `labs/vol1/lab_01_ml_intro.py`
+- `labs/vol1/lab_09_data_selection.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/vol2/lab_10_inference.py`
+- `labs/vol2/lab_11_edge_intelligence.py`
+- `labs/vol2/lab_13_security_privacy.py`
+- `labs/vol2/lab_15_sustainable_ai.py`
+- `labs/vol2/lab_17_fleet_synthesis.py`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/LAB_USER_ACTIVITY_FEEDBACK_PASS_2026_06_04.md`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Executed the first simulated feedback loop from `LAB_USER_ACTIVITY_FEEDBACK_LOOP.md` across orientation, Mobile ML, TinyML, RoboTaxi/autonomy, edge, cloud/fleet, privacy, sustainability, and capstone scenarios.
+- Captured expert feedback packets and backward requirements in `LAB_USER_ACTIVITY_FEEDBACK_PASS_2026_06_04.md`.
+- Added a shared `track_context()` cue: `What changed because of your track`.
+- The cue is generated from canonical `TrackProfile` fields, so no notebook-local hardware, model, system, latency, cost, energy, or scenario facts were added.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were required for this pass.
+- Follow-up requirements call for report schema/generation tests and variant ref resolution tests.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.ui.track_context()` now tells students which primary metric, guardrail, and dominant constraint changed because of the selected track.
+
+Plan updates needed in other labs:
+- The next engineering pass should prioritize report schema/generation tests across deep labs.
+- Targeted modality refinements should focus on V2-03 topology/fabric visuals, V2-13 threat/control stack, V2-15 region/carbon evidence, and V2-17 final fleet design review.
+
+Tests or checks run:
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol1/lab_09_data_selection.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py labs/vol2/lab_11_edge_intelligence.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_17_fleet_synthesis.py --port-start 29900 --output-dir /tmp/mlsysbook-feedback-pass-20260604 > /tmp/mlsysbook-feedback-pass-20260604/results.json`
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py`
+- `python3 -m pytest labs/tests/test_static.py -q`
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_01_ml_intro.py labs/vol2/lab_17_fleet_synthesis.py --port-start 30100 --output-dir /tmp/mlsysbook-feedback-cue-check > /tmp/mlsysbook-feedback-cue-check/results.json`
+- `python3 labs/tools/render_lab_smoke.py --labs labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol1/lab_09_data_selection.py labs/vol1/lab_10_model_compress.py labs/vol2/lab_10_inference.py labs/vol2/lab_11_edge_intelligence.py labs/vol2/lab_13_security_privacy.py labs/vol2/lab_15_sustainable_ai.py labs/vol2/lab_17_fleet_synthesis.py --port-start 30200 --output-dir /tmp/mlsysbook-feedback-pass-20260604-after-cue > /tmp/mlsysbook-feedback-pass-20260604-after-cue/results.json`
+- Post-fix cluster browser smoke result: 9 passed, 0 failed; every non-orientation lab had four distinct rendered track states and no overflowing `.mlsysbook-field` cards.
+
+### 2026-06-04 - Shared Pedagogy Shell UI and Report Contract Pass
+
+Labs:
+- Shared lab UI components used by track-aware labs.
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/lab-plan-dashboard.html`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/vol2/lab_06_collective_communication.py`
+- `labs/tests/test_report_contract.py`
+- `labs/lab-plan-dashboard.html`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Moved the screenshot feedback into shared UI components instead of per-lab embedded style patches.
+- `learning_objectives()` now renders visible bullet lists.
+- `lab_header()` separates metadata chips from topic chips and filters out the implementation label `Track-aware`.
+- Shared panels now use a consistent panel width, so lab sections line up as one reading window.
+- `track_context()` and `scenario_brief()` now use a short narrative plus compact source-of-truth facts table instead of a wall of uneven cards.
+- Added final-row spanning in compact fact tables so odd field counts do not leave blank cells.
+- Completed the lab-plan dashboard's Volume I/II coverage sections with canonical track materialization and one row per implemented lab.
+- Added report contract tests that generate every catalog lab report for every canonical track and statically check required `build_lab_report()` schema fields.
+- Filled the missing Volume II collective communication `evidence_summary` field required by the report schema.
+
+MLSysIM facts/APIs needed:
+- No new MLSysIM facts were added in this pass.
+- The UI continues to display hardware, model, system, metric, guardrail, and constraint facts from `mlsysbook_labs` track/variant registries and MLSysIM references.
+
+Notebook-local constants removed:
+- None in this pass.
+- The V1-10 part body still has legacy inline presentation inside the older tab implementation; future migration should replace those part bodies with shared reusable part components rather than copying styles into the notebook.
+
+Reusable component or modality improved:
+- `mlsysbook_labs.ui.lab_header()`
+- `mlsysbook_labs.ui.learning_objectives()`
+- `mlsysbook_labs.ui.track_context()`
+- `mlsysbook_labs.ui.scenario_brief()`
+
+Plan updates needed in other labs:
+- Migrate older bespoke part bodies, especially V1-10 tabs, to shared reusable part components for narrative callouts, prediction blocks, evidence panels, metric cards, plots, and reflections.
+- Continue using report-contract tests as a release gate when labs are specialized further.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py`
+- `python3 -m pytest labs/tests/test_report_contract.py -q`
+- Browser render of V1-10 on `http://127.0.0.1:30311`: relevant-only chips, visible bullet objectives, consistent 840px shell panels, compact track/scenario tables, no page errors, no stale marker on clean load.
+- Browser click check of V1-10 Part A prediction: no persistent stale marker or visible red stale overlay in the captured after-click screenshots.
+
+### 2026-06-04 - Full Student-Flow Browser Interaction QA Pass
+
+Labs:
+- All 34 lab pages.
+- `labs/lab-plan-dashboard.html`
+- `labs/lab-modality-catalog.html`
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/tools/interaction_lab_smoke.py`
+- `labs/mlsysbook_labs/ui.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Added a deep Playwright/Marimo interaction smoke tool that launches each lab, loads it in Chromium, scrolls through the page, switches canonical tracks, opens part tabs, simulates safe answer clicks, captures screenshots, and checks for runtime, stale-output, layout overflow, offscreen, and report/part-structure failures.
+- The tool now treats Lab 00 as a real student flow: it answers the three orientation checks, unlocks the track selector, then verifies all four canonical tracks.
+- Fixed shared tab styling in `mlsysbook_labs.ui` so later tabs do not shift content off the left side of the viewport after selection.
+- The full browser pass verified that every lab part exposed by the tabs has multiple student-facing pieces such as narrative, prediction/control, evidence/source, and reflection/report structure.
+
+MLSysIM facts/APIs needed:
+- No new hardware, model, metric, or system facts were added.
+- The QA pass reinforces the existing rule that track-specific facts shown in labs must come from the `mlsysbook_labs`/MLSysIM registries rather than notebook-local constants.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- Shared tab overflow behavior in `apply_lab_styles()`.
+- Reusable interaction smoke harness for future student-flow regression checks.
+
+Plan updates needed in other labs:
+- Keep the part-depth requirement as a release gate: a part should not be just one question; it should include a readable purpose, at least one action/control or prediction, evidence/source trace, and reflection or report consequence.
+- Future part-body migrations should keep using shared components rather than embedding per-lab CSS.
+
+Tests or checks run:
+- `python3 labs/tools/interaction_lab_smoke.py --labs labs/vol1/lab_00_introduction.py --html-pages labs/lab-plan-dashboard.html --port-start 30800 --output-dir /tmp/mlsysbook-interaction-lab00 --max-radios 0 > /tmp/mlsysbook-interaction-lab00/results.json`
+- Focused result: 1/1 lab passed and 1/1 HTML page passed.
+- `python3 labs/tools/interaction_lab_smoke.py --port-start 30900 --output-dir /tmp/mlsysbook-interaction-all-v3 --max-radios 0 > /tmp/mlsysbook-interaction-all-v3/results.json`
+- Full result: 34/34 labs passed and 2/2 HTML pages passed; 118 part checks passed the multi-piece requirement.
+- Aggregated part categories: narrative 118, controls 118, source/math 118, reflection 116, evidence 114, prediction 61.
+- Screenshot spot checks: Lab 00 orientation, V1-10 compression synthesis, and V1-11 hardware acceleration synthesis.
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py labs/tools/interaction_lab_smoke.py`
+- `python3 -m pytest labs/tests/test_report_contract.py labs/tests/test_static.py -q`
+- Result: 818 passed, 4 skipped, 5 xfailed.
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+### 2026-06-04 - Lab 10 Track-First Visual Flow Feedback Pass
+
+Labs:
+- `labs/vol1/lab_10_model_compress.py` as the pilot.
+- Shared UI helpers used by all track-aware labs.
+
+Track(s):
+- iPhone, Oura Ring, RoboTaxi, Cloud Fleet.
+
+Files touched:
+- `labs/mlsysbook_labs/ui.py`
+- `labs/mlsysbook_labs/__init__.py`
+- `labs/vol1/lab_10_model_compress.py`
+- `labs/tests/test_ui_helpers.py`
+- `labs/LAB_IMPLEMENTATION_NOTES.md`
+- `wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+What changed:
+- Kept red for the lab header, blue for preparation, and moved the track mission, case start, lab map, and reading instructions into green launch panels.
+- Removed visible source-trace, evidence-summary, and MLSysIM wording from the Lab 10 student launch flow.
+- Removed the MLSysIM chip/footer from shared header and track context rendering.
+- Added reusable `scenario_thread()` and `decision_flow()` helpers, with tab-safe inline critical styling, so each part can tie back to the selected track and show a compact decision path without relying on Mermaid rendering.
+- Added scenario threads and decision paths to Lab 10 Parts A-E plus synthesis.
+- Made synthesis explain the final recipe decision without source/tooling language.
+- Gave big takeaways and download-report panels distinct visual treatments.
+
+MLSysIM facts/APIs needed:
+- No new facts or APIs were added.
+- Provenance remains available inside structured report data, but it is not visually emphasized in the student launch flow.
+
+Notebook-local constants removed:
+- None in this pass.
+
+Reusable component or modality improved:
+- `scenario_thread()`
+- `decision_flow()`
+- `lab_header()`
+- `track_context()`
+- `scenario_brief()`
+- `lab_map()`
+- `big_takeaways()`
+
+Plan updates needed in other labs:
+- Use the Lab 10 pilot as the pattern for future part-body migrations: track thread first, concept explanation second, decision flow third, then prediction/control/evidence/reflection.
+- Keep source/provenance information out of the visible launch path unless an instructor explicitly wants an audit/debug view.
+
+Tests or checks run:
+- `python3 -m py_compile labs/mlsysbook_labs/ui.py labs/mlsysbook_labs/__init__.py labs/vol1/lab_10_model_compress.py labs/tests/test_ui_helpers.py`
+- `python3 -m pytest labs/tests/test_ui_helpers.py labs/tests/test_static.py labs/tests/test_report_contract.py -q`
+- Result: 823 passed, 4 skipped, 5 xfailed.
+- Browser screenshots: `/tmp/mlsysbook-lab10-final-top.png`, `/tmp/mlsysbook-lab10-final-instruction.png`, `/tmp/mlsysbook-lab10-final-part-a.png`, `/tmp/mlsysbook-lab10-final-synthesis.png`, `/tmp/mlsysbook-lab10-final-report.png`.
+- DOM checks on Lab 10: no visible `Evidence Summary`, `Source Trace`, `source trace`, or `MLSysIM`; zero horizontal overflow and zero offscreen panels.
+- `python3 labs/tools/interaction_lab_smoke.py --labs labs/vol1/lab_10_model_compress.py --html-pages labs/lab-plan-dashboard.html --port-start 31200 --output-dir /tmp/mlsysbook-lab10-final-audit --max-radios 0 > /tmp/mlsysbook-lab10-final-audit/results.json`
+- Focused result: 1/1 lab passed and 1/1 HTML page passed.
+- `python3 labs/tools/interaction_lab_smoke.py --port-start 31300 --output-dir /tmp/mlsysbook-style-final-all --max-radios 0 > /tmp/mlsysbook-style-final-all/results.json`
+- Full result: 34/34 labs passed and 2/2 HTML pages passed; 118 part checks passed.
+- `python3 -m build --wheel labs`
+- `cp labs/dist/mlsysbook_labs-0.1.0-py3-none-any.whl wheels/mlsysbook_labs-0.1.0-py3-none-any.whl`
+
+Follow-up iteration:
+- Ran a stricter learner audit that switched all four tracks, clicked through Parts A-E, opened synthesis, and checked for visible source/provenance labels.
+- Removed visible `Hardware source`, `System source`, and `Model source` labels from the Lab 10 student setup and shared track context.
+- Shortened Lab 10 part-level scenario threads so they act as reminders, not repeated scenario briefs.
+- Added `labs/LAB10_LEARNER_FEEDBACK_LOOP_2026_06_04.md` as the focused simulated instructor/learner feedback record.
+- Re-ran focused and full browser checks: 1/1 Lab 10 passed, then 34/34 labs and 2/2 HTML pages passed.

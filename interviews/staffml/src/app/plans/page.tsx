@@ -2,10 +2,12 @@
 
 import { useState, useEffect } from "react";
 import { motion } from "framer-motion";
-import { Map, CheckCircle2, ArrowRight, Terminal, Clock, Target } from "lucide-react";
+import { Map, CheckCircle2, ArrowRight, Terminal, Clock, Target, Trash2 } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
-import { STUDY_PLANS, getPlanQuestions, getPlanProgress, markPlanQuestionComplete, StudyPlan } from "@/lib/plans";
+import { STUDY_PLANS, getPlanQuestions, getPlanProgress, markPlanQuestionComplete, StudyPlan, getCustomPaths, generateCustomPathQuestions, deleteCustomPath, getPrepStats, type CustomPath } from "@/lib/plans";
+import PathBuilder from "@/components/plans/PathBuilder";
+import PrepDashboard from "@/components/plans/PrepDashboard";
 import { Question, cleanScenario, checkNapkinMath, extractFinalNumber, NapkinResult } from "@/lib/corpus";
 import { useFullQuestion } from "@/lib/hooks/useFullQuestion";
 import { saveAttempt, recordActivity, updateSRCard } from "@/lib/progress";
@@ -15,13 +17,16 @@ import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { track } from "@/lib/analytics";
 import { useToast } from "@/components/Toast";
 import HardwareRef from "@/components/HardwareRef";
+import BookRefCard from "@/components/BookRefCard";
 
 export default function PlansPage() {
   const [mounted, setMounted] = useState(false);
   const [activePlan, setActivePlan] = useState<StudyPlan | null>(null);
+  const [activeCustomPath, setActiveCustomPath] = useState<CustomPath | null>(null);
   const [questions, setQuestions] = useState<Question[]>([]);
   const [currentIdx, setCurrentIdx] = useState(0);
   const [completedIds, setCompletedIds] = useState<string[]>([]);
+  const [customPaths, setCustomPaths] = useState<CustomPath[]>([]);
 
   // Question state
   const [showAnswer, setShowAnswer] = useState(false);
@@ -31,19 +36,38 @@ export default function PlansPage() {
 
   const { show: showToast } = useToast();
 
-  useEffect(() => { setMounted(true); }, []);
+  useEffect(() => { setMounted(true); setCustomPaths(getCustomPaths()); }, []);
 
   const startPlan = (plan: StudyPlan) => {
     const qs = getPlanQuestions(plan);
     const progress = getPlanProgress(plan.id);
     setActivePlan(plan);
+    setActiveCustomPath(null);
     setQuestions(qs);
     setCompletedIds(progress.completedIds);
-    // Find first uncompleted question
     const firstUncompleted = qs.findIndex(q => !progress.completedIds.includes(q.id));
     setCurrentIdx(firstUncompleted >= 0 ? firstUncompleted : 0);
     resetQuestionState();
     track({ type: 'plan_started', planId: plan.id });
+  };
+
+  const startCustom = (path: CustomPath) => {
+    const qs = generateCustomPathQuestions(path);
+    const progress = getPlanProgress(path.id);
+    setActiveCustomPath(path);
+    setActivePlan(null);
+    setQuestions(qs);
+    setCompletedIds(progress.completedIds);
+    setCustomPaths(getCustomPaths());
+    const firstUncompleted = qs.findIndex(q => !progress.completedIds.includes(q.id));
+    setCurrentIdx(firstUncompleted >= 0 ? firstUncompleted : 0);
+    resetQuestionState();
+    track({ type: 'plan_started', planId: path.id });
+  };
+
+  const handleDeleteCustom = (id: string) => {
+    deleteCustomPath(id);
+    setCustomPaths(getCustomPaths());
   };
 
   const resetQuestionState = () => {
@@ -73,8 +97,12 @@ export default function PlansPage() {
     setShowAnswer(true);
   };
 
+  const activePlanId = activePlan?.id || activeCustomPath?.id || null;
+  const activePlanTitle = activePlan?.title || activeCustomPath?.title || "";
+  const activePlanIcon = activePlan?.icon || "📚";
+
   const handleScore = (score: number) => {
-    if (!current || !activePlan) return;
+    if (!current || !activePlanId) return;
     const finalScore = Math.min(score, maxScore);
     saveAttempt({
       questionId: current.id,
@@ -89,11 +117,10 @@ export default function PlansPage() {
     if (activity.newMilestone) {
       showToast({ type: 'badge', title: activity.newMilestone, description: `${activity.streak.currentStreak} day streak!` });
     }
-    markPlanQuestionComplete(activePlan.id, current.id);
+    markPlanQuestionComplete(activePlanId, current.id);
     const newCompleted = [...completedIds, current.id];
     setCompletedIds(newCompleted);
 
-    // Move to next uncompleted
     let next = currentIdx + 1;
     while (next < questions.length && newCompleted.includes(questions[next].id)) {
       next++;
@@ -102,9 +129,10 @@ export default function PlansPage() {
       setCurrentIdx(next);
       resetQuestionState();
     } else {
-      showToast({ type: 'success', title: 'Plan Complete!', description: `Finished ${activePlan.title}` });
-      track({ type: 'plan_completed', planId: activePlan.id });
+      showToast({ type: 'success', title: 'Plan Complete!', description: `Finished ${activePlanTitle}` });
+      track({ type: 'plan_completed', planId: activePlanId });
       setActivePlan(null);
+      setActiveCustomPath(null);
     }
   };
 
@@ -113,7 +141,7 @@ export default function PlansPage() {
   }
 
   // Plan selection view
-  if (!activePlan) {
+  if (!activePlan && !activeCustomPath) {
     return (
       <div className="flex-1 flex flex-col px-6 py-10">
         <div className="max-w-4xl mx-auto w-full">
@@ -121,10 +149,60 @@ export default function PlansPage() {
             <Map className="w-8 h-8 text-accentBlue" />
             <div>
               <h1 className="text-3xl font-extrabold text-textPrimary tracking-tight">Study Plans</h1>
-              <p className="text-sm text-textSecondary">Curated question sequences for targeted interview prep</p>
+              <p className="text-sm text-textSecondary">Build your own path or pick a curated plan</p>
             </div>
           </div>
 
+          <PathBuilder onStart={startCustom} />
+
+          {customPaths.length > 0 && (
+            <div className="mt-8 mb-4">
+              <h2 className="text-sm font-bold text-textPrimary mb-3">Your Paths</h2>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                {customPaths.map(cp => {
+                  const progress = getPlanProgress(cp.id);
+                  const qs = generateCustomPathQuestions(cp);
+                  const pct = qs.length > 0 ? Math.round((progress.completedIds.length / qs.length) * 100) : 0;
+                  const prepStats = getPrepStats(cp, qs);
+
+                  return (
+                    <div key={cp.id} className="flex items-center gap-3 p-4 rounded-lg border border-border bg-surface/50 group">
+                      <button onClick={() => startCustom(cp)} className="flex-1 text-left">
+                        <div className="text-sm font-bold text-textPrimary mb-0.5">{cp.title}</div>
+                        <div className="flex items-center gap-2 text-[10px] font-mono text-textTertiary">
+                          <span>{cp.startLevel}+</span>
+                          <span>{qs.length} Qs</span>
+                          <span>{progress.completedIds.length} done</span>
+                          {prepStats && (
+                            <span className={prepStats.onTrack ? "text-accentGreen" : "text-accentAmber"}>
+                              {prepStats.daysRemaining}d left
+                            </span>
+                          )}
+                        </div>
+                        {pct > 0 && (
+                          <div className="flex items-center gap-2 mt-2">
+                            <div className="flex-1 h-1.5 bg-border rounded-full overflow-hidden">
+                              <div className="h-full bg-accentBlue rounded-full" style={{ width: `${pct}%` }} />
+                            </div>
+                            <span className="text-[10px] font-mono text-accentBlue">{pct}%</span>
+                          </div>
+                        )}
+                      </button>
+                      <button
+                        onClick={() => handleDeleteCustom(cp.id)}
+                        className="p-1.5 text-textTertiary hover:text-accentRed opacity-0 group-hover:opacity-100 transition-all"
+                        title="Delete this path"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <h2 className="text-sm font-bold text-textPrimary mt-8 mb-3">Curated Plans</h2>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
             {STUDY_PLANS.map((plan, i) => {
               const progress = getPlanProgress(plan.id);
@@ -191,10 +269,10 @@ export default function PlansPage() {
       {/* Plan progress header */}
       <div className="border-b border-border bg-surface/50 px-6 py-3 flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={() => setActivePlan(null)} className="text-xs text-textTertiary hover:text-textPrimary transition-colors">
+          <button onClick={() => { setActivePlan(null); setActiveCustomPath(null); }} className="text-xs text-textTertiary hover:text-textPrimary transition-colors">
             ← Plans
           </button>
-          <span className="text-sm font-medium text-textPrimary">{activePlan.icon} {activePlan.title}</span>
+          <span className="text-sm font-medium text-textPrimary">{activePlanIcon} {activePlanTitle}</span>
           <span className="text-xs font-mono text-textTertiary">
             {completedIds.length}/{questions.length}
           </span>
@@ -206,6 +284,11 @@ export default function PlansPage() {
           <span className="text-xs font-mono text-textTertiary">{planProgress}%</span>
         </div>
       </div>
+
+      {activeCustomPath && (() => {
+        const stats = getPrepStats(activeCustomPath, questions);
+        return stats ? <PrepDashboard stats={stats} /> : null;
+      })()}
 
       {/* Question + answer — same split layout */}
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden">
@@ -237,7 +320,7 @@ export default function PlansPage() {
         <div className="w-full lg:w-[460px] border-t lg:border-t-0 lg:border-l border-border bg-surface/90 flex flex-col">
           <div className="h-10 border-b border-border flex items-center px-4 bg-background/50">
             <span className="text-[10px] font-mono text-textTertiary uppercase tracking-widest flex items-center gap-2">
-              <Target className="w-3 h-3" /> {activePlan.title} — Q{currentIdx + 1}
+              <Target className="w-3 h-3" /> {activePlanTitle} — Q{currentIdx + 1}
             </span>
           </div>
           <HardwareRef />
@@ -301,6 +384,7 @@ export default function PlansPage() {
                     ))}
                   </div>
                 )}
+                <BookRefCard refs={current.book_refs} />
                 <div className="border-t border-border pt-4">
                   <span className="text-[10px] font-mono text-textTertiary uppercase block mb-3">Rate yourself</span>
                   <div className="grid grid-cols-4 gap-2">

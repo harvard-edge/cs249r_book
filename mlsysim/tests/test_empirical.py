@@ -9,34 +9,36 @@
 # omits framework overhead, kernel scheduling, and data pipeline effects.
 
 import pytest
-from mlsysim.core.constants import Q_, ureg
-from mlsysim.core.solver import SingleNodeModel, DistributedModel, ServingModel
+from mlsysim.core.units import Q_, ureg
+from mlsysim.engine.empirical import EMPIRICAL_ANCHORS, anchor_by_id
+from mlsysim.engine.solvers import SingleNodeModel, DistributedModel, ServingModel
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
+from mlsysim.physics import calc_transformer_training_flops
 from mlsysim.systems.types import Fleet, NetworkFabric, Node
 
 # ─── 1. RESNET-50 TRAINING (SINGLE NODE) ───────────────────────────────────
 @pytest.mark.empirical
 def test_resnet50_h100_throughput():
     """
-    Validate ResNet-50 throughput on H100 against MLPerf v3.1.
+    Validate ResNet-50 throughput on H100 against the benchmark registry.
 
-    External target: ~4,800 samples/s (MLPerf Training v3.1, NVIDIA H100 SXM,
-    single GPU, closed division). Source: mlcommons.org/en/training-normal-31/
+    External target: Literature.Benchmarks.ResNet50H100TrainThroughput.
 
     The analytical model over-predicts because it does not account for
     data pipeline overhead (Wall 9) or framework kernel launch tax (Wall 3).
     We accept a 50% tolerance to validate the model is in the right ballpark.
     """
-    model = Models.ResNet50
-    hardware = Hardware.H100
+    h100_anchor = anchor_by_id("resnet50_h100_train_bs256")
+    model = h100_anchor.workload
+    hardware = h100_anchor.hardware
 
     # efficiency=0.08 calibrated to the "accelerator overkill" regime where
     # ResNet-50 kernels are too small to saturate H100 tensor cores.
     profile = SingleNodeModel().solve(model, hardware, batch_size=256, efficiency=0.08, is_training=True)
 
     throughput = profile.throughput.m_as("1/s")
-    mlperf_target = 4800.0  # MLPerf v3.1 single-GPU H100
+    mlperf_target = float(h100_anchor.target)
 
     # Analytical model yields higher than MLPerf due to missing overhead.
     # Accept 50% tolerance — we're validating order of magnitude, not exact match.
@@ -49,18 +51,20 @@ def test_llama3_8b_h100_itl():
     """
     Validate Llama-3-8B Inter-Token Latency (ITL) on H100.
 
-    External target: ~5-10ms at batch 1 (NVIDIA TensorRT-LLM benchmarks).
+    External target: Literature.Benchmarks.Llama3_8B_H100_ITLLower/Upper.
     Decode is memory-bandwidth-bound: ITL ≈ model_weights / HBM_bandwidth.
     The analytical model gives a lower bound (no framework overhead).
     """
-    model = Models.Llama3_8B
-    hardware = Hardware.H100
+    llama_anchor = anchor_by_id("llama3_8b_h100_bs1_itl")
+    model = llama_anchor.workload
+    hardware = llama_anchor.hardware
 
     res = ServingModel().solve(model, hardware, seq_len=1024, batch_size=1, efficiency=0.60)
 
     itl_ms = res.itl.m_as("ms")
-    # Analytical lower bound should be 3-8ms; real-world is 5-12ms
-    assert 1.0 < itl_ms < 20.0, f"Llama-3-8B ITL {itl_ms:.1f}ms outside plausible range [1, 20]ms"
+    lower = float(llama_anchor.lower) / 3
+    upper = float(llama_anchor.upper) * 2
+    assert lower < itl_ms < upper, f"Llama-3-8B ITL {itl_ms:.1f}ms outside plausible range"
 
 # ─── 3. DISTRIBUTED EFFICIENCY (8x H100 CLUSTER) ───────────────────────────
 @pytest.mark.empirical
@@ -71,8 +75,8 @@ def test_distributed_resnet_efficiency():
     External target: >90% scaling efficiency for small DP over NVLink.
     Source: NVIDIA DGX H100 data sheet claims near-linear scaling within node.
     """
-    model = Models.ResNet50
-    h100 = Hardware.H100
+    model = Models.Vision.ResNet50
+    h100 = Hardware.Cloud.H100
 
     node = Node(
         name="H100-Node",
@@ -91,9 +95,59 @@ def test_distributed_resnet_efficiency():
 # ─── 4. DIMENSIONAL INTEGRITY ───────────────────────────────────────────────
 def test_dimensional_integrity():
     """Verify that results preserve Pint units and can be converted."""
-    model = Models.ResNet50
-    hardware = Hardware.H100
+    model = Models.Vision.ResNet50
+    hardware = Hardware.Cloud.H100
     profile = SingleNodeModel().solve(model, hardware)
 
     assert profile.latency.check('[time]')
     assert profile.throughput.check('1/[time]')
+
+
+@pytest.mark.empirical
+def test_documented_calibration_table_stays_in_range():
+    """Check the sourced, domain-reviewed calibration anchors.
+
+    These are broad sanity bands, not exact benchmarks. They catch registry or
+    formula drift that would move MLSysIM outside the published calibration
+    envelope for common teaching examples.
+    """
+    a100_anchor = anchor_by_id("resnet50_a100_train_bs256")
+    resnet_a100 = SingleNodeModel().solve(
+        a100_anchor.workload,
+        a100_anchor.hardware,
+        **a100_anchor.solver_kwargs,
+    )
+    assert a100_anchor.accepts(resnet_a100.throughput.m_as(a100_anchor.units))
+
+    h100_anchor = anchor_by_id("resnet50_h100_train_bs256")
+    resnet_h100 = SingleNodeModel().solve(
+        h100_anchor.workload,
+        h100_anchor.hardware,
+        **h100_anchor.solver_kwargs,
+    )
+    assert h100_anchor.accepts(resnet_h100.throughput.m_as(h100_anchor.units))
+
+    llama_anchor = anchor_by_id("llama3_8b_h100_bs1_itl")
+    llama_itl = ServingModel().solve(
+        llama_anchor.workload,
+        llama_anchor.hardware,
+        **llama_anchor.solver_kwargs,
+    ).itl.m_as(llama_anchor.units)
+    assert llama_anchor.accepts(llama_itl)
+
+    gpt3_anchor = anchor_by_id("gpt3_175b_training_flops")
+    gpt3 = gpt3_anchor.workload
+    gpt3_flops = calc_transformer_training_flops(gpt3.parameters, gpt3.training_tokens)
+    assert gpt3_anchor.accepts(gpt3_flops.m_as(gpt3_anchor.units))
+
+
+def test_empirical_anchors_have_provenance_and_review_notes():
+    for anchor in EMPIRICAL_ANCHORS:
+        assert anchor.registry_paths
+        assert anchor.provenance_ids
+        assert anchor.review_notes
+        values = [anchor.target, anchor.lower, anchor.upper]
+        for value in values:
+            if value is not None:
+                assert value.provenance.ref
+                assert value.provenance.verified

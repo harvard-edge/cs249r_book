@@ -11,13 +11,9 @@ REPO_ROOT = Path(__file__).resolve().parents[3]
 
 # Define strict scopes: {Name: {"sources": [dirs/files], "bibs": [files]}}
 SCOPES = {
-    "Vol1": {
-        "sources": ["book/quarto/contents/vol1"],
-        "bibs": ["book/quarto/contents/vol1/backmatter/references.bib"]
-    },
-    "Vol2": {
-        "sources": ["book/quarto/contents/vol2"],
-        "bibs": ["book/quarto/contents/vol2/backmatter/references.bib"]
+    "Book": {
+        "sources": ["book/quarto/contents"],
+        "bibs": ["book/quarto/contents/references.bib"]
     },
     "Interviews": {
         "sources": ["interviews"],
@@ -34,14 +30,16 @@ SCOPES = {
             "mlsysim/docs/references.bib"
         ]
     },
-    "PeriodicTable": {
-        "sources": ["periodic-table"],
-        "bibs": ["periodic-table/paper/references.bib"]
+    "DesignGrammar": {
+        "sources": ["design-grammar"],
+        "bibs": ["design-grammar/paper/references.bib"]
     }
 }
 
 EXCLUDE = ("_build", "_site", "node_modules", ".git", "__pycache__", ".venv")
-NON_CITE_PREFIXES = ("sec-", "fig-", "tbl-", "eq-", "lst-", "exr-", "exm-", "thm-")
+NON_CITE_PREFIXES = (
+    "sec-", "fig-", "tbl-", "eq-", "lst-", "alg-", "algo-", "exr-", "exm-", "thm-"
+)
 
 # Tightened regex: Must NOT be followed by a / (which suggests a file path)
 # and should be followed by a word boundary or specific punctuation.
@@ -80,7 +78,12 @@ def extract_cites(path):
         keys = set()
         for m in CITE_RE.finditer(text):
             k = m.group(1).rstrip(".,;:)")
-            if k and not k.startswith(NON_CITE_PREFIXES) and not k.endswith("_") and k not in KNOWN_FALSE_POSITIVE_KEYS:
+            if (
+                k
+                and not k.lower().startswith(NON_CITE_PREFIXES)
+                and not k.endswith("_")
+                and k not in KNOWN_FALSE_POSITIVE_KEYS
+            ):
                 keys.add(k)
         return keys
 

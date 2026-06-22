@@ -187,7 +187,9 @@ def MapDashboard(active_grid, active_eval, comparison_evals):
         grid = comp['grid']
         is_active = grid.name == active_grid.name
         
-        color = COLORS['GreenLine'] if grid.renewable_pct and grid.renewable_pct > 50 else COLORS['OrangeLine']
+        # Color based on carbon intensity threshold (low carbon < 200 g/kWh)
+        # This correctly handles France (Nuclear) as green.
+        color = COLORS['GreenLine'] if grid.carbon_intensity_g_kwh < 200 else COLORS['OrangeLine']
         if not is_active:
             color = "#cbd5e1"
             
@@ -223,11 +225,12 @@ def MapDashboard(active_grid, active_eval, comparison_evals):
     
     # 2. Donut Chart
     pct = active_grid.renewable_pct or 0.0
+    is_low_carbon = active_grid.carbon_intensity_g_kwh < 200
     fig_donut = go.Figure(go.Pie(
         values=[pct, 100 - pct],
         labels=['Renewable', 'Other'],
         hole=.75,
-        marker=dict(colors=[COLORS['GreenLine'] if pct > 50 else COLORS['OrangeLine'], '#f1f5f9']),
+        marker=dict(colors=[COLORS['GreenLine'] if is_low_carbon else COLORS['OrangeLine'], '#f1f5f9']),
         textinfo='none',
         hoverinfo='label+percent'
     ))
@@ -247,7 +250,7 @@ def MapDashboard(active_grid, active_eval, comparison_evals):
     <div style="display:flex; flex-direction:column; gap:8px; justify-content:center; padding-left:16px;">
         <div style="display:flex; justify-content:space-between; width:150px; font-size:0.85rem;">
             <span style="color:#64748b; font-weight:600;">CO₂</span>
-            <span style="font-weight:800; color:{COLORS['GreenLine'] if pct>50 else COLORS['OrangeLine']};">{carbon_t:,.1f} t</span>
+            <span style="font-weight:800; color:{COLORS['GreenLine'] if is_low_carbon else COLORS['OrangeLine']};">{carbon_t:,.1f} t</span>
         </div>
         <div style="display:flex; justify-content:space-between; width:150px; font-size:0.85rem;">
             <span style="color:#64748b; font-weight:600;">PUE</span>
@@ -266,9 +269,10 @@ def MapDashboard(active_grid, active_eval, comparison_evals):
         grid = comp['grid']
         val_t = comp['carbon_kg'] / 1000.0
         is_active = grid.name == active_grid.name
+        is_grid_low_carbon = grid.carbon_intensity_g_kwh < 200
         
         bg = "#ffffff" if is_active else "#f8fafc"
-        border = f"2px solid {COLORS['GreenLine'] if pct>50 else COLORS['OrangeLine']}" if is_active else "1px solid #e2e8f0"
+        border = f"2px solid {COLORS['GreenLine'] if is_grid_low_carbon else COLORS['OrangeLine']}" if is_active else "1px solid #e2e8f0"
         
         strip_items.append(f"""
         <div style="flex:1; background:{bg}; border:{border}; border-radius:8px; padding:10px; text-align:center;">

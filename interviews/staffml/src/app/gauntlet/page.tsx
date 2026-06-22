@@ -20,6 +20,8 @@ import { saveAttempt, saveGauntletResult, AttemptRecord, recordActivity, updateS
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
 import { useToast } from "@/components/Toast";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
+import MarkdownText from "@/components/MarkdownText";
+import MCQOptions from "@/components/MCQOptions";
 import QuestionFeedback from "@/components/QuestionFeedback";
 import HardwareRef from "@/components/HardwareRef";
 import NapkinCalc from "@/components/NapkinCalc";
@@ -75,6 +77,8 @@ export default function GauntletPage() {
   const [showStarGate, setShowStarGate] = useState(false);
   const [timeRemaining, setTimeRemaining] = useState(0);
   const [userAnswer, setUserAnswer] = useState("");
+  // MCQ self-check selection (A1). Per-question, NOT scored — see MCQOptions.
+  const [mcqSelected, setMcqSelected] = useState<number | null>(null);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Review state (self-assessment per question)
@@ -192,7 +196,7 @@ export default function GauntletPage() {
     setQuestions(selected);
     setCurrentIdx(0);
     setShowAnswer(false);
-    setUserAnswer("");
+    setUserAnswer(""); setMcqSelected(null);
     setScores([]);
     setClarifications({});
     setTimeRemaining(dur.minutes * 60);
@@ -248,7 +252,7 @@ export default function GauntletPage() {
     if (currentIdx < questions.length - 1) {
       setCurrentIdx(currentIdx + 1);
       setShowAnswer(false);
-      setUserAnswer("");
+      setUserAnswer(""); setMcqSelected(null);
       setRubricItems([]);
     } else {
       // All questions answered — show results
@@ -513,7 +517,7 @@ export default function GauntletPage() {
                 </h2>
                 <div className="prose max-w-none">
                   <p className="text-textSecondary leading-relaxed text-base">
-                    {cleanScenario(q.scenario)}
+                    <MarkdownText text={cleanScenario(q.scenario)} />
                   </p>
                 </div>
               </motion.div>
@@ -584,14 +588,18 @@ export default function GauntletPage() {
                       <span className="text-[10px] font-mono text-accentRed uppercase mb-1 block flex items-center gap-1">
                         <XCircle className="w-3 h-3" /> Common Mistake
                       </span>
-                      <p className="text-sm text-textSecondary leading-relaxed">{q.details.common_mistake}</p>
+                      <p className="text-sm text-textSecondary leading-relaxed">
+                        <MarkdownText text={q.details.common_mistake} />
+                      </p>
                     </div>
                   )}
                   <div className="border-l-4 border-accentGreen pl-4">
                     <span className="text-[10px] font-mono text-accentGreen uppercase mb-1 block flex items-center gap-1">
                       <CheckCircle2 className="w-3 h-3" /> Model Answer
                     </span>
-                    <p className="text-sm text-textPrimary leading-relaxed">{q.details.realistic_solution}</p>
+                    <p className="text-sm text-textPrimary leading-relaxed">
+                      <MarkdownText text={q.details.realistic_solution} />
+                    </p>
                   </div>
                   {q.details.napkin_math && (
                     <div className="bg-background border border-border p-4 rounded-lg">
@@ -785,9 +793,11 @@ export default function GauntletPage() {
                     <span className="text-[10px] font-mono text-textTertiary shrink-0">{labels[s]}</span>
                   </summary>
                   <div className="px-3 pb-3 pt-1 border-t border-borderSubtle space-y-2">
-                    <p className="text-[12px] text-textSecondary leading-relaxed">{q.details.realistic_solution}</p>
+                    <p className="text-[12px] text-textSecondary leading-relaxed">
+                      <MarkdownText text={q.details.realistic_solution} />
+                    </p>
                     {q.details.common_mistake && (
-                      <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> {q.details.common_mistake}</p>
+                      <p className="text-[11px] text-accentRed/80"><span className="font-bold">Common mistake:</span> <MarkdownText text={q.details.common_mistake} /></p>
                     )}
                     {askedClarifications.length > 0 && (
                       <div className="pt-2 mt-2 border-t border-borderSubtle">

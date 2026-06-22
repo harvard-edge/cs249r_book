@@ -1,66 +1,122 @@
 # viz/plots.py
-# Centralized Visualization Style for MLSys Book
-# Ensures all generated figures across Vol 1 & 2 share a consistent,
-# MIT Press-ready aesthetic.
+# Simulator-aware plotters for generated MLSysIM figures.
+# Book publication style is owned by book.tools.figures.style; this module keeps
+# a local fallback so standalone mlsysim installs do not depend on the book tree.
 
 import os
 
-# Prefer a headless-safe backend unless the caller explicitly requested one.
-# This prevents macOS/AppKit aborts when tests or notebooks render figures from
-# a shell without an attached GUI session.
 try:
-    import matplotlib
-    if "MPLBACKEND" not in os.environ:
-        matplotlib.use("Agg", force=True)
-    import matplotlib.pyplot as plt
     import numpy as np
-    _matplotlib_available = True
 except ImportError:
-    plt = None
     np = None
-    _matplotlib_available = False
 
-# --- Brand & Book Palette ---
-COLORS = {
-    "crimson":    "#A51C30", # Harvard Crimson
-    "primary":    "#333333", # Dark Gray (Text)
-    "grid":       "#CCCCCC", # Light Gray
-    
-    # TikZ / Technical Palette (The "Golden" set)
-    "BlueLine":   "#006395", "BlueL":   "#D1E6F3", "BlueFill": "#D6EAF8",
-    "RedLine":    "#CB202D", "RedL":    "#F5D2D5", "RedFill": "#F2D7D5",
-    "GreenLine":  "#008F45", "GreenL":  "#D4EFDF", "GreenFill": "#D5F5E3",
-    "OrangeLine": "#E67817", "OrangeL": "#FCE4CC",
-    "VioletLine": "#7E317B", "VioletL": "#E6D4E5",
-    "BrownLine":  "#78492A", "BrownL":  "#E3D3C8",
-    "YellowFill": "#FEF9E0"
-}
+try:
+    from book.tools.figures.style import (
+        COLORS,
+        WEB_FIG_DPI,
+        bar_compare,
+        finalize_web_figure as _finalize_web_figure,
+        set_book_style,
+        setup_plot,
+    )
+except ImportError:
+    # Standalone mlsysim fallback. Keep in sync with book.tools.figures.style.
+    try:
+        import matplotlib
 
-def set_book_style():
-    """Applies the global matplotlib style configuration."""
-    if not _matplotlib_available:
-        raise ImportError("matplotlib is required for plot generation.")
-    plt.rcParams.update({
-        'font.family': 'sans-serif',
-        'font.sans-serif': ['Helvetica', 'Helvetica Neue', 'Arial', 'DejaVu Sans'],
-        'font.size': 10,
-        'text.color': COLORS['primary'],
-        'axes.labelsize': 11,
-        'axes.titlesize': 12,
-        'axes.titleweight': 'bold',
-        'axes.grid': True,
-        'grid.color': COLORS['grid'],
-        'grid.alpha': 0.4,
-        'grid.linestyle': '--',
-        'figure.dpi': 300,
-        'savefig.bbox': 'tight'
-    })
+        if "MPLBACKEND" not in os.environ:
+            matplotlib.use("Agg", force=True)
+        import matplotlib.pyplot as plt
 
-def setup_plot(figsize=(8, 5)):
-    """One-line plot setup for QMD blocks."""
-    set_book_style()
-    fig, ax = plt.subplots(figsize=figsize)
-    return fig, ax, COLORS, plt
+        _matplotlib_available = True
+    except ImportError:
+        plt = None
+        _matplotlib_available = False
+
+    COLORS = {
+        "crimson": "#A51C30",
+        "primary": "#333333",
+        "grid": "#CCCCCC",
+        "BlueLine": "#006395",
+        "BlueL": "#D1E6F3",
+        "BlueFill": "#D6EAF8",
+        "RedLine": "#CB202D",
+        "RedL": "#F5D2D5",
+        "RedFill": "#F2D7D5",
+        "GreenLine": "#008F45",
+        "GreenL": "#D4EFDF",
+        "GreenFill": "#D5F5E3",
+        "OrangeLine": "#E67817",
+        "OrangeL": "#FCE4CC",
+        "VioletLine": "#7E317B",
+        "VioletL": "#E6D4E5",
+        "BrownLine": "#78492A",
+        "BrownL": "#E3D3C8",
+        "YellowFill": "#FEF9E0",
+    }
+
+    WEB_FIG_DPI = 120
+
+    def set_book_style():
+        """Apply the global matplotlib style configuration."""
+        if not _matplotlib_available:
+            raise ImportError("matplotlib is required for plot generation.")
+        plt.rcParams.update(
+            {
+                "font.family": "sans-serif",
+                "font.sans-serif": [
+                    "Helvetica",
+                    "Helvetica Neue",
+                    "Arial",
+                    "DejaVu Sans",
+                ],
+                "font.size": 10,
+                "text.color": COLORS["primary"],
+                "axes.labelsize": 11,
+                "axes.titlesize": 12,
+                "axes.titleweight": "bold",
+                "axes.grid": True,
+                "grid.color": COLORS["grid"],
+                "grid.alpha": 0.4,
+                "grid.linestyle": "--",
+                "figure.dpi": 300,
+                "savefig.bbox": "tight",
+            }
+        )
+
+    def _finalize_web_figure(fig):
+        """Match Quarto web defaults while publication figures keep print DPI."""
+        fig.set_dpi(WEB_FIG_DPI)
+        return fig
+
+    def setup_plot(figsize=(8, 5)):
+        """One-line plot setup for generated plotting blocks."""
+        set_book_style()
+        fig, ax = plt.subplots(figsize=figsize)
+        return fig, ax, COLORS, plt
+
+    def bar_compare(labels, values, *, title=None, ylabel=None, figsize=(8, 4), color=None):
+        """Render a compact bar comparison with the MLSysBook style."""
+        fig, ax, colors, _ = setup_plot(figsize=figsize)
+        bar_color = color or colors["BlueLine"]
+        bars = ax.bar(labels, values, color=bar_color, alpha=0.8)
+        if title:
+            ax.set_title(title)
+        if ylabel:
+            ax.set_ylabel(ylabel)
+        ax.tick_params(axis="x", rotation=0)
+        for bar, value in zip(bars, values):
+            ax.text(
+                bar.get_x() + bar.get_width() / 2,
+                bar.get_height(),
+                f"{value:g}",
+                ha="center",
+                va="bottom",
+                fontsize=9,
+                color=colors["primary"],
+            )
+        return _finalize_web_figure(fig), ax
+
 
 def plot_roofline(hardware_node, workloads=None):
     """
@@ -204,7 +260,7 @@ def plot_roofline(hardware_node, workloads=None):
 
     # Plot workloads
     if workloads:
-        from ..core.solver import SingleNodeModel
+        from ..engine.solvers import SingleNodeModel
 
         workload_colors = [
             colors["crimson"],
@@ -236,7 +292,7 @@ def plot_roofline(hardware_node, workloads=None):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
-    return fig, ax
+    return _finalize_web_figure(fig), ax
 
 def plot_distributed_roofline(fleet_system, workloads=None):
     """
@@ -370,7 +426,7 @@ def plot_distributed_roofline(fleet_system, workloads=None):
     ax.set_xlim(x_min, x_max)
     ax.set_ylim(peak_flops * 0.001, peak_flops * 2)
     ax.legend(loc="lower right", fontsize=8, framealpha=0.9)
-    return fig, ax
+    return _finalize_web_figure(fig), ax
 
 def _metric_as_float(value, unit=None):
     """Return a numeric metric, converting Pint quantities when needed."""
@@ -401,7 +457,7 @@ def _memory_utilization(metrics):
 def plot_evaluation_scorecard(evaluation):
     """
     Visualizes the supply-vs-demand scorecard for a SystemEvaluation.
-    Follows the LEGO-style visualization pattern.
+    Follows the compact, labeled visualization pattern used by generated examples.
     """
     l1_metrics = evaluation.feasibility.metrics
     l2_metrics = evaluation.performance.metrics
@@ -432,4 +488,4 @@ def plot_evaluation_scorecard(evaluation):
     ax.set_xlim(0, max(max(ratios) + 0.5, 1.5))
     ax.set_xlabel('Resource Utilization (Demand / Supply)')
     ax.set_title(f'System Evaluation: {evaluation.scenario_name}')
-    return fig, ax
+    return _finalize_web_figure(fig), ax

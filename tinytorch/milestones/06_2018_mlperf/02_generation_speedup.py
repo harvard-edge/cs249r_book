@@ -126,7 +126,7 @@ def main():
     except ImportError as e:
         console.print(Panel(
             f"[red]Import Error: {e}[/red]\n\n"
-            f"[yellow]This milestone requires modules 11-17.[/yellow]\n"
+            f"[yellow]This milestone requires modules 01-08, 11, 12, 14, and 18.[/yellow]\n"
             f"[dim]Make sure you've completed and exported these modules.[/dim]",
             title="Missing Modules",
             border_style="red"

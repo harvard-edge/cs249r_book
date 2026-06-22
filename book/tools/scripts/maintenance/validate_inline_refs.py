@@ -6,13 +6,19 @@ Pre-render guardrail for inline Python in QMD files.
 Checks:
 1. Every `{python} ref` resolves to a defined variable or ClassName.attr
 2. Every `{python} ref` appears AFTER its definition (Locality)
-3. No inline Python inside LaTeX math mode (causes decimal stripping)
-4. No inline Python adjacent to LaTeX symbols like $\\times$
-5. No grid tables with inline Python (use pipe tables instead)
+3. No grid tables with inline Python (use pipe tables instead)
+4. No inline f-strings or function calls in QMD prose (pre-compute in cells)
+5. No inline Python in fig-cap/tbl-cap/lst-cap/fig-alt YAML options
 6. (--check-lego) callout-notebook blocks without a preceding LEGO cell
 7. (--check-lego) Hardcoded derived results in display math inside callout-notebooks
 8. (--check-scope) Bare variable references in class bodies that need ClassName.attr
 9. (--check-scope) Python 3 class-scope comprehension issues
+
+The previous "no inline Python inside LaTeX math" and "no inline Python adjacent
+to LaTeX symbols" checks were retired alongside mlsysim.fmt's MarkdownStr
+migration: fmt() now returns a Markdown-rendering string that bypasses Quarto's
+auto-escape, so values land verbatim inside math mode. The bug class those
+checks guarded against (silent decimal/comma corruption) no longer exists.
 
 Inline refs may be simple identifiers (`{python} var_name`) or dotted class
 attribute access (`{python} ClassName.attr`).
@@ -31,7 +37,7 @@ from pathlib import Path
 
 DEPRECATION_MSG = (
     "DEPRECATION: use Binder instead of direct script invocation:\n"
-    "  ./book/binder validate inline-refs [--path <file-or-dir>] [--check-patterns] [--check-lego]"
+    "  ./book/binder check refs --scope inline [--path <file-or-dir>] [--check-patterns] [--check-lego]"
 )
 
 BOOK_ROOT = Path(__file__).resolve().parent.parent  # book/quarto/
@@ -50,24 +56,13 @@ ASSIGNMENT = re.compile(r'^([a-zA-Z_]\w*(?:\s*,\s*[a-zA-Z_]\w*)*)\s*=')
 # Pattern for class definitions in compute cells
 CLASS_DEF = re.compile(r'^class\s+(\w+)\s*[:(]')
 
-# Pattern for Exports: in header block
-EXPORTS_SECTION = re.compile(r'#\s*.\s*[Ee]xports?:\s*(.*)')
+# NOTE: The LATEX_INLINE_PYTHON and LATEX_ADJACENT patterns that used to live here
+# were retired alongside mlsysim.fmt's MarkdownStr migration. They guarded against
+# Quarto's auto-escape silently corrupting commas and decimals inside $..$ math
+# mode — a bug class that no longer exists now that fmt() returns a string that
+# renders verbatim. See mlsysim/mlsysim/fmt.py and the project math rules.
 
-# Problematic patterns that cause rendering issues
-# Pattern 1: Inline Python directly inside LaTeX math: $`{python}`$ or $..`{python}`$
-# Only matches when $ is immediately followed by backtick-python (within short distance)
-# This avoids false positives from {python} appearing between two separate $...$ pairs
-# EXCLUDES _str variables which are pre-formatted strings (no decimals to strip)
-# Handles both simple `var_str` and dotted `Name.attr_str`
-LATEX_INLINE_PYTHON = re.compile(r'(?<!\\)\$\s*`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`|`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*(?<!\\)\$')
-
-# Pattern 2: Inline Python adjacent to LaTeX symbols (decimal stripping risk)
-# Only flags NON-_str variables. Using _str variables adjacent to $\times$ etc. is the
-# PREFERRED convention — see book-prose.md "Multiplication and Times Notation".
-# Handles both simple `var_str` and dotted `Name.attr_str`
-LATEX_ADJACENT = re.compile(r'`\{python\}\s+(?!\w+(?:\.\w+)?_str)[^`]+`\s*\$\\(times|approx|ll|gg|mu)\$')
-
-# Pattern 3: Grid table row separator (indicates grid table format)
+# Grid table row separator (indicates grid table format)
 GRID_TABLE_SEP = re.compile(r'^\+[-:=+]+\+$')
 
 # Pattern 4: Inline f-string formatting (should be pre-computed as _str)
@@ -296,21 +291,6 @@ def check_rendering_patterns(qmd_path, verbose=False):
     grid_table_start = 0
     
     for i, line in enumerate(lines, 1):
-        # Check for inline Python inside LaTeX math
-        if LATEX_INLINE_PYTHON.search(line):
-            warnings.append((filepath, i, "LATEX_MATH", 
-                "Inline Python inside $...$ - will strip decimal points"))
-            if verbose:
-                print(f"  ⚠ {qmd_path.name}:{i} — Python inside LaTeX math")
-        
-        # Check for non-_str inline Python adjacent to LaTeX symbols (decimal stripping risk)
-        # NOTE: _str variables adjacent to $\times$ is the PREFERRED convention.
-        if LATEX_ADJACENT.search(line):
-            warnings.append((filepath, i, "LATEX_ADJACENT",
-                "Non-_str inline Python adjacent to $\\\\times$ (decimal stripping risk)"))
-            if verbose:
-                print(f"  ⚠ {qmd_path.name}:{i} — Non-_str Python adjacent to LaTeX symbol")
-        
         # Track grid tables
         if GRID_TABLE_SEP.match(line.strip()):
             if not in_grid_table:
@@ -718,7 +698,6 @@ def validate_file(qmd_path, verbose=False, check_patterns=False, check_lego=Fals
     defined_vars = set()
     defined_classes = set()
     in_cell = False
-    in_exports = False
 
     for i, line in enumerate(lines, 1):
         # 1. Track variable and class definitions in cells
@@ -727,7 +706,6 @@ def validate_file(qmd_path, verbose=False, check_patterns=False, check_lego=Fals
             continue
         if in_cell and CELL_END.match(line):
             in_cell = False
-            in_exports = False
             continue
         
         if in_cell:
@@ -743,36 +721,6 @@ def validate_file(qmd_path, verbose=False, check_patterns=False, check_lego=Fals
                 for v in re.split(r'[,\s]+', vars_part):
                     if v.strip():
                         defined_vars.add(v.strip())
-            
-            # Check for Exports: in header
-            m = EXPORTS_SECTION.match(line.strip())
-            if m:
-                in_exports = True
-                vars_raw = m.group(1)
-                # Remove unit parentheticals like (MB, GB)
-                vars_raw = re.sub(r'\(.*?\)', '', vars_raw)
-                for v in re.split(r'[,\s]+', vars_raw):
-                    v = v.strip().rstrip(',')
-                    if v:
-                        defined_vars.add(v)
-            elif in_exports:
-                # Continuation of exports
-                m = re.match(r'#\s*.\s*(.*)', line.strip())
-                if m:
-                    content = m.group(1).strip()
-                    # If content starts with a section like 'Goal:', stop
-                    if re.match(r'^[A-Z][a-z]+:', content):
-                        in_exports = False
-                    elif content == "" or "──" in content:
-                        in_exports = False
-                    else:
-                        vars_raw = re.sub(r'\(.*?\)', '', content)
-                        for v in re.split(r'[,\s]+', vars_raw):
-                            v = v.strip().rstrip(',')
-                            if v:
-                                defined_vars.add(v)
-                else:
-                    in_exports = False
             continue # Don't check for refs inside compute cells
 
         # 2. Check inline references for Locality

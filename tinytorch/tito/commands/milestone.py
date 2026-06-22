@@ -21,6 +21,7 @@ import sys
 import json
 import time
 import subprocess
+import importlib
 import yaml
 from datetime import datetime
 from pathlib import Path
@@ -144,12 +145,103 @@ MILESTONE_SCRIPTS = {
                 "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 18]  # Full training + Embeddings + Attention + Profiler + Memoization (18)
             }
         ],
-        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 14, 15, 16, 17, 18, 19],  # Full training + Optimization tier
+        "required_modules": [1, 2, 3, 4, 5, 6, 7, 8, 11, 12, 14, 15, 16, 17, 18, 19],  # Full default run: optimization + generation speedup parts
         "description": "Compress and accelerate your neural network",
         "historical_context": "MLPerf standardized ML benchmarks",
         "emoji": "🏆"
     }
 }
+
+
+MODULE_EXPORT_CHECKS = {
+    1: [("tinytorch", "Tensor"), ("tinytorch.core.tensor", "Tensor")],
+    2: [("tinytorch", "ReLU"), ("tinytorch.core.activations", "ReLU")],
+    3: [("tinytorch", "Linear"), ("tinytorch.core.layers", "Linear")],
+    4: [("tinytorch", "CrossEntropyLoss"), ("tinytorch.core.losses", "CrossEntropyLoss")],
+    5: [("tinytorch", "DataLoader"), ("tinytorch.core.dataloader", "DataLoader")],
+    6: [("tinytorch", "enable_autograd"), ("tinytorch.core.autograd", "enable_autograd")],
+    7: [("tinytorch", "SGD"), ("tinytorch.core.optimizers", "SGD")],
+    8: [("tinytorch", "Trainer"), ("tinytorch.core.training", "Trainer")],
+    9: [("tinytorch", "Conv2d"), ("tinytorch.core.spatial", "Conv2d")],
+    10: [("tinytorch", "CharTokenizer"), ("tinytorch.core.tokenization", "CharTokenizer")],
+    11: [("tinytorch", "Embedding"), ("tinytorch.core.embeddings", "Embedding")],
+    12: [("tinytorch", "MultiHeadAttention"), ("tinytorch.core.attention", "MultiHeadAttention")],
+    13: [("tinytorch", "TransformerBlock"), ("tinytorch.core.transformers", "TransformerBlock")],
+    14: [("tinytorch", "Profiler"), ("tinytorch.perf.profiling", "Profiler")],
+    15: [("tinytorch", "Quantizer"), ("tinytorch.perf.quantization", "Quantizer")],
+    16: [("tinytorch", "Compressor"), ("tinytorch.perf.compression", "Compressor")],
+    17: [("tinytorch", "vectorized_matmul"), ("tinytorch.perf.acceleration", "vectorized_matmul")],
+    18: [("tinytorch", "KVCache"), ("tinytorch.perf.memoization", "KVCache")],
+    19: [("tinytorch.perf.benchmarking", "Benchmark")],
+    20: [("tinytorch", "olympics")],
+}
+
+
+def _module_progress_to_int(module_value):
+    """Normalize module progress entries like 1, "01", or "01_tensor" to int."""
+    if isinstance(module_value, int):
+        return module_value
+    if not isinstance(module_value, str):
+        return None
+    prefix = module_value.split("_", 1)[0]
+    try:
+        return int(prefix)
+    except ValueError:
+        return None
+
+
+def _load_completed_module_numbers() -> set:
+    """Read completed module numbers from the canonical .tito progress file."""
+    progress_file = Path(".tito") / "progress.json"
+    completed = set()
+    if not progress_file.exists():
+        return completed
+
+    try:
+        with open(progress_file, 'r') as f:
+            progress_data = json.load(f)
+    except (json.JSONDecodeError, IOError):
+        return completed
+
+    for module_value in progress_data.get("completed_modules", []):
+        module_num = _module_progress_to_int(module_value)
+        if module_num is not None:
+            completed.add(module_num)
+    return completed
+
+
+def _required_modules_for(milestone: dict) -> list[int]:
+    """Return all modules required by a milestone as sorted ints."""
+    required = set()
+    for module_value in milestone.get("required_modules", []):
+        module_num = _module_progress_to_int(module_value)
+        if module_num is not None:
+            required.add(module_num)
+    for script in milestone.get("scripts", []):
+        for module_value in script.get("required_modules", []):
+            module_num = _module_progress_to_int(module_value)
+            if module_num is not None:
+                required.add(module_num)
+    return sorted(required)
+
+
+def _validate_required_exports(required_modules: list[int]) -> list[str]:
+    """Return missing or silently failed exports for the required modules."""
+    failures = []
+
+    for module_num in required_modules:
+        for module_path, symbol_name in MODULE_EXPORT_CHECKS.get(module_num, []):
+            try:
+                module = importlib.import_module(module_path)
+            except ImportError as exc:
+                failures.append(f"{module_path}.{symbol_name}: import failed ({exc})")
+                continue
+
+            value = getattr(module, symbol_name, None)
+            if value is None:
+                failures.append(f"{module_path}.{symbol_name}: exported as None")
+
+    return failures
 
 
 class MilestoneSystem:
@@ -224,7 +316,7 @@ class MilestoneSystem:
 
         for milestone_id, milestone in self.MILESTONES.items():
             # Check if all required modules are complete (no more checkpoint dependencies)
-            required_modules = milestone.get("required_modules", [])
+            required_modules = _required_modules_for(milestone)
             required_complete = all(
                 self._is_module_completed(f"{mod:02d}")
                 for mod in required_modules
@@ -247,10 +339,10 @@ class MilestoneSystem:
                 "title": milestone["title"],
                 "emoji": milestone.get("emoji", "🎯"),
                 "trigger_module": trigger_module,
-                "required_modules": milestone.get("required_modules", []),
+                "required_modules": required_modules,
                 "victory_condition": milestone.get("victory_condition", milestone.get("description", "")),
-                "capability": milestone.get("capability", ""),
-                "real_world_impact": milestone.get("real_world_impact", ""),
+                "capability": milestone.get("capability", milestone.get("description", "")),
+                "real_world_impact": milestone.get("real_world_impact", milestone.get("historical_context", "")),
                 "required_complete": required_complete,
                 "trigger_complete": trigger_complete,
                 "is_unlocked": is_unlocked,
@@ -279,9 +371,18 @@ class MilestoneSystem:
             "celebration_needed": False
         }
 
-        # Find milestone triggered by this module
+        completed_num = _module_progress_to_int(completed_module)
+
+        # Find milestones made runnable by this completed module.
         for milestone_id, milestone in self.MILESTONES.items():
-            if milestone["trigger_module"] == completed_module:
+            trigger_module = milestone.get("trigger_module")
+            if trigger_module:
+                should_check = trigger_module == completed_module
+            else:
+                required_modules = _required_modules_for(milestone)
+                should_check = bool(required_modules) and completed_num == max(required_modules)
+
+            if should_check:
                 status = self.get_milestone_status()
                 milestone_status = status["milestones"][milestone_id]
 
@@ -335,7 +436,7 @@ class MilestoneSystem:
             "milestone_id": milestone_id,
             "milestone_name": milestone["name"],
             "title": milestone.get("title", ""),
-            "capability": milestone.get("capability", ""),
+            "capability": milestone.get("capability", milestone.get("description", "")),
             "victory_condition": milestone.get("victory_condition", "")
         }
 
@@ -358,7 +459,12 @@ class MilestoneSystem:
             try:
                 with open(progress_file, 'r') as f:
                     progress_data = json.load(f)
-                    return module_name in progress_data.get("completed_modules", [])
+                    module_num = _module_progress_to_int(module_name)
+                    completed_nums = {
+                        _module_progress_to_int(mod)
+                        for mod in progress_data.get("completed_modules", [])
+                    }
+                    return module_num in completed_nums
             except (json.JSONDecodeError, IOError):
                 pass
         return False
@@ -378,6 +484,8 @@ class MilestoneSystem:
                 pass
 
         return {
+            "completed_milestones": [],
+            "completion_dates": {},
             "unlocked_milestones": [],
             "unlock_dates": {},
             "total_unlocked": 0,
@@ -485,7 +593,7 @@ class MilestoneCommand(BaseCommand):
         test_parser.add_argument(
             'milestone_id',
             nargs='?',
-            help='Milestone ID to test (1-5), or test next available'
+            help='Milestone ID to test (1-6), or test next available'
         )
 
         # Demo subcommand
@@ -495,7 +603,7 @@ class MilestoneCommand(BaseCommand):
         )
         demo_parser.add_argument(
             'milestone_id',
-            help='Milestone ID to demonstrate (1-5)'
+            help='Milestone ID to demonstrate (1-6)'
         )
 
     def run(self, args: Namespace) -> int:
@@ -515,9 +623,9 @@ class MilestoneCommand(BaseCommand):
                 "  • [bold]demo[/bold]       - Run capability demonstration\n\n"
                 "[dim]Examples:[/dim]\n"
                 "[dim]  tito milestone list[/dim]\n"
-                "[dim]  tito milestone run 02           # Run all parts[/dim]\n"
-                "[dim]  tito milestone run 02 --part 1  # Run Part 1 only[/dim]\n"
-                "[dim]  tito milestone run 02 --part 2  # Run Part 2 only[/dim]\n"
+                "[dim]  tito milestone run 03           # Run all parts[/dim]\n"
+                "[dim]  tito milestone run 03 --part 1  # Run Part 1 only[/dim]\n"
+                "[dim]  tito milestone run 03 --part 2  # Run Part 2 only[/dim]\n"
                 "[dim]  tito milestone info 03[/dim]\n"
                 "[dim]  tito milestone status --detailed[/dim]",
                 title="🏆 Milestone System",
@@ -577,15 +685,15 @@ class MilestoneCommand(BaseCommand):
                 f"[bold cyan]🎯 Next Achievement[/bold cyan]\n\n"
                 f"[bold yellow]{next_milestone['emoji']} {next_milestone['title']}[/bold yellow]\n"
                 f"[dim]{next_milestone['victory_condition']}[/dim]\n\n"
-                f"[green]Ready to unlock![/green] Complete: {next_milestone['trigger_module']}\n"
-                f"[dim]tito module complete {next_milestone['trigger_module']}[/dim]",
+                f"[green]Ready to run![/green]\n"
+                f"[dim]tito milestone run {next_milestone['id']}[/dim]",
                 title="Next Milestone",
                 border_style="bright_green"
             ))
-        elif status["total_unlocked"] == 5:
+        elif status["total_unlocked"] == total_milestones:
             console.print(Panel(
                 f"[bold green]🏆 QUEST COMPLETE! 🏆[/bold green]\n\n"
-                f"[green]You've unlocked all 5 epic milestones![/green]\n"
+                f"[green]You've unlocked all {total_milestones} epic milestones![/green]\n"
                 f"[bold white]You are now an ML Systems Engineer![/bold white]\n\n"
                 f"[cyan]Share your achievement and inspire others![/cyan]",
                 title="🌟 FULL MASTERY ACHIEVED",
@@ -610,7 +718,10 @@ class MilestoneCommand(BaseCommand):
         elif milestone["required_complete"] and not milestone["trigger_complete"]:
             status_icon = "🔒"
             status_color = "cyan"
-            status_text = f"COMPLETE: {milestone['trigger_module']}"
+            if milestone["trigger_module"]:
+                status_text = f"COMPLETE: {milestone['trigger_module']}"
+            else:
+                status_text = "READY"
         else:
             status_icon = "🔒"
             status_color = "dim"
@@ -625,14 +736,19 @@ class MilestoneCommand(BaseCommand):
         # Add detailed information if requested
         if detailed:
             req_status = "✅" if milestone["required_complete"] else "❌"
-            trigger_status = "✅" if milestone["trigger_complete"] else "❌"
+            if milestone["trigger_module"]:
+                trigger_status = "✅" if milestone["trigger_complete"] else "❌"
+                trigger_text = milestone["trigger_module"]
+            else:
+                trigger_status = "•"
+                trigger_text = "N/A"
 
             required_modules_str = ', '.join(f"{m:02d}" for m in milestone.get('required_modules', []))
 
             milestone_content += (
                 f"\n\n[bold]Requirements:[/bold]\n"
                 f"  {req_status} Modules: {required_modules_str}\n"
-                f"  {trigger_status} Trigger: {milestone.get('trigger_module', 'N/A')}\n"
+                f"  {trigger_status} Trigger: {trigger_text}\n"
                 f"[bold]Capability:[/bold] {milestone['capability']}\n"
                 f"[bold]Impact:[/bold] {milestone['real_world_impact']}"
             )
@@ -735,7 +851,13 @@ class MilestoneCommand(BaseCommand):
             branch.add(f"[dim]{milestone['capability']}[/dim]")
 
             # Add trigger module info
-            if milestone["trigger_complete"]:
+            if not milestone["trigger_module"]:
+                required_modules_str = ', '.join(f"{m:02d}" for m in milestone.get('required_modules', []))
+                if milestone["required_complete"]:
+                    branch.add(f"[green]✅ Prerequisites complete: {required_modules_str}[/green]")
+                else:
+                    branch.add(f"[dim]🎯 Complete modules: {required_modules_str}[/dim]")
+            elif milestone["trigger_complete"]:
                 branch.add(f"[green]✅ {milestone['trigger_module']} completed[/green]")
             else:
                 branch.add(f"[dim]🎯 Complete: {milestone['trigger_module']}[/dim]")
@@ -770,7 +892,7 @@ class MilestoneCommand(BaseCommand):
         if milestone_id not in milestone_system.MILESTONES:
             console.print(Panel(
                 f"[red]Invalid milestone ID: {milestone_id}[/red]\n\n"
-                f"Valid milestone IDs: 1, 2, 3, 4, 5",
+                f"Valid milestone IDs: 1, 2, 3, 4, 5, 6",
                 title="Invalid Milestone",
                 border_style="red"
             ))
@@ -781,7 +903,7 @@ class MilestoneCommand(BaseCommand):
         console.print(Panel(
             f"[bold cyan]🧪 Testing Milestone {milestone_id}[/bold cyan]\n\n"
             f"[bold]{milestone['emoji']} {milestone['title']}[/bold]\n"
-            f"[dim]{milestone['victory_condition']}[/dim]",
+            f"[dim]{milestone.get('victory_condition', milestone.get('description', ''))}[/dim]",
             title="Milestone Test",
             border_style="bright_cyan"
         ))
@@ -796,8 +918,8 @@ class MilestoneCommand(BaseCommand):
                 f"[bold green]✅ Milestone Test Passed![/bold green]\n\n"
                 f"[green]All requirements met for {result['milestone_name']}[/green]\n"
                 f"[cyan]Capability: {result['capability']}[/cyan]\n\n"
-                f"[bold yellow]Complete the trigger module to unlock:[/bold yellow]\n"
-                f"[dim]tito module complete {milestone['trigger_module']}[/dim]",
+                f"[bold yellow]Run the milestone:[/bold yellow]\n"
+                f"[dim]tito milestone run {milestone_id}[/dim]",
                 title="🎉 Ready to Unlock!",
                 border_style="green"
             ))
@@ -823,7 +945,7 @@ class MilestoneCommand(BaseCommand):
         if milestone_id not in milestone_system.MILESTONES:
             console.print(Panel(
                 f"[red]Invalid milestone ID: {milestone_id}[/red]\n\n"
-                f"Valid milestone IDs: 1, 2, 3, 4, 5",
+                f"Valid milestone IDs: 1, 2, 3, 4, 5, 6",
                 title="Invalid Milestone",
                 border_style="red"
             ))
@@ -838,7 +960,7 @@ class MilestoneCommand(BaseCommand):
             console.print(Panel(
                 f"[yellow]Milestone {milestone_id} not yet unlocked.[/yellow]\n\n"
                 f"[bold]{milestone['emoji']} {milestone['title']}[/bold]\n"
-                f"[dim]{milestone['victory_condition']}[/dim]\n\n"
+                f"[dim]{milestone.get('victory_condition', milestone.get('description', ''))}[/dim]\n\n"
                 f"[cyan]Complete the requirements first:[/cyan]\n"
                 f"[dim]tito milestone test {milestone_id}[/dim]",
                 title="Milestone Locked",
@@ -847,11 +969,21 @@ class MilestoneCommand(BaseCommand):
             return 0
 
         # Check if demo file exists
-        demo_path = Path("capabilities") / milestone["demo_file"]
+        demo_file = milestone.get("demo_file")
+        if not demo_file:
+            console.print(Panel(
+                f"[yellow]Demo not available for Milestone {milestone_id}[/yellow]\n\n"
+                f"Use [dim]tito milestone run {milestone_id}[/dim] to run the milestone script.",
+                title="Demo Unavailable",
+                border_style="yellow"
+            ))
+            return 0
+
+        demo_path = Path("capabilities") / demo_file
         if not demo_path.exists():
             console.print(Panel(
                 f"[yellow]Demo not available for Milestone {milestone_id}[/yellow]\n\n"
-                f"Demo file not found: {milestone['demo_file']}\n"
+                f"Demo file not found: {demo_file}\n"
                 f"[dim]This demo may be coming in a future update.[/dim]",
                 title="Demo Unavailable",
                 border_style="yellow"
@@ -863,8 +995,8 @@ class MilestoneCommand(BaseCommand):
             f"[bold cyan]🎬 Launching Milestone {milestone_id} Demo[/bold cyan]\n\n"
             f"[bold]{milestone['emoji']} {milestone['title']}[/bold]\n"
             f"[yellow]Watch your capability in action![/yellow]\n\n"
-            f"[cyan]Demonstrating: {milestone['capability']}[/cyan]\n"
-            f"[dim]Running: {milestone['demo_file']}[/dim]",
+            f"[cyan]Demonstrating: {milestone.get('capability', milestone.get('description', ''))}[/cyan]\n"
+            f"[dim]Running: {demo_file}[/dim]",
             title="Capability Demo",
             border_style="bright_cyan"
         ))
@@ -880,7 +1012,7 @@ class MilestoneCommand(BaseCommand):
                 console.print(Panel(
                     f"[bold green]✅ Demo completed successfully![/bold green]\n\n"
                     f"[yellow]You've seen your {milestone['title']} capability in action![/yellow]\n"
-                    f"[cyan]Real-world impact: {milestone['real_world_impact']}[/cyan]",
+                    f"[cyan]Real-world impact: {milestone.get('real_world_impact', milestone.get('historical_context', ''))}[/cyan]",
                     title="🎉 Demo Complete",
                     border_style="green"
                 ))
@@ -890,7 +1022,7 @@ class MilestoneCommand(BaseCommand):
         except Exception as e:
             console.print(Panel(
                 f"[red]❌ Error running demo: {e}[/red]\n\n"
-                f"[dim]You can manually run: python capabilities/{milestone['demo_file']}[/dim]",
+                f"[dim]You can manually run: python capabilities/{demo_file}[/dim]",
                 title="Demo Error",
                 border_style="red"
             ))
@@ -904,33 +1036,13 @@ class MilestoneCommand(BaseCommand):
 
         console.print(Panel(
             "[bold cyan]🏆 TinyTorch Milestones[/bold cyan]\n\n"
-            "[dim]Recreate ML history from 1957 to 2018[/dim]",
+            "[dim]Recreate ML history from 1958 to 2018[/dim]",
             title="Available Milestones",
             border_style="bright_cyan"
         ))
 
-        # Check module completion status
-        # Module workflow saves to progress.json in project root
-        progress_file = Path("progress.json")
-        completed_modules_raw = []
-        if progress_file.exists():
-            try:
-                with open(progress_file, 'r') as f:
-                    progress_data = json.load(f)
-                    completed_modules_raw = progress_data.get("completed_modules", [])
-            except (json.JSONDecodeError, IOError):
-                pass
-
-        # Convert completed modules to integers for comparison
-        # Handles both "01" and "01_tensor" formats
-        completed_module_nums = set()
-        for mod in completed_modules_raw:
-            try:
-                # Extract number from formats like "01" or "01_tensor"
-                num_str = mod.split("_")[0] if "_" in mod else mod
-                completed_module_nums.add(int(num_str))
-            except (ValueError, IndexError):
-                pass
+        # Check module completion status from the canonical module progress file.
+        completed_module_nums = _load_completed_module_numbers()
 
         # Check milestone completion
         milestone_progress = self._get_milestone_progress_data()
@@ -938,9 +1050,10 @@ class MilestoneCommand(BaseCommand):
 
         for milestone_id in sorted(MILESTONE_SCRIPTS.keys()):
             milestone = MILESTONE_SCRIPTS[milestone_id]
+            required_modules = _required_modules_for(milestone)
 
             # Check if prerequisites met (required_modules contains integers)
-            prereqs_met = all(mod in completed_module_nums for mod in milestone["required_modules"])
+            prereqs_met = all(mod in completed_module_nums for mod in required_modules)
             is_complete = milestone_id in completed_milestones
 
             # Status indicator
@@ -971,7 +1084,7 @@ class MilestoneCommand(BaseCommand):
                 if prereqs_met and not is_complete:
                     milestone_display += f"[bold yellow]▶ Run now:[/bold yellow] [cyan]tito milestone run {milestone_id}[/cyan]\n"
                 elif not prereqs_met:
-                    missing = [f"{m:02d}" for m in milestone["required_modules"] if m not in completed_module_nums]
+                    missing = [f"{m:02d}" for m in required_modules if m not in completed_module_nums]
                     milestone_display += f"[dim]Required: Complete modules {', '.join(missing)}[/dim]\n"
 
                 console.print(Panel(
@@ -1081,8 +1194,12 @@ class MilestoneCommand(BaseCommand):
 
             completed_modules = progress_data.get('completed_modules', [])
 
-            # Convert completed to set of integers
-            completed_set = {int(m) if isinstance(m, str) else m for m in completed_modules}
+            # Convert completed to set of integers. Handles "01" and "01_tensor".
+            completed_set = {
+                module_num
+                for module_num in (_module_progress_to_int(m) for m in completed_modules)
+                if module_num is not None
+            }
             missing_modules = [m for m in required_modules if m not in completed_set]
 
             if missing_modules:
@@ -1105,35 +1222,28 @@ class MilestoneCommand(BaseCommand):
             # Test imports work
             console.print("[bold cyan]🧪 Testing YOUR implementations...[/bold cyan]\n")
 
-            # Try importing key components (basic check)
-            try:
-                import sys as _sys
-                _sys.path.insert(0, str(Path.cwd()))
+            import sys as _sys
+            _sys.path.insert(0, str(Path.cwd()))
 
-                if 1 in milestone["required_modules"]:
-                    from tinytorch import Tensor
-                    console.print("  [green]✓[/green] Tensor import successful")
-
-                if 2 in milestone["required_modules"]:
-                    from tinytorch import ReLU
-                    console.print("  [green]✓[/green] Activations import successful")
-
-                if 3 in milestone["required_modules"]:
-                    from tinytorch import Linear
-                    console.print("  [green]✓[/green] Layers import successful")
-
-                console.print(f"\n[green]✅ YOUR Tiny🔥Torch is ready![/green]\n")
-
-            except ImportError as e:
+            export_failures = _validate_required_exports(required_modules)
+            if export_failures:
                 console.print(Panel(
-                    f"[red]Import Error![/red]\n\n"
-                    f"[yellow]Error: {e}[/yellow]\n\n"
+                    f"[red]Import Test Failed![/red]\n\n"
+                    f"[yellow]Missing or invalid exports:[/yellow]\n"
+                    + "\n".join(f"  • {failure}" for failure in export_failures[:8])
+                    + ("\n  • ..." if len(export_failures) > 8 else "")
+                    + "\n\n"
                     f"[dim]Your modules may not be exported correctly.[/dim]\n"
                     f"[dim]Try re-exporting: tito module complete XX[/dim]",
                     title="Import Test Failed",
                     border_style="red"
                 ))
                 return 1
+
+            for module_num in required_modules:
+                console.print(f"  [green]✓[/green] Module {module_num:02d} exports available")
+
+            console.print(f"\n[green]✅ YOUR Tiny🔥Torch is ready![/green]\n")
 
         # Show milestone banner
         scripts_info = ""
@@ -1304,17 +1414,9 @@ class MilestoneCommand(BaseCommand):
         milestone = MILESTONE_SCRIPTS[milestone_id]
 
         # Check status
-        progress_file = Path(".tito") / "progress.json"
-        completed_modules = []
-        if progress_file.exists():
-            try:
-                with open(progress_file, 'r') as f:
-                    progress_data = json.load(f)
-                    completed_modules = progress_data.get("completed_modules", [])
-            except:
-                pass
+        completed_module_nums = _load_completed_module_numbers()
 
-        prereqs_met = all(f"{m:02d}" in completed_modules for m in milestone["required_modules"])
+        prereqs_met = all(m in completed_module_nums for m in milestone["required_modules"])
 
         # Display detailed info
         info_text = (
@@ -1329,7 +1431,7 @@ class MilestoneCommand(BaseCommand):
 
         for mod in milestone["required_modules"]:
             mod_str = f"{mod:02d}"
-            if mod_str in completed_modules:
+            if mod in completed_module_nums:
                 info_text += f"  [green]✓[/green] Module {mod_str}\n"
             else:
                 info_text += f"  [red]✗[/red] Module {mod_str}\n"
@@ -1345,7 +1447,7 @@ class MilestoneCommand(BaseCommand):
         if prereqs_met:
             info_text += f"\n[bold green]✅ Ready to run![/bold green]\n[cyan]tito milestone run {milestone_id}[/cyan]"
         else:
-            missing = [m for m in milestone["required_modules"] if m not in completed_modules]
+            missing = [m for m in milestone["required_modules"] if m not in completed_module_nums]
             info_text += f"\n[bold yellow]🔒 Locked[/bold yellow]\nComplete modules: {', '.join(f'{m:02d}' for m in missing)}"
 
         console.print(Panel(
@@ -1417,47 +1519,22 @@ class MilestoneCommand(BaseCommand):
             pass
 
     def _offer_progress_sync(self, milestone_id: str, milestone_name: str) -> None:
+        """Offer to sync progress after milestone completion.
+
+        Delegates to the shared :func:`auto_sync_after_completion` helper so the
+        CI / interactivity / logged-in rules match the module-completion path.
+        Crucially, this no longer skips the sync on a non-TTY shell (Git Bash /
+        IDE terminals) -- that silent skip left progress unsynced (#1849).
         """
-        Offer to sync progress after milestone completion.
-        Uses the centralized SubmissionHandler for all progress syncing.
-        """
-        from ..core import auth
-        from ..core.submission import SubmissionHandler
-        from rich.prompt import Confirm
+        from ..core.submission import auto_sync_after_completion
 
-        console = self.console
-
-        # Check if user is logged in
-        if auth.is_logged_in():
-            console.print()
-            # Only prompt in interactive terminal (skip in CI/pipes)
-            import sys
-            if sys.stdin.isatty() and sys.stdout.isatty():
-                try:
-                    should_sync = Confirm.ask(
-                        f"[cyan]Would you like to sync this achievement to your profile?[/cyan]",
-                        default=True
-                    )
-                except EOFError:
-                    # Non-interactive mode - skip sync prompt
-                    should_sync = False
-            else:
-                # Non-interactive mode (CI, pipes, etc.) - skip sync
-                should_sync = False
-
-            if should_sync:
-                try:
-                    # Use the centralized SubmissionHandler
-                    handler = SubmissionHandler(self.config, console)
-
-                    # Sync progress (includes modules and milestones)
-                    # The handler reads from both progress.json and .tito/milestones.json
-                    handler.sync_progress()
-
-                    console.print(f"[green]✅ Milestone {milestone_id} synced to your profile![/green]")
-                except Exception as e:
-                    console.print(f"[yellow]⚠️ Could not sync: {e}[/yellow]")
-                    console.print("[dim]Your progress is saved locally and will sync next time.[/dim]")
-        else:
-            console.print()
-            console.print("[dim]💡 Run 'tito login' to sync your achievements to the leaderboard![/dim]")
+        self.console.print()
+        try:
+            auto_sync_after_completion(
+                self.config,
+                self.console,
+                prompt="Sync this achievement to your profile?",
+            )
+        except Exception as e:
+            self.console.print(f"[yellow]⚠️ Could not sync: {e}[/yellow]")
+            self.console.print("[dim]Your progress is saved locally and will sync next time.[/dim]")

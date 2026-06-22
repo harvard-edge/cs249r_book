@@ -98,21 +98,21 @@ class TestMlsysimAPI:
         # Edge tier
         assert hw.Edge.JetsonOrinNX is not None
         # Tiny tier
-        assert hw.Tiny.ESP32 is not None
+        assert hw.Tiny.ESP32_S3 is not None
 
     @pytest.mark.engine
     def test_model_registry_accessible(self, mlsysim):
         """All models referenced in labs should exist in registry."""
         models = mlsysim.Models
-        assert models.ResNet50 is not None
-        assert models.GPT2 is not None
-        assert models.MobileNetV2 is not None
+        assert models.Vision.ResNet50 is not None
+        assert models.Language.GPT2 is not None
+        assert models.Vision.MobileNetV2 is not None
 
     @pytest.mark.engine
     def test_engine_solve_basic(self, mlsysim):
         """Engine.solve() works for a basic inference scenario."""
         result = mlsysim.Engine.solve(
-            model=mlsysim.Models.ResNet50,
+            model=mlsysim.Models.Vision.ResNet50,
             hardware=mlsysim.Hardware.Cloud.H100,
         )
         assert result.feasible is True
@@ -123,7 +123,7 @@ class TestMlsysimAPI:
     def test_engine_solve_tiny_oom(self, mlsysim):
         """Large model on tiny device should be infeasible."""
         result = mlsysim.Engine.solve(
-            model=mlsysim.Models.GPT2,
-            hardware=mlsysim.Hardware.Tiny.ESP32,
+            model=mlsysim.Models.Language.GPT2,
+            hardware=mlsysim.Hardware.Tiny.ESP32_S3,
         )
-        assert result.feasible is False, "GPT-2 should not fit on ESP32"
+        assert result.feasible is False, "GPT-2 should not fit on ESP32-S3"

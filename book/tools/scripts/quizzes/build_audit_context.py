@@ -47,9 +47,9 @@ OUTPUT_DIR = HERE / "_audit" / "contexts"
 
 
 def qmd_path_for(vol: str, chapter: str) -> Path:
-    """Return the chapter's main ``.qmd``. Matches the same logic used
-    in ``generate_quizzes.py`` for handling outliers like
-    ``optimizations/model_compression.qmd``."""
+    """Return the chapter's main ``.qmd``. Matches the same fallback
+    logic used in ``generate_quizzes.py`` in case the folder name and
+    qmd stem ever diverge."""
     chapter_dir = CONTENTS_DIR / vol / chapter
     direct = chapter_dir / f"{chapter}.qmd"
     if direct.is_file():

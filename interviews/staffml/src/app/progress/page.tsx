@@ -1,14 +1,15 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { motion } from "framer-motion";
-import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload, Target, AlertTriangle } from "lucide-react";
+import { BarChart3, Trash2, Terminal, Crosshair, Download, Upload, Target, AlertTriangle, ChevronDown } from "lucide-react";
 import clsx from "clsx";
 import Link from "next/link";
-import { getCompetencyAreas, getTracks, getQuestionsByFilter } from "@/lib/corpus";
-import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress, getLastExportAt } from "@/lib/progress";
+import { getCompetencyAreas, getTracks, getQuestionsByFilter, getTopics, getQuestions } from "@/lib/corpus";
+import { getAttempts, getGauntletResults, clearProgress, exportProgress, importProgress, getLastExportAt, getTopicProgressMap, type AreaProgress } from "@/lib/progress";
 import { useToast } from "@/components/Toast";
 import { track } from "@/lib/analytics";
+import AreaProgressSection from "@/components/progress/AreaProgressSection";
 
 /**
  * Format an ISO timestamp as a human-friendly relative string for the
@@ -37,9 +38,13 @@ export default function ProgressPage() {
   const [totalAttempted, setTotalAttempted] = useState(0);
   const [showClearConfirm, setShowClearConfirm] = useState(false);
   const [lastExport, setLastExport] = useState<string | null>(null);
+  const [areaProgress, setAreaProgress] = useState<AreaProgress[]>([]);
+  const [showHeatmap, setShowHeatmap] = useState(false);
 
   const tracks = getTracks().filter(t => t !== "global");
   const areas = getCompetencyAreas();
+  const totalTopics = getTopics().length;
+  const totalCorpus = getQuestions().length;
 
   useEffect(() => {
     setMounted(true);
@@ -69,6 +74,7 @@ export default function ProgressPage() {
     });
 
     setHeatData(data);
+    setAreaProgress(getTopicProgressMap());
   };
 
   const handleClear = () => {
@@ -147,12 +153,18 @@ export default function ProgressPage() {
           </div>
           <div className="flex items-center gap-4">
             <div className="text-right">
-              <div className="text-[10px] text-textTertiary">Gauntlets</div>
-              <div className="text-lg font-bold font-mono text-textPrimary">{gauntletCount}</div>
+              <div className="text-[10px] text-textTertiary">Topics</div>
+              <div className="text-lg font-bold font-mono text-textPrimary">
+                {areaProgress.reduce((s, a) => s + a.topics.filter(t => t.attempted > 0).length, 0)}/{totalTopics}
+              </div>
             </div>
             <div className="text-right">
               <div className="text-[10px] text-textTertiary">Questions</div>
-              <div className="text-lg font-bold font-mono text-textPrimary">{totalAttempted}</div>
+              <div className="text-lg font-bold font-mono text-textPrimary">{totalAttempted}/{totalCorpus.toLocaleString()}</div>
+            </div>
+            <div className="text-right">
+              <div className="text-[10px] text-textTertiary">Gauntlets</div>
+              <div className="text-lg font-bold font-mono text-textPrimary">{gauntletCount}</div>
             </div>
           </div>
         </div>
@@ -302,8 +314,31 @@ export default function ProgressPage() {
           </motion.div>
         ) : (
           <>
-            {/* Heat map grid */}
-            <motion.div
+            {/* Topic progress by area (NeetCode-style) */}
+            {areaProgress.length > 0 && (
+              <div className="space-y-2 mb-8">
+                <h2 className="text-sm font-bold text-textPrimary mb-3">Progress by Topic</h2>
+                {areaProgress
+                  .sort((a, b) => {
+                    const aPct = a.totalQuestions > 0 ? a.correct / a.totalQuestions : 0;
+                    const bPct = b.totalQuestions > 0 ? b.correct / b.totalQuestions : 0;
+                    return bPct - aPct || a.area.localeCompare(b.area);
+                  })
+                  .map(area => (
+                    <AreaProgressSection key={area.area} area={area} />
+                  ))}
+              </div>
+            )}
+
+            {/* Track × Competency heatmap (collapsible) */}
+            <button
+              onClick={() => setShowHeatmap(!showHeatmap)}
+              className="flex items-center gap-2 text-xs text-textTertiary hover:text-textSecondary transition-colors mb-3"
+            >
+              <ChevronDown className={clsx("w-3 h-3 transition-transform", showHeatmap && "rotate-180")} />
+              Track &times; Competency heatmap
+            </button>
+            {showHeatmap && <motion.div
               initial={{ opacity: 0 }}
               animate={{ opacity: 1 }}
               className="overflow-x-auto"
@@ -390,7 +425,7 @@ export default function ProgressPage() {
                   })}
                 </tbody>
               </table>
-            </motion.div>
+            </motion.div>}
 
             {/* Legend + actions */}
             <div className="flex items-center justify-between mt-8 pt-6 border-t border-border">

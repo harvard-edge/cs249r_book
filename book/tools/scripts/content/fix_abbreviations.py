@@ -87,7 +87,7 @@ NO_EXPAND = {"CUDA", "cuDNN", "GPU", "GPUs", "CPU", "CPUs", "RAM", "API",
 CHAPTER_DIRS = [
     "introduction", "ml_systems", "ml_workflow", "data_engineering",
     "nn_computation", "nn_architectures", "frameworks", "training",
-    "data_selection", "optimizations", "hw_acceleration", "benchmarking",
+    "data_selection", "model_compression", "hw_acceleration", "benchmarking",
     "model_serving", "ml_ops", "responsible_engr", "conclusion",
 ]
 

@@ -17,6 +17,7 @@ class Registry:
         self._loaded = False
 
     def _load_plugins(self):
+        """Dynamically discovers and loads entry points for third-party extensions."""
         if self._loaded:
             return
         

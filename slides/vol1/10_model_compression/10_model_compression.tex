@@ -74,6 +74,7 @@
 % =============================================================================
 \begin{frame}{Learning Objectives}
 \note{
+[1 min]
 % -- LINK: Prior chapters trained and optimized models; this chapter makes them deployable
 Students learned to train models (Ch8--9) and will soon see hardware (Ch11).
 This slide frames the gap: trained models are too big for production silicon.
@@ -81,7 +82,9 @@ This slide frames the gap: trained models are too big for production silicon.
 % -- NARRATE: Walk through objectives emphasizing the three-layer stack
 Read each objective aloud. Stress the progression: structural (what to compute),
 precision (how precisely), architectural (how efficiently). These three layers
-are the chapter's organizing framework.
+are the chapter's organizing framework. Note LO 6: hardware-aware design ---
+aligning model structure and quantization format to accelerator capabilities
+is what converts theoretical compression ratios into real speedups.
 
 % -- ENGAGE: Surface personal experience with deployment constraints
 Ask: ``Has anyone tried to run a large model on a phone or Raspberry Pi?
@@ -105,7 +108,7 @@ IF SHORT: Read objectives quickly, skip the audience question.
   \item Apply \textbf{pruning} (structured vs.\ unstructured) and quantify the accuracy-sparsity trade-off
   \item Implement \textbf{knowledge distillation} to transfer capabilities from teachers to students
   \item Distinguish \textbf{PTQ vs.\ QAT} and identify when each is appropriate
-  \item Analyze \textbf{operator fusion} as a zero-cost optimization
+  \item Analyze \textbf{hardware-aware design principles} to align model operations with target platform capabilities
   \item Design integrated compression pipelines under deployment constraints
 \end{enumerate}
 
@@ -113,10 +116,13 @@ IF SHORT: Read objectives quickly, skip the audience question.
 
 \begin{frame}{Visual Language}
 \note{
+[0.5 min]
 % -- NARRATE: Brief orientation to the color code
 Point to each card: blue = compute ops, green = data/memory, orange = routing,
 red = error/bottleneck. In this chapter, red highlights accuracy loss regions
-and blue highlights compute savings from compression.
+and blue highlights compute savings from compression. The color system
+connects to the chapter's semantic use of accuracy loss (red) vs.\ compute
+savings (blue) throughout the compression-accuracy trade-off diagrams.
 
 % -- FLEX: [OPTIONAL] Skip if students saw this in a previous lecture
 [OPTIONAL] If students already know the color system, say ``same legend as before'' and advance.
@@ -159,6 +165,7 @@ Throughout this course, colors carry meaning:
 
 \begin{frame}{Why Compress? The Math Does Not Work}
 \note{
+[2 min]
 % -- LINK: Learning objectives just promised deployability --- this slide shows why it is hard
 The objectives listed ``compression makes models deployable.'' Now show the
 arithmetic: 14 GB model, 8 GB phone. The numbers do not fit.
@@ -217,8 +224,87 @@ IF SHORT: Skip the question, just walk through the table.
 
 \end{frame}
 
+% --- War Story: AlexNet ---
+\begin{frame}{War Story: AlexNet's Two-GPU Split (2012)}
+\note{
+[2 min]
+% -- LINK: The deployment gap was arithmetic (14 GB, 8 GB); this grounds it in history
+The previous slide showed the memory math. This war story reveals that
+memory constraints shaped deep learning since its founding moment in 2012.
+Students often treat compression as a modern engineering afterthought;
+this corrects that framing.
+
+% -- NARRATE: Walk through Context, Failure, Consequence, Systems lesson
+\textbf{Context}: In 2012, Krizhevsky, Sutskever, and Hinton at the University of Toronto
+set out to train a 60-million-parameter convolutional network on ImageNet.
+\textbf{Failure}: A single NVIDIA GTX 580 carried only 3 GB of memory---not enough to hold
+the model, its activations, and gradients during training. The hardware wall
+blocked the architecture they wanted.
+\textbf{Consequence}: They split the network across two GTX 580s, placing half the
+feature maps on each GPU, communicating only in selected layers. AlexNet's
+two-tower structure was a memory budget forced into the architecture---not
+a modeling choice. That split network won ImageNet 2012 by more than
+10 percentage points and launched the deep-learning era.
+\textbf{Systems lesson}: Every model carries the fingerprints of the memory hierarchy
+it had to fit on. Compression is not a finishing step; it is the same battle
+the field has fought since AlexNet.
+
+% -- ENGAGE: Ask what they would have done
+Ask: ``If you were Krizhevsky in 2012 with 3 GB of GPU memory and a 60M-param
+model, what would your options be?'' Give 20 seconds. Expected: reduce model
+size, use less precision, distribute across GPUs, use CPU memory (too slow).
+
+% -- WARN: Students see AlexNet as a historical curiosity, not a systems lesson
+Common error: treating this as trivia. Correct framing: the same constraint---
+not enough memory for the model on the target hardware---is the exact problem
+every section of this chapter solves. The techniques changed; the tension did not.
+
+% -- FLEX: [CORE] This war story is the chapter's historical anchor
+[CORE] Do not skip---this establishes why compression is not optional polish.
+IF AHEAD: ``How does this compare to today's LLM training splits across 1000+ GPUs?''
+IF SHORT: Read Context and Systems lesson; skip the engagement question.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Context}: 2012. University of Toronto. Goal: train a 60M-parameter
+    convolutional network on ImageNet.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize \textbf{Failure}: GTX 580 = \textbf{3 GB} RAM. Model + activations + gradients
+    $\gg$ 3 GB. One GPU cannot hold the planned architecture.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Consequence}: Split across two GPUs. Half the feature maps per GPU.
+    The two-tower structure was a \emph{memory budget}, not a modeling choice.
+    Won ImageNet 2012 by $>$10 percentage points.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \vspace{0.5cm}
+    \mlsysinsight{Systems Lesson:}{Every model carries the fingerprints of the memory hierarchy it had to fit on.}
+
+    \vspace{0.2cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize Compression is not a finishing step added to a finished model.\\[0.1cm]
+    It is the \textbf{same battle the field has fought since AlexNet.}\\[0.1cm]
+    Training split $\to$ gradient checkpointing $\to$ pruning $\to$ quantization: all renegotiate the same silicon contract.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+\mlsyscite{Krizhevsky, Sutskever \& Hinton, NeurIPS 2012}
+
+\end{frame}
+
 \begin{frame}{The Physics of Quantization}
 \note{
+[2 min]
 % -- LINK: The deployment gap showed a size problem; now reveal the energy problem
 The previous slide showed models do not fit in RAM. This slide shows why
 even fitting is not enough --- moving data costs orders of magnitude more
@@ -291,6 +377,7 @@ IF SHORT: Skip the question, keep the table walkthrough.
 
 \begin{frame}{The Three-Layer Optimization Stack}
 \note{
+[2 min]
 % -- LINK: Energy hierarchy showed why compression matters; now show the full toolkit
 The energy slide proved data movement dominates. This slide introduces the
 three-layer stack that attacks the problem from three angles simultaneously.
@@ -328,6 +415,7 @@ IF SHORT: Show the diagram, state the 16x result, move on.
 
 \begin{frame}{The Compression-Accuracy Trade-off}
 \note{
+[2 min]
 % -- LINK: The stack showed three layers; now show where each sits on the risk curve
 The optimization stack introduced three layers. This diagram maps them onto
 a compression-vs-accuracy curve to show which are safe and which are dangerous.
@@ -364,6 +452,7 @@ IF SHORT: Just name the three regions and the knee, skip the INT4 discussion.
 % --- ACTIVE LEARNING 1: Predict ---
 \begin{frame}{Predict: Which Technique First?}
 \note{
+[2 min]
 % -- LINK: The three-region diagram just showed Region 1 is free; test if students internalized it
 Students just saw the compression-accuracy curve. This exercise tests whether
 they absorbed the ``free lunch first'' principle.
@@ -410,6 +499,7 @@ You need 30 FPS.\\[0.2cm]
 
 \begin{frame}{Pruning: Remove What Doesn't Matter}
 \note{
+[2 min]
 % -- LINK: The optimization stack's top layer is structural --- pruning is its primary tool
 The three-layer stack's top layer addresses ``what to compute.'' Pruning
 removes weights that carry minimal information, directly reducing model size.
@@ -471,6 +561,7 @@ IF SHORT: Skip the audience question, walk through the equation and numbers.
 
 \begin{frame}{Structured vs.\ Unstructured Pruning}
 \note{
+[2 min]
 % -- LINK: Pruning was introduced abstractly; now show it has two fundamentally different forms
 The previous slide warned that pruning does not auto-speed inference.
 This slide explains why: it depends on the pruning structure.
@@ -526,6 +617,7 @@ IF SHORT: Just cover the three columns, skip the engagement question.
 
 \begin{frame}{Iterative vs.\ One-Shot Pruning}
 \note{
+[2 min]
 % -- LINK: Structured vs unstructured was about where to prune; this is about how much at once
 The previous slide showed pruning types. This slide shows pruning schedules:
 gradual removal with recovery vs aggressive one-shot removal.
@@ -598,6 +690,7 @@ IF SHORT: Cover just the table numbers and the 0.4\% vs 5\% contrast.
 
 \begin{frame}{Knowledge Distillation: Learning from a Teacher}
 \note{
+[2 min]
 % -- LINK: Pruning removes weights from an existing model; distillation trains a new smaller one
 Pruning carved away parts of an existing network. Distillation takes a
 different approach: train a compact student from scratch using the teacher's
@@ -653,6 +746,7 @@ IF SHORT: Skip the analogy, keep the diagram walkthrough and DistilBERT numbers.
 
 \begin{frame}{Distillation vs.\ Pruning}
 \note{
+[2 min]
 % -- LINK: Students now know both pruning and distillation; compare them head-to-head
 The previous slides introduced pruning (carve existing model) and distillation
 (train a new smaller model). This table makes the trade-off explicit.
@@ -701,29 +795,37 @@ IF SHORT: Highlight just the Hardware row and the Conservation card.
 
 \begin{frame}{Case Study: DistilBERT in Production}
 \note{
+[2 min]
 % -- LINK: Distillation was abstract; this shows a real deployment story
 Students learned the distillation mechanism and the pruning-vs-distillation
 comparison. This slide grounds it with a real production deployment.
 
 % -- NARRATE: Walk through the DistilBERT numbers as a war story
 ``Hugging Face needed BERT for real-time NLP serving. BERT-Base: 110M params,
-440 MB, 6.5 ms per query. Too slow for mobile and too expensive for
-high-QPS servers.'' Point to the table: ``DistilBERT: 66M params, 260 MB,
-2.5 ms. 40\% fewer params, 60\% faster, retains 97\% of teacher accuracy
-on GLUE.'' Then: ``The key: distillation produced a \emph{dense} model
-that runs on any hardware without sparse kernel support.''
+440 MB. Too slow for mobile and too expensive for high-QPS servers.''
+Point to the table: ``DistilBERT: 66M params, 260 MB. 40\% fewer params,
+60\% faster, retains 97\% of teacher accuracy on GLUE.'' Then: ``The key:
+distillation produced a \emph{dense} model that runs on any hardware.''
 
 % -- ENGAGE: Would you deploy DistilBERT or pruned BERT?
 Ask: ``For a mobile keyboard prediction app, would you use DistilBERT or
 pruned BERT?'' Give 20 seconds. Expected: DistilBERT --- dense model runs
 on any mobile hardware; pruned BERT needs sparse kernels.
 
-% -- WARN: Students may think 97\% accuracy is always acceptable
-Common error: ``3\% loss is fine.'' Correct framing: for safety-critical
-tasks (medical, legal), 3\% can be catastrophic. Always validate on
-the specific downstream task, not the generic benchmark.
+% -- WARN: Latency figures are context-specific; the chapter footnote gives different numbers
+The latency values in this table (6.5 ms / 2.5 ms) are illustrative
+single-sample figures for one hardware context. The chapter footnote
+(fn-distilbert-deployment) cites the full deployment impact as 85 ms to
+34 ms, reflecting a different inference context (batch size, sequence length,
+hardware). Both are valid; the key lesson is the 2.6$\times$ ratio and the
+``dense output on any hardware'' property. Emphasize: latency figures are
+hardware- and batch-size-dependent---always profile on the target device.
 
-% -- FLEX: [OPTIONAL] Concrete war story deepens understanding
+% -- WARN: Students may think 97\% accuracy is always acceptable
+Separate warn: ``3\% loss is fine'' is dangerous for safety-critical tasks
+(medical, legal). Always validate on the specific downstream task.
+
+% -- FLEX: [OPTIONAL] Concrete case study deepens understanding
 [OPTIONAL] The numbers are memorable; skip if short on time.
 IF AHEAD: ``What about TinyBERT (4x smaller than DistilBERT)?''
 IF SHORT: State the three headline numbers and move on.
@@ -774,11 +876,18 @@ IF SHORT: State the three headline numbers and move on.
 
 \begin{frame}{Quick Check}
 \note{
+[1 min]
 % -- NARRATE: Pause and let students retrieve before moving to quantization
 Say: ``Close your notes. In what order should you apply compression techniques,
 and why?'' Wait 30 seconds in silence. Then cold-call one student.
 Expected: fusion first (free), then quantization (cheap), then pruning (tuning),
 then distillation (training budget).
+
+% -- ENGAGE: The retrieval task itself is the engagement. Expected answers:
+fusion (Region 1, free), INT8 quantization (cheap, 4x), structured pruning
+(requires fine-tuning), distillation last (full training run needed). A common
+wrong answer is distillation first because it ``sounds'' most thorough.
+Correct framing: always exhaust cheap options before expensive ones.
 
 % -- FLEX: [CORE] Distributed retrieval practice between major sections
 [CORE] This 30-second pause cements the pruning/distillation material
@@ -805,6 +914,7 @@ FP32 $\to$ INT8: \textbf{4$\times$} memory, \textbf{2--4$\times$} throughput\\[0
 
 \begin{frame}{How Quantization Works}
 \note{
+[2 min]
 % -- LINK: The focus frame just stated the 4x rule; now show the mechanism
 The dark-background slide stated FP32-to-INT8 gives 4x memory. This slide
 reveals how: snapping continuous values to a discrete grid.
@@ -848,6 +958,7 @@ Below 4 bits: the \textbf{Quantization Cliff} --- accuracy collapses catastrophi
 
 \begin{frame}{PTQ vs.\ QAT: When Precision Matters}
 \note{
+[2 min]
 % -- LINK: The number line showed quantization is lossy; now show two strategies to manage the loss
 Students understand quantization introduces error. This slide presents
 two strategies: accept the error (PTQ) or train through it (QAT).
@@ -911,6 +1022,7 @@ IF SHORT: Skip the STE detail, emphasize ``PTQ first, QAT if needed.''
 % --- ACTIVE LEARNING 2: Exercise ---
 \begin{frame}{Your Turn: The Quantization Speedup}
 \note{
+[3 min]
 % -- LINK: PTQ vs QAT showed precision choices; now calculate the concrete impact
 Students chose between PTQ and QAT. This exercise makes them calculate
 exactly how much speedup quantization delivers on a bandwidth-bound LLM.
@@ -980,6 +1092,7 @@ IF SHORT: Show the solution immediately, walk through the arithmetic.
 
 \begin{frame}{Neural Architecture Search (NAS)}
 \note{
+[2 min]
 % -- LINK: Pruning and distillation modify existing architectures; NAS designs new ones from scratch
 Pruning removes weights, distillation transfers knowledge. NAS takes a
 fundamentally different approach: automatically search for an architecture
@@ -1035,6 +1148,7 @@ IF SHORT: Show the diagram, state the EfficientNet numbers, move on.
 
 \begin{frame}{Operator Fusion: The Free Lunch}
 \note{
+[2 min]
 % -- LINK: NAS redesigned the architecture; fusion optimizes how it executes on hardware
 NAS addressed the model structure. Operator fusion addresses the bottom
 layer of the optimization stack: hardware implementation. This is Region 1
@@ -1073,12 +1187,129 @@ IF SHORT: Show the diagram, state ``10--30\% free,'' move on.
 
 \end{frame}
 
+\begin{frame}{Hardware-Aware Design: Aligning to the Silicon (1/2)}
+\note{
+[1 min]
+% -- LINK: Operator fusion showed one way to match hardware; this slide generalizes the principle
+Operator fusion eliminates redundant memory round-trips by keeping data in
+on-chip registers. That is one manifestation of a broader principle: model
+structure, quantization format, and operator choices must all align with
+what the target accelerator can natively execute. This slide names that
+principle.
+
+% -- NARRATE: Walk through the core principle and the first two alignment dimensions
+State the headline: ``Theoretical compression ratios do NOT equal measured speedups.
+The gap closes only when model operations align with silicon capabilities.''
+Then walk the two cards:
+1.\ \textbf{Pruning alignment}: Channel pruning and N:M sparsity (e.g., 2:4) are
+efficient because GPU Sparse Tensor Cores have dedicated hardware for 2:4
+patterns. Unstructured sparsity does not align --- no hardware skip mechanism.
+2.\ \textbf{Quantization alignment}: INT8 maps directly to accelerator arithmetic
+units (Tensor Cores, NPUs). Unsupported formats mean software emulation and
+no speedup despite a theoretical compression ratio.
+
+% -- FLEX: [CORE] First part of the hardware-aware design principle.
+[CORE] This slide closes two of the three alignment dimensions.
+IF SHORT: Cover only the headline and pruning alignment card; move to slide 2.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    Theoretical compression ratios $\neq$ measured speedups.\\
+    The gap closes when operations align with silicon.
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{computestroke}
+    {\scriptsize \textbf{Pruning alignment}\\
+    Channel pruning + 2:4 N:M sparsity $\to$ Sparse Tensor Cores.\\
+    Unstructured sparsity $\to$ no HW skip $\to$ no speedup.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Quantization alignment}\\
+    INT8 $\to$ native Tensor Core arithmetic.\\
+    Unsupported formats $\to$ software emulation $\to$ no gain.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \vspace{0.3cm}
+    \mlsysinsight{The Principle:}{Align pruning structure, quantization format, and operator choices with the capabilities of the target accelerator.}
+
+    \vspace{0.3cm}
+    \mlsysalert{Pitfall:}{A compression technique that looks efficient in FLOPs may deliver no speedup if it does not match what the silicon can execute natively.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{Hardware-Aware Design: Aligning to the Silicon (2/2)}
+\note{
+[1 min]
+% -- LINK: Previous slide covered pruning and quantization alignment; this completes operator alignment
+The previous slide covered the pruning and quantization dimensions of hardware
+alignment. This slide covers operator alignment and connects to Ch11.
+
+% -- NARRATE: Walk through operator alignment and the Ch11 forward pointer
+3.\ \textbf{Operator alignment}: Depthwise separable convolutions look efficient
+in FLOPs but are memory-bandwidth bound on many GPUs. Hardware-aware NAS
+(from the NAS section) measures actual latency rather than FLOP counts
+precisely because the two can diverge by 3--5$\times$.
+Then the forward pointer: ``Ch11 shows exactly how GPU Tensor Cores, systolic
+arrays, and Sparse Tensor Cores exploit these alignments.''
+
+% -- ENGAGE: Ask which compression technique is hardware-unaware
+Ask: ``From the techniques we covered, which one risks being hardware-unaware?''
+Give 20 seconds. Expected: unstructured pruning --- it gives memory savings
+but no latency gain without hardware-native sparse execution support.
+
+% -- WARN: Students think any compression ratio translates directly to a speedup
+Common error: ``INT8 gives 4$\times$ memory, so 4$\times$ speedup.'' Correct
+framing: the speedup materializes only if the operator runs on native INT8
+arithmetic units. Profile on the target device.
+
+% -- FLEX: [CORE] Completes the 6th learning objective (hardware-aware design)
+[CORE] This slide closes the LO contract and directly prepares Ch11.
+IF AHEAD: ``Which of the three alignment dimensions is easiest to overlook?''
+IF SHORT: State the operator alignment one-liner and the profile rule.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.52\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Operator alignment}\\
+    FLOPs can diverge 3--5$\times$ from measured latency.\\
+    Hardware-aware NAS measures actual device latency.\\
+    Depthwise separable convolutions: low FLOPs, memory-bound in practice.}
+    \end{mlsyscard}
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Profile on target hardware}\\
+    Theoretical ratios and measured latency diverge sharply.\\
+    Always measure end-to-end on the deployment device.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.45\textwidth}
+    \vspace{0.3cm}
+    {\scriptsize \textbf{Next chapter} (Ch11) shows exactly how GPU Tensor Cores, systolic arrays, and Sparse Tensor Cores exploit these alignment principles.}
+
+    \vspace{0.3cm}
+    \mlsysconcept{Summary:}{Three alignment dimensions: pruning structure, quantization format, operator choices. All must match target silicon.}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 % =============================================================================
 \section{Efficiency Measurement}
 % =============================================================================
 
 \begin{frame}{Pareto Efficiency for Compression}
 \note{
+[2 min]
 % -- LINK: Students know individual techniques; now formalize how to compare them
 Students learned pruning, distillation, and quantization as separate tools.
 This slide introduces Pareto efficiency as the formal framework for
@@ -1152,6 +1383,7 @@ IF SHORT: State the frontier concept and the dominated-point example.
 
 \begin{frame}{Your Turn: Pruning Arithmetic}
 \note{
+[3 min]
 % -- LINK: Pareto analysis showed how to compare; now calculate concrete pruning numbers
 Students just learned to evaluate compression configurations. This exercise
 forces them to calculate the concrete impact of pruning on parameters and FLOPs.
@@ -1228,6 +1460,7 @@ IF SHORT: Show solution immediately, walk through the quadratic argument.
 
 \begin{frame}{The Decision Framework}
 \note{
+[2 min]
 % -- LINK: Students now know all individual techniques; this slide shows how to combine them
 Each technique was introduced in isolation. This decision framework maps
 deployment constraints to the right combination and order of techniques.
@@ -1280,6 +1513,7 @@ IF SHORT: Just cover the recommended order card and BERT example.
 
 \begin{frame}{The 4$\times$ MobileNet Win}
 \note{
+[2 min]
 % -- LINK: The decision framework was abstract; this is a concrete deployment story
 The previous slide mapped constraints to techniques. This slide shows
 the framework applied: MobileNetV3 for video-call background blur.
@@ -1346,6 +1580,7 @@ IF SHORT: Cover just the before/after table and the ``Ships? Yes'' punchline.
 % --- ACTIVE LEARNING 3: Discussion ---
 \begin{frame}{Discussion: Design a Compression Pipeline}
 \note{
+[3 min]
 % -- LINK: The decision framework and MobileNet case were cloud/mobile; now push to TinyML
 Students designed pipelines for phones (8 GB). This exercise pushes to
 the extreme: 384 KB SRAM on an Arduino Nicla.
@@ -1401,6 +1636,7 @@ on an Arduino Nicla (\textbf{384 KB} SRAM, \textbf{100 mW}).\\[0.2cm]
 
 \begin{frame}{Fallacies}
 \note{
+[2 min]
 % -- LINK: Students just designed pipelines composing techniques; now show how composition fails
 The discussion exercise assumed techniques compose cleanly. These fallacies
 show where that assumption breaks down.
@@ -1440,6 +1676,7 @@ IF SHORT: Cover just the first fallacy (interaction), skip the other two.
 
 \begin{frame}{Pitfalls}
 \note{
+[2 min]
 % -- LINK: Fallacies showed conceptual errors; pitfalls show operational mistakes
 The fallacies were about wrong mental models. These pitfalls are about
 wrong engineering practices --- optimizing the wrong metric and skipping
@@ -1478,6 +1715,7 @@ IF SHORT: Cover just the first pitfall (FLOPs vs latency).
 
 \begin{frame}{Muddiest Point}
 \note{
+[1 min]
 % -- NARRATE: Collect muddiest points for next-lecture opening
 Say: ``Write down the single most confusing concept from today. One sentence.
 Hand it in on your way out or submit digitally.'' Use responses to open
@@ -1498,6 +1736,7 @@ IF SHORT: Reduce to 30 seconds, still collect responses.
 % --- RETRIEVAL PRACTICE ---
 \begin{frame}{What Were the Key Ideas?}
 \note{
+[2 min]
 % -- NARRATE: Retrieval practice before revealing takeaways
 Say: ``Close your notes. Write down the 4 most important concepts from today.
 90 seconds. No peeking.'' Walk around the room silently. Do NOT reveal the
@@ -1522,36 +1761,42 @@ IF SHORT: Reduce to 60 seconds but still require writing.
 
 \begin{frame}{Key Takeaways}
 \note{
+[2 min]
 % -- NARRATE: Reveal takeaways after retrieval, anchor with numbers
 Walk through each bullet. Emphasize the quantitative anchors students
 should remember: ``4x from INT8. 16x combined. For LLMs, weight-only INT4
 dominates. Order matters: fuse, quantize, prune, distill. And always ---
-profile on target hardware, not FLOPs.''
+profile on target hardware, not FLOPs.'' Point specifically to the 7th
+bullet: hardware-aware design is the bridge to Ch11 --- this is why the
+Sparse Tensor Cores and native INT8 units in the H100 were designed.
 
 % -- FLEX: [CORE] This is the definitive summary --- read every bullet
 [CORE] Students compare their retrieval practice answers against these bullets.
 IF SHORT: Read the bold terms only, skip the explanatory text.
 }
 
-\footnotesize
-\begin{itemize}\setlength\itemsep{0pt}
-  \item \textbf{Three-layer optimization stack}: Structural (what to compute), Precision (how precisely), Architectural (how efficiently). Combine all three.
-  \item \textbf{PTQ is a strong baseline}: INT8 post-training quantization delivers 4$\times$ compression with no retraining. Use QAT only when insufficient.
-  \item \textbf{For LLMs, weight-only quantization wins}: INT4 weights + FP16 activations dominate because generation is memory-bandwidth bound.
-  \item \textbf{Structured pruning for commodity hardware}: Unstructured sparsity needs sparse kernels. Structured pruning (channels, heads) delivers real latency gains.
-  \item \textbf{Order matters}: Fuse first (free), quantize second (cheap), prune third (requires tuning), distill last (requires training).
-  \item \textbf{Profile on target hardware}: FLOPs and parameter counts mispredict real-world performance. A 2$\times$ FLOP reduction may yield only 1.2$\times$ speedup.
+\scriptsize
+\begin{itemize}\setlength\itemsep{1pt}
+  \item \textbf{Three-layer stack}: Structural (what to compute), Precision (how precisely), Architectural (how efficiently). Combine all three for multiplicative gains.
+  \item \textbf{PTQ is the strong baseline}: INT8 post-training quantization delivers 4$\times$ compression with no retraining. Use QAT only when PTQ falls short.
+  \item \textbf{LLMs: weight-only INT4 wins}: INT4 weights + FP16 activations dominate because autoregressive generation is memory-bandwidth bound.
+  \item \textbf{Structured pruning for real speedup}: Unstructured sparsity needs sparse kernels. Structured pruning (channels, heads) produces a smaller dense network on any hardware.
+  \item \textbf{Order matters}: Fuse first (free), INT8 second (cheap), structured pruning third (tuning), distillation last (training budget).
+  \item \textbf{Profile on target hardware}: FLOPs mispredict real performance. A 2$\times$ FLOP reduction may yield only 1.2$\times$ speedup on a memory-bound device.
+  \item \textbf{Hardware-aware design}: Align pruning structure, quantization format, and operators with target accelerator capabilities. Theoretical ratios only materialize when silicon can execute them natively.
 \end{itemize}
 
 \end{frame}
 
 \begin{frame}{References}
 \note{
+[1 min]
 % -- NARRATE: Point students to the foundational papers
 Say: ``These are the seven papers that define the field. Han et al.\ for
 pruning, Hinton for distillation, Jacob for quantization, Frankle for
 Lottery Tickets, Zoph for NAS, Tan for EfficientNet, Sanh for DistilBERT.
-Start with Han and Hinton if you read only two.''
+Start with Han and Hinton if you read only two. The AlexNet war story
+is from Krizhevsky, Sutskever \& Hinton, NeurIPS 2012.''
 
 % -- FLEX: [OPTIONAL] Skip if running short --- students have the slide
 [OPTIONAL] This slide is a reference, not a teaching moment.
@@ -1571,6 +1816,7 @@ IF SHORT: Say ``references are on this slide'' and advance.
 
 \begin{frame}{Next Lecture: Hardware Acceleration}
 \note{
+[1 min]
 % -- LINK: This chapter compressed the model; the next chapter shows where it runs
 Model compression reduced what needs to be computed and how precisely.
 But compressed models still run on physical hardware --- and the hardware
@@ -1634,6 +1880,7 @@ IF SHORT: Just say ``next: hardware acceleration'' and dismiss.
 
 \begin{frame}{Backup: Quantization Cliff --- Why INT4 Is Dangerous}
 \note{
+[2 min]
 % -- NARRATE: Extended explanation of the quantization cliff for students who ask
 Use if students ask about going below INT8. Walk through the accuracy
 numbers: FP32 76.2\%, INT8 76.1\% (negligible), INT4 71--73\% (significant),
@@ -1650,6 +1897,7 @@ Use if students ask about going below INT8.\\small ResNet-50 accuracy by precisi
 
 \begin{frame}{Backup: PTQ vs QAT Decision Tree}
 \note{
+[2 min]
 % -- NARRATE: Decision tree for choosing PTQ vs QAT
 Start with PTQ (always). If accuracy drop < 1\%: ship PTQ. If 1--3\% drop:
 try QAT with the same training data. If > 3\% drop: the model architecture
@@ -1673,6 +1921,7 @@ $\bullet$ Drop $> 3\%$: Architecture may not tolerate quantization. Consider dis
 
 \begin{frame}{Backup: Pareto Frontier Construction}
 \note{
+[2 min]
 % -- NARRATE: How to build a Pareto frontier in practice
 1. Generate N compression configurations (vary pruning ratio, quantization
 level, distillation temperature). 2. Measure accuracy and latency for each
@@ -1697,6 +1946,7 @@ Use if students ask how to construct a Pareto frontier.\\[0.1cm]
 
 \begin{frame}{Backup: Compression Pipeline Order}
 \note{
+[1 min]
 % -- NARRATE: Quick-reference for the recommended compression pipeline order
 Use if students need a concise reference. Walk through: (1) Operator fusion ---
 free, 10--30\% latency reduction. (2) INT8 quantization --- 4x memory, under

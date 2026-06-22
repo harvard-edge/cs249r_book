@@ -32,7 +32,7 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "On a 1,024-GPU cluster, two separate synchronous training jobs each request 512 GPUs and the scheduler allocates 256 to each while both wait for more. An hour later both jobs have produced zero samples and roughly $2,000 in GPU-hours has been burned. Which mechanism best explains why partial allocation produced zero useful work rather than half-speed work?",
+            "question": "On a 1,024-GPU cluster, two separate synchronous training jobs each request 512 GPUs and the scheduler allocates 256 to each while both wait for more. An hour later both jobs have produced zero samples and roughly $1,000 in GPU-hours has been burned at $2 per GPU-hour. Which mechanism best explains why partial allocation produced zero useful work rather than half-speed work?",
             "choices": [
               "Hold-and-wait deadlock: each job locks some GPUs while waiting for more, and synchronous AllReduce cannot start until every worker in the gang is present",
               "Amdahl's law dominates because the jobs have too much serial work to parallelize effectively at 256 GPUs",
@@ -45,13 +45,13 @@
           {
             "question_type": "SHORT",
             "question": "An operator reports that their ML research cluster feels unusable at 80 percent utilization while their web-serving cluster feels healthy at the same utilization. Using the chapter's queueing argument, explain why this is a predictable consequence of workload statistics rather than a scheduler misconfiguration, and what utilization target the operator should set instead.",
-            "answer": "ML job durations are heavy-tailed: a few week-long training runs coexist with many short experiments, so the squared coefficient of variation is far larger than for web traffic. In the Pollaczek-Khinchine regime the chapter invokes, raising the coefficient of variation from 1 to 3 stretches expected waiting from roughly 4x to 20x the average job length, so the same 80 percent utilization produces order-of-magnitude worse tail queueing on the ML cluster. The practical fix is to target 60 to 70 percent utilization and accept the lower headline number in exchange for usable response times on interactive debugging jobs.",
+            "answer": "ML job durations are heavy-tailed: a few week-long training runs coexist with many short experiments, so the squared coefficient of variation is far larger than for web traffic. In the Pollaczek-Khinchine regime the chapter invokes, raising the coefficient of variation from 1 to 3 stretches expected waiting from roughly 4$\\times$ to 20$\\times$ the average job length, so the same 80 percent utilization produces order-of-magnitude worse tail queueing on the ML cluster. The practical fix is to target 60 to 70 percent utilization and accept the lower headline number in exchange for usable response times on interactive debugging jobs.",
             "learning_objective": "Explain how heavy-tailed ML job duration variance changes the utilization-vs-queueing trade-off and sets a lower sustainable utilization target"
           },
           {
             "question_type": "TF",
-            "question": "True or False: On a 10,000-GPU cluster, raising sustained productive utilization from 50 percent to 80 percent is economically equivalent to adding roughly 6,000 GPUs of productive capacity, even though the physical GPU count and power bill are unchanged.",
-            "answer": "True. The chapter frames utilization gains as recovered productive capacity: at fixed cluster size, moving from 50 to 80 percent useful work delivers (0.80 - 0.50) / 0.50 = 60 percent more productive GPU-hours, which on 10,000 GPUs is about 6,000 additional GPUs' worth of output per year. That is why the chapter calls scheduling one of the highest-leverage investments in ML infrastructure.",
+            "question": "True or False: On a 10,000-GPU cluster, raising sustained productive utilization from 50 percent to 80 percent adds 3,000 fully utilized GPU-equivalents of productive capacity, which is equivalent to buying roughly 6,000 raw GPUs if those GPUs would run at the old 50 percent utilization.",
+            "answer": "True. At fixed cluster size, moving from 50 to 80 percent useful work raises productive capacity from 5,000 to 8,000 fully utilized GPU-equivalents, a gain of 3,000. If newly purchased GPUs would also run at the old 50 percent utilization, producing those 3,000 additional GPU-equivalents would require about 6,000 raw GPUs. That is why the chapter calls scheduling one of the highest-leverage investments in ML infrastructure.",
             "learning_objective": "Interpret utilization deltas as quantitative changes in effective fleet capacity rather than dashboard cosmetics"
           },
           {
@@ -74,8 +74,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "RLHF training keeps an actor, critic, reference model, and reward model running simultaneously, each with different compute and memory profiles. Explain why classical homogeneous gang scheduling fails for this workload and what the scheduler must provide instead.",
-            "answer": "Classical gang scheduling assumes a single pool of identical workers that all wait on each other at the same AllReduce, which works when every rank runs the same forward and backward pass. RLHF breaks this assumption because the four roles have different bottlenecks: the actor and reference models are inference-dominated and memory-bound, while the critic and reward-model update paths are backprop-dominated and compute-bound. The scheduler must therefore do heterogeneous gang scheduling: allocate a balanced constellation of node types atomically, keep the roles connected with enough bandwidth to stream tokens and rewards between them, and treat the whole constellation as a single gang whose under-provisioned role stalls the entire pipeline.",
+            "question": "Preference-training pipelines often keep policy trainers, evaluators, and inference-style workers supplying reference behavior running simultaneously within one job. Explain why classical homogeneous gang scheduling fails for this workload and what the scheduler must provide instead.",
+            "answer": "Classical gang scheduling assumes a single pool of identical workers executing the exact same compute graph, which works when every rank runs the same forward and backward pass. Preference training breaks this assumption because the roles have different bottlenecks: inference-style workers generating rollouts are memory-bound and need high-HBM nodes, while policy trainers are compute-bound and need high-compute nodes for backpropagation. The scheduler must therefore do heterogeneous gang scheduling: allocate a balanced constellation of diverse node types atomically, keep the roles connected with enough bandwidth to stream data continuously between them, and treat the whole constellation as a single gang whose under-provisioned role stalls the entire pipeline.",
             "learning_objective": "Analyze why heterogeneous gang scheduling is required for composite ML workloads whose roles have different resource profiles"
           }
         ]
@@ -197,14 +197,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "The section compares AllReduce latency for 64 GPUs under four placement strategies and reports 120 ms for random placement versus 25 ms for a topology-optimal placement. What is the main conclusion the reader should draw from this 4.8x gap?",
+            "question": "The section compares AllReduce latency for 64 GPUs under four placement strategies and reports 120 ms for random placement versus 25 ms for a topology-optimal placement. What is the main conclusion the reader should draw from this 4.8$\\times$ gap?",
             "choices": [
               "AllReduce performance is largely insensitive to placement once the GPU count is fixed, so any difference must be measurement noise",
               "Rail optimization helps only serving workloads, not training",
               "Placement alone, without touching model code or hyperparameters, can produce a large collective-communication speedup because it changes the bandwidth and hop count the ring walks across",
               "The speedup comes entirely from raising the effective batch size until communication disappears from the critical path"
             ],
-            "answer": "The correct answer is C. The 120-to-25 ms drop is a direct consequence of placing the ring so it walks shorter, higher-bandwidth links: hop count falls, tail-latency variance falls, and the slowest edge of the ring becomes much faster. The placement-insensitive framing contradicts the experiment outright, the rail-optimization comment misattributes the section's scope, and batch size manipulates the ratio of compute to communication but does not explain why the same collective ran 4.8x faster on the same hardware.",
+            "answer": "The correct answer is C. The 120-to-25 ms drop is a direct consequence of placing the ring so it walks shorter, higher-bandwidth links: hop count falls, tail-latency variance falls, and the slowest edge of the ring becomes much faster. The placement-insensitive framing contradicts the experiment outright, the rail-optimization comment misattributes the section's scope, and batch size manipulates the ratio of compute to communication but does not explain why the same collective ran 4.8$\\times$ faster on the same hardware.",
             "learning_objective": "Quantify the impact of topology-aware placement on collective-communication performance"
           },
           {
@@ -236,7 +236,7 @@
     },
     {
       "section_id": "#sec-fleet-orchestration-elastic-training",
-      "section_title": "Elastic Training",
+      "section_title": "Elastic Scheduling",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
@@ -267,8 +267,8 @@
           },
           {
             "question_type": "SHORT",
-            "question": "Explain the scheduler-framework contract required for safe elastic scale-up and scale-down, naming the two concrete responsibilities on each side.",
-            "answer": "The scheduler must (a) signal capacity changes through a defined protocol with enough notice for graceful adaptation, and (b) fence the outgoing workers so they stop issuing collectives before their slots are reassigned. The framework must (a) rebuild its world-size, communication groups, and data-shard assignments after the membership change, and (b) resynchronize parameter state so every remaining worker enters the next step from the same checkpoint. If either side skips its half of the contract, samples get duplicated or dropped, or the first AllReduce after rescale completes with inconsistent gradients.",
+            "question": "Explain the scheduler-framework contract required for safe elastic scale-up and scale-down, naming the responsibilities on each side.",
+            "answer": "The scheduler guarantees that resource changes are communicated through defined signals with sufficient advance notice for graceful adaptation, rather than abruptly terminating processes. The framework guarantees it can handle these changes without corrupting model state by reconstructing communication groups, adjusting the effective batch size, and recalibrating the learning rate. If either side violates this contract, the job either crashes from unexpected preemption or resumes with an invalid distributed state.",
             "learning_objective": "Explain the coordination contract between orchestration and training frameworks in elastic training"
           },
           {
@@ -285,15 +285,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A top-of-rack switch fails, dropping dozens of workers from an elastic job simultaneously. Which failure mode does the chapter flag as a major risk in the subsequent rendezvous?",
+            "question": "An elastic training job is scaled down from 256 to 64 GPUs. Which trade-off must the framework navigate regarding batch size and memory limits?",
             "choices": [
-              "A thundering herd of surviving workers plus fresh replacements simultaneously re-registering, overwhelming the rendezvous service and triggering retry storms that further delay group formation",
-              "Stale membership views that let two rendezvous rounds both believe they are the authoritative world, producing duplicate data-shard assignments",
-              "Partial collective completion where the failed workers' contributions were already AllReduced and must be subtracted from the surviving gradients",
-              "Automatic deletion of prior checkpoints because the rescaling protocol rewrites checkpoint metadata on membership change"
+              "Holding the global batch size constant preserves convergence mathematics but risks out-of-memory errors because each remaining GPU must process more samples per step.",
+              "Scaling the global batch size down proportionally guarantees both memory safety and identical convergence behavior without learning rate adjustments.",
+              "Using an adaptive learning rate allows the global batch size to remain constant, automatically bypassing per-GPU memory limits.",
+              "Holding the per-GPU batch size constant preserves memory limits and automatically maintains the original convergence trajectory."
             ],
-            "answer": "The correct answer is A. When a correlated fault evicts many workers, the survivors and their replacements all hit the rendezvous backend within a short window; that surge can exceed the service's throughput, causing timeouts and retries that cascade. The stale-view framing describes a classic consensus bug but not the chapter's named risk; partial-collective subtraction is not how AllReduce works (a failed rank aborts the collective, it is not algebraically removed); and checkpoint deletion is not part of the rescale protocol.",
-            "learning_objective": "Identify the thundering-herd rendezvous failure mode that arises during elastic recovery from correlated faults"
+            "answer": "The correct answer is A. To keep the global batch size constant across fewer workers, each remaining GPU must hold a larger per-worker batch of activations, which can easily violate per-GPU memory limits. Keeping the per-GPU batch size constant avoids memory limits but shrinks the global batch size, which introduces convergence risk unless the learning rate is adaptively recalibrated. The adaptive-learning-rate option conflates learning-rate scaling with memory footprint reduction.",
+            "learning_objective": "Analyze the trade-off between constant global batch size and adaptive learning rate when scaling an elastic job down."
           },
           {
             "question_type": "ORDER",
@@ -577,14 +577,14 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A cluster over-commits resources by 1.4x. Under what workload condition is this most likely to be safe and beneficial?",
+            "question": "A cluster over-commits resources by 1.4$\\times$. Under what workload condition is this most likely to be safe and beneficial?",
             "choices": [
               "When most jobs sustain near-100 percent real GPU utilization continuously",
               "When every team requests exactly the same GPU count",
               "When actual per-job utilization is bursty and peaks across jobs are not strongly synchronized, so statistical multiplexing smooths aggregate demand below the committed total",
               "When the cluster has no priority classes, so all pressure is treated uniformly"
             ],
-            "answer": "The correct answer is C. Over-subscription is a bet that requested capacity overstates actual concurrent use, which pays off when peaks are uncorrelated. If every job runs compute-saturated all the time, 1.4x over-commitment produces direct contention instead of statistical slack. Identical request sizes do not imply uncorrelated peaks, and flattening priority classes removes the tool the scheduler needs to resolve the contention when the bet goes wrong.",
+            "answer": "The correct answer is C. Over-subscription is a bet that requested capacity overstates actual concurrent use, which pays off when peaks are uncorrelated. If every job runs compute-saturated all the time, 1.4$\\times$ over-commitment produces direct contention instead of statistical slack. Identical request sizes do not imply uncorrelated peaks, and flattening priority classes removes the tool the scheduler needs to resolve the contention when the bet goes wrong.",
             "learning_objective": "Evaluate when over-subscription can safely increase effective cluster utilization"
           },
           {

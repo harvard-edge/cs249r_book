@@ -28,7 +28,7 @@ CHAPTERS=(
   "book/quarto/contents/vol1/nn_computation/nn_computation.qmd"
   "book/quarto/contents/vol1/training/training.qmd"
   "book/quarto/contents/vol1/hw_acceleration/hw_acceleration.qmd"
-  "book/quarto/contents/vol1/optimizations/model_compression.qmd"
+  "book/quarto/contents/vol1/model_compression/model_compression.qmd"
   "book/quarto/contents/vol1/frameworks/frameworks.qmd"
   "book/quarto/contents/vol1/benchmarking/benchmarking.qmd"
   "book/quarto/contents/vol1/ml_ops/ml_ops.qmd"

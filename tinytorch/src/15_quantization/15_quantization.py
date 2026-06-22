@@ -487,13 +487,22 @@ def quantize_int8(tensor: Tensor) -> Tuple[Tensor, float, int]:
     max_val = float(np.max(data))
 
     # Step 2: Handle edge case (constant tensor).
-    # All elements have the same value, so there is no range to map.
-    # We still need dequantize(quantize(c)) ≈ c, so we encode every element
-    # as q=0 and set zero_point so that (0 - zero_point) * scale = c.
-    # With scale=1.0 that means zero_point = -round(c), clamped to INT8 range.
+    # All elements have the same value c, so there is no range to map. We encode
+    # every element as q=0 and choose zero_point/scale so dequantization recovers
+    # the constant via (0 - zero_point) * scale = c.
     if abs(max_val - min_val) < EPSILON:
-        scale = 1.0
-        zero_point = int(np.clip(np.round(-min_val), INT8_MIN_VALUE, INT8_MAX_VALUE))
+        c = min_val
+        if abs(c) <= INT8_MAX_VALUE:
+            # |c| fits the INT8 range: scale=1.0 and zero_point = -round(c).
+            scale = 1.0
+            zero_point = int(np.round(-c))
+        else:
+            # |c| exceeds the INT8 range. Keeping scale=1.0 would force
+            # zero_point = -c, which np.clip would saturate to +-128 and
+            # silently corrupt the value. Use zero_point = +-1 and scale = |c|
+            # instead, so (0 - zero_point) * scale = c holds without clamping.
+            zero_point = -1 if c > 0 else 1
+            scale = abs(c)
         quantized_data = np.zeros_like(data, dtype=np.int8)
         return Tensor(quantized_data), scale, zero_point
 
@@ -566,6 +575,17 @@ def test_unit_quantize_int8():
     restored_neg = (q_neg.data.astype(np.float32) - zp_neg) * scale_neg
     assert np.allclose(restored_neg, -3.0, atol=0.01), (
         f"Negative constant tensor dequantized to {restored_neg} instead of -3.0."
+    )
+
+    # Large constant outside the INT8 range. With scale=1.0 the zero_point would
+    # be clamped to the INT8 range and silently corrupt the value, so the
+    # constant must still be recovered exactly via the |c| > 127 branch.
+    large_tensor = Tensor([[500.0, 500.0]])
+    q_large, scale_large, zp_large = quantize_int8(large_tensor)
+    restored_large = (q_large.data.astype(np.float32) - zp_large) * scale_large
+    assert np.allclose(restored_large, 500.0), (
+        f"Large constant tensor dequantized to {restored_large} instead of 500.0. "
+        "zero_point must not be clamped for |c| > 127."
     )
 
     print("INT8 quantization works correctly!")
@@ -2215,7 +2235,7 @@ def test_module():
     print("🎉 ALL TESTS PASSED! Module ready for export.")
     print("Run: tito module complete 15")
 
-# %% [markdown]
+# %% [markdown] nbgrader={"grade": false, "grade_id": "quantization-reflection", "solution": true}
 """
 ## 🤔 ML Systems Reflection Questions
 

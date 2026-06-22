@@ -3,210 +3,485 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # ZONE A: OPENING
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
 
-# ─── CELL 0: SETUP ────────────────────────────────────────────────────────
 @app.cell
 async def _():
     import marimo as mo
     import sys
-    import math
     from pathlib import Path
-    import numpy as np
 
-    # WASM bootstrap: install mlsysim from hosted wheel when running in browser
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install(
-            "../../wheels/mlsysim-0.1.1-py3-none-any.whl", keep_going=False
-        )
-    elif "mlsysim" not in sys.modules:
-        _root = Path(__file__).resolve().parents[2]
-        if str(_root) not in sys.path:
-            sys.path.insert(0, str(_root))
+        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
+    else:
+        _labs_dir = Path(__file__).resolve().parents[1]
+        if str(_labs_dir) not in sys.path:
+            sys.path.insert(0, str(_labs_dir))
+        from bootstrap import native_bootstrap
+        native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    import mlsysim
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import DecisionLog
-    import mlsysim
-    from mlsysim import Engine, Models, Hardware
-
-    # ── Hardware constants from registry ──────────────────────────────────
-    H100 = Hardware.Cloud.H100
-    H100_TFLOPS_FP16 = H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS      = H100.memory.bandwidth.m_as("GB/s")
-    H100_RAM_GB      = H100.memory.capacity.m_as("GB")
-    H100_TDP_W       = H100.tdp.m_as("W")
-
-    A100 = Hardware.Cloud.A100
-    A100_TFLOPS_FP16 = A100.compute.peak_flops.m_as("TFLOPs/s")
-    A100_BW_GBS      = A100.memory.bandwidth.m_as("GB/s")
-    A100_RAM_GB      = A100.memory.capacity.m_as("GB")
-
-    JETSON = Hardware.Edge.JetsonOrinNX
-    JETSON_TFLOPS = JETSON.compute.peak_flops.m_as("TFLOPs/s")
-    JETSON_BW_GBS = JETSON.memory.bandwidth.m_as("GB/s")
-    JETSON_RAM_GB = JETSON.memory.capacity.m_as("GB")
-    JETSON_TDP_W  = JETSON.tdp.m_as("W")
-
-    IPHONE = Hardware.Mobile.iPhone15Pro
-    IPHONE_TFLOPS = IPHONE.compute.peak_flops.m_as("TFLOPs/s")
-    IPHONE_BW_GBS = IPHONE.memory.bandwidth.m_as("GB/s")
-    IPHONE_RAM_GB = IPHONE.memory.capacity.m_as("GB")
-    IPHONE_TDP_W  = IPHONE.tdp.m_as("W")
-
-    ESP32 = Hardware.Tiny.ESP32_S3
-    ESP32_TFLOPS  = ESP32.compute.peak_flops.m_as("TFLOPs/s")
-    ESP32_BW_GBS  = ESP32.memory.bandwidth.m_as("GB/s")
-    ESP32_RAM_KB  = ESP32.memory.sram_capacity.m_as("KiB")
-    ESP32_RAM_GB  = ESP32_RAM_KB / (1024 * 1024)
-    ESP32_TDP_W   = ESP32.tdp.m_as("W")
-
-    HIMAX = Hardware.Tiny.HimaxWE1
-    HIMAX_TFLOPS  = HIMAX.compute.peak_flops.m_as("TFLOPs/s")
-    HIMAX_BW_GBS  = HIMAX.memory.bandwidth.m_as("GB/s")
-    HIMAX_RAM_GB  = HIMAX.memory.capacity.m_as("GB")
-    HIMAX_TDP_W   = HIMAX.tdp.m_as("W")
-
-    # ── Model constants ────────────────────────────────────────────────────
-    RESNET50_PARAMS  = Models.ResNet50.parameters.m_as("count")
-    RESNET50_FLOPS   = Models.ResNet50.inference_flops.m_as("flop")
-    RESNET50_SIZE_MB = RESNET50_PARAMS * 2 / (1024 * 1024)  # FP16
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        action_box,
+        build_lab_report,
+        diagnose_triad,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        intervention_frontier,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_arc_context,
+        track_selector,
+        triad_track_profile,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, LAB_CSS, apply_plotly_theme, DecisionLog,
-        go, mo, np, math,
-        Engine, Models, Hardware,
-        H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
-        A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
-        JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
-        IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-        ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
-        HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
-        RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
+        ACADEMIC_LAB_CSS,
+        action_box,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        build_lab_report,
+        diagnose_triad,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        intervention_frontier,
         ledger,
+        mlsysim,
+        mo,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_arc_context,
+        track_selector,
+        triad_track_profile,
     )
 
 
-# ─── CELL 1: HEADER ───────────────────────────────────────────────────────
+@app.cell
+def _(get_lab_metadata):
+    v1_01_metadata = get_lab_metadata("vol1/lab_01_ml_intro.py")
+    return (v1_01_metadata,)
+
+
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v1_01_track_picker = track_selector(default=_default_track)
+    v1_01_track_picker
+    return (v1_01_track_picker,)
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    triad_track_profile,
+    v1_01_track_picker,
+):
+    v1_01_track_id = v1_01_track_picker.value
+    v1_01_profile = get_track_profile(v1_01_track_id)
+    v1_01_variant = get_lab_track_variant("v1_01_ai_triad", v1_01_profile.track_id)
+    v1_01_hardware = resolve_mlsysim_ref(v1_01_variant.hardware_ref)
+    v1_01_model = resolve_mlsysim_ref(v1_01_variant.model_ref)
+    v1_01_triad = triad_track_profile(
+        v1_01_profile,
+        v1_01_variant,
+        v1_01_hardware,
+        v1_01_model,
+    )
+    return (
+        v1_01_hardware,
+        v1_01_model,
+        v1_01_profile,
+        v1_01_track_id,
+        v1_01_triad,
+        v1_01_variant,
+    )
+
+
+@app.cell
+def _():
+    def v1_01_track_lens(track_id):
+        lenses = {
+            "iphone": {
+                "silent_metric": "privacy-safe UX quality",
+                "quality_initial_pct": 94.0,
+                "quality_floor_pct": 88.0,
+                "degradation_lambda": 12.0,
+                "drift_driver": "lighting, accents, accessibility use, and privacy-limited cohorts",
+                "silent_consequence": "crash logs stay clean while users see heat, battery drain, and uneven quality",
+                "correct_response": "privacy-safe cohort audit",
+                "response_options": (
+                    "privacy-safe cohort audit",
+                    "code rollback",
+                    "buy larger cloud GPUs",
+                    "ignore until crash logs fire",
+                ),
+                "pressure_label": "privacy-limited cohort drift",
+                "operating_pressure_label": "interactive request pressure",
+                "train_amount_label": "privacy-safe training cohort review",
+                "train_unit": "k device-days",
+                "train_base": 28.0,
+                "train_limit": 55.0,
+                "infer_amount_label": "p95 UI latency",
+                "infer_unit": "ms/use",
+                "infer_base": 62.0,
+                "infer_limit": 100.0,
+                "guardrail_amount_label": "energy per sustained use",
+                "guardrail_unit": "mJ",
+                "guardrail_base": 140.0,
+                "guardrail_limit": 220.0,
+                "deployment_failure": "thermal or visible UX responsiveness miss",
+                "evidence_packets": (
+                    "10-minute sustained run with p95 UI latency and battery trace",
+                    "offline validation accuracy only",
+                    "training loss curve only",
+                ),
+                "correct_evidence": "10-minute sustained run with p95 UI latency and battery trace",
+                "risk_options": (
+                    "privacy-safe cohorts remain under-sampled after the first fix",
+                    "thermal soak passes only on a cold device",
+                    "unsupported operators silently fall back to CPU",
+                ),
+            },
+            "oura_ring": {
+                "silent_metric": "always-on sensing quality",
+                "quality_initial_pct": 92.0,
+                "quality_floor_pct": 86.0,
+                "degradation_lambda": 10.5,
+                "drift_driver": "sensor contact, skin temperature, activity mix, and delayed labels",
+                "silent_consequence": "firmware keeps running while sleep and recovery estimates become less reliable",
+                "correct_response": "sensor-contact cohort audit",
+                "response_options": (
+                    "sensor-contact cohort audit",
+                    "increase model size first",
+                    "raise sensing cadence without budget check",
+                    "ignore until OTA failure",
+                ),
+                "pressure_label": "sensor-contact drift",
+                "operating_pressure_label": "sensing cadence pressure",
+                "train_amount_label": "labeled biosignal coverage",
+                "train_unit": "k nights",
+                "train_base": 18.0,
+                "train_limit": 38.0,
+                "infer_amount_label": "wake time per sensor window",
+                "infer_unit": "ms/window",
+                "infer_base": 38.0,
+                "infer_limit": 50.0,
+                "guardrail_amount_label": "duty cycle",
+                "guardrail_unit": "%",
+                "guardrail_base": 2.4,
+                "guardrail_limit": 4.0,
+                "deployment_failure": "SRAM/flash, cadence, or duty-cycle violation",
+                "evidence_packets": (
+                    "24-hour duty-cycle replay with SRAM/flash fit",
+                    "offline validation accuracy only",
+                    "training loss curve only",
+                ),
+                "correct_evidence": "24-hour duty-cycle replay with SRAM/flash fit",
+                "risk_options": (
+                    "sensor-contact cohorts remain thin",
+                    "OTA payload exceeds the safe flash image budget",
+                    "battery regression appears after cadence changes",
+                ),
+            },
+            "robotaxi": {
+                "silent_metric": "rare-hazard recall",
+                "quality_initial_pct": 96.0,
+                "quality_floor_pct": 94.0,
+                "degradation_lambda": 8.0,
+                "drift_driver": "weather, construction, emergency vehicles, and sensor burst patterns",
+                "silent_consequence": "average accuracy stays strong while rare hazards lose safety margin",
+                "correct_response": "rare-event replay",
+                "response_options": (
+                    "rare-event replay",
+                    "optimize average accuracy only",
+                    "raise fleet speed cap",
+                    "ignore until a dashboard crash",
+                ),
+                "pressure_label": "rare-hazard distribution drift",
+                "operating_pressure_label": "sensor burst pressure",
+                "train_amount_label": "rare-event replay coverage",
+                "train_unit": "k clips",
+                "train_base": 32.0,
+                "train_limit": 70.0,
+                "infer_amount_label": "p99 perception latency",
+                "infer_unit": "ms/frame",
+                "infer_base": 7.2,
+                "infer_limit": 10.0,
+                "guardrail_amount_label": "safety margin consumed",
+                "guardrail_unit": "%",
+                "guardrail_base": 42.0,
+                "guardrail_limit": 70.0,
+                "deployment_failure": "safety margin or p99 latency miss",
+                "evidence_packets": (
+                    "rare-event replay with p99/p999 latency and fallback drill",
+                    "offline validation accuracy only",
+                    "training loss curve only",
+                ),
+                "correct_evidence": "rare-event replay with p99/p999 latency and fallback drill",
+                "risk_options": (
+                    "rare-hazard recall remains below the safety case",
+                    "p999 latency fails during sensor bursts",
+                    "fallback behavior is untested for new construction scenes",
+                ),
+            },
+            "cloud_fleet": {
+                "silent_metric": "served quality at SLA",
+                "quality_initial_pct": 91.0,
+                "quality_floor_pct": 87.0,
+                "degradation_lambda": 9.5,
+                "drift_driver": "traffic mix, customer cohorts, prompt/query patterns, and label freshness",
+                "silent_consequence": "fleet health stays green while cost/request and quality drift out of policy",
+                "correct_response": "quality and cost/request canary",
+                "response_options": (
+                    "quality and cost/request canary",
+                    "add capacity before diagnosis",
+                    "optimize validation accuracy only",
+                    "ignore until instances crash",
+                ),
+                "pressure_label": "traffic and cohort drift",
+                "operating_pressure_label": "QPS/utilization pressure",
+                "train_amount_label": "fresh labeled traffic coverage",
+                "train_unit": "M examples",
+                "train_base": 42.0,
+                "train_limit": 95.0,
+                "infer_amount_label": "p99 request latency",
+                "infer_unit": "ms/request",
+                "infer_base": 180.0,
+                "infer_limit": 250.0,
+                "guardrail_amount_label": "cost per request",
+                "guardrail_unit": "milli-$",
+                "guardrail_base": 1.2,
+                "guardrail_limit": 2.0,
+                "deployment_failure": "SLA breach or negative unit economics",
+                "evidence_packets": (
+                    "load/SLA canary with cost/request and utilization",
+                    "offline validation accuracy only",
+                    "training loss curve only",
+                ),
+                "correct_evidence": "load/SLA canary with cost/request and utilization",
+                "risk_options": (
+                    "cost/request rises after traffic mix changes",
+                    "utilization looks good while p99 SLA misses",
+                    "carbon budget is exceeded by the chosen capacity plan",
+                ),
+            },
+        }
+        return lenses.get(track_id, lenses["iphone"])
+
+    def v1_01_silent_degradation(lens, drift_pressure_pct, months_in_production, monitoring_cadence):
+        cadence_weeks = {
+            "weekly": 1.0,
+            "monthly": 4.0,
+            "quarterly": 13.0,
+        }.get(monitoring_cadence, 4.0)
+        drift = max(0.0, min(100.0, float(drift_pressure_pct))) / 100.0
+        months = max(0.0, min(12.0, float(months_in_production)))
+        cadence_penalty = max(0.0, (cadence_weeks - 1.0) * 0.08)
+        loss = lens["degradation_lambda"] * drift * (months / 12.0) + cadence_penalty
+        quality = max(0.0, lens["quality_initial_pct"] - loss)
+        floor = lens["quality_floor_pct"]
+        timeline = []
+        for month in range(0, 13):
+            month_loss = lens["degradation_lambda"] * drift * (month / 12.0) + cadence_penalty
+            timeline.append({
+                "month": month,
+                "quality_pct": max(0.0, lens["quality_initial_pct"] - month_loss),
+                "floor_pct": floor,
+                "code_health_pct": 100.0,
+            })
+        return {
+            "quality_pct": quality,
+            "floor_pct": floor,
+            "loss_pct": loss,
+            "feasible": quality >= floor,
+            "months": months,
+            "drift_pct": drift * 100.0,
+            "cadence_weeks": cadence_weeks,
+            "timeline": tuple(timeline),
+        }
+
+    def v1_01_amount_system(lens, model_scale_pct, operating_pressure_pct):
+        scale = max(50.0, min(150.0, float(model_scale_pct))) / 100.0
+        pressure = max(0.0, min(100.0, float(operating_pressure_pct))) / 100.0
+        training_amount = lens["train_base"] * scale * (0.85 + pressure * 0.35)
+        inference_amount = lens["infer_base"] * scale * (0.70 + pressure * 0.60)
+        guardrail_amount = lens["guardrail_base"] * scale * (0.75 + pressure * 0.70)
+        training_pass = training_amount <= lens["train_limit"]
+        inference_pass = inference_amount <= lens["infer_limit"]
+        guardrail_pass = guardrail_amount <= lens["guardrail_limit"]
+        return {
+            "training_amount": training_amount,
+            "training_limit": lens["train_limit"],
+            "training_pass": training_pass,
+            "inference_amount": inference_amount,
+            "inference_limit": lens["infer_limit"],
+            "inference_pass": inference_pass,
+            "guardrail_amount": guardrail_amount,
+            "guardrail_limit": lens["guardrail_limit"],
+            "guardrail_pass": guardrail_pass,
+            "deployment_ready": training_pass and inference_pass and guardrail_pass,
+        }
+
+    def v1_01_comparison_track_id(track_id):
+        return {
+            "iphone": "oura_ring",
+            "oura_ring": "cloud_fleet",
+            "robotaxi": "cloud_fleet",
+            "cloud_fleet": "oura_ring",
+        }.get(track_id, "cloud_fleet")
+
+    def v1_01_axis_margins(result):
+        return {
+            "Data": result.data_score_pct - result.data_threshold_pct,
+            "Algorithm": result.algorithm_score_pct - result.algorithm_threshold_pct,
+            "Machine": result.machine_score_pct - result.machine_threshold_pct,
+        }
+
+    return (
+        v1_01_amount_system,
+        v1_01_axis_margins,
+        v1_01_comparison_track_id,
+        v1_01_silent_degradation,
+        v1_01_track_lens,
+    )
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    triad_track_profile,
+    v1_01_comparison_track_id,
+    v1_01_track_id,
+):
+    v1_01_comparison_id = v1_01_comparison_track_id(v1_01_track_id)
+    v1_01_comparison_profile = get_track_profile(v1_01_comparison_id)
+    v1_01_comparison_variant = get_lab_track_variant("v1_01_ai_triad", v1_01_comparison_profile.track_id)
+    v1_01_comparison_hardware = resolve_mlsysim_ref(v1_01_comparison_variant.hardware_ref)
+    v1_01_comparison_model = resolve_mlsysim_ref(v1_01_comparison_variant.model_ref)
+    v1_01_comparison_triad = triad_track_profile(
+        v1_01_comparison_profile,
+        v1_01_comparison_variant,
+        v1_01_comparison_hardware,
+        v1_01_comparison_model,
+    )
+    return (
+        v1_01_comparison_id,
+        v1_01_comparison_profile,
+        v1_01_comparison_triad,
+        v1_01_comparison_variant,
+    )
+
+
+@app.cell(hide_code=True)
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    track_arc_context,
+    v1_01_metadata,
+    v1_01_profile,
+    v1_01_triad,
+    v1_01_variant,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
+                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 01
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
+                       color: #f8fafc; line-height: 1.1;">
                 The AI Triad
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
                 Data &middot; Algorithm &middot; Machine
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                A single model deployed across three hardware targets fails for
-                three different physical reasons. The D-A-M triad is the diagnostic
-                framework you will use for the entire course.
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
+                      max-width: 780px; line-height: 1.65;">
+                {v1_01_variant.workload_summary} The first engineering decision
+                is not which knob to improve; it is which axis is actually binding.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~51 min
+                    4 Parts + Memo &middot; ~55 min
                 </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 1: Introduction to ML Systems
-                </span>
-                <span style="background: rgba(0,143,69,0.15); color: #6ee7b7;
-                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
-                             font-weight: 600; border: 1px solid rgba(0,143,69,0.25);">
-                    First Lab of the Curriculum
+                    {v1_01_profile.label}
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">D-A-M Triad Diagnosis</span>
-                <span class="badge badge-warn">Iron Law T = D/BW + O/R + L</span>
-                <span class="badge badge-fail">~100x Out of Memory (OOM) on ESP32</span>
+                <span class="badge badge-info">Silent Degradation</span>
+                <span class="badge badge-warn">Binding Axis</span>
+                <span class="badge badge-fail">First Fix</span>
             </div>
         </div>
         """),
+        track_context(v1_01_profile),
+        track_arc_context(v1_01_profile, v1_01_metadata.lab_id),
     ])
     return
 
 
-# ─── CELL 2: BRIEFING ─────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, mo, v1_01_triad):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Diagnose which D-A-M axis is binding</strong> &mdash;
-                    given a system with poor performance, identify whether Data, Algorithm,
-                    or Machine is the bottleneck before investing resources.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Apply the Iron Law T&nbsp;=&nbsp;D/BW&nbsp;+&nbsp;O/R&nbsp;+&nbsp;L</strong>
-                    to ResNet-50 inference and discover that the H100 is memory-bound
-                    at batch=1, not compute-bound.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Quantify the deployment spectrum</strong> &mdash; measure
-                    the ~1,000,000x compute gap between H100 and ESP32 and explain why
-                    the same model is infeasible on a microcontroller by ~100x.</div>
-            </div>
+        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+            Learning Objectives
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    D-A-M framework from the Introduction chapter &middot;
-                    Iron Law equation from the Iron Law section (Ch. 1) &middot;
-                    Deployment spectrum from the Deployment Spectrum section (Ch. 1)
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~51 min</strong><br/>
-                    Part A: ~12 min &middot; Part B: ~12 min<br/>
-                    Part C: ~12 min &middot; Part D: ~9 min
-                </div>
-            </div>
+        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+            <div style="margin-bottom: 3px;">1. <strong>Explain silent degradation:</strong>
+                show how learned behavior changes without a code diff.</div>
+            <div style="margin-bottom: 3px;">2. <strong>Diagnose the binding axis:</strong>
+                separate data coverage, algorithm design, and machine envelope.</div>
+            <div style="margin-bottom: 3px;">3. <strong>Separate evidence systems:</strong>
+                distinguish training evidence from inference evidence.</div>
+            <div style="margin-bottom: 3px;">4. <strong>Defend the first fix:</strong>
+                select an intervention, reject alternatives, and name validation evidence.</div>
         </div>
-
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
                     padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
@@ -214,9 +489,7 @@ def _(COLORS, mo):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;If the same model deployed to an H100 (NVIDIA's flagship datacenter GPU), a Jetson (NVIDIA's edge AI module), and an ESP32 (Espressif's low-power microcontroller, 512 KB SRAM) fails
-                for three different physical reasons &mdash; how do you diagnose which axis
-                to fix before spending the budget?&rdquo;
+                "The behavior changed. Which quantity changed, which axis binds, and what first fix is defensible?"
             </div>
         </div>
     </div>
@@ -224,1172 +497,1052 @@ def _(COLORS, mo):
     return
 
 
-# ─── CELL 3: READING ──────────────────────────────────────────────────────
 @app.cell(hide_code=True)
 def _(mo):
     mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
-
-    - **The Introduction chapter** -- The D-A-M framework (Data, Algorithm, Machine) and
-      the three worked examples (recommendation system, vision model, language model).
-    - **The Iron Law section (Ch. 1)** -- The Iron Law `T = D/BW + O/R + L` with
-      variable definitions and the ResNet-50 worked example.
-    - **The Deployment Spectrum section (Ch. 1)** -- The deployment spectrum table
-      showing Cloud, Edge, Mobile, and TinyML hardware tiers.
+    **Recommended Reading** - Complete the Introduction chapter's discussion of
+    production ML as a system before starting this lab.
     """), kind="info")
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ZONE B-D: ALL PARTS AS TABS
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# ZONE B: WIDGET DEFINITIONS
+# ===========================================================================
 
 
-# ─── CELL 4: TABS CELL ────────────────────────────────────────────────────
+@app.cell(hide_code=True)
+def _(action_box, mo, v1_01_track_id, v1_01_track_lens):
+    _lens = v1_01_track_lens(v1_01_track_id)
+    partA_pred = mo.ui.radio(
+        options={
+            "A) No, quality only changes after code changes": "code_only",
+            "B) Yes, the input distribution can move under fixed code": "silent_drift",
+            "C) Only if the server or device crashes": "infrastructure_only",
+            "D) Only if the model file is edited": "weights_only",
+        },
+        label=f"Part A prediction - can {_lens['silent_metric']} fall while code and infrastructure stay fixed?",
+    )
+    partA_drift = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=55,
+        step=5,
+        label=f"{_lens['pressure_label']} (%)",
+    )
+    partA_months = mo.ui.slider(
+        start=0,
+        stop=12,
+        value=6,
+        step=1,
+        label="Months since deployment",
+    )
+    partA_cadence = mo.ui.dropdown(
+        options={
+            "Weekly monitoring": "weekly",
+            "Monthly monitoring": "monthly",
+            "Quarterly monitoring": "quarterly",
+        },
+        value="Monthly monitoring",
+        label="Monitoring cadence",
+    )
+    partA_response = action_box(
+        mo.ui.radio(
+            options={option: option for option in _lens["response_options"]},
+            label="",
+        ),
+        title="Part A Checkpoint - first response",
+        body="Choose the response you would defend after the degradation evidence.",
+        name="silent_response",
+    )
+    return (partA_cadence, partA_drift, partA_months, partA_pred, partA_response)
+
+
+@app.cell(hide_code=True)
+def _(action_box, mo, v1_01_triad):
+    partB_pred = mo.ui.radio(
+        options={
+            "A) Data will bind": "Data",
+            "B) Algorithm will bind": "Algorithm",
+            "C) Machine will bind": "Machine",
+            "D) I need evidence before deciding": "Depends",
+        },
+        label=f"Part B prediction - for {v1_01_triad.label}, which D-A-M axis do you expect to bind?",
+    )
+    partB_data = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=int(v1_01_triad.default_data_pct),
+        step=5,
+        label="Data readiness (%)",
+    )
+    partB_algorithm = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=int(v1_01_triad.default_algorithm_pct),
+        step=5,
+        label="Algorithm readiness (%)",
+    )
+    partB_machine = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=int(v1_01_triad.default_machine_pct),
+        step=5,
+        label="Machine readiness (%)",
+    )
+    partB_decision = action_box(
+        mo.ui.radio(
+            options={
+                "Data": "Data",
+                "Algorithm": "Algorithm",
+                "Machine": "Machine",
+            },
+            label="",
+        ),
+        title="Part B Checkpoint - final diagnosis",
+        body="Choose the binding axis you would defend after reading the evidence and track comparison.",
+        name="diagnosis",
+    )
+    return (partB_algorithm, partB_data, partB_decision, partB_machine, partB_pred)
+
+
+@app.cell(hide_code=True)
+def _(action_box, mo, v1_01_track_id, v1_01_track_lens):
+    _lens = v1_01_track_lens(v1_01_track_id)
+    partC_pred = mo.ui.radio(
+        options={
+            "A) Training convergence is enough to ship": "training_only",
+            "B) Offline validation accuracy is enough to ship": "offline_accuracy",
+            "C) Runtime inference evidence must authorize deployment": "inference_evidence",
+            "D) Hardware evidence matters only after launch": "defer_runtime",
+        },
+        label="Part C prediction - what evidence should authorize deployment?",
+    )
+    partC_model_scale = mo.ui.slider(
+        start=50,
+        stop=150,
+        value=100,
+        step=5,
+        label="Model scale (% of baseline)",
+    )
+    partC_pressure = mo.ui.slider(
+        start=0,
+        stop=100,
+        value=70,
+        step=5,
+        label=f"{_lens['operating_pressure_label']} (%)",
+    )
+    partC_evidence = action_box(
+        mo.ui.radio(
+            options={packet: packet for packet in _lens["evidence_packets"]},
+            label="",
+        ),
+        title="Part C Checkpoint - evidence packet",
+        body="Choose the evidence packet that belongs in the triad diagnosis memo.",
+        name="evidence_packet",
+    )
+    return (partC_evidence, partC_model_scale, partC_pred, partC_pressure)
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_01_triad):
+    partD_pred = mo.ui.radio(
+        options={
+            "A) Spend the whole budget on the weakest axis": "weakest",
+            "B) Spend evenly across all three axes": "even",
+            "C) Spend on hardware first": "hardware",
+            "D) Spend on model architecture first": "model",
+        },
+        label="Part D prediction - how should a fixed lifecycle budget be allocated?",
+    )
+    partD_data_budget = mo.ui.slider(start=0, stop=100, value=40, step=5, label="Data budget (%)")
+    partD_algorithm_budget = mo.ui.slider(start=0, stop=100, value=30, step=5, label="Algorithm budget (%)")
+    partD_machine_budget = mo.ui.slider(start=0, stop=100, value=30, step=5, label="Machine budget (%)")
+    partD_selected = mo.ui.dropdown(
+        options={axis: axis for axis in v1_01_triad.intervention_options or ("Data", "Algorithm", "Machine")},
+        value=(v1_01_triad.intervention_options or ("Data",))[0],
+        label="Intervention to defend",
+    )
+    partD_validation = mo.ui.dropdown(
+        options={test: test for test in v1_01_triad.validation_tests},
+        value=v1_01_triad.validation_tests[0],
+        label="Validation evidence",
+    )
+    return (
+        partD_algorithm_budget,
+        partD_data_budget,
+        partD_machine_budget,
+        partD_pred,
+        partD_selected,
+        partD_validation,
+    )
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_01_track_id, v1_01_track_lens):
+    _lens = v1_01_track_lens(v1_01_track_id)
+    synthesis_risk = mo.ui.radio(
+        options={risk: risk for risk in _lens["risk_options"]},
+        label="Carry-forward risk for later labs",
+    )
+    return (synthesis_risk,)
+
+
+# ===========================================================================
+# ZONE C: MAIN LAB
+# ===========================================================================
+
+
 @app.cell(hide_code=True)
 def _(
     COLORS,
-    H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB, H100_TDP_W,
-    A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
-    JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
-    IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB, ESP32_TDP_W,
-    HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB, HIMAX_TDP_W,
-    RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware,
-    apply_plotly_theme, go, math, mo, np,
+    apply_plotly_theme,
+    diagnose_triad,
+    go,
+    intervention_frontier,
+    mo,
+    partA_cadence,
+    partA_drift,
+    partA_months,
+    partA_pred,
+    partA_response,
+    partB_algorithm,
+    partB_data,
+    partB_decision,
+    partB_machine,
+    partB_pred,
+    partC_evidence,
+    partC_model_scale,
+    partC_pred,
+    partC_pressure,
+    partD_algorithm_budget,
+    partD_data_budget,
+    partD_machine_budget,
+    partD_pred,
+    partD_selected,
+    partD_validation,
+    source_trace,
+    synthesis_risk,
+    v1_01_amount_system,
+    v1_01_axis_margins,
+    v1_01_comparison_profile,
+    v1_01_comparison_triad,
+    v1_01_profile,
+    v1_01_silent_degradation,
+    v1_01_track_lens,
+    v1_01_triad,
+    v1_01_variant,
 ):
-    # ─────────────────────────────────────────────────────────────────────
-    # SHARED WIDGET STATE
-    # ─────────────────────────────────────────────────────────────────────
+    _lens = v1_01_track_lens(v1_01_profile.track_id)
 
-    # Part A widgets
-    partA_prediction = mo.ui.radio(
-        options={
-            "A) Improves proportionally (~4x better)":                  "proportional",
-            "B) Improves modestly (~1.3x better)":                       "modest",
-            "C) No change -- the bottleneck is elsewhere":               "no_change",
-            "D) Gets worse due to overfitting":                          "worse",
-        },
-        label="A recommendation system is showing poor accuracy. The team proposes "
-              "buying 4x more GPUs. What happens to accuracy?",
-    )
-    return (partA_prediction,)
+    def _metric_card(label, value, detail, color, border=False):
+        border_style = f"2px solid {color}" if border else "1px solid #e2e8f0"
+        return f"""
+        <div style="padding:16px; border:{border_style}; border-radius:8px;
+                    min-width:150px; text-align:center; background:white;
+                    border-top:3px solid {color}; flex:1;">
+            <div style="color:#64748b; font-size:0.78rem; font-weight:700;">{label}</div>
+            <div style="font-size:1.35rem; font-weight:800; color:{color}; line-height:1.15;">{value}</div>
+            <div style="font-size:0.72rem; color:#64748b; line-height:1.35;">{detail}</div>
+        </div>
+        """
 
-@app.cell(hide_code=True)
-def _(mo):
-    # Part B widgets
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) Data loading (D_vol/BW) -- weight loading dominates at batch=1": "data",
-            "B) Compute (O/R_peak) -- it is a GPU, compute must dominate":       "compute",
-            "C) Framework overhead -- kernel dispatch is the bottleneck":         "overhead",
-            "D) All three terms are roughly equal":                                "balanced",
-        },
-        label="For ResNet-50 inference at batch=1 on an H100 GPU, which Iron Law "
-              "term dominates total inference latency?",
-    )
-    return (partB_prediction,)
+    def _module_banner(color, background, label, text):
+        return mo.Html(f"""
+        <div style="border-left:4px solid {color}; background:{background};
+                    border-radius:0 8px 8px 0; padding:16px 22px; margin:12px 0;">
+            <div style="font-size:0.72rem; font-weight:700; color:{color};
+                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
+                {label}
+            </div>
+            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
+                "{text}"
+            </div>
+        </div>
+        """)
 
-@app.cell(hide_code=True)
-def _(mo):
-    # Part C widgets
-    partC_prediction = mo.ui.radio(
-        options={
-            "A) ~2x over budget (need a small trim)":                   "2x",
-            "B) ~10x over budget (need significant compression)":        "10x",
-            "C) ~100x over budget (fundamentally infeasible)":           "200x",
-            "D) It fits with INT8 quantization":                         "fits",
-        },
-        label="ResNet-50 requires ~49 MB in FP16. The ESP32-S3 has 512 KB of SRAM. "
-              "What is the ratio of model size to available memory?",
-    )
-    return (partC_prediction,)
-
-@app.cell(hide_code=True)
-def _(mo):
-    # Part D widgets
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) ~100x":            "100x",
-            "B) ~10,000x":         "10000x",
-            "C) ~1,000,000x":      "1000000x",
-            "D) ~1,000,000,000x":  "1000000000x",
-        },
-        label="What is the compute ratio between an H100 GPU and an ESP32 "
-              "microcontroller?",
-    )
-    return (partD_prediction,)
-
-@app.cell(hide_code=True)
-def _(DecisionLog, mo):
-    partA_scenario = mo.ui.dropdown(
-        options={
-            "Rec System: stale training data": "stale_data",
-            "Vision Model: insufficient compute": "low_compute",
-            "LLM: exceeds device memory": "oom_model",
-        },
-        value="Rec System: stale training data",
-        label="Select system scenario:",
-    )
-    partA_fix = mo.ui.dropdown(
-        options={
-            "Add more GPUs (Machine)": "machine",
-            "Refresh training data (Data)": "data",
-            "Use smaller model (Algorithm)": "algorithm",
-        },
-        value="Add more GPUs (Machine)",
-        label="Prescribe fix:",
-    )
-    partB_batch = mo.ui.slider(
-        start=1, stop=256, value=1, step=1, label="Batch size",
-    )
-    partC_target = mo.ui.radio(
-        options={
-            "H100 (Cloud)": "h100",
-            "Jetson Orin NX (Edge)": "jetson",
-            "ESP32-S3 (TinyML)": "esp32",
-        },
-        value="H100 (Cloud)",
-        label="Deployment target:",
-        inline=True,
-    )
-    partD_scale = mo.ui.radio(
-        options={"Linear scale": "linear", "Log scale": "log"},
-        value="Linear scale",
-        label="Chart scale:",
-        inline=True,
-    )
-
-    synth_decision_input, synth_decision_ui = DecisionLog(
-        placeholder="Based on what I learned in this lab, the most important diagnostic "
-                    "question before investing in hardware is..."
-    )
-    return (partA_fix, partA_scenario, partB_batch, partC_target, partD_scale)
-
-@app.cell(hide_code=True)
-def _(
-    COLORS, H100_TFLOPS_FP16, H100_BW_GBS, H100_RAM_GB,
-    H100_TDP_W, A100_TFLOPS_FP16, A100_BW_GBS, A100_RAM_GB,
-    JETSON_TFLOPS, JETSON_BW_GBS, JETSON_RAM_GB, JETSON_TDP_W,
-    IPHONE_TFLOPS, IPHONE_BW_GBS, IPHONE_RAM_GB, IPHONE_TDP_W,
-    ESP32_TFLOPS, ESP32_BW_GBS, ESP32_RAM_KB, ESP32_RAM_GB,
-    ESP32_TDP_W, HIMAX_TFLOPS, HIMAX_BW_GBS, HIMAX_RAM_GB,
-    HIMAX_TDP_W, RESNET50_PARAMS, RESNET50_FLOPS, RESNET50_SIZE_MB,
-    Engine, Models, Hardware, apply_plotly_theme,
-    go, math, mo, np,
-    synth_decision_input, synth_decision_ui, ledger, partA_fix,
-    partA_prediction, partA_scenario, partB_batch, partB_prediction,
-    partC_prediction, partC_target, partD_prediction, partD_scale,
-):
-    # ─────────────────────────────────────────────────────────────────────
-    # PART A BUILDER -- Three Axes, One System
-    # ─────────────────────────────────────────────────────────────────────
+    def _readiness_chart(diagnosis):
+        axes = ["Data", "Algorithm", "Machine"]
+        scores = [diagnosis.data_score_pct, diagnosis.algorithm_score_pct, diagnosis.machine_score_pct]
+        thresholds = [diagnosis.data_threshold_pct, diagnosis.algorithm_threshold_pct, diagnosis.machine_threshold_pct]
+        colors = [COLORS["RedLine"] if axis == diagnosis.binding_axis else COLORS["BlueLine"] for axis in axes]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=axes, y=scores, name="Readiness", marker_color=colors, opacity=0.9))
+        fig.add_trace(go.Scatter(
+            x=axes,
+            y=thresholds,
+            name="Track threshold",
+            mode="markers+lines",
+            line=dict(color=COLORS["OrangeLine"], dash="dash"),
+        ))
+        fig.update_layout(
+            height=340,
+            yaxis=dict(title="Readiness (%)", gridcolor="#f1f5f9", range=[0, 105]),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=60, r=20, t=60, b=40),
+        )
+        apply_plotly_theme(fig)
+        return mo.as_html(fig)
 
     def build_part_a():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; CTO, MedVision Health
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our DR screening model is showing poor accuracy on the latest patient
-                cohort. The infrastructure team says we should buy 4x more GPUs. The data
-                team says the training data is 18 months old. The ML team says we need a
-                bigger model. Who is right?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Dr. Priya Mehta, CTO &middot; MedVision Health
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The AI Triad: Data, Algorithm, Machine
-
-        Every ML system has three axes -- **Data** (quality, freshness, volume),
-        **Algorithm** (architecture, parameters, training), and **Machine** (compute,
-        memory, bandwidth). A system performing poorly cannot be fixed by throwing
-        resources at the wrong axis. You must diagnose *which* axis is binding
-        before you can improve anything.
-
-        This is the foundational diagnostic skill of the entire course: identifying
-        which constraint is active before investing.
-        """))
-
-        # Prediction
-        items.append(partA_prediction)
-
-        if partA_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the diagnostic simulator."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        # Reveal prediction
-        _pred = partA_prediction.value
-        if _pred == "no_change":
-            _reveal = ("**Correct.** The system has stale training data (Data axis). "
-                       "Adding GPUs (Machine axis) changes nothing because the bottleneck "
-                       "is not compute. Diagnosis must precede investment.")
-            _kind = "success"
-        elif _pred == "proportional":
-            _reveal = ("**No. More GPUs do not fix stale data.** The training data is "
-                       "18 months old. The distribution has shifted. The Machine axis is "
-                       "not the bottleneck -- the Data axis is. 4x more GPUs at $120K each "
-                       "yields 0% accuracy improvement.")
-            _kind = "warn"
-        elif _pred == "modest":
-            _reveal = ("**The improvement is actually zero, not modest.** The bottleneck is "
-                       "Data (stale training distribution), not Machine. Adding compute to "
-                       "a data-starved system is like buying a faster engine for a car with "
-                       "no fuel.")
-            _kind = "warn"
-        else:
-            _reveal = ("**Overfitting is a real concern, but the primary issue is simpler.** "
-                       "The training data is 18 months stale. The model is not overfitting "
-                       "to current data -- it was trained on a distribution that no longer "
-                       "exists. The Data axis is the binding constraint.")
-            _kind = "warn"
-
-        items.append(mo.callout(mo.md(_reveal), kind=_kind))
-
-        # Interactive diagnosis
-        items.append(mo.md("""
-        ### Diagnose the Patient
-
-        Three systems are presented as patient charts. For each, identify the
-        binding D-A-M axis and prescribe the correct fix. Try applying the wrong
-        fix first to see zero improvement.
-        """))
-
-        items.append(mo.hstack([partA_scenario, partA_fix], justify="start", gap="2rem"))
-
-        _scenario = partA_scenario.value
-        _fix = partA_fix.value
-
-        # Scenario definitions
-        _scenarios = {
-            "stale_data": {
-                "name": "Recommendation System",
-                "problem": "Accuracy dropped 8% over 6 months",
-                "binding": "data",
-                "detail": "Training data is 18 months old. User preferences have shifted. "
-                          "The model is confidently recommending products from last year's trends.",
-                "metrics": {"Accuracy": "72%", "GPU Util": "85%", "Latency": "12 ms",
-                            "Data Age": "18 months"},
-            },
-            "low_compute": {
-                "name": "Medical Vision Model",
-                "problem": "Inference takes 340 ms, SLA requires 100 ms",
-                "binding": "machine",
-                "detail": "The model architecture is correct and the data is fresh, but the "
-                          "inference hardware (T4 GPU) cannot process the high-resolution images "
-                          "fast enough. The compute term dominates the Iron Law.",
-                "metrics": {"Accuracy": "94%", "GPU Util": "99%", "Latency": "340 ms",
-                            "Data Age": "2 weeks"},
-            },
-            "oom_model": {
-                "name": "On-Device Language Model",
-                "problem": "Model does not fit in device memory (8 GB phone, 14 GB model)",
-                "binding": "algorithm",
-                "detail": "The model is too large for the target device. More data or faster "
-                          "compute will not help -- the Algorithm axis (model architecture and "
-                          "size) must change. Quantization or a smaller architecture is needed.",
-                "metrics": {"Accuracy": "N/A (OOM)", "GPU Util": "N/A", "Latency": "N/A",
-                            "Model Size": "14 GB"},
-            },
-        }
-
-        _sc = _scenarios[_scenario]
-        _correct_fix = _sc["binding"]
-        _fixed = _fix == _correct_fix
-
-        # Diagnostic card
-        _status_color = COLORS["GreenLine"] if _fixed else COLORS["RedLine"]
-        _status_bg = COLORS["GreenLL"] if _fixed else COLORS["RedLL"]
-        _status_text = "FIX APPLIED -- SYSTEM RECOVERING" if _fixed else "WRONG AXIS -- NO IMPROVEMENT"
-
-        _metrics_html = ""
-        for _k, _v in _sc["metrics"].items():
-            _metrics_html += f"""
-            <div style="display:flex; justify-content:space-between; padding:6px 0;
-                        border-bottom:1px solid {COLORS['Border']};">
-                <span style="color:{COLORS['TextSec']}; font-size:0.85rem;">{_k}</span>
-                <span style="font-family:monospace; font-weight:700;
-                             color:{COLORS['Text']}; font-size:0.85rem;">{_v}</span>
-            </div>"""
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:20px; flex-wrap:wrap; margin:16px 0;">
-            <div style="flex:1; min-width:280px; background:white;
-                        border:1px solid {COLORS['Border']}; border-radius:12px; padding:20px;">
-                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:10px;">
-                    Patient Chart: {_sc['name']}</div>
-                <div style="font-size:0.95rem; font-weight:700; color:{COLORS['Text']};
-                            margin-bottom:8px;">{_sc['problem']}</div>
-                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.6;
-                            margin-bottom:14px;">{_sc['detail']}</div>
-                {_metrics_html}
-                <div style="margin-top:14px; padding:8px 12px; background:{COLORS['OrangeLL']};
-                            border-radius:8px; font-size:0.82rem; font-weight:700;
-                            color:{COLORS['OrangeLine']}; text-align:center;">
-                    Binding Axis: {_correct_fix.upper()}</div>
-            </div>
-            <div style="flex:1; min-width:280px; background:white;
-                        border:2px solid {_status_color}; border-radius:12px; padding:20px;">
-                <div style="font-size:0.72rem; font-weight:700; color:{_status_color};
-                            text-transform:uppercase; letter-spacing:0.12em; margin-bottom:10px;">
-                    Prescribed Fix: {_fix.replace('_', ' ').title()}</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_status_color};
-                            text-align:center; margin:20px 0;">
-                    {'Improvement: RECOVERED' if _fixed else 'Improvement: 0%'}</div>
-                <div style="font-size:0.85rem; color:{COLORS['TextSec']}; line-height:1.6;
-                            text-align:center;">
-                    {'The fix addresses the binding constraint.' if _fixed
-                     else f'This fix targets the {_fix.title()} axis, but the binding constraint is on the {_correct_fix.title()} axis. No improvement results.'}</div>
-                <div style="margin-top:14px; padding:10px; background:{_status_bg};
-                            border-radius:8px; text-align:center; font-size:0.82rem;
-                            font-weight:700; color:{_status_color};">
-                    {_status_text}</div>
-            </div>
-        </div>
-        """))
-
-        if not _fixed:
-            items.append(mo.callout(mo.md(
-                f"**Wrong axis.** You prescribed a fix for the **{_fix.title()}** axis, "
-                f"but the binding constraint is **{_correct_fix.title()}**. "
-                "Change the fix dropdown to see the system recover. "
-                "This is the lesson: diagnosis must precede investment."
-            ), kind="danger"))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Math Peek: Why Diagnosis Precedes Investment": mo.md("""
-The D-A-M framework formalizes a simple principle: system performance is bounded
-by the **worst** axis, not the best.
-
-$$
-\\text{Performance} = f(\\min(D_{\\text{quality}},\\; A_{\\text{capacity}},\\; M_{\\text{throughput}}))
-$$
-
-Improving an axis that is not the minimum has zero marginal return. The Iron Law
-(Part B) makes this quantitative for the Machine axis. Data quality metrics and
-Algorithm capacity metrics complete the picture.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART B BUILDER -- The Iron Law Surprise
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_b():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; VP Engineering (escalated from Part A)
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;You diagnosed the bottleneck by intuition. But how do you <em>quantify</em>
-                which axis is binding? Our H100 inference is slower than expected. Engineering
-                proposes doubling compute throughput. Finance wants a number. Is this worth it?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; David Park, VP Engineering &middot; MedVision Health
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Iron Law Decomposes Inference Latency
-
-        ```
-        T  =  D_vol/BW  +  O/(R_peak * eta)  +  L_lat
-              --------     ----------------     ------
-              Data term    Compute term         Overhead
-        ```
-
-        Each term is independent. Doubling compute throughput (R_peak) reduces **only**
-        the Compute term. If the Data term is larger -- which it is at low batch sizes --
-        the speedup is negligible.
-
-        **Arithmetic Intensity (AI)** = O / D_vol (FLOPs per byte). Note: AI here refers to arithmetic intensity, not artificial intelligence.
-        Below the Ridge Point (R_peak / BW), the workload is **memory-bound**.
-        """))
-
-        items.append(partB_prediction)
-
-        if partB_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the Latency Waterfall."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        # Controls
-        items.append(partB_batch)
-
-        _batch = partB_batch.value
-        _eta = 0.5
-
-        # Use the Engine API — the same Roofline solver students will use for all 14 labs
-        _profile = Engine.solve(
-            Models.ResNet50, Hardware.Cloud.H100,
-            batch_size=_batch, precision="fp16", efficiency=_eta,
-        )
-        _t_data_ms = _profile.latency_memory.m_as("ms")
-        _t_comp_ms = _profile.latency_compute.m_as("ms")
-        _t_ovh_ms = _profile.latency_overhead.m_as("ms")
-        _t_total = _profile.latency.m_as("ms")
-        _bottleneck = _profile.bottleneck
-        _mfu = _profile.mfu * 100
-
-        _terms = {"Data": _t_data_ms, "Compute": _t_comp_ms, "Overhead": _t_ovh_ms}
-
-        # Waterfall chart
-        _labels = ["Data Term (D/BW)", "Compute Term (O/R*eta)", "Overhead (L)"]
-        _vals = [_t_data_ms, _t_comp_ms, _t_ovh_ms]
-        _bar_colors = [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["Grey"]]
-        _tkeys = list(_terms.keys())
-
-        _bottleneck_map = {"Memory": "Data", "Compute": "Compute"}
-        _fig = go.Figure()
-        for _i, (_lbl, _v, _bc) in enumerate(zip(_labels, _vals, _bar_colors)):
-            _bw = 3 if _tkeys[_i] == _bottleneck_map.get(_bottleneck, "") else 1
-            _fig.add_trace(go.Bar(
-                name=_lbl, x=[_lbl], y=[_v],
-                marker_color=_bc, marker_line_color="white",
-                marker_line_width=_bw, opacity=0.88,
-                hovertemplate="%{x}: %{y:.4f} ms<extra></extra>",
-            ))
-        _fig.update_layout(
-            barmode="group", height=320,
-            yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
-            xaxis=dict(gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.1, x=0),
-            margin=dict(l=50, r=20, t=60, b=30),
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.md(f"### Latency Waterfall -- ResNet-50 on H100 (batch = {_batch})"))
-        items.append(mo.as_html(_fig))
-
-        # Metric cards
-        def _mcard(label, val_ms, is_bot, sub):
-            _col = COLORS["RedLine"] if is_bot else COLORS["BlueLine"]
-            _brd = f"border: 2px solid {COLORS['RedLine']};" if is_bot else "border: 1px solid #e2e8f0;"
-            return f"""
-            <div style="padding:16px; {_brd} border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {_col}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.75rem; font-weight:600; margin-bottom:4px;">
-                    {label}{"  (bottleneck)" if is_bot else ""}</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_col};">{val_ms:.4f} ms</div>
-                <div style="font-size:0.7rem; color:#94a3b8; margin-top:4px;">{sub}</div>
-            </div>"""
-
-        _mem_gb = _profile.memory_footprint.m_as("GB")
-        _ai = _profile.arithmetic_intensity.magnitude
-        _ridge_point = H100_TFLOPS_FP16 * 1000 / H100_BW_GBS  # FLOPs/Byte
-
-        _cards = f"""
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:16px 0;">
-            {_mcard("Data Term", _t_data_ms, _bottleneck == "Memory",
-                    f"{_mem_gb:.4f} GB / {H100_BW_GBS:,.0f} GB/s")}
-            {_mcard("Compute Term", _t_comp_ms, _bottleneck == "Compute",
-                    f"{RESNET50_FLOPS*_batch/1e9:.1f} GF / ({H100_TFLOPS_FP16:.0f}T * {_eta})")}
-            {_mcard("Overhead", _t_ovh_ms, False, "dispatch tax")}
-            {_mcard("Total", _t_total, False, f"Bottleneck: {_bottleneck}")}
-        </div>
-        <div style="display:flex; gap:12px; flex-wrap:wrap; margin:0 0 16px 0;">
-            <div style="padding:12px 20px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Model FLOPs Utilization (MFU)</div>
-                <div style="font-size:1.3rem; font-weight:800;
-                            color:{'#008F45' if _mfu > 50 else '#CC5500' if _mfu > 20 else '#CB202D'};">
-                    {_mfu:.1f}%</div>
-            </div>
-            <div style="padding:12px 20px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Arithmetic Intensity</div>
-                <div style="font-size:1.3rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    {_ai:.1f} F/B</div>
-            </div>
-            <div style="padding:12px 20px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        background:white; flex:1; text-align:center;">
-                <div style="color:#94a3b8; font-size:0.72rem; font-weight:600;">Ridge Point (H100)</div>
-                <div style="font-size:1.3rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                    ~{_ridge_point:.0f} F/B</div>
-            </div>
-        </div>"""
-        items.append(mo.Html(_cards))
-
-        # Formula
-        items.append(mo.md(f"""
-**Iron Law -- Live Calculation** (`batch = {_batch}`)
-
-```
-T  =  D_vol/BW              +  O/(R * eta)                       +  L
-   =  {_mem_gb:.4f} GB / {H100_BW_GBS:,} GB/s  +  {RESNET50_FLOPS*_batch:.2e} / ({H100_TFLOPS_FP16:.0f}T * {_eta})  +  {_t_ovh_ms:.3f} ms
-   =  {_t_data_ms:.4f} ms           +  {_t_comp_ms:.4f} ms                     +  {_t_ovh_ms:.4f} ms
-   =  {_t_total:.4f} ms total  (Bottleneck: {_bottleneck})
-
-AI = {_ai:.1f} FLOPs/Byte  {'<<' if _ai < _ridge_point else '>>'} Ridge Point ~{_ridge_point:.0f} FLOPs/Byte
-     => {'MEMORY-BOUND' if _ai < _ridge_point else 'COMPUTE-BOUND'}
-```
-"""))
-
-        # Batch sweep chart showing crossover — powered by Engine.solve()
-        _batches = [1, 2, 4, 8, 16, 32, 64, 128, 256]
-        _data_times = []
-        _comp_times = []
-        for _b in _batches:
-            _p = Engine.solve(Models.ResNet50, Hardware.Cloud.H100, batch_size=_b, precision="fp16", efficiency=_eta)
-            _data_times.append(_p.latency_memory.m_as("ms"))
-            _comp_times.append(_p.latency_compute.m_as("ms"))
-
-        _fig2 = go.Figure()
-        _fig2.add_trace(go.Scatter(
-            x=_batches, y=_data_times, mode="lines+markers",
-            name="Data Term (D/BW)", line=dict(color=COLORS["BlueLine"], width=2.5),
-            hovertemplate="Batch %{x}: %{y:.4f} ms<extra></extra>",
-        ))
-        _fig2.add_trace(go.Scatter(
-            x=_batches, y=_comp_times, mode="lines+markers",
-            name="Compute Term (O/R*eta)", line=dict(color=COLORS["OrangeLine"], width=2.5),
-            hovertemplate="Batch %{x}: %{y:.4f} ms<extra></extra>",
-        ))
-        _fig2.update_layout(
-            height=280,
-            xaxis=dict(title="Batch Size", type="log", gridcolor="#f1f5f9"),
-            yaxis=dict(title="Latency (ms)", type="log", gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.12, x=0),
-            margin=dict(l=50, r=20, t=60, b=40),
-        )
-        apply_plotly_theme(_fig2)
-        items.append(mo.md("### Bottleneck Crossover: Data vs Compute by Batch Size"))
-        items.append(mo.as_html(_fig2))
-
-        # Prediction reveal — use Engine at batch=1 for reference values
-        _pred = partB_prediction.value
-        _ref = Engine.solve(Models.ResNet50, Hardware.Cloud.H100, batch_size=1, precision="fp16", efficiency=_eta)
-        _t_data_ref = _ref.latency_memory.m_as("ms")
-        _t_comp_ref = _ref.latency_compute.m_as("ms")
-
-        if _pred == "data":
-            _rev_msg = (
-                f"**Correct.** At batch=1 on the H100, the Data Term is {_t_data_ref:.4f} ms -- "
-                f"approximately {_t_data_ref/_t_comp_ref:.0f}x the Compute Term ({_t_comp_ref:.4f} ms). "
-                "The H100 is so fast at arithmetic that it spends most time waiting for data from High Bandwidth Memory (HBM). "
-                "Buying a 2x faster GPU would yield less than 10% latency improvement."
-            )
-            _rev_kind = "success"
-        elif _pred == "compute":
-            _rev_msg = (
-                f"**The compute term is actually the smallest.** "
-                f"Data Term ({_t_data_ref:.4f} ms) is ~{_t_data_ref/_t_comp_ref:.0f}x the "
-                f"Compute Term ({_t_comp_ref:.4f} ms) at batch=1. "
-                "A GPU is not always compute-bound. "
-                "Increase the batch slider to watch the crossover happen."
-            )
-            _rev_kind = "warn"
-        else:
-            _rev_msg = (
-                f"**The dominant term is Data at batch=1.** "
-                f"Data: {_t_data_ref:.4f} ms, Compute: {_t_comp_ref:.4f} ms, "
-                f"Overhead: {_ref.latency_overhead.m_as('ms'):.4f} ms. "
-                "The workload is memory-bound. "
-                "Slide batch size up to ~32-64 to watch it become compute-bound."
-            )
-            _rev_kind = "warn"
-
-        items.append(mo.callout(mo.md(_rev_msg), kind=_rev_kind))
-
-        # MathPeek
-        items.append(mo.accordion({
-            "Math Peek: The Iron Law": mo.md(f"""
-$$
-T = \\frac{{D_{{\\text{{vol}}}}}}{{BW}} + \\frac{{O}}{{R_{{\\text{{peak}}}} \\cdot \\eta}} + L_{{\\text{{lat}}}}
-$$
-
-**Ridge Point** = $R_{{\\text{{peak}}}} / BW$ = {H100_TFLOPS_FP16:.0f} TFLOPS / {H100_BW_GBS:,.0f} GB/s = **~{_ridge_point:.0f} FLOPs/Byte**
-
-When Arithmetic Intensity < Ridge Point, the workload is **memory-bound**.
-At batch=1: AI = {RESNET50_FLOPS/1e9:.1f} GFLOPs / {RESNET50_SIZE_MB/1024:.4f} GB = ~{RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} FLOPs/Byte
-
-Since {RESNET50_FLOPS/(RESNET50_SIZE_MB/1024*1e9):.0f} << {_ridge_point:.0f}, the workload is **deeply memory-bound**.
-""")
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART C BUILDER -- The Triad Across Targets
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_c():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; VP Product (escalated)
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;The Iron Law told you the H100 is memory-bound at batch=1. But what
-                happens when you take that <em>same</em> model and deploy it on an edge device?
-                Or a microcontroller? We need to know before we commit to hardware.&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; MedVision Health, Deployment Planning
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## Same Model, Three Targets, Three Different Failures
-
-        ResNet-50 deployed on three hardware targets is diagnosed by the Engine as
-        having *different* binding constraints at each tier:
-        - **H100**: Memory-bound (Machine axis is fine but underutilized)
-        - **Jetson Orin NX**: Fits, but severely bandwidth-limited
-        - **ESP32**: Flatly infeasible -- 49 MB model vs 512 KB SRAM
-
-        "The model works" is meaningless without specifying *where*.
-        """))
-
-        items.append(partC_prediction)
-
-        if partC_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the cross-target comparison."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        # Target selector
-        items.append(partC_target)
-
-        # Run Engine.solve for all three targets
-        _hw_specs = {
-            "h100": {
-                "name": "H100 (Cloud)", "ram_gb": H100_RAM_GB,
-                "tflops": H100_TFLOPS_FP16, "bw_gbs": H100_BW_GBS,
-                "tdp_w": H100_TDP_W, "color": COLORS["BlueLine"],
-            },
-            "jetson": {
-                "name": "Jetson Orin NX (Edge)", "ram_gb": JETSON_RAM_GB,
-                "tflops": JETSON_TFLOPS, "bw_gbs": JETSON_BW_GBS,
-                "tdp_w": JETSON_TDP_W, "color": COLORS["OrangeLine"],
-            },
-            "esp32": {
-                "name": "ESP32-S3 (TinyML)", "ram_gb": ESP32_RAM_GB,
-                "tflops": ESP32_TFLOPS, "bw_gbs": ESP32_BW_GBS,
-                "tdp_w": ESP32_TDP_W, "color": COLORS["RedLine"],
-            },
-        }
-
-        # Build comparison table
-        _table_rows = ""
-        for _key, _hw in _hw_specs.items():
-            _model_gb = RESNET50_SIZE_MB / 1024
-            _feasible = _model_gb < _hw["ram_gb"]
-            _mem_ratio = _model_gb / _hw["ram_gb"]
-
-            if not _feasible:
-                _bottleneck_str = "INFEASIBLE (OOM)"
-                _latency_str = "N/A"
-                _status_badge = f'<span class="badge badge-fail">INFEASIBLE ({_mem_ratio:.0f}x over)</span>'
-                _dam_axis = "Machine (capacity)"
-            else:
-                _t_data = (_model_gb / _hw["bw_gbs"]) * 1000
-                _t_comp = (RESNET50_FLOPS / (_hw["tflops"] * 1e12 * 0.5)) * 1000
-                _t_total_hw = _t_data + _t_comp + 0.05
-                if _t_data > _t_comp:
-                    _bottleneck_str = "Memory-bound"
-                    _dam_axis = "Machine (bandwidth)"
-                else:
-                    _bottleneck_str = "Compute-bound"
-                    _dam_axis = "Machine (compute)"
-                _latency_str = f"{_t_total_hw:.2f} ms"
-                _status_badge = f'<span class="badge badge-ok">Feasible</span>'
-
-            _highlight = "background:#f0f8ff;" if _key == partC_target.value else ""
-            _table_rows += f"""
-            <tr style="{_highlight}">
-                <td style="padding:10px; font-weight:700; color:{_hw['color']};">{_hw['name']}</td>
-                <td style="padding:10px; font-family:monospace;">{_hw['ram_gb']:.2f} GB</td>
-                <td style="padding:10px; font-family:monospace;">{_hw['tflops']:.3f} TFLOPS</td>
-                <td style="padding:10px;">{_status_badge}</td>
-                <td style="padding:10px; font-family:monospace;">{_latency_str}</td>
-                <td style="padding:10px; font-weight:600;">{_bottleneck_str}</td>
-                <td style="padding:10px; color:{COLORS['OrangeLine']}; font-weight:700;">{_dam_axis}</td>
-            </tr>"""
-
-        items.append(mo.Html(f"""
-        <div style="overflow-x:auto; margin:16px 0;">
-            <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-                <thead>
-                    <tr style="background:{COLORS['Surface2']}; border-bottom:2px solid {COLORS['Border']};">
-                        <th style="padding:10px; text-align:left;">Target</th>
-                        <th style="padding:10px; text-align:left;">RAM</th>
-                        <th style="padding:10px; text-align:left;">Compute</th>
-                        <th style="padding:10px; text-align:left;">Feasibility</th>
-                        <th style="padding:10px; text-align:left;">Latency</th>
-                        <th style="padding:10px; text-align:left;">Bottleneck</th>
-                        <th style="padding:10px; text-align:left;">Binding D-A-M Axis</th>
-                    </tr>
-                </thead>
-                <tbody>{_table_rows}</tbody>
-            </table>
-        </div>
-        """))
-
-        # Detailed view for selected target
-        _sel = partC_target.value
-        _hw = _hw_specs[_sel]
-        _model_gb = RESNET50_SIZE_MB / 1024
-        _feasible = _model_gb < _hw["ram_gb"]
-
-        if not _feasible:
-            _mem_ratio = _model_gb / _hw["ram_gb"]
-            items.append(mo.callout(mo.md(
-                f"**INFEASIBLE: {_mem_ratio:.0f}x over memory budget.** "
-                f"ResNet-50 requires {RESNET50_SIZE_MB:.0f} MB in FP16. "
-                f"The {_hw['name']} has {ESP32_RAM_KB:.0f} KB of SRAM. "
-                f"This is a **{_mem_ratio:.0f}x memory gap**. "
-                "No amount of compression will make ResNet-50 run on this device. "
-                "You need a *different algorithm entirely* (e.g., DS-CNN at 200K params)."
-            ), kind="danger"))
-
-            # OOM visualization
-            items.append(mo.Html(f"""
-            <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-                <div style="padding:16px; border:2px solid {COLORS['RedLine']}; border-radius:10px;
-                            min-width:150px; text-align:center; background:{COLORS['RedLL']}; flex:1;">
-                    <div style="color:{COLORS['RedLine']}; font-size:0.78rem; font-weight:700;">Model Size</div>
-                    <div style="font-size:1.7rem; font-weight:800; color:{COLORS['RedLine']};">
-                        {RESNET50_SIZE_MB:.0f} MB</div>
-                </div>
-                <div style="padding:16px; border:2px solid {COLORS['RedLine']}; border-radius:10px;
-                            min-width:150px; text-align:center; background:{COLORS['RedLL']}; flex:1;">
-                    <div style="color:{COLORS['RedLine']}; font-size:0.78rem; font-weight:700;">Available SRAM</div>
-                    <div style="font-size:1.7rem; font-weight:800; color:{COLORS['RedLine']};">
-                        {ESP32_RAM_KB:.0f} KB</div>
-                </div>
-                <div style="padding:16px; border:2px solid {COLORS['RedLine']}; border-radius:10px;
-                            min-width:150px; text-align:center; background:{COLORS['RedLL']}; flex:1;">
-                    <div style="color:{COLORS['RedLine']}; font-size:0.78rem; font-weight:700;">Overflow</div>
-                    <div style="font-size:1.7rem; font-weight:800; color:{COLORS['RedLine']};">
-                        {_mem_ratio:.0f}x</div>
-                </div>
-            </div>
-            """))
-        else:
-            _t_data = (_model_gb / _hw["bw_gbs"]) * 1000
-            _t_comp = (RESNET50_FLOPS / (_hw["tflops"] * 1e12 * 0.5)) * 1000
-            _t_total_hw = _t_data + _t_comp + 0.05
-            _pct_data = _t_data / _t_total_hw * 100
-            _pct_comp = _t_comp / _t_total_hw * 100
-            items.append(mo.callout(mo.md(
-                f"**Feasible on {_hw['name']}.** "
-                f"Latency = {_t_total_hw:.2f} ms "
-                f"(Data: {_t_data:.2f} ms [{_pct_data:.0f}%], "
-                f"Compute: {_t_comp:.2f} ms [{_pct_comp:.0f}%]). "
-                f"{'Memory-bound: the bandwidth term dominates.' if _t_data > _t_comp else 'Compute-bound: the operations term dominates.'}"
-            ), kind="info"))
-
-        # Prediction reveal
-        _pred = partC_prediction.value
-        _actual_ratio = RESNET50_SIZE_MB * 1024 / ESP32_RAM_KB
-
-        if _pred == "200x":
-            _rev = (f"**Correct.** The ratio is ~{_actual_ratio:.0f}x. "
-                    "This is not a compression problem -- it is a feasibility violation. "
-                    "You need a fundamentally different model architecture for TinyML.")
-            _rkind = "success"
-        elif _pred == "2x":
-            _rev = (f"**The gap is ~{_actual_ratio:.0f}x, not 2x.** "
-                    "Most students underestimate MCU-scale memory because they have never "
-                    "worked with 512 KB. Select the ESP32 target above to see the OOM.")
-            _rkind = "warn"
-        elif _pred == "10x":
-            _rev = (f"**The gap is ~{_actual_ratio:.0f}x, not 10x.** "
-                    "Even aggressive 8x compression (INT4 quantization) would leave a "
-                    "~12x memory gap. The model architecture must change entirely.")
-            _rkind = "warn"
-        else:
-            _rev = (f"**INT8 quantization only halves the memory to ~25 MB.** "
-                    f"The ESP32 has {ESP32_RAM_KB:.0f} KB. The gap is ~{_actual_ratio:.0f}x. "
-                    "Quantization helps but cannot bridge a ~100x gap.")
-            _rkind = "warn"
-
-        items.append(mo.callout(mo.md(
-            f"**You predicted:** {_pred}  |  **Actual ratio:** ~{_actual_ratio:.0f}x"
-        ), kind="info"))
-        items.append(mo.callout(mo.md(_rev), kind=_rkind))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART D BUILDER -- The Deployment Spectrum
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_d():
-        items = []
-
-        # Stakeholder message
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Strategic Review &middot; CEO, MedVision Health
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We want to deploy our DR screening model everywhere: cloud for hospitals,
-                edge for mobile clinics, and on-device for remote villages with no connectivity.
-                How different are these targets, really? Can we just run the same model at
-                different speeds?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; James Chen, CEO &middot; MedVision Health
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-        ## The Full Deployment Spectrum: 9 Orders of Magnitude
-
-        The deployment spectrum spans 9 orders of magnitude in compute and 5 orders
-        of magnitude in memory. This gap is so vast that a universal ML software stack
-        is physically impossible -- each deployment tier requires fundamentally different
-        choices on every D-A-M axis.
-        """))
-
-        items.append(partD_prediction)
-
-        if partD_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the deployment spectrum chart."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(partD_scale)
-
-        _scale = partD_scale.value
-
-        # Hardware data from registry
-        _hw_data = [
-            ("H100",     H100_TFLOPS_FP16,  H100_RAM_GB,   H100_TDP_W,  COLORS["BlueLine"]),
-            ("A100",     A100_TFLOPS_FP16,   A100_RAM_GB,   700,         COLORS["BlueLine"]),
-            ("Jetson",   JETSON_TFLOPS,      JETSON_RAM_GB, JETSON_TDP_W, COLORS["OrangeLine"]),
-            ("iPhone",   IPHONE_TFLOPS,      IPHONE_RAM_GB, IPHONE_TDP_W, COLORS["OrangeLine"]),
-            ("ESP32",    ESP32_TFLOPS,       ESP32_RAM_GB,  ESP32_TDP_W,  COLORS["RedLine"]),
-            ("Himax",    HIMAX_TFLOPS,       HIMAX_RAM_GB,  HIMAX_TDP_W,  COLORS["RedLine"]),
+        items = [
+            _module_banner(
+                COLORS["BlueLine"],
+                COLORS["BlueL"],
+                f"Operations Page - {v1_01_variant.stakeholder}",
+                f"{_lens['silent_metric']} is trending down, but code version, model file, and infrastructure health are unchanged.",
+            ),
+            mo.md(f"""
+## Part A: Model Behavior Is Not Normal Software Behavior
+
+**Concept.** In traditional software, behavior usually changes when code changes.
+In ML systems, learned behavior can degrade silently because the current input
+distribution drifts away from the training distribution.
+
+**Track lens.** For **{v1_01_profile.label}**, watch **{_lens['silent_metric']}**
+under {_lens['drift_driver']}. The guardrail is **{v1_01_triad.guardrail_metric}**.
+            """),
+            partA_pred,
         ]
+        if partA_pred.value is None:
+            items.append(mo.callout(mo.md("Make the prediction first, then the degradation instrument unlocks."), kind="warn"))
+            return mo.vstack(items)
 
-        _names = [d[0] for d in _hw_data]
-        _compute = [d[1] for d in _hw_data]
-        _memory = [d[2] for d in _hw_data]
-        _colors = [d[4] for d in _hw_data]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            name="Compute (TFLOPS)", x=_names, y=_compute,
-            marker_color=[COLORS["BlueLine"]] * len(_names),
-            opacity=0.85,
-            hovertemplate="%{x}: %{y:,.0f} TFLOPS<extra></extra>",
-        ))
-        _fig.add_trace(go.Bar(
-            name="Memory (GB)", x=_names, y=_memory,
-            marker_color=[COLORS["GreenLine"]] * len(_names),
-            opacity=0.85,
-            hovertemplate="%{x}: %{y:,.0f} GB<extra></extra>",
-        ))
-        _fig.update_layout(
-            barmode="group", height=380,
-            yaxis=dict(title="Magnitude (units vary)", type=_scale, gridcolor="#f1f5f9"),
-            xaxis=dict(gridcolor="#f1f5f9"),
-            legend=dict(orientation="h", y=1.1, x=0),
-            margin=dict(l=50, r=20, t=60, b=40),
+        items.append(mo.hstack([partA_drift, partA_months, partA_cadence], widths="equal"))
+        silent = v1_01_silent_degradation(_lens, partA_drift.value, partA_months.value, partA_cadence.value)
+        months = [row["month"] for row in silent["timeline"]]
+        quality = [row["quality_pct"] for row in silent["timeline"]]
+        floors = [row["floor_pct"] for row in silent["timeline"]]
+        code_health = [row["code_health_pct"] for row in silent["timeline"]]
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=months, y=quality, mode="lines+markers", name=_lens["silent_metric"], line=dict(color=COLORS["BlueLine"], width=3)))
+        fig.add_trace(go.Scatter(x=months, y=floors, mode="lines", name="quality floor", line=dict(color=COLORS["RedLine"], dash="dash")))
+        fig.add_trace(go.Scatter(x=months, y=code_health, mode="lines", name="code/infrastructure health", line=dict(color=COLORS["GreenLine"], dash="dot")))
+        fig.add_trace(go.Scatter(x=[silent["months"]], y=[silent["quality_pct"]], mode="markers", name="current month", marker=dict(size=12, color=COLORS["OrangeLine"])))
+        fig.update_layout(
+            height=360,
+            yaxis=dict(title="Percent", gridcolor="#f1f5f9", range=[70, 102]),
+            xaxis=dict(title="Months in production", dtick=1),
+            legend=dict(orientation="h", y=1.14, x=0),
+            margin=dict(l=60, r=20, t=70, b=50),
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
 
-        if _scale == "linear":
-            items.append(mo.callout(mo.md(
-                "**On linear scale, the ESP32 and Himax bars are invisible.** "
-                "The H100's compute is over 1,000,000x larger. "
-                "Switch to log scale to see all devices. "
-                "This invisibility IS the point."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**On log scale, each gridline is 10x, not +1.** "
-                "The visual gap between H100 and ESP32 represents six orders of magnitude "
-                "in compute. No compiler can bridge this gap."
-            ), kind="info"))
-
-        # Ratio cards
-        _compute_ratio = H100_TFLOPS_FP16 / ESP32_TFLOPS
-        _memory_ratio = H100_RAM_GB / ESP32_RAM_GB
-
+        status_color = COLORS["GreenLine"] if silent["feasible"] else COLORS["RedLine"]
         items.append(mo.Html(f"""
         <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['RedLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Compute Gap</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['RedLine']};">
-                    ~{_compute_ratio:,.0f}x</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">H100 vs ESP32</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Memory Gap</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">
-                    ~{_memory_ratio:,.0f}x</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">H100 vs ESP32</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:#94a3b8; font-size:0.78rem; font-weight:600;">Orders of Magnitude</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">
-                    ~{math.log10(_compute_ratio):.0f}</div>
-                <div style="font-size:0.72rem; color:#94a3b8;">in compute TFLOPS</div>
-            </div>
+            {_metric_card("Observed Quality", f"{silent['quality_pct']:.1f}%", _lens["silent_metric"], status_color, True)}
+            {_metric_card("Quality Floor", f"{silent['floor_pct']:.1f}%", "track-specific minimum", COLORS["RedLine"])}
+            {_metric_card("Silent Loss", f"{silent['loss_pct']:.1f} pp", "without a code diff", COLORS["OrangeLine"])}
+            {_metric_card("Code Health", "100%", "unchanged serving path", COLORS["GreenLine"])}
         </div>
         """))
 
-        # What this means per D-A-M axis
-        items.append(mo.Html(f"""
-        <div style="overflow-x:auto; margin:16px 0;">
-            <table style="width:100%; border-collapse:collapse; font-size:0.85rem;">
-                <thead>
-                    <tr style="background:{COLORS['Surface2']}; border-bottom:2px solid {COLORS['Border']};">
-                        <th style="padding:10px; text-align:left;">Tier</th>
-                        <th style="padding:10px; text-align:left;">Data Strategy</th>
-                        <th style="padding:10px; text-align:left;">Algorithm Strategy</th>
-                        <th style="padding:10px; text-align:left;">Machine Constraint</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    <tr>
-                        <td style="padding:10px; font-weight:700; color:{COLORS['BlueLine']};">Cloud</td>
-                        <td style="padding:10px;">Full datasets, TB-scale</td>
-                        <td style="padding:10px;">Full models (ResNet-50, GPT-3)</td>
-                        <td style="padding:10px;">Throughput, cost</td>
-                    </tr>
-                    <tr style="background:{COLORS['Surface2']};">
-                        <td style="padding:10px; font-weight:700; color:{COLORS['OrangeLine']};">Edge</td>
-                        <td style="padding:10px;">Filtered, preprocessed</td>
-                        <td style="padding:10px;">Compressed models (MobileNet, INT8)</td>
-                        <td style="padding:10px;">Bandwidth, power</td>
-                    </tr>
-                    <tr>
-                        <td style="padding:10px; font-weight:700; color:{COLORS['RedLine']};">TinyML</td>
-                        <td style="padding:10px;">Preprocessed features only</td>
-                        <td style="padding:10px;">Purpose-built models (DS-CNN, 200K params)</td>
-                        <td style="padding:10px;">Capacity (KB-scale SRAM)</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
+        items.append(mo.md(f"""
+**Evidence Table**
+
+| Quantity | Value | Why it matters |
+|---|---:|---|
+| Drift pressure | {silent['drift_pct']:.0f}% | {_lens['drift_driver']} |
+| Months in production | {silent['months']:.0f} | time lets drift accumulate |
+| Monitoring cadence | every {silent['cadence_weeks']:.0f} week(s) | slower cadence delays detection |
+| {_lens['silent_metric']} | {silent['quality_pct']:.1f}% | quality can move while code is fixed |
+| Code/infrastructure health | 100.0% | conventional dashboards can stay green |
         """))
 
-        # Prediction reveal
-        _pred = partD_prediction.value
-        _actual = H100_TFLOPS_FP16 / ESP32_TFLOPS
-        _pred_labels = {
-            "100x": "~100x", "10000x": "~10,000x",
-            "1000000x": "~1,000,000x", "1000000000x": "~1,000,000,000x",
-        }
-
-        if _pred == "1000000x":
-            _rev = (f"**Correct.** The compute gap is ~{_actual:,.0f}x -- "
-                    "six orders of magnitude.")
-            _rkind = "success"
-        elif _pred == "100x":
-            _rev = (f"**The gap is ~{_actual/100:.0f}x larger than your prediction.** "
-                    f"Actual: ~{_actual:,.0f}x. Each tier drops ~100x, "
-                    "compounding across three steps.")
-            _rkind = "warn"
-        elif _pred == "10000x":
-            _rev = (f"**Close but ~100x too low.** Actual: ~{_actual:,.0f}x.")
-            _rkind = "warn"
+        if silent["feasible"]:
+            items.append(mo.callout(mo.md(
+                f"**Boundary not crossed yet.** The system still clears the {_lens['quality_floor_pct']:.1f}% floor, "
+                "but the chart shows why monitoring must exist before user complaints become the detector."
+            ), kind="info"))
         else:
-            _rev = (f"**Overshot.** Actual: ~{_actual:,.0f}x (~10^6, not 10^9).")
-            _rkind = "warn"
+            items.append(mo.callout(mo.md(
+                f"**Reversible failure:** {_lens['silent_metric']} is below the {_lens['quality_floor_pct']:.1f}% floor. "
+                f"For {v1_01_profile.label}, the consequence is {_lens['silent_consequence']}."
+            ), kind="warn"))
 
-        items.append(mo.callout(mo.md(
-            f"**You predicted:** {_pred_labels.get(_pred, _pred)}  |  "
-            f"**Actual compute gap:** ~{_actual:,.0f}x"
-        ), kind="info"))
-        items.append(mo.callout(mo.md(_rev), kind=_rkind))
-
+        items.append(source_trace({
+            "chapter_anchor": "ML vs. Traditional Software; degradation equation",
+            "source_model": "Accuracy(t) ~= Accuracy_0 - lambda * D(P_t || P_0)",
+            "local_helper": "v1_01_silent_degradation",
+            "track_driver": _lens["drift_driver"],
+        }, summary="Math Peek: silent degradation model"))
+        items.append(partA_response)
+        response_payload = partA_response.value if isinstance(partA_response.value, dict) else {}
+        response = response_payload.get("silent_response")
+        if response == _lens["correct_response"]:
+            items.append(mo.callout(mo.md("**Defensible response.** You chose a monitoring/data response for a behavior change that code logs would not expose."), kind="success"))
+        elif response is not None:
+            items.append(mo.callout(mo.md(
+                f"**Reconsider the failure mode.** The evidence points to **{_lens['correct_response']}** before treating this as a normal code or capacity incident."
+            ), kind="warn"))
         return mo.vstack(items)
 
-    # ─────────────────────────────────────────────────────────────────────
-    # SYNTHESIS BUILDER
-    # ─────────────────────────────────────────────────────────────────────
+    def build_part_b():
+        items = [
+            _module_banner(
+                COLORS["OrangeLine"],
+                COLORS["OrangeL"],
+                f"Deployment Review - {v1_01_triad.stakeholder}",
+                v1_01_triad.failure_story,
+            ),
+            mo.md(f"""
+## Part B: Data, Algorithm, and Machine Are Coupled
+
+**Concept.** The same symptom can come from Data, Algorithm, or Machine. The
+first useful intervention targets the axis with the weakest margin to its
+track-specific threshold.
+
+- **Data:** {v1_01_triad.data_axis}
+- **Algorithm:** {v1_01_triad.algorithm_axis}
+- **Machine:** {v1_01_triad.machine_axis}
+            """),
+            partB_pred,
+        ]
+        if partB_pred.value is None:
+            items.append(mo.callout(mo.md("Make the D-A-M prediction first. The readiness controls stay hidden until you commit."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partB_data, partB_algorithm, partB_machine], widths="equal"))
+        diag = diagnose_triad(
+            v1_01_triad,
+            data_score_pct=partB_data.value,
+            algorithm_score_pct=partB_algorithm.value,
+            machine_score_pct=partB_machine.value,
+        )
+        compare_diag = diagnose_triad(
+            v1_01_comparison_triad,
+            data_score_pct=partB_data.value,
+            algorithm_score_pct=partB_algorithm.value,
+            machine_score_pct=partB_machine.value,
+        )
+        items.append(_readiness_chart(diag))
+
+        status_color = COLORS["GreenLine"] if diag.feasible else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            {_metric_card("Binding Axis", diag.binding_axis, "weakest margin to threshold", COLORS["RedLine"], True)}
+            {_metric_card("Primary Metric", diag.primary_metric, v1_01_profile.label, COLORS["BlueLine"])}
+            {_metric_card("Guardrail", diag.guardrail_metric, "must stay protected", COLORS["OrangeLine"])}
+            {_metric_card("Status", "PASS" if diag.feasible else "FAIL", ", ".join(diag.violations) or "no violations", status_color, True)}
+        </div>
+        """))
+
+        selected_margins = v1_01_axis_margins(diag)
+        compare_margins = v1_01_axis_margins(compare_diag)
+        items.append(mo.md(f"""
+**Diagnosis Table**
+
+| Axis | Score | {v1_01_profile.label} threshold | Margin | Meaning |
+|---|---:|---:|---:|---|
+| Data | {diag.data_score_pct:.0f}% | {diag.data_threshold_pct:.0f}% | {selected_margins['Data']:+.1f} pp | {v1_01_triad.data_axis} |
+| Algorithm | {diag.algorithm_score_pct:.0f}% | {diag.algorithm_threshold_pct:.0f}% | {selected_margins['Algorithm']:+.1f} pp | {v1_01_triad.algorithm_axis} |
+| Machine | {diag.machine_score_pct:.0f}% | {diag.machine_threshold_pct:.0f}% | {selected_margins['Machine']:+.1f} pp | {v1_01_triad.machine_axis} |
+
+**Track Comparison: Same Scores, Different Envelope**
+
+| Track | Binding axis | Primary metric | Guardrail | Data margin | Algorithm margin | Machine margin |
+|---|---|---|---|---:|---:|---:|
+| {v1_01_profile.label} | {diag.binding_axis} | {diag.primary_metric} | {diag.guardrail_metric} | {selected_margins['Data']:+.1f} | {selected_margins['Algorithm']:+.1f} | {selected_margins['Machine']:+.1f} |
+| {v1_01_comparison_profile.label} | {compare_diag.binding_axis} | {compare_diag.primary_metric} | {compare_diag.guardrail_metric} | {compare_margins['Data']:+.1f} | {compare_margins['Algorithm']:+.1f} | {compare_margins['Machine']:+.1f} |
+        """))
+
+        if diag.binding_axis != compare_diag.binding_axis:
+            items.append(mo.callout(mo.md(
+                f"**Track context changed the answer.** The selected track binds on **{diag.binding_axis}**, "
+                f"while {v1_01_comparison_profile.label} binds on **{compare_diag.binding_axis}** under the same raw scores."
+            ), kind="info"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Same binding axis, different evidence.** Both tracks bind on **{diag.binding_axis}**, but the primary metric and guardrail language differ."
+            ), kind="info"))
+
+        items.append(source_trace({
+            "chapter_anchor": "D-A-M taxonomy; samples per dollar",
+            "source_model": "Cost proportional to (Model Size * Dataset Size) / Hardware Efficiency",
+            "shared_helper": "mlsysbook_labs.triad.diagnose_triad",
+            "selected_variant": v1_01_variant.scenario_id,
+            "comparison_track": v1_01_comparison_profile.track_id,
+        }, summary="Math Peek: coupled D-A-M diagnosis"))
+
+        items.append(partB_decision)
+        decision_payload = partB_decision.value if isinstance(partB_decision.value, dict) else {}
+        decision = decision_payload.get("diagnosis")
+        if decision == diag.binding_axis:
+            items.append(mo.callout(mo.md("**Good diagnosis.** Your checkpoint matches the evidence and the selected track envelope."), kind="success"))
+        elif decision is not None:
+            items.append(mo.callout(mo.md(
+                f"**Re-check the margin.** You chose {decision}, but the current binding axis is **{diag.binding_axis}**."
+            ), kind="warn"))
+        return mo.vstack(items)
+
+    def build_part_c():
+        items = [
+            _module_banner(
+                COLORS["GreenLine"],
+                COLORS["GreenLL"],
+                f"Evidence Gate - {v1_01_triad.stakeholder}",
+                "The training run completed, but the deployment owner asks what amount system proves the artifact can run.",
+            ),
+            mo.md(f"""
+## Part C: Training and Inference Create Different Amount Systems
+
+**Concept.** Training evidence is not inference evidence. Training asks whether
+the system can learn within a throughput or cost envelope. Inference asks whether
+the learned artifact can serve within a request, sensor-window, or device budget.
+
+For **{v1_01_profile.label}**, the inference gate is **{_lens['infer_amount_label']}**
+plus **{_lens['guardrail_amount_label']}**.
+            """),
+            partC_pred,
+        ]
+        if partC_pred.value is None:
+            items.append(mo.callout(mo.md("Commit to an evidence prediction before changing model scale or operating pressure."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partC_model_scale, partC_pressure], widths="equal"))
+        amounts = v1_01_amount_system(_lens, partC_model_scale.value, partC_pressure.value)
+        labels = [
+            "Training amount",
+            "Inference primary",
+            "Inference guardrail",
+        ]
+        pct_of_limit = [
+            100 * amounts["training_amount"] / amounts["training_limit"],
+            100 * amounts["inference_amount"] / amounts["inference_limit"],
+            100 * amounts["guardrail_amount"] / amounts["guardrail_limit"],
+        ]
+        colors = [
+            COLORS["GreenLine"] if amounts["training_pass"] else COLORS["RedLine"],
+            COLORS["GreenLine"] if amounts["inference_pass"] else COLORS["RedLine"],
+            COLORS["GreenLine"] if amounts["guardrail_pass"] else COLORS["RedLine"],
+        ]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=labels, y=pct_of_limit, marker_color=colors, opacity=0.9, name="Percent of limit"))
+        fig.add_trace(go.Scatter(x=labels, y=[100, 100, 100], mode="lines+markers", name="limit", line=dict(color=COLORS["OrangeLine"], dash="dash")))
+        fig.update_layout(
+            height=340,
+            yaxis=dict(title="% of allowed limit", gridcolor="#f1f5f9", range=[0, max(130, max(pct_of_limit) + 15)]),
+            legend=dict(orientation="h", y=1.12, x=0),
+            margin=dict(l=60, r=20, t=60, b=40),
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+
+        ready_color = COLORS["GreenLine"] if amounts["deployment_ready"] else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            {_metric_card("Training Evidence", "PASS" if amounts["training_pass"] else "FAIL", _lens["train_amount_label"], COLORS["GreenLine"] if amounts["training_pass"] else COLORS["RedLine"], True)}
+            {_metric_card("Inference Evidence", "PASS" if amounts["inference_pass"] else "FAIL", _lens["infer_amount_label"], COLORS["GreenLine"] if amounts["inference_pass"] else COLORS["RedLine"], True)}
+            {_metric_card("Guardrail", "PASS" if amounts["guardrail_pass"] else "FAIL", _lens["guardrail_amount_label"], COLORS["GreenLine"] if amounts["guardrail_pass"] else COLORS["RedLine"], True)}
+            {_metric_card("Deployable", "YES" if amounts["deployment_ready"] else "NO", _lens["deployment_failure"], ready_color, True)}
+        </div>
+        """))
+
+        items.append(mo.md(f"""
+**Amount-System Evidence**
+
+| Stage | Quantity | Value | Limit | Unit | Decision |
+|---|---|---:|---:|---|---|
+| Training | {_lens['train_amount_label']} | {amounts['training_amount']:.1f} | {amounts['training_limit']:.1f} | {_lens['train_unit']} | {"PASS" if amounts['training_pass'] else "FAIL"} |
+| Inference | {_lens['infer_amount_label']} | {amounts['inference_amount']:.1f} | {amounts['inference_limit']:.1f} | {_lens['infer_unit']} | {"PASS" if amounts['inference_pass'] else "FAIL"} |
+| Inference guardrail | {_lens['guardrail_amount_label']} | {amounts['guardrail_amount']:.1f} | {amounts['guardrail_limit']:.1f} | {_lens['guardrail_unit']} | {"PASS" if amounts['guardrail_pass'] else "FAIL"} |
+        """))
+
+        if partC_pred.value == "inference_evidence":
+            items.append(mo.callout(mo.md("**Correct evidence standard.** Deployment needs runtime inference evidence, not only a training or offline score."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                f"**Training is not the deployment gate.** For {v1_01_profile.label}, the memo must attach runtime evidence for {_lens['infer_amount_label']} and {_lens['guardrail_amount_label']}."
+            ), kind="warn"))
+
+        items.append(source_trace({
+            "chapter_anchor": "Inference footnote; Iron Law of ML Systems; training-serving divide",
+            "source_model": "T ~= D_vol/BW + O/(R_peak * eta_hw) + L_lat",
+            "local_helper": "v1_01_amount_system",
+            "track_inference_gate": _lens["infer_amount_label"],
+        }, summary="Math Peek: training amount vs inference amount"))
+
+        items.append(partC_evidence)
+        evidence_payload = partC_evidence.value if isinstance(partC_evidence.value, dict) else {}
+        evidence = evidence_payload.get("evidence_packet")
+        if evidence == _lens["correct_evidence"]:
+            items.append(mo.callout(mo.md("**Memo-ready evidence.** You selected a packet that measures the deployed artifact in its operating envelope."), kind="success"))
+        elif evidence is not None:
+            items.append(mo.callout(mo.md(
+                f"**Evidence gap.** Attach **{_lens['correct_evidence']}** before treating the artifact as deployable."
+            ), kind="warn"))
+        return mo.vstack(items)
+
+    def build_part_d():
+        items = [
+            _module_banner(
+                COLORS["OrangeLine"],
+                COLORS["OrangeL"],
+                f"Lifecycle Budget - {v1_01_triad.stakeholder}",
+                "The next lifecycle loop has one engineering budget. Choose the first defensible fix and name how it could be invalidated.",
+            ),
+            mo.md("""
+## Part D: Lifecycle Decisions Need a First Defensible Fix
+
+**Concept.** Lifecycle decisions are not generic improvement lists. The first fix
+must relieve the current binding axis under the selected track's constraints and
+must include validation evidence that could overturn the choice.
+            """),
+            partD_pred,
+        ]
+        if partD_pred.value is None:
+            items.append(mo.callout(mo.md("Predict the lifecycle budget strategy before opening the intervention frontier."), kind="warn"))
+            return mo.vstack(items)
+
+        items.append(mo.hstack([partD_data_budget, partD_algorithm_budget, partD_machine_budget, partD_selected], widths="equal"))
+        frontier = intervention_frontier(
+            v1_01_triad,
+            data_budget_pct=partD_data_budget.value,
+            algorithm_budget_pct=partD_algorithm_budget.value,
+            machine_budget_pct=partD_machine_budget.value,
+            selected_intervention=partD_selected.value,
+        )
+        axes = ["Data", "Algorithm", "Machine"]
+        scores = [frontier.data_score_pct, frontier.algorithm_score_pct, frontier.machine_score_pct]
+        colors = [COLORS["GreenLine"] if axis == frontier.best_intervention else COLORS["BlueLine"] for axis in axes]
+        fig = go.Figure()
+        fig.add_trace(go.Bar(x=axes, y=scores, marker_color=colors, opacity=0.9, name="Post-intervention readiness"))
+        fig.update_layout(
+            height=330,
+            yaxis=dict(title="Post-intervention readiness (%)", gridcolor="#f1f5f9", range=[0, 105]),
+            margin=dict(l=60, r=20, t=40, b=40),
+        )
+        apply_plotly_theme(fig)
+        items.append(mo.as_html(fig))
+
+        status_color = COLORS["GreenLine"] if frontier.feasible else COLORS["RedLine"]
+        items.append(mo.Html(f"""
+        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
+            {_metric_card("Selected", frontier.selected_intervention, f"margin {frontier.selected_score_pct:+.1f} pp", COLORS["OrangeLine"], True)}
+            {_metric_card("Best Axis", frontier.best_intervention, f"margin {frontier.best_score_pct:+.1f} pp", COLORS["GreenLine"])}
+            {_metric_card("Binding After Fix", frontier.binding_axis, "remaining weakest axis", COLORS["RedLine"])}
+            {_metric_card("Status", "PASS" if frontier.feasible else "FAIL", "all thresholds met" if frontier.feasible else "constraint remains", status_color, True)}
+        </div>
+        """))
+
+        items.append(mo.md(f"""
+**Frontier Table**
+
+| Axis | Budget | Post-score | Interpretation |
+|---|---:|---:|---|
+| Data | {frontier.data_budget_pct:.0f}% | {frontier.data_score_pct:.1f}% | {v1_01_triad.data_axis} |
+| Algorithm | {frontier.algorithm_budget_pct:.0f}% | {frontier.algorithm_score_pct:.1f}% | {v1_01_triad.algorithm_axis} |
+| Machine | {frontier.machine_budget_pct:.0f}% | {frontier.machine_score_pct:.1f}% | {v1_01_triad.machine_axis} |
+
+Rejected alternatives for the selected intervention: {", ".join(frontier.rejected_alternatives)}.
+        """))
+
+        if not frontier.feasible:
+            items.append(mo.callout(mo.md(
+                f"**Reversible lifecycle failure:** this budget leaves **{frontier.binding_axis}** below threshold. "
+                "Change the budget or selected intervention until the first fix is defensible."
+            ), kind="warn"))
+        elif frontier.selected_intervention != frontier.best_intervention:
+            items.append(mo.callout(mo.md(
+                f"**Defend carefully.** The selected fix is {frontier.selected_intervention}, but the frontier says {frontier.best_intervention} has the strongest margin."
+            ), kind="warn"))
+        else:
+            items.append(mo.callout(mo.md("**Defensible first fix.** The selected intervention matches the strongest current frontier evidence."), kind="success"))
+
+        if partD_pred.value == "weakest":
+            items.append(mo.callout(mo.md("**Correct principle.** Spend first where the constraint is binding, then validate that the bottleneck did not migrate."), kind="success"))
+        else:
+            items.append(mo.callout(mo.md(
+                "**Budget follows diagnosis.** Even spending, hardware-first spending, or architecture-first spending can miss the binding axis."
+            ), kind="warn"))
+
+        items.append(partD_validation)
+        items.append(source_trace({
+            "chapter_anchor": "ML lifecycle; D-A-M bottlenecks migrate; five-pillar ownership",
+            "shared_helper": "mlsysbook_labs.triad.intervention_frontier",
+            "validation_evidence": partD_validation.value,
+            "track_guardrail": v1_01_triad.guardrail_metric,
+        }, summary="Math Peek: first fix inside the lifecycle loop"))
+        return mo.vstack(items)
 
     def build_synthesis():
-        _compute_ratio = H100_TFLOPS_FP16 / ESP32_TFLOPS
-        _mem_ratio = RESNET50_SIZE_MB * 1024 / ESP32_RAM_KB
-        _ridge_point = H100_TFLOPS_FP16 * 1000 / H100_BW_GBS
-
-        # Persist to Design Ledger when student writes a decision
-        if synth_decision_input.value:
-            ledger.save(chapter=1, design={
-                "insight": synth_decision_input.value,
-                "bottleneck_at_batch1": "Memory",
-                "compute_ratio_h100_esp32": f"{_compute_ratio:,.0f}x",
-                "memory_ratio_resnet50_esp32": f"{_mem_ratio:.0f}x",
-            })
-
+        silent = v1_01_silent_degradation(_lens, partA_drift.value, partA_months.value, partA_cadence.value)
+        diag = diagnose_triad(
+            v1_01_triad,
+            data_score_pct=partB_data.value,
+            algorithm_score_pct=partB_algorithm.value,
+            machine_score_pct=partB_machine.value,
+        )
+        amounts = v1_01_amount_system(_lens, partC_model_scale.value, partC_pressure.value)
+        frontier = intervention_frontier(
+            v1_01_triad,
+            data_budget_pct=partD_data_budget.value,
+            algorithm_budget_pct=partD_algorithm_budget.value,
+            machine_budget_pct=partD_machine_budget.value,
+            selected_intervention=partD_selected.value,
+        )
+        diagnosis_payload = partB_decision.value if isinstance(partB_decision.value, dict) else {}
+        evidence_payload = partC_evidence.value if isinstance(partC_evidence.value, dict) else {}
+        response_payload = partA_response.value if isinstance(partA_response.value, dict) else {}
+        diagnosis_value = diagnosis_payload.get("diagnosis")
+        evidence_value = evidence_payload.get("evidence_packet")
+        response_value = response_payload.get("silent_response")
         return mo.vstack([
+            mo.md("""
+## Synthesis: Triad Diagnosis Memo
+
+Record one memo that connects silent model behavior, D-A-M diagnosis,
+training/inference evidence, and the first lifecycle fix.
+            """),
+            synthesis_risk,
             mo.Html(f"""
-            <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                        border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                    Key Takeaways
+            <div style="border:1px solid #d9dee8; border-left:4px solid {COLORS['BlueLine']};
+                        border-radius:8px; background:white; padding:18px 22px; margin:14px 0;">
+                <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
+                            text-transform:uppercase; letter-spacing:0.1em; margin-bottom:8px;">
+                    Memo Snapshot
                 </div>
-                <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                    <div style="margin-bottom: 10px;">
-                        <strong>1. Diagnosis precedes investment.</strong>
-                        The D-A-M triad is a diagnostic framework: a system performing poorly
-                        cannot be fixed by throwing resources at the wrong axis. A recommendation
-                        system with stale data gains 0% from 4x more GPUs.
-                    </div>
-                    <div style="margin-bottom: 10px;">
-                        <strong>2. The Iron Law reveals the binding constraint.</strong>
-                        At batch=1, ResNet-50 on H100 is memory-bound
-                        (AI ~40 FLOPs/Byte << Ridge Point ~{_ridge_point:.0f} FLOPs/Byte).
-                        Doubling compute yields less than 10% latency improvement.
-                    </div>
-                    <div>
-                        <strong>3. The deployment spectrum spans ~{_compute_ratio:,.0f}x in compute.</strong>
-                        ResNet-50 is infeasible on ESP32 by ~{_mem_ratio:.0f}x in memory.
-                        Each deployment tier requires architecturally different models --
-                        the tiers exist because physics creates discrete constraints.
-                    </div>
-                </div>
+                <p><strong>Track:</strong> {v1_01_profile.label}</p>
+                <p><strong>Silent behavior evidence:</strong> {_lens['silent_metric']} is {silent['quality_pct']:.1f}% against a {silent['floor_pct']:.1f}% floor; first response: {response_value or 'not selected'}.</p>
+                <p><strong>D-A-M diagnosis:</strong> current evidence binds on {diag.binding_axis}; checkpoint diagnosis: {diagnosis_value or 'not selected'}.</p>
+                <p><strong>Training vs inference:</strong> training evidence is {"PASS" if amounts['training_pass'] else "FAIL"}, inference evidence is {"PASS" if amounts['inference_pass'] else "FAIL"}, guardrail evidence is {"PASS" if amounts['guardrail_pass'] else "FAIL"}; packet: {evidence_value or 'not selected'}.</p>
+                <p><strong>First fix:</strong> defend {frontier.selected_intervention}; reject {', '.join(frontier.rejected_alternatives)}; validate with {partD_validation.value}.</p>
+                <p><strong>Carry-forward risk:</strong> {synthesis_risk.value or 'not selected'}</p>
             </div>
             """),
-
-            mo.Html(f"""
-            <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        What's Next
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Lab 02: The Physics of Deployment</strong> -- deepens the Iron Law.
-                        Part A shows why a $2M H100 upgrade yielded only 8% latency improvement.
-                        Part B shows where the speed of light makes cloud inference physically
-                        impossible.
-                    </div>
-                </div>
-                <div style="flex: 1; min-width: 280px; background: white;
-                            border: 1px solid {COLORS['Border']}; border-radius: 12px;
-                            padding: 20px 24px;">
-                    <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                                text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                        Textbook Connection
-                    </div>
-                    <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                        <strong>Read:</strong> the Introduction chapter for the D-A-M framework,
-                        the Iron Law section (Ch. 1) for the full Iron Law derivation,
-                        the Deployment Spectrum section (Ch. 1) for the hardware tier table.
-                        <br/><strong>Build:</strong> TinyTorch Module 01 -- implement the D-A-M diagnostic framework and Iron Law calculator from scratch.
-                    </div>
-                </div>
-            </div>
-            """),
-
-            mo.accordion({
-                "Self-Assessment: Can you answer these?": mo.md("""
-1. A vision system has 94% accuracy but 340 ms latency (SLA: 100 ms). Which D-A-M axis is binding?
-2. Why does doubling H100 compute yield <10% latency improvement for ResNet-50 at batch=1?
-3. ResNet-50 requires ~49 MB in FP16. The ESP32 has 512 KB. Can INT8 quantization fix this?
-
-*If you cannot answer all three from memory, revisit Parts A, B, and C.*
-""")
-            }),
-
-            mo.md("---"),
-            mo.md("### Decision Log"),
-            mo.md("Record the single most important insight from this lab. "
-                   "This entry carries forward to Lab 02 and beyond via the Design Ledger."),
-            synth_decision_ui,
+            mo.callout(mo.md(
+                "**Chapter invariant.** A machine learning system does what its data, arithmetic, and hardware permit. "
+                "The memo is defensible only if the selected evidence names which quantity changed and which constraint now binds."
+            ), kind="info"),
         ])
 
-    # ─────────────────────────────────────────────────────────────────────
-    # COMPOSE TABS
-    # ─────────────────────────────────────────────────────────────────────
-
-    tabs = mo.ui.tabs({
-        "Part A -- Three Axes, One System":    build_part_a(),
-        "Part B -- The Iron Law Surprise":     build_part_b(),
-        "Part C -- The Triad Across Targets":  build_part_c(),
-        "Part D -- The Deployment Spectrum":    build_part_d(),
-        "Synthesis":                            build_synthesis(),
+    _tabs = mo.ui.tabs({
+        "Part A: Silent Behavior": build_part_a(),
+        "Part B: D-A-M Diagnosis": build_part_b(),
+        "Part C: Training vs Inference": build_part_c(),
+        "Part D: First Fix": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
-    tabs
+    _tabs
     return
 
 
-# ═══════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═══════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# ZONE D: LEDGER HUD AND REPORT
+# ===========================================================================
 
 
-# ─── CELL 5: LEDGER HUD ───────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo):
-    _chapter = ledger._state.history.get(1, {})
-    _track = ledger._state.track or "not set"
+def _(
+    diagnose_triad,
+    intervention_frontier,
+    ledger,
+    mo,
+    partA_cadence,
+    partA_drift,
+    partA_months,
+    partA_pred,
+    partA_response,
+    partB_algorithm,
+    partB_data,
+    partB_decision,
+    partB_machine,
+    partB_pred,
+    partC_evidence,
+    partC_model_scale,
+    partC_pred,
+    partC_pressure,
+    partD_algorithm_budget,
+    partD_data_budget,
+    partD_machine_budget,
+    partD_pred,
+    partD_selected,
+    partD_validation,
+    synthesis_risk,
+    v1_01_amount_system,
+    v1_01_profile,
+    v1_01_silent_degradation,
+    v1_01_track_lens,
+    v1_01_triad,
+    v1_01_variant,
+):
+    _lens = v1_01_track_lens(v1_01_profile.track_id)
+    _silent = v1_01_silent_degradation(_lens, partA_drift.value, partA_months.value, partA_cadence.value)
+    _diag = diagnose_triad(
+        v1_01_triad,
+        data_score_pct=partB_data.value,
+        algorithm_score_pct=partB_algorithm.value,
+        machine_score_pct=partB_machine.value,
+    )
+    _amounts = v1_01_amount_system(_lens, partC_model_scale.value, partC_pressure.value)
+    _frontier = intervention_frontier(
+        v1_01_triad,
+        data_budget_pct=partD_data_budget.value,
+        algorithm_budget_pct=partD_algorithm_budget.value,
+        machine_budget_pct=partD_machine_budget.value,
+        selected_intervention=partD_selected.value,
+    )
+    _silent_payload = partA_response.value if isinstance(partA_response.value, dict) else {}
+    _diagnosis_payload = partB_decision.value if isinstance(partB_decision.value, dict) else {}
+    _evidence_payload = partC_evidence.value if isinstance(partC_evidence.value, dict) else {}
+    _silent_response = _silent_payload.get("silent_response")
+    _diagnosis_value = _diagnosis_payload.get("diagnosis")
+    _evidence_value = _evidence_payload.get("evidence_packet")
+    if (
+        partA_pred.value is not None
+        and _silent_response is not None
+        and partB_pred.value is not None
+        and _diagnosis_value is not None
+        and partC_pred.value is not None
+        and _evidence_value is not None
+        and partD_pred.value is not None
+        and synthesis_risk.value
+    ):
+        ledger.save(chapter=1, design={
+            "chapter": "v1_01",
+            "track_id": v1_01_profile.track_id,
+            "scenario_id": v1_01_variant.scenario_id,
+            "hardware_ref": v1_01_triad.hardware_ref,
+            "model_ref": v1_01_triad.model_ref,
+            "completed": True,
+            "silent_degradation_prediction": partA_pred.value,
+            "silent_failure_response": _silent_response,
+            "observed_quality_pct": _silent["quality_pct"],
+            "predicted_binding_axis": partB_pred.value,
+            "triad_final_diagnosis": _diagnosis_value,
+            "computed_binding_axis": _diag.binding_axis,
+            "training_inference_prediction": partC_pred.value,
+            "selected_evidence_packet": _evidence_value,
+            "deployment_ready": _amounts["deployment_ready"],
+            "budget_prediction": partD_pred.value,
+            "selected_intervention": _frontier.selected_intervention,
+            "best_intervention": _frontier.best_intervention,
+            "rejected_alternatives": _frontier.rejected_alternatives,
+            "validation_evidence": partD_validation.value,
+            "carry_forward_risk": synthesis_risk.value,
+        })
 
     mo.Html(f"""
     <div class="lab-hud">
         <span class="hud-label">LAB</span>
-        <span class="hud-value">01 &middot; The AI Triad</span>
-        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-value">01 &middot; AI Triad</span>
         <span class="hud-label">TRACK</span>
-        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">CHAPTER&nbsp;1</span>
-        <span class="hud-value">Introduction to ML Systems</span>
-        <span style="color:{COLORS['Border']};">|</span>
+        <span class="hud-value">{v1_01_profile.label}</span>
+        <span style="flex:1;"></span>
+        <span class="hud-label">ARTIFACT</span>
+        <span class="hud-value">{v1_01_triad.report_artifact}</span>
         <span class="hud-label">STATUS</span>
-        <span class="hud-active">active</span>
+        <span class="hud-active">ACTIVE</span>
     </div>
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    build_lab_report,
+    diagnose_triad,
+    intervention_frontier,
+    mo,
+    partA_cadence,
+    partA_drift,
+    partA_months,
+    partA_pred,
+    partA_response,
+    partB_algorithm,
+    partB_data,
+    partB_decision,
+    partB_machine,
+    partB_pred,
+    partC_evidence,
+    partC_model_scale,
+    partC_pred,
+    partC_pressure,
+    partD_algorithm_budget,
+    partD_data_budget,
+    partD_machine_budget,
+    partD_pred,
+    partD_selected,
+    partD_validation,
+    report_export_panel,
+    synthesis_risk,
+    v1_01_amount_system,
+    v1_01_comparison_profile,
+    v1_01_metadata,
+    v1_01_profile,
+    v1_01_silent_degradation,
+    v1_01_track_lens,
+    v1_01_triad,
+    v1_01_variant,
+):
+    _lens = v1_01_track_lens(v1_01_profile.track_id)
+    _silent = v1_01_silent_degradation(_lens, partA_drift.value, partA_months.value, partA_cadence.value)
+    _diag = diagnose_triad(
+        v1_01_triad,
+        data_score_pct=partB_data.value,
+        algorithm_score_pct=partB_algorithm.value,
+        machine_score_pct=partB_machine.value,
+    )
+    _amounts = v1_01_amount_system(_lens, partC_model_scale.value, partC_pressure.value)
+    _frontier = intervention_frontier(
+        v1_01_triad,
+        data_budget_pct=partD_data_budget.value,
+        algorithm_budget_pct=partD_algorithm_budget.value,
+        machine_budget_pct=partD_machine_budget.value,
+        selected_intervention=partD_selected.value,
+    )
+    _silent_payload = partA_response.value if isinstance(partA_response.value, dict) else {}
+    _diagnosis_payload = partB_decision.value if isinstance(partB_decision.value, dict) else {}
+    _evidence_payload = partC_evidence.value if isinstance(partC_evidence.value, dict) else {}
+    _silent_response = _silent_payload.get("silent_response")
+    _diagnosis_value = _diagnosis_payload.get("diagnosis")
+    _evidence_value = _evidence_payload.get("evidence_packet")
+    _incomplete = []
+    if partA_pred.value is None:
+        _incomplete.append("Part A silent-degradation prediction")
+    if _silent_response is None:
+        _incomplete.append("Part A first response")
+    if partB_pred.value is None:
+        _incomplete.append("Part B D-A-M prediction")
+    if _diagnosis_value is None:
+        _incomplete.append("Part B final binding-axis diagnosis")
+    if partC_pred.value is None:
+        _incomplete.append("Part C training/inference prediction")
+    if _evidence_value is None:
+        _incomplete.append("Part C evidence packet")
+    if partD_pred.value is None:
+        _incomplete.append("Part D lifecycle-budget prediction")
+    if not synthesis_risk.value:
+        _incomplete.append("Synthesis carry-forward risk")
+
+    _report = build_lab_report(
+        v1_01_metadata,
+        track=v1_01_profile.label,
+        scenario=v1_01_variant.workload_summary,
+        learning_objectives=(
+            "Explain why learned model behavior can degrade without code changes.",
+            "Diagnose the binding Data, Algorithm, or Machine axis under a track-specific envelope.",
+            "Separate training evidence from inference evidence using different amount systems.",
+            "Defend a first lifecycle fix with rejected alternatives, validation evidence, and carry-forward risk.",
+        ),
+        predictions={
+            "silent_degradation": partA_pred.value,
+            "pre_evidence_binding_axis": partB_pred.value,
+            "final_binding_axis_diagnosis": _diagnosis_value,
+            "training_vs_inference_evidence": partC_pred.value,
+            "lifecycle_budget_strategy": partD_pred.value,
+        },
+        knob_settings={
+            "drift_pressure_pct": partA_drift.value,
+            "months_in_production": partA_months.value,
+            "monitoring_cadence": partA_cadence.value,
+            "data_score_pct": partB_data.value,
+            "algorithm_score_pct": partB_algorithm.value,
+            "machine_score_pct": partB_machine.value,
+            "model_scale_pct": partC_model_scale.value,
+            "operating_pressure_pct": partC_pressure.value,
+            "data_budget_pct": partD_data_budget.value,
+            "algorithm_budget_pct": partD_algorithm_budget.value,
+            "machine_budget_pct": partD_machine_budget.value,
+            "selected_intervention": partD_selected.value,
+            "validation_evidence": partD_validation.value,
+            "carry_forward_risk": synthesis_risk.value,
+        },
+        evidence_summary={
+            "hardware_ref": v1_01_triad.hardware_ref,
+            "model_ref": v1_01_triad.model_ref,
+            "silent_metric": _lens["silent_metric"],
+            "observed_quality_pct": _silent["quality_pct"],
+            "quality_floor_pct": _silent["floor_pct"],
+            "silent_failure_response": _silent_response,
+            "binding_axis": _diag.binding_axis,
+            "diagnosis_feasible": _diag.feasible,
+            "violations": _diag.violations,
+            "comparison_track": v1_01_comparison_profile.label,
+            "training_amount": _amounts["training_amount"],
+            "training_pass": _amounts["training_pass"],
+            "inference_amount": _amounts["inference_amount"],
+            "inference_pass": _amounts["inference_pass"],
+            "guardrail_amount": _amounts["guardrail_amount"],
+            "guardrail_pass": _amounts["guardrail_pass"],
+            "selected_evidence_packet": _evidence_value,
+            "frontier_binding_axis": _frontier.binding_axis,
+            "selected_intervention": _frontier.selected_intervention,
+            "best_intervention": _frontier.best_intervention,
+            "rejected_alternatives": _frontier.rejected_alternatives,
+        },
+        final_decision=(
+            f"Defend {_frontier.selected_intervention} first for {v1_01_triad.label}; "
+            f"diagnosis binds on {_diag.binding_axis}; attach {_evidence_value or 'runtime evidence'}; "
+            f"validate with {partD_validation.value}; reject {', '.join(_frontier.rejected_alternatives)}."
+        ),
+        big_takeaways=(
+            "ML behavior is learned from data and can silently degrade while code remains fixed.",
+            "Data, Algorithm, and Machine are coupled; track thresholds decide which axis binds.",
+            "Training success and inference readiness use different units and evidence.",
+            "The lifecycle memo should name a first fix, rejected alternatives, validation evidence, and a carry-forward risk.",
+        ),
+        reflections={
+            "report_artifact": v1_01_triad.report_artifact,
+            "data_axis": v1_01_triad.data_axis,
+            "algorithm_axis": v1_01_triad.algorithm_axis,
+            "machine_axis": v1_01_triad.machine_axis,
+            "primary_metric": v1_01_triad.primary_metric,
+            "guardrail_metric": v1_01_triad.guardrail_metric,
+            "validation_tests": v1_01_triad.validation_tests,
+        },
+        residual_risk=synthesis_risk.value or (
+            f"The selected first fix may be invalidated if {partD_validation.value} fails "
+            f"or if {_frontier.binding_axis} remains below threshold after implementation."
+        ),
+        source_trace={
+            "track_id": v1_01_profile.track_id,
+            "scenario_id": v1_01_variant.scenario_id,
+            "hardware_ref": v1_01_variant.hardware_ref,
+            "model_ref": v1_01_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.triad",
+            "local_helpers": ("v1_01_silent_degradation", "v1_01_amount_system"),
+            "chapter_formulas": ("Accuracy(t) ~= Accuracy_0 - lambda * D(P_t || P_0)", "T ~= D_vol/BW + O/(R_peak * eta_hw) + L_lat"),
+            "source_policy": v1_01_profile.source_policy,
+        },
+        result_snapshot={
+            "triad_profile": v1_01_triad,
+            "silent_degradation": _silent,
+            "diagnosis": _diag,
+            "amount_system": _amounts,
+            "intervention_frontier": _frontier,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
+    if _incomplete:
+        _status = mo.vstack([
+            mo.md("## Report Status"),
+            mo.callout(
+                mo.md(
+                    "Finish the required predictions and decisions before downloading "
+                    "the Lab 01 triad diagnosis memo."
+                ),
+                kind="warn",
+            ),
+            report_export_panel(_report),
+        ])
+    else:
+        _status = mo.vstack([
+            mo.md("## Download Report"),
+            mo.callout(
+                mo.md(
+                    "This V1-01 diagnosis memo is generated locally from the selected track, "
+                    "your inputs, and the computed evidence."
+                ),
+                kind="info",
+            ),
+            report_export_panel(_report),
+        ])
+
+    _status
     return
 
 

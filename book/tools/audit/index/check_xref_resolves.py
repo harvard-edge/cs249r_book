@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 book-index-xref-resolves hook.
 
 Fails if any \index{X|see{Y}} or \index{X|seealso{Y}} target Y doesn't

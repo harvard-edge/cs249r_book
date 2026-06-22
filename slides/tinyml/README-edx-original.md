@@ -17,7 +17,7 @@ TinyML on edX is designed in four chapters across 3 courses as described below. 
 
 ## The TinyMLx Team:
 ### Course Instructors
-+ [Vijay Janapa Reddi](https://scholar.harvard.edu/vijay-janapa-reddi)
++ [Vijay Janapa Reddi](https://vijay.seas.harvard.edu)
 + [Laurence Maroney](http://www.laurencemoroney.com/)
 + [Pete Warden](https://petewarden.com/)
 + [Lara Suzuki](https://larissasuzuki.com/)

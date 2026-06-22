@@ -102,8 +102,17 @@ def _line_of(text: str, offset: int) -> int:
 
 
 def _iter_svgs(contents_dir: Path) -> Iterator[Path]:
-    if contents_dir.is_dir():
-        yield from contents_dir.rglob('*.svg')
+    # Skip Quarto's per-chapter render output under `<chapter>_files/`.
+    # Those SVGs are gitignored (.gitignore: `book/quarto/**/*_files/`),
+    # regenerated on every render, and already sanitized in the final
+    # EPUB by book/quarto/scripts/epub_postprocess.py. The source-level
+    # check should only inspect authored SVGs.
+    if not contents_dir.is_dir():
+        return
+    for svg in contents_dir.rglob('*.svg'):
+        if any(p.endswith('_files') for p in svg.parts):
+            continue
+        yield svg
 
 
 def _iter_bibs(quarto_dir: Path) -> Iterator[Path]:

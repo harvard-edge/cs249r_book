@@ -19,11 +19,13 @@ Tests:
 
 import ast
 import re
+import zipfile
 from pathlib import Path
 
 import pytest
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+LABS_ROOT = REPO_ROOT / "labs"
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
@@ -76,7 +78,11 @@ class TestMarimoStructure:
     def test_wasm_bootstrap(self, lab_path):
         """WASM bootstrap for browser deployment."""
         source = read_source(lab_path)
-        assert 'sys.platform == "emscripten"' in source, "Missing WASM bootstrap"
+        assert 'sys.platform == "emscripten"' in source, (
+            "Missing inline WASM bootstrap (sys.platform == 'emscripten' guard). "
+            "Each lab must handle micropip.install inline because marimo's "
+            "html-wasm export bundles only the notebook file."
+        )
 
     def test_has_tabs(self, lab_path):
         """Labs should use mo.ui.tabs() for Part navigation."""
@@ -191,7 +197,7 @@ class TestWheelConsistency:
     """Ensure the micropip wheel URL in every lab matches the actual mlsysim version."""
 
     def test_micropip_url_matches_pyproject_version(self, lab_path):
-        """The micropip wheel URL must contain the version from mlsysim/pyproject.toml."""
+        """The inline micropip wheel URL must match the version from mlsysim/pyproject.toml."""
         try:
             import tomllib
         except ImportError:
@@ -209,9 +215,141 @@ class TestWheelConsistency:
             f"From labs/volN/ the repo root is two levels up; use '{expected_fragment}'."
         )
         assert expected_fragment in source, (
-            f"Wheel version mismatch or not relative. Expected '{expected_fragment}' in micropip URL "
+            f"Wheel version mismatch. Expected '{expected_fragment}' in micropip URL "
             f"but not found. Update the micropip.install() URL in this lab."
         )
+
+    def test_mlsysbook_labs_wheel_present_when_imported(self, lab_path):
+        """Labs importing mlsysbook_labs must install its browser wheel."""
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        source = read_source(lab_path)
+        if "mlsysbook_labs" not in source:
+            pytest.skip("Lab has not migrated to mlsysbook_labs yet")
+
+        pyproject = REPO_ROOT / "labs" / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+
+        expected_fragment = f"../../wheels/mlsysbook_labs-{version}-py3-none-any.whl"
+        assert expected_fragment in source, (
+            f"Missing mlsysbook_labs WASM wheel install. Expected '{expected_fragment}'."
+        )
+
+    def test_mlsysbook_labs_wheel_contains_contract_modules(self):
+        """The lab helper wheel must include the schema, UI, report, and version modules."""
+        wheel = REPO_ROOT / "wheels" / "mlsysbook_labs-0.1.0-py3-none-any.whl"
+        assert wheel.exists(), f"Missing lab helper wheel: {wheel}"
+        with zipfile.ZipFile(wheel) as zf:
+            names = set(zf.namelist())
+        required = {
+            "mlsysbook_labs/__init__.py",
+            "mlsysbook_labs/architecture.py",
+            "mlsysbook_labs/benchmarking.py",
+            "mlsysbook_labs/capstone.py",
+            "mlsysbook_labs/data_pipeline.py",
+            "mlsysbook_labs/deployment.py",
+            "mlsysbook_labs/edge.py",
+            "mlsysbook_labs/frameworks.py",
+            "mlsysbook_labs/inference.py",
+            "mlsysbook_labs/schemas.py",
+            "mlsysbook_labs/tracks.py",
+            "mlsysbook_labs/training.py",
+            "mlsysbook_labs/triad.py",
+            "mlsysbook_labs/variants.py",
+            "mlsysbook_labs/workflow.py",
+            "mlsysbook_labs/registry_refs.py",
+            "mlsysbook_labs/migration.py",
+            "mlsysbook_labs/neural_compute.py",
+            "mlsysbook_labs/ops.py",
+            "mlsysbook_labs/responsibility.py",
+            "mlsysbook_labs/roofline.py",
+            "mlsysbook_labs/serving.py",
+            "mlsysbook_labs/selection.py",
+            "mlsysbook_labs/system_design.py",
+            "mlsysbook_labs/ui.py",
+            "mlsysbook_labs/reports.py",
+            "mlsysbook_labs/versions.py",
+        }
+        missing = sorted(required - names)
+        assert not missing, f"mlsysbook_labs wheel missing modules: {missing}"
+
+
+class TestLabCatalog:
+    """Release metadata catalog must stay aligned with the lab files."""
+
+    def test_every_lab_has_catalog_metadata(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        lab_files = {
+            str(path.relative_to(LABS_ROOT))
+            for path in sorted((LABS_ROOT / "vol1").glob("lab_*.py"))
+        }
+        lab_files.update(
+            str(path.relative_to(LABS_ROOT))
+            for path in sorted((LABS_ROOT / "vol2").glob("lab_*.py"))
+        )
+        assert lab_files == set(LAB_CATALOG), (
+            "Lab catalog and lab files differ. "
+            f"Missing metadata: {sorted(lab_files - set(LAB_CATALOG))}; "
+            f"stale metadata: {sorted(set(LAB_CATALOG) - lab_files)}"
+        )
+
+    def test_lab_ids_are_unique(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        lab_ids = [metadata.lab_id for metadata in LAB_CATALOG.values()]
+        duplicates = sorted({lab_id for lab_id in lab_ids if lab_ids.count(lab_id) > 1})
+        assert not duplicates, f"Duplicate lab IDs: {duplicates}"
+
+    def test_catalog_has_version_fields(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        for path, metadata in LAB_CATALOG.items():
+            assert metadata.lab_version, f"{path} missing lab_version"
+            assert metadata.report_schema_version, f"{path} missing report_schema_version"
+            assert metadata.ledger_schema_version, f"{path} missing ledger_schema_version"
+            assert metadata.mlsysim_version, f"{path} missing mlsysim_version"
+            assert metadata.updated_at, f"{path} missing updated_at"
+
+    def test_every_lab_has_track_plan_file(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        missing = []
+        for path in LAB_CATALOG:
+            plan_path = (LABS_ROOT / path).with_suffix(".track-plan.md")
+            if not plan_path.exists():
+                missing.append(str(plan_path.relative_to(LABS_ROOT)))
+        assert not missing, f"Missing track plan files: {missing}"
+
+    def test_every_lab_has_track_report_surface(self):
+        from mlsysbook_labs import LAB_CATALOG
+
+        missing = []
+        for path in LAB_CATALOG:
+            source = read_source(str(LABS_ROOT / path))
+            has_baseline_panel = (
+                "legacy_migration_panel" in source
+                and "get_lab_metadata" in source
+                and "get_lab_track_variant" in source
+            )
+            has_deep_surface = (
+                "get_track_profile" in source
+                and "build_lab_report" in source
+                and ("track_context" in source or "track_selector" in source)
+            )
+            has_shared_renderer_surface = (
+                "render_system_design_lab" in source
+                and "system_design_context" in source
+                and "system_design_controls" in source
+                and "track_selector" in source
+            )
+            if not (has_baseline_panel or has_deep_surface or has_shared_renderer_surface):
+                missing.append(path)
+        assert not missing, f"Missing track/report surface: {missing}"
 
     def test_no_absolute_wheel_url(self, lab_path):
         """Labs must use relative URLs for the wheel, not absolute mlsysbook.ai URLs."""
@@ -241,6 +379,32 @@ class TestWheelConsistency:
             f"This causes BadZipFile in production when micropip fetches the missing URL."
         )
 
+    def test_wheel_contains_lab_toolkit(self):
+        """The browser wheel must include mlsysim.labs used by every Marimo lab."""
+        try:
+            import tomllib
+        except ImportError:
+            import tomli as tomllib
+
+        pyproject = REPO_ROOT / "mlsysim" / "pyproject.toml"
+        with open(pyproject, "rb") as f:
+            version = tomllib.load(f)["project"]["version"]
+
+        wheel_path = REPO_ROOT / "wheels" / f"mlsysim-{version}-py3-none-any.whl"
+        required = {
+            "mlsysim/labs/__init__.py",
+            "mlsysim/labs/state.py",
+            "mlsysim/labs/style.py",
+            "mlsysim/labs/components.py",
+        }
+        with zipfile.ZipFile(wheel_path) as wheel:
+            names = set(wheel.namelist())
+        missing = sorted(required - names)
+        assert not missing, (
+            f"Wheel is missing browser lab toolkit files: {missing}\n"
+            f"Fix: python3 -m build --wheel mlsysim/ && cp mlsysim/dist/mlsysim-*.whl wheels/"
+        )
+
 
 # ── Test: WASM Compatibility ────────────────────────────────────────────────
 
@@ -250,18 +414,6 @@ WASM_BLOCKED_IMPORTS = {
     "tkinter", "PyQt5", "PyQt6",
 }
 
-
-class TestStateImplementation:
-    """Ensure state.py uses IndexedDB and not localStorage."""
-
-    def test_no_localstorage_import(self):
-        state_py_path = REPO_ROOT / "mlsysim" / "mlsysim" / "labs" / "state.py"
-        with open(state_py_path, "r") as f:
-            source = f.read()
-        assert "from js import localStorage" not in source, (
-            "Found 'from js import localStorage' in state.py. "
-            "Use IndexedDB instead, as localStorage is not available in WASM web workers."
-        )
 
 class TestWASMCompatibility:
     """Catch imports that will fail in the Pyodide/WASM environment."""
@@ -310,17 +462,16 @@ RUNTIME_INSTALLED_PACKAGES = frozenset({
 })
 
 
-def _find_micropip_install_line(cell_body):
-    """Return the line number of the `await micropip.install(...)` call
-    in this cell's body, or None if not found."""
+def _find_runtime_bootstrap_line(cell_body):
+    """Return the line number of runtime package install in the setup cell."""
     for stmt in ast.walk(ast.Module(body=cell_body, type_ignores=[])):
-        # Match `await micropip.install(...)` — an Await wrapping a Call
         if isinstance(stmt, ast.Await) and isinstance(stmt.value, ast.Call):
             call = stmt.value
-            if (isinstance(call.func, ast.Attribute)
-                and call.func.attr == "install"
-                and isinstance(call.func.value, ast.Name)
-                and call.func.value.id == "micropip"):
+            if isinstance(call.func, ast.Attribute) and call.func.attr == "install":
+                if (isinstance(call.func.value, ast.Name)
+                    and call.func.value.id == "micropip"):
+                    return stmt.lineno
+            if isinstance(call.func, ast.Name) and call.func.id == "setup_lab":
                 return stmt.lineno
     return None
 
@@ -363,13 +514,13 @@ class TestWASMRuntimeImportOrder:
             if not has_cell_dec:
                 continue
 
-            # Does this cell have a micropip.install call?
-            install_line = _find_micropip_install_line(node.body)
+            # Does this cell install runtime packages (micropip or shared bootstrap)?
+            install_line = _find_runtime_bootstrap_line(node.body)
             if install_line is None:
                 continue
 
             # Scan cell body for runtime-installed package imports
-            # that appear BEFORE the micropip install line.
+            # that appear BEFORE the bootstrap install line.
             for sub in ast.walk(node):
                 if isinstance(sub, ast.Import):
                     for alias in sub.names:

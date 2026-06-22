@@ -17,7 +17,7 @@ Usage in tutorials:
            ["H100",  6.1, 0.42]])
 """
 
-from .core.constants import ureg
+from .core.units import ureg
 
 
 def _format_value(v):
@@ -119,6 +119,7 @@ def table(headers, rows, alignments=None):
 
     # Build format strings
     def _align(text, width, align_char):
+        """Aligns numeric and string metrics for clean CLI output."""
         if align_char == "<":
             return text.ljust(width)
         elif align_char == "^":

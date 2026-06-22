@@ -1,59 +1,93 @@
-# Part I: The Fleet {.unnumbered}
+# Fleet Principles {.unnumbered}
 
-The **Machine Learning Fleet** is the warehouse-scale computer where the network is the bus, power density is the speed limit, and failure is a statistical certainty. Continuing the curriculum's focus on the physics of AI engineering, Part I builds the physics of scale: the silicon, the wires, the cooling systems, and the storage hierarchies that make distributed ML possible. We shift from the single accelerator to the data-center-scale machine, where the engineering question is no longer how to compute on one device but how to move energy and information at a scale that challenges the limits of the physical infrastructure.
+The Machine Learning Fleet is the warehouse-scale computer where the network is the bus, power density is the speed limit, and failure is a statistical certainty. Continuing the curriculum's focus on the physics of AI engineering, Part I builds the physics of scale: the silicon, the wires, the cooling systems, and the storage hierarchies that make distributed ML possible. We shift from the single accelerator to the data-center-scale machine, where the engineering question is no longer how to compute on one device but how to move energy and information at a scale that challenges the limits of the physical infrastructure.
 
-This transition requires a fundamental shift in perspective. At scale, the individual GPU is merely a component in a larger, tightly coupled system. The principles of the Fleet are not best practices for cluster management; they are the physical invariants that dictate what kind of models can be trained and how they can be served. From the thermodynamic limits of heat dissipation to the bisection bandwidth of the network fabric, these constraints define the boundaries of the fleet stack.
+This transition requires a fundamental shift in perspective. At scale, the individual GPU is merely a component in a larger, tightly coupled system. The principles of the Fleet are not best practices for cluster management; they are the physical invariants that dictate what kind of models can be trained and how they can be served. From the thermodynamic limits of heat dissipation to the bisection bandwidth of the network fabric, these constraints define the boundaries of the fleet stack. The governing pattern parallels the single node: where the node is bound by the conservation of complexity across Data, Algorithm, and Machine, the Fleet is bound by the displacement of overhead across Compute, Communication, and Coordination (the C³ taxonomy). The execution tax of scale cannot be eliminated, only relocated.
+
+Those boundaries appear first in the facility itself: every operation eventually becomes heat that must be removed.
 
 ::: {#pri-thermodynamic-limit .callout-principle title="The Thermodynamic Limit"}
-**Invariant**: Irreversible computation and data movement dissipate electrical energy as heat; at data-center scale, the practical limit is the rate at which that heat can be removed.
-$$ P_{\text{limit}} = \frac{\Delta Q}{\Delta t} $$
 
-**Implication**: The bottleneck of the modern AI data center is not FLOPS, but watts per square foot. When a rack generates 100 kW of heat, air cooling fails. The physical design of the fleet is dictated by the ability to move heat away from silicon.
+**Invariant**: Irreversible computation and data movement dissipate electrical energy as heat; at data-center scale, the practical limit is the rate at which that heat can be removed.
+$$ \dot{Q}_{\text{limit}} = \frac{\Delta Q}{\Delta t} $$
+where $\dot{Q}_{\text{limit}}$ is the maximum heat-removal rate, $\Delta Q$ is heat energy, and $\Delta t$ is the removal time window.
+
+**Implication**: The bottleneck of the modern AI data center is not FLOP/s, but watts per square foot. When a rack generates 100 kW of heat, air cooling fails. The physical design of the fleet is dictated by the ability to move heat away from silicon.
+
 :::
 
+At the rack level, the same heat budget becomes a density constraint.
+
 ::: {#pri-power-density-wall .callout-principle title="The Power Density Wall"}
+
 **Invariant**: Cluster scaling is constrained by thermal dissipation limits (watts per rack) and cooling capacity, not just silicon area or floor space.
 
 **Implication**: Modern AI accelerators generate heat densities that exceed air cooling capabilities. **Liquid cooling** becomes a facility requirement, not an option, for large-scale training clusters.
+
 :::
 
+Thermal capacity sets the outer envelope; inside it, memory capacity determines how frontier models must be divided.
+
 ::: {#pri-memory-capacity-gap .callout-principle title="The Memory Capacity Gap"}
+
 **Invariant**: Frontier model memory requirements have grown faster and more irregularly than single-accelerator HBM capacity.
 
 **Implication**: Models no longer fit on single devices. Architectures must embrace 3D parallelism (splitting the model itself via tensor and pipeline parallelism) as the default state, breaking the abstraction of the "single device."
+
 :::
 
+Once a model is divided across devices, the network becomes part of the execution path.
+
 ::: {#pri-bisection-bandwidth .callout-principle title="The Bisection Bandwidth Theorem"}
+
 **Invariant**: The performance of a distributed application is limited by the minimum bisection bandwidth of the network topology.
 
 **Implication**: A cluster with 10,000 GPUs cannot support synchronized distributed training if the accelerators are connected by a 1 Gbps Ethernet tree. **Non-blocking topologies** (fat-tree, Dragonfly) are required to ensure that the network does not become the bottleneck for collective operations like AllReduce.
+
 :::
+
+The fleet also fixes where efficiency comes from: general-purpose hardware offers flexibility, while specialization can reclaim power for stable workloads.
 
 ::: {#pri-generality-tax .callout-principle title="The Generality Tax"}
+
 **Invariant**: For workloads with stable computation patterns, specialization can improve performance per watt by reducing general-purpose overhead, while also reducing programmability and workload flexibility.
-$$ \eta_{\text{specific}} \gg \eta_{\text{general}} \quad \text{for a fixed power budget} $$
+$$ \rho_{\text{energy,specific}} \gg \rho_{\text{energy,general}} \quad \text{for a fixed power budget} $$
 
 **Implication**: The trajectory from CPU to GPU to Tensor Processing Unit (TPU) to fixed-function ASIC is a workload-dependent architecture trade-off, not a universal physical law. Each step can trade programmability for efficiency, and the fleet architect must choose the right point on this curve for each workload.
+
 :::
+
+Compute efficiency helps only if the training pipeline can keep the accelerators fed.
 
 ::: {#pri-io-wall .callout-principle title="The I/O Wall"}
+
 **Invariant**: When storage throughput cannot deliver training data as fast as accelerators consume it, GPUs idle regardless of their computational power.
 $$ \text{Utilization} = \min\!\left(1,\;\frac{\text{BW}_{\text{storage}}}{N_{\text{GPU}} \times R_{\text{consumption}}}\right) $$
+where $\text{BW}_{\text{storage}}$ is aggregate storage bandwidth, $N_{\text{GPU}}$ is the number of accelerators, and $R_{\text{consumption}}$ is each accelerator's data-consumption rate.
 
-**Implication**: A storage system that was adequate for 8 GPUs becomes the bottleneck at 64. The I/O wall scales with the number of accelerators: every GPU added to the cluster raises the throughput floor that storage must sustain, making the data pipeline—not the model—the limiting factor.
+**Implication**: A storage system that was adequate for 8 GPUs becomes the bottleneck at 64. The I/O wall scales with the number of accelerators: every GPU added to the cluster raises the throughput floor that storage must sustain, making the data pipeline, rather than the model, the limiting factor.
+
 :::
 
+Meeting that demand requires a hierarchy rather than a single undifferentiated storage pool.
+
 ::: {#pri-storage-hierarchy .callout-principle title="The Storage Hierarchy Principle"}
+
 **Invariant**: Storage performance decreases and capacity increases as data moves further from the accelerator.
 
 **Implication**: The systems engineer's task is to ensure that the *right data* is on the *right tier* at the *right time*. Data format choices, caching strategies, prefetch buffer sizing, and tiering policies all exist to manage movement upward through the hierarchy so that accelerators do not starve.
+
 :::
 
+Even after data reaches the right tier, coordination limits how efficiently more nodes translate into more throughput.
+
 ::: {#pri-scaling-efficiency .callout-principle title="The Scaling Efficiency Bound"}
+
 **Invariant**: Adding nodes to a distributed training job yields diminishing returns because communication overhead grows with cluster size while per-node computation remains constant.
 $$ \eta_{\text{scaling}} = \frac{T_1}{N \times T_N} \leq 1 $$
 
-**Implication**: Perfect linear scaling ($\eta_{\text{scaling}} = 1.0$) is a theoretical limit, not a practical target. Well-tuned dense-training jobs commonly reach $\eta \approx 0.85$–$0.95$ at moderate scale on modern fabrics, and degrade further as $N$ grows. The gap between $\eta = 1.0$ and the achieved efficiency is the **Communication Tax**—the price of coordination.
+**Implication**: Perfect linear scaling ($\eta_{\text{scaling}} = 1.0$) is a theoretical limit, not a practical target. Well-tuned dense-training jobs commonly reach $\eta_{\text{scaling}} \approx 0.85$–$0.95$ at moderate scale on modern fabrics, and degrade further as $N$ grows. The gap between $\eta_{\text{scaling}} = 1.0$ and the achieved efficiency is the **Communication Tax**—the price of coordination.
+
 :::
 
 These invariants establish the Fleet as a first-class engineering object. Part I builds this machine from the ground up: from the landscape of distributed ML systems and why single machines no longer suffice, through the silicon, power, and cooling systems of the AI data center, the network fabrics that connect the fleet, and the storage hierarchy that feeds the training pipeline. Together, these chapters form the foundation for the lighthouse archetypes (@sec-vol2-introduction-archetypes) that we will track throughout this volume.

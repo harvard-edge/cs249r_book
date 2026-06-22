@@ -7,6 +7,7 @@ showing how the physical location of a datacenter radically alters
 the environmental impact of training a model.
 """
 import mlsysim
+from mlsysim.solvers import SustainabilityModel
 
 def main():
     print("Evaluating a 30-day training run on 256x H100 GPUs...\n")
@@ -15,13 +16,13 @@ def main():
     fleet = mlsysim.Systems.Clusters.Research_256
 
     # 2. Define the Solver
-    solver = mlsysim.SustainabilityModel()
+    solver = SustainabilityModel()
 
     # 3. Evaluate in Poland (Coal heavy grid)
     res_poland = solver.solve(
         fleet=fleet, 
         duration_days=30, 
-        datacenter=mlsysim.Infra.Grids.Poland,
+        datacenter=mlsysim.Infrastructure.Grids.Poland,
         mfu=0.45
     )
     
@@ -29,7 +30,7 @@ def main():
     res_quebec = solver.solve(
         fleet=fleet, 
         duration_days=30, 
-        datacenter=mlsysim.Infra.Grids.Quebec,
+        datacenter=mlsysim.Infrastructure.Grids.Quebec,
         mfu=0.45
     )
 

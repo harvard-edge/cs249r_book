@@ -3,1199 +3,1686 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
-
-# ═════════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 # ZONE A: OPENING
-# ═════════════════════════════════════════════════════════════════════════════
+# ===========================================================================
 
-# ─── CELL 0: SETUP ──────────────────────────────────────────────────────────
+
 @app.cell
 async def _():
     import marimo as mo
     import sys
-    import math
     from pathlib import Path
-    import numpy as np
 
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install(
-            "../../wheels/mlsysim-0.1.1-py3-none-any.whl", keep_going=False
-        )
-    elif "mlsysim" not in sys.modules:
-        _root = Path(__file__).resolve().parents[2]
-        if str(_root) not in sys.path:
-            sys.path.insert(0, str(_root))
+        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
+    else:
+        _labs_dir = Path(__file__).resolve().parents[1]
+        if str(_labs_dir) not in sys.path:
+            sys.path.insert(0, str(_labs_dir))
+        from bootstrap import native_bootstrap
+        native_bootstrap(__file__)
 
     import plotly.graph_objects as go
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    from mlsysim.labs.components import FailureBanner
-    import mlsysim
-
-    # ── Hardware constants ─────────────────────────────────────────────────
-    H100_TFLOPS   = mlsysim.Hardware.Cloud.H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS   = mlsysim.Hardware.Cloud.H100.memory.bandwidth.m_as("GB/s")
-    H100_RAM_GB   = mlsysim.Hardware.Cloud.H100.memory.capacity.m_as("GB")
-
-    MOBILE_TFLOPS = mlsysim.Hardware.Mobile.iPhone15Pro.compute.peak_flops.m_as("TFLOPs/s")
-    MOBILE_BW_GBS = mlsysim.Hardware.Mobile.iPhone15Pro.memory.bandwidth.m_as("GB/s")
-    MOBILE_RAM_GB = mlsysim.Hardware.Mobile.iPhone15Pro.memory.capacity.m_as("GB")
-
-    # ── Activation function transistor costs ───────────────────────────────
-    # Source: @sec-nn-computation-activation-functions (textbook Table 5.x)
-    TRANSISTOR_COSTS = {
-        "ReLU":    50,      # Single comparison: max(0, x)
-        "GELU":    1200,    # Approximate erf() or tanh polynomial
-        "Sigmoid": 2500,    # exp(-x), division, addition
-        "Swish":   2550,    # Sigmoid(x) * x
-    }
-
-    # ── Memory hierarchy tier latencies (ns per access) ────────────────────
-    # Source: @sec-nn-computation-memory-hierarchy
-    TIER_LATENCY_NS = {"L1": 1.0, "L2": 5.0, "HBM": 100.0, "DRAM": 200.0}
-    CLOUD_TIERS_KB  = {"L1": 256, "L2": 50_000, "HBM": 80_000_000}
-    MOBILE_TIERS_KB = {"L1": 128, "L2": 32_000, "HBM": 8_000_000}  # "HBM" = main memory (LPDDR5 on mobile)
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        memory_cliff,
+        neural_compute_profile,
+        operation_ledger,
+        operator_design,
+        part_workflow,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, H100_TFLOPS, H100_BW_GBS, H100_RAM_GB,
-        MOBILE_TFLOPS, MOBILE_BW_GBS, MOBILE_RAM_GB,
-        TRANSISTOR_COSTS, TIER_LATENCY_NS, CLOUD_TIERS_KB, MOBILE_TIERS_KB,
-        LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        apply_plotly_theme,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        ledger,
+        memory_cliff,
+        mo,
+        neural_compute_profile,
+        operation_ledger,
+        operator_design,
+        part_workflow,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_arc_context,
+        track_context,
+        track_selector,
     )
 
 
-# ─── CELL 1: HEADER ─────────────────────────────────────────────────────────
+@app.cell
+def _(get_lab_metadata):
+    v1_05_metadata = get_lab_metadata("vol1/lab_05_nn_compute.py")
+    return (v1_05_metadata,)
+
+
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v1_05_track_picker = track_selector(default=_default_track)
+    v1_05_track_picker
+    return (v1_05_track_picker,)
+
+
+@app.cell
+def _(
+    get_lab_track_variant,
+    get_track_profile,
+    neural_compute_profile,
+    resolve_mlsysim_ref,
+    v1_05_track_picker,
+):
+    v1_05_track_id = v1_05_track_picker.value
+    v1_05_profile = get_track_profile(v1_05_track_id)
+    v1_05_variant = get_lab_track_variant("v1_05_neural_computation", v1_05_profile.track_id)
+    v1_05_hardware = resolve_mlsysim_ref(v1_05_variant.hardware_ref)
+    v1_05_model = resolve_mlsysim_ref(v1_05_variant.model_ref)
+    v1_05_compute = neural_compute_profile(
+        v1_05_profile,
+        v1_05_variant,
+        v1_05_hardware,
+        v1_05_model,
+    )
+    return (
+        v1_05_compute,
+        v1_05_hardware,
+        v1_05_model,
+        v1_05_profile,
+        v1_05_track_id,
+        v1_05_variant,
+    )
+
+
+@app.cell
+def _():
+    def v1_05_escape(value):
+        import html as _html
+
+        return _html.escape(str(value))
+
+    def v1_05_fields_html(fields):
+        return "\n".join(
+            (
+                '<div class="mlsysbook-field">'
+                f"<strong>{v1_05_escape(key)}</strong>{v1_05_escape(value)}"
+                "</div>"
+            )
+            for key, value in fields.items()
+        )
+
+    def v1_05_table_html(headers, rows, numeric=()):
+        header_html = "".join(f"<th>{v1_05_escape(header)}</th>" for header in headers)
+        body_rows = []
+        numeric_cols = set(numeric)
+        for row in rows:
+            cells = []
+            for idx, value in enumerate(row):
+                align = "right" if idx in numeric_cols else "left"
+                cells.append(f'<td style="text-align:{align};">{v1_05_escape(value)}</td>')
+            body_rows.append(f"<tr>{''.join(cells)}</tr>")
+        return f"""
+        <div style="overflow-x:auto; margin-top:14px;">
+          <table class="mlsysbook-table">
+            <thead><tr>{header_html}</tr></thead>
+            <tbody>{''.join(body_rows)}</tbody>
+          </table>
+        </div>
+        """
+
+    def v1_05_callout_html(title, body, kind="info"):
+        palette = {
+            "ok": ("#dcfce7", "#166534"),
+            "warn": ("#fef3c7", "#92400e"),
+            "fail": ("#fee2e2", "#991b1b"),
+            "info": ("#e0f2fe", "#075985"),
+        }
+        background, border = palette.get(kind, palette["info"])
+        return f"""
+        <div class="mlsysbook-callout" style="background:{background}; border-color:{border};">
+          <strong>{v1_05_escape(title)}:</strong> {v1_05_escape(body)}
+        </div>
+        """
+
+    def v1_05_prediction_html(title, predicted, actual, labels):
+        if predicted is None:
+            return v1_05_callout_html(
+                title,
+                "Commit to a structured prediction before using this evidence.",
+                "warn",
+            )
+        predicted_label = labels.get(predicted, predicted)
+        actual_label = labels.get(actual, actual)
+        if predicted == actual:
+            return v1_05_callout_html(
+                title,
+                f"Prediction matched: {actual_label}.",
+                "ok",
+            )
+        return v1_05_callout_html(
+            title,
+            f"You predicted {predicted_label}; measured evidence points to {actual_label}.",
+            "warn",
+        )
+
+    def v1_05_track_story(track_id):
+        stories = {
+            "iphone": {
+                "stakeholder": "mobile product engineer",
+                "amount_focus": "local inference latency, activation memory, and power/thermal headroom",
+                "failure": "the feature feels slow or heats the phone during repeated local inference",
+                "batch_meaning": "batching usually means queued user frames, so latency and thermal pressure matter more than raw throughput",
+                "energy_label": "mJ/inference",
+                "checkpoint_hint": "protect responsiveness first, then verify the NPU path stays covered",
+                "next_lab": "V1-06 should favor mobile architectures that reduce activation traffic before adding width.",
+            },
+            "oura_ring": {
+                "stakeholder": "wearable firmware engineer",
+                "amount_focus": "SRAM, flash, wake time, and uJ/window",
+                "failure": "the sensing window overflows SRAM or keeps the MCU awake too long",
+                "batch_meaning": "batching means holding more windows before sleep, so wake time and SRAM dominate",
+                "energy_label": "uJ/window",
+                "checkpoint_hint": "stream or summarize before asking for more temporal context",
+                "next_lab": "V1-06 should prefer streaming TinyML architectures with bounded buffers.",
+            },
+            "robotaxi": {
+                "stakeholder": "autonomous vehicle platform engineer",
+                "amount_focus": "real-time frame deadline, sensor pipeline headroom, and p99 bandwidth",
+                "failure": "a bursty sensor frame misses the perception deadline",
+                "batch_meaning": "batching means aggregating sensor streams, so tail latency and safety margin dominate",
+                "energy_label": "mJ/frame",
+                "checkpoint_hint": "bound the worst frame first, then preserve recall at object boundaries",
+                "next_lab": "V1-06 should choose architectures with predictable feature-map sizes across sensors.",
+            },
+            "cloud_fleet": {
+                "stakeholder": "fleet service owner",
+                "amount_focus": "throughput, accelerator memory, utilization, cost/request, and p99 latency",
+                "failure": "a larger batch improves average throughput but raises p99 latency or accelerator memory pressure",
+                "batch_meaning": "batching is an economic utilization knob, but activation state still consumes HBM",
+                "energy_label": "mJ/request",
+                "checkpoint_hint": "increase utilization only while memory and p99 latency remain inside the SLA",
+                "next_lab": "V1-06 should connect architecture choices to accelerator occupancy and memory reuse.",
+            },
+        }
+        return stories.get(track_id, stories["iphone"])
+
+    def v1_05_budget_ratios(result, profile):
+        return {
+            "activation memory": result.activations_mb / max(profile.activation_budget_mb, 1e-9),
+            "bandwidth": result.estimated_bandwidth_gbs / max(profile.bandwidth_budget_gbs, 1e-9),
+            "latency": result.estimated_latency_ms / max(profile.latency_budget_ms, 1e-9),
+            "power": result.estimated_power_w / max(profile.power_budget_w, 1e-9),
+        }
+
+    def v1_05_binding_from_ratios(ratios):
+        name = max(ratios, key=ratios.get)
+        return {"name": name, "ratio": ratios[name]}
+
+    def v1_05_cliff_category(profile, cliff):
+        if cliff.threshold_multiplier is None:
+            return "no_cliff"
+        if cliff.threshold_multiplier < profile.default_shape_multiplier:
+            return "before_default"
+        if cliff.threshold_multiplier <= profile.default_shape_multiplier * 1.25:
+            return "near_default"
+        return "later"
+
+    def v1_05_batch_factor(profile, policy):
+        if policy == "low_latency":
+            return 0.5 if profile.batch > 1 else 1.0
+        if policy == "throughput_x2":
+            return 2.0
+        if policy == "throughput_x4":
+            return 4.0
+        return 1.0
+
+    def v1_05_precision_bytes(profile, policy):
+        if policy == "compact_int8":
+            return 1
+        if policy == "wide_fp16":
+            return 2
+        return profile.precision_bytes
+
+    def v1_05_scaled_profile(profile, batch_policy, precision_policy):
+        from dataclasses import replace
+
+        batch_factor = v1_05_batch_factor(profile, batch_policy)
+        precision_bytes = v1_05_precision_bytes(profile, precision_policy)
+        scaled_batch = max(1, int(round(profile.batch * batch_factor)))
+        return replace(profile, batch=scaled_batch, precision_bytes=precision_bytes)
+
+    def v1_05_energy_display(track_id, energy_j):
+        if track_id == "oura_ring":
+            return f"{energy_j * 1_000_000:.1f} uJ/window"
+        if track_id == "cloud_fleet":
+            return f"{energy_j * 1_000:.2f} mJ/request"
+        if track_id == "robotaxi":
+            return f"{energy_j * 1_000:.2f} mJ/frame"
+        return f"{energy_j * 1_000:.2f} mJ/inference"
+
+    def v1_05_batch_precision_rows(profile, shape_multiplier, selected_batch, selected_precision, operation_ledger):
+        specs = [
+            ("low_latency", "track_precision"),
+            ("default", "track_precision"),
+            ("throughput_x2", "compact_int8"),
+            ("throughput_x4", "compact_int8"),
+            ("throughput_x2", "wide_fp16"),
+        ]
+        selected_spec = (selected_batch, selected_precision)
+        if selected_spec not in specs:
+            specs.append(selected_spec)
+        labels = {
+            "low_latency": "Low-latency batch/window",
+            "default": "Track default batch/window",
+            "throughput_x2": "Throughput x2 batch/window",
+            "throughput_x4": "Aggressive x4 batch/window",
+            "track_precision": "Track precision",
+            "compact_int8": "Compact INT8",
+            "wide_fp16": "Wider FP16",
+        }
+        rows = []
+        for batch_policy, precision_policy in specs:
+            scaled_profile = v1_05_scaled_profile(profile, batch_policy, precision_policy)
+            result = operation_ledger(scaled_profile, shape_multiplier=shape_multiplier)
+            ratios = v1_05_budget_ratios(result, scaled_profile)
+            binding = v1_05_binding_from_ratios(ratios)
+            throughput_per_s = scaled_profile.batch / max(result.estimated_latency_ms, 1e-9) * 1000.0
+            energy_j = result.estimated_power_w * result.estimated_latency_ms / 1000.0
+            rows.append(
+                {
+                    "batch_policy": batch_policy,
+                    "precision_policy": precision_policy,
+                    "label": f"{labels[batch_policy]} + {labels[precision_policy]}",
+                    "batch": scaled_profile.batch,
+                    "precision_bytes": scaled_profile.precision_bytes,
+                    "activation_mb": result.activations_mb,
+                    "latency_ms": result.estimated_latency_ms,
+                    "bandwidth_gbs": result.estimated_bandwidth_gbs,
+                    "power_w": result.estimated_power_w,
+                    "throughput_per_s": throughput_per_s,
+                    "energy_j": energy_j,
+                    "binding": binding["name"],
+                    "binding_ratio": binding["ratio"],
+                    "feasible": result.feasible,
+                    "selected": (batch_policy, precision_policy) == selected_spec,
+                    "violations": result.violations,
+                }
+            )
+        return tuple(rows)
+
+    def v1_05_strategy_category(profile, selected_row):
+        if not selected_row["feasible"]:
+            return "not_safe"
+        if selected_row["precision_bytes"] < profile.precision_bytes:
+            return "compact_precision"
+        if selected_row["batch"] > profile.batch:
+            return "larger_batch"
+        return "default"
+
+    def v1_05_roofline_diagnosis(profile, result):
+        crossover = profile.peak_tflops * 1000.0 / max(profile.memory_bandwidth_gbs, 1e-9)
+        roofline_wall = "memory" if result.arithmetic_intensity < crossover else "compute"
+        if result.dominant_resource in {"activation memory", "bandwidth"}:
+            diagnosed_wall = "memory"
+            recommendation = "reduce activation bytes, tile/stream tensors, or improve reuse"
+        elif result.dominant_resource == "latency":
+            diagnosed_wall = "compute"
+            recommendation = "reduce operation count or use a faster fused kernel"
+        elif result.dominant_resource == "power":
+            diagnosed_wall = "energy"
+            recommendation = "reduce precision, wake time, or sustained data movement"
+        else:
+            diagnosed_wall = roofline_wall
+            recommendation = "match the optimization to the measured binding amount"
+        return {
+            "crossover": crossover,
+            "roofline_wall": roofline_wall,
+            "diagnosed_wall": diagnosed_wall,
+            "recommendation": recommendation,
+        }
+
+    def v1_05_design_alignment(diagnosis, selected_result, all_results):
+        highest_activation = max(all_results, key=lambda result: result.activation_mb)
+        slowest_latency = max(all_results, key=lambda result: result.latency_ms)
+        activation_reduction = selected_result.activation_mb < highest_activation.activation_mb
+        latency_reduction = selected_result.latency_ms < slowest_latency.latency_ms
+        if diagnosis["diagnosed_wall"] == "memory":
+            aligned = activation_reduction
+            target = "activation or byte movement reduction"
+        elif diagnosis["diagnosed_wall"] == "compute":
+            aligned = latency_reduction
+            target = "operation or latency reduction"
+        else:
+            aligned = activation_reduction or latency_reduction
+            target = "precision, power, or wake-time reduction"
+        return {
+            "aligned": aligned,
+            "target": target,
+            "message": (
+                f"Selected design targets {target}."
+                if aligned
+                else f"Selected design may not attack the diagnosed wall: {target}."
+            ),
+        }
+
+    return (
+        v1_05_batch_precision_rows,
+        v1_05_binding_from_ratios,
+        v1_05_budget_ratios,
+        v1_05_callout_html,
+        v1_05_cliff_category,
+        v1_05_design_alignment,
+        v1_05_energy_display,
+        v1_05_fields_html,
+        v1_05_prediction_html,
+        v1_05_roofline_diagnosis,
+        v1_05_strategy_category,
+        v1_05_table_html,
+        v1_05_track_story,
+    )
+
+
+@app.cell(hide_code=True)
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_arc_context,
+    track_context,
+    v1_05_compute,
+    v1_05_metadata,
+    v1_05_profile,
+    v1_05_track_story,
+    v1_05_variant,
+):
+    _story = v1_05_track_story(v1_05_profile.track_id)
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
+                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 05
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Transistor Tax
+                       color: #f8fafc; line-height: 1.1;">
+                Neural Computation Amounts
             </h1>
-            <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
+            <p style="margin: 0 0 6px 0; font-size: 1.05rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Silicon Cost &middot; Memory Cliffs &middot; Width-Squared Scaling &middot; Backprop Memory
+                Operations &middot; Activations &middot; Memory Traffic &middot; Energy
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                Four quantitative realities about neural computation that shape every
-                architecture decision: activation functions have wildly different silicon
-                costs, memory hierarchies create cliffs not slopes, width scales
-                quadratically, and training demands storing everything inference can discard.
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
+                      max-width: 860px; line-height: 1.65;">
+                {v1_05_variant.workload_summary} Neural computation is a budget:
+                tensor shapes become bounded amounts of operations, activations,
+                memory traffic, and energy.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~50 min
+                    4 Concept Modules + Synthesis
                 </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 5: Neural Computation
+                    {v1_05_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v1_05_compute.tensor_label}
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">ReLU: 50 transistors</span>
-                <span class="badge badge-warn">Sigmoid: 2,500 transistors</span>
-                <span class="badge badge-fail">Memory Cliffs: 10-100x</span>
+                <span class="badge badge-info">Shape Growth</span>
+                <span class="badge badge-warn">Activation Cliff</span>
+                <span class="badge badge-info">Batch/Precision</span>
+                <span class="badge badge-fail">Compute-vs-Memory Diagnosis</span>
             </div>
         </div>
         """),
+        track_context(v1_05_profile),
+        track_arc_context(v1_05_profile, v1_05_metadata.lab_id),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Track Amount Lens</h2>
+          <div class="mlsysbook-grid">
+            <div class="mlsysbook-field"><strong>Stakeholder</strong>{_story["stakeholder"]}</div>
+            <div class="mlsysbook-field"><strong>Bounded amounts</strong>{_story["amount_focus"]}</div>
+            <div class="mlsysbook-field"><strong>Natural failure</strong>{_story["failure"]}</div>
+            <div class="mlsysbook-field"><strong>Operator tensor</strong>{v1_05_compute.tensor_label}</div>
+          </div>
+          <div class="mlsysbook-callout"><strong>Shared concept sequence:</strong>
+            Parts A-D are the same for every track. The selected track changes
+            persona, constraints, thresholds, evidence emphasis, failure mode,
+            and report framing.</div>
+        </div>
+        """),
+        source_trace(
+            {
+                "chapter_invariant": "neural computation turns tensors into bounded operation, activation, memory-traffic, and energy amounts",
+                "chapter_anchors": "Purpose; Forward pass computation; Memory wall; Batch processing; Arithmetic intensity",
+                "hardware_ref": v1_05_variant.hardware_ref,
+                "model_ref": v1_05_variant.model_ref,
+                "shared_helper": "neural_compute_profile()",
+            },
+            summary="Opening source map",
+        ),
     ])
     return
 
 
-# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
-    mo.Html(f"""
-    <div style="border-left: 4px solid {COLORS['BlueLine']};
-                background: white; border-radius: 0 12px 12px 0;
-                padding: 20px 28px; margin: 8px 0 16px 0;
-                box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
+def _(COLORS, mo, part_workflow, v1_05_compute, v1_05_profile, v1_05_track_story):
+    _story = v1_05_track_story(v1_05_profile.track_id)
+    mo.vstack([
+        mo.Html(f"""
+        <div style="border-left: 4px solid {COLORS['BlueLine']};
+                    background: white; border-radius: 0 12px 12px 0;
+                    padding: 20px 28px; margin: 8px 0 16px 0;
+                    box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
                 Learning Objectives
             </div>
             <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the transistor cost ratio</strong>
-                    between ReLU (~50 transistors) and Sigmoid (~2,500 transistors) and predict
-                    when this 50x gap becomes a dominant fraction of inference time.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Predict which memory hierarchy tier</strong>
-                    a layer's activations land in given batch size and width, and identify the
-                    batch size threshold where a 10x latency cliff appears.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Calculate the Floating Point Operations (FLOPs) scaling law</strong>
-                    for dense layers: doubling width yields ~2x total FLOPs (hidden-to-hidden
-                    layer quadruples, but input/output layers only double).</div>
-                <div style="margin-bottom: 3px;">4. <strong>Compare forward vs. backward memory</strong>:
-                    training stores all layer activations simultaneously, creating a 4-10x
-                    memory multiplier over inference.</div>
+                <div style="margin-bottom: 3px;">1. <strong>Trace tensor shape growth:</strong>
+                    connect a changed shape to activation, operation, and byte amounts.</div>
+                <div style="margin-bottom: 3px;">2. <strong>Find the binding budget:</strong>
+                    identify when activations, bandwidth, latency, or power bind first.</div>
+                <div style="margin-bottom: 3px;">3. <strong>Compare batch and precision:</strong>
+                    trade throughput against memory, latency, and energy in your track.</div>
+                <div style="margin-bottom: 3px;">4. <strong>Diagnose the optimization:</strong>
+                    decide whether compute or memory/data movement is the wall.</div>
             </div>
-        </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+            <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
+                        padding: 16px 28px 0 28px;">
+                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                             text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
+                    Core Question
                 </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Activation function definitions from the Neural Computation chapter
-                    &middot; Memory hierarchy tiers from the Neural Computation chapter
-                    &middot; Iron Law equation from the Iron Law section (Ch. 1)
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~50 min</strong><br/>
-                    Part A: ~10 min &middot; Part B: ~10 min<br/>
-                    Part C: ~10 min &middot; Part D: ~10 min
+                <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
+                            line-height: 1.5; font-style: italic;">
+                    Which bounded amount controls {v1_05_compute.label}, and which operator
+                    choice carries the right architecture implication forward?
                 </div>
             </div>
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
-                    padding: 16px 28px 0 28px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Core Question
-            </div>
-            <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
-                        line-height: 1.5; font-style: italic;">
-                &ldquo;ReLU and Sigmoid produce similar accuracy &mdash; so why does the
-                choice of activation function determine whether your model fits in cache
-                or spills to memory 100x slower?&rdquo;
-            </div>
-        </div>
-    </div>
-    """)
+        """),
+        part_workflow(
+            "Neural Computation Amount Workflow",
+            (
+                {
+                    "part": "Part A",
+                    "concept": "Tensor shape growth changes activation and operation amounts.",
+                    "prediction": "Predict which amount binds first.",
+                    "controls": "Adjust the shape multiplier for the active operator.",
+                    "evidence": "Compare activation memory, GMACs, bytes moved, intensity, latency, and power.",
+                    "decision": "Pick the amount to reduce first.",
+                },
+                {
+                    "part": "Part B",
+                    "concept": "Memory and activations can bind before arithmetic does.",
+                    "prediction": "Predict where the activation cliff appears.",
+                    "controls": "Sweep the shape variable and inspect normalized budgets.",
+                    "evidence": "Find the first threshold crossing and exact violations.",
+                    "decision": "Choose the largest defensible shape policy.",
+                },
+                {
+                    "part": "Part C",
+                    "concept": "Batch and precision trade throughput, memory, latency, and energy.",
+                    "prediction": "Predict which batch/precision strategy survives.",
+                    "controls": "Change batch/window and precision policies.",
+                    "evidence": "Compare feasible and infeasible strategies in a table and scatter plot.",
+                    "decision": "Record the track-specific batch/precision policy.",
+                },
+                {
+                    "part": "Part D",
+                    "concept": "Compute-vs-memory diagnosis determines the right optimization.",
+                    "prediction": "Predict the wall before selecting an operator design.",
+                    "controls": "Choose an operator design option.",
+                    "evidence": "Compare arithmetic intensity with the hardware crossover and design candidates.",
+                    "decision": "Name the optimization family and residual risk.",
+                },
+            ),
+            scenario=(
+                f"{v1_05_compute.label} is constrained by {_story['amount_focus']}; "
+                f"batch/window choices mean {_story['batch_meaning']}."
+            ),
+            reflection="The synthesis saves an operator budget note: binding amount, selected design, residual risk, and V1-06 architecture implication.",
+        ),
+    ])
     return
 
 
-# ─── CELL 3: READING ────────────────────────────────────────────────────────
+# ===========================================================================
+# ZONE B: CONTROLS
+# ===========================================================================
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_05_compute):
+    v1_05_resource_prediction = mo.ui.radio(
+        options={
+            "Activation memory binds first": "activation memory",
+            "Memory traffic / bandwidth binds first": "bandwidth",
+            "Arithmetic latency binds first": "latency",
+            "Energy or power binds first": "power",
+        },
+        label=f"Part A prediction: which bounded amount will dominate {v1_05_compute.label}?",
+    )
+    v1_05_shape_multiplier = mo.ui.slider(
+        start=v1_05_compute.shape_min,
+        stop=v1_05_compute.shape_max,
+        value=v1_05_compute.default_shape_multiplier,
+        step=v1_05_compute.shape_step,
+        label="Shape multiplier",
+    )
+    v1_05_amount_checkpoint = mo.ui.radio(
+        options={
+            "Reduce activation tensor size first": "reduce_activations",
+            "Reduce memory traffic first": "reduce_bytes",
+            "Reduce operation count first": "reduce_ops",
+            "Reduce sustained power first": "reduce_power",
+        },
+        label="Part A checkpoint: which amount should the operator budget reduce first?",
+    )
+    return (v1_05_amount_checkpoint, v1_05_resource_prediction, v1_05_shape_multiplier)
+
+
 @app.cell(hide_code=True)
 def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
+    v1_05_cliff_prediction = mo.ui.radio(
+        options={
+            "The cliff is already before the default shape": "before_default",
+            "The cliff is near the default shape": "near_default",
+            "The cliff appears only after more shape growth": "later",
+            "No activation cliff appears in the tested envelope": "no_cliff",
+        },
+        label="Part B prediction: where will the activation budget fail?",
+    )
+    v1_05_memory_checkpoint = mo.ui.radio(
+        options={
+            "Ship only below the measured cliff": "below_cliff",
+            "Tile or stream the operator before growing shape": "tile_stream",
+            "Hold shape and reduce precision first": "reduce_precision",
+            "Accept the overage and document the violation": "accept_violation",
+        },
+        label="Part B checkpoint: what shape policy goes into the budget note?",
+    )
+    return (v1_05_cliff_prediction, v1_05_memory_checkpoint)
 
-    - **Chapter 5: The Artificial Neuron** -- activation function definitions, computational
-      graph of a single neuron, transistor-level implementation of ReLU vs. Sigmoid.
-    - **Chapter 5: The Transistor Tax** -- silicon cost table for common activation functions,
-      percentage of inference time consumed by activations on Cloud vs. Mobile.
-    - **Chapter 5: Memory Hierarchy** -- cache tiers (L1/L2/High Bandwidth Memory (HBM)/DRAM), tier latencies,
-      and the concept of memory cliffs vs. gradual degradation.
-    - **Chapter 5: Backpropagation Memory** -- why training must store all intermediate
-      activations, and the forward-vs-backward memory multiplier.
-    """), kind="info")
-    return
+
+@app.cell(hide_code=True)
+def _(mo):
+    v1_05_batch_prediction = mo.ui.radio(
+        options={
+            "Track default is the only defensible policy": "default",
+            "Compact precision makes the selected policy safe": "compact_precision",
+            "A larger batch/window is safe": "larger_batch",
+            "The selected batch/precision policy will fail": "not_safe",
+        },
+        label="Part C prediction: which batch/precision outcome do you expect?",
+    )
+    v1_05_batch_policy = mo.ui.dropdown(
+        options={
+            "Low-latency batch/window": "low_latency",
+            "Track default batch/window": "default",
+            "Throughput x2 batch/window": "throughput_x2",
+            "Aggressive x4 batch/window": "throughput_x4",
+        },
+        value="Track default batch/window",
+        label="Batch/window policy",
+    )
+    v1_05_precision_policy = mo.ui.dropdown(
+        options={
+            "Track precision": "track_precision",
+            "Compact INT8": "compact_int8",
+            "Wider FP16": "wide_fp16",
+        },
+        value="Track precision",
+        label="Precision policy",
+    )
+    v1_05_batch_checkpoint = mo.ui.radio(
+        options={
+            "Use default batch/window and protect latency": "default_latency",
+            "Use compact precision with validation": "compact_validate",
+            "Increase batch/window only with p99 guardrail": "batch_with_guardrail",
+            "Reject the selected policy and redesign": "reject_redesign",
+        },
+        label="Part C checkpoint: what batch/precision policy do you record?",
+    )
+    return (
+        v1_05_batch_checkpoint,
+        v1_05_batch_policy,
+        v1_05_batch_prediction,
+        v1_05_precision_policy,
+    )
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ZONE B-D: ALL PARTS AS TABS
-# ═════════════════════════════════════════════════════════════════════════════
+@app.cell(hide_code=True)
+def _(mo, v1_05_compute):
+    _design_options = {design.label: design.design_id for design in v1_05_compute.design_options}
+    v1_05_diagnosis_prediction = mo.ui.radio(
+        options={
+            "Memory or data movement is the wall": "memory",
+            "Compute latency is the wall": "compute",
+            "Energy or thermal power is the wall": "energy",
+        },
+        label="Part D prediction: what wall should the optimization target?",
+    )
+    v1_05_design = mo.ui.dropdown(
+        options=_design_options,
+        value=v1_05_compute.design_options[0].label,
+        label="Operator design",
+    )
+    v1_05_optimization_checkpoint = mo.ui.radio(
+        options={
+            "Reduce bytes moved and activation residency": "memory_optimization",
+            "Reduce operation count or use a fused compute kernel": "compute_optimization",
+            "Reduce precision, wake time, or sustained power": "energy_optimization",
+            "Keep the baseline and accept the residual risk": "accept_baseline",
+        },
+        label="Part D checkpoint: which optimization family goes into the memo?",
+    )
+    return (v1_05_design, v1_05_diagnosis_prediction, v1_05_optimization_checkpoint)
 
-# ─── CELL 4: TABS CELL ──────────────────────────────────────────────────────
+
+@app.cell(hide_code=True)
+def _(mo):
+    v1_05_final_decision = mo.ui.radio(
+        options={
+            "Ship selected operator with measured binding amount": "ship_with_binding",
+            "Ship only after reducing the binding amount": "reduce_before_ship",
+            "Redesign architecture before this operator can ship": "redesign_architecture",
+        },
+        label="Synthesis decision: what is the operator budget decision?",
+    )
+    v1_05_budget_note = mo.ui.text_area(
+        label="Operator budget note",
+        placeholder=(
+            "Name the binding amount, the selected operator design, the evidence number, "
+            "the residual risk, and the architecture implication for V1-06."
+        ),
+        full_width=True,
+    )
+    return (v1_05_budget_note, v1_05_final_decision)
+
+
+@app.cell
+def _(
+    memory_cliff,
+    operation_ledger,
+    operator_design,
+    v1_05_batch_policy,
+    v1_05_batch_precision_rows,
+    v1_05_binding_from_ratios,
+    v1_05_budget_ratios,
+    v1_05_cliff_category,
+    v1_05_compute,
+    v1_05_design,
+    v1_05_design_alignment,
+    v1_05_precision_policy,
+    v1_05_roofline_diagnosis,
+    v1_05_shape_multiplier,
+    v1_05_strategy_category,
+    v1_05_track_story,
+):
+    v1_05_ledger = operation_ledger(
+        v1_05_compute,
+        shape_multiplier=v1_05_shape_multiplier.value,
+    )
+    v1_05_cliff = memory_cliff(v1_05_compute, samples=44)
+    v1_05_shape_ledgers = tuple(
+        operation_ledger(v1_05_compute, shape_multiplier=value)
+        for value in v1_05_cliff.shape_values
+    )
+    v1_05_design_result = operator_design(
+        v1_05_compute,
+        design_id=v1_05_design.value,
+        shape_multiplier=v1_05_shape_multiplier.value,
+    )
+    v1_05_design_results = tuple(
+        operator_design(
+            v1_05_compute,
+            design_id=design.design_id,
+            shape_multiplier=v1_05_shape_multiplier.value,
+        )
+        for design in v1_05_compute.design_options
+    )
+    v1_05_ratios = v1_05_budget_ratios(v1_05_ledger, v1_05_compute)
+    v1_05_binding_ratio = v1_05_binding_from_ratios(v1_05_ratios)
+    v1_05_cliff_actual = v1_05_cliff_category(v1_05_compute, v1_05_cliff)
+    v1_05_batch_rows = v1_05_batch_precision_rows(
+        v1_05_compute,
+        v1_05_shape_multiplier.value,
+        v1_05_batch_policy.value,
+        v1_05_precision_policy.value,
+        operation_ledger,
+    )
+    v1_05_selected_batch_row = next(row for row in v1_05_batch_rows if row["selected"])
+    v1_05_batch_actual = v1_05_strategy_category(v1_05_compute, v1_05_selected_batch_row)
+    v1_05_diagnosis = v1_05_roofline_diagnosis(v1_05_compute, v1_05_ledger)
+    v1_05_alignment = v1_05_design_alignment(
+        v1_05_diagnosis,
+        v1_05_design_result,
+        v1_05_design_results,
+    )
+    v1_05_story = v1_05_track_story(v1_05_compute.track_id)
+    return (
+        v1_05_alignment,
+        v1_05_batch_actual,
+        v1_05_batch_rows,
+        v1_05_binding_ratio,
+        v1_05_cliff,
+        v1_05_cliff_actual,
+        v1_05_design_result,
+        v1_05_design_results,
+        v1_05_diagnosis,
+        v1_05_ledger,
+        v1_05_ratios,
+        v1_05_selected_batch_row,
+        v1_05_shape_ledgers,
+        v1_05_story,
+    )
+
+
+# ===========================================================================
+# ZONE C: CONCEPT MODULES
+# ===========================================================================
+
+
 @app.cell(hide_code=True)
 def _(
-    COLORS, CLOUD_TIERS_KB, H100_BW_GBS, H100_RAM_GB, H100_TFLOPS,
-    MOBILE_BW_GBS, MOBILE_RAM_GB, MOBILE_TFLOPS, MOBILE_TIERS_KB,
-    TIER_LATENCY_NS, TRANSISTOR_COSTS, apply_plotly_theme,
-    go, math, mo, np, ledger,
+    COLORS,
+    apply_plotly_theme,
+    go,
+    mo,
+    source_trace,
+    v1_05_alignment,
+    v1_05_amount_checkpoint,
+    v1_05_batch_actual,
+    v1_05_batch_checkpoint,
+    v1_05_batch_policy,
+    v1_05_batch_prediction,
+    v1_05_batch_rows,
+    v1_05_binding_ratio,
+    v1_05_budget_note,
+    v1_05_callout_html,
+    v1_05_cliff,
+    v1_05_cliff_actual,
+    v1_05_cliff_prediction,
+    v1_05_compute,
+    v1_05_design,
+    v1_05_design_result,
+    v1_05_design_results,
+    v1_05_diagnosis,
+    v1_05_diagnosis_prediction,
+    v1_05_energy_display,
+    v1_05_fields_html,
+    v1_05_final_decision,
+    v1_05_ledger,
+    v1_05_memory_checkpoint,
+    v1_05_optimization_checkpoint,
+    v1_05_precision_policy,
+    v1_05_prediction_html,
+    v1_05_ratios,
+    v1_05_resource_prediction,
+    v1_05_selected_batch_row,
+    v1_05_shape_ledgers,
+    v1_05_shape_multiplier,
+    v1_05_story,
+    v1_05_table_html,
+    v1_05_variant,
 ):
-    # ─────────────────────────────────────────────────────────────────────
-    # SHARED WIDGET STATE
-    # ─────────────────────────────────────────────────────────────────────
+    _resource_labels = {
+        "activation memory": "activation memory",
+        "bandwidth": "memory traffic / bandwidth",
+        "latency": "arithmetic latency",
+        "power": "energy or power",
+    }
+    _cliff_labels = {
+        "before_default": "before the default shape",
+        "near_default": "near the default shape",
+        "later": "after more shape growth",
+        "no_cliff": "no cliff inside the tested envelope",
+    }
+    _batch_labels = {
+        "default": "track default",
+        "compact_precision": "compact precision",
+        "larger_batch": "larger batch/window",
+        "not_safe": "selected policy fails",
+    }
+    _diagnosis_labels = {
+        "memory": "memory or data movement",
+        "compute": "compute latency",
+        "energy": "energy or thermal power",
+    }
 
-    # Part A widgets
-    partA_prediction = mo.ui.radio(
-        options={
-            "A) <1% (negligible, like on GPUs)": "lt1",
-            "B) ~5% (noticeable but small)": "5pct",
-            "C) ~23% (significant cost)": "23pct",
-            "D) ~50% (dominant cost)": "50pct",
-        },
-        label="On a mobile NPU, what fraction of inference time comes from activation "
-              "functions if you use Sigmoid instead of ReLU in every layer?",
+    _growth_fig = go.Figure()
+    _growth_fig.add_trace(go.Scatter(
+        x=[result.shape_multiplier for result in v1_05_shape_ledgers],
+        y=[result.activations_mb for result in v1_05_shape_ledgers],
+        mode="lines",
+        name="Activation memory (MB)",
+        line=dict(color=COLORS["BlueLine"], width=3),
+    ))
+    _growth_fig.add_trace(go.Scatter(
+        x=[result.shape_multiplier for result in v1_05_shape_ledgers],
+        y=[result.ops_gmac for result in v1_05_shape_ledgers],
+        mode="lines",
+        name="Operations (GMAC)",
+        yaxis="y2",
+        line=dict(color=COLORS["OrangeLine"], width=3),
+    ))
+    _growth_fig.add_vline(
+        x=v1_05_shape_multiplier.value,
+        line_dash="dash",
+        line_color=COLORS["TextMuted"],
+        annotation_text="current",
     )
-    return (partA_prediction,)
+    _growth_fig.update_layout(
+        height=360,
+        xaxis=dict(title="Shape multiplier", gridcolor="#f1f5f9"),
+        yaxis=dict(title="Activation memory (MB)", gridcolor="#f1f5f9"),
+        yaxis2=dict(title="Operations (GMAC)", overlaying="y", side="right", showgrid=False),
+        margin=dict(l=60, r=60, t=35, b=55),
+        legend=dict(orientation="h", y=-0.22),
+    )
+    apply_plotly_theme(_growth_fig)
 
-@app.cell(hide_code=True)
-def _(mo):
-    partA_context = mo.ui.radio(
-        options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
-        value="Cloud GPU (H100)",
-        label="Deployment context:",
-        inline=True,
+    _cliff_colors = [COLORS["GreenLine"] if ok else COLORS["RedLine"] for ok in v1_05_cliff.feasible]
+    _cliff_fig = go.Figure()
+    _cliff_fig.add_trace(go.Scatter(
+        x=list(v1_05_cliff.shape_values),
+        y=list(v1_05_cliff.activation_mb),
+        mode="lines+markers",
+        marker=dict(color=_cliff_colors, size=7),
+        line=dict(color=COLORS["BlueLine"], width=2.5),
+        name="Activation memory",
+    ))
+    _cliff_fig.add_hline(
+        y=v1_05_compute.activation_budget_mb,
+        line_dash="dash",
+        line_color=COLORS["RedLine"],
+        line_width=1.5,
+        annotation_text="activation budget",
     )
-    partA_act_l1 = mo.ui.dropdown(
-        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
-        value="Sigmoid", label="Layer 1",
+    if v1_05_cliff.threshold_multiplier is not None:
+        _cliff_fig.add_vline(
+            x=v1_05_cliff.threshold_multiplier,
+            line_dash="dash",
+            line_color=COLORS["RedLine"],
+            line_width=1.5,
+            annotation_text="first cliff",
+        )
+    _cliff_fig.update_layout(
+        height=360,
+        xaxis=dict(title="Shape multiplier", gridcolor="#f1f5f9"),
+        yaxis=dict(title="Activation memory (MB)", gridcolor="#f1f5f9"),
+        margin=dict(l=60, r=20, t=35, b=55),
     )
-    partA_act_l2 = mo.ui.dropdown(
-        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
-        value="Sigmoid", label="Layer 2",
+    apply_plotly_theme(_cliff_fig)
+
+    _budget_fig = go.Figure()
+    _budget_fig.add_trace(go.Bar(
+        x=list(v1_05_ratios.values()),
+        y=list(v1_05_ratios.keys()),
+        orientation="h",
+        marker_color=[
+            COLORS["RedLine"] if ratio > 1.0 else COLORS["GreenLine"]
+            for ratio in v1_05_ratios.values()
+        ],
+        text=[f"{ratio:.2f}x" for ratio in v1_05_ratios.values()],
+        textposition="outside",
+    ))
+    _budget_fig.add_vline(x=1.0, line_dash="dash", line_color=COLORS["RedLine"])
+    _budget_fig.update_layout(
+        height=300,
+        xaxis=dict(title="Used / budget", gridcolor="#f1f5f9"),
+        yaxis=dict(title="Budget amount", gridcolor="#f1f5f9"),
+        margin=dict(l=110, r=40, t=25, b=45),
+        showlegend=False,
     )
-    partA_act_l3 = mo.ui.dropdown(
-        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
-        value="Sigmoid", label="Layer 3",
+    apply_plotly_theme(_budget_fig)
+
+    _batch_fig = go.Figure()
+    for _row in v1_05_batch_rows:
+        _color = COLORS["GreenLine"] if _row["feasible"] else COLORS["RedLine"]
+        _symbol = "diamond" if _row["selected"] else "circle"
+        _batch_fig.add_trace(go.Scatter(
+            x=[_row["latency_ms"]],
+            y=[_row["activation_mb"]],
+            mode="markers+text",
+            text=["selected" if _row["selected"] else ""],
+            textposition="top center",
+            marker=dict(
+                color=_color,
+                size=max(10, min(28, _row["throughput_per_s"] / 50)),
+                symbol=_symbol,
+                line=dict(color="#0f172a", width=1),
+            ),
+            name=_row["label"],
+            hovertemplate=(
+                "<b>%{fullData.name}</b><br>"
+                "Latency %{x:.3f} ms<br>"
+                "Activation %{y:.2f} MB<extra></extra>"
+            ),
+        ))
+    _batch_fig.add_vline(x=v1_05_compute.latency_budget_ms, line_dash="dash", line_color=COLORS["RedLine"])
+    _batch_fig.add_hline(y=v1_05_compute.activation_budget_mb, line_dash="dash", line_color=COLORS["RedLine"])
+    _batch_fig.update_layout(
+        height=380,
+        xaxis=dict(title="Latency estimate (ms)", gridcolor="#f1f5f9"),
+        yaxis=dict(title="Activation memory (MB)", gridcolor="#f1f5f9"),
+        margin=dict(l=60, r=20, t=35, b=60),
+        legend=dict(orientation="h", y=-0.25),
     )
-    partA_act_l4 = mo.ui.dropdown(
-        options={"ReLU": "ReLU", "GELU": "GELU", "Sigmoid": "Sigmoid", "Swish": "Swish"},
-        value="Sigmoid", label="Layer 4",
+    apply_plotly_theme(_batch_fig)
+
+    _roof_fig = go.Figure()
+    _roof_fig.add_trace(go.Bar(
+        y=["Current intensity", "Hardware crossover"],
+        x=[v1_05_ledger.arithmetic_intensity, v1_05_diagnosis["crossover"]],
+        orientation="h",
+        marker_color=[COLORS["BlueLine"], COLORS["OrangeLine"]],
+        text=[
+            f"{v1_05_ledger.arithmetic_intensity:.2f} ops/byte",
+            f"{v1_05_diagnosis['crossover']:.2f} ops/byte",
+        ],
+        textposition="outside",
+    ))
+    _roof_fig.update_layout(
+        height=260,
+        xaxis=dict(title="Arithmetic intensity (ops/byte)", gridcolor="#f1f5f9"),
+        yaxis=dict(gridcolor="#f1f5f9"),
+        margin=dict(l=140, r=40, t=25, b=45),
+        showlegend=False,
+    )
+    apply_plotly_theme(_roof_fig)
+
+    _ledger_rows = (
+        ("Weights", f"{v1_05_ledger.weights_mb:.3f} MB", "persistent model bytes"),
+        ("Activations", f"{v1_05_ledger.activations_mb:.3f} MB", f"limit {v1_05_compute.activation_budget_mb:.3f} MB"),
+        ("Operations", f"{v1_05_ledger.ops_gmac:.3f} GMAC", "shape-dependent arithmetic"),
+        ("Bytes moved", f"{v1_05_ledger.bytes_moved_mb:.3f} MB", "memory traffic estimate"),
+        ("Arithmetic intensity", f"{v1_05_ledger.arithmetic_intensity:.2f} ops/byte", "reuse diagnostic"),
+        ("Estimated latency", f"{v1_05_ledger.estimated_latency_ms:.3f} ms", f"limit {v1_05_compute.latency_budget_ms:.1f} ms"),
+        ("Estimated bandwidth", f"{v1_05_ledger.estimated_bandwidth_gbs:.2f} GB/s", f"limit {v1_05_compute.bandwidth_budget_gbs:.2f} GB/s"),
+        ("Estimated power", f"{v1_05_ledger.estimated_power_w:.3f} W", f"limit {v1_05_compute.power_budget_w:.3f} W"),
+    )
+    _budget_rows = tuple(
+        (
+            name,
+            f"{ratio:.2f}x",
+            "binding" if name == v1_05_binding_ratio["name"] else "headroom",
+        )
+        for name, ratio in v1_05_ratios.items()
+    )
+    _batch_rows = tuple(
+        (
+            row["label"],
+            row["batch"],
+            f"{row['precision_bytes']} B",
+            f"{row['activation_mb']:.2f} MB",
+            f"{row['latency_ms']:.3f} ms",
+            f"{row['throughput_per_s']:.1f}/s",
+            v1_05_energy_display(v1_05_compute.track_id, row["energy_j"]),
+            row["binding"],
+            "selected" if row["selected"] else ("pass" if row["feasible"] else "fail"),
+        )
+        for row in v1_05_batch_rows
+    )
+    _design_rows = tuple(
+        (
+            result.design_label,
+            f"{result.activation_mb:.2f} MB",
+            f"{result.latency_ms:.3f} ms",
+            f"{result.bandwidth_gbs:.2f} GB/s",
+            "pass" if result.feasible else "fail",
+            result.quality_risk,
+        )
+        for result in v1_05_design_results
     )
 
-    # Part B widgets
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) 2x (linear with data size)": "2x",
-            "B) 1.5x (some overhead)": "1.5x",
-            "C) 10x (cache tier boundary crossed)": "10x",
-            "D) No change (hardware handles it)": "none",
-        },
-        label="A layer produces a 16 KB activation tensor in L2 cache. You double the "
-              "batch size (32 KB now). How does latency change on a mobile NPU?",
+    _violations = "; ".join(v1_05_ledger.violations) if v1_05_ledger.violations else "no current budget violation"
+    _threshold = (
+        f"{v1_05_cliff.threshold_multiplier:.2f}x"
+        if v1_05_cliff.threshold_multiplier is not None
+        else "not reached"
     )
-    return (partA_act_l1, partA_act_l2, partA_act_l3, partA_act_l4, partA_context, partB_prediction)
-
-@app.cell(hide_code=True)
-def _(mo):
-    partB_context = mo.ui.radio(
-        options={"Cloud GPU (H100)": "cloud", "Mobile NPU (iPhone)": "mobile"},
-        value="Mobile NPU (iPhone)",
-        label="Deployment context:",
-        inline=True,
-    )
-    partB_batch = mo.ui.slider(
-        start=1, stop=512, value=1, step=1, label="Batch size",
-    )
-    partB_width = mo.ui.slider(
-        start=64, stop=4096, value=256, step=64, label="Layer width",
+    _batch_violation = (
+        "; ".join(v1_05_selected_batch_row["violations"])
+        if v1_05_selected_batch_row["violations"]
+        else "selected policy stays inside the modeled envelope"
     )
 
-    # Part C widgets
-    partC_prediction = mo.ui.radio(
-        options={
-            "A) 2x (linear with width)": "2x",
-            "B) 3x": "3x",
-            "C) ~4x (quadratic)": "4x",
-            "D) 8x (cubic)": "8x",
-        },
-        label="A 3-layer MLP has hidden layers of width 128. You double the hidden "
-              "width to 256. By how much do total FLOPs increase?",
-    )
-    return (partB_batch, partB_context, partB_width, partC_prediction)
+    _part_a = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part A: Tensor Shape Growth Changes Amounts</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            You are the {v1_05_story["stakeholder"]}. The operator story is:
+            {v1_05_compute.operator_story}</div>
+        </div>
+        """),
+        v1_05_resource_prediction,
+        v1_05_shape_multiplier,
+        mo.Html(v1_05_prediction_html(
+            "Prediction Check",
+            v1_05_resource_prediction.value,
+            v1_05_ledger.dominant_resource,
+            _resource_labels,
+        )),
+        mo.as_html(_growth_fig),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Operation Ledger Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_05_fields_html({
+                "Dominant bounded amount": _resource_labels.get(v1_05_ledger.dominant_resource, v1_05_ledger.dominant_resource),
+                "Shape multiplier": f"{v1_05_shape_multiplier.value:.2f}x",
+                "Activation memory": f"{v1_05_ledger.activations_mb:.2f} MB / {v1_05_compute.activation_budget_mb:.2f} MB",
+                "Operations": f"{v1_05_ledger.ops_gmac:.2f} GMAC",
+                "Bytes moved": f"{v1_05_ledger.bytes_moved_mb:.2f} MB",
+                "Track amount lens": v1_05_story["amount_focus"],
+            })}
+          </div>
+          {v1_05_table_html(("Amount", "Value", "Meaning"), _ledger_rows, numeric=(1,))}
+        </div>
+        """),
+        mo.Html(v1_05_callout_html(
+            "Consequence",
+            f"For {v1_05_compute.label}, this shape currently makes {v1_05_ledger.dominant_resource} the controlling amount.",
+            "info",
+        )),
+        mo.accordion({
+            "Math Peek / Source Model - shape to amount": mo.md("""
+            A forward layer transforms `A_prev` through `Z = A_prev W + b` and
+            `A = f(Z)`. The tensor dimensions set both activation elements and
+            operation count. In this lab the shared helper computes:
 
-@app.cell(hide_code=True)
-def _(mo):
-    partC_width = mo.ui.slider(
-        start=32, stop=2048, value=128, step=32, label="Hidden layer width",
-    )
+            `activation_MB = tensor_elements x bytes_per_value / 1e6`
 
-    # Part D widgets
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) ~50 MB (same as inference)": "50mb",
-            "B) ~100 MB (2x for gradients)": "100mb",
-            "C) ~200 MB (4x)": "200mb",
-            "D) ~500 MB+ (10x+)": "500mb",
-        },
-        label="A 20-layer model uses 50 MB for inference. How much memory does training "
-              "require (weights + gradients + activations, ignoring optimizer state)?",
-    )
-    return (partC_width, partD_prediction)
+            `arithmetic_intensity = operation_count / bytes_moved`
+            """),
+        }),
+        source_trace(
+            {
+                "chapter_anchor": "Forward pass computation; matrix multiplication formulation",
+                "shared_helper": "operation_ledger()",
+                "hardware_ref": v1_05_variant.hardware_ref,
+                "model_ref": v1_05_variant.model_ref,
+                "shape_multiplier": f"{v1_05_shape_multiplier.value:.2f}",
+            },
+            summary="Part A source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_05_amount_checkpoint,
+    ])
 
-# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
-@app.cell(hide_code=True)
-def _(mo):
-    partD_depth = mo.ui.slider(
-        start=3, stop=50, value=20, step=1, label="Network depth (layers)",
-    )
-    partD_batch = mo.ui.slider(
-        start=1, stop=128, value=32, step=1, label="Batch size",
-    )
-    partD_phase = mo.ui.radio(
-        options={"Inference": "inference", "Training": "training"},
-        value="Inference",
-        label="Phase:",
-        inline=True,
-    )
-    partD_width_d = mo.ui.slider(
-        start=64, stop=2048, value=512, step=64, label="Layer width",
-    )
-    return (partD_batch, partD_depth, partD_phase, partD_width_d)
+    _part_b = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part B: Memory And Activations Can Bind First</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            The stakeholder asks how far {v1_05_compute.tensor_label} can grow before
+            the track's activation, bandwidth, latency, or power budget fails.</div>
+        </div>
+        """),
+        v1_05_cliff_prediction,
+        v1_05_shape_multiplier,
+        mo.Html(v1_05_prediction_html(
+            "Prediction Check",
+            v1_05_cliff_prediction.value,
+            v1_05_cliff_actual,
+            _cliff_labels,
+        )),
+        mo.hstack([mo.as_html(_cliff_fig), mo.as_html(_budget_fig)], widths="equal"),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Boundary Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_05_fields_html({
+                "First activation cliff": _threshold,
+                "Current activation": f"{v1_05_ledger.activations_mb:.2f} MB",
+                "Activation budget": f"{v1_05_compute.activation_budget_mb:.2f} MB",
+                "Binding budget": f"{v1_05_binding_ratio['name']} at {v1_05_binding_ratio['ratio']:.2f}x",
+                "Current feasible": "yes" if v1_05_ledger.feasible else "no",
+                "Violations": _violations,
+            })}
+          </div>
+          {v1_05_table_html(("Budget amount", "Used / limit", "Status"), _budget_rows, numeric=(1,))}
+        </div>
+        """),
+        mo.Html(v1_05_callout_html(
+            "Consequence",
+            (
+                f"Current shape is inside the envelope. The measured cliff is {_threshold}."
+                if v1_05_ledger.feasible
+                else f"Current shape fails: {_violations}. Move the slider down, tile, stream, or reduce precision to recover."
+            ),
+            "ok" if v1_05_ledger.feasible else "fail",
+        )),
+        mo.accordion({
+            "Math Peek / Source Model - feasible envelope": mo.md("""
+            The boundary is not a single FLOP number. Feasibility is a conjunction:
 
+            `activation_ok and bandwidth_ok and latency_ok and power_ok`
 
-@app.cell(hide_code=True)
-def _(
-    mo, partA_act_l1, partA_act_l2, partA_act_l3,
-    partA_act_l4, partA_context, partA_prediction, partB_batch,
-    partB_context, partB_prediction, partB_width, partC_prediction,
-    partC_width, partD_prediction, partD_batch, partD_depth,
-    partD_phase, partD_width_d,
-):
+            The binding amount is the largest normalized ratio:
 
-    # ─────────────────────────────────────────────────────────────────────
-    # PART A BUILDER: The Transistor Tax
-    # ─────────────────────────────────────────────────────────────────────
+            `max(actual_amount / budget_amount)`
+            """),
+        }),
+        source_trace(
+            {
+                "chapter_anchor": "Memory: training vs. inference; Quick estimation for ML engineers",
+                "shared_helpers": "operation_ledger() and memory_cliff()",
+                "activation_budget_mb": f"{v1_05_compute.activation_budget_mb:.2f}",
+                "threshold_multiplier": _threshold,
+                "track_id": v1_05_compute.track_id,
+            },
+            summary="Part B source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_05_memory_checkpoint,
+    ])
+
+    _part_c = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part C: Batch And Precision Trade Amounts</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            Batch/window policy for this track means {v1_05_story["batch_meaning"]}.
+            Precision changes bytes per value, memory traffic, and validation risk.</div>
+        </div>
+        """),
+        v1_05_batch_prediction,
+        mo.hstack([v1_05_batch_policy, v1_05_precision_policy], justify="start", gap="2rem"),
+        mo.Html(v1_05_prediction_html(
+            "Prediction Check",
+            v1_05_batch_prediction.value,
+            v1_05_batch_actual,
+            _batch_labels,
+        )),
+        mo.as_html(_batch_fig),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Batch/Precision Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_05_fields_html({
+                "Selected strategy": v1_05_selected_batch_row["label"],
+                "Selected batch/window": v1_05_selected_batch_row["batch"],
+                "Precision bytes": v1_05_selected_batch_row["precision_bytes"],
+                "Throughput estimate": f"{v1_05_selected_batch_row['throughput_per_s']:.1f}/s",
+                "Energy amount": v1_05_energy_display(v1_05_compute.track_id, v1_05_selected_batch_row["energy_j"]),
+                "Binding amount": f"{v1_05_selected_batch_row['binding']} at {v1_05_selected_batch_row['binding_ratio']:.2f}x",
+            })}
+          </div>
+          {v1_05_table_html(
+              ("Strategy", "Batch", "Precision", "Activation", "Latency", "Throughput", "Energy", "Binding", "Status"),
+              _batch_rows,
+              numeric=(1, 2, 3, 4, 5, 6),
+          )}
+        </div>
+        """),
+        mo.Html(v1_05_callout_html(
+            "Consequence",
+            _batch_violation,
+            "ok" if v1_05_selected_batch_row["feasible"] else "fail",
+        )),
+        mo.accordion({
+            "Math Peek / Source Model - batch and precision": mo.md("""
+            Batch/window policy changes the number of activation elements held at
+            once. Precision changes bytes per activation and bytes per weight.
+
+            `activation_MB = batch x tensor_shape x bytes_per_value / 1e6`
+
+            `energy = estimated_power x latency`
+
+            Larger batches can improve useful work per launch, but they also
+            increase activation residency and can move the p99 or wake-time wall.
+            """),
+        }),
+        source_trace(
+            {
+                "chapter_anchor": "Batch Processing footnote; precision trades against power",
+                "shared_helper": "operation_ledger()",
+                "local_helper": "v1_05_batch_precision_rows()",
+                "track_id": v1_05_compute.track_id,
+                "selected_batch_policy": v1_05_batch_policy.value,
+                "selected_precision_policy": v1_05_precision_policy.value,
+            },
+            summary="Part C source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_05_batch_checkpoint,
+    ])
+
+    _part_d = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part D: Diagnosis Determines Optimization</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            You need to choose an optimization. A compute-bound operator wants fewer
+            operations or a better kernel; a memory-bound operator wants fewer bytes,
+            tiling, streaming, or reuse.</div>
+        </div>
+        """),
+        v1_05_diagnosis_prediction,
+        v1_05_design,
+        mo.Html(v1_05_prediction_html(
+            "Prediction Check",
+            v1_05_diagnosis_prediction.value,
+            v1_05_diagnosis["diagnosed_wall"],
+            _diagnosis_labels,
+        )),
+        mo.as_html(_roof_fig),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Diagnosis Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_05_fields_html({
+                "Arithmetic intensity": f"{v1_05_ledger.arithmetic_intensity:.2f} ops/byte",
+                "Hardware crossover": f"{v1_05_diagnosis['crossover']:.2f} ops/byte",
+                "Roofline wall": _diagnosis_labels.get(v1_05_diagnosis["roofline_wall"], v1_05_diagnosis["roofline_wall"]),
+                "Diagnosed wall": _diagnosis_labels.get(v1_05_diagnosis["diagnosed_wall"], v1_05_diagnosis["diagnosed_wall"]),
+                "Recommended family": v1_05_diagnosis["recommendation"],
+                "Selected design": v1_05_design_result.design_label,
+            })}
+          </div>
+          {v1_05_table_html(
+              ("Design", "Activation", "Latency", "Bandwidth", "Feasible", "Quality risk"),
+              _design_rows,
+              numeric=(1, 2, 3),
+          )}
+        </div>
+        """),
+        mo.Html(v1_05_callout_html(
+            "Consequence",
+            v1_05_alignment["message"],
+            "ok" if v1_05_alignment["aligned"] else "warn",
+        )),
+        mo.Html(v1_05_callout_html(
+            "Selected Design Risk",
+            f"{v1_05_design_result.quality_risk}; residual risk: {v1_05_design_result.residual_risk}",
+            "info",
+        )),
+        mo.accordion({
+            "Math Peek / Source Model - compute vs memory": mo.md("""
+            Arithmetic intensity asks how much arithmetic is done for each byte
+            moved. The roofline crossover is the point where memory bandwidth and
+            peak compute can both be used:
+
+            `crossover = peak_ops_per_second / memory_bytes_per_second`
+
+            Below the crossover, reducing bytes moved is usually more valuable
+            than adding compute. Above it, reducing operations or improving the
+            kernel is more likely to help.
+            """),
+        }),
+        source_trace(
+            {
+                "chapter_anchor": "Memory wall; arithmetic intensity of matrix multiply vs. element-wise work",
+                "shared_helpers": "operation_ledger() and operator_design()",
+                "local_helper": "v1_05_roofline_diagnosis()",
+                "track_id": v1_05_compute.track_id,
+                "selected_design": v1_05_design.value,
+            },
+            summary="Part D source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_05_optimization_checkpoint,
+    ])
+
+    _synthesis = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Synthesis: Operator Budget Note</h2></div>
+          <div class="mlsysbook-callout"><strong>Invariant:</strong>
+            Neural computation turns tensors into bounded amounts of operations,
+            activations, memory traffic, and energy. The budget note records which
+            amount bound this design and what architecture implication carries to V1-06.</div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Decision Record</h2>
+          <div class="mlsysbook-grid">
+            {v1_05_fields_html({
+                "Track": v1_05_compute.label,
+                "Tensor": v1_05_compute.tensor_label,
+                "Binding amount": f"{v1_05_binding_ratio['name']} at {v1_05_binding_ratio['ratio']:.2f}x",
+                "Selected design": v1_05_design_result.design_label,
+                "Batch/precision": v1_05_selected_batch_row["label"],
+                "Diagnosis": _diagnosis_labels.get(v1_05_diagnosis["diagnosed_wall"], v1_05_diagnosis["diagnosed_wall"]),
+                "Residual risk": v1_05_design_result.residual_risk,
+                "Next-lab implication": v1_05_story["next_lab"],
+            })}
+          </div>
+        </div>
+        """),
+        v1_05_final_decision,
+        v1_05_budget_note,
+        mo.accordion({
+            "Math Peek / Source Model - operator budget note": mo.md("""
+            A complete operator budget note has five fields:
+
+            1. decision
+            2. binding amount
+            3. evidence number
+            4. residual risk
+            5. architecture implication
+
+            That record is what later labs can reuse when architecture, training,
+            compression, acceleration, and serving decisions change the envelope.
+            """),
+        }),
+        mo.Html(f"""
+        <div class="lab-hud">
+            <span class="hud-label">LAB</span>
+            <span class="hud-value">05 &middot; Neural Computation</span>
+            <span class="hud-label">TRACK</span>
+            <span class="hud-value">{v1_05_compute.label}</span>
+            <span style="flex:1;"></span>
+            <span class="hud-label">BINDING</span>
+            <span class="hud-value">{v1_05_binding_ratio["name"]}</span>
+            <span class="hud-label">STATUS</span>
+            <span class="hud-active">ACTIVE</span>
+        </div>
+        """),
+    ])
 
     def build_part_a():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; ML Compiler Engineer, NeuralEdge Inc.
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Our mobile vision model uses Sigmoid activations in every layer. The
-                cloud version runs perfectly, but on the phone it is 30% slower than our
-                latency budget. Engineering says the activations are irrelevant &mdash;
-                they are just element-wise ops. Can you check the silicon cost?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Priya Nair, ML Compiler Engineer &middot; NeuralEdge Inc.
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## The Transistor Tax: Not All Activations Are Created Equal
-
-Every activation function compiles down to transistor-level logic. The cost
-varies enormously:
-
-| Function | Transistors | Operation |
-|----------|-------------|-----------|
-| **ReLU** | ~50 | Single comparison: `max(0, x)` |
-| **GELU** | ~1,200 | Approximate `erf()` or tanh polynomial |
-| **Sigmoid** | ~2,500 | Exponentiation + division: `1/(1+exp(-x))` |
-| **Swish** | ~2,550 | Sigmoid(x) * x |
-
-On a cloud GPU, activation compute is <1% of total inference time because
-matrix multiplies dominate. On a mobile NPU, the 50x transistor gap between
-ReLU and Sigmoid becomes a **significant fraction** of total inference time.
-        """))
-
-        items.append(partA_prediction)
-
-        if partA_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the activation cost simulator."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partA_context], justify="start"))
-        items.append(mo.hstack([partA_act_l1, partA_act_l2, partA_act_l3, partA_act_l4], justify="start"))
-
-        # Simulation
-        _ctx = partA_context.value
-        _is_mobile = _ctx == "mobile"
-        _hw_clock_ghz = 1.5 if _is_mobile else 2.1
-        _hw_label = "Mobile NPU (iPhone)" if _is_mobile else "Cloud GPU (H100)"
-        _channels = 64
-        _spatial = 56 * 56
-        _activations_per_layer = _channels * _spatial
-
-        _matmul_flops_per_layer = 2 * _channels * _channels * _spatial
-        _total_mm_flops = 4 * _matmul_flops_per_layer
-        _peak_tflops = MOBILE_TFLOPS if _is_mobile else H100_TFLOPS
-        _matmul_time_ms = (_total_mm_flops / (_peak_tflops * 1e12)) * 1000
-
-        _pipeline_width = 256 if _is_mobile else 16384
-        _act_names = [partA_act_l1.value, partA_act_l2.value, partA_act_l3.value, partA_act_l4.value]
-        _layer_times_act = []
-        for _act in _act_names:
-            _transistors = TRANSISTOR_COSTS.get(_act, 50)
-            _cycles_per_act = _transistors / 50
-            _act_time = (_activations_per_layer * _cycles_per_act) / (_hw_clock_ghz * 1e9 * _pipeline_width) * 1000
-            _layer_times_act.append(_act_time)
-
-        _total_act_time = sum(_layer_times_act)
-        _total_mm_time = _matmul_time_ms
-        _norm_time = _total_mm_time * 0.05
-        _other_time = _total_mm_time * 0.02
-        _total_time = _total_mm_time + _total_act_time + _norm_time + _other_time
-        _act_pct = (_total_act_time / _total_time) * 100 if _total_time > 0 else 0
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(name="Matrix Multiply", x=["Breakdown"], y=[_total_mm_time],
-                              marker_color=COLORS["BlueLine"], opacity=0.88,
-                              hovertemplate="Matrix Multiply: %{y:.2f} ms<extra></extra>"))
-        _fig.add_trace(go.Bar(name="Activations", x=["Breakdown"], y=[_total_act_time],
-                              marker_color=COLORS["RedLine"] if _act_pct > 10 else COLORS["OrangeLine"],
-                              opacity=0.88,
-                              hovertemplate="Activations: %{y:.2f} ms<extra></extra>"))
-        _fig.add_trace(go.Bar(name="Normalization", x=["Breakdown"], y=[_norm_time],
-                              marker_color=COLORS["GreenLine"], opacity=0.88,
-                              hovertemplate="Normalization: %{y:.2f} ms<extra></extra>"))
-        _fig.add_trace(go.Bar(name="Other", x=["Breakdown"], y=[_other_time],
-                              marker_color=COLORS["Grey"], opacity=0.88,
-                              hovertemplate="Other: %{y:.2f} ms<extra></extra>"))
-        _fig.update_layout(barmode="stack", height=320, yaxis_title="Time (ms)",
-                           title=f"Inference Time Decomposition -- {_hw_label}",
-                           legend=dict(orientation="h", y=1.12, x=0))
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _total_transistors = sum(TRANSISTOR_COSTS[a] * _activations_per_layer for a in _act_names)
-        _relu_baseline = 50 * _activations_per_layer * 4
-        _color = COLORS["RedLine"] if _act_pct > 15 else COLORS["OrangeLine"] if _act_pct > 5 else COLORS["GreenLine"]
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Activation % of Total</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{_color};">{_act_pct:.1f}%</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Total Transistors (Act.)</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['BlueLine']};">{_total_transistors:,.0f}</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:150px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">vs. All-ReLU Baseline</div>
-                <div style="font-size:1.7rem; font-weight:800; color:{COLORS['OrangeLine']};">{_total_transistors/_relu_baseline:.1f}x</div>
-            </div>
-        </div>
-        """))
-
-        # Reveal
-        _pred = partA_prediction.value
-        if _pred == "23pct":
-            items.append(mo.callout(mo.md(
-                "**Correct.** On a mobile NPU, switching all layers to Sigmoid pushes "
-                "activation compute to ~23% of total inference time. On cloud hardware "
-                "with 16,000+ Arithmetic Logic Units (ALUs), the same switch is barely measurable (<1%). "
-                "The deployment context determines whether this design choice has a real cost."
-            ), kind="success"))
-        elif _pred == "lt1":
-            items.append(mo.callout(mo.md(
-                "**That is the cloud GPU answer, not mobile.** On cloud hardware, activations "
-                "are indeed <1% thanks to massive parallelism. But on mobile with ~256 ALUs, "
-                "the 50x transistor gap translates to ~23% of inference time. "
-                "Try switching the context toggle to Mobile to see the difference."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**Close but not quite.** The actual fraction on mobile is ~23%. "
-                f"Sigmoid requires ~2,500 transistors per activation vs. ReLU's ~50 -- "
-                f"a 50x gap that becomes significant when hardware parallelism is limited."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "MathPeek: Activation Cost Formula": mo.md(f"""
-**Activation time per layer:**
-```
-T_act = (N_activations * C_transistors) / (f_clock * N_ALUs)
-      = ({_activations_per_layer:,} * C) / ({_hw_clock_ghz} GHz * {_pipeline_width})
-```
-Where C varies: ReLU=50, GELU=1200, Sigmoid=2500, Swish=2550.
-
-Source: @sec-nn-computation-activation-functions, @sec-nn-computation-transistor-tax
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART B BUILDER: The Memory Hierarchy Cliff
-    # ─────────────────────────────────────────────────────────────────────
+        return _part_a
 
     def build_part_b():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Performance Engineer, NeuralEdge Inc.
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We doubled our batch size and expected 2x throughput. Instead, latency
-                jumped 10x on the mobile target. On the cloud GPU, everything was fine. The
-                model is identical. What happened?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Marcus Chen, Performance Engineer &middot; NeuralEdge Inc.
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## Memory Hierarchies Create Cliffs, Not Slopes
-
-Memory is not flat. Hardware organizes it into tiers with dramatically different latencies:
-
-| Tier | Typical Capacity | Latency | Relative Speed |
-|------|-----------------|---------|---------------|
-| **L1 Cache** | ~128-256 KB | ~1 ns | 1x (baseline) |
-| **L2 Cache** | 32-50 MB | ~5 ns | 5x slower |
-| **HBM / DRAM** | 8-80 GB | ~100-200 ns | 100-200x slower |
-
-When a tensor exceeds a tier capacity, latency does not degrade gradually -- it
-**falls off a cliff** to the next tier. Doubling batch size can push activations
-from L2 (5 ns) to HBM (100 ns): a **20x latency jump**, not 2x.
-        """))
-
-        items.append(partB_prediction)
-
-        if partB_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the memory tier simulator."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partB_context, partB_batch, partB_width], justify="start"))
-
-        _ctx = partB_context.value
-        _batch = partB_batch.value
-        _width = partB_width.value
-        _is_mobile = _ctx == "mobile"
-        _tiers = MOBILE_TIERS_KB if _is_mobile else CLOUD_TIERS_KB
-
-        _tensor_bytes = _batch * _width * 4
-        _tensor_kb = _tensor_bytes / 1024
-
-        def _get_tier(sz_kb, tiers):
-            if sz_kb <= tiers["L1"]:
-                return "L1"
-            elif sz_kb <= tiers["L2"]:
-                return "L2"
-            elif sz_kb <= tiers["HBM"]:
-                return "HBM"
-            return "DRAM"
-
-        _tier = _get_tier(_tensor_kb, _tiers)
-        _tier_colors = {"L1": COLORS["GreenLine"], "L2": COLORS["BlueLine"],
-                        "HBM": COLORS["OrangeLine"], "DRAM": COLORS["RedLine"]}
-        _tier_color = _tier_colors[_tier]
-        _access_ns = TIER_LATENCY_NS[_tier]
-        _latency_ratio = _access_ns / TIER_LATENCY_NS["L2"]
-
-        _batch_range = np.arange(1, 513)
-        _sizes_kb = _batch_range * _width * 4 / 1024
-        _latencies = np.array([TIER_LATENCY_NS[_get_tier(s, _tiers)] for s in _sizes_kb])
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_batch_range.tolist(), y=_latencies.tolist(),
-            mode="lines", name="Access Latency",
-            line=dict(color=COLORS["BlueLine"], width=2.5),
-            fill="tozeroy", fillcolor="rgba(0,99,149,0.1)",
-            hovertemplate="Batch %{x}: %{y:.1f} ns<extra></extra>",
-        ))
-        _fig.add_trace(go.Scatter(
-            x=[_batch], y=[_access_ns],
-            mode="markers", name="Current Setting",
-            marker=dict(size=14, color=_tier_color, symbol="diamond",
-                        line=dict(width=2, color="white")),
-            hovertemplate="Batch %{x}: %{y:.1f} ns<extra></extra>",
-        ))
-        for _tier_name, _tier_cap in _tiers.items():
-            _boundary_batch = max(1, int(_tier_cap / (_width * 4 / 1024)))
-            if 1 < _boundary_batch < 512:
-                _fig.add_vline(x=_boundary_batch, line_dash="dash",
-                               line_color=COLORS["OrangeLine"], opacity=0.6,
-                               annotation_text=f"{_tier_name} limit", annotation_position="top")
-        _fig.update_layout(
-            height=360, xaxis_title="Batch Size", yaxis_title="Access Latency (ns)",
-            yaxis_type="log",
-            title=f"Memory Tier Latency vs. Batch Size -- {'Mobile' if _is_mobile else 'Cloud'} (width={_width})",
-        )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _oom = _tensor_kb > _tiers["HBM"]
-        if _oom:
-            items.append(FailureBanner(
-                condition=True,
-                message=f"OOM -- Activation tensor ({_tensor_kb:,.0f} KB) exceeds device memory ({_tiers['HBM']:,} KB). Reduce batch size or layer width."
-            ))
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_tier_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Tensor Size</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_tier_color};">{_tensor_kb:,.1f} KB</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_tier_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Memory Tier</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_tier_color};">{_tier}</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_tier_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Access Latency</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_tier_color};">{_access_ns:.0f} ns</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['RedLine'] if _latency_ratio > 5 else COLORS['GreenLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">vs. L2 Baseline</div>
-                <div style="font-size:1.5rem; font-weight:800;
-                     color:{COLORS['RedLine'] if _latency_ratio > 5 else COLORS['GreenLine']};">{_latency_ratio:.0f}x</div>
-            </div>
-        </div>
-        """))
-
-        _pred = partB_prediction.value
-        if _pred == "10x":
-            items.append(mo.callout(mo.md(
-                "**Correct.** On mobile, doubling from 16 KB to 32 KB can cross the L2 boundary "
-                "into HBM, triggering a ~20x latency jump. Memory hierarchies create step "
-                "functions, not gradual slopes. On cloud with 50 MB L2, the same doubling "
-                "stays comfortably in cache."
-            ), kind="success"))
-        elif _pred == "2x":
-            items.append(mo.callout(mo.md(
-                "**That assumes flat memory -- but memory is tiered.** A 2x increase in tensor "
-                "size that crosses a tier boundary triggers a 10-20x latency jump. Switch the "
-                "context to Mobile and watch at the L2 boundary."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**The answer depends on context.** On mobile, crossing L2->HBM gives ~20x. "
-                "On cloud, 32 KB fits comfortably in 50 MB L2, so ~2x is roughly correct."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "MathPeek: Memory Tier Placement": mo.md(f"""
-**Tensor size:** `batch * width * 4 bytes = {_batch} * {_width} * 4 = {_tensor_bytes:,} bytes = {_tensor_kb:,.1f} KB`
-
-**Cliff at boundary:** L2 (5 ns) to HBM (100 ns) = **20x jump**
-
-Source: @sec-nn-computation-memory-hierarchy
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART C BUILDER: The Width-Squared Surprise
-    # ─────────────────────────────────────────────────────────────────────
+        return _part_b
 
     def build_part_c():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Research Lead, NeuralEdge Inc.
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We doubled the hidden layer width and expected the model to be twice
-                as expensive. But our profiler shows a 3.8x increase in FLOPs. There must
-                be a bug in the profiler. Can you verify?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Dr. Liang Wei, Research Lead &middot; NeuralEdge Inc.
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## Dense Layer FLOPs Scale as O(width^2)
-
-For a dense (fully connected) layer: `FLOPs = 2 * width_in * width_out`
-
-For hidden-to-hidden layers, both dimensions are the hidden width W,
-so FLOPs = 2W^2. Doubling W yields 2*(2W)^2 = 8W^2 -- a **4x increase**.
-
-For a 3-layer MLP (784 -> W -> W -> 10):
-- **Input-to-hidden**: 2 * 784 * W (linear in W)
-- **Hidden-to-hidden**: 2 * W * W (quadratic in W)
-- **Hidden-to-output**: 2 * W * 10 (linear in W)
-
-The quadratic term dominates as W grows.
-        """))
-
-        items.append(partC_prediction)
-
-        if partC_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the FLOP scaling simulator."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(partC_width)
-
-        _w = partC_width.value
-        _input_dim = 784
-        _output_dim = 10
-        _flops_l1 = 2 * _input_dim * _w
-        _flops_l2 = 2 * _w * _w
-        _flops_l3 = 2 * _w * _output_dim
-        _total_flops = _flops_l1 + _flops_l2 + _flops_l3
-
-        _ref_w = 128
-        _ref_flops = 2 * _input_dim * _ref_w + 2 * _ref_w * _ref_w + 2 * _ref_w * _output_dim
-        _flops_ratio = _total_flops / _ref_flops if _ref_flops > 0 else 1
-        _width_ratio = _w / _ref_w
-
-        _fig = go.Figure()
-        for _name, _val, _col in zip(
-            ["Input->Hidden", "Hidden->Hidden", "Hidden->Output"],
-            [_flops_l1, _flops_l2, _flops_l3],
-            [COLORS["BlueLine"], COLORS["OrangeLine"], COLORS["GreenLine"]],
-        ):
-            _fig.add_trace(go.Bar(name=_name, x=["Current Width"], y=[_val],
-                                  marker_color=_col, opacity=0.88,
-                                  hovertemplate="%{fullData.name}: %{y:,.0f} FLOPs<extra></extra>"))
-        _fig.update_layout(barmode="stack", height=300, yaxis_title="FLOPs",
-                           title=f"Per-Layer FLOPs -- MLP (784->{_w}->{_w}->10)",
-                           legend=dict(orientation="h", y=1.12, x=0))
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _widths = np.arange(32, 2049, 32)
-        _total_curve = (2 * _input_dim * _widths + 2 * _widths**2 + 2 * _widths * _output_dim).astype(float)
-        _linear_ref = _total_curve[0] * (_widths / _widths[0])
-
-        _fig2 = go.Figure()
-        _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_total_curve.tolist(),
-                                   mode="lines", name="Actual FLOPs (quadratic)",
-                                   line=dict(color=COLORS["RedLine"], width=2.5),
-                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
-        _fig2.add_trace(go.Scatter(x=_widths.tolist(), y=_linear_ref.tolist(),
-                                   mode="lines", name="If linear (2x width = 2x FLOPs)",
-                                   line=dict(color=COLORS["Grey"], width=2, dash="dash"),
-                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
-        _fig2.add_trace(go.Scatter(x=[_w], y=[float(_total_flops)],
-                                   mode="markers", name="Current Width",
-                                   marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
-                                               line=dict(width=2, color="white")),
-                                   hovertemplate="Width %{x}: %{y:,.0f} FLOPs<extra></extra>"))
-        _fig2.update_layout(height=360, xaxis_title="Hidden Width", yaxis_title="Total FLOPs",
-                            title="FLOPs Scaling: Actual (Quadratic) vs. Linear Assumption",
-                            legend=dict(orientation="h", y=1.12, x=0))
-        apply_plotly_theme(_fig2)
-        items.append(mo.as_html(_fig2))
-
-        _qcolor = COLORS["RedLine"] if _flops_ratio > 3 else COLORS["OrangeLine"] if _flops_ratio > 1.5 else COLORS["GreenLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Width Ratio (vs 128)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_width_ratio:.1f}x</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_qcolor}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">FLOPs Ratio (vs 128)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_qcolor};">{_flops_ratio:.1f}x</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Total FLOPs</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_total_flops:,.0f}</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Hidden->Hidden Share</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_flops_l2/_total_flops*100:.0f}%</div>
-            </div>
-        </div>
-        """))
-
-        _actual_256 = (2*784*256 + 2*256*256 + 2*256*10) / (2*784*128 + 2*128*128 + 2*128*10)
-        _pred = partC_prediction.value
-        if _pred == "2x":
-            items.append(mo.callout(mo.md(
-                f"**Correct.** Doubling width from 128 to 256 increases total FLOPs by "
-                f"~{_actual_256:.1f}x. The hidden-to-hidden layer scales as W^2, but the "
-                f"input and output layers scale linearly, pulling the total below 4x."
-            ), kind="success"))
-        elif _pred == "4x":
-            items.append(mo.callout(mo.md(
-                f"**The quadratic layer dominates but doesn't tell the whole story.** "
-                f"The hidden-to-hidden layer (2*W^2) quadruples, but the input layer "
-                f"(2*784*W) and output layer (2*W*10) only double, pulling total to "
-                f"~{_actual_256:.1f}x."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**Not quite.** The actual increase is ~{_actual_256:.1f}x. The quadratic layer "
-                f"dominates, but input/output layers scale linearly, pulling total below 4x."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "MathPeek: FLOPs Scaling": mo.md(f"""
-**Per-layer FLOPs for MLP (784->{_w}->{_w}->10):**
-```
-Layer 1: 2 * 784 * {_w} = {_flops_l1:,}
-Layer 2: 2 * {_w} * {_w} = {_flops_l2:,}
-Layer 3: 2 * {_w} * 10  = {_flops_l3:,}
-Total = {_total_flops:,}
-```
-Doubling 128->256: ratio = {_actual_256:.2f}x (not 4x!)
-
-Source: @sec-nn-computation-flop-counting
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART D BUILDER: Forward vs. Backward Memory
-    # ─────────────────────────────────────────────────────────────────────
+        return _part_c
 
     def build_part_d():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Training Infra Lead, NeuralEdge Inc.
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;Inference works perfectly on our edge device. We want to add on-device
-                fine-tuning, but training immediately runs OOM. The model is the same. Why
-                does training need so much more memory than inference?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; James Okafor, Training Infra Lead &middot; NeuralEdge Inc.
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## Inference Discards; Training Stores Everything
-
-During **inference**, each layer's activations can be discarded after the next
-layer consumes them. Memory usage is approximately constant.
-
-During **training**, backpropagation needs every intermediate activation to
-compute gradients. All layer activations must be stored **simultaneously**.
-
-```
-Inference memory = weights + max_single_layer_activation
-Training memory  = weights + gradients + ALL_layer_activations
-```
-
-The training-to-inference ratio grows with depth and batch size.
-        """))
-
-        items.append(partD_prediction)
-
-        if partD_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the memory comparison."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partD_phase, partD_depth, partD_batch, partD_width_d], justify="start"))
-
-        _phase = partD_phase.value
-        _depth = partD_depth.value
-        _batch = partD_batch.value
-        _w = partD_width_d.value
-        _is_training = _phase == "training"
-        _bpp = 4
-        _input_dim = 784
-        _output_dim = 10
-
-        _params_l1 = _input_dim * _w
-        _params_hidden = max(0, _depth - 2) * _w * _w
-        _params_out = _w * _output_dim
-        _total_params = _params_l1 + _params_hidden + _params_out
-        _weight_mb = _total_params * _bpp / (1024 * 1024)
-
-        _act_per_layer_mb = _batch * _w * _bpp / (1024 * 1024)
-
-        if _is_training:
-            _act_total_mb = _act_per_layer_mb * _depth
-            _grad_mb = _weight_mb
-            _total_mb = _weight_mb + _grad_mb + _act_total_mb
-        else:
-            _act_total_mb = _act_per_layer_mb
-            _grad_mb = 0.0
-            _total_mb = _weight_mb + _act_total_mb
-
-        _inference_mb = _weight_mb + _act_per_layer_mb
-        _ratio = _total_mb / _inference_mb if _inference_mb > 0 else 1
-
-        _fig = go.Figure()
-        _colors_bar = [COLORS["BlueLine"], COLORS["GreenLine"],
-                       COLORS["RedLine"] if _is_training else COLORS["OrangeLine"]]
-        for _name, _val, _col in zip(["Weights", "Gradients", "Activations"],
-                                      [_weight_mb, _grad_mb, _act_total_mb], _colors_bar):
-            _fig.add_trace(go.Bar(name=_name, x=[_phase.capitalize()], y=[_val],
-                                  marker_color=_col, opacity=0.88,
-                                  hovertemplate="%{fullData.name}: %{y:,.1f} MB<extra></extra>"))
-        _fig.add_hline(y=80_000, line_dash="dash", line_color=COLORS["BlueLine"],
-                       annotation_text="H100 (80 GB)", annotation_position="right")
-        _fig.add_hline(y=8_000, line_dash="dash", line_color=COLORS["OrangeLine"],
-                       annotation_text="iPhone (8 GB)", annotation_position="right")
-        _fig.update_layout(barmode="stack", height=380, yaxis_title="Memory (MB)",
-                           title=f"Memory Breakdown -- {_phase.capitalize()} (depth={_depth}, batch={_batch}, width={_w})",
-                           legend=dict(orientation="h", y=1.12, x=0))
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
-
-        _depths = np.arange(3, 51)
-        _inf_mem = np.array([
-            (_input_dim * _w + max(0, d-2) * _w * _w + _w * _output_dim) * _bpp / (1024*1024)
-            + _act_per_layer_mb for d in _depths])
-        _train_mem = np.array([
-            ((_input_dim * _w + max(0, d-2) * _w * _w + _w * _output_dim) * _bpp * 2
-            + d * _batch * _w * _bpp) / (1024*1024) for d in _depths])
-
-        _fig2 = go.Figure()
-        _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_inf_mem.tolist(),
-                                   mode="lines", name="Inference",
-                                   line=dict(color=COLORS["GreenLine"], width=2.5),
-                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
-        _fig2.add_trace(go.Scatter(x=_depths.tolist(), y=_train_mem.tolist(),
-                                   mode="lines", name="Training",
-                                   line=dict(color=COLORS["RedLine"], width=2.5),
-                                   fill="tonexty", fillcolor="rgba(203,32,45,0.1)",
-                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
-        _fig2.add_trace(go.Scatter(x=[_depth], y=[_total_mb], mode="markers", name="Current",
-                                   marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
-                                               line=dict(width=2, color="white")),
-                                   hovertemplate="Depth %{x}: %{y:,.1f} MB<extra></extra>"))
-        _fig2.update_layout(height=360, xaxis_title="Network Depth (layers)", yaxis_title="Memory (MB)",
-                            title=f"Memory vs. Depth (batch={_batch}, width={_w})",
-                            legend=dict(orientation="h", y=1.12, x=0))
-        apply_plotly_theme(_fig2)
-        items.append(mo.as_html(_fig2))
-
-        _ratio_color = COLORS["RedLine"] if _ratio > 5 else COLORS["OrangeLine"] if _ratio > 2 else COLORS["GreenLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Weights</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_weight_mb:,.1f} MB</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Gradients</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_grad_mb:,.1f} MB</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_colors_bar[2]}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Activations</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_colors_bar[2]};">{_act_total_mb:,.1f} MB</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_ratio_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Train/Inference Ratio</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_ratio_color};">{_ratio:.1f}x</div>
-            </div>
-        </div>
-        """))
-
-        if _total_mb > 8_000 and _is_training:
-            items.append(mo.callout(mo.md(
-                f"**OOM on mobile (8 GB).** Training requires {_total_mb:,.0f} MB. "
-                f"On-device fine-tuning is infeasible. Reduce batch size, depth, or width."
-            ), kind="danger"))
-
-        _pred = partD_prediction.value
-        if _pred in ("200mb", "500mb"):
-            items.append(mo.callout(mo.md(
-                f"**Correct range.** Training requires {_ratio:.1f}x the memory of inference "
-                f"at current settings. Stored activations dominate: training keeps all {_depth} "
-                f"layers simultaneously for backpropagation."
-            ), kind="success"))
-        elif _pred == "100mb":
-            items.append(mo.callout(mo.md(
-                "**You accounted for gradients but forgot activations.** Gradients double "
-                "weight memory (2x), but stored activations add depth * batch * width per "
-                "layer -- the dominant term at deep networks."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**Training is much more expensive than inference.** The actual ratio is "
-                f"{_ratio:.1f}x. Backpropagation requires storing all intermediate activations."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "MathPeek: Training vs. Inference Memory": mo.md(f"""
-**Inference:** {_weight_mb:,.1f} + {_act_per_layer_mb:,.1f} = {_inference_mb:,.1f} MB
-**Training:** {_weight_mb:,.1f} + {_grad_mb:,.1f} + {_act_total_mb:,.1f} = {_total_mb:,.1f} MB
-**Ratio:** {_ratio:.1f}x
-
-Note: Optimizer state (Lab 08) adds 2 more weight-sized buffers for Adam.
-Source: @sec-nn-computation-backprop-memory
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # SYNTHESIS BUILDER
-    # ─────────────────────────────────────────────────────────────────────
+        return _part_d
 
     def build_synthesis():
-        items = []
-        items.append(mo.md("""
-## Synthesis: Design a Mobile Inference Pipeline
+        return _synthesis
 
-You are deploying a 10-layer vision model on a mobile NPU (iPhone, 8 GB RAM,
-5W power budget) for both real-time inference (30 FPS) and on-device fine-tuning.
-        """))
-
-        items.append(mo.callout(mo.md("""
-1. **Activation function choice**: Which activation and why? What is the impact on mobile?
-2. **Maximum batch size**: Before activations cross the L2 boundary on mobile
-   (32 MB L2, width=256), what is the maximum batch size?
-   *Hint: batch * 256 * 4 bytes <= 32 MB*
-3. **Training memory**: At depth=10, batch=32, width=256, what is the total
-   (weights + gradients + activations, ignoring optimizer state)?
-4. **Feasibility**: Can on-device fine-tuning fit in 8 GB?
-        """), kind="info"))
-
-        items.append(mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. The Transistor Tax is deployment-dependent.</strong>
-                    Sigmoid costs 50x more transistors than ReLU. On cloud: invisible (<1%).
-                    On mobile: ~23% of inference time. Architecture choices free on one target
-                    are expensive on another.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. Memory creates cliffs, not slopes.</strong>
-                    Crossing L2 to HBM triggers a 10-20x latency jump. Memory-aware design
-                    means keeping tensors within tier boundaries.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>3. Width scales quadratically.</strong>
-                    Doubling hidden width increases dense layer FLOPs by ~4x. The Operations
-                    term in the Iron Law is dominated by architecture decisions.
-                </div>
-                <div>
-                    <strong>4. Training stores everything inference discards.</strong>
-                    Backpropagation requires all intermediate activations simultaneously,
-                    creating a 4-10x memory multiplier over inference.
-                </div>
-            </div>
-        </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0 16px 0; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 06: Network Architectures</strong> -- This lab showed how
-                    individual layer costs scale. Lab 06 asks: when you compose layers into
-                    architectures (MLP, CNN, Transformer), which designs are physically feasible?
-                </div>
-            </div>
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> the Neural Computation chapter for transistor costs,
-                    memory hierarchies, and FLOP scaling.<br/>
-                    <strong>Build:</strong> TinyTorch Module 05 -- implement forward and
-                    backward passes for dense layers and activation functions.
-                </div>
-            </div>
-        </div>
-        """))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # COMPOSE TABS
-    # ─────────────────────────────────────────────────────────────────────
-
-    tabs = mo.ui.tabs({
-        "Part A \u2014 The Transistor Tax":       build_part_a(),
-        "Part B \u2014 The Memory Cliff":         build_part_b(),
-        "Part C \u2014 Width-Squared Surprise":   build_part_c(),
-        "Part D \u2014 Forward vs. Backward":     build_part_d(),
-        "Synthesis":                              build_synthesis(),
+    v1_05_tabs = mo.ui.tabs({
+        "Part A: Shape Amounts": build_part_a(),
+        "Part B: Activation Cliff": build_part_b(),
+        "Part C: Batch/Precision": build_part_c(),
+        "Part D: Diagnosis": build_part_d(),
+        "Synthesis": build_synthesis(),
     })
-    tabs
-    return
+    v1_05_tabs
+    return (v1_05_tabs,)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═════════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# ZONE D: LEDGER AND REPORT
+# ===========================================================================
 
-# ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
+
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, partA_prediction, partD_prediction):
-    _track = ledger._state.track or "not set"
-    if partA_prediction.value is not None and partD_prediction.value is not None:
+def _(
+    ledger,
+    mo,
+    v1_05_alignment,
+    v1_05_amount_checkpoint,
+    v1_05_batch_checkpoint,
+    v1_05_batch_policy,
+    v1_05_batch_prediction,
+    v1_05_binding_ratio,
+    v1_05_budget_note,
+    v1_05_cliff,
+    v1_05_cliff_prediction,
+    v1_05_compute,
+    v1_05_design_result,
+    v1_05_diagnosis,
+    v1_05_diagnosis_prediction,
+    v1_05_final_decision,
+    v1_05_ledger,
+    v1_05_memory_checkpoint,
+    v1_05_optimization_checkpoint,
+    v1_05_precision_policy,
+    v1_05_profile,
+    v1_05_resource_prediction,
+    v1_05_selected_batch_row,
+    v1_05_shape_multiplier,
+    v1_05_story,
+    v1_05_variant,
+):
+    if v1_05_resource_prediction.value is not None:
         ledger.save(chapter=5, design={
             "chapter": "v1_05",
-            "activation_cost_surprise": True,
-            "memory_cliff_discovered": True,
-            "width_scaling_law": "quadratic",
-            "forward_vs_backward_ratio": "4-10x",
-            "completed": True,
+            "track_id": v1_05_profile.track_id,
+            "scenario_id": v1_05_variant.scenario_id,
+            "hardware_ref": v1_05_compute.hardware_ref,
+            "model_ref": v1_05_compute.model_ref,
+            "completed": v1_05_final_decision.value is not None and bool(str(v1_05_budget_note.value or "").strip()),
+            "resource_prediction": v1_05_resource_prediction.value,
+            "dominant_resource": v1_05_ledger.dominant_resource,
+            "shape_multiplier": v1_05_shape_multiplier.value,
+            "activation_memory_mb": v1_05_ledger.activations_mb,
+            "ops_gmac": v1_05_ledger.ops_gmac,
+            "bytes_moved_mb": v1_05_ledger.bytes_moved_mb,
+            "memory_cliff_prediction": v1_05_cliff_prediction.value,
+            "memory_cliff_multiplier": v1_05_cliff.threshold_multiplier,
+            "amount_checkpoint": v1_05_amount_checkpoint.value,
+            "memory_checkpoint": v1_05_memory_checkpoint.value,
+            "batch_prediction": v1_05_batch_prediction.value,
+            "batch_policy": v1_05_batch_policy.value,
+            "precision_policy": v1_05_precision_policy.value,
+            "batch_precision_binding": v1_05_selected_batch_row["binding"],
+            "throughput_per_s": v1_05_selected_batch_row["throughput_per_s"],
+            "energy_j": v1_05_selected_batch_row["energy_j"],
+            "diagnosis_prediction": v1_05_diagnosis_prediction.value,
+            "diagnosed_wall": v1_05_diagnosis["diagnosed_wall"],
+            "operator_design": v1_05_design_result.design_id,
+            "optimization_checkpoint": v1_05_optimization_checkpoint.value,
+            "design_alignment": v1_05_alignment["aligned"],
+            "binding_amount": v1_05_binding_ratio["name"],
+            "binding_ratio": v1_05_binding_ratio["ratio"],
+            "quality_risk": v1_05_design_result.quality_risk,
+            "residual_risk": v1_05_design_result.residual_risk,
+            "final_decision": v1_05_final_decision.value,
+            "operator_budget_note": v1_05_budget_note.value,
+            "next_lab_implication": v1_05_story["next_lab"],
         })
 
     mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">05 &middot; The Transistor Tax</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">TRACK</span>
-        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">CHAPTER&nbsp;5</span>
-        <span class="hud-value">Neural Computation</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">active</span>
+    <div class="mlsysbook-panel">
+      <h2>Design Ledger</h2>
+      <div class="mlsysbook-grid">
+        <div class="mlsysbook-field"><strong>Saved track</strong>{v1_05_profile.label}</div>
+        <div class="mlsysbook-field"><strong>Binding amount</strong>{v1_05_binding_ratio["name"]}</div>
+        <div class="mlsysbook-field"><strong>Selected design</strong>{v1_05_design_result.design_label}</div>
+        <div class="mlsysbook-field"><strong>Next lab</strong>{v1_05_story["next_lab"]}</div>
+      </div>
     </div>
     """)
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    build_lab_report,
+    mo,
+    report_export_panel,
+    v1_05_alignment,
+    v1_05_amount_checkpoint,
+    v1_05_batch_checkpoint,
+    v1_05_batch_policy,
+    v1_05_batch_prediction,
+    v1_05_batch_rows,
+    v1_05_binding_ratio,
+    v1_05_budget_note,
+    v1_05_cliff,
+    v1_05_cliff_prediction,
+    v1_05_compute,
+    v1_05_design_result,
+    v1_05_diagnosis,
+    v1_05_diagnosis_prediction,
+    v1_05_final_decision,
+    v1_05_ledger,
+    v1_05_memory_checkpoint,
+    v1_05_metadata,
+    v1_05_optimization_checkpoint,
+    v1_05_precision_policy,
+    v1_05_profile,
+    v1_05_resource_prediction,
+    v1_05_selected_batch_row,
+    v1_05_shape_multiplier,
+    v1_05_story,
+    v1_05_variant,
+):
+    _incomplete = []
+    _required = (
+        ("Part A dominant-amount prediction", v1_05_resource_prediction.value),
+        ("Part A checkpoint", v1_05_amount_checkpoint.value),
+        ("Part B cliff prediction", v1_05_cliff_prediction.value),
+        ("Part B checkpoint", v1_05_memory_checkpoint.value),
+        ("Part C batch/precision prediction", v1_05_batch_prediction.value),
+        ("Part C checkpoint", v1_05_batch_checkpoint.value),
+        ("Part D diagnosis prediction", v1_05_diagnosis_prediction.value),
+        ("Part D checkpoint", v1_05_optimization_checkpoint.value),
+        ("Synthesis decision", v1_05_final_decision.value),
+    )
+    for label, value in _required:
+        if value is None:
+            _incomplete.append(label)
+    if not str(v1_05_budget_note.value or "").strip():
+        _incomplete.append("Synthesis operator budget note")
+
+    _report = build_lab_report(
+        v1_05_metadata,
+        track=v1_05_profile.label,
+        scenario=v1_05_variant.workload_summary,
+        learning_objectives=(
+            "Trace tensor shape growth into activation memory, operations, bytes moved, and energy.",
+            "Find the binding activation, bandwidth, latency, or power budget.",
+            "Compare batch and precision choices across throughput, memory, latency, and energy.",
+            "Diagnose compute-vs-memory behavior before choosing an operator optimization.",
+        ),
+        predictions={
+            "part_a_dominant_amount": v1_05_resource_prediction.value,
+            "part_b_cliff": v1_05_cliff_prediction.value,
+            "part_c_batch_precision": v1_05_batch_prediction.value,
+            "part_d_diagnosis": v1_05_diagnosis_prediction.value,
+        },
+        knob_settings={
+            "shape_multiplier": v1_05_shape_multiplier.value,
+            "batch_policy": v1_05_batch_policy.value,
+            "precision_policy": v1_05_precision_policy.value,
+            "operator_design": v1_05_design_result.design_id,
+        },
+        evidence_summary={
+            "hardware_ref": v1_05_compute.hardware_ref,
+            "model_ref": v1_05_compute.model_ref,
+            "dominant_resource": v1_05_ledger.dominant_resource,
+            "binding_amount": v1_05_binding_ratio["name"],
+            "binding_ratio": v1_05_binding_ratio["ratio"],
+            "activation_memory_mb": v1_05_ledger.activations_mb,
+            "activation_budget_mb": v1_05_compute.activation_budget_mb,
+            "ops_gmac": v1_05_ledger.ops_gmac,
+            "bytes_moved_mb": v1_05_ledger.bytes_moved_mb,
+            "arithmetic_intensity": v1_05_ledger.arithmetic_intensity,
+            "roofline_crossover": v1_05_diagnosis["crossover"],
+            "diagnosed_wall": v1_05_diagnosis["diagnosed_wall"],
+            "memory_cliff_multiplier": v1_05_cliff.threshold_multiplier,
+            "selected_batch_precision": v1_05_selected_batch_row["label"],
+            "selected_throughput_per_s": v1_05_selected_batch_row["throughput_per_s"],
+            "selected_energy_j": v1_05_selected_batch_row["energy_j"],
+            "selected_design": v1_05_design_result.design_label,
+            "design_alignment": v1_05_alignment["aligned"],
+            "quality_risk": v1_05_design_result.quality_risk,
+        },
+        final_decision=(
+            f"{v1_05_final_decision.value or 'pending'}; "
+            f"binding amount is {v1_05_binding_ratio['name']} and selected design is {v1_05_design_result.design_label}."
+        ),
+        big_takeaways=(
+            "Tensor shapes are amount systems: they create operations, activations, bytes moved, and energy.",
+            "Activation or memory-traffic budgets can bind before arithmetic throughput is exhausted.",
+            "Batch and precision are deployment controls whose value depends on the selected track.",
+            "The right optimization follows the measured compute-vs-memory diagnosis.",
+        ),
+        reflections={
+            "part_a_checkpoint": v1_05_amount_checkpoint.value,
+            "part_b_checkpoint": v1_05_memory_checkpoint.value,
+            "part_c_checkpoint": v1_05_batch_checkpoint.value,
+            "part_d_checkpoint": v1_05_optimization_checkpoint.value,
+            "operator_budget_note": v1_05_budget_note.value,
+            "residual_risk": v1_05_design_result.residual_risk,
+            "next_lab_implication": v1_05_story["next_lab"],
+        },
+        residual_risk=v1_05_design_result.residual_risk,
+        source_trace={
+            "track_id": v1_05_profile.track_id,
+            "scenario_id": v1_05_variant.scenario_id,
+            "hardware_ref": v1_05_variant.hardware_ref,
+            "model_ref": v1_05_variant.model_ref,
+            "shared_helpers": "neural_compute_profile(), operation_ledger(), memory_cliff(), operator_design()",
+            "local_helpers": "v1_05_budget_ratios(), v1_05_batch_precision_rows(), v1_05_roofline_diagnosis()",
+            "source_policy": v1_05_profile.source_policy,
+        },
+        result_snapshot={
+            "compute_profile": v1_05_compute,
+            "operation_ledger": v1_05_ledger,
+            "memory_cliff": v1_05_cliff,
+            "batch_precision_rows": v1_05_batch_rows,
+            "operator_design": v1_05_design_result,
+            "diagnosis": v1_05_diagnosis,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
+    mo.vstack([
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V1-05 operator budget note is generated locally from the selected track, "
+                "your predictions, controls, and computed evidence."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
+    ])
     return
 
 

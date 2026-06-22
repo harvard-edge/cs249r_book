@@ -44,7 +44,7 @@
           {
             "question_type": "SHORT",
             "question": "A team scales a 70B-parameter model's gradient synchronization from 8 GPUs to 1,000 GPUs under ring AllReduce and expects per-node bytes transferred to grow roughly linearly with participant count. Explain why that expectation is wrong, and identify what actually dominates synchronization time at scale.",
-            "answer": "In ring AllReduce, each participant transfers 2(N-1)/N times the full gradient per collective, which approaches 2 times the gradient size as N grows rather than scaling with N. Per-node bytes are therefore nearly constant: 1,000 GPUs move essentially the same volume per node as 8 GPUs. What dominates at scale is the aggregate payload (hundreds of gigabytes for a 70B model's gradient) divided by inter-node bandwidth, plus the O(N) step-count latency of the ring. The practical consequence is that bandwidth per link and the algorithm's step count become the knobs to tune, not per-node message volume.",
+            "answer": "In ring AllReduce, each participant transfers 2(N-1)/N times the full gradient per collective, which approaches 2 times the gradient size as N grows rather than scaling with N. Per-node bytes are therefore nearly constant: 1,000 GPUs move essentially the same volume per node as 8 GPUs. What dominates at scale is the aggregate payload (hundreds of gigabytes for a 70B model's gradient) divided by inter-node bandwidth, plus the $\\mathcal{O}(N)$ step-count latency of the ring. The practical consequence is that bandwidth per link and the algorithm's step count become the knobs to tune, not per-node message volume.",
             "learning_objective": "Analyze how ring AllReduce's per-node communication volume scales with participant count and identify the dominant cost at large N."
           },
           {
@@ -86,7 +86,7 @@
             "hierarchical bandwidth budget",
             "when alpha-beta fails to predict measured NCCL latency"
           ],
-          "question_strategy": "Open with regime classification from raw alpha and beta values, apply the alpha-beta model to choose an optimization for a small-message workload, compare alpha-beta and LogP for overlap analysis, analyze the hierarchical Llama 70B budget, and close with a diagnostic judgment about when alpha-beta predictions diverge from NCCL measurements.",
+          "question_strategy": "Open with regime classification from raw $\\alpha$ and $\\beta$ values, apply the alpha-beta model to choose an optimization for a small-message workload, compare alpha-beta and LogP for overlap analysis, analyze the hierarchical Llama 70B budget, and close with a diagnostic judgment about when alpha-beta predictions diverge from NCCL measurements.",
           "difficulty_progression": "Moves from regime inference to optimization choice, to model comparison under overlap, to analyzing a realistic hierarchical budget, and finally to diagnostic judgment about theory-versus-measurement gaps.",
           "integration": "Applies alpha-beta reasoning from earlier benchmarking chapters to concrete datacenter interconnects and the Llama 70B scenario.",
           "ranking_explanation": "This is the chapter's core quantitative section with multiple new models applied to realistic workloads, warranting a full quiz."
@@ -94,25 +94,25 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "On InfiniBand NDR with alpha = 2 microseconds and beta = 50 GB/s, an MoE routing workload sends 4 KB token messages and a dense data-parallel workload sends 1 GB gradient buffers. Which optimization family should each workload prioritize?",
+            "question": "On InfiniBand NDR with $\\alpha = 2$ microseconds and $\\beta = 50$ GB/s, an MoE routing workload sends 4 KB token messages and a dense data-parallel workload sends 1 GB gradient buffers. Which optimization family should each workload prioritize?",
             "choices": [
-              "Both workloads should prioritize reducing alpha, since alpha dominates on modern fabrics regardless of message size.",
+              "Both workloads should prioritize reducing $\\alpha$, since $\\alpha$ dominates on modern fabrics regardless of message size.",
               "The 4 KB messages sit well below the ~100 KB critical size so MoE should fuse messages and reduce startup cost, while 1 GB buffers sit three orders above the critical size so dense training should compress payload and add bandwidth.",
               "Both workloads should prioritize switching from RDMA to TCP to simplify the stack.",
-              "The 1 GB buffers are latency-bound because longer messages take longer, so dense training should optimize alpha."
+              "The 1 GB buffers are latency-bound because longer messages take longer, so dense training should optimize $\\alpha$."
             ],
-            "answer": "The correct answer is B. The critical message size n* = alpha times beta = 2 microseconds times 50 GB/s = 100 KB separates regimes: messages much smaller than n* are alpha-dominated and benefit from fusion, while messages much larger than n* are beta-dominated and benefit from compression and added bandwidth. A \"both should optimize alpha\" answer ignores that 1 GB at 50 GB/s takes 20,000 microseconds of transfer time versus 2 microseconds of startup, making alpha effectively invisible. The claim that longer messages are latency-bound reverses the regime relationship entirely.",
-            "learning_objective": "Apply the critical message size n* = alpha times beta to classify a workload and select the correct optimization family."
+            "answer": "The correct answer is B. The critical message size $n^* = \\alpha \\cdot \\beta = 2$ microseconds $\\times 50$ GB/s $= 100$ KB separates regimes: messages much smaller than $n^*$ are $\\alpha$-dominated and benefit from fusion, while messages much larger than $n^*$ are $\\beta$-dominated and benefit from compression and added bandwidth. A \"both should optimize $\\alpha$\" answer ignores that 1 GB at 50 GB/s takes 20,000 microseconds of transfer time versus 2 microseconds of startup, making $\\alpha$ effectively invisible. The claim that longer messages are latency-bound reverses the regime relationship entirely.",
+            "learning_objective": "Apply the critical message size $n^* = \\alpha \\cdot \\beta$ to classify a workload and select the correct optimization family."
           },
           {
             "question_type": "SHORT",
             "question": "A training engineer has tuned an AllReduce algorithm using the alpha-beta model and predicted that it should finish in 5 ms on her cluster, but profiling shows the backward pass running in parallel is never fully hidden behind the AllReduce. Explain why the LogP model is better suited than alpha-beta for diagnosing this overlap failure.",
-            "answer": "The alpha-beta model predicts the total communication time but treats the processor as idle throughout the transfer, which hides the distinction between what can overlap with computation and what cannot. LogP separates network latency L, which can run in parallel with compute, from processor overhead o, which consumes the GPU during initiation and completion of every transfer. If the backward pass has 500 microseconds of compute but each AllReduce has 50 microseconds of non-overlappable o on each end, 100 microseconds of every collective sits on the critical path regardless of how much L is hidden. Diagnosing overlap therefore requires measuring o separately, not just the alpha and beta the alpha-beta model exposes.",
+            "answer": "The alpha-beta model predicts the total communication time but treats the processor as idle throughout the transfer, which hides the distinction between what can overlap with computation and what cannot. LogP separates network latency $L_{\\text{lat}}$, which can run in parallel with compute, from processor overhead $o$, which consumes the GPU during initiation and completion of every transfer. If the backward pass has 500 microseconds of compute but each AllReduce has 50 microseconds of non-overlappable $o$ on each end, 100 microseconds of every collective sits on the critical path regardless of how much $L_{\\text{lat}}$ is hidden. Diagnosing overlap therefore requires measuring $o$ separately, not just the $\\alpha$ and $\\beta$ the alpha-beta model exposes.",
             "learning_objective": "Compare alpha-beta and LogP for analyzing whether a collective can be hidden behind concurrent computation."
           },
           {
             "question_type": "MCQ",
-            "question": "The chapter's Llama 70B budget on 128 GPUs across 16 nodes shows hierarchical AllReduce completing roughly an order of magnitude faster than flat ring AllReduce. Which mechanism most directly explains the speedup?",
+            "question": "The chapter's Llama 70B budget on 128 GPUs across 16 nodes shows hierarchical AllReduce completing about six times faster than flat ring AllReduce. Which mechanism most directly explains the speedup?",
             "choices": [
               "Hierarchical AllReduce eliminates inter-node communication entirely by keeping all traffic on NVLink.",
               "Hierarchical AllReduce first reduces within each node over fast NVLink so only a reduced shard, not the full gradient, traverses the slower InfiniBand fabric between nodes.",
@@ -124,14 +124,14 @@
           },
           {
             "question_type": "FILL",
-            "question": "On a link with alpha = 2 microseconds and beta = 50 GB/s, a 4 KB MoE routing message takes roughly 2.08 microseconds of which 96 percent is startup cost; because this message sits 25 times below the ____ message size, fusing many tokens into one large transfer delivers a far larger speedup than adding raw bandwidth.",
-            "answer": "critical. The critical message size n* = alpha times beta marks the crossover between latency-bound and bandwidth-bound regimes; messages far below n* are dominated by per-message startup, so amortizing alpha through fusion reduces total transfer time more than any feasible bandwidth upgrade.",
+            "question": "On a link with $\\alpha = 2$ microseconds and $\\beta = 50$ GB/s, a 4 KB MoE routing message takes roughly 2.08 microseconds of which 96 percent is startup cost; because this message sits 25 times below the ____ message size, fusing many tokens into one large transfer delivers a far larger speedup than adding raw bandwidth.",
+            "answer": "critical. The critical message size $n^* = \\alpha \\cdot \\beta$ marks the crossover between latency-bound and bandwidth-bound regimes; messages far below $n^*$ are dominated by per-message startup, so amortizing $\\alpha$ through fusion reduces total transfer time more than any feasible bandwidth upgrade.",
             "learning_objective": "Infer the critical-message-size concept from a described workload and connect it to the correct optimization family."
           },
           {
             "question_type": "TF",
             "question": "True or False: Alpha-beta model predictions are accurate for 1 GB AllReduce messages on a real cluster but can be off by 5 to 10 times for 64 KB messages, because measured NCCL small-message latency is inflated by protocol setup and memory registration overhead that alpha-beta does not model.",
-            "answer": "True. The section documents that NCCL's effective small-message alpha includes protocol negotiation, CUDA kernel launch, and memory registration costs that dwarf wire-level startup, so a 64 KB collective predicted at roughly 4 microseconds can measure 20 to 40 microseconds. For 1 GB messages, transfer time dominates at 20,000 microseconds, so any software overhead is a negligible fraction of total time, and alpha-beta predictions closely match measurements.",
+            "answer": "True. The section documents that NCCL's effective small-message $\\alpha$ includes protocol negotiation, CUDA kernel launch, and memory registration costs that dwarf wire-level startup, so a 64 KB collective predicted at roughly 4 microseconds can measure 20 to 40 microseconds. For 1 GB messages, transfer time dominates at 20,000 microseconds, so any software overhead is a negligible fraction of total time, and alpha-beta predictions closely match measurements.",
             "learning_objective": "Evaluate when alpha-beta predictions are reliable versus when library-level overhead dominates, based on message-size regime."
           }
         ]
@@ -147,7 +147,7 @@
             "selecting the right primitive for FSDP parameter reconstruction",
             "AllReduce as ReduceScatter plus AllGather and its memory implications",
             "FSDP latency sensitivity versus standard data parallelism",
-            "AlltoAll scaling challenges for expert parallelism"
+            "AllToAll scaling challenges for expert parallelism"
           ],
           "question_strategy": "Warm up with primitive selection for sharded reconstruction, move to decomposition-enabled memory schedules, analyze FSDP volume versus frequency trade-off, classify MoE's scaling pain point, and close with a misconception check about FSDP latency sensitivity.",
           "difficulty_progression": "Primitive identification to compositional reasoning to FSDP system-level analysis to cross-primitive comparison to misconception refutation.",
@@ -182,25 +182,25 @@
           {
             "question_type": "SHORT",
             "question": "A team migrates a 7B-parameter training run from standard data parallelism to FSDP to fit a larger model on the same hardware and observes that memory pressure drops as expected but throughput worsens. Explain why FSDP can preserve total communication volume yet degrade throughput, and identify the system property that changed.",
-            "answer": "FSDP replaces one AllReduce per step with roughly one AllGather per forward layer plus one ReduceScatter per backward layer, so a 32-layer network issues around 64 collectives per step instead of one fused gradient synchronization. Total bytes across the step may be comparable, but each collective now pays alpha-dominated startup cost, making the workload far more sensitive to per-operation latency and library-level overhead. The system property that changed is the balance between bandwidth cost and startup-frequency cost: FSDP is latency-sensitive in a way standard data parallelism is not. The consequence is that FSDP throughput depends heavily on prefetching quality, communication-stream overlap, and the effective alpha of the library.",
+            "answer": "FSDP replaces one AllReduce per step with roughly one AllGather per forward layer plus one ReduceScatter per backward layer, so a 32-layer network issues around 64 collectives per step instead of one fused gradient synchronization. Total bytes across the step may be comparable, but each collective now pays $\\alpha$-dominated startup cost, making the workload far more sensitive to per-operation latency and library-level overhead. The system property that changed is the balance between bandwidth cost and startup-frequency cost: FSDP is latency-sensitive in a way standard data parallelism is not. The consequence is that FSDP throughput depends heavily on prefetching quality, communication-stream overlap, and the effective $\\alpha$ of the library.",
             "learning_objective": "Analyze the frequency-versus-volume trade-off that makes FSDP more latency-sensitive than standard data parallelism."
           },
           {
             "question_type": "MCQ",
-            "question": "A mixture-of-experts layer uses AlltoAll to route tokens to remote experts. The workload scales poorly from 128 to 1,024 GPUs even though the gradient AllReduce on the same hardware continues to scale well. What fundamental property of AlltoAll explains this divergence?",
+            "question": "A mixture-of-experts layer uses AllToAll to route tokens to remote experts. The workload scales poorly from 128 to 1,024 GPUs even though the gradient AllReduce on the same hardware continues to scale well. What fundamental property of AllToAll explains this divergence?",
             "choices": [
-              "AlltoAll cannot use RDMA, so every transfer must pass through CPU memory and bottlenecks on host DRAM.",
-              "AlltoAll creates roughly N^2 distinct source-to-destination transfers that stress bisection bandwidth and produce contention patterns that AllReduce's structured reduction avoids.",
-              "AlltoAll is only valid within one node, so multi-node MoE must emulate it with repeated Broadcast operations.",
-              "AlltoAll always moves more total bytes per worker than the model's hidden dimension, regardless of batch size."
+              "AllToAll cannot use RDMA, so every transfer must pass through CPU memory and bottlenecks on host DRAM.",
+              "AllToAll creates roughly $N^2$ distinct source-to-destination transfers that stress bisection bandwidth and produce contention patterns that AllReduce's structured reduction avoids.",
+              "AllToAll is only valid within one node, so multi-node MoE must emulate it with repeated Broadcast operations.",
+              "AllToAll always moves more total bytes per worker than the model's hidden dimension, regardless of batch size."
             ],
-            "answer": "The correct answer is B. AlltoAll's logical connectivity is O(N^2): every worker has a distinct payload for every other worker, which hits bisection bandwidth and produces in-network contention that grows superlinearly with cluster size. AllReduce's ring or tree structure avoids this by amortizing traffic along a fixed topology. Claims that AlltoAll cannot use RDMA or only works within one node are implementation myths, and the assertion about byte volumes misrepresents how AlltoAll scales with workload parameters.",
-            "learning_objective": "Compare AlltoAll and AllReduce scaling behavior to explain why expert-parallel workloads hit contention ceilings at smaller cluster sizes than dense workloads."
+            "answer": "The correct answer is B. AllToAll's logical connectivity is $\\mathcal{O}(N^2)$: every worker has a distinct payload for every other worker, which hits bisection bandwidth and produces in-network contention that grows superlinearly with cluster size. AllReduce's ring or tree structure avoids this by amortizing traffic along a fixed topology. Claims that AllToAll cannot use RDMA or only works within one node are implementation myths, and the assertion about byte volumes misrepresents how AllToAll scales with workload parameters.",
+            "learning_objective": "Compare AllToAll and AllReduce scaling behavior to explain why expert-parallel workloads hit contention ceilings at smaller cluster sizes than dense workloads."
           },
           {
             "question_type": "TF",
             "question": "True or False: Because FSDP's per-operation message size is much smaller than standard data parallelism's single fused AllReduce, FSDP is automatically less sensitive to per-collective startup latency.",
-            "answer": "False. Smaller messages issued many more times per step amplify sensitivity to alpha because every collective pays the startup cost. Standard data parallelism fuses the entire gradient into roughly one AllReduce per step, so alpha is amortized over the whole payload. FSDP pays roughly 2L collectives per step for an L-layer network, making startup frequency rather than message size the dominant latency concern unless prefetching and overlap hide it.",
+            "answer": "False. Smaller messages issued many more times per step amplify sensitivity to $\\alpha$ because every collective pays the startup cost. Standard data parallelism fuses the entire gradient into roughly one AllReduce per step, so $\\alpha$ is amortized over the whole payload. FSDP pays roughly $2N_{\\text{layers}}$ collectives per step for an $N_{\\text{layers}}$-layer network, making startup frequency rather than message size the dominant latency concern unless prefetching and overlap hide it.",
             "learning_objective": "Evaluate how message frequency versus message size determines the latency sensitivity of sharded training schemes."
           }
         ]
@@ -228,7 +228,7 @@
             "question_type": "MCQ",
             "question": "A naive parameter-server AllReduce gathers all gradients at a central server, sums them, and broadcasts the result back. Why does this approach become unscalable as GPU count grows?",
             "choices": [
-              "Because the central aggregator's NIC must carry traffic proportional to N times M, creating a bandwidth hotspot whose saturation point is independent of how many workers exist.",
+              "Because the central aggregator's NIC must carry traffic proportional to $N \\times M$, creating a bandwidth hotspot whose saturation point is independent of how many workers exist.",
               "Because reduction is only mathematically valid when every worker communicates with exactly two neighbors.",
               "Because tree-based broadcast cannot be implemented on InfiniBand fabrics.",
               "Because modern optimizers require gradients to remain permanently sharded across workers."
@@ -238,26 +238,26 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Order the following stages of Ring AllReduce for N GPUs and a tensor split into N chunks: (1) every GPU holds a copy of the fully reduced tensor, (2) each GPU owns one fully reduced chunk after the scatter-reduce phase, (3) the initial tensor is partitioned into N chunks and circulates around the ring while workers accumulate partial sums.",
-            "answer": "The correct order is: (3) the initial tensor is partitioned into N chunks and circulates around the ring while workers accumulate partial sums, (2) each GPU owns one fully reduced chunk after the scatter-reduce phase, (1) every GPU holds a copy of the fully reduced tensor. Ring AllReduce runs scatter-reduce first to produce one fully reduced chunk per GPU (the intermediate state), then runs all-gather to replicate those chunks to every participant. Reversing the phases would attempt to replicate chunks before the reductions were complete, leaving each GPU with only partial sums rather than the global aggregate.",
+            "question": "Order the following stages of Ring AllReduce for $N$ GPUs and a tensor split into $N$ chunks: (1) every GPU holds a copy of the fully reduced tensor, (2) each GPU owns one fully reduced chunk after the scatter-reduce phase, (3) the initial tensor is partitioned into $N$ chunks and circulates around the ring while workers accumulate partial sums.",
+            "answer": "The correct order is: (3) the initial tensor is partitioned into $N$ chunks and circulates around the ring while workers accumulate partial sums, (2) each GPU owns one fully reduced chunk after the scatter-reduce phase, (1) every GPU holds a copy of the fully reduced tensor. Ring AllReduce runs scatter-reduce first to produce one fully reduced chunk per GPU (the intermediate state), then runs all-gather to replicate those chunks to every participant. Reversing the phases would attempt to replicate chunks before the reductions were complete, leaving each GPU with only partial sums rather than the global aggregate.",
             "learning_objective": "Sequence the two phases of Ring AllReduce and identify the intermediate state after scatter-reduce."
           },
           {
             "question_type": "MCQ",
-            "question": "A library must choose an AllReduce algorithm for 256-byte control-message synchronization across 256 GPUs on a datacenter fabric with alpha = 5 microseconds and beta = 25 GB/s. Which algorithm should it pick, and why?",
+            "question": "A library must choose an AllReduce algorithm for 256-byte control-message synchronization across 256 GPUs on a datacenter fabric with $\\alpha = 5$ microseconds and $\\beta = 25$ GB/s. Which algorithm should it pick, and why?",
             "choices": [
               "Ring AllReduce, because its bandwidth term is always smaller than tree's regardless of message size.",
-              "Tree AllReduce, because 256 bytes sits far below the crossover N times alpha times beta, so the O(log N) step count dominates total time over bandwidth efficiency.",
+              "Tree AllReduce, because 256 bytes sits far below even the log-aware crossover, so the $\\mathcal{O}(\\log N)$ step count dominates total time over bandwidth efficiency.",
               "Parameter-server aggregation, because small messages are below the threshold where decentralized collectives matter.",
               "Any algorithm will perform identically because 256 bytes fits inside a single network packet."
             ],
-            "answer": "The correct answer is B. The crossover point M ~ N times alpha times beta = 256 times 5 microseconds times 25 GB/s ~ 32 MB; a 256-byte message sits nine orders of magnitude below that, deep in the latency-bound regime where the algorithm with fewer sequential steps wins. Ring's O(N) step count (256 sequential alphas) dwarfs tree's O(log N) (eight steps). Returning to a parameter server would reintroduce the hotspot problem at even modest scales, and the packet-size argument ignores that the competition is between sequential step counts, not within-packet efficiency.",
-            "learning_objective": "Apply the tree-versus-ring crossover rule M ~ N times alpha times beta to a concrete cluster scenario that differs from the worked example."
+            "answer": "The correct answer is B. The coarse crossover point $M \\sim N\\alpha\\beta = 256 \\times 5$ microseconds $\\times 25$ GB/s $\\approx 32$ MB, while the log-aware estimate is about 4 MB. A 256-byte message sits many orders of magnitude below either threshold, deep in the latency-bound regime where the algorithm with fewer sequential steps wins. Ring's $2(N-1)$ startup steps are roughly $510\\alpha$, while tree's $2\\log_2 N$ steps are $16\\alpha$. Returning to a parameter server would reintroduce the hotspot problem at even modest scales, and the packet-size argument ignores that the competition is between sequential step counts, not within-packet efficiency.",
+            "learning_objective": "Apply the tree-versus-ring crossover rule, including the log-aware estimate, to a concrete cluster scenario that differs from the worked example."
           },
           {
             "question_type": "SHORT",
-            "question": "Recursive halving-doubling (butterfly) AllReduce has bandwidth-optimal data motion and O(log N) latency in its cost equation, yet it can underperform ring AllReduce on large hierarchical clusters. Explain the mismatch between its theoretical strength and its real-world weakness.",
-            "answer": "Halving-doubling is topology-oblivious: its partner exchanges in later rounds pair GPUs that may be physically distant, forcing traffic across slow inter-node fabric even though the partnership is arbitrary. On a two-tier cluster where NVLink is an order of magnitude faster than InfiniBand, round log2(GPUs-per-node) and later pair workers across the InfiniBand boundary. This contention on the scarce tier erases the theoretical advantage that assumed uniform link cost. Ring AllReduce, though it has O(N) latency terms, can be mapped to match the physical topology (intra-node segments on NVLink, inter-node segments on InfiniBand) through hierarchical execution, letting the implementation extract the bandwidth the topology actually offers. The lesson is that an algorithm's cost formula is only as accurate as its link-uniformity assumption.",
+            "question": "Recursive halving-doubling (butterfly) AllReduce has bandwidth-optimal data motion and $\\mathcal{O}(\\log N)$ latency in its cost equation, yet it can underperform ring AllReduce on large hierarchical clusters. Explain the mismatch between its theoretical strength and its real-world weakness.",
+            "answer": "Halving-doubling is topology-oblivious: its partner exchanges in later rounds pair GPUs that may be physically distant, forcing traffic across slow inter-node fabric even though the partnership is arbitrary. On a two-tier cluster where NVLink is an order of magnitude faster than InfiniBand, round $\\log_2(\\text{GPUs-per-node})$ and later pair workers across the InfiniBand boundary. This contention on the scarce tier erases the theoretical advantage that assumed uniform link cost. Ring AllReduce, though it has $\\mathcal{O}(N)$ latency terms, can be mapped to match the physical topology (intra-node segments on NVLink, inter-node segments on InfiniBand) through hierarchical execution, letting the implementation extract the bandwidth the topology actually offers. The lesson is that an algorithm's cost formula is only as accurate as its link-uniformity assumption.",
             "learning_objective": "Analyze why a collective with favorable theoretical asymptotics may lose on hierarchical physical networks."
           },
           {
@@ -301,7 +301,7 @@
           },
           {
             "question_type": "ORDER",
-            "question": "Order the phases of hierarchical AllReduce on a cluster of N nodes times G GPUs per node: (1) perform cross-node reduction among corresponding GPU indices across nodes, (2) perform intra-node reduction within each node's G GPUs over NVLink, (3) perform intra-node AllGather within each node so every GPU in the node receives the final result.",
+            "question": "Order the phases of hierarchical AllReduce on a cluster of $H$ nodes times $G$ GPUs per node, with $N = H G$ devices: (1) perform cross-node reduction among corresponding GPU indices across nodes, (2) perform intra-node reduction within each node's $G$ GPUs over NVLink, (3) perform intra-node AllGather within each node so every GPU in the node receives the final result.",
             "answer": "The correct order is: (2) perform intra-node reduction within each node's G GPUs over NVLink, (1) perform cross-node reduction among corresponding GPU indices across nodes, (3) perform intra-node AllGather within each node so every GPU in the node receives the final result. Local NVLink-based ReduceScatter shrinks each node's payload by factor G before it crosses the inter-node fabric; only the reduced shard then traverses InfiniBand; and only after that global reduction completes can the intra-node AllGather reconstruct the full tensor on every GPU. Doing the inter-node phase first would move a G-times larger payload across the slow tier; doing the final AllGather before the cross-node reduction would replicate incomplete sums.",
             "learning_objective": "Sequence the three phases of hierarchical AllReduce and explain why the ordering minimizes traffic on the slowest tier."
           },
@@ -340,7 +340,7 @@
     },
     {
       "section_id": "#sec-communication-collective-operations-collective-operations-gradient-compression-7a5c",
-      "section_title": "The Last Resort: Gradient Compression",
+      "section_title": "Gradient Compression Under Bandwidth Scarcity",
       "quiz_data": {
         "quiz_needed": true,
         "rationale": {
@@ -366,12 +366,12 @@
               "Whenever the optimizer is Adam rather than SGD, independent of the communication regime.",
               "Only when messages are latency-bound, because compression reduces the startup term directly."
             ],
-            "answer": "The correct answer is B. Compression pays off when the bandwidth term is the dominant step-time cost and the compute overhead plus any convergence penalty is small relative to the bandwidth savings. A \"communication is already tiny\" answer is exactly the regime where compression hurts, because there is no bandwidth to save but compute cost is paid every step. The Adam-versus-SGD answer confuses optimizer choice with communication regime, and the latency-bound claim gets the mechanism backwards: compression shrinks n/beta, which is invisible when alpha dominates.",
+            "answer": "The correct answer is B. Compression pays off when the bandwidth term is the dominant step-time cost and the compute overhead plus any convergence penalty is small relative to the bandwidth savings. A \"communication is already tiny\" answer is exactly the regime where compression hurts, because there is no bandwidth to save but compute cost is paid every step. The Adam-versus-SGD answer confuses optimizer choice with communication regime, and the latency-bound claim gets the mechanism backwards: compression shrinks $n/\\beta$, which is invisible when $\\alpha$ dominates.",
             "learning_objective": "Evaluate when gradient compression improves end-to-end training time based on communication regime and compression cost."
           },
           {
             "question_type": "MCQ",
-            "question": "Top-K sparsification selects the top-K largest-magnitude gradient entries per worker, promising a compression ratio of roughly dim/K on a dim-dimensional gradient. Why does the effective compression ratio rarely reach this theoretical value in practice?",
+            "question": "Top-K sparsification selects the top-K largest-magnitude gradient entries per worker, promising a compression ratio of roughly $d_{\\text{grad}}/K_{\\text{top}}$ on a $d_{\\text{grad}}$-dimensional gradient. Why does the effective compression ratio rarely reach this theoretical value in practice?",
             "choices": [
               "Because sparse encoding must transmit both values and indices, and for a typical $10^8$-parameter model, 32-bit indices for each kept entry often cost more than the 16-bit values themselves, roughly halving effective compression.",
               "Because sparse gradients require the full dense tensor to be materialized at the receiver before any computation proceeds.",
@@ -401,8 +401,8 @@
           },
           {
             "question_type": "TF",
-            "question": "True or False: If a compressed gradient remains far above the critical message size n*, the main benefit of compression is reducing the bandwidth term rather than the latency term.",
-            "answer": "True. In the bandwidth-bound regime (n >> n*), total time is dominated by n/beta, so shrinking n by compression reduces total time proportionally. Alpha is essentially a constant addendum that compression cannot affect. Only when compression drops n below n* does the workload shift into the alpha-dominated regime, where further compression stops helping.",
+            "question": "True or False: If a compressed gradient remains far above the critical message size $n^*$, the main benefit of compression is reducing the bandwidth term rather than the latency term.",
+            "answer": "True. In the bandwidth-bound regime ($n \\gg n^*$), total time is dominated by $n/\\beta$, so shrinking $n$ by compression reduces total time proportionally. $\\alpha$ is essentially a constant addendum that compression cannot affect. Only when compression drops $n$ below $n^*$ does the workload shift into the $\\alpha$-dominated regime, where further compression stops helping.",
             "learning_objective": "Apply the alpha-beta model to predict what kind of benefit compression delivers in the bandwidth-bound regime."
           },
           {
@@ -458,7 +458,7 @@
           {
             "question_type": "SHORT",
             "question": "A production training stack uses NCCL for GPU tensor collectives and Gloo for CPU-side coordination such as barriers and scalar broadcasts. Explain why splitting backends across process groups can be better than standardizing on a single library for all communication.",
-            "answer": "Different process groups face different bottlenecks, so matching each to its optimal backend is a per-traffic-class decision rather than a global one. GPU tensor collectives benefit from NCCL's GPUDirect paths, fused kernels, and topology awareness; these require GPU-resident tensors and CUDA context, and they deliver orders of magnitude more bandwidth on the workloads that dominate step time. CPU-side coordination such as checkpoint barriers or control-plane scalars moves a few bytes a few times per step and does not benefit from GPU-optimized paths; forcing these flows through NCCL would add CUDA-context overhead without any bandwidth gain, and forcing GPU tensor traffic through Gloo would throw away the 10-100x speedup NCCL provides. The practical consequence is that a two-backend design serves both paths at their peak, while a single-backend design pessimizes one of them.",
+            "answer": "Different process groups face different bottlenecks, so matching each to its optimal backend is a per-traffic-class decision rather than a global one. GPU tensor collectives benefit from NCCL's GPUDirect paths, fused kernels, and topology awareness; these require GPU-resident tensors and CUDA context, and they deliver orders of magnitude more bandwidth on the workloads that dominate step time. CPU-side coordination such as checkpoint barriers or control-plane scalars moves a few bytes a few times per step and does not benefit from GPU-optimized paths; forcing these flows through NCCL would add CUDA-context overhead without any bandwidth gain, and forcing GPU tensor traffic through Gloo would throw away the 10--100$\\times$ speedup NCCL provides. The practical consequence is that a two-backend design serves both paths at their peak, while a single-backend design pessimizes one of them.",
             "learning_objective": "Justify multi-backend communication designs by matching each backend to the memory location and traffic class it optimizes."
           }
         ]
@@ -499,18 +499,18 @@
             "question_type": "MCQ",
             "question": "Bucket fusion groups multiple small gradient AllReduce calls into one larger call. Why is bucket size a tuning decision rather than a \"larger is always better\" choice?",
             "choices": [
-              "Large buckets amortize alpha startup costs across more payload but delay when communication can start, shrinking the compute window available for overlap; the optimum balances startup amortization against overlap exposure.",
+              "Large buckets amortize $\\alpha$ startup costs across more payload but delay when communication can start, shrinking the compute window available for overlap; the optimum balances startup amortization against overlap exposure.",
               "Large buckets are mathematically incompatible with ring-based collectives, so only small buckets work.",
               "Small buckets always maximize both bandwidth and overlap, so tuning only affects memory usage.",
               "Bucket size matters only for CPU training, because GPUs ignore collective launch overhead entirely."
             ],
-            "answer": "The correct answer is A. Bucket sizing is a two-sided trade-off: smaller buckets launch sooner (more overlap opportunity) but pay alpha more times; larger buckets launch later (less overlap) but amortize alpha more efficiently. The optimum depends on the ratio of alpha to backward-pass length. The mathematical-incompatibility claim invents a constraint that does not exist, the \"small always wins\" claim ignores alpha entirely, and the CPU-only claim contradicts the whole motivation for bucket fusion.",
-            "learning_objective": "Analyze the two-sided trade-off between alpha amortization and overlap opportunity in bucketed gradient communication."
+            "answer": "The correct answer is A. Bucket sizing is a two-sided trade-off: smaller buckets launch sooner (more overlap opportunity) but pay $\\alpha$ more times; larger buckets launch later (less overlap) but amortize $\\alpha$ more efficiently. The optimum depends on the ratio of $\\alpha$ to backward-pass length. The mathematical-incompatibility claim invents a constraint that does not exist, the \"small always wins\" claim ignores $\\alpha$ entirely, and the CPU-only claim contradicts the whole motivation for bucket fusion.",
+            "learning_objective": "Analyze the two-sided trade-off between $\\alpha$ amortization and overlap opportunity in bucketed gradient communication."
           },
           {
             "question_type": "SHORT",
             "question": "Explain why switching from blocking to asynchronous collective APIs does not automatically guarantee that communication is hidden behind computation, and identify the quantitative condition under which some communication still lands on the critical path.",
-            "answer": "Async APIs only mean the host thread regains control after issuing the collective; they do not eliminate the GPU-side initiation and completion overhead the LogP model calls o. Under LogP, only the in-flight network latency L can overlap with concurrent compute; the 2o of non-overlappable processor overhead remains on the critical path regardless of async semantics. The condition for hidden communication is that the concurrent compute time C must exceed L + 2o. If a layer's backward work is only 100 microseconds but the collective has L = 50 microseconds and o = 30 microseconds, then L + 2o = 110 microseconds > 100 microseconds, and the extra 10 microseconds is exposed on the critical path even with a perfectly implemented async launch.",
+            "answer": "Async APIs only mean the host thread regains control after issuing the collective; they do not eliminate the GPU-side initiation and completion overhead the LogP model calls $o$. Under LogP, only the in-flight network latency $L_{\\text{lat}}$ can overlap with concurrent compute; the $2o$ of non-overlappable processor overhead remains on the critical path regardless of async semantics. The condition for hidden communication is $T_{\\text{compute}} > L_{\\text{lat}} + 2o$. If a layer's backward work is only 100 microseconds but the collective has $L_{\\text{lat}} = 50$ microseconds and $o = 30$ microseconds, then $L_{\\text{lat}} + 2o = 110$ microseconds > 100 microseconds, and the extra 10 microseconds is exposed on the critical path even with a perfectly implemented async launch.",
             "learning_objective": "Evaluate overlap limits using the LogP distinction between overlappable latency and non-overlappable overhead."
           },
           {
@@ -554,19 +554,19 @@
           {
             "question_type": "TF",
             "question": "True or False: Upgrading a cluster's inter-node fabric from 100G to 400G Ethernet will typically accelerate MoE token routing as much as it accelerates dense LLM gradient synchronization on the same cluster.",
-            "answer": "False. Dense LLM gradient synchronization moves hundreds of gigabytes per step and is bandwidth-bound, so a 4x bandwidth upgrade translates nearly linearly to step-time reduction. MoE token routing sends many small messages that sit deep in the latency-bound regime below the critical size, where alpha dominates and adding bandwidth barely changes the per-message cost. The same upgrade therefore produces very different speedups for the two workloads, and an MoE team would see far more benefit from reducing alpha (switch latency, kernel bypass) than from adding beta.",
+            "answer": "False. Dense LLM gradient synchronization moves hundreds of gigabytes per step and is bandwidth-bound, so a 4$\\times$ bandwidth upgrade translates nearly linearly to step-time reduction. MoE token routing sends many small messages that sit deep in the latency-bound regime below the critical size, where $\\alpha$ dominates and adding bandwidth barely changes the per-message cost. The same upgrade therefore produces very different speedups for the two workloads, and an MoE team would see far more benefit from reducing $\\alpha$ (switch latency, kernel bypass) than from adding $\\beta$.",
             "learning_objective": "Evaluate why bandwidth upgrades deliver regime-dependent speedups across different distributed workload classes."
           },
           {
             "question_type": "MCQ",
-            "question": "A team sees degraded throughput on an MoE workload and proposes replacing its AlltoAll-based token routing with an AllReduce-based aggregation, arguing that AllReduce's better asymptotic bandwidth should fix the problem. Why is this a misdiagnosis?",
+            "question": "A team sees degraded throughput on an MoE workload and proposes replacing its AllToAll-based token routing with an AllReduce-based aggregation, arguing that AllReduce's better asymptotic bandwidth should fix the problem. Why is this a misdiagnosis?",
             "choices": [
-              "Because AllReduce has better asymptotic bandwidth than AlltoAll and should always replace AlltoAll in expert routing.",
+              "Because AllReduce has better asymptotic bandwidth than AllToAll and should always replace AllToAll in expert routing.",
               "Because AllReduce computes a global aggregate (one value per position, summed across workers), while MoE routing requires distinct worker-to-worker payloads, so the two primitives have incompatible semantics regardless of bandwidth asymptotics.",
-              "Because AlltoAll is slower purely because it cannot use topology-aware routing.",
+              "Because AllToAll is slower purely because it cannot use topology-aware routing.",
               "Because AllReduce eliminates all synchronization barriers, making it safer for sparse models."
             ],
-            "answer": "The correct answer is B. AlltoAll and AllReduce solve different problems: AllReduce sums position-wise values to a globally consistent result, whereas MoE needs to move different tokens to different experts. Substituting AllReduce would produce summed expert inputs rather than routed tokens, which is the wrong function. The bandwidth-asymptotics answer is the actual misconception the section rejects; the topology-routing and barrier-elimination claims invent properties that AllReduce does not have.",
+            "answer": "The correct answer is B. AllToAll and AllReduce solve different problems: AllReduce sums position-wise values to a globally consistent result, whereas MoE needs to move different tokens to different experts. Substituting AllReduce would produce summed expert inputs rather than routed tokens, which is the wrong function. The bandwidth-asymptotics answer is the actual misconception the section rejects; the topology-routing and barrier-elimination claims invent properties that AllReduce does not have.",
             "learning_objective": "Diagnose why collective choice must match workload semantics, not just raw throughput intuition."
           },
           {
@@ -598,18 +598,18 @@
             "question_type": "MCQ",
             "question": "A dense LLM training job is bandwidth-bound on inter-node gradient synchronization across 16 nodes of 8 GPUs, while an MoE job on the same cluster is latency- and contention-bound on token routing. Which primary optimization strategy best pairs the workload with its dominant bottleneck?",
             "choices": [
-              "Dense LLM: hierarchical AllReduce plus rail-aligned rank placement to multiply inter-node bandwidth; MoE: low-latency topology-aware AlltoAll routing plus token load balancing to cut alpha and contention.",
+              "Dense LLM: hierarchical AllReduce plus rail-aligned rank placement to multiply inter-node bandwidth; MoE: low-latency topology-aware AlltoAll routing plus token load balancing to cut $\\alpha$ and contention.",
               "Dense LLM: switch every collective to AlltoAll for higher asymptotic throughput; MoE: switch to parameter-server aggregation to simplify scheduling.",
               "Dense LLM: use Tree AllReduce for all message sizes regardless of payload; MoE: buy more inter-node bandwidth per link without touching routing.",
               "Dense LLM: disable communication-computation overlap to simplify execution; MoE: increase bucket size until messages cross the critical size."
             ],
-            "answer": "The correct answer is A. Dense LLM gradient traffic is bandwidth-bound, so the primary levers are hierarchical decomposition (to move the reduced shard across the slow tier) and topology alignment (to use every rail). MoE routing is latency-bound and contention-bound, so the primary levers are lowering alpha through switch selection and topology-aware paths, plus load balancing to keep experts from becoming hotspots. The AlltoAll-everywhere answer misapplies a primitive to a workload whose semantics do not match; the Tree-everywhere answer ignores that Ring wins on large payloads; the disable-overlap answer throws away the largest lever on dense workloads.",
+            "answer": "The correct answer is A. Dense LLM gradient traffic is bandwidth-bound, so the primary levers are hierarchical decomposition (to move the reduced shard across the slow tier) and topology alignment (to use every rail). MoE routing is latency-bound and contention-bound, so the primary levers are lowering $\\alpha$ through switch selection and topology-aware paths, plus load balancing to keep experts from becoming hotspots. The AlltoAll-everywhere answer misapplies a primitive to a workload whose semantics do not match; the Tree-everywhere answer ignores that Ring wins on large payloads; the disable-overlap answer throws away the largest lever on dense workloads.",
             "learning_objective": "Select workload-appropriate primitive-plus-topology strategy pairs for bandwidth-bound dense training versus latency-and-contention-bound sparse routing."
           },
           {
             "question_type": "SHORT",
             "question": "Explain how the chapter's three major levers (algorithm choice, topology-aware execution, and the overlap-plus-compression residual-cost layer) act on different parts of the total communication problem, and describe the order in which an engineer should apply them when tuning a distributed training job.",
-            "answer": "Algorithm choice decides the latency-versus-bandwidth trade-off of the collective itself: Ring when N times alpha times beta is smaller than payload (bandwidth-optimal); Tree or butterfly when payload is smaller than that threshold (latency-optimal). Topology-aware execution then maps the chosen algorithm onto real links so that payload traverses fast tiers first (hierarchical AllReduce) and traffic respects rail boundaries (rail-optimized routing), reclaiming bandwidth the flat model would waste. Overlap and compression attack whatever cost remains: overlap hides some of the transfer behind concurrent compute (bounded by LogP's o), and compression reduces n/beta when bandwidth still binds. The engineering order is to select the right algorithm first (wrong algorithm cannot be fixed by topology), align the topology next (wrong placement cannot be fixed by overlap), and apply overlap and compression last to attack residual cost. Reversing this order wastes effort on lower levers while higher-impact choices remain suboptimal.",
+            "answer": "Algorithm choice decides the latency-versus-bandwidth trade-off of the collective itself: Ring when the payload is above the log-aware crossover estimate $N\\alpha\\beta / \\log_2 N$ (bandwidth-optimal); Tree or butterfly when the payload is below that threshold (latency-optimal). Topology-aware execution then maps the chosen algorithm onto real links so that payload traverses fast tiers first (hierarchical AllReduce) and traffic respects rail boundaries (rail-optimized routing), reclaiming bandwidth the flat model would waste. Overlap and compression attack whatever cost remains: overlap hides some of the transfer behind concurrent compute (bounded by LogP's $o$), and compression reduces $n/\\beta$ when bandwidth still binds. The engineering order is to select the right algorithm first (wrong algorithm cannot be fixed by topology), align the topology next (wrong placement cannot be fixed by overlap), and apply overlap and compression last to attack residual cost. Reversing this order wastes effort on lower levers while higher-impact choices remain suboptimal.",
             "learning_objective": "Synthesize how algorithm choice, topology-aware execution, and residual-cost reduction address distinct parts of the communication problem and justify the order in which they should be applied."
           }
         ]

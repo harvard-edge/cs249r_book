@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""
+r"""
 Phase C.1 — formatting violation detector.
 
 Scans every body-prose .qmd and reports \index{} placements that violate
 formatting rules:
-  V1. \index{} inside opening **bold** span (after **, before content)
+  V1. \index{} inside **bold** span
   V2. \index{} inside *italic* span
   V3. \index{} inside `code` span
   V4. \index{} on heading line (#+)
@@ -24,6 +24,29 @@ OUTDIR = ROOT / ".claude" / "_reviews" / "index_audit_2026-05-02"
 CONTENT = ROOT / "book" / "quarto" / "contents"
 
 
+def text_before_for_italic_scan(before: str) -> str:
+    """Remove Markdown constructs whose `*` characters are not italic markers."""
+    before = re.sub(r"^\s*[*+-]\s+", "", before)
+    before = re.sub(r"\*\*[^*\n]+?\*\*", "", before)
+    before = re.sub(r"`[^`\n]+`", "", before)
+    before = re.sub(r"\$[^$\n]*\$", "", before)
+    before = before.replace(r"\*", "")
+    return before
+
+
+def bold_spans(line: str) -> list[tuple[int, int]]:
+    """Return simple same-line Markdown bold spans."""
+    spans = []
+    start = None
+    for marker in re.finditer(r"(?<!\\)\*\*", line):
+        if start is None:
+            start = marker.start()
+        else:
+            spans.append((start, marker.end()))
+            start = None
+    return spans
+
+
 def find_violations(file: Path) -> list[dict]:
     s = str(file)
     if any(x in s for x in ("frontmatter/", "backmatter/", "/parts/",
@@ -33,8 +56,15 @@ def find_violations(file: Path) -> list[dict]:
     text = file.read_text(errors="replace")
     in_code_block = False
     in_yaml = False
+    in_html_comment = False
     for i, line in enumerate(text.splitlines(), 1):
         stripped = line.lstrip()
+
+        # Converted/retired figure source often lives inside HTML comments.
+        # Ignore fences and index-like text there; Quarto will not render them.
+        if in_html_comment or "<!--" in line:
+            in_html_comment = "-->" not in line
+            continue
 
         # Track code blocks
         if stripped.startswith("```"):
@@ -49,9 +79,17 @@ def find_violations(file: Path) -> list[dict]:
                              "violation": "V6_inside_code_block", "ctx": line[:120]})
             continue
 
-        # YAML
-        if stripped.startswith("---") and not stripped.startswith("--- "):
-            in_yaml = not in_yaml
+        # YAML frontmatter is only the opening metadata block. Later `---`
+        # lines are Markdown thematic breaks and must not put the scanner into
+        # YAML mode for the rest of the chapter.
+        if i == 1 and stripped == "---":
+            in_yaml = True
+            if "\\index{" in line:
+                rows.append({"file": str(file.relative_to(ROOT)), "line": i,
+                             "violation": "V7_yaml", "ctx": line[:120]})
+            continue
+        if in_yaml and stripped == "---":
+            in_yaml = False
             if "\\index{" in line:
                 rows.append({"file": str(file.relative_to(ROOT)), "line": i,
                              "violation": "V7_yaml", "ctx": line[:120]})
@@ -77,38 +115,20 @@ def find_violations(file: Path) -> list[dict]:
                          "violation": "V5_callout", "ctx": line[:120]})
             continue
 
-        # V1: \index{} immediately after opening ** (no content between **)
-        # Pattern: ** followed by \index{
-        # The ** is "opening" if there's an even count of completed **...** pairs before it
-        for m in re.finditer(r"\*\*\\index\{", line):
-            before = line[:m.start()]
-            pairs = re.findall(r"\*\*[^*\n]+?\*\*", before)
-            consumed_pairs = 0
-            search_pos = 0
-            for p in pairs:
-                idx = before.find(p, search_pos)
-                if idx >= 0:
-                    consumed_pairs += 1
-                    search_pos = idx + len(p)
-            # Count remaining `**` after consuming
-            leftover = before[search_pos:]
-            stray_stars = leftover.count("**")
-            if stray_stars % 2 == 0:  # the ** is OPENING a new bold span
+        # V1: any \index{} inside a simple same-line bold span.
+        for start, end in bold_spans(line):
+            pos = line.find("\\index{", start, end)
+            if pos >= 0:
                 rows.append({"file": str(file.relative_to(ROOT)), "line": i,
                              "violation": "V1_inside_bold",
-                             "ctx": line[max(0, m.start()-20):m.start()+60]})
+                             "ctx": line[max(0, pos-20):pos+60]})
 
         # V2: \index{} inside italic — pattern: \w*\\index{ where the * isn't part of **
         # Detect by checking if position is inside an unmatched single * span
         for m in re.finditer(r"\\index\{", line):
             pos = m.start()
-            before = line[:pos]
-            # Strip ** pairs first
-            no_bolds = re.sub(r"\*\*[^*\n]+?\*\*", "", before)
-            # Strip code spans
-            no_code = re.sub(r"`[^`\n]+`", "", no_bolds)
-            # Now count remaining single *
-            stars = no_code.count("*")
+            before = text_before_for_italic_scan(line[:pos])
+            stars = before.count("*")
             if stars % 2 == 1:
                 rows.append({"file": str(file.relative_to(ROOT)), "line": i,
                              "violation": "V2_inside_italic",
@@ -138,6 +158,7 @@ def main():
             by_violation.setdefault(r["violation"], 0)
             by_violation[r["violation"]] += 1
 
+    OUTDIR.mkdir(parents=True, exist_ok=True)
     outpath = OUTDIR / "phase_c_format_violations.csv"
     with open(outpath, "w", newline="") as out:
         w = csv.DictWriter(out, fieldnames=["file", "line", "violation", "ctx"])

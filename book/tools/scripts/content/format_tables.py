@@ -21,7 +21,7 @@ Usage:
     python format_tables.py --fix -f quarto/contents/vol1/efficient_ai/efficient_ai.qmd
 
     # Check all files in a directory
-    python format_tables.py --check -d quarto/contents/vol1/optimizations
+    python format_tables.py --check -d quarto/contents/vol1/model_compression
 
     # Fix all chapter files
     python format_tables.py --fix --all

@@ -176,8 +176,8 @@ def _build_and_check(
         return False, 0.0, "Unknown format type", []
 
     # Delete previous output to ensure clean test (same rule: any .pdf, any .epub, index.html)
-    from ..core.config import get_output_file
-    existing = get_output_file(output_dir, format_type)
+    from ..core.config import get_output_file, get_chapter_output_file
+    existing = get_chapter_output_file(output_dir, format_type, chapter_name, volume) or get_output_file(output_dir, format_type)
     if existing is not None:
         try:
             existing.unlink()
@@ -205,7 +205,7 @@ def _build_and_check(
         log_file.write_text(full_output)
 
         # Success = output file present (any .pdf, any .epub, or index.html)
-        resolved = get_output_file(output_dir, format_type)
+        resolved = get_chapter_output_file(output_dir, format_type, chapter_name, volume) or get_output_file(output_dir, format_type)
         combined = result.stdout + result.stderr
         quarto_warnings = _extract_quarto_warnings(combined)
 

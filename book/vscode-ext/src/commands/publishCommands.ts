@@ -28,8 +28,8 @@ export function registerPublishCommands(context: vscode.ExtensionContext): void 
       });
     }),
     vscode.commands.registerCommand('mlsysbook.buildGlossary', () => {
-      void runBookCommand('./book/binder fix glossary build', root, {
-        label: 'Build global glossary',
+      void runBookCommand('./book/binder fix glossary paths', root, {
+        label: 'Show glossary paths',
       });
     }),
     vscode.commands.registerCommand('mlsysbook.compressImages', () => {

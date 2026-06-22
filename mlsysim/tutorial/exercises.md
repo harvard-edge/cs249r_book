@@ -16,8 +16,8 @@ from memory-bound to compute-bound on a datacenter GPU.
 import mlsysim
 from mlsysim import Engine, Hardware, Models
 
-model = Models.ResNet50
-hw    = Hardware.A100
+model = Models.Vision.ResNet50
+hw    = Hardware.Cloud.A100
 ```
 
 ### Task
@@ -59,7 +59,7 @@ term scales linearly with batch size while the memory term grows more slowly
 (weights loaded once, only activation traffic scales). For CNN workloads
 like ResNet-50, the transition may already be at batch_size=1, unlike
 Transformer decode which is memory-bound at batch_size=1. Compare with
-`Models.Llama3_8B` to see a memory-bound regime.
+`Models.Language.Llama3_8B` to see a memory-bound regime.
 
 </details>
 
@@ -80,11 +80,12 @@ GPU memory, accounting for both model weights and KV-cache.
 ### Setup
 
 ```python
-from mlsysim import ServingModel, Hardware, Models
+from mlsysim import Hardware, Models
+from mlsysim.solvers import ServingModel
 
 serving = ServingModel()
-model   = Models.Llama3_8B
-hw      = Hardware.H100
+model   = Models.Language.Llama3_8B
+hw      = Hardware.Cloud.H100
 ```
 
 ### Task
@@ -142,11 +143,12 @@ from INT4 quantization, and understand the accuracy trade-off.
 ### Setup
 
 ```python
-from mlsysim import CompressionModel, Engine, Hardware, Models
+from mlsysim import Engine, Hardware, Models
+from mlsysim.solvers import CompressionModel
 
 compress = CompressionModel()
-model    = Models.Llama3_8B
-hw       = Hardware.H100
+model    = Models.Language.Llama3_8B
+hw       = Hardware.Cloud.H100
 ```
 
 ### Task
@@ -216,10 +218,11 @@ What is the optimal compression point?
 ### Setup
 
 ```python
-from mlsysim import ParallelismOptimizer, Models, Systems
+from mlsysim import Models, Systems
+from mlsysim.solvers import ParallelismOptimizer
 
 optimizer = ParallelismOptimizer()
-model     = Models.Llama3_70B
+model     = Models.Language.Llama3_70B
 fleet     = Systems.Clusters.Research_256  # 256 H100s
 ```
 
@@ -304,7 +307,8 @@ carbon footprint of a long training run.
 ### Setup
 
 ```python
-from mlsysim import SustainabilityModel, Infra, Systems
+from mlsysim import Infrastructure, Systems
+from mlsysim.solvers import SustainabilityModel
 
 sustain = SustainabilityModel()
 fleet   = Systems.Clusters.Research_256  # 256 H100s
@@ -317,14 +321,14 @@ Quebec (hydroelectric).
 
 ```python
 # Virginia (US Average)
-r_va = sustain.solve(fleet, duration_days=30, datacenter=Infra.US_Avg, mfu=0.4)
+r_va = sustain.solve(fleet, duration_days=30, datacenter=Infrastructure.Grids.US_Avg, mfu=0.4)
 print(f"=== Virginia (US Average Grid) ===")
 print(f"Energy:  {r_va.total_energy_kwh:,.0f} kWh")
 print(f"Carbon:  {r_va.carbon_footprint_kg:,.0f} kg CO2")
 print(f"Water:   {r_va.water_usage_liters:,.0f} liters")
 
 # Quebec (Hydro)
-r_qc = sustain.solve(fleet, duration_days=30, datacenter=Infra.Quebec, mfu=0.4)
+r_qc = sustain.solve(fleet, duration_days=30, datacenter=Infrastructure.Grids.Quebec, mfu=0.4)
 print(f"\n=== Quebec (Hydroelectric) ===")
 print(f"Energy:  {r_qc.total_energy_kwh:,.0f} kWh")
 print(f"Carbon:  {r_qc.carbon_footprint_kg:,.0f} kg CO2")
@@ -381,14 +385,14 @@ that maximizes throughput while meeting latency SLAs.
 ```python
 from mlsysim import (
     EconomicsModel, ServingModel, Hardware, Models,
-    Systems, Infra
+    Systems, Infrastructure
 )
 from mlsysim.systems.types import Fleet, Node, NetworkFabric
 from mlsysim.systems.registry import Nodes, Fabrics
 
 serving = ServingModel()
 econ    = EconomicsModel()
-model   = Models.Llama3_8B
+model   = Models.Language.Llama3_8B
 ```
 
 ### Task
@@ -398,15 +402,15 @@ each scaled to fit within a $1M annual budget.
 
 ```python
 configs = [
-    ("A100 cluster", Hardware.A100, Nodes.DGX_A100, 20),   # ~20 nodes
-    ("H100 cluster", Hardware.H100, Nodes.DGX_H100, 8),    # ~8 nodes
-    ("B200 cluster", Hardware.B200, Nodes.DGX_B200, 4),     # ~4 nodes
+    ("A100 cluster", Hardware.Cloud.A100, Nodes.DGX_A100, 20),   # ~20 nodes
+    ("H100 cluster", Hardware.Cloud.H100, Nodes.DGX_H100, 8),    # ~8 nodes
+    ("B200 cluster", Hardware.Cloud.B200, Nodes.DGX_B200, 4),     # ~4 nodes
 ]
 
 for name, hw, node_template, n_nodes in configs:
     fleet = Fleet(
         name=name, node=node_template, count=n_nodes,
-        fabric=Fabrics.InfiniBand_NDR, region=Infra.US_Avg
+        fabric=Fabrics.InfiniBand_NDR, region=Infrastructure.Grids.US_Avg
     )
     # Economics: 365-day TCO
     tco = econ.solve(fleet, duration_days=365, mfu=0.3)
@@ -482,7 +486,7 @@ hw = HardwareNode(
     release_year=2018,
     compute=ComputeCore(
         peak_flops=0.000064 * ureg.TFLOPs / ureg.s,
-        precision_flops={"int8": 0.000128 * ureg.TFLOPs / ureg.s},
+        precision_flops={"int8": 0.000128 * ureg.TOPS},
     ),
     memory=MemoryHierarchy(
         capacity=1 * ureg.MB,
@@ -577,13 +581,14 @@ at 1000 QPS, within a $5M annual budget, deployed across two regions.
 
 ```python
 from mlsysim import (
-    ServingModel, EconomicsModel, SustainabilityModel, CompressionModel,
-    Hardware, Models, Infra
+    ServingModel, EconomicsModel, SustainabilityModel,
+    Hardware, Models, Infrastructure
 )
+from mlsysim.solvers import CompressionModel
 from mlsysim.systems.types import Fleet
 from mlsysim.systems.registry import Nodes, Fabrics
 
-model   = Models.Llama3_70B
+model   = Models.Language.Llama3_70B
 serving = ServingModel()
 econ    = EconomicsModel()
 sustain = SustainabilityModel()
@@ -603,11 +608,11 @@ Design a fleet that meets ALL constraints simultaneously:
 
 ```python
 # How many QPS per H100 at FP16?
-r = serving.solve(model, Hardware.H100, seq_len=2048, batch_size=1, precision="fp16")
+r = serving.solve(model, Hardware.Cloud.H100, seq_len=2048, batch_size=1, precision="fp16")
 print(f"Single H100: TTFT={r.ttft:~P.1f}  ITL={r.itl:~P.1f}  feasible={r.feasible}")
 
 # Try with INT4 compression
-c = compress.solve(model, Hardware.H100, method="quantization", target_bitwidth=4)
+c = compress.solve(model, Hardware.Cloud.H100, method="quantization", target_bitwidth=4)
 print(f"INT4 compression: {c.compression_ratio:.1f}x  accuracy_delta={c.accuracy_delta:.1f}%")
 ```
 
@@ -633,9 +638,9 @@ for us_pct in [0.3, 0.5, 0.7]:
     n_qc = n_total - n_us
 
     fleet_us = Fleet(name="US East", node=Nodes.DGX_H100, count=max(1,n_us),
-                     fabric=Fabrics.InfiniBand_NDR, region=Infra.US_Avg)
+                     fabric=Fabrics.InfiniBand_NDR, region=Infrastructure.Grids.US_Avg)
     fleet_qc = Fleet(name="Quebec", node=Nodes.DGX_H100, count=max(1,n_qc),
-                     fabric=Fabrics.InfiniBand_NDR, region=Infra.Quebec)
+                     fabric=Fabrics.InfiniBand_NDR, region=Infrastructure.Grids.Quebec)
 
     tco_us = econ.solve(fleet_us, duration_days=365, mfu=0.3)
     tco_qc = econ.solve(fleet_qc, duration_days=365, mfu=0.3)

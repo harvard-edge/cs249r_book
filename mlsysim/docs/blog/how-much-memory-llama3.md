@@ -40,7 +40,7 @@ You need either tensor parallelism (TP=2) or quantization to INT4.
 Weights are only half the story. Each active request needs a KV cache:
 
 ```python
-from mlsysim.core.formulas import calc_kv_cache_size
+from mlsysim.physics import calc_kv_cache_size
 
 # Llama-3 70B: 80 layers, 8 KV heads (GQA), 128 dim per head
 kv_per_request = calc_kv_cache_size(
@@ -61,7 +61,7 @@ But at 32K context? KV cache is 1.28 GB per request → only **35 requests**.
 ## The Full Picture
 
 ```python
-from mlsysim.core.solver import ServingModel
+from mlsysim.solvers import ServingModel
 
 result = ServingModel().solve(
     mlsysim.Models.Language.Llama3_70B,
@@ -98,5 +98,5 @@ mlsysim serve Llama3_70B H100 --seq-len 4096 --batch-size 1
 ---
 
 *This analysis was computed with [mlsysim](https://mlsysbook.ai/mlsysim),
-a first-principles analytical calculator for ML systems.
+a first-principles analytical modeling framework for ML systems.
 All constants are traceable to hardware datasheets.*

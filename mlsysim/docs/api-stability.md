@@ -4,7 +4,7 @@
 
 This document defines which parts of the mlsysim API are stable, which are
 experimental, and what guarantees you can rely on when building on top of the
-simulator.
+framework.
 
 ---
 
@@ -53,9 +53,9 @@ positions will not change.
 ```python
 from mlsysim import Hardware
 
-gpu = Hardware.H100            # All current entries are stable
-gpu = Hardware.A100
-gpu = Hardware.Cloud.H100
+gpu = Hardware.Cloud.H100            # All current entries are stable
+gpu = Hardware.Cloud.A100
+gpu = Hardware.Edge.JetsonOrinNX
 # ... every entry shipping in 0.1.x
 ```
 
@@ -67,21 +67,44 @@ removed or renamed.
 ```python
 from mlsysim import Models
 
-model = Models.Llama3_70B      # All current entries are stable
-model = Models.GPT2
+model = Models.Language.Llama3_70B      # All current entries are stable
+model = Models.Language.GPT2
 # ... every entry shipping in 0.1.x
 ```
 
 Same guarantee as Hardware: additions are allowed, removals are not.
 
+### Registry paths
+
+Use **nested canonical paths** in Python:
+
+```python
+mlsysim.Hardware.Cloud.H100
+mlsysim.Models.Language.Llama3_8B
+mlsysim.Models.Vision.ResNet50
+```
+
+Flat aliases at the registry root (for example bare `H100` or `ResNet50` leaf names) were removed in the registry migration.
+The CLI still resolves short names (`mlsysim eval Llama3_8B H100`) for convenience.
+
+Solvers not listed in `mlsysim.__init__` (for example `CompressionModel`, `MoERoutingModel`)
+import from `mlsysim.solvers`. Workload types import from `mlsysim.models.types`.
+
 ### Scenario Registry
 
 ```python
-from mlsysim import Scenarios
+from mlsysim import ReferenceStats, Scenarios
 ```
 
-All scenarios shipping in 0.1.0 are stable. Their names, parameters, and
-behavior are fixed for the 0.1.x series.
+`Scenarios.*` is the executable scenario registry: each entry composes an
+existing `Models.*` workload, a `Hardware.*` or `Systems.*` target, and
+scenario-local constraints such as latency or power budget. `ReferenceStats.*`
+holds non-executable sourced anchors, such as mobile power envelopes, Waymo
+data-rate ranges, and TinyML case-study measurements.
+
+There are no compatibility aliases between these namespaces. Use
+`Scenarios.SmartDoorbell` for an executable case and
+`ReferenceStats.MobilePower` for sourced non-executable anchors.
 
 ### PerformanceProfile Fields
 
@@ -124,6 +147,11 @@ The solver class hierarchy, their constructors, and their method signatures
 may change. The `Engine.solve()` facade insulates you from these changes --
 prefer it over direct solver instantiation.
 
+Solver classes are exported from `mlsysim.solvers`, not the package root. Use
+`from mlsysim.solvers import ServingModel` so solver-specific dependencies stay
+explicit and the root namespace remains reserved for registries, units, and
+formatting helpers.
+
 ### Training Mode Parameter
 
 ```python
@@ -163,34 +191,8 @@ They may be renamed, reorganized, or moved to nested objects.
 These interfaces still work in v0.1.x but emit deprecation warnings and will
 be removed in the next minor release.
 
-### `mlsysim.BaseModel` Alias
-
-```python
-# Deprecated:
-from mlsysim import BaseModel
-
-# Use instead:
-from mlsysim.core.solver import ForwardModel
-```
-
-The top-level `BaseModel` name was ambiguous (conflicts with Pydantic's
-`BaseModel` in many codebases). It is now an alias that emits a
-`DeprecationWarning`.
-
-### Direct Solver Imports from Top-Level
-
-```python
-# Deprecated:
-from mlsysim import ForwardModel, DistributedModel
-
-# Use instead:
-from mlsysim.solvers import DistributedModel
-from mlsysim.core.solver import ForwardModel
-```
-
-Solver classes should be imported from `mlsysim.solvers` when available, not
-from the `mlsysim` top-level namespace. Base hierarchy types such as
-`ForwardModel` live in `mlsysim.core.solver`.
+No public import path is deprecated in `0.1.2`. Deprecations will be listed here
+and in the changelog before the next minor release.
 
 ---
 
@@ -198,6 +200,6 @@ from the `mlsysim` top-level namespace. Base hierarchy types such as
 
 1. **Pin your dependency:** `mlsysim ~= 0.1.0` (allows 0.1.x patches, blocks 0.2.0).
 2. **Use `Engine.solve()` as your primary interface.** It is the most stable entry point.
-3. **Avoid importing from `mlsysim.solvers` unless you need solver-specific features.** The engine facade covers most use cases.
+3. **Use `mlsysim.solvers` only when you need solver-specific features.** The engine facade covers most use cases.
 4. **Run with warnings enabled** (`python3 -W default`) to catch deprecation notices early.
 5. **Read the changelog** before any minor version upgrade.

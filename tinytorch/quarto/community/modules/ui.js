@@ -26,6 +26,12 @@ export function updateNavState() {
     if (navDashboard) navDashboard.style.display = isLoggedIn ? 'flex' : 'none';
     if (navCommunity) navCommunity.style.display = 'flex';
     if (navArena) navArena.style.display = 'flex';
+
+    // Unlock the sidebar Dashboard link once logged in (hide the lock + tooltip).
+    const navDashboardSidebar = document.getElementById('navDashboardSidebar');
+    const navDashboardLock = document.getElementById('navDashboardLock');
+    if (navDashboardLock) navDashboardLock.style.display = isLoggedIn ? 'none' : 'flex';
+    if (navDashboardSidebar) navDashboardSidebar.classList.toggle('nav-item-restricted', !isLoggedIn);
 }
 
 export function renderLayout() {
@@ -86,9 +92,9 @@ export function renderLayout() {
             <a href="${basePath}/arena.html" class="nav-item">
                 <span>Arena</span>
             </a>
-            <a href="${basePath}/dashboard.html" class="nav-item nav-item-restricted">
+            <a href="${basePath}/dashboard.html" class="nav-item nav-item-restricted" id="navDashboardSidebar">
                 <span>Dashboard</span>
-                <span class="lock-container">
+                <span class="lock-container" id="navDashboardLock">
                     <svg class="lock-icon" viewBox="0 0 24 24" fill="currentColor"><path d="M18 10h-1V7c0-2.76-2.24-5-5-5S7 4.24 7 7v3H6c-1.1 0-2 .9-2 2v8c0 1.1.9 2 2 2h12c1.1 0 2-.9 2-2v-8c0-1.1-.9-2-2-2zm-6 9c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2zm3-10H9V7c0-1.66 1.34-3 3-3s3 1.34 3 3v3z"/></svg>
                     <span class="lock-tooltip">Account Required</span>
                 </span>

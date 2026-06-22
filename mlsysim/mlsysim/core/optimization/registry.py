@@ -2,6 +2,7 @@ from .protocol import OptimizerProtocol
 
 
 def _load_scipy_backend():
+    """Lazy-loads the SciPy optimization backend."""
     try:
         from .scipy_backend import ScipyBackend
         return ScipyBackend
@@ -13,6 +14,7 @@ def _load_scipy_backend():
 
 
 def _load_ortools_backend():
+    """Lazy-loads the Google OR-Tools optimization backend."""
     try:
         from .ortools_backend import ORToolsDiscreteBackend
         return ORToolsDiscreteBackend
@@ -24,6 +26,7 @@ def _load_ortools_backend():
 
 
 def _load_exhaustive_backend():
+    """Lazy-loads the Exhaustive grid-search optimization backend."""
     from .exhaustive_backend import ExhaustiveBackend
     return ExhaustiveBackend
 

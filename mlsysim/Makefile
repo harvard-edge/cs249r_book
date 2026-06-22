@@ -14,6 +14,9 @@ install: ## Install the package in editable mode with all dev and cli dependenci
 test: ## Run the full test suite
 	python3 -m pytest tests/ -v
 
+audit: ## Run the package provenance audit
+	python3 -m mlsysim.tools.audit_provenance --scope all --strict
+
 format: ## Format the code using ruff
 	ruff format .
 	ruff check --fix .
@@ -24,6 +27,12 @@ lint: ## Run the linter (ruff) to check for style violations
 build: ## Build the package for distribution (creates .tar.gz and .whl)
 	pip install build
 	python3 -m build
+
+docs: ## Render the Quarto documentation site locally
+	cd docs && quarto render
+
+docs-preview: ## Preview the Quarto documentation site with hot-reloading
+	cd docs && quarto preview
 
 clean: ## Remove build artifacts, cache directories, and .pyc files
 	rm -rf dist/

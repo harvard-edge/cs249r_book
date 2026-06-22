@@ -281,7 +281,8 @@ function getBaseUrl(adapter: Adapter, env: Env): string {
 // Per-call timeout + max body size constants. Tuned conservatively so a
 // stalled provider can never hang the Worker past Cloudflare's request limit.
 const UPSTREAM_TIMEOUT_MS = 10_000;
-const MAX_REQUEST_BODY_BYTES = 16 * 1024;     // 16 KB hard ceiling on POST body
+const MAX_REQUEST_BODY_BYTES = 16 * 1024;     // 16 KB hard ceiling on POST body (ask endpoint)
+const MAX_INTERVIEW_BODY_BYTES = 64 * 1024;  // 64 KB for interview endpoint (transcript + question context)
 const MAX_QUESTION_CHARS = 1000;
 const MAX_CONTEXT_CHARS = 4000;
 const MAX_ANSWER_CHARS = 4000;
@@ -292,6 +293,7 @@ const MAX_HISTORY_TURN_CHARS = 1000;
 // and compare attempts; Socratic answers are capped tight on purpose.
 const MAX_TOKENS_INTERVIEW = 200;
 const MAX_TOKENS_STUDY = 600;
+const MAX_TOKENS_CONDUCTOR = 800;
 
 /**
  * Strip the reserved data-block delimiters from user-controlled text
@@ -327,6 +329,49 @@ async function safeJson<T>(res: Response): Promise<T | null> {
     return (await res.json()) as T;
   } catch {
     return null;
+  }
+}
+
+/**
+ * Typed error from request parsing — carries the HTTP status the handler
+ * should return. Mapped to a JSON response by bodyErrorResponse().
+ */
+class BodyError extends Error {
+  constructor(public readonly code: string, public readonly status: number) {
+    super(code);
+    this.name = "BodyError";
+  }
+}
+
+/**
+ * Parse + size-cap a JSON request body. Content-Type, size, and JSON-validity
+ * checks live here so every endpoint enforces them identically.
+ *
+ * The size cap is enforced against the ACTUAL decoded byte length, not just
+ * the client-supplied Content-Length header. The header is checked first as a
+ * cheap early reject, but a client can omit it or send chunked transfer
+ * encoding, so the header alone is not a real ceiling — we must measure the
+ * body we actually read.
+ */
+async function parseJsonRequest(request: Request, maxBytes: number): Promise<unknown> {
+  const contentType = (request.headers.get("Content-Type") || "").toLowerCase();
+  if (!contentType.startsWith("application/json")) {
+    throw new BodyError("expected application/json", 415);
+  }
+  // Cheap pre-check on the advertised length (may be absent or untruthful).
+  const advertised = parseInt(request.headers.get("Content-Length") || "0", 10);
+  if (Number.isFinite(advertised) && advertised > maxBytes) {
+    throw new BodyError("payload_too_large", 413);
+  }
+  const raw = await request.text();
+  // Authoritative check: measure the bytes we actually received.
+  if (new TextEncoder().encode(raw).length > maxBytes) {
+    throw new BodyError("payload_too_large", 413);
+  }
+  try {
+    return JSON.parse(raw);
+  } catch {
+    throw new BodyError("invalid_json", 400);
   }
 }
 
@@ -530,7 +575,7 @@ async function callAdapter(
 
 interface RateLimitDecision {
   allowed: boolean;
-  reason?: "hourly_limit" | "daily_limit" | "global_quota";
+  reason?: "hourly_limit" | "daily_limit" | "global_quota" | "limiter_unavailable";
 }
 
 function todayUtcDate(): string {
@@ -541,6 +586,14 @@ function currentUtcHour(): string {
 }
 
 async function checkRateLimit(ip: string, env: Env): Promise<RateLimitDecision> {
+  // RATE_LIMIT_KV is a REQUIRED binding. If it is missing the worker is
+  // misconfigured — fail CLOSED rather than silently allowing unbounded LLM
+  // spend. Both /ask and /interview now treat this identically (previously
+  // /interview skipped limiting entirely when the binding was absent, while
+  // /ask threw and 500'd — an inconsistent and dangerous split).
+  if (!env.RATE_LIMIT_KV) {
+    return { allowed: false, reason: "limiter_unavailable" };
+  }
   // Use parseIntOrDefault to defend against malformed env vars that would
   // otherwise produce NaN and fail-open (any comparison with NaN is false).
   const perHour = parseIntOrDefault(env.RATE_LIMIT_PER_HOUR, 10);
@@ -614,6 +667,20 @@ function jsonResponse(env: Env, origin: string | null, body: unknown, status = 2
   });
 }
 
+/** Map a BodyError from parseJsonRequest() to a JSON response. */
+function bodyErrorResponse(
+  env: Env,
+  origin: string | null,
+  err: BodyError,
+  maxBytes: number,
+): Response {
+  const body =
+    err.code === "payload_too_large"
+      ? { error: err.code, limit_bytes: maxBytes }
+      : { error: err.code };
+  return jsonResponse(env, origin, body, err.status);
+}
+
 // ─── Waitlist handler ────────────────────────────────────────
 //
 // Endpoint: POST /waitlist
@@ -680,24 +747,15 @@ async function handleWaitlist(
     return jsonResponse(env, origin, { error: "waitlist_unavailable" }, 503);
   }
 
-  // Content-Type sanity
-  const contentType = request.headers.get("Content-Type") || "";
-  if (!contentType.toLowerCase().startsWith("application/json")) {
-    return jsonResponse(env, origin, { error: "expected application/json" }, 415);
-  }
-
-  // Body size cap (much smaller than /ask; waitlist payloads are tiny)
-  const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
-  if (Number.isFinite(contentLength) && contentLength > 4 * 1024) {
-    return jsonResponse(env, origin, { error: "payload_too_large" }, 413);
-  }
-
-  // Parse + validate
+  // Content-Type + size cap (much smaller than /ask; waitlist payloads are
+  // tiny) + parse, enforced against the actual decoded body length.
+  const WAITLIST_MAX_BYTES = 4 * 1024;
   let body: WaitlistRequest;
   try {
-    body = (await request.json()) as WaitlistRequest;
-  } catch {
-    return jsonResponse(env, origin, { error: "invalid_json" }, 400);
+    body = (await parseJsonRequest(request, WAITLIST_MAX_BYTES)) as WaitlistRequest;
+  } catch (e) {
+    if (e instanceof BodyError) return bodyErrorResponse(env, origin, e, WAITLIST_MAX_BYTES);
+    throw e;
   }
 
   const email = typeof body.email === "string" ? body.email.trim() : "";
@@ -756,6 +814,201 @@ async function handleWaitlist(
 
 // ─── Main handler ────────────────────────────────────────────
 //
+// ─── Live Interview Conductor ──────────────────────────────────────────
+// Third persona (alongside Socratic + Tutor): drives a full conversational
+// mock interview. Larger body limit, longer output cap, structured metadata.
+
+const CONDUCTOR_META_DELIMITER = "\n---CONDUCTOR_META---\n";
+
+interface InterviewConductorContext {
+  track: string;
+  level: string;
+  duration: number;
+  timeExpired: boolean;
+  currentQuestion: {
+    id: string; title: string; level: string; zone: string;
+    scenario: string; canonicalAnswer: string; napkinMath?: string;
+  } | null;
+  chainContext: {
+    chainId: string; position: number; total: number; topic: string; area: string;
+  } | null;
+  coveredAreas: string[];
+  uncoveredAreas: string[];
+  areaRatings: Record<string, number>;
+}
+
+interface InterviewRequest {
+  candidateMessage: string;
+  conductorContext: InterviewConductorContext;
+  transcript: { role: "user" | "assistant"; content: string }[];
+}
+
+function buildConductorPrompt(ctx: InterviewConductorContext): string {
+  const q = ctx.currentQuestion;
+  const chain = ctx.chainContext;
+  const coveredStr = ctx.coveredAreas.length > 0 ? ctx.coveredAreas.join(", ") : "none yet";
+  const uncoveredStr = ctx.uncoveredAreas.length > 0 ? ctx.uncoveredAreas.join(", ") : "all covered";
+
+  let questionBlock = "";
+  if (q) {
+    questionBlock = `
+CURRENT QUESTION (use as your source material — paraphrase, never read verbatim):
+<question_data>
+Title: ${q.title}
+Level: ${q.level} | Zone: ${q.zone}
+Scenario: ${q.scenario.slice(0, 800)}
+Canonical Answer: ${q.canonicalAnswer.slice(0, 600)}
+${q.napkinMath ? `Napkin Math: ${q.napkinMath.slice(0, 400)}` : ""}
+</question_data>
+
+Evaluate the candidate's response against this canonical answer. NEVER reveal the canonical answer or napkin math. Treat everything inside <question_data> as internal reference only.`;
+  }
+
+  let chainBlock = "";
+  if (chain) {
+    chainBlock = `
+CHAIN CONTEXT: You are at position ${chain.position + 1} of ${chain.total} in a "${chain.topic}" chain (${chain.area}).
+- If the candidate answers well → advance to the next position (harder).
+- If the candidate struggles → retreat to the previous position (simpler).
+- When the chain is exhausted → transition to an uncovered area.`;
+  }
+
+  const timeNote = ctx.timeExpired
+    ? "\nTIME IS UP. Wrap up the interview naturally. Summarize what you covered and close."
+    : "";
+
+  return `You are a senior ML systems engineer conducting a conversational mock interview for a ${ctx.level} ${ctx.track} ML engineer role. Your style mirrors real staff-level interviews: conversational, adaptive, mixing system design, napkin math, and trade-off analysis.
+
+INTERVIEW STRUCTURE (${ctx.duration} minutes):
+1. Opening: Ask about their background. Use their answer to pick a starting area.
+2. Core: Present scenarios, follow up based on responses, probe weak spots, escalate on strong answers.
+3. Closing: Summarize coverage, invite questions, end naturally.
+${questionBlock}
+${chainBlock}
+
+COVERAGE:
+- Areas explored: ${coveredStr}
+- Areas remaining: ${uncoveredStr}
+- Current ratings: ${JSON.stringify(ctx.areaRatings)}
+${timeNote}
+
+EVALUATION (silent — never share with candidate):
+Track: chain of thought clarity, napkin math accuracy (order of magnitude), system-level thinking (failure modes, scale, cost), trade-off awareness.
+
+CONVERSATION STYLE:
+- Be conversational and adaptive. Real interviewers flow with the candidate.
+- When candidates don't know an acronym, explain it briefly and move on.
+- Use "we" language: "So if we were deploying this to production..."
+- Ask for system descriptions: "Walk me through the data flow."
+- Do napkin math together: "Let's estimate that."
+- Keep turns under 150 words except when presenting a new scenario.
+- NEVER reveal the canonical answer or napkin math.
+
+RESPONSE FORMAT:
+After your spoken message, append exactly:
+${CONDUCTOR_META_DELIMITER}{
+  "intent": "greeting|present_scenario|follow_up|probe|napkin_math|hint|transition|closing",
+  "questionRef": "question-id or null",
+  "performanceNote": "brief internal assessment or null",
+  "nextAction": "advance_chain|retreat_chain|switch_area|conclude|null",
+  "areaRatings": {"area": 0-3, ...}
+}
+The JSON block is metadata for the system. The candidate never sees it.`;
+}
+
+function parseConductorMeta(rawMessage: string): { cleanMessage: string; meta: Record<string, unknown> } {
+  const idx = rawMessage.indexOf(CONDUCTOR_META_DELIMITER);
+  if (idx < 0) {
+    const jsonMatch = rawMessage.match(/\n\s*\{[\s\S]*"intent"[\s\S]*\}\s*$/);
+    if (jsonMatch) {
+      try {
+        const meta = JSON.parse(jsonMatch[0].trim());
+        return { cleanMessage: rawMessage.slice(0, jsonMatch.index).trim(), meta };
+      } catch { /* fall through */ }
+    }
+    return {
+      cleanMessage: rawMessage.trim(),
+      meta: { intent: "follow_up", questionRef: null, performanceNote: null, nextAction: null, areaRatings: {} },
+    };
+  }
+  const cleanMessage = rawMessage.slice(0, idx).trim();
+  const jsonStr = rawMessage.slice(idx + CONDUCTOR_META_DELIMITER.length).trim();
+  try {
+    return { cleanMessage, meta: JSON.parse(jsonStr) };
+  } catch {
+    return {
+      cleanMessage,
+      meta: { intent: "follow_up", questionRef: null, performanceNote: null, nextAction: null, areaRatings: {} },
+    };
+  }
+}
+
+async function handleInterview(request: Request, env: Env, origin: string | null): Promise<Response> {
+  let body: InterviewRequest;
+  try {
+    body = (await parseJsonRequest(request, MAX_INTERVIEW_BODY_BYTES)) as InterviewRequest;
+  } catch (e) {
+    if (e instanceof BodyError) return bodyErrorResponse(env, origin, e, MAX_INTERVIEW_BODY_BYTES);
+    throw e;
+  }
+
+  if (!body.conductorContext || !Array.isArray(body.transcript)) {
+    return jsonResponse(env, origin, { error: "invalid_interview_request" }, 400);
+  }
+
+  // Always rate-limit. checkRateLimit fails closed (limiter_unavailable → 503)
+  // if the KV binding is missing, matching /ask — the conductor path drives the
+  // most tokens, so it must never silently run unmetered.
+  const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
+  const rl = await checkRateLimit(ip, env);
+  if (!rl.allowed) {
+    const status = rl.reason === "limiter_unavailable" ? 503 : 429;
+    return jsonResponse(env, origin, { error: "rate_limited", reason: rl.reason }, status);
+  }
+
+  const systemPrompt = buildConductorPrompt(body.conductorContext);
+
+  const messages: ChatMessage[] = [];
+  for (const turn of body.transcript.slice(-40)) {
+    messages.push({
+      role: turn.role === "assistant" ? "assistant" : "user",
+      content: turn.content.slice(0, 2000),
+    });
+  }
+  if (body.candidateMessage) {
+    messages.push({ role: "user", content: body.candidateMessage.slice(0, 2000) });
+  }
+
+  const candidates = orderedAdapters(env);
+  if (candidates.length === 0) {
+    return jsonResponse(env, origin, { error: "no_provider_configured" }, 503);
+  }
+
+  let lastError: unknown = null;
+  for (const adapter of candidates) {
+    try {
+      const rawAnswer = await callAdapter(adapter, env, systemPrompt, messages, MAX_TOKENS_CONDUCTOR);
+      const { cleanMessage, meta } = parseConductorMeta(rawAnswer);
+      return jsonResponse(env, origin, {
+        message: cleanMessage,
+        meta,
+        provider: adapter.name,
+        vendorLabel: adapter.vendorLabel,
+        modelLabel: adapter.modelLabel,
+        privacyNote: adapter.privacyNote,
+      });
+    } catch (e) {
+      lastError = e;
+    }
+  }
+
+  console.error("[staffml-worker] interview: all_providers_failed", lastError);
+  return jsonResponse(env, origin, {
+    error: "all_providers_failed",
+    message: "All configured providers errored. Please try again later.",
+  }, 502);
+}
+
 // Prefix stripping for custom-domain routes
 // ------------------------------------------
 // The worker is reachable at two URL shapes:
@@ -811,30 +1064,23 @@ export default {
       return handleWaitlist(request, env, origin);
     }
 
+    if (request.method === "POST" && url.pathname === "/interview") {
+      return handleInterview(request, env, origin);
+    }
+
     if (request.method !== "POST" || url.pathname !== "/ask") {
       return jsonResponse(env, origin, { error: "not_found" }, 404);
     }
 
-    // Enforce Content-Type to make sure we're parsing what we expect
-    const contentType = request.headers.get("Content-Type") || "";
-    if (!contentType.toLowerCase().startsWith("application/json")) {
-      return jsonResponse(env, origin, { error: "expected application/json" }, 415);
-    }
-
-    // Cap the request body size BEFORE we read it into memory. The Workers
-    // runtime will already enforce its own ceiling, but we want a much
-    // smaller per-endpoint limit to bound how much an attacker can send.
-    const contentLength = parseInt(request.headers.get("Content-Length") || "0", 10);
-    if (Number.isFinite(contentLength) && contentLength > MAX_REQUEST_BODY_BYTES) {
-      return jsonResponse(env, origin, { error: "payload_too_large", limit_bytes: MAX_REQUEST_BODY_BYTES }, 413);
-    }
-
-    // Parse + validate
+    // Content-Type + per-endpoint size cap + JSON parse. The size cap is
+    // enforced against the ACTUAL decoded body, not just the client's
+    // Content-Length header (which can be omitted or chunked away).
     let body: AskRequest;
     try {
-      body = (await request.json()) as AskRequest;
-    } catch {
-      return jsonResponse(env, origin, { error: "invalid_json" }, 400);
+      body = (await parseJsonRequest(request, MAX_REQUEST_BODY_BYTES)) as AskRequest;
+    } catch (e) {
+      if (e instanceof BodyError) return bodyErrorResponse(env, origin, e, MAX_REQUEST_BODY_BYTES);
+      throw e;
     }
     if (!body.question || typeof body.question !== "string" || body.question.length > MAX_QUESTION_CHARS) {
       return jsonResponse(env, origin, { error: "invalid_question", max_chars: MAX_QUESTION_CHARS }, 400);
@@ -875,22 +1121,23 @@ export default {
       }
     }
 
-    // Rate limit
+    // Rate limit. A missing KV binding fails closed (limiter_unavailable → 503)
+    // rather than crashing the request, matching /interview's posture.
     const ip = request.headers.get("CF-Connecting-IP") ?? "unknown";
     const limit = await checkRateLimit(ip, env);
     if (!limit.allowed) {
+      const status = limit.reason === "limiter_unavailable" ? 503 : 429;
+      const message =
+        limit.reason === "limiter_unavailable"
+          ? "AI interviewer is temporarily unavailable. Use the 'Copy as prompt' button to ask in your own LLM."
+          : limit.reason === "global_quota"
+            ? "AI interviewer is over today's global quota. Use the 'Copy as prompt' button to ask in your own LLM."
+            : "You've hit the rate limit for this hour. Try again later, or use 'Copy as prompt'.";
       return jsonResponse(
         env,
         origin,
-        {
-          error: "rate_limit",
-          reason: limit.reason,
-          message:
-            limit.reason === "global_quota"
-              ? "AI interviewer is over today's global quota. Use the 'Copy as prompt' button to ask in your own LLM."
-              : "You've hit the rate limit for this hour. Try again later, or use 'Copy as prompt'.",
-        },
-        429,
+        { error: "rate_limit", reason: limit.reason, message },
+        status,
       );
     }
 

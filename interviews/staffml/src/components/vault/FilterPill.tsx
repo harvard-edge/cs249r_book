@@ -1,13 +1,15 @@
 import clsx from "clsx";
 
-export default function FilterPill({ label, count, isActive, color, icon, onClick }: {
+export default function FilterPill({ label, count, isActive, color, icon, onClick, testId }: {
   label: string; count?: number; isActive: boolean;
   color?: string; icon?: React.ReactNode; onClick: () => void;
+  testId?: string;
 }) {
   return (
     <button
       onClick={onClick}
       aria-pressed={isActive}
+      data-testid={testId}
       className={clsx(
         "flex items-center gap-1.5 px-3 py-2 rounded-lg text-[12px] font-semibold transition-all border whitespace-nowrap shrink-0",
         isActive

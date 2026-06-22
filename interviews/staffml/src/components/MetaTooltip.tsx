@@ -8,12 +8,19 @@
  * narrow containers; uses max-width to bound that.
  *
  * Accessibility:
- *   - The trigger gets `tabIndex={0}` and `role="button"` if it's not
- *     already a button
+ *   - The trigger gets `tabIndex={0}` so keyboard users can focus it and
+ *     the tooltip appears (via `group-focus-within`). No `role` is set —
+ *     the trigger is informational, not a button. Adding `role="button"`
+ *     without a handler misled screen readers into announcing an
+ *     interactive control whose Enter/Space did nothing.
  *   - The tooltip body is hidden visually until hover/focus but always in
  *     the DOM, with `role="tooltip"` and an aria-describedby link
  *   - Also sets a native `title=` attribute as a fallback for screen
  *     readers that don't support live tooltip semantics
+ *   - When the badge is already nested inside an interactive parent
+ *     (e.g. a `<button>`), pass `withTooltip={false}` on the wrapping
+ *     LevelBadge so MetaTooltip isn't rendered at all — avoids nested
+ *     interactives and a double tab stop.
  *
  * Usage:
  *   <MetaTooltip title="L4 — Analyze (Senior)" body="Can you compare trade-offs and diagnose?">
@@ -44,7 +51,6 @@ export default function MetaTooltip({
     <span
       className={clsx("group relative inline-flex", className)}
       tabIndex={0}
-      role="button"
       aria-describedby={id}
       title={fallbackTitle}
     >

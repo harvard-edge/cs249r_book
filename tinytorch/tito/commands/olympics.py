@@ -98,7 +98,7 @@ class OlympicsCommand(BaseCommand):
         message.append("  • Complete modules: ", style="white")
         message.append("tito module status\n", style="cyan")
         message.append("  • Track milestones: ", style="white")
-        message.append("tito milestones status\n", style="cyan")
+        message.append("tito milestone status\n", style="cyan")
         message.append("  • Join community:   ", style="white")
         message.append("tito community login\n", style="cyan")
 

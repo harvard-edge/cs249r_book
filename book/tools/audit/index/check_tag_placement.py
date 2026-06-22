@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""
+r"""
 book-index-tag-placement hook.
 
 Fails if any \index{} is placed inside a structural element where it

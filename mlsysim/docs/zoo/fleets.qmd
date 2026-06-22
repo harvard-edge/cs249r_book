@@ -1,17 +1,19 @@
 ---
 title: "The Fleet Zoo"
-subtitle: "Vetted System Archetypes and Multi-Node Clusters"
+subtitle: "Vetted Nodes, Racks, Fabrics, and Multi-Node Clusters"
 ---
 The Fleet Zoo defines the **Structural Context** of ML systems—from single microcontrollers to
-warehouse-scale supercomputers. Fleets combine hardware nodes, network fabric, and a count to
-form a complete system that the `DistributedModel` can analyze.
+warehouse-scale supercomputers. Systems entries compose hardware nodes, rack profiles, network
+fabrics, and cluster counts into complete structures that the `DistributedModel`, sustainability
+models, and book LEGO cells can analyze.
 
 ::: {.callout-note}
 ## Understanding System Hierarchy
 A **Fleet** = Node × Count + Fabric. The **Node** specifies which accelerator and how many per
-server box. The **Fabric** specifies how nodes talk to each other (NVLink for intra-node,
-InfiniBand for inter-node). Use the [3D Parallelism tutorial](../tutorials/index.qmd) to see
-how these parameters affect training time.
+server box. A **RackProfile** specifies a physical rack composition and power envelope. The
+**Fabric** specifies how nodes talk to each other (NVLink for intra-node, InfiniBand for
+inter-node). Use the [3D Parallelism tutorial](../tutorials/index.qmd) to see how these
+parameters affect training time.
 :::
 
 ```{python}
@@ -32,13 +34,26 @@ def print_tier_table(title, tier_class):
 
 def print_node_table(title, node_class):
     print(f"### {title}")
-    print("| Node Name | Accelerator | Count | Intra-Node BW |")
-    print("|:---|:---:|:---:|:---:|")
+    print("| Node Name | Accelerator | Count | Host Memory | Intra-Node BW |")
+    print("|:---|:---:|:---:|:---:|:---:|")
     for attr_name in sorted(dir(node_class)):
         if attr_name.startswith("_"): continue
         item = getattr(node_class, attr_name)
         if "Node" in type(item).__name__ and not "HardwareNode" in type(item).__name__:
-            print(f"| **{item.name}** | {item.accelerator.name} | {item.accelerators_per_node} | {item.intra_node_bw:~P} |")
+            host_memory = f"{item.host_memory:~P}" if item.host_memory is not None else "---"
+            print(f"| **{item.name}** | {item.accelerator.name} | {item.accelerators_per_node} | {host_memory} | {item.intra_node_bw:~P} |")
+    print("\n")
+
+def print_rack_table(title, rack_class):
+    print(f"### {title}")
+    print("| Rack Name | Node Type | Nodes | Accelerators | Accelerator Power | Support Power | Total Power |")
+    print("|:---|:---:|:---:|:---:|:---:|:---:|:---:|")
+    for attr_name in sorted(dir(rack_class)):
+        if attr_name.startswith("_"): continue
+        item = getattr(rack_class, attr_name)
+        if "RackProfile" in type(item).__name__:
+            support_power = f"{item.non_accelerator_power:~P}" if item.non_accelerator_power is not None else "---"
+            print(f"| **{item.name}** | {item.node.name} | {item.nodes_per_rack} | {item.accelerator_count} | {item.accelerator_power:~P} | {support_power} | {item.total_power:~P} |")
     print("\n")
 
 def print_fleet_table(title, fleet_class):
@@ -56,6 +71,7 @@ reg = getattr(mlsysim, 'Systems', None)
 if reg:
     if hasattr(reg, 'Tiers'): print_tier_table("Deployment Tiers", reg.Tiers)
     if hasattr(reg, 'Nodes'): print_node_table("Reference Nodes", reg.Nodes)
+    if hasattr(reg, 'Racks'): print_rack_table("Reference Racks", reg.Racks)
     if hasattr(reg, 'Clusters'): print_fleet_table("Production Clusters", reg.Clusters)
 else:
     print("Error: Systems registry not found in mlsysim.")
@@ -67,11 +83,17 @@ else:
 
 ### Why Fleet Size Matters
 
-Distributed training performance is dominated by **communication overhead**. As you add more nodes, each all-reduce synchronization step must transfer gradient data across the fabric. The `DistributedModel` models this trade-off using the ring all-reduce formula [@dean2012large]:
+Distributed training performance is dominated by **communication overhead** in large-scale systems such as DistBelief [@dean2012large]. As you add more nodes, each all-reduce synchronization step must transfer gradient data across the fabric. The `DistributedModel` models this trade-off using the ring all-reduce cost model from Patarasuk and Yuan's bandwidth-optimal all-reduce analysis [-@patarasuk2009]:
 
 $$T_{\text{dp}} = 2(N-1) \cdot \left(\frac{M/N}{BW} + L\right)$$
 
 where $N$ is the GPU count, $M$ is the model size in bytes, and $BW$ is the fabric bandwidth.
+
+### Rack Profiles Are System Facts
+
+Rack profiles are composed system facts, not one-off arithmetic. A rack table may explain the
+component breakdown, but the aggregate rack profile stays in `Systems.Racks.*` so every chapter
+uses the same node count, accelerator count, support power, and total power.
 
 ### The Fabric Matters More Than You Think
 

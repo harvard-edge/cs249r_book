@@ -49,6 +49,7 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.lowercase_prose_references", "lowercase-prose-references"),
     ("audit.checks.acknowledgements_spelling", "acknowledgements-spelling"),
     ("audit.checks.binary_units", "binary-units-in-prose"),
+    ("audit.checks.table_caption", "table-without-caption"),
     ("audit.checks.h3_titlecase", "h3-titlecase"),
     ("audit.checks.concept_term_capitalization", "concept-term-capitalization"),
     ("audit.checks.abbreviation_first_use", "abbreviation-first-use"),
@@ -56,6 +57,16 @@ CHECK_REGISTRY: list[tuple[str, str]] = [
     ("audit.checks.alt_text_style", "alt-text-style"),
     ("audit.checks.bibliography_hygiene", "bibliography-hygiene"),
     ("audit.checks.notation_consistency", "notation-consistency"),
+    ("audit.checks.index_placement", "index-placement"),
+    # Wave 7 — release-gate defect catalog (run via book/tools/audit/scan.py)
+    ("audit.checks.bare_attribution", "bare-attribution"),
+    ("audit.checks.duplicate_citation", "duplicate-citation"),
+    ("audit.checks.math_notation_render", "math-notation-render"),
+    ("audit.checks.unresolved_xref", "unresolved-xref"),
+    ("audit.checks.longtable_continuity", "longtable-candidate"),
+    ("audit.checks.sec_slug_placement", "sec-slug-end-of-paragraph"),
+    ("audit.checks.footnote_numbering", "footnote-numbering"),
+    ("audit.checks.layout_proxies", "layout-proxy"),
 ]
 
 
@@ -127,22 +138,28 @@ def resolve_scope(scope: str) -> list[Path]:
 
 
 def get_rule_file_sha() -> str:
-    """Get the git SHA of book-prose-merged.md so the ledger is reproducible."""
-    rule_file = (
-        Path.home()
-        / "GitHub"
-        / "AIConfigs"
-        / "projects"
-        / "MLSysBook"
-        / ".claude"
-        / "rules"
-        / "book-prose-merged.md"
-    )
+    """Get the git SHA of the merged prose-rule file so the ledger is reproducible.
+
+    Resolves the rule file relative to the repository root (via the project's
+    rules directory), so the scanner is portable across machines and checkouts.
+    """
+    try:
+        repo_root = Path(
+            subprocess.check_output(
+                ["git", "rev-parse", "--show-toplevel"],
+                cwd=Path(__file__).resolve().parent,
+                text=True,
+            ).strip()
+        )
+    except (subprocess.CalledProcessError, subprocess.TimeoutExpired, OSError):
+        return "unknown"
+
+    rule_file = repo_root / ".claude" / "rules" / "book-prose-merged.md"
     if not rule_file.exists():
         return "unknown"
     try:
         result = subprocess.run(
-            ["git", "-C", str(rule_file.parent.parent.parent.parent.parent),
+            ["git", "-C", str(rule_file.parent),
              "log", "-n", "1", "--pretty=format:%H", "--", str(rule_file)],
             capture_output=True, text=True, timeout=5,
         )
@@ -344,6 +361,15 @@ def main() -> int:
             "itself or to reproduce pre-Pass-16 scanner behavior."
         ),
     )
+    parser.add_argument(
+        "--fail-on-open",
+        action="store_true",
+        help=(
+            "Exit with code 1 if any issue has status='open' after the "
+            "accept-list is applied. For pre-commit hook integration: "
+            "lets `--categories X` act as a hard gate that blocks commits."
+        ),
+    )
     args = parser.parse_args()
 
     categories = (
@@ -365,6 +391,16 @@ def main() -> int:
     print(f"\nLedger written to {output}", file=sys.stderr)
 
     print_summary(ledger)
+
+    if args.fail_on_open:
+        open_count = sum(1 for i in ledger.issues if getattr(i, "status", "open") == "open")
+        if open_count:
+            print(
+                f"\n❌ --fail-on-open: {open_count} open issue(s) — see ledger above.",
+                file=sys.stderr,
+            )
+            return 1
+
     return 0
 
 

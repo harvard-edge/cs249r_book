@@ -242,13 +242,30 @@ export default function EcosystemBar() {
   const dropdownHoverBg = isDark ? '#3a3a3a' : '#f8f9fa';
   const dividerColor = isDark ? '#454d55' : '#dee2e6';
 
-  // Load Bootstrap Icons font
+  // Load Bootstrap Icons font.
+  // SRI integrity pins the CSS bytes — if jsDelivr ever serves modified
+  // content, the browser rejects the stylesheet rather than applying it.
+  // crossorigin="anonymous" is required for integrity to be enforced on
+  // cross-origin resources. If the bootstrap-icons version is ever bumped,
+  // recompute the hash:
+  //   curl -sL <url> | openssl dgst -sha384 -binary | openssl base64 -A
   useEffect(() => {
     if (document.getElementById("bi-css")) return;
     const link = document.createElement("link");
     link.id = "bi-css";
     link.rel = "stylesheet";
     link.href = "https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css";
+    link.integrity = "sha384-XGjxtQfXaH2tnPFa9x+ruJTuLE3Aa6LhHSWRr1XeTyhezb4abCG4ccI5AkVDxqC+";
+    link.crossOrigin = "anonymous";
+    // Surface SRI/network failures in devtools — without this the browser
+    // silently blocks the stylesheet and the only symptom is missing icons.
+    link.onerror = () => {
+      console.error(
+        "[EcosystemBar] Failed to load Bootstrap Icons CSS from jsDelivr.",
+        "If you just bumped the version, recompute the SRI hash with:",
+        "curl -sL", link.href, "| openssl dgst -sha384 -binary | openssl base64 -A",
+      );
+    };
     document.head.appendChild(link);
   }, []);
 
@@ -565,7 +582,29 @@ export default function EcosystemBar() {
 
       {/* Mobile expanded */}
       {mobileOpen && (
-        <div className="nav-lg:hidden" style={{ borderTop: `1px solid ${borderColor}`, backgroundColor: bgColor, padding: '12px 16px' }}>
+        <div
+          className="nav-lg:hidden"
+          style={{
+            borderTop: `1px solid ${borderColor}`,
+            backgroundColor: bgColor,
+            padding: '12px 16px',
+            // Cap the menu at the remaining viewport height so it scrolls
+            // internally instead of pushing the whole sticky bar past the
+            // viewport. Without this, the menu's overflow content sits
+            // below the fold and the next touch-drag scrolls the PAGE
+            // (because the menu isn't its own scroll container) — items
+            // only became reachable after the bar released at the body
+            // bottom. 60 = the header row's minHeight; `dvh` (not `vh`)
+            // tracks the dynamic mobile viewport as the URL bar shows /
+            // hides so we don't clip the bottom on iOS Safari.
+            maxHeight: 'calc(100dvh - 60px)',
+            overflowY: 'auto',
+            // Prevent scroll-chaining: once the menu reaches its end, a
+            // continued swipe shouldn't start scrolling the page behind.
+            overscrollBehavior: 'contain',
+            WebkitOverflowScrolling: 'touch',
+          }}
+        >
           {LEFT_MENUS.map((menu) => (
             <div key={menu.id} style={{ marginBottom: 12 }}>
               <div style={{ fontSize: 10, fontWeight: 600, color: '#adb5bd', textTransform: 'uppercase' as const, letterSpacing: 1, marginBottom: 4 }}>

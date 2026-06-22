@@ -9,7 +9,7 @@ mlsysim to model unreleased or generic hardware.
 import mlsysim
 from mlsysim.hardware.types import HardwareNode, ComputeCore, MemoryHierarchy
 from mlsysim.models.types import CNNWorkload
-from mlsysim.core.scenarios import Scenario
+from mlsysim.engine.scenarios import Scenario
 
 def main():
     print("--- Designing a Hypothetical 'Generic Drone' ---")

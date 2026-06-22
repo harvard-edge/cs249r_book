@@ -1,31 +1,33 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { ECOSYSTEM_BASE } from "../lib/env";
 import {
   Library, Target, Crosshair, BarChart3, BookOpen,
   Menu, X, Sun, Moon, Map, Cpu, Server, ChevronDown, Info,
-  Star, Bug, Send, Atom, Network,
+  Star, Bug, Send, Atom, Network, Mic2,
 } from "lucide-react";
 import clsx from "clsx";
 import StreakBadge from "@/components/StreakBadge";
 import { buildSiteIssueUrl } from "@/lib/issue-url";
 import { getDueCount } from "@/lib/progress";
 import { useTheme } from "@/components/ThemeProvider";
+import { useVisibilityPoll } from "@/lib/hooks/useVisibilityPoll";
 
 const primaryLinks = [
   { href: "/", label: "Vault", icon: Library },
   { href: "/practice", label: "Practice", icon: Target },
+  { href: "/plans", label: "Plans", icon: Map },
   { href: "/gauntlet", label: "Mock Interview", icon: Crosshair },
+  { href: "/interview", label: "Live Interview", icon: Mic2 },
   { href: "/progress", label: "Progress", icon: BarChart3 },
   { href: "/about", label: "About", icon: Info },
 ];
 
 const toolLinks = [
   { href: "/explore", label: "Vault Explorer", icon: Network },
-  { href: "/plans", label: "Study Plans", icon: Map },
   { href: "/framework", label: "Framework", icon: Atom },
   { href: "/contribute", label: "Contribute", icon: Send },
   { href: "/roofline", label: "Roofline", icon: Cpu },
@@ -41,14 +43,31 @@ export default function Nav() {
   const { theme, toggleTheme } = useTheme();
   const toolsRef = useRef<HTMLDivElement>(null);
 
-  // Check for due SR cards periodically
-  useEffect(() => {
-    try { setDueCount(getDueCount()); } catch {}
-    const interval = setInterval(() => {
-      try { setDueCount(getDueCount()); } catch {}
-    }, 30000);
-    return () => clearInterval(interval);
+  // Single source of truth for refreshing the due-count badge — used by
+  // both the periodic poll below AND the cross-tab storage listener.
+  // Errors are logged (not swallowed) so a corrupted-localStorage failure
+  // shows up in devtools instead of presenting as a frozen badge.
+  const refresh = useCallback(() => {
+    try {
+      setDueCount(getDueCount());
+    } catch (e) {
+      console.error("[Nav] getDueCount failed", e);
+    }
   }, []);
+
+  // Check for due SR cards every 30s while the tab is visible. The hook
+  // pauses on hidden and re-reads immediately on resume — see its docs.
+  useVisibilityPoll(refresh, 30_000);
+
+  // Cross-tab freshness: the poll above only catches up on visibility
+  // transitions, so if two tabs are visible at the same time (split
+  // screen, multiple monitors) a write in one tab is invisible to the
+  // other until its next 30s tick. The `storage` event fires in OTHER
+  // tabs the instant one tab writes to localStorage, so re-read on it.
+  useEffect(() => {
+    window.addEventListener("storage", refresh);
+    return () => window.removeEventListener("storage", refresh);
+  }, [refresh]);
 
   // Close tools dropdown on outside click
   useEffect(() => {

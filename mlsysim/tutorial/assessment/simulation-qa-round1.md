@@ -42,8 +42,8 @@ show up at scale:
    communication cost, which changes fleet size, which changes carbon. That cascade is
    what the pipeline handles.
 
-3. **Traceability.** Every hardware constant in mlsysim is a `TraceableConstant` with a
-   source, date, and DOI. When your spreadsheet says "H100 bandwidth = 3350 GB/s," where
+3. **Traceability.** Registry entries and appendix `Literature` / `Systems` anchors carry a `Provenance` record
+   (`Sourced` scalars and `metadata.provenance` on hardware/models). When your spreadsheet says "H100 bandwidth = 3350 GB/s," where
    did that number come from? Is it the datasheet peak or the measured sustained? Is it
    HBM3 or HBM3E? In mlsysim, you can audit any number back to its origin.
 
@@ -614,7 +614,7 @@ a sale based on a modeling artifact.
 **Rajan:** Or vice versa. The bias matters.
 
 **Katharina:** I think the play for both of us is to contribute calibrated
-efficiency values. If they have a `TraceableConstant` system where every
+efficiency values. If they have a provenance system where every
 number has a source, we can submit official numbers from our benchmark teams.
 Then at least the hardware specs are accurate and traceable to us.
 

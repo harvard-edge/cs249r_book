@@ -20,7 +20,7 @@
 
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { getQuestionFullDetail, type Question } from "../corpus";
 
 export type UseFullQuestionStatus = "loading" | "ready" | "error";
@@ -38,35 +38,45 @@ export function useFullQuestion(
     status: summary ? "loading" : "ready",
   }));
 
+  // The effect re-runs only when the question id changes, but it reads the
+  // summary through a ref so the merge always uses the CURRENT summary rather
+  // than a value captured when the effect last ran. Without the ref, keying on
+  // `summary?.id` alone closes over a stale `summary` if the same-id record is
+  // swapped for a richer one; depending on the whole `summary` object instead
+  // would refetch on every render when a caller passes a fresh object.
+  const summaryRef = useRef(summary);
+  summaryRef.current = summary;
+
   useEffect(() => {
-    if (!summary) {
+    const current = summaryRef.current;
+    if (!current) {
       setResult({ question: undefined, status: "ready" });
       return;
     }
     // Already hydrated in the summary itself (rare, but possible if a
     // future bundle ships details inline). Skip the fetch.
-    if (summary.scenario && summary.details?.realistic_solution) {
-      setResult({ question: summary, status: "ready" });
+    if (current.scenario && current.details?.realistic_solution) {
+      setResult({ question: current, status: "ready" });
       return;
     }
-    setResult({ question: summary, status: "loading" });
+    setResult({ question: current, status: "loading" });
     let cancelled = false;
-    getQuestionFullDetail(summary.id)
+    getQuestionFullDetail(current.id)
       .then(full => {
         if (cancelled) return;
         if (!full) {
-          setResult({ question: summary, status: "error" });
+          setResult({ question: current, status: "error" });
           return;
         }
         // Merge rather than replace: the Worker returns the heavy fields
         // (scenario, details) but does not necessarily carry every
         // summary-bundle field. Spread summary first so Worker values
         // win where they overlap, but summary-only fields survive.
-        setResult({ question: { ...summary, ...full }, status: "ready" });
+        setResult({ question: { ...current, ...full }, status: "ready" });
       })
       .catch(() => {
         if (cancelled) return;
-        setResult({ question: summary, status: "error" });
+        setResult({ question: current, status: "error" });
       });
     return () => {
       cancelled = true;

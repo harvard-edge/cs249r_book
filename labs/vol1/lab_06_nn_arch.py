@@ -3,168 +3,567 @@ import marimo
 __generated_with = "0.23.1"
 app = marimo.App(width="full")
 
+# ===========================================================================
+# ZONE A: SETUP
+# ===========================================================================
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ZONE A: OPENING
-# ═════════════════════════════════════════════════════════════════════════════
 
-# ─── CELL 0: SETUP ──────────────────────────────────────────────────────────
 @app.cell
 async def _():
+    import html
     import marimo as mo
     import sys
-    import math
     from pathlib import Path
-    import numpy as np
 
     if sys.platform == "emscripten":
         import micropip
         await micropip.install(["pydantic", "pint", "plotly", "pandas"], keep_going=False)
-        await micropip.install(
-            "../../wheels/mlsysim-0.1.1-py3-none-any.whl", keep_going=False
-        )
-    elif "mlsysim" not in sys.modules:
-        _root = Path(__file__).resolve().parents[2]
-        if str(_root) not in sys.path:
-            sys.path.insert(0, str(_root))
+        await micropip.install("../../wheels/mlsysim-0.1.2-py3-none-any.whl", keep_going=False)
+        await micropip.install("../../wheels/mlsysbook_labs-0.1.0-py3-none-any.whl", keep_going=False)
+    else:
+        _labs_dir = Path(__file__).resolve().parents[1]
+        if str(_labs_dir) not in sys.path:
+            sys.path.insert(0, str(_labs_dir))
+        from bootstrap import native_bootstrap
+        native_bootstrap(__file__)
 
     import plotly.graph_objects as go
+    from mlsysim.labs.components import MathPeek
     from mlsysim.labs.state import DesignLedger
     from mlsysim.labs.style import COLORS, LAB_CSS, apply_plotly_theme
-    import mlsysim
-    from mlsysim.core.engine import Engine
-
-    # ── Hardware constants ─────────────────────────────────────────────────
-    H100 = mlsysim.Hardware.Cloud.H100
-    JETSON = mlsysim.Hardware.Edge.JetsonOrinNX
-    IPHONE = mlsysim.Hardware.Mobile.iPhone15Pro
-
-    H100_RAM_GB   = H100.memory.capacity.m_as("GB")
-    JETSON_RAM_GB = JETSON.memory.capacity.m_as("GB")
-    IPHONE_RAM_GB = IPHONE.memory.capacity.m_as("GB")
-
-    H100_TFLOPS   = H100.compute.peak_flops.m_as("TFLOPs/s")
-    H100_BW_GBS   = H100.memory.bandwidth.m_as("GB/s")
-    H100_DISPATCH = H100.dispatch_tax.m_as("ms")
-
-    JETSON_DISPATCH = JETSON.dispatch_tax.m_as("ms")
+    from mlsysbook_labs import (
+        ACADEMIC_LAB_CSS,
+        architecture_decision,
+        architecture_scaling_curve,
+        architecture_signature,
+        architecture_track_profile,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_arc_context,
+        track_selector,
+    )
 
     ledger = DesignLedger()
     if getattr(ledger, "is_wasm", False):
         _ = await ledger.load_async()
     return (
-        COLORS, Engine, H100, JETSON, IPHONE,
-        H100_RAM_GB, JETSON_RAM_GB, IPHONE_RAM_GB,
-        H100_TFLOPS, H100_BW_GBS, H100_DISPATCH, JETSON_DISPATCH,
-        LAB_CSS, apply_plotly_theme, go, math, mo, np, ledger, mlsysim,
+        ACADEMIC_LAB_CSS,
+        COLORS,
+        LAB_CSS,
+        MathPeek,
+        apply_plotly_theme,
+        architecture_decision,
+        architecture_scaling_curve,
+        architecture_signature,
+        architecture_track_profile,
+        build_lab_report,
+        get_lab_metadata,
+        get_lab_track_variant,
+        get_track_profile,
+        go,
+        html,
+        ledger,
+        mo,
+        report_export_panel,
+        resolve_mlsysim_ref,
+        source_trace,
+        track_context,
+        track_arc_context,
+        track_selector,
     )
 
 
-# ─── CELL 1: HEADER ─────────────────────────────────────────────────────────
+@app.cell
+def _(get_lab_metadata):
+    v1_06_metadata = get_lab_metadata("vol1/lab_06_nn_arch.py")
+    return (v1_06_metadata,)
+
+
 @app.cell(hide_code=True)
-def _(LAB_CSS, mo):
+def _(ledger, track_selector):
+    _saved_track = ledger.get_track()
+    _default_track = _saved_track if _saved_track and _saved_track != "NONE" else "iphone"
+    v1_06_track_picker = track_selector(default=_default_track)
+    v1_06_track_picker
+    return (v1_06_track_picker,)
+
+
+@app.cell
+def _(
+    architecture_track_profile,
+    get_lab_track_variant,
+    get_track_profile,
+    resolve_mlsysim_ref,
+    v1_06_track_picker,
+):
+    v1_06_track_id = v1_06_track_picker.value
+    v1_06_profile = get_track_profile(v1_06_track_id)
+    v1_06_variant = get_lab_track_variant("v1_06_architecture_tax", v1_06_profile.track_id)
+    v1_06_hardware = resolve_mlsysim_ref(v1_06_variant.hardware_ref)
+    v1_06_model = resolve_mlsysim_ref(v1_06_variant.model_ref)
+    v1_06_architecture = architecture_track_profile(
+        v1_06_profile,
+        v1_06_variant,
+        v1_06_hardware,
+        v1_06_model,
+    )
+    return (
+        v1_06_architecture,
+        v1_06_hardware,
+        v1_06_model,
+        v1_06_profile,
+        v1_06_track_id,
+        v1_06_variant,
+    )
+
+
+@app.cell
+def _(COLORS, html):
+    def v1_06_e(value):
+        return html.escape(str(value))
+
+    def v1_06_fields_html(items):
+        return "".join(
+            f'<div class="mlsysbook-field"><strong>{v1_06_e(label)}</strong>{v1_06_e(value)}</div>'
+            for label, value in items.items()
+        )
+
+    def v1_06_table_html(headers, rows, *, numeric=()):
+        _head = "".join(f"<th>{v1_06_e(header)}</th>" for header in headers)
+        _body = []
+        for row in rows:
+            _cells = []
+            for idx, value in enumerate(row):
+                _style = " style='text-align:right; font-variant-numeric: tabular-nums;'" if idx in numeric else ""
+                _cells.append(f"<td{_style}>{v1_06_e(value)}</td>")
+            _body.append(f"<tr>{''.join(_cells)}</tr>")
+        return f"""
+        <table class="mlsysbook-table">
+          <thead><tr>{_head}</tr></thead>
+          <tbody>{''.join(_body)}</tbody>
+        </table>
+        """
+
+    def v1_06_callout_html(title, message, *, kind="info"):
+        _colors = {
+            "ok": COLORS["GreenLine"],
+            "warn": COLORS["OrangeLine"],
+            "fail": COLORS["RedLine"],
+            "info": COLORS["BlueLine"],
+        }
+        _color = _colors.get(kind, COLORS["BlueLine"])
+        return f"""
+        <div class="mlsysbook-panel" style="border-left:4px solid {_color};">
+          <div class="mlsysbook-section-label">{v1_06_e(title)}</div>
+          <p style="margin:0; line-height:1.6; color:{COLORS['TextSec']};">{v1_06_e(message)}</p>
+        </div>
+        """
+
+    def v1_06_prediction_html(title, predicted, actual, labels):
+        if predicted is None:
+            return v1_06_callout_html(
+                title,
+                "Commit to a structured prediction before treating the evidence as a design answer.",
+                kind="info",
+            )
+        _same = predicted == actual
+        _message = (
+            f"You predicted {labels.get(predicted, predicted)}. "
+            f"The instrument points to {labels.get(actual, actual)}."
+        )
+        if _same:
+            _message += " The prediction matches the measured constraint."
+        else:
+            _message += " Use the gap to revise the architecture recommendation."
+        return v1_06_callout_html(title, _message, kind="ok" if _same else "warn")
+
+    def v1_06_track_amount_system(profile):
+        _systems = {
+            "iphone": {
+                "amounts": "latency, activation memory, energy, and supported NPU kernels",
+                "stake": "local vision/audio UX, privacy, battery, and thermal headroom",
+                "failure": "NPU fallback, thermal throttle, or user-visible latency",
+                "bias": "local spatial/audio bias is valuable only if it stays on supported kernels",
+                "mitigation": "reduce resolution/context, choose mobile-local topology, or prove kernels stay on accelerator",
+            },
+            "oura_ring": {
+                "amounts": "SRAM, flash image size, wake time, duty cycle, and signal quality",
+                "stake": "tiny sequence/signal inference without draining the ring battery",
+                "failure": "SRAM overflow or duty-cycle violation",
+                "bias": "temporal locality is valuable only when state remains SRAM-resident",
+                "mitigation": "shorten the window, stream state, or reject attention state that spills from SRAM",
+            },
+            "robotaxi": {
+                "amounts": "p99 latency, activation memory, power, sensor burst margin, and rare-event recall",
+                "stake": "vehicle-local perception with a safety case",
+                "failure": "tail-latency miss or rare-event safety margin miss",
+                "bias": "perception locality is valuable only when rare-event replay and p99 deadlines pass",
+                "mitigation": "keep the bounded detector, split global context behind fallback, or reduce sensor scale",
+            },
+            "cloud_fleet": {
+                "amounts": "HBM memory, p99 SLA, utilization, cost/request, and quality",
+                "stake": "SLA-compliant transformer service economics",
+                "failure": "context/KV memory pressure, queue/SLA breach, or negative cost/request",
+                "bias": "flexible attention is valuable only while memory and batching economics hold",
+                "mitigation": "cap context, use memory-aware attention, rebatch traffic, or select a smaller serving architecture",
+            },
+        }
+        return _systems.get(profile.track_id, _systems["iphone"])
+
+    def v1_06_family_topology(family):
+        _family = family.lower()
+        if "transformer" in _family or "vit" in _family:
+            return ("all-to-all attention", "gather/reduce over tokens", "low locality")
+        if "rnn" in _family or "temporal" in _family:
+            return ("recurrent or causal sequence", "streaming state reuse", "state locality")
+        if "cnn" in _family or "detector" in _family:
+            return ("sliding-window convolution", "spatial reuse and tiling", "high locality")
+        if "sparse" in _family or "moe" in _family:
+            return ("sparse routing", "scatter/gather across experts", "data-dependent locality")
+        return ("dense feed-forward", "GEMM and activation traffic", "batch locality")
+
+    def v1_06_budget_ratios(profile, item):
+        return {
+            "activation memory": item.activation_mb / max(profile.memory_budget_mb, 1e-9),
+            "latency": item.latency_ms / max(profile.latency_budget_ms, 1e-9),
+            "power": item.power_w / max(profile.power_budget_w, 1e-9),
+            "quality guardrail": profile.quality_floor_pct / max(item.quality_pct, 1e-9),
+            "kernel support": profile.kernel_support_floor_pct / max(item.kernel_support_pct, 1e-9),
+        }
+
+    def v1_06_topology_summary(profile, signature):
+        _rows = []
+        for item in signature:
+            _topology, _access, _locality = v1_06_family_topology(item.family)
+            _ops_per_mb = item.ops_gmac / max(item.activation_mb, 1e-9)
+            _ratios = v1_06_budget_ratios(profile, item)
+            _rows.append({
+                "id": item.architecture_id,
+                "label": item.label,
+                "family": item.family,
+                "topology": _topology,
+                "access": _access,
+                "locality": _locality,
+                "ops_per_mb": _ops_per_mb,
+                "memory_pct": 100.0 * _ratios["activation memory"],
+                "latency_pct": 100.0 * _ratios["latency"],
+                "power_pct": 100.0 * _ratios["power"],
+                "dominant": item.dominant_constraint,
+                "feasible": item.feasible,
+            })
+        _best = max(signature, key=lambda item: item.score if item.feasible else item.score - 100.0)
+        _topology, _access, _locality = v1_06_family_topology(_best.family)
+        if _best.dominant_constraint == "kernel support":
+            _actual = "kernel"
+        elif _best.dominant_constraint == "quality guardrail":
+            _actual = "quality"
+        elif "attention" in _topology or "transformer" in _best.family.lower() or "vit" in _best.family.lower():
+            _actual = "attention"
+        else:
+            _actual = "local"
+        return {
+            "rows": tuple(_rows),
+            "actual": _actual,
+            "best_label": _best.label,
+            "best_topology": _topology,
+            "best_access": _access,
+            "best_locality": _locality,
+            "best_constraint": _best.dominant_constraint,
+        }
+
+    def v1_06_attention_wall(profile, signature, curve, scale_value):
+        _candidate_by_id = {candidate.architecture_id: candidate for candidate in profile.candidates}
+        _attention_items = [
+            item for item in signature
+            if "transformer" in item.family.lower() or "vit" in item.family.lower()
+        ]
+        if not _attention_items:
+            _attention_items = [max(signature, key=lambda item: _candidate_by_id[item.architecture_id].activation_exponent)]
+        _attention = max(
+            _attention_items,
+            key=lambda item: _candidate_by_id[item.architecture_id].activation_exponent,
+        )
+        _ratios = v1_06_budget_ratios(profile, _attention)
+        _amount = max(
+            ("activation memory", "latency", "power", "quality guardrail", "kernel support"),
+            key=lambda key: _ratios[key],
+        )
+        _actual = "memory" if _amount == "activation memory" else "latency" if _amount == "latency" else "power" if _amount == "power" else "quality_kernel"
+        _first_failure = curve.first_failure_by_candidate.get(_attention.architecture_id)
+        _first_failure_text = (
+            f"{_first_failure:.0f} {profile.scaling_unit}" if _first_failure is not None else "not reached in sweep"
+        )
+        _system = v1_06_track_amount_system(profile)
+        _status = "fail" if not _attention.feasible else "warn" if max(_ratios.values()) > 0.8 else "ok"
+        _message = (
+            f"{_attention.label} is governed by {_amount}: "
+            f"activation memory is {_attention.activation_mb:.2f} MB against {profile.memory_budget_mb:.2f} MB, "
+            f"latency is {_attention.latency_ms:.2f} ms against {profile.latency_budget_ms:.2f} ms, "
+            f"and the first infeasible scale is {_first_failure_text}. "
+            f"Mitigation: {_system['mitigation']}."
+        )
+        return {
+            "attention_id": _attention.architecture_id,
+            "attention_label": _attention.label,
+            "dominant_amount": _amount,
+            "actual": _actual,
+            "first_failure": _first_failure_text,
+            "status": _status,
+            "message": _message,
+            "scale_value": scale_value,
+            "memory_pct": 100.0 * _ratios["activation memory"],
+            "latency_pct": 100.0 * _ratios["latency"],
+            "power_pct": 100.0 * _ratios["power"],
+        }
+
+    def v1_06_bias_match(profile, item):
+        _family = item.family.lower()
+        if profile.track_id == "cloud_fleet":
+            if "transformer" in _family:
+                return 1.15
+            if "cnn" in _family:
+                return 0.68
+            return 1.0
+        if profile.track_id == "robotaxi":
+            if "cnn" in _family or "detector" in _family:
+                return 1.12
+            if "hybrid" in _family:
+                return 0.96
+            if "transformer" in _family:
+                return 0.78
+            return 0.9
+        if profile.track_id == "oura_ring":
+            if "temporal" in _family or "cnn" in _family or "depthwise" in _family:
+                return 1.18
+            if "transformer" in _family:
+                return 0.64
+            return 0.9
+        if "cnn" in _family:
+            return 1.15
+        if "transformer" in _family and "efficient" in item.label.lower():
+            return 0.92
+        if "transformer" in _family or "vit" in _family:
+            return 0.75
+        return 0.9
+
+    def v1_06_bias_frontier(profile, signature, data_pressure):
+        _rows = []
+        for item in signature:
+            _match = v1_06_bias_match(profile, item)
+            _ratios = v1_06_budget_ratios(profile, item)
+            _resource_pressure = max(_ratios["activation memory"], _ratios["latency"], _ratios["power"])
+            _data_need = 100.0 * float(data_pressure) / max(_match, 1e-9)
+            _deployability = max(
+                0.0,
+                100.0
+                - 40.0 * max(0.0, _resource_pressure - 1.0)
+                - 0.20 * max(0.0, _data_need - 100.0)
+                - 0.60 * max(0.0, profile.quality_floor_pct - item.quality_pct)
+                - 0.50 * max(0.0, profile.kernel_support_floor_pct - item.kernel_support_pct),
+            )
+            _score = item.quality_pct + 0.25 * _deployability - 0.08 * _data_need
+            _rows.append({
+                "id": item.architecture_id,
+                "label": item.label,
+                "family": item.family,
+                "bias_match": _match,
+                "data_need": _data_need,
+                "quality": item.quality_pct,
+                "deployability": _deployability,
+                "feasible": item.feasible,
+                "dominant": item.dominant_constraint,
+                "score": _score if item.feasible else _score - 75.0,
+            })
+        _best = max(_rows, key=lambda row: row["score"])
+        _leaderboard = max(signature, key=lambda item: item.quality_pct)
+        _best_family = _best["family"].lower()
+        if _best["id"] == _leaderboard.architecture_id:
+            _actual = "leaderboard"
+        elif "transformer" in _best_family and profile.track_id == "cloud_fleet":
+            _actual = "flexible_attention"
+        elif "cnn" in _best_family or "temporal" in _best_family or "detector" in _best_family:
+            _actual = "local_bias"
+        else:
+            _actual = "track_constraint"
+        return {
+            "rows": tuple(_rows),
+            "best": _best,
+            "leaderboard_label": _leaderboard.label,
+            "actual": _actual,
+        }
+
+    def v1_06_review_summary(profile, signature, decision):
+        _selected = next(item for item in signature if item.architecture_id == decision.selected_id)
+        _leaderboard = max(signature, key=lambda item: item.quality_pct)
+        _ratios = v1_06_budget_ratios(profile, _selected)
+        _headroom = min(1.0 / max(_ratios["activation memory"], 1e-9), 1.0 / max(_ratios["latency"], 1e-9), 1.0 / max(_ratios["power"], 1e-9))
+        _feasible_items = [item for item in signature if item.feasible]
+        _headroom_pick = max(
+            _feasible_items or list(signature),
+            key=lambda item: min(
+                1.0 / max(v1_06_budget_ratios(profile, item)["activation memory"], 1e-9),
+                1.0 / max(v1_06_budget_ratios(profile, item)["latency"], 1e-9),
+                1.0 / max(v1_06_budget_ratios(profile, item)["power"], 1e-9),
+            ),
+        )
+        if not _selected.feasible:
+            _status = "reject"
+            _kind = "fail"
+            _actual = "guardrail"
+            _message = f"Reject {_selected.label}: {', '.join(_selected.violations) or _selected.dominant_constraint}."
+        elif _selected.architecture_id == _headroom_pick.architecture_id:
+            _status = "approve"
+            _kind = "ok"
+            _actual = "headroom"
+            _message = f"Approve {_selected.label}: it has the strongest track headroom among feasible candidates."
+        elif _selected.architecture_id == _leaderboard.architecture_id:
+            _status = "approve with mitigation"
+            _kind = "warn"
+            _actual = "leaderboard"
+            _message = f"Approve {_selected.label} only with validation because the leaderboard choice still carries {_selected.dominant_constraint} risk."
+        else:
+            _status = "approve with mitigation"
+            _kind = "warn"
+            _actual = "guardrail"
+            _message = f"Approve {_selected.label} with mitigation: {_selected.dominant_constraint} is closest to the guardrail."
+        return {
+            "selected": _selected,
+            "leaderboard": _leaderboard,
+            "headroom_pick": _headroom_pick,
+            "headroom": _headroom,
+            "status": _status,
+            "kind": _kind,
+            "actual": _actual,
+            "message": _message,
+        }
+
+    return (
+        v1_06_attention_wall,
+        v1_06_bias_frontier,
+        v1_06_callout_html,
+        v1_06_fields_html,
+        v1_06_prediction_html,
+        v1_06_review_summary,
+        v1_06_table_html,
+        v1_06_topology_summary,
+        v1_06_track_amount_system,
+    )
+
+
+@app.cell(hide_code=True)
+def _(
+    ACADEMIC_LAB_CSS,
+    LAB_CSS,
+    mo,
+    source_trace,
+    track_context,
+    track_arc_context,
+    v1_06_architecture,
+    v1_06_metadata,
+    v1_06_profile,
+    v1_06_variant,
+):
     mo.vstack([
         LAB_CSS,
-        mo.Html("""
+        ACADEMIC_LAB_CSS,
+        mo.Html(f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 60%, #0c1a2e 100%);
                     padding: 36px 44px; border-radius: 16px; color: white;
                     box-shadow: 0 8px 32px rgba(0,0,0,0.35);">
             <div style="font-size: 0.72rem; font-weight: 700; letter-spacing: 0.18em;
-                        color: #475569; text-transform: uppercase; margin-bottom: 10px;">
+                        color: #94a3b8; text-transform: uppercase; margin-bottom: 10px;">
                 Machine Learning Systems &middot; Volume I &middot; Lab 06
             </div>
             <h1 style="margin: 0 0 10px 0; font-size: 2.4rem; font-weight: 900;
-                       color: #f8fafc; line-height: 1.1; letter-spacing: -0.02em;">
-                The Architecture Tax
+                       color: #f8fafc; line-height: 1.1;">
+                Architecture Tax
             </h1>
             <p style="margin: 0 0 6px 0; font-size: 1.15rem; font-weight: 600;
                       color: #94a3b8; letter-spacing: 0.04em; font-family: 'SF Mono', monospace;">
-                Inductive Bias &middot; Quadratic Wall &middot; Depth vs. Width &middot; Workload Signatures
+                Inductive Bias &middot; Scaling Shape &middot; Kernel Support &middot; Guardrails
             </p>
-            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #64748b;
-                      max-width: 680px; line-height: 1.65;">
-                Architecture is not just an accuracy choice -- it is a systems choice
-                that determines parameter count, memory access patterns, parallelism,
-                and hardware utilization. Each architecture family occupies a distinct
-                point in the compute-memory trade-off space.
+            <p style="margin: 0 0 22px 0; font-size: 1.0rem; color: #cbd5e1;
+                      max-width: 860px; line-height: 1.65;">
+                {v1_06_variant.workload_summary} The goal is not to crown one universal
+                architecture; it is to choose the family whose resource signature matches
+                the selected track. Architecture choices create different resource
+                shapes; inductive bias and scaling laws determine which amount grows first.
+                Every track follows the same four concepts; the track changes the persona,
+                thresholds, evidence emphasis, failure mode, and report framing.
             </p>
             <div style="display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 20px;">
                 <span style="background: rgba(99,102,241,0.18); color: #a5b4fc;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(99,102,241,0.3);">
-                    4 Parts + Synthesis &middot; ~52 min
+                    4 Concept Modules + Synthesis &middot; ~50 min
                 </span>
                 <span style="background: rgba(203,32,45,0.15); color: #fca5a5;
                              padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
                              font-weight: 600; border: 1px solid rgba(203,32,45,0.25);">
-                    Chapter 6: Network Architectures
+                    {v1_06_profile.label}
+                </span>
+                <span style="background: rgba(34,197,94,0.12); color: #86efac;
+                             padding: 5px 14px; border-radius: 20px; font-size: 0.8rem;
+                             font-weight: 600; border: 1px solid rgba(34,197,94,0.20);">
+                    {v1_06_architecture.scaling_variable}
                 </span>
             </div>
             <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-                <span class="badge badge-info">MLP: 22.7B params / layer</span>
-                <span class="badge badge-warn">Attention: O(N^2) memory</span>
-                <span class="badge badge-fail">Depth: dispatch tax</span>
+                <span class="badge badge-info">Topology Locality</span>
+                <span class="badge badge-warn">Attention Memory Wall</span>
+                <span class="badge badge-info">Inductive Bias</span>
+                <span class="badge badge-fail">Deployment Memo</span>
             </div>
         </div>
         """),
+        track_context(v1_06_profile),
+        track_arc_context(v1_06_profile, v1_06_metadata.lab_id),
+        source_trace({
+            "chapter": "vol1/nn_architectures/nn_architectures.qmd",
+            "anchors": (
+                "Architectural Principles",
+                "CNNs: Spatial Pattern Processing",
+                "RNNs: Sequential Pattern Processing",
+                "Attention: Dynamic Processing",
+                "Transformers: Parallel Sequence Processing",
+                "Architecture Selection Framework",
+                "Fallacies and Pitfalls",
+            ),
+            "shared_helper": "mlsysbook_labs.architecture",
+            "scenario_id": v1_06_variant.scenario_id,
+        }, summary="Opening source map"),
     ])
     return
 
 
-# ─── CELL 2: BRIEFING ───────────────────────────────────────────────────────
 @app.cell(hide_code=True)
-def _(COLORS, mo):
+def _(COLORS, mo, v1_06_architecture):
     mo.Html(f"""
     <div style="border-left: 4px solid {COLORS['BlueLine']};
                 background: white; border-radius: 0 12px 12px 0;
                 padding: 20px 28px; margin: 8px 0 16px 0;
                 box-shadow: 0 1px 4px rgba(0,0,0,0.06);">
-        <div style="margin-bottom: 16px;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                Learning Objectives
-            </div>
-            <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
-                <div style="margin-bottom: 3px;">1. <strong>Quantify the parameter explosion</strong>
-                    from removing inductive bias: an MLP first layer on 224x224 images requires
-                    22.7 billion parameters vs. 1,728 for a 3x3 CNN -- a 13.1 million-fold reduction.</div>
-                <div style="margin-bottom: 3px;">2. <strong>Calculate the quadratic attention wall</strong>:
-                    doubling context length from 4K to 8K tokens quadruples attention memory,
-                    creating hard OOM ceilings on context window size.</div>
-                <div style="margin-bottom: 3px;">3. <strong>Diagnose the depth-vs-width trade-off</strong>:
-                    two networks with identical FLOPs can have 10x different latencies due to
-                    sequential dispatch overhead.</div>
-                <div style="margin-bottom: 3px;">4. <strong>Compare workload signatures</strong>:
-                    predict which architecture achieves highest GPU utilization based on
-                    arithmetic intensity.</div>
-            </div>
+        <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
+                    text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
+            Learning Objectives
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 0 -28px; padding: 0 28px;"></div>
-        <div style="display: flex; gap: 32px; margin-top: 16px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 220px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Prerequisites
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    Dense layer FLOPs from the Neural Computation chapter &middot;
-                    Memory hierarchy cliffs from the Neural Computation chapter &middot;
-                    Iron Law from the Iron Law section (Ch. 1)
-                </div>
-            </div>
-            <div style="flex: 0 0 180px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
-                    Duration
-                </div>
-                <div style="font-size: 0.85rem; color: {COLORS['TextSec']}; line-height: 1.65;">
-                    <strong>~52 min</strong><br/>
-                    Part A: ~12 min &middot; Part B: ~12 min<br/>
-                    Part C: ~10 min &middot; Part D: ~8 min
-                </div>
-            </div>
+        <div style="font-size: 0.9rem; color: {COLORS['TextSec']}; line-height: 1.7;">
+            <div style="margin-bottom: 3px;">1. <strong>Compare architecture signatures:</strong>
+                parameters, operations, activation memory, latency, power, quality, and kernel support.</div>
+            <div style="margin-bottom: 3px;">2. <strong>Predict scaling failure:</strong>
+                sweep {v1_06_architecture.scaling_variable} and identify the first architecture family that breaks.</div>
+            <div style="margin-bottom: 3px;">3. <strong>Reason about inductive bias:</strong>
+                explain how locality, recurrence, attention, or routing changes data need and deployability.</div>
+            <div style="margin-bottom: 3px;">4. <strong>Defend an architecture:</strong>
+                recommend one family, reject alternatives, and state the validation requirement.</div>
         </div>
-        <div style="border-top: 1px solid {COLORS['Border']}; margin: 12px -28px 0 -28px;
+        <div style="border-top: 1px solid {COLORS['Border']}; margin: 14px -28px 0 -28px;
                     padding: 16px 28px 0 28px;">
             <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
                         text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 6px;">
@@ -172,9 +571,8 @@ def _(COLORS, mo):
             </div>
             <div style="font-size: 1.05rem; color: {COLORS['Text']}; font-weight: 600;
                         line-height: 1.5; font-style: italic;">
-                &ldquo;Two networks have identical FLOPs and parameter counts. Why is one
-                10x faster than the other -- and why does the &lsquo;modern&rsquo; Transformer
-                achieve lower GPU utilization than the &lsquo;old&rsquo; CNN?&rdquo;
+                Which architecture family fits {v1_06_architecture.label}, and what failure
+                appears next as {v1_06_architecture.scaling_variable} grows?
             </div>
         </div>
     </div>
@@ -182,912 +580,1140 @@ def _(COLORS, mo):
     return
 
 
-# ─── CELL 3: READING ────────────────────────────────────────────────────────
+# ===========================================================================
+# ZONE B: CONTROLS AND COMPUTATION
+# ===========================================================================
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_06_architecture):
+    v1_06_failure_prediction = mo.ui.radio(
+        options={
+            "Local convolution or streaming state will best match the amount system": "local",
+            "Attention/token mixing will best match the amount system": "attention",
+            "Kernel support or dispatch will decide before the topology": "kernel",
+            "Quality guardrail will decide before resource budgets": "quality",
+        },
+        label=f"Part A prediction: which topology best matches {v1_06_architecture.label}?",
+    )
+    v1_06_topology_checkpoint = mo.ui.radio(
+        options={
+            "Choose the topology with the best locality/headroom": "locality_headroom",
+            "Choose the topology with the best quality proxy": "quality_proxy",
+            "Defer until kernel and memory profiling is complete": "profile_first",
+            "Reject the current candidate set": "reject_set",
+        },
+        label="Part A checkpoint: what topology decision follows from the signature?",
+    )
+    return (v1_06_failure_prediction, v1_06_topology_checkpoint)
+
+
+@app.cell(hide_code=True)
+def _(mo, v1_06_architecture):
+    v1_06_scale = mo.ui.slider(
+        start=v1_06_architecture.scale_min,
+        stop=v1_06_architecture.scale_max,
+        value=v1_06_architecture.default_scale,
+        step=v1_06_architecture.scale_step,
+        label=f"{v1_06_architecture.scaling_variable} ({v1_06_architecture.scaling_unit})",
+    )
+    v1_06_scale
+    return (v1_06_scale,)
+
+
 @app.cell(hide_code=True)
 def _(mo):
-    mo.callout(mo.md("""
-    **Recommended Reading** -- Complete the following before this lab:
+    v1_06_memory_prediction = mo.ui.radio(
+        options={
+            "Activation/KV/state memory becomes the hidden wall": "memory",
+            "Latency crosses the budget before memory": "latency",
+            "Power or duty cycle crosses first": "power",
+            "Quality or kernel support fails before scale does": "quality_kernel",
+        },
+        label="Part B prediction: as the workload scale grows, which amount fails first?",
+    )
+    v1_06_scaling_checkpoint = mo.ui.radio(
+        options={
+            "Shorten the context/window/resolution": "shorten_scale",
+            "Keep the local or streaming topology": "local_topology",
+            "Require memory-aware attention kernels": "memory_kernel",
+            "Escalate to a larger deployment envelope": "larger_envelope",
+        },
+        label="Part B checkpoint: what mitigation would you defend after seeing the wall?",
+    )
+    return (v1_06_memory_prediction, v1_06_scaling_checkpoint)
 
-    - **Chapter 6: Inductive Bias** -- why CNNs have 13M fewer parameters than MLPs
-      for the same image task. Weight sharing and locality as physical constraints.
-    - **Chapter 6: Attention Complexity** -- the N*N score matrix, quadratic memory
-      scaling, and OOM ceilings on context length.
-    - **Chapter 6: Depth vs. Width** -- sequential dispatch overhead, parallelism,
-      and why FLOPs are an insufficient proxy for latency.
-    - **Chapter 6: Workload Signatures** -- arithmetic intensity by architecture
-      family and the roofline model connection.
-    """), kind="info")
-    return
+
+@app.cell(hide_code=True)
+def _(mo):
+    v1_06_bias_prediction = mo.ui.radio(
+        options={
+            "Structured local bias wins by reducing data and state": "local_bias",
+            "Flexible attention wins because quality outweighs resource cost": "flexible_attention",
+            "The leaderboard-quality model wins": "leaderboard",
+            "The answer changes with the track constraint": "track_constraint",
+        },
+        label="Part C prediction: which inductive-bias trade-off survives deployment?",
+    )
+    v1_06_data_pressure = mo.ui.slider(
+        start=0.5,
+        stop=2.0,
+        value=1.0,
+        step=0.1,
+        label="Data / coverage pressure multiplier",
+    )
+    v1_06_bias_checkpoint = mo.ui.radio(
+        options={
+            "Defend the structured-bias architecture": "structured_bias",
+            "Defend the flexible attention architecture": "flexible_attention",
+            "Collect more data before changing architecture": "more_data",
+            "Reject the bias because deployment evidence fails": "reject_bias",
+        },
+        label="Part C checkpoint: which bias decision would you record?",
+    )
+    return (v1_06_bias_checkpoint, v1_06_bias_prediction, v1_06_data_pressure)
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ZONE B-D: ALL PARTS AS TABS
-# ═════════════════════════════════════════════════════════════════════════════
+@app.cell(hide_code=True)
+def _(mo, v1_06_architecture):
+    _architecture_options = {
+        candidate.label: candidate.architecture_id
+        for candidate in v1_06_architecture.candidates
+    }
+    v1_06_review_prediction = mo.ui.radio(
+        options={
+            "Approve the highest-quality architecture": "leaderboard",
+            "Approve the feasible architecture with the most headroom": "headroom",
+            "Approve the smallest architecture": "smallest",
+            "Let the track guardrail decide": "guardrail",
+        },
+        label="Part D prediction: which review rule should approve the architecture?",
+    )
+    v1_06_arch_choice = mo.ui.dropdown(
+        options=_architecture_options,
+        value=v1_06_architecture.candidates[0].label,
+        label="Architecture recommendation",
+    )
+    v1_06_deployment_checkpoint = mo.ui.radio(
+        options={
+            "Approve": "approve",
+            "Approve only with mitigation": "mitigate",
+            "Reject and redesign": "reject",
+        },
+        label="Part D checkpoint: what should the review record?",
+    )
+    v1_06_reflection = mo.ui.text_area(
+        label="Synthesis memo",
+        placeholder="Recommendation, rejected alternatives, measured evidence, residual risk, and validation requirement.",
+        full_width=True,
+    )
+    return (
+        v1_06_arch_choice,
+        v1_06_deployment_checkpoint,
+        v1_06_reflection,
+        v1_06_review_prediction,
+    )
 
-# ─── CELL 4: TABS CELL ──────────────────────────────────────────────────────
+
+@app.cell
+def _(
+    architecture_decision,
+    architecture_scaling_curve,
+    architecture_signature,
+    v1_06_attention_wall,
+    v1_06_arch_choice,
+    v1_06_architecture,
+    v1_06_bias_frontier,
+    v1_06_data_pressure,
+    v1_06_review_summary,
+    v1_06_scale,
+    v1_06_topology_summary,
+):
+    v1_06_signature = architecture_signature(
+        v1_06_architecture,
+        scale_value=v1_06_scale.value,
+    )
+    v1_06_curve = architecture_scaling_curve(v1_06_architecture, samples=36)
+    v1_06_decision = architecture_decision(
+        v1_06_architecture,
+        architecture_id=v1_06_arch_choice.value,
+        scale_value=v1_06_scale.value,
+    )
+    v1_06_selected_eval = next(
+        item for item in v1_06_signature
+        if item.architecture_id == v1_06_decision.selected_id
+    )
+    v1_06_topology = v1_06_topology_summary(v1_06_architecture, v1_06_signature)
+    v1_06_attention = v1_06_attention_wall(
+        v1_06_architecture,
+        v1_06_signature,
+        v1_06_curve,
+        v1_06_scale.value,
+    )
+    v1_06_bias = v1_06_bias_frontier(
+        v1_06_architecture,
+        v1_06_signature,
+        v1_06_data_pressure.value,
+    )
+    v1_06_review = v1_06_review_summary(
+        v1_06_architecture,
+        v1_06_signature,
+        v1_06_decision,
+    )
+    return (
+        v1_06_attention,
+        v1_06_bias,
+        v1_06_curve,
+        v1_06_decision,
+        v1_06_review,
+        v1_06_selected_eval,
+        v1_06_signature,
+        v1_06_topology,
+    )
+
+
+# ===========================================================================
+# ZONE C: PARTS
+# ===========================================================================
+
+
 @app.cell(hide_code=True)
 def _(
-    COLORS, Engine, H100, JETSON, IPHONE,
-    H100_RAM_GB, JETSON_RAM_GB, IPHONE_RAM_GB,
-    H100_TFLOPS, H100_BW_GBS, H100_DISPATCH, JETSON_DISPATCH,
-    apply_plotly_theme, go, math, mo, np, ledger, mlsysim,
+    COLORS,
+    MathPeek,
+    apply_plotly_theme,
+    go,
+    mo,
+    source_trace,
+    v1_06_arch_choice,
+    v1_06_architecture,
+    v1_06_attention,
+    v1_06_bias,
+    v1_06_bias_checkpoint,
+    v1_06_bias_prediction,
+    v1_06_curve,
+    v1_06_data_pressure,
+    v1_06_decision,
+    v1_06_deployment_checkpoint,
+    v1_06_failure_prediction,
+    v1_06_memory_prediction,
+    v1_06_prediction_html,
+    v1_06_review,
+    v1_06_review_prediction,
+    v1_06_scale,
+    v1_06_scaling_checkpoint,
+    v1_06_selected_eval,
+    v1_06_signature,
+    v1_06_table_html,
+    v1_06_fields_html,
+    v1_06_callout_html,
+    v1_06_topology,
+    v1_06_topology_checkpoint,
+    v1_06_track_amount_system,
 ):
-    # ─────────────────────────────────────────────────────────────────────
-    # SHARED WIDGET STATE
-    # ─────────────────────────────────────────────────────────────────────
-
-    # Part A widgets
-    partA_prediction = mo.ui.radio(
-        options={
-            "A) ~150K (about the input size)": "150k",
-            "B) ~23M (like ResNet-50 total)": "23m",
-            "C) ~1B (a billion)": "1b",
-            "D) ~22.7B (twenty-two billion)": "22b",
-        },
-        label="An MLP takes a 224x224 RGB image as a flattened input (150,528 dims). "
-              "The first hidden layer also has 150,528 neurons. How many parameters in this single layer?",
+    _labels = [item.label for item in v1_06_signature]
+    _signature_fig = go.Figure()
+    _signature_fig.add_trace(go.Bar(
+        x=_labels,
+        y=[100.0 * item.activation_mb / max(v1_06_architecture.memory_budget_mb, 1e-9) for item in v1_06_signature],
+        name="Activation memory",
+        marker_color=COLORS["BlueLine"],
+        text=[f"{100.0 * item.activation_mb / max(v1_06_architecture.memory_budget_mb, 1e-9):.0f}%" for item in v1_06_signature],
+        textposition="outside",
+    ))
+    _signature_fig.add_trace(go.Bar(
+        x=_labels,
+        y=[100.0 * item.latency_ms / max(v1_06_architecture.latency_budget_ms, 1e-9) for item in v1_06_signature],
+        name="Latency",
+        marker_color=COLORS["OrangeLine"],
+        text=[f"{100.0 * item.latency_ms / max(v1_06_architecture.latency_budget_ms, 1e-9):.0f}%" for item in v1_06_signature],
+        textposition="outside",
+    ))
+    _signature_fig.add_trace(go.Bar(
+        x=_labels,
+        y=[100.0 * item.power_w / max(v1_06_architecture.power_budget_w, 1e-9) for item in v1_06_signature],
+        name="Power / duty cycle",
+        marker_color=COLORS["GreenLine"],
+        text=[f"{100.0 * item.power_w / max(v1_06_architecture.power_budget_w, 1e-9):.0f}%" for item in v1_06_signature],
+        textposition="outside",
+    ))
+    _signature_fig.add_hline(
+        y=100,
+        line_dash="dash",
+        line_color=COLORS["RedLine"],
+        line_width=1.5,
+        annotation_text="budget",
+        annotation_font_color=COLORS["RedLine"],
     )
-    return (partA_prediction,)
-
-@app.cell(hide_code=True)
-def _(mo):
-    partA_arch = mo.ui.radio(
-        options={"MLP (no structure)": "mlp", "CNN 3x3": "cnn3", "CNN 5x5": "cnn5"},
-        value="MLP (no structure)", label="Architecture:", inline=True,
+    _signature_fig.update_layout(
+        barmode="group",
+        height=360,
+        xaxis=dict(title="Candidate architecture", gridcolor="#f1f5f9"),
+        yaxis=dict(title="% of track budget", gridcolor="#f1f5f9"),
+        margin=dict(l=60, r=20, t=35, b=80),
     )
-    partA_resolution = mo.ui.slider(
-        start=28, stop=512, value=224, step=28, label="Image resolution (px)",
-    )
+    apply_plotly_theme(_signature_fig)
 
-    # Part B widgets
-    partB_prediction = mo.ui.radio(
-        options={
-            "A) 2x (linear with tokens)": "2x",
-            "B) 4x (quadratic)": "4x",
-            "C) 8x": "8x",
-            "D) 16x": "16x",
-        },
-        label="Doubling a Transformer's context from 4,096 to 8,192 tokens -- "
-              "how much more memory does attention require?",
-    )
-    return (partA_arch, partA_resolution, partB_prediction)
-
-@app.cell(hide_code=True)
-def _(mo):
-    partB_seq_len = mo.ui.slider(
-        start=512, stop=131072, value=4096, step=512, label="Sequence length (tokens)",
-    )
-    partB_heads = mo.ui.slider(
-        start=1, stop=64, value=32, step=1, label="Attention heads",
-    )
-
-    # Part C widgets
-    partC_prediction = mo.ui.radio(
-        options={
-            "A) Same speed -- same FLOPs means same time": "same",
-            "B) Deep network -- more specialized": "deep",
-            "C) Shallow-wide -- by ~2x": "2x",
-            "D) Shallow-wide -- by ~10x": "10x",
-        },
-        label="Two networks: identical FLOPs/params. One is 128 layers deep (width 32). "
-              "The other is 2 layers deep (width 512). Which is faster at inference?",
-    )
-    return (partB_heads, partB_seq_len, partC_prediction)
-
-@app.cell(hide_code=True)
-def _(mo):
-    partC_depth = mo.ui.slider(
-        start=2, stop=128, value=64, step=2, label="Depth (layers)",
-    )
-    partC_context_c = mo.ui.radio(
-        options={"Cloud (H100)": "cloud", "Edge (Jetson)": "edge"},
-        value="Cloud (H100)", label="Deployment:", inline=True,
-    )
-
-    # Part D widgets
-    partD_prediction = mo.ui.radio(
-        options={
-            "A) Transformer (modern and optimized)": "transformer",
-            "B) CNN (high arithmetic intensity)": "cnn",
-            "C) MLP (simplest architecture)": "mlp",
-            "D) All roughly equal": "equal",
-        },
-        label="Which architecture family achieves the highest GPU utilization (MFU) at batch=1?",
-    )
-    return (partC_context_c, partC_depth, partD_prediction)
-
-# ─── widget cell: extracted from tabs cell body (#1332 polish) ────
-@app.cell(hide_code=True)
-def _(mo):
-    partD_batch_d = mo.ui.slider(
-        start=1, stop=256, value=1, step=1, label="Batch size",
-    )
-    return (partD_batch_d,)
-
-
-@app.cell(hide_code=True)
-def _(
-    mo, partA_arch, partA_prediction, partA_resolution,
-    partB_heads, partB_prediction, partB_seq_len, partC_context_c,
-    partC_depth, partC_prediction, partD_prediction, partD_batch_d,
-):
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART A BUILDER: The Cost of No Structure
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_a():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['BlueLine']}; background:{COLORS['BlueL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['BlueLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; ML Architect, WildlifeVision
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We want to classify camera trap images using a simple fully-connected
-                network. No fancy convolutions, no attention -- just pure MLPs. Our intern
-                says this should work fine for 224x224 images. How many parameters do we need?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Dr. Sarah Kimani, ML Architect &middot; WildlifeVision
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## Inductive Bias Is a Physical Memory Constraint
-
-An MLP processing a 224x224 RGB image flattens the input to 150,528 dimensions.
-With a matching hidden layer, the first-layer weight matrix has:
-
-```
-Parameters = 150,528 * 150,528 = 22.66 billion
-Memory     = 22.66B * 4 bytes  = 90.6 GB (FP32)
-```
-
-A CNN with 3x3 filters requires only **1,728 parameters** for the same first layer
-(3 * 3 * 3 channels_in * 64 channels_out). That is a **13.1 million-fold reduction**.
-
-Inductive bias (locality, weight sharing) is not an abstract concept -- it is the
-mechanism that makes computer vision physically feasible.
-        """))
-
-        items.append(partA_prediction)
-
-        if partA_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the architecture comparison."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partA_arch, partA_resolution], justify="start"))
-
-        _res = partA_resolution.value
-        _arch = partA_arch.value
-        _channels_in = 3
-        _channels_out = 64
-        _input_dim = _res * _res * _channels_in
-
-        if _arch == "mlp":
-            _params = _input_dim * _input_dim
-            _arch_label = f"MLP ({_input_dim:,} x {_input_dim:,})"
-        elif _arch == "cnn3":
-            _params = 3 * 3 * _channels_in * _channels_out
-            _arch_label = f"CNN 3x3 ({3}x{3}x{_channels_in}x{_channels_out})"
-        else:
-            _params = 5 * 5 * _channels_in * _channels_out
-            _arch_label = f"CNN 5x5 ({5}x{5}x{_channels_in}x{_channels_out})"
-
-        _mem_gb = _params * 4 / (1024**3)
-        _cnn3_params = 3 * 3 * _channels_in * _channels_out
-        _fold_reduction = _params / _cnn3_params if _cnn3_params > 0 else 1
-
-        # Bar chart on log scale
-        _archs = ["MLP", "CNN 3x3", "CNN 5x5"]
-        _p_mlp = _input_dim * _input_dim
-        _p_cnn3 = 3 * 3 * _channels_in * _channels_out
-        _p_cnn5 = 5 * 5 * _channels_in * _channels_out
-        _all_params = [_p_mlp, _p_cnn3, _p_cnn5]
-        _bar_colors = [COLORS["RedLine"], COLORS["BlueLine"], COLORS["GreenLine"]]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            x=_archs, y=_all_params,
-            marker_color=_bar_colors, opacity=0.88,
-            text=[f"{p:,.0f}" for p in _all_params],
-            textposition="outside",
-        ))
-        # Device threshold lines
-        for _dev, _ram, _col in [("H100 80GB", 80, COLORS["BlueLine"]),
-                                  ("Jetson 16GB", 16, COLORS["OrangeLine"]),
-                                  ("iPhone 8GB", 8, COLORS["RedLine"])]:
-            _max_params = _ram * (1024**3) / 4
-            _fig.add_hline(y=_max_params, line_dash="dash", line_color=_col,
-                           annotation_text=_dev, annotation_position="right")
-
-        _fig.update_layout(
-            height=400, yaxis_title="First-Layer Parameters", yaxis_type="log",
-            title=f"First-Layer Parameters at {_res}x{_res} Resolution (log scale)",
+    _signature_rows = tuple(
+        (
+            item.label,
+            item.family,
+            f"{item.params_m:.2f}M",
+            f"{item.ops_gmac:.2f}",
+            f"{item.activation_mb:.2f} MB / {v1_06_architecture.memory_budget_mb:.2f}",
+            f"{item.latency_ms:.2f} ms / {v1_06_architecture.latency_budget_ms:.2f}",
+            f"{item.power_w:.3f} W / {v1_06_architecture.power_budget_w:.3f}",
+            f"{item.quality_pct:.1f}% / {v1_06_architecture.quality_floor_pct:.1f}%",
+            f"{item.kernel_support_pct:.1f}% / {v1_06_architecture.kernel_support_floor_pct:.1f}%",
+            "yes" if item.feasible else "no - violation",
+            item.dominant_constraint,
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
+        for item in v1_06_signature
+    )
 
-        _oom_color = COLORS["RedLine"] if _mem_gb > 80 else COLORS["OrangeLine"] if _mem_gb > 8 else COLORS["GreenLine"]
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_oom_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Parameters ({_arch.upper()})</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_oom_color};">{_params:,.0f}</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_oom_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Memory (FP32)</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_oom_color};">{_mem_gb:,.1f} GB</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">MLP/CNN Fold Reduction</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_fold_reduction:,.0f}x</div>
-            </div>
-        </div>
-        """))
-
-        if _mem_gb > H100_RAM_GB and _arch == "mlp":
-            items.append(mo.callout(mo.md(
-                f"**OOM -- Even the H100 cannot hold this single layer.** "
-                f"The MLP first layer requires {_mem_gb:,.1f} GB in FP32, exceeding "
-                f"the H100's {H100_RAM_GB:.0f} GB. This is not a performance problem -- "
-                f"it is a **feasibility violation**. CNNs exist because MLPs cannot."
-            ), kind="danger"))
-
-        _pred = partA_prediction.value
-        if _pred == "22b":
-            items.append(mo.callout(mo.md(
-                "**Correct.** 150,528^2 = 22.66 billion parameters in one layer. "
-                "This exceeds even an H100 in FP32. CNNs reduce this by 13.1 million-fold "
-                "through locality and weight sharing -- inductive bias is a physical necessity."
-            ), kind="success"))
-        elif _pred == "150k":
-            items.append(mo.callout(mo.md(
-                "**You confused input size with parameter count.** A dense layer connecting "
-                "N inputs to N outputs has N*N parameters. At 150,528 inputs, that is "
-                "150,528^2 = 22.66 billion -- not 150,528."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**Not quite.** The first dense layer has input_dim * hidden_dim = "
-                f"150,528 * 150,528 = 22.66 billion parameters. The O(d^2) scaling of "
-                f"dense layers makes MLPs physically infeasible for image-sized inputs."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "MathPeek: Parameter Count": mo.md(f"""
-**MLP:** params = input_dim * hidden_dim = {_input_dim:,} * {_input_dim:,} = {_input_dim*_input_dim:,}
-**CNN 3x3:** params = 3 * 3 * C_in * C_out = 9 * {_channels_in} * {_channels_out} = {_p_cnn3:,}
-**Fold reduction:** {_input_dim*_input_dim / _p_cnn3:,.0f}x
-
-Source: @sec-architectures-inductive-bias
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART B BUILDER: The Quadratic Wall
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_b():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['OrangeLine']}; background:{COLORS['OrangeL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['OrangeLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Product Manager, WildlifeVision
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We want to use a Transformer for analyzing long audio recordings from
-                wildlife sensors. The research paper uses 4K token context. We need 128K for
-                full recordings. Just double the context a few times -- how much more memory?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Alex Torres, Product Manager &middot; WildlifeVision
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## The Quadratic Wall: Attention Memory Scales as N^2
-
-Transformer self-attention creates an N x N score matrix. Doubling context
-from N to 2N:
-
-```
-Attention memory = 2 * N^2 * heads * bytes_per_element
-At 2N:           = 2 * (2N)^2 * heads * bytes = 4 * original
-```
-
-This is a **4x increase**, not 2x. At 128K tokens with 32 heads in FP16,
-the attention matrix alone requires ~64 GB -- exceeding even an H100 for
-a single head's computation.
-        """))
-
-        items.append(partB_prediction)
-
-        if partB_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction above to unlock the attention memory simulator."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partB_seq_len, partB_heads], justify="start"))
-
-        _seq = partB_seq_len.value
-        _heads = partB_heads.value
-        _bytes = 2  # FP16
-        _attn_mem_bytes = 2 * _seq * _seq * _heads * _bytes
-        _attn_mem_gb = _attn_mem_bytes / (1024**3)
-
-        # Memory curve
-        _seq_range = np.array([512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072])
-        _mem_curve = 2 * _seq_range.astype(float)**2 * _heads * _bytes / (1024**3)
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_seq_range.tolist(), y=_mem_curve.tolist(),
-            mode="lines+markers", name="Attention Memory (GB)",
-            line=dict(color=COLORS["RedLine"], width=2.5),
-        ))
-        _fig.add_trace(go.Scatter(
-            x=[_seq], y=[_attn_mem_gb],
-            mode="markers", name="Current Setting",
-            marker=dict(size=14, color=COLORS["BlueLine"], symbol="diamond",
-                        line=dict(width=2, color="white")),
-        ))
-        _fig.add_hline(y=H100_RAM_GB, line_dash="dash", line_color=COLORS["BlueLine"],
-                       annotation_text=f"H100 ({H100_RAM_GB:.0f} GB)")
-        _fig.add_hline(y=JETSON_RAM_GB, line_dash="dash", line_color=COLORS["OrangeLine"],
-                       annotation_text=f"Jetson ({JETSON_RAM_GB:.0f} GB)")
-        _fig.update_layout(
-            height=380, xaxis_title="Sequence Length (tokens)",
-            yaxis_title="Attention Memory (GB)", xaxis_type="log", yaxis_type="log",
-            title=f"Attention Memory vs. Sequence Length ({_heads} heads, FP16)",
+    _topology_rows = tuple(
+        (
+            row["label"],
+            row["topology"],
+            row["access"],
+            row["locality"],
+            f"{row['ops_per_mb']:.3f}",
+            f"{row['memory_pct']:.1f}%",
+            f"{row['latency_pct']:.1f}%",
+            row["dominant"],
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
+        for row in v1_06_topology["rows"]
+    )
 
-        _oom_h100 = _attn_mem_gb > H100_RAM_GB
-        _oom_jetson = _attn_mem_gb > JETSON_RAM_GB
-        _color = COLORS["RedLine"] if _oom_h100 else COLORS["OrangeLine"] if _oom_jetson else COLORS["GreenLine"]
-
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {_color}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Attention Memory</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{_color};">{_attn_mem_gb:,.2f} GB</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Sequence Length</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_seq:,} tokens</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:140px; text-align:center; background:white; border-top:3px solid {COLORS['OrangeLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Score Matrix Size</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['OrangeLine']};">{_seq:,} x {_seq:,}</div>
-            </div>
-        </div>
-        """))
-
-        if _oom_h100:
-            items.append(mo.callout(mo.md(
-                f"**OOM on H100.** Attention alone requires {_attn_mem_gb:,.1f} GB, exceeding "
-                f"the H100's {H100_RAM_GB:.0f} GB. Techniques like FlashAttention or sparse "
-                f"attention are required to make this sequence length feasible."
-            ), kind="danger"))
-        elif _oom_jetson:
-            items.append(mo.callout(mo.md(
-                f"**OOM on Jetson.** Attention requires {_attn_mem_gb:,.1f} GB, exceeding "
-                f"the Jetson's {JETSON_RAM_GB:.0f} GB. This context length requires cloud hardware."
-            ), kind="danger"))
-
-        _pred = partB_prediction.value
-        if _pred == "4x":
-            items.append(mo.callout(mo.md(
-                "**Correct.** The N*N attention matrix means doubling context gives 4x memory. "
-                "This quadratic wall is why context length extensions (4K->128K) require "
-                "fundamental algorithmic innovations like FlashAttention, not just more RAM."
-            ), kind="success"))
-        elif _pred == "2x":
-            items.append(mo.callout(mo.md(
-                "**Linear intuition fails for attention.** The score matrix is N*N. "
-                "Doubling N gives (2N)^2 = 4N^2 -- a 4x increase, not 2x."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not quite.** Attention memory scales as N^2. Doubling N yields exactly "
-                "4x memory. The key insight: each token must attend to every other token."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "MathPeek: Attention Memory": mo.md(f"""
-```
-Attention_memory = 2 * seq_len^2 * heads * bytes_per_element
-                 = 2 * {_seq:,}^2 * {_heads} * {_bytes}
-                 = {_attn_mem_bytes:,.0f} bytes = {_attn_mem_gb:,.2f} GB
-```
-Doubling seq_len: 2 * (2N)^2 = 4 * 2N^2 = **4x memory**
-
-Source: @sec-architectures-attention-complexity
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART C BUILDER: Depth vs. Width
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_c():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['GreenLine']}; background:{COLORS['GreenL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['GreenLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; Systems Engineer, WildlifeVision
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We have two model candidates with identical FLOP counts and identical
-                accuracy. One is deep-narrow (128 layers, width 32), the other shallow-wide
-                (2 layers, width 512). Our benchmarks show a 10x latency difference. Must be
-                a measurement error -- same FLOPs should mean same speed, right?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Ravi Patel, Systems Engineer &middot; WildlifeVision
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## FLOPs Are Not Latency: Depth Imposes Sequential Overhead
-
-Each layer dispatch incurs a fixed overhead (kernel launch tax). A 128-layer
-network pays this tax 128 times; a 2-layer network pays it twice.
-
-Additionally, narrow layers (width 32) have fewer parallel operations per
-layer, reducing hardware utilization. The combination of high dispatch tax
-and low per-layer parallelism makes deep-narrow networks dramatically
-slower than shallow-wide ones -- even at identical total FLOPs.
-        """))
-
-        items.append(partC_prediction)
-
-        if partC_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction to unlock the depth-vs-width simulator."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(mo.hstack([partC_depth, partC_context_c], justify="start"))
-
-        _depth = partC_depth.value
-        _ctx = partC_context_c.value
-        _dispatch_ms = H100_DISPATCH if _ctx == "cloud" else JETSON_DISPATCH
-
-        # Fixed total param budget: ~32,768 params
-        _total_param_budget = 32768
-        _width = max(4, int(math.sqrt(_total_param_budget / _depth)))
-        _actual_params = _depth * _width * _width
-        _flops_per_layer = 2 * _width * _width
-        _total_flops = _depth * _flops_per_layer
-
-        _peak_tflops = H100_TFLOPS if _ctx == "cloud" else 25.0
-        _compute_per_layer_ms = (_flops_per_layer / (_peak_tflops * 1e12)) * 1000
-        _total_compute_ms = _depth * _compute_per_layer_ms
-        _total_dispatch_ms = _depth * _dispatch_ms
-        _total_latency_ms = _total_compute_ms + _total_dispatch_ms
-        _dispatch_fraction = _total_dispatch_ms / _total_latency_ms * 100 if _total_latency_ms > 0 else 0
-
-        # Reference: shallow-wide (2 layers)
-        _ref_depth = 2
-        _ref_width = max(4, int(math.sqrt(_total_param_budget / _ref_depth)))
-        _ref_compute = _ref_depth * (2 * _ref_width * _ref_width) / (_peak_tflops * 1e12) * 1000
-        _ref_dispatch = _ref_depth * _dispatch_ms
-        _ref_total = _ref_compute + _ref_dispatch
-        _speedup = _total_latency_ms / _ref_total if _ref_total > 0 else 1
-
-        # Depth curve
-        _depths = np.arange(2, 129, 2)
-        _widths_c = np.array([max(4, int(math.sqrt(_total_param_budget / d))) for d in _depths])
-        _compute_c = _depths * (2 * _widths_c**2) / (_peak_tflops * 1e12) * 1000
-        _dispatch_c = _depths * _dispatch_ms
-        _total_c = _compute_c + _dispatch_c
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Scatter(
-            x=_depths.tolist(), y=_total_c.tolist(),
-            mode="lines", name="Total Latency",
-            line=dict(color=COLORS["RedLine"], width=2.5),
+    _latency_fig = go.Figure()
+    _activation_fig = go.Figure()
+    _palette = [COLORS["BlueLine"], COLORS["GreenLine"], COLORS["OrangeLine"], COLORS["RedLine"]]
+    for idx, candidate in enumerate(v1_06_architecture.candidates):
+        _points = v1_06_curve.points_by_candidate[candidate.architecture_id]
+        _latency_fig.add_trace(go.Scatter(
+            x=[point.scale_value for point in _points],
+            y=[point.latency_ms for point in _points],
+            mode="lines+markers",
+            name=candidate.label,
+            line=dict(color=_palette[idx % len(_palette)], width=2.5),
+            marker=dict(size=6),
         ))
-        _fig.add_trace(go.Scatter(
-            x=_depths.tolist(), y=_dispatch_c.tolist(),
-            mode="lines", name="Dispatch Overhead",
-            line=dict(color=COLORS["OrangeLine"], width=2, dash="dash"),
-            fill="tozeroy", fillcolor="rgba(204,85,0,0.1)",
+        _activation_fig.add_trace(go.Scatter(
+            x=[point.scale_value for point in _points],
+            y=[point.activation_mb for point in _points],
+            mode="lines+markers",
+            name=candidate.label,
+            line=dict(color=_palette[idx % len(_palette)], width=2.5),
+            marker=dict(size=6),
         ))
-        _fig.add_trace(go.Scatter(
-            x=[_depth], y=[_total_latency_ms],
-            mode="markers", name="Current",
-            marker=dict(size=12, color=COLORS["BlueLine"], symbol="diamond",
-                        line=dict(width=2, color="white")),
-        ))
-        _fig.update_layout(
-            height=360, xaxis_title="Depth (layers)", yaxis_title="Latency (ms)",
-            title=f"Latency vs. Depth (fixed ~{_total_param_budget:,} params) -- {'Cloud' if _ctx=='cloud' else 'Edge'}",
+    _latency_fig.add_hline(
+        y=v1_06_architecture.latency_budget_ms,
+        line_dash="dash",
+        line_color=COLORS["RedLine"],
+        line_width=1.5,
+        annotation_text="latency budget",
+        annotation_font_color=COLORS["RedLine"],
+    )
+    _latency_fig.add_vline(
+        x=v1_06_scale.value,
+        line_dash="dot",
+        line_color=COLORS["TextMuted"],
+        line_width=1.3,
+        annotation_text="current",
+    )
+    _latency_fig.update_layout(
+        height=360,
+        xaxis=dict(
+            title=f"{v1_06_architecture.scaling_variable} ({v1_06_architecture.scaling_unit})",
+            gridcolor="#f1f5f9",
+        ),
+        yaxis=dict(title="Latency (ms)", gridcolor="#f1f5f9"),
+        margin=dict(l=60, r=20, t=35, b=50),
+    )
+    apply_plotly_theme(_latency_fig)
+
+    _activation_fig.add_hline(
+        y=v1_06_architecture.memory_budget_mb,
+        line_dash="dash",
+        line_color=COLORS["RedLine"],
+        line_width=1.5,
+        annotation_text="memory budget",
+        annotation_font_color=COLORS["RedLine"],
+    )
+    _activation_fig.add_vline(
+        x=v1_06_scale.value,
+        line_dash="dot",
+        line_color=COLORS["TextMuted"],
+        line_width=1.3,
+        annotation_text="current",
+    )
+    _activation_fig.update_layout(
+        height=360,
+        xaxis=dict(
+            title=f"{v1_06_architecture.scaling_variable} ({v1_06_architecture.scaling_unit})",
+            gridcolor="#f1f5f9",
+        ),
+        yaxis=dict(title="Activation / state memory (MB)", gridcolor="#f1f5f9"),
+        margin=dict(l=60, r=20, t=35, b=50),
+    )
+    apply_plotly_theme(_activation_fig)
+
+    _failure_rows = tuple(
+        (
+            candidate.label,
+            candidate.scaling_law,
+            (
+                f"{v1_06_curve.first_failure_by_candidate[candidate.architecture_id]:.0f} {v1_06_architecture.scaling_unit}"
+                if v1_06_curve.first_failure_by_candidate[candidate.architecture_id] is not None
+                else "not reached"
+            ),
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
+        for candidate in v1_06_architecture.candidates
+    )
 
-        items.append(mo.Html(f"""
-        <div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['BlueLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Depth</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['BlueLine']};">{_depth} layers</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white; border-top:3px solid {COLORS['GreenLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Width</div>
-                <div style="font-size:1.5rem; font-weight:800; color:{COLORS['GreenLine']};">{_width}</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['OrangeLine'] if _dispatch_fraction > 30 else COLORS['GreenLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">Dispatch Overhead</div>
-                <div style="font-size:1.5rem; font-weight:800;
-                     color:{COLORS['OrangeLine'] if _dispatch_fraction > 30 else COLORS['GreenLine']};">{_dispatch_fraction:.0f}%</div>
-            </div>
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:130px; text-align:center; background:white;
-                        border-top:3px solid {COLORS['RedLine'] if _speedup > 5 else COLORS['OrangeLine']}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.78rem; font-weight:600;">vs. 2-Layer (same FLOPs)</div>
-                <div style="font-size:1.5rem; font-weight:800;
-                     color:{COLORS['RedLine'] if _speedup > 5 else COLORS['OrangeLine']};">{_speedup:.1f}x slower</div>
-            </div>
-        </div>
-        """))
+    _bias_fig = go.Figure()
+    _bias_fig.add_trace(go.Scatter(
+        x=[row["deployability"] for row in v1_06_bias["rows"]],
+        y=[row["quality"] for row in v1_06_bias["rows"]],
+        mode="markers+text",
+        text=[row["label"] for row in v1_06_bias["rows"]],
+        textposition="top center",
+        marker=dict(
+            size=[max(10, min(28, row["data_need"] / 5.0)) for row in v1_06_bias["rows"]],
+            color=[
+                COLORS["GreenLine"] if row["feasible"] else COLORS["RedLine"]
+                for row in v1_06_bias["rows"]
+            ],
+            line=dict(color="white", width=1.5),
+        ),
+        name="Candidate",
+    ))
+    _bias_fig.add_hline(
+        y=v1_06_architecture.quality_floor_pct,
+        line_dash="dash",
+        line_color=COLORS["RedLine"],
+        line_width=1.5,
+        annotation_text="quality floor",
+        annotation_font_color=COLORS["RedLine"],
+    )
+    _bias_fig.update_layout(
+        height=360,
+        xaxis=dict(title="Deployability score", range=[0, 105], gridcolor="#f1f5f9"),
+        yaxis=dict(title="Quality proxy (%)", gridcolor="#f1f5f9"),
+        margin=dict(l=60, r=20, t=35, b=50),
+    )
+    apply_plotly_theme(_bias_fig)
 
-        _pred = partC_prediction.value
-        if _pred == "10x":
-            items.append(mo.callout(mo.md(
-                f"**Correct.** At {_depth} layers, the deep-narrow network is {_speedup:.1f}x "
-                f"slower than the 2-layer alternative. Dispatch overhead ({_dispatch_fraction:.0f}% "
-                f"of total) and reduced per-layer parallelism make FLOPs a necessary but "
-                f"insufficient proxy for latency."
-            ), kind="success"))
-        elif _pred == "same":
-            items.append(mo.callout(mo.md(
-                f"**FLOPs are not latency.** Same FLOPs, but the 128-layer network pays "
-                f"dispatch overhead 128 times. At current settings, the deep network is "
-                f"{_speedup:.1f}x slower."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                f"**The gap is larger than expected.** The deep-narrow network is {_speedup:.1f}x "
-                f"slower due to accumulated dispatch overhead and reduced parallelism."
-            ), kind="warn"))
-
-        items.append(mo.accordion({
-            "MathPeek: Dispatch Overhead": mo.md(f"""
-```
-Per-layer dispatch: {_dispatch_ms} ms
-Total dispatch:     {_depth} * {_dispatch_ms} = {_total_dispatch_ms:.3f} ms
-Total compute:      {_total_compute_ms:.4f} ms
-Dispatch fraction:  {_dispatch_fraction:.1f}%
-```
-The shallow-wide (2 layers, width {_ref_width}) completes in {_ref_total:.4f} ms.
-
-Source: @sec-architectures-depth-vs-width
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # PART D BUILDER: Workload Signatures
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_part_d():
-        items = []
-
-        items.append(mo.Html(f"""
-        <div style="border-left:4px solid {COLORS['RedLine']}; background:{COLORS['RedL']};
-                    border-radius:0 10px 10px 0; padding:16px 22px; margin:12px 0;">
-            <div style="font-size:0.72rem; font-weight:700; color:{COLORS['RedLine']};
-                        text-transform:uppercase; letter-spacing:0.1em; margin-bottom:6px;">
-                Incoming Message &middot; CTO, WildlifeVision
-            </div>
-            <div style="font-style:italic; font-size:1.0rem; color:#1e293b; line-height:1.65;">
-                &ldquo;We are choosing between a CNN and a Transformer for our edge deployment.
-                The Transformer is newer and gets better benchmark scores. But our edge GPU
-                utilization numbers look backwards -- the CNN achieves higher MFU. Is our
-                profiling tool broken?&rdquo;
-            </div>
-            <div style="font-size:0.78rem; color:#475569; margin-top:8px; font-weight:600;">
-                &mdash; Dr. Maya Rodriguez, CTO &middot; WildlifeVision
-            </div>
-        </div>
-        """))
-
-        items.append(mo.md("""
-## Workload Signatures: Arithmetic Intensity Determines Utilization
-
-Each architecture family has a characteristic arithmetic intensity (AI = FLOPs/byte):
-
-- **CNNs**: High AI (>20 FLOPs/byte) -- weight reuse across spatial positions
-  makes them compute-bound and GPU-efficient.
-- **Transformers at batch=1**: Low AI (<5 FLOPs/byte) for attention --
-  memory-bound, lower GPU utilization.
-- **MLPs at batch=1**: Very low AI (~0.5 FLOPs/byte) -- permanently bandwidth-bound.
-
-The hardware ridge point (peak_FLOPS / peak_BW) determines the crossover.
-        """))
-
-        items.append(partD_prediction)
-
-        if partD_prediction.value is None:
-            items.append(mo.callout(
-                mo.md("Select your prediction to unlock the workload signature comparison."),
-                kind="warn",
-            ))
-            return mo.vstack(items)
-
-        items.append(partD_batch_d)
-
-        _bs = partD_batch_d.value
-
-        # Use Engine.solve for representative models
-        _models = [
-            ("ResNet-50 (CNN)", mlsysim.Models.ResNet50),
-            ("GPT-2 (Transformer)", mlsysim.Models.GPT2),
-            ("MobileNetV2 (CNN)", mlsysim.Models.MobileNetV2),
-        ]
-        _results = []
-        for _name, _model in _models:
-            try:
-                _profile = Engine.solve(_model, H100, batch_size=_bs, precision="fp16", efficiency=0.5)
-                _ai = _profile.arithmetic_intensity.magnitude
-                _mfu = _profile.mfu
-                _bn = _profile.bottleneck
-                _results.append((_name, _ai, _mfu, _bn))
-            except Exception:
-                _results.append((_name, 0.0, 0.0, "Error"))
-
-        # Ridge point for H100
-        _ridge = H100_TFLOPS * 1000 / H100_BW_GBS  # FLOPS/byte
-
-        _names = [r[0] for r in _results]
-        _ais = [r[1] for r in _results]
-        _mfus = [r[2] for r in _results]
-        _bottlenecks = [r[3] for r in _results]
-
-        _ai_colors = [COLORS["GreenLine"] if ai > _ridge else COLORS["OrangeLine"] if ai > _ridge/2 else COLORS["RedLine"]
-                      for ai in _ais]
-
-        _fig = go.Figure()
-        _fig.add_trace(go.Bar(
-            x=_names, y=_ais,
-            marker_color=_ai_colors, opacity=0.88,
-            text=[f"{ai:.1f}" for ai in _ais], textposition="outside",
-        ))
-        _fig.add_hline(y=_ridge, line_dash="dash", line_color=COLORS["BlueLine"],
-                       annotation_text=f"H100 Ridge Point ({_ridge:.0f} FLOPs/byte)")
-        _fig.update_layout(
-            height=360, yaxis_title="Arithmetic Intensity (FLOPs/byte)", yaxis_type="log",
-            title=f"Arithmetic Intensity by Architecture (batch={_bs})",
+    _bias_rows = tuple(
+        (
+            row["label"],
+            row["family"],
+            f"{row['bias_match']:.2f}x",
+            f"{row['data_need']:.1f}",
+            f"{row['quality']:.1f}%",
+            f"{row['deployability']:.1f}",
+            "yes" if row["feasible"] else "no",
+            row["dominant"],
         )
-        apply_plotly_theme(_fig)
-        items.append(mo.as_html(_fig))
+        for row in v1_06_bias["rows"]
+    )
 
-        _cards = '<div style="display:flex; gap:14px; flex-wrap:wrap; margin:16px 0;">'
-        for _name, _ai, _mfu, _bn in _results:
-            _mfu_col = COLORS["GreenLine"] if _mfu > 0.5 else COLORS["OrangeLine"] if _mfu > 0.2 else COLORS["RedLine"]
-            _cards += f"""
-            <div style="padding:16px; border:1px solid {COLORS['Border']}; border-radius:10px;
-                        min-width:180px; text-align:center; background:white; border-top:3px solid {_mfu_col}; flex:1;">
-                <div style="color:{COLORS['TextMuted']}; font-size:0.72rem; font-weight:700; margin-bottom:6px;">{_name}</div>
-                <div style="font-size:1.3rem; font-weight:800; color:{_mfu_col};">MFU: {_mfu:.1%}</div>
-                <div style="font-size:0.78rem; color:{COLORS['TextSec']}; margin-top:4px;">
-                    AI: {_ai:.1f} | {_bn}
-                </div>
-            </div>"""
-        _cards += '</div>'
-        items.append(mo.Html(_cards))
+    _decision_rows = (
+        (
+            "Selected",
+            v1_06_review["selected"].label,
+            f"{v1_06_review['selected'].quality_pct:.1f}%",
+            f"{v1_06_review['selected'].latency_ms:.2f} ms",
+            f"{v1_06_review['selected'].activation_mb:.2f} MB",
+            "yes" if v1_06_review["selected"].feasible else "no",
+            v1_06_review["selected"].dominant_constraint,
+        ),
+        (
+            "Leaderboard",
+            v1_06_review["leaderboard"].label,
+            f"{v1_06_review['leaderboard'].quality_pct:.1f}%",
+            f"{v1_06_review['leaderboard'].latency_ms:.2f} ms",
+            f"{v1_06_review['leaderboard'].activation_mb:.2f} MB",
+            "yes" if v1_06_review["leaderboard"].feasible else "no",
+            v1_06_review["leaderboard"].dominant_constraint,
+        ),
+        (
+            "Headroom pick",
+            v1_06_review["headroom_pick"].label,
+            f"{v1_06_review['headroom_pick'].quality_pct:.1f}%",
+            f"{v1_06_review['headroom_pick'].latency_ms:.2f} ms",
+            f"{v1_06_review['headroom_pick'].activation_mb:.2f} MB",
+            "yes" if v1_06_review["headroom_pick"].feasible else "no",
+            v1_06_review["headroom_pick"].dominant_constraint,
+        ),
+    )
 
-        _pred = partD_prediction.value
-        if _pred == "cnn":
-            items.append(mo.callout(mo.md(
-                "**Correct.** CNNs achieve the highest GPU utilization because weight reuse "
-                "across spatial positions gives them high arithmetic intensity. They operate "
-                "in the compute-bound regime. Transformers at batch=1 are memory-bound due "
-                "to the attention mechanism's low arithmetic intensity."
-            ), kind="success"))
-        elif _pred == "transformer":
-            items.append(mo.callout(mo.md(
-                "**Common misconception.** Transformers are newer but are memory-bound at "
-                "small batch sizes due to low arithmetic intensity in attention. CNNs achieve "
-                "higher MFU through spatial weight reuse. Try increasing batch size to see "
-                "Transformers improve."
-            ), kind="warn"))
-        else:
-            items.append(mo.callout(mo.md(
-                "**Not quite.** CNNs win on utilization because spatial weight reuse gives "
-                "them the highest arithmetic intensity. Architecture determines hardware "
-                "efficiency, not recency."
-            ), kind="warn"))
+    _validation_rows = tuple((test,) for test in v1_06_architecture.validation_tests)
+    _rejection_rows = tuple((item,) for item in v1_06_decision.rejected_alternatives)
+    _amount_system = v1_06_track_amount_system(v1_06_architecture)
 
-        items.append(mo.accordion({
-            "MathPeek: Arithmetic Intensity": mo.md(f"""
-**Ridge Point (H100):**
-```
-Ridge = peak_FLOPS / peak_BW = {H100_TFLOPS:.0f} TFLOPS / {H100_BW_GBS:.0f} GB/s
-      = {_ridge:.0f} FLOPs/byte
-```
-Workloads with AI < Ridge are **memory-bound** (low MFU).
-Workloads with AI > Ridge are **compute-bound** (high MFU).
+    _part_a_labels = {
+        "local": "local convolution or streaming state",
+        "attention": "attention/token mixing",
+        "kernel": "kernel support or dispatch",
+        "quality": "quality guardrail",
+    }
+    _part_b_labels = {
+        "memory": "activation/KV/state memory",
+        "latency": "latency",
+        "power": "power or duty cycle",
+        "quality_kernel": "quality or kernel support",
+    }
+    _part_c_labels = {
+        "local_bias": "structured local bias",
+        "flexible_attention": "flexible attention",
+        "leaderboard": "leaderboard-quality model",
+        "track_constraint": "track constraint",
+    }
+    _part_d_labels = {
+        "leaderboard": "highest-quality architecture",
+        "headroom": "feasible headroom model",
+        "smallest": "smallest architecture",
+        "guardrail": "track guardrail",
+    }
 
-Source: @sec-architectures-workload-signatures
-"""),
-        }))
-
-        return mo.vstack(items)
-
-    # ─────────────────────────────────────────────────────────────────────
-    # SYNTHESIS BUILDER
-    # ─────────────────────────────────────────────────────────────────────
-
-    def build_synthesis():
-        items = []
-        items.append(mo.md("""
-## Synthesis: Design for the Edge
-
-A wildlife conservation project needs to classify animals from camera trap
-images on a 16 GB Jetson Orin NX with a 50 ms latency SLA.
-        """))
-
-        items.append(mo.callout(mo.md("""
-Using the four analyses from this lab, justify:
-
-1. **Why not an MLP?** (cite the parameter explosion from Part A)
-2. **Why not a large Transformer?** (cite the quadratic wall from Part B)
-3. **Deep-narrow or shallow-wide CNN?** (cite dispatch overhead from Part C)
-4. **What MFU should you expect?** (cite arithmetic intensity from Part D)
-        """), kind="info"))
-
-        items.append(mo.Html(f"""
-        <div style="background: {COLORS['Surface2']}; border: 1px solid {COLORS['Border']};
-                    border-radius: 12px; padding: 24px 28px; margin: 16px 0;">
-            <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['TextMuted']};
-                        text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 12px;">
-                Key Takeaways
-            </div>
-            <div style="font-size: 0.92rem; color: {COLORS['Text']}; line-height: 1.75;">
-                <div style="margin-bottom: 10px;">
-                    <strong>1. Inductive bias is a physical necessity.</strong>
-                    An MLP on 224x224 images needs 22.7B parameters in its first layer --
-                    exceeding even an H100. CNNs reduce this by 13.1 million-fold through
-                    locality and weight sharing.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>2. Attention scales quadratically.</strong>
-                    Doubling context length quadruples attention memory (N^2).
-                    At 128K tokens, attention alone can exceed 80 GB.
-                </div>
-                <div style="margin-bottom: 10px;">
-                    <strong>3. FLOPs are not latency.</strong>
-                    A 128-layer network with identical FLOPs to a 2-layer network can be
-                    10x slower due to accumulated dispatch overhead and reduced parallelism.
-                </div>
-                <div>
-                    <strong>4. Architecture determines utilization.</strong>
-                    CNNs achieve higher GPU utilization than Transformers at small batch sizes
-                    because spatial weight reuse gives them higher arithmetic intensity.
-                </div>
-            </div>
+    _part_a = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part A: Topology Changes Locality</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            As {v1_06_architecture.stakeholder}, you must choose a topology for
+            {v1_06_architecture.workload_label}. The amount system is {_amount_system["amounts"]}.</div>
         </div>
-        """))
-
-        items.append(mo.Html(f"""
-        <div style="display: flex; gap: 16px; margin: 8px 0; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['BlueLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    What's Next
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Lab 07: ML Frameworks</strong> -- Architecture determines the workload.
-                    But the framework determines how that workload executes. Lab 07 shows how
-                    eager vs. compiled execution and kernel fusion can change latency by 17x
-                    without touching a single weight.
-                </div>
-            </div>
-            <div style="flex: 1; min-width: 280px; background: white;
-                        border: 1px solid {COLORS['Border']}; border-radius: 12px; padding: 20px 24px;">
-                <div style="font-size: 0.7rem; font-weight: 700; color: {COLORS['GreenLine']};
-                            text-transform: uppercase; letter-spacing: 0.12em; margin-bottom: 8px;">
-                    Textbook &amp; TinyTorch
-                </div>
-                <div style="font-size: 0.88rem; color: {COLORS['TextSec']}; line-height: 1.6;">
-                    <strong>Read:</strong> the Network Architectures chapter for inductive bias,
-                    attention complexity, depth-width trade-offs.<br/>
-                    <strong>Build:</strong> TinyTorch Module 06 -- implement CNN
-                    convolution and self-attention from scratch.
-                </div>
-            </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Concept</h2>
+          <ul class="mlsysbook-list">
+            <li>Topology is not decoration: local filters, recurrent state, attention gather/reduce, and sparse routing move different amounts.</li>
+            <li>The chart is normalized to the selected track budgets so the binding amount is visible.</li>
+            <li>Quality is only one column; locality, memory, latency, power, and kernel support decide deployability.</li>
+          </ul>
+          <div class="mlsysbook-callout"><strong>Track architecture story:</strong> {v1_06_architecture.architecture_story}</div>
         </div>
-        """))
+        """),
+        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
+        mo.hstack([v1_06_failure_prediction], justify="start"),
+        mo.Html(v1_06_prediction_html(
+            "Prediction Check",
+            v1_06_failure_prediction.value,
+            v1_06_topology["actual"],
+            _part_a_labels,
+        )),
+        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
+        mo.hstack([v1_06_scale], justify="start"),
+        mo.as_html(_signature_fig),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Topology Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_06_fields_html({
+                "Best topology": f"{v1_06_topology['best_label']} ({v1_06_topology['best_topology']})",
+                "Access pattern": v1_06_topology["best_access"],
+                "Locality": v1_06_topology["best_locality"],
+                "Dominant amount": v1_06_topology["best_constraint"],
+                "Track stake": _amount_system["stake"],
+                "Natural failure": _amount_system["failure"],
+            })}
+          </div>
+          {v1_06_table_html(
+              ("Architecture", "Topology", "Access pattern", "Locality", "GMAC/MB", "Memory budget", "Latency budget", "Dominant"),
+              _topology_rows,
+              numeric=(4, 5, 6),
+          )}
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Signature Table</h2>
+          {v1_06_table_html(
+              ("Architecture", "Family", "Params", "GMAC", "Activations", "Latency", "Power", "Quality", "Kernels", "Feasible", "Dominant"),
+              _signature_rows,
+              numeric=(2, 3, 4, 5, 6, 7, 8),
+          )}
+        </div>
+        """),
+        mo.Html(v1_06_callout_html(
+            "Consequence",
+            (
+                f"{v1_06_topology['best_label']} is the current topology match because "
+                f"{v1_06_topology['best_constraint']} is the governing amount. "
+                "A different family may have a higher quality proxy but create a resource shape the track cannot absorb."
+            ),
+            kind="ok",
+        )),
+        MathPeek(
+            "dense ~= H*W*C weights; convolution ~= K*K*C weights per filter; attention scores ~= S^2",
+            {
+                "topology": "The graph structure determines operation and memory locality before runtime optimization.",
+                "locality": "Sliding windows reuse nearby data; attention gathers across all tokens; recurrence keeps compact state but serializes time.",
+                "amount system": "The selected track decides whether locality appears as latency, SRAM, p99 margin, or cost/request.",
+            },
+        ),
+        source_trace(
+            {
+                "chapter_anchor": "CNN algorithmic structure; RNN system implications; Computational primitives",
+                "formula": "local filters, recurrent state, and attention gather/reduce imply different data movement",
+                "track_id": v1_06_architecture.track_id,
+            },
+            summary="Part A source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_06_topology_checkpoint,
+    ])
 
-        return mo.vstack(items)
+    _part_b = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part B: Attention And Sequence Scaling Hide The Memory Wall</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            Product asks for a larger {v1_06_architecture.scaling_variable}. The weights may still fit,
+            but activation, attention, or state memory can become the hidden wall.</div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Concept</h2>
+          <ul class="mlsysbook-list">
+            <li>Attention scores scale with sequence length squared during full attention.</li>
+            <li>Serving state and KV-like caches scale with resident sequence length and concurrency.</li>
+            <li>A candidate that fits at the default scale can still be fragile at the next product requirement.</li>
+          </ul>
+        </div>
+        """),
+        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
+        v1_06_memory_prediction,
+        mo.Html(v1_06_prediction_html(
+            "Prediction Check",
+            v1_06_memory_prediction.value,
+            v1_06_attention["actual"],
+            _part_b_labels,
+        )),
+        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
+        mo.hstack([v1_06_scale], justify="start"),
+        mo.hstack([mo.as_html(_latency_fig), mo.as_html(_activation_fig)], widths="equal"),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Scaling Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_06_fields_html({
+                "Attention-like candidate": v1_06_attention["attention_label"],
+                "Dominant amount": v1_06_attention["dominant_amount"],
+                "First infeasible scale": v1_06_attention["first_failure"],
+                "Memory pressure": f"{v1_06_attention['memory_pct']:.1f}% of budget",
+                "Latency pressure": f"{v1_06_attention['latency_pct']:.1f}% of budget",
+                "Power pressure": f"{v1_06_attention['power_pct']:.1f}% of budget",
+            })}
+          </div>
+          {v1_06_table_html(("Architecture", "Scaling shape", "First infeasible scale"), _failure_rows)}
+        </div>
+        """),
+        mo.Html(v1_06_callout_html(
+            "Consequence",
+            v1_06_attention["message"],
+            kind=v1_06_attention["status"],
+        )),
+        MathPeek(
+            "attention_scores = O(S^2); KV/state ~= B x layers x 2 x heads x S x d_head x bytes",
+            {
+                "S": f"{v1_06_architecture.scaling_variable} expressed as {v1_06_architecture.scaling_unit}.",
+                "hidden wall": "Weights can fit while activation/state memory or bandwidth breaks the service.",
+                "mitigation": "Reduce scale, use memory-aware attention, or choose a topology with bounded state.",
+            },
+        ),
+        source_trace(
+            {
+                "chapter_anchor": "Attention system implications; Transformer training compute wall; Transformer inference memory bandwidth wall; KV cache sizing",
+                "formula": "quadratic attention memory and linear resident state/KV cache",
+                "track_id": v1_06_architecture.track_id,
+            },
+            summary="Part B source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_06_scaling_checkpoint,
+    ])
 
-    # ─────────────────────────────────────────────────────────────────────
-    # COMPOSE TABS
-    # ─────────────────────────────────────────────────────────────────────
+    _part_c = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part C: Inductive Bias Trades Quality, Data Need, And Deployability</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            The team asks whether a more flexible architecture is worth the data, memory, and validation cost.
+            Your answer must fit {_amount_system["stake"]}.</div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Concept</h2>
+          <ul class="mlsysbook-list">
+            <li>Inductive bias narrows the hypothesis space, often reducing data need and resource demand.</li>
+            <li>No Free Lunch means the same bias can hurt when the data violates the assumed structure.</li>
+            <li>Deployability is part of the bias trade-off, not a post-processing step.</li>
+          </ul>
+          <div class="mlsysbook-callout"><strong>Track bias statement:</strong> {_amount_system["bias"]}.</div>
+        </div>
+        """),
+        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
+        v1_06_bias_prediction,
+        mo.Html(v1_06_prediction_html(
+            "Prediction Check",
+            v1_06_bias_prediction.value,
+            v1_06_bias["actual"],
+            _part_c_labels,
+        )),
+        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
+        mo.hstack([v1_06_data_pressure], justify="start"),
+        mo.as_html(_bias_fig),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Bias Frontier Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_06_fields_html({
+                "Best bias fit": v1_06_bias["best"]["label"],
+                "Leaderboard quality": v1_06_bias["leaderboard_label"],
+                "Data pressure": f"{v1_06_data_pressure.value:.1f}x",
+                "Best data-need index": f"{v1_06_bias['best']['data_need']:.1f}",
+                "Best deployability": f"{v1_06_bias['best']['deployability']:.1f}",
+                "Best dominant amount": v1_06_bias["best"]["dominant"],
+            })}
+          </div>
+          {v1_06_table_html(
+              ("Architecture", "Family", "Bias match", "Data need index", "Quality", "Deployability", "Feasible", "Dominant"),
+              _bias_rows,
+              numeric=(2, 3, 4, 5),
+          )}
+        </div>
+        """),
+        mo.Html(v1_06_callout_html(
+            "Consequence",
+            (
+                f"{v1_06_bias['best']['label']} is the current bias recommendation. "
+                f"It carries a data-need index of {v1_06_bias['best']['data_need']:.1f} and "
+                f"a deployability score of {v1_06_bias['best']['deployability']:.1f}. "
+                "If data pressure rises, a weaker or mismatched bias must buy its quality with more examples and more system budget."
+            ),
+            kind="ok" if v1_06_bias["best"]["feasible"] else "warn",
+        )),
+        MathPeek(
+            "effective_data_need ~= data_pressure / bias_match; deployable if quality >= floor and resource ratios <= 1",
+            {
+                "bias_match": "How well the architecture's structural prior matches the selected track workload.",
+                "No Free Lunch": "A bias improves matching tasks and degrades mismatched tasks.",
+                "deployability": "A scenario score combining memory, latency, power, quality, and kernel guardrails.",
+            },
+        ),
+        source_trace(
+            {
+                "chapter_anchor": "Learnability gap; No Free Lunch theorem; Inductive bias hierarchy",
+                "formula": "sample/data need changes with architecture bias and workload structure",
+                "track_id": v1_06_architecture.track_id,
+            },
+            summary="Part C source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_06_bias_checkpoint,
+    ])
 
-    tabs = mo.ui.tabs({
-        "Part A \u2014 The Cost of No Structure":    build_part_a(),
-        "Part B \u2014 The Quadratic Wall":          build_part_b(),
-        "Part C \u2014 Depth vs. Width":             build_part_c(),
-        "Part D \u2014 Workload Signatures":         build_part_d(),
-        "Synthesis":                                 build_synthesis(),
+    _part_d = mo.vstack([
+        mo.Html(f"""
+        <div class="mlsysbook-panel mlsysbook-nugget">
+          <div class="mlsysbook-part-title"><h2>Part D: Architecture Selection Is A Deployment Recommendation</h2></div>
+          <div class="mlsysbook-callout"><strong>Scenario:</strong>
+            You are in architecture review. The recommendation must name a selected family,
+            rejected alternatives, guardrails, and the validation test that could overturn the choice.</div>
+        </div>
+        """),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Concept</h2>
+          <ul class="mlsysbook-list">
+            <li>The highest-quality candidate is only valid inside the deployment envelope.</li>
+            <li>Review should compare the selected design against the leaderboard and headroom alternatives.</li>
+            <li>The memo is incomplete without residual risk and validation evidence.</li>
+          </ul>
+        </div>
+        """),
+        mo.Html('<div class="mlsysbook-panel"><h2>Prediction</h2></div>'),
+        v1_06_review_prediction,
+        mo.Html(v1_06_prediction_html(
+            "Prediction Check",
+            v1_06_review_prediction.value,
+            v1_06_review["actual"],
+            _part_d_labels,
+        )),
+        mo.Html('<div class="mlsysbook-panel"><h2>Manipulation</h2></div>'),
+        v1_06_arch_choice,
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Review Evidence</h2>
+          <div class="mlsysbook-grid">
+            {v1_06_fields_html({
+                "Selected architecture": v1_06_decision.selected_label,
+                "Review status": v1_06_review["status"],
+                "Dominant constraint": v1_06_decision.dominant_constraint,
+                "Next failure": v1_06_decision.next_failure,
+                "Quality": f"{v1_06_selected_eval.quality_pct:.1f}% / floor {v1_06_architecture.quality_floor_pct:.1f}%",
+                "Kernel support": f"{v1_06_selected_eval.kernel_support_pct:.1f}% / floor {v1_06_architecture.kernel_support_floor_pct:.1f}%",
+            })}
+          </div>
+          {v1_06_table_html(
+              ("Role", "Architecture", "Quality", "Latency", "Activation", "Feasible", "Dominant"),
+              _decision_rows,
+              numeric=(2, 3, 4),
+          )}
+        </div>
+        """),
+        mo.Html(v1_06_callout_html(
+            "Consequence",
+            v1_06_review["message"],
+            kind=v1_06_review["kind"],
+        )),
+        mo.Html(f"""
+        <div class="mlsysbook-panel">
+          <h2>Rejected Alternatives And Validation</h2>
+          {v1_06_table_html(("Rejected alternative",), _rejection_rows)}
+          {v1_06_table_html(("Validation test",), _validation_rows)}
+        </div>
+        """),
+        MathPeek(
+            "valid_architecture = memory<=budget and latency<=budget and power<=budget and quality>=floor and kernels>=floor",
+            {
+                "leaderboard": "The highest quality proxy is compared against system guardrails.",
+                "headroom": "The feasible candidate farthest from memory, latency, and power failure.",
+                "residual risk": "The validation condition that could falsify the recommendation.",
+            },
+        ),
+        source_trace(
+            {
+                "chapter_anchor": "Architecture Selection Framework; Fallacies and Pitfalls",
+                "formula": "deployment feasibility is a conjunction of constraints, not a single score",
+                "track_id": v1_06_architecture.track_id,
+            },
+            summary="Part D source model",
+        ),
+        mo.Html('<div class="mlsysbook-panel"><h2>Checkpoint</h2></div>'),
+        v1_06_deployment_checkpoint,
+    ])
+
+    mo.ui.tabs({
+        "Part A - Topology": _part_a,
+        "Part B - Memory Wall": _part_b,
+        "Part C - Inductive Bias": _part_c,
+        "Part D - Recommendation": _part_d,
+        "Synthesis": mo.md("Use the synthesis memo below after completing Parts A-D."),
     })
-    tabs
     return
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# ZONE D: CLOSING
-# ═════════════════════════════════════════════════════════════════════════════
+# ===========================================================================
+# ZONE D: SYNTHESIS AND REPORT
+# ===========================================================================
 
-# ─── CELL 5: LEDGER HUD ─────────────────────────────────────────────────────
+
 @app.cell(hide_code=True)
-def _(COLORS, ledger, mo, partA_prediction, partD_prediction):
-    _track = ledger._state.track or "not set"
-    if partA_prediction.value is not None and partD_prediction.value is not None:
+def _(
+    v1_06_attention,
+    v1_06_bias,
+    v1_06_bias_checkpoint,
+    v1_06_bias_prediction,
+    v1_06_callout_html,
+    v1_06_deployment_checkpoint,
+    ledger,
+    mo,
+    v1_06_architecture,
+    v1_06_decision,
+    v1_06_failure_prediction,
+    v1_06_fields_html,
+    v1_06_memory_prediction,
+    v1_06_profile,
+    v1_06_reflection,
+    v1_06_review,
+    v1_06_review_prediction,
+    v1_06_scaling_checkpoint,
+    v1_06_selected_eval,
+    v1_06_table_html,
+    v1_06_topology,
+    v1_06_topology_checkpoint,
+    v1_06_variant,
+):
+    _memo_text = str(v1_06_reflection.value or "").strip()
+    _ready_for_ledger = all(
+        value is not None
+        for value in (
+            v1_06_failure_prediction.value,
+            v1_06_memory_prediction.value,
+            v1_06_bias_prediction.value,
+            v1_06_review_prediction.value,
+            v1_06_topology_checkpoint.value,
+            v1_06_scaling_checkpoint.value,
+            v1_06_bias_checkpoint.value,
+            v1_06_deployment_checkpoint.value,
+        )
+    ) and bool(_memo_text)
+
+    if any(
+        value is not None
+        for value in (
+            v1_06_failure_prediction.value,
+            v1_06_memory_prediction.value,
+            v1_06_bias_prediction.value,
+            v1_06_review_prediction.value,
+        )
+    ):
         ledger.save(chapter=6, design={
             "chapter": "v1_06",
-            "attention_complexity": "quadratic",
-            "cnn_vs_mlp_flops_ratio": "100x_less",
-            "depth_vs_width_tradeoff": "depth_more_efficient",
-            "completed": True,
+            "track_id": v1_06_profile.track_id,
+            "scenario_id": v1_06_variant.scenario_id,
+            "hardware_ref": v1_06_architecture.hardware_ref,
+            "model_ref": v1_06_architecture.model_ref,
+            "completed": _ready_for_ledger,
+            "failure_prediction": v1_06_failure_prediction.value,
+            "attention_memory_prediction": v1_06_memory_prediction.value,
+            "bias_prediction": v1_06_bias_prediction.value,
+            "review_prediction": v1_06_review_prediction.value,
+            "topology_checkpoint": v1_06_topology_checkpoint.value,
+            "scaling_checkpoint": v1_06_scaling_checkpoint.value,
+            "bias_checkpoint": v1_06_bias_checkpoint.value,
+            "deployment_checkpoint": v1_06_deployment_checkpoint.value,
+            "selected_architecture": v1_06_decision.selected_id,
+            "dominant_constraint": v1_06_decision.dominant_constraint,
+            "next_failure": v1_06_decision.next_failure,
+            "quality_pct": v1_06_selected_eval.quality_pct,
+            "kernel_support_pct": v1_06_selected_eval.kernel_support_pct,
+            "residual_risk": v1_06_decision.residual_risk,
+            "validation_requirement": v1_06_decision.validation_requirement,
         })
 
-    mo.Html(f"""
-    <div class="lab-hud">
-        <span class="hud-label">LAB</span>
-        <span class="hud-value">06 &middot; The Architecture Tax</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">TRACK</span>
-        <span class="{'hud-active' if _track != 'not set' else 'hud-none'}">{_track}</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">CHAPTER&nbsp;6</span>
-        <span class="hud-value">Network Architectures</span>
-        <span style="color:{COLORS['Border']};">|</span>
-        <span class="hud-label">STATUS</span>
-        <span class="hud-active">active</span>
-    </div>
-    """)
+    def build_synthesis():
+        return mo.vstack([
+            mo.Html(f"""
+            <div class="mlsysbook-panel mlsysbook-nugget">
+              <div class="mlsysbook-part-title"><h2>Synthesis: Record The Architecture Recommendation Memo</h2></div>
+              <div class="mlsysbook-callout"><strong>Invariant:</strong>
+                Architecture choices create different resource shapes. The memo is valid only when
+                the selected family, rejected alternatives, measured constraint, and residual risk
+                are all explicit.</div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Decision Record</h2>
+              <div class="mlsysbook-grid">
+                {v1_06_fields_html({
+                    "Track": v1_06_architecture.label,
+                    "Selected architecture": v1_06_decision.selected_label,
+                    "Topology match": v1_06_topology["best_label"],
+                    "Attention wall": f"{v1_06_attention['attention_label']} -> {v1_06_attention['dominant_amount']}",
+                    "Bias recommendation": v1_06_bias["best"]["label"],
+                    "Review status": v1_06_review["status"],
+                    "Dominant constraint": v1_06_decision.dominant_constraint,
+                    "Next failure": v1_06_decision.next_failure,
+                    "Residual risk": v1_06_decision.residual_risk,
+                    "Validation requirement": v1_06_decision.validation_requirement,
+                })}
+              </div>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="mlsysbook-panel">
+              <h2>Memo Fields</h2>
+              {v1_06_table_html(
+                  ("Required field", "Current value"),
+                  (
+                      ("Recommendation", v1_06_decision.memo_summary),
+                      ("Rejected alternatives", "; ".join(v1_06_decision.rejected_alternatives)),
+                      ("Measured evidence", f"{v1_06_selected_eval.latency_ms:.2f} ms, {v1_06_selected_eval.activation_mb:.2f} MB, {v1_06_selected_eval.power_w:.3f} W"),
+                      ("Residual risk", v1_06_decision.residual_risk),
+                      ("Validation requirement", v1_06_decision.validation_requirement),
+                  ),
+              )}
+            </div>
+            """),
+            mo.Html('<div class="mlsysbook-panel"><h2>Student Memo</h2></div>'),
+            v1_06_reflection,
+            mo.Html(v1_06_callout_html(
+                "Ledger Status",
+                "Ready to save as completed." if _ready_for_ledger else "Complete the predictions, checkpoints, and memo text before treating the ledger entry as complete.",
+                kind="ok" if _ready_for_ledger else "warn",
+            )),
+            mo.Html("""
+            <div class="mlsysbook-panel">
+              <h2>Big Takeaways</h2>
+              <ul class="mlsysbook-list">
+                <li><strong>Topology controls locality.</strong> The same quality proxy can hide different operation and memory shapes.</li>
+                <li><strong>Scaling shape exposes the next wall.</strong> Attention and sequence state can make memory the binding resource.</li>
+                <li><strong>Bias is a deployment trade-off.</strong> Stronger structure can reduce data need and resource cost, but only when the workload matches it.</li>
+                <li><strong>Selection is a recommendation.</strong> A defensible architecture memo names rejected alternatives and residual risk.</li>
+              </ul>
+            </div>
+            """),
+            mo.Html(f"""
+            <div class="lab-hud">
+                <span class="hud-label">LAB</span>
+                <span class="hud-value">06 &middot; Architecture Tax</span>
+                <span class="hud-label">TRACK</span>
+                <span class="hud-value">{v1_06_profile.label}</span>
+                <span style="flex:1;"></span>
+                <span class="hud-label">ARTIFACT</span>
+                <span class="hud-value">{v1_06_architecture.report_artifact}</span>
+                <span class="hud-label">STATUS</span>
+                <span class="hud-active">ACTIVE</span>
+            </div>
+            """),
+        ])
+
+    build_synthesis()
+    return
+
+
+@app.cell(hide_code=True)
+def _(
+    build_lab_report,
+    mo,
+    report_export_panel,
+    v1_06_attention,
+    v1_06_architecture,
+    v1_06_bias,
+    v1_06_bias_checkpoint,
+    v1_06_bias_prediction,
+    v1_06_curve,
+    v1_06_data_pressure,
+    v1_06_decision,
+    v1_06_deployment_checkpoint,
+    v1_06_failure_prediction,
+    v1_06_memory_prediction,
+    v1_06_metadata,
+    v1_06_profile,
+    v1_06_reflection,
+    v1_06_review,
+    v1_06_review_prediction,
+    v1_06_scale,
+    v1_06_scaling_checkpoint,
+    v1_06_selected_eval,
+    v1_06_signature,
+    v1_06_topology,
+    v1_06_topology_checkpoint,
+    v1_06_variant,
+):
+    _incomplete = []
+    if v1_06_failure_prediction.value is None:
+        _incomplete.append("Part A topology prediction")
+    if v1_06_memory_prediction.value is None:
+        _incomplete.append("Part B memory-wall prediction")
+    if v1_06_bias_prediction.value is None:
+        _incomplete.append("Part C inductive-bias prediction")
+    if v1_06_review_prediction.value is None:
+        _incomplete.append("Part D review prediction")
+    if v1_06_topology_checkpoint.value is None:
+        _incomplete.append("Part A topology checkpoint")
+    if v1_06_scaling_checkpoint.value is None:
+        _incomplete.append("Part B scaling checkpoint")
+    if v1_06_bias_checkpoint.value is None:
+        _incomplete.append("Part C bias checkpoint")
+    if v1_06_deployment_checkpoint.value is None:
+        _incomplete.append("Part D deployment checkpoint")
+    if not str(v1_06_reflection.value or "").strip():
+        _incomplete.append("Synthesis recommendation memo")
+
+    _report = build_lab_report(
+        v1_06_metadata,
+        track=v1_06_profile.label,
+        scenario=v1_06_variant.workload_summary,
+        learning_objectives=(
+            "Explain how topology changes operation and memory locality for the selected track.",
+            "Sweep the track-specific scaling variable and identify the memory/latency/power wall.",
+            "Reason about inductive bias as a trade-off among quality, data need, and deployability.",
+            "Recommend one architecture family and state rejected alternatives plus residual risk.",
+        ),
+        predictions={
+            "topology_prediction": v1_06_failure_prediction.value,
+            "memory_wall_prediction": v1_06_memory_prediction.value,
+            "bias_prediction": v1_06_bias_prediction.value,
+            "review_prediction": v1_06_review_prediction.value,
+        },
+        knob_settings={
+            "scale_value": v1_06_scale.value,
+            "scaling_variable": v1_06_architecture.scaling_variable,
+            "data_pressure": v1_06_data_pressure.value,
+            "selected_architecture": v1_06_decision.selected_id,
+        },
+        evidence_summary={
+            "hardware_ref": v1_06_architecture.hardware_ref,
+            "model_ref": v1_06_architecture.model_ref,
+            "memory_budget_mb": v1_06_architecture.memory_budget_mb,
+            "latency_budget_ms": v1_06_architecture.latency_budget_ms,
+            "power_budget_w": v1_06_architecture.power_budget_w,
+            "selected_architecture": v1_06_decision.selected_label,
+            "dominant_constraint": v1_06_decision.dominant_constraint,
+            "next_failure": v1_06_decision.next_failure,
+            "selected_latency_ms": v1_06_selected_eval.latency_ms,
+            "selected_activation_mb": v1_06_selected_eval.activation_mb,
+            "topology_match": v1_06_topology["best_label"],
+            "attention_wall": v1_06_attention["dominant_amount"],
+            "bias_recommendation": v1_06_bias["best"]["label"],
+            "review_status": v1_06_review["status"],
+        },
+        final_decision=v1_06_decision.memo_summary,
+        big_takeaways=(
+            "Topology changes locality and therefore the amount system the track must pay.",
+            "Attention and sequence scaling can make activation/state memory the hidden wall.",
+            "Inductive bias trades quality, data need, and deployability.",
+            "A defensible architecture memo names rejected alternatives and the validation risk that remains.",
+        ),
+        reflections={
+            "student_memo": v1_06_reflection.value,
+            "topology_checkpoint": v1_06_topology_checkpoint.value,
+            "scaling_checkpoint": v1_06_scaling_checkpoint.value,
+            "bias_checkpoint": v1_06_bias_checkpoint.value,
+            "deployment_checkpoint": v1_06_deployment_checkpoint.value,
+            "rejected_alternatives": v1_06_decision.rejected_alternatives,
+            "validation_requirement": v1_06_decision.validation_requirement,
+            "report_artifact": v1_06_architecture.report_artifact,
+        },
+        residual_risk=v1_06_decision.residual_risk,
+        source_trace={
+            "track_id": v1_06_profile.track_id,
+            "scenario_id": v1_06_variant.scenario_id,
+            "hardware_ref": v1_06_variant.hardware_ref,
+            "model_ref": v1_06_variant.model_ref,
+            "shared_helper": "mlsysbook_labs.architecture",
+            "local_helpers": (
+                "v1_06_topology_summary",
+                "v1_06_attention_wall",
+                "v1_06_bias_frontier",
+                "v1_06_review_summary",
+            ),
+            "source_policy": v1_06_profile.source_policy,
+        },
+        result_snapshot={
+            "architecture_profile": v1_06_architecture,
+            "signature": v1_06_signature,
+            "scaling_curve": v1_06_curve,
+            "topology": v1_06_topology,
+            "attention_wall": v1_06_attention,
+            "bias_frontier": v1_06_bias,
+            "review": v1_06_review,
+            "decision": v1_06_decision,
+        },
+        incomplete_fields=tuple(_incomplete),
+    )
+
+    mo.vstack([
+        mo.md("## Download Report"),
+        mo.callout(
+            mo.md(
+                "This V1-06 architecture recommendation memo is generated locally from "
+                "the selected track, your predictions, checkpoints, and the computed evidence."
+            ),
+            kind="info",
+        ),
+        report_export_panel(_report),
+    ])
     return
 
 

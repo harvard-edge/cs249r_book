@@ -38,6 +38,19 @@ if (which.status !== 0 || !which.stdout.trim()) {
     "    pip install -e interviews/vault-cli\n" +
     "  then re-run `npm run dev`."
   );
+
+  // Fallback: mirror SVG visuals even without the vault CLI, so visual
+  // questions render correctly in the dev server.
+  const mirrorScript = path.resolve(__dirname, "mirror-visuals.sh");
+  console.log("[build-local-corpus] running SVG mirror fallback ...");
+  const mirror = spawnSync("bash", [mirrorScript], {
+    cwd: REPO_ROOT,
+    stdio: "inherit",
+  });
+  if (mirror.status !== 0) {
+    console.warn("[build-local-corpus] SVG mirror fallback failed (non-fatal).");
+  }
+
   process.exit(0);
 }
 

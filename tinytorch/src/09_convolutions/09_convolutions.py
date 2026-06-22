@@ -1669,6 +1669,74 @@ Memory access pattern identical to MaxPool, just different aggregation!
 
 #| export
 
+class AvgPool2dBackward(Function):
+    """
+    Gradient computation for 2D average pooling.
+
+    Each output is the mean of the kernel_h*kernel_w inputs in its window, so
+    the gradient is distributed equally (1/kernel_area) to every input position
+    that contributed, accumulating where windows overlap.
+    """
+
+    def __init__(self, x, output_shape, kernel_size, stride, padding):
+        super().__init__(x)
+        self.x = x
+        self.output_shape = output_shape
+        self.kernel_size = kernel_size
+        self.stride = stride
+        self.padding = padding
+
+    def apply(self, grad_output):
+        """
+        Distribute each output gradient equally across its pooling window.
+
+        Args:
+            grad_output: Gradient from next layer
+
+        Returns:
+            Gradient w.r.t. input
+        """
+        batch_size, channels, in_height, in_width = self.x.shape
+        _, _, out_height, out_width = self.output_shape
+        kernel_h, kernel_w = self.kernel_size
+        kernel_area = kernel_h * kernel_w
+
+        # Average pooling pads with zeros, so the gradient buffer is padded with
+        # zeros too (matching the forward pass).
+        if self.padding > 0:
+            grad_input_padded = np.zeros(
+                (batch_size, channels,
+                 in_height + 2 * self.padding,
+                 in_width + 2 * self.padding)
+            )
+        else:
+            grad_input_padded = np.zeros_like(self.x.data)
+
+        # Spread each output gradient equally over its window, accumulating overlaps.
+        for b in range(batch_size):
+            for c in range(channels):
+                for out_h in range(out_height):
+                    for out_w in range(out_width):
+                        in_h_start = out_h * self.stride
+                        in_w_start = out_w * self.stride
+                        share = grad_output[b, c, out_h, out_w] / kernel_area
+                        for k_h in range(kernel_h):
+                            for k_w in range(kernel_w):
+                                grad_input_padded[b, c, in_h_start + k_h, in_w_start + k_w] += share
+
+        # Remove padding
+        if self.padding > 0:
+            grad_input = grad_input_padded[:, :,
+                                          self.padding:-self.padding,
+                                          self.padding:-self.padding]
+        else:
+            grad_input = grad_input_padded
+
+        # Return as tuple (following Function protocol)
+        return (grad_input,)
+
+#| export
+
 class AvgPool2d:
     """
     2D Average Pooling layer for spatial dimension reduction.
@@ -1824,6 +1892,12 @@ class AvgPool2d:
 
         # Step 5: Return Tensor with gradient tracking
         result = Tensor(output, requires_grad=x.requires_grad)
+
+        if result.requires_grad:
+            result._grad_fn = AvgPool2dBackward(
+                x, result.shape, self.kernel_size, self.stride, self.padding
+            )
+
         return result
         ### END SOLUTION
 

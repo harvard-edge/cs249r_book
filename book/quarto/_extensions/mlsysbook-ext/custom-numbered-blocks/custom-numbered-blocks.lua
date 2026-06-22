@@ -534,7 +534,14 @@ local function Pandoc_prefix_count(doc)
 
     if blk.t=="Header" and not fbx.ishtmlbook then
       if (blk.level == 1) then -- increase prefix
-         if  blk.classes:includes("unnumbered")
+         local header_text = str(blk.content):gsub("^%s+", ""):gsub("%s+$", "")
+         -- Quarto's full-PDF book render can emit an empty index wrapper as
+         -- `\chapter{}\label{section}` before the real numbered chapters.
+         -- It is not a reader-facing chapter, so it must not advance custom
+         -- callout counters (Example, Lighthouse, Systems Perspective, etc.).
+         if header_text == "" then
+           -- keep the current prefix and counters unchanged
+         elseif  blk.classes:includes("unnumbered")
          then
            prefix = ""
          else
@@ -878,6 +885,20 @@ local function resolveref(data)
           end
           return pandoc.Link(data[refid].refnum, href)
         end
+      end
+    end,
+    -- HTML path: Pandoc parses bare `\ref{...}` as InlineMath, so the
+    -- RawInline branch above never fires. Catch the math form here when
+    -- the entire math span is exactly `\ref{id}` (anchored ^...$ so we
+    -- don't disturb legitimate math expressions that happen to use \ref).
+    Math = function(el)
+      local refid = el.text:match("^%s*\\ref{(.-)}%s*$")
+      if refid and data[refid] then
+        local href = '#' .. refid
+        if fbx.ishtmlbook then
+          href = data[refid].file .. '.html' .. href
+        end
+        return pandoc.Link(data[refid].refnum, href)
       end
     end,
     -- Support for @id syntax (Quarto/Pandoc Cite elements)

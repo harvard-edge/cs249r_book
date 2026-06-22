@@ -28,7 +28,7 @@ import mlsysim
 from mlsysim import Engine
 
 profile = Engine.solve(
-    model      = mlsysim.Models.ResNet50,
+    model      = mlsysim.Models.Vision.ResNet50,
     hardware   = mlsysim.Hardware.Cloud.A100,
     batch_size = 1,
     precision  = "fp16",

@@ -5,8 +5,29 @@ MIT Press round 1 style rules, applies safe fixes under strict safety
 gates, and verifies the result.
 
 **Status:** Phase A complete (infrastructure + 7 check categories).
-**Plan:** `/Users/VJ/Desktop/MIT_Press_Feedback/15_audit_loop/PLAN.md`
-**Rules:** `/Users/VJ/GitHub/AIConfigs/projects/MLSysBook/.claude/rules/book-prose-merged.md`
+
+The editorial rules this pipeline enforces are maintained outside this repository (the project's prose style guide).
+
+**Fmt / notation audit** (inline `{python}` numbers, spurious `.0`): see
+[`fmt/README.md`](fmt/README.md).
+
+### Registry migration build (constants → zoos)
+
+End-to-end gate for the completed `mlsysim` registry migration:
+
+```bash
+python3 book/tools/audit/check_registry_migration_build.py
+```
+
+Individual tools:
+
+| Script | Purpose |
+|--------|---------|
+| `book_check_registry_sources.py` | Ban legacy flat constants / alias paths in QMD LEGO cells |
+| `generate_appendix_constants.py --verify` | Execute appendix assumption-table cells against live registries |
+| `refresh_mlsysim_constants_yamls.py --finalize` | Mark audit YAML inventory `should_change: false` |
+| `audit_mlsysim_drift.py` | Detect hand-coded canonical constant drift |
+| `snapshot_lego_baseline.py` | Refresh `artifacts/lego_baseline.json` |
 
 ---
 

@@ -1,12 +1,12 @@
 """
-Unit tests for mlsysim.core.walls — the 22 ML Systems Wall taxonomy.
+Unit tests for mlsysim.engine.walls — the 22 ML Systems Wall taxonomy.
 
 Validates registry completeness, lookup helpers, and data integrity.
 """
 
 import pytest
 
-from mlsysim.core.walls import (
+from mlsysim.engine.walls import (
     ALL_WALLS,
     COMPUTE,
     Domain,

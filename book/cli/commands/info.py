@@ -75,6 +75,10 @@ class InfoCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder info",
             description="Book statistics and figure extraction",
@@ -332,7 +336,7 @@ class InfoCommand:
             # Citations (rough count of unique @cite patterns, excluding cross-refs)
             for cm in citation_pat.finditer(line):
                 ref = cm.group(0)[1:]  # strip @
-                if not any(ref.startswith(p) for p in ("fig-", "tbl-", "sec-", "eq-", "lst-")):
+                if not any(ref.startswith(p) for p in ("fig-", "tbl-", "sec-", "eq-", "lst-", "alg-", "algo-", "Algo-")):
                     citations += 1
 
             # Text lines and words (prose lines only)

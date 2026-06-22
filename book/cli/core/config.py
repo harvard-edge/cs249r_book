@@ -36,6 +36,42 @@ def get_output_file(output_dir: Path, format_type: str) -> Optional[Path]:
     return None
 
 
+
+
+def get_chapter_output_file(
+    output_dir: Path,
+    format_type: str,
+    chapter_name: str,
+    volume: str = "vol1",
+) -> Optional[Path]:
+    """Return the primary output for a single-chapter build.
+
+    HTML: ``contents/<vol>/.../<chapter>.html`` when present, else ``index.html``.
+    PDF/EPUB: ``<chapter>.pdf`` under the output tree when present, else first match.
+    """
+    if not output_dir.exists():
+        return None
+    if format_type == "html":
+        contents = output_dir / "contents" / volume
+        if contents.is_dir():
+            hits = sorted(contents.rglob(f"{chapter_name}.html"))
+            if hits:
+                return hits[-1]
+        index = output_dir / "index.html"
+        return index if index.exists() else None
+    if format_type == "pdf":
+        hits = sorted(output_dir.rglob(f"{chapter_name}.pdf"))
+        if hits:
+            return hits[-1]
+        return get_output_file(output_dir, format_type)
+    if format_type == "epub":
+        hits = sorted(output_dir.rglob(f"{chapter_name}.epub"))
+        if hits:
+            return hits[-1]
+        return get_output_file(output_dir, format_type)
+    return None
+
+
 class ConfigManager:
     """Manages Quarto configuration files and format switching."""
 

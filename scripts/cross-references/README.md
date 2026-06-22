@@ -1,45 +1,17 @@
 # Cross-Reference Review Tooling
 
 This folder contains the reusable cross-reference workflow for Volume 1 and Volume 2.
-The goal is to make cross-references useful to readers without turning the
-books into a dense web of authorial pointers.
+The canonical editorial policy lives in the project cross-reference rules. Keep policy
+changes there; keep reusable scripts and command-level workflow notes here.
 
 Generated inventories, packets, reports, and merged decision queues default to
 `review/cross-references/`. Keep reusable scripts and instructions here under
 `scripts/cross-references/`; keep run outputs under `review/`.
 
-## Scope
+## Policy Source
 
-- Volume 1 and Volume 2 are separate books.
-- Do not create Quarto cross-references across `contents/vol1/` and
-  `contents/vol2/`.
-- A volume may share frontmatter includes or bibliography infrastructure, but
-  reader-facing section, figure, table, equation, and principle references must
-  resolve inside the same volume.
-
-## Editorial Rule
-
-A cross-reference is a pedagogical signpost. Keep it only when it changes what
-the reader can do next.
-
-Use a cross-reference when:
-
-- the current paragraph depends on a concept taught earlier in the same volume;
-- the target is the canonical definition, taxonomy, law, table, or framework;
-- a local reminder would otherwise become a repeated mini-explanation;
-- the prose directly interprets a numbered figure, table, or equation;
-- a forward pointer reduces confusion about where a derivation or full treatment
-  will appear;
-- two sections must be compared to understand a tradeoff.
-
-Avoid a cross-reference when:
-
-- the connection is merely thematic;
-- the target is in the other volume;
-- the term can be locally explained in a short phrase;
-- the reference repeats within the same local discussion;
-- the sentence already names the target concept clearly;
-- the pointer exists mainly as author bookkeeping.
+Before changing cross-references, read the project cross-reference rules. This script
+folder implements that policy mechanically; it does not define the standard.
 
 ## Automation Strategy
 

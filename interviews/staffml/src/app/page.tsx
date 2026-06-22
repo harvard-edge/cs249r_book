@@ -264,6 +264,7 @@ function HomePage() {
               <div className="flex items-center gap-2">
                 {!dailyDone && (
                   <Link href="/practice?daily=1"
+                    data-testid="daily-challenge-cta"
                     className="inline-flex items-center gap-1.5 px-3 py-1.5 bg-accentBlue text-white font-bold rounded-lg text-xs hover:opacity-90 transition-opacity"
                   >
                     <Calendar className="w-3 h-3" /> Daily Challenge
@@ -306,6 +307,7 @@ function HomePage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-2">
                   <Link
                     href="/practice?daily=1"
+                    data-testid="daily-challenge-cta"
                     className="flex items-start gap-2.5 p-3 rounded-lg bg-background border border-border hover:border-accentBlue/40 transition-colors group"
                   >
                     <Calendar className="w-4 h-4 text-accentBlue shrink-0 mt-0.5" />
@@ -394,6 +396,7 @@ function HomePage() {
                 count={getTrackCount()}
                 isActive={!selectedTrack}
                 onClick={() => setSelectedTrack(null)}
+                testId="track-pill-all"
               />
               {[
                 { id: "cloud", label: "Cloud", icon: <Cloud className="w-3 h-3" /> },
@@ -408,6 +411,7 @@ function HomePage() {
                   isActive={selectedTrack === t.id}
                   icon={t.icon}
                   onClick={() => setSelectedTrack(selectedTrack === t.id ? null : t.id)}
+                  testId={`track-pill-${t.id}`}
                 />
               ))}
             </div>
@@ -419,6 +423,7 @@ function HomePage() {
                 label="All"
                 isActive={selectedAreas.size === 0}
                 onClick={() => { setSelectedAreas(new Set()); setShowAllAreas(false); }}
+                testId="area-pill-all"
               />
               {visibleAreas.map((area) => {
                 const style = getAreaStyle(area.id);
@@ -440,6 +445,7 @@ function HomePage() {
                       });
                       setHeaderCollapsed(true);
                     }}
+                    testId={`area-pill-${area.id}`}
                   />
                 );
               })}
@@ -448,6 +454,7 @@ function HomePage() {
                   label={showAllAreas ? "Show less" : `+${hiddenCount} more`}
                   isActive={false}
                   onClick={() => setShowAllAreas(!showAllAreas)}
+                  testId="area-pill-more"
                 />
               )}
             </div>
@@ -461,11 +468,13 @@ function HomePage() {
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search topics — KV cache, roofline, quantization..."
                 aria-label="Search topics"
+                data-testid="topic-search"
                 className="w-full pl-10 pr-10 py-2 bg-surface border border-border rounded-lg text-[13px] font-medium text-textPrimary placeholder:text-textTertiary focus:outline-none focus:border-borderHighlight transition-colors"
               />
               {query && (
                 <button onClick={() => setQuery("")}
                   aria-label="Clear search"
+                  data-testid="topic-search-clear"
                   className="absolute right-3 top-1/2 -translate-y-1/2 text-textTertiary hover:text-textPrimary">
                   <X className="w-3.5 h-3.5" />
                 </button>

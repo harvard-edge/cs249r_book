@@ -2,7 +2,7 @@
 """Build the cumulative prior-vocabulary context for a target chapter.
 
 Walks the Vol1 → Vol2 reading order and, for chapter N, produces the
-union of every glossary term first defined in chapters 1..N-1. The
+union of every definition term first introduced in chapters 1..N-1. The
 resulting JSON is passed to that chapter's quiz-generation sub-agent so
 it knows which terms it may assume vs. which it must treat as novel to
 this chapter.
@@ -38,7 +38,7 @@ READING_ORDER: list[tuple[str, str]] = [
     ("vol1", "frameworks"),
     ("vol1", "training"),
     ("vol1", "data_selection"),
-    ("vol1", "optimizations"),       # .qmd is model_compression.qmd; glossary uses dir name
+    ("vol1", "model_compression"),
     ("vol1", "hw_acceleration"),
     ("vol1", "benchmarking"),
     ("vol1", "model_serving"),
@@ -65,27 +65,83 @@ READING_ORDER: list[tuple[str, str]] = [
     ("vol2", "conclusion"),
 ]
 
-BASE = Path(__file__).resolve().parents[4] / "quarto" / "contents"
+BASE = Path(__file__).resolve().parents[3] / "quarto" / "contents"
 
 
-def _glossary_path(vol: str, chap: str) -> Path | None:
-    """Return the glossary JSON path for a chapter, or ``None`` if absent.
+def _chapter_qmd_path(vol: str, chap: str) -> Path | None:
+    """Return the main QMD path for a chapter, or ``None`` if absent.
 
-    The directory name and the glossary file stem usually match, but some
-    chapters (``optimizations``) name the glossary after the ``.qmd``
-    stem instead. Fall back to any ``*_glossary.json`` in the chapter
-    directory.
+    The directory name and QMD stem normally match; the fallback handles
+    the case where they diverge.
     """
     chap_dir = BASE / vol / chap
-    direct = chap_dir / f"{chap}_glossary.json"
+    direct = chap_dir / f"{chap}.qmd"
     if direct.is_file():
         return direct
-    candidates = sorted(chap_dir.glob("*_glossary.json"))
+    candidates = sorted(
+        path for path in chap_dir.glob("*.qmd") if not path.name.startswith("_")
+    )
     return candidates[0] if candidates else None
 
 
+_DEFINITION_CALLOUT_RE = re.compile(
+    r"^:{3,4}\s+\{\.callout-definition(?P<attrs>[^\n]*)\}\s*\n(?P<body>.*?)(?=^:{3,4}\s*$)",
+    re.MULTILINE | re.DOTALL,
+)
+_TITLE_RE = re.compile(r'title="([^"]+)"')
+_BOLD_TERM_RE = re.compile(r"\*\*\*([^*\n]+?)\*\*\*")
+_INDEX_RE = re.compile(r"\\index\{[^{}]*\}")
+_ATTR_RE = re.compile(r"\{#[^{}]+\}")
+
+
+def _clean_markdown(text: str) -> str:
+    text = _INDEX_RE.sub("", text)
+    text = _ATTR_RE.sub("", text)
+    text = text.replace("***", "").replace("**", "").replace("*", "")
+    return " ".join(text.split()).strip()
+
+
+def _first_paragraph(text: str) -> str:
+    paragraph: list[str] = []
+    for raw_line in text.strip().splitlines():
+        line = raw_line.strip()
+        if not line:
+            if paragraph:
+                break
+            continue
+        if line.startswith((":::", "```")):
+            if paragraph:
+                break
+            continue
+        paragraph.append(line)
+    return _clean_markdown(" ".join(paragraph))
+
+
+def _terms_from_chapter_qmd(path: Path) -> list[dict[str, str]]:
+    """Extract defined terms from definition callouts in a chapter QMD."""
+    text = path.read_text(encoding="utf-8")
+    entries: list[dict[str, str]] = []
+    for match in _DEFINITION_CALLOUT_RE.finditer(text):
+        body = match.group("body")
+        title_match = _TITLE_RE.search(match.group("attrs"))
+        bold_match = _BOLD_TERM_RE.search(body)
+        term = bold_match.group(1) if bold_match else (
+            title_match.group(1) if title_match else ""
+        )
+        term = _clean_markdown(term)
+        if not term:
+            continue
+        entries.append(
+            {
+                "term": term,
+                "definition": _first_paragraph(body),
+            }
+        )
+    return entries
+
+
 def prior_vocab_for(target_idx: int) -> list[dict]:
-    """Union of every glossary term introduced in chapters before ``target_idx``.
+    """Union of every definition term introduced before ``target_idx``.
 
     Deduplicates by lowercased term; the first chapter to introduce a
     term wins, and later re-definitions are ignored.
@@ -93,15 +149,10 @@ def prior_vocab_for(target_idx: int) -> list[dict]:
     terms: list[dict] = []
     seen: set[str] = set()
     for vol, chap in READING_ORDER[:target_idx]:
-        gloss = _glossary_path(vol, chap)
-        if gloss is None:
+        qmd = _chapter_qmd_path(vol, chap)
+        if qmd is None:
             continue
-        try:
-            data = json.loads(gloss.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            print(f"warn: could not parse {gloss}: {e}", file=sys.stderr)
-            continue
-        for entry in data.get("terms", []):
+        for entry in _terms_from_chapter_qmd(qmd):
             term = entry.get("term", "").strip()
             if not term:
                 continue

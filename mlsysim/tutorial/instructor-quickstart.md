@@ -76,7 +76,7 @@ Each exercise takes 20–30 minutes of class time. Solutions are in
 
 | Material | File | Description |
 |----------|------|-------------|
-| Tutorial slides | `slides/tutorial_part1.tex` + `tutorial_part2.tex` | 102 Beamer slides with speaker notes |
+| Tutorial slides | `slides/tutorial_module*.tex` | 320+ Beamer slides with speaker notes across 4 modules |
 | 8 exercises | `exercises.md` | Hands-on problems with expected answers |
 | Cheat sheet | `cheatsheet.md` | Single-page reference (Iron Law + key equations) |
 | Pre/post quiz | `assessment/quiz.md` | 10-question assessment with distractor analysis |
@@ -115,7 +115,7 @@ Every concept in your course maps to one term in this equation. Every homework
 problem is about understanding which term is the bottleneck and how to improve it.
 The 22-wall taxonomy provides the vocabulary; the Iron Law provides the structure.
 
-See [laws-explained.md](../docs/laws-explained.md) for plain-English explanations
+See [laws-explained.qmd](../docs/laws-explained.qmd) for plain-English explanations
 of all 22 constraints.
 
 ## Getting Help

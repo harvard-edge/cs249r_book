@@ -1,19 +1,13 @@
-# mlsysim.core — Constants, Formulas, and Analytical Solvers
+# mlsysim.core — Primitives
+#
+# Units, types, provenance (+ catalog), the registry/plugin infrastructure,
+# validation helpers, and exceptions. Primitives only: nothing here imports an
+# engine module. The simulator (solvers, engine, evaluation, scenarios, …)
+# lives in mlsysim.engine.
+#
+# Sibling registry re-exports are intentionally omitted to avoid circular
+# imports on Python <3.12. Access via mlsysim.Hardware etc. (from __init__.py)
+# or import directly: from mlsysim.hardware.registry import Hardware.
 
-from . import constants
-from . import config
-from . import evaluation
-from .constants import ureg, Q_
-from .formulas import *
-
-# Point to the new vetted registries
-from ..hardware.registry import Hardware
-from ..models.registry import Models
-from ..systems.registry import Systems, Tiers
-from ..infra.registry import Infra
-
-from .scenarios import Scenario, Scenarios, Applications, Fleet
-from .resolver_factory import ResolverFactory
-from .results import *
-from .pipeline import Pipeline, CompositionError
-from .walls import Domain, Wall, wall, walls_for_resolver, walls_in_domain, taxonomy
+from . import units
+from .units import ureg, Q_

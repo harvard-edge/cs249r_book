@@ -966,21 +966,25 @@ class MatmulBackward(Function):
 
         # Gradient for first input: grad_output @ b.T
         if isinstance(a, Tensor) and a.requires_grad:
-            # For batched tensors, transpose only last two dims
             if b.data.ndim >= 2:
+                # Batched: transpose only the last two dims
                 b_T = np.swapaxes(b.data, -2, -1)
+                grad_a = np.matmul(grad_output, b_T)
             else:
-                b_T = b.data.T
-            grad_a = np.matmul(grad_output, b_T)
+                # 1D b: A(m,k) @ b(k,) -> out(m,)
+                # grad_A = outer(grad_output, b): (m,) x (k,) -> (m, k)
+                grad_a = np.outer(grad_output, b.data)
 
         # Gradient for second input: a.T @ grad_output
         if isinstance(b, Tensor) and b.requires_grad:
-            # For batched tensors, transpose only last two dims
             if a.data.ndim >= 2:
+                # Batched: transpose only the last two dims
                 a_T = np.swapaxes(a.data, -2, -1)
+                grad_b = np.matmul(a_T, grad_output)
             else:
-                a_T = a.data.T
-            grad_b = np.matmul(a_T, grad_output)
+                # 1D a: a(k,) @ B(k,n) -> out(n,)
+                # grad_B = outer(a, grad_output): (k,) x (n,) -> (k, n)
+                grad_b = np.outer(a.data, grad_output)
 
         return grad_a, grad_b
         ### END SOLUTION
@@ -2501,6 +2505,10 @@ def enable_autograd(quiet=False):
 
         return result
 
+    def tracked_radd(self, other):
+        """Scalar-left addition with gradient tracking."""
+        return tracked_add(self, other)
+
     def tracked_mul(self, other):
         """
         Multiplication with gradient tracking.
@@ -2525,6 +2533,10 @@ def enable_autograd(quiet=False):
             result._grad_fn = MulBackward(self, other_tensor)
 
         return result
+
+    def tracked_rmul(self, other):
+        """Scalar-left multiplication with gradient tracking."""
+        return tracked_mul(self, other)
 
     def tracked_matmul(self, other):
         """
@@ -2613,6 +2625,12 @@ def enable_autograd(quiet=False):
 
         return result
 
+    def tracked_rsub(self, other):
+        """Scalar-left subtraction with gradient tracking."""
+        if not isinstance(other, Tensor):
+            other = Tensor(other)
+        return tracked_sub(other, self)
+
     def tracked_div(self, other):
         """
         Division with gradient tracking.
@@ -2637,6 +2655,12 @@ def enable_autograd(quiet=False):
             result._grad_fn = DivBackward(self, other)
 
         return result
+
+    def tracked_rdiv(self, other):
+        """Scalar-left division with gradient tracking."""
+        if not isinstance(other, Tensor):
+            other = Tensor(other)
+        return tracked_div(other, self)
 
     def tracked_getitem(self, key):
         """
@@ -2780,9 +2804,13 @@ def enable_autograd(quiet=False):
 
     # Install enhanced operations
     Tensor.__add__ = tracked_add
+    Tensor.__radd__ = tracked_radd
     Tensor.__sub__ = tracked_sub
+    Tensor.__rsub__ = tracked_rsub
     Tensor.__mul__ = tracked_mul
+    Tensor.__rmul__ = tracked_rmul
     Tensor.__truediv__ = tracked_div
+    Tensor.__rtruediv__ = tracked_rdiv
     Tensor.__getitem__ = tracked_getitem
     Tensor.matmul = tracked_matmul
     Tensor.transpose = tracked_transpose

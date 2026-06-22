@@ -1,0 +1,396 @@
+chapter: vol2/appendix_reliability
+source_file: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd
+status: migrated
+python_cells:
+- label: appendix-reliability-setup
+  start_line: 15
+  end_line: 165
+  lego_class: ReliabilityFoundations, ReliabilityStrings
+  purpose: Centralizes component MTTF/FIT rates, node and cluster MTBF, checkpoint
+    sizing, Young-Daly interval, recovery time, and availability examples for downstream
+    tables and prose.
+  constants:
+  - name: component_mttf_references
+    value: Systems.Reliability.Gpu.mttf_hours, HBM_MTTF_HOURS, NIC_MTTF_HOURS, PSU_MTTF_HOURS, PCIE_SWITCH_MTTF_HOURS,
+      CABLE_MTTF_HOURS, TOR_SWITCH_MTTF_HOURS
+    kind: reliability_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The component FIT table and prose already draw the reference
+      MTTF values from MLSysIM.
+  - name: node_topology_counts
+    value: 8 GPUs per node from Systems.Nodes.DGX_H100.accelerators_per_node; local 2 NICs per node; local 2 PSUs
+      per node
+    kind: hardware_topology_constant
+    current_source: mixed
+    should_change: false
+    target_source: mlsysim.Systems.Nodes.<reliability_reference_node> or a new MLSysIM
+      reliability-node profile that preserves 8 GPUs, 2 NICs, and 2 PSUs
+    preserves_rendered_value: unknown
+    narrative_check: The prose and @tbl-mtbf-cluster caption explicitly say 8 GPUs,
+      2 NICs, 2 PSUs per node. Directly using Nodes.DGX_H100 would change NIC count
+      to 8 and alter every node/cluster MTBF value, so preserving the rendered values
+      requires a matching MLSysIM profile or constant.
+  - name: cluster_size_sweep
+    value: CLUSTER_SMALL_GPUS, local 1024, CLUSTER_MEDIUM_GPUS, CLUSTER_LARGE_GPUS,
+      local 10_000, CLUSTER_MEGA_GPUS
+    kind: cluster_system_constant
+    current_source: mixed
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The 10,000-GPU row is the canonical worked example throughout
+      the appendix; exact 1,024 and 10,000 values must be preserved if promoted to
+      MLSysIM constants.
+  - name: recovery_parameters
+    value: HEARTBEAT_TIMEOUT_S, RESCHEDULE_TIME_S, CHECKPOINT_WRITE_BW_GBS
+    kind: reliability_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Recovery anatomy and checkpoint write-time prose already use
+      the MLSysIM values.
+  - name: model_size_buckets
+    value: '[7e9, 13e9, 70e9, 175e9, 1e12] with labels [7B, 13B, 70B, 175B, 1T]'
+    kind: model_architecture_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The checkpoint-size table is labeled by model scale rather than
+      model family. Using exact same scale constants preserves the rendered checkpoint
+      sizes and 175B worked example.
+  - name: availability_example
+    value: replicas [1, 2, 3, 4, 5] and single-replica availability 0.99
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The surrounding prose frames 99 percent availability and k replicas
+      as an illustrative serving availability example, not a universal system constant.
+      The method should still reuse R.avail_single rather than duplicate 0.99.
+  - name: fit_scale
+    value: 1e9 device-hours
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The FIT definition in the prose is exactly failures per 10^9
+      device-hours; replacing 1e9 with BILLION preserves all FIT values.
+  - name: checkpoint_bytes_per_param
+    value: 14 bytes per parameter in calc_checkpoint_size(175e9, 14) and ckpt_size_gb
+    kind: data_format_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.physics.calc_checkpoint_size default, or new mlsysim.core.units.MIXED_PRECISION_ADAM_CHECKPOINT_BYTES_PER_PARAM
+      derived from BYTES_FP16 + 3 * BYTES_FP32
+    preserves_rendered_value: true
+    narrative_check: The prose explicitly decomposes the 14 bytes into BF16 weights
+      plus FP32 master weights and Adam moments. The rendered 2,450 GB 175B checkpoint
+      must remain unchanged.
+- label: component-fit-table
+  start_line: 194
+  end_line: 235
+  lego_class: ComponentFitTable
+  purpose: Formats component FIT, MTTF in hours, and MTTF in years for @tbl-component-fit.
+  constants:
+  - name: component_rates_and_hours_per_year
+    value: R component FIT/MTTF values and HOURS_PER_YEAR
+    kind: reliability_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: ReliabilityFoundations values backed by mlsysim.core.units;
+      mlsysim.core.units.HOURS_PER_YEAR
+    preserves_rendered_value: true
+    narrative_check: Table cells and the adjacent GPU-lasts-years sentence already
+      consume setup values sourced from MLSysIM.
+- label: mtbf-cluster-table
+  start_line: 267
+  end_line: 305
+  lego_class: null
+  purpose: Builds @tbl-mtbf-cluster rows from R.cluster_sizes, R.cluster_mtbf, and
+    time conversion constants.
+  constants:
+  - name: cluster_sizes
+    value: R.cluster_sizes, including local 1,024 and 10,000 anchors from the setup
+      cell
+    kind: cluster_system_constant
+    current_source: mixed
+    should_change: false
+    target_source: same target as cluster_size_sweep in appendix-reliability-setup
+    preserves_rendered_value: true
+    narrative_check: The 10,000-GPU guard and rendered table row must continue to
+      match the prose that says failures occur every few hours at 10,000 GPUs.
+  - name: time_conversions
+    value: MINUTES_PER_HOUR, HOURS_PER_DAY
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The minutes display and failures-per-day column are already source-backed.
+  - name: narrative_guard_thresholds
+    value: 24.0 hours and 5.0 hours
+    kind: narrative_guard
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These checks enforce prose consistency and are not system/model
+      constants.
+- label: failure-probability-table
+  start_line: 330
+  end_line: 366
+  lego_class: null
+  purpose: Computes Pr(>=1 failure) across cluster sizes and job durations for @tbl-failure-prob.
+  constants:
+  - name: job_duration_hours
+    value: '[24, 168, 720] for 1 day, 1 week, and 30 days'
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The table headers explicitly render 24 h, 168 h, and 720 h; deriving
+      them from MLSysIM time constants preserves the displayed durations and probabilities.
+  - name: probability_display_thresholds
+    value: 0.999 and 0.99
+    kind: display_threshold
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are table formatting thresholds, not modeling constants.
+- label: checkpoint-sizing-table
+  start_line: 420
+  end_line: 449
+  lego_class: null
+  purpose: Formats checkpoint sizes and write times for the model-size buckets defined
+    in the setup cell.
+  constants:
+  - name: model_size_buckets
+    value: R.model_sizes_params and R.model_labels
+    kind: model_architecture_constant
+    current_source: local_literal
+    should_change: false
+    target_source: same target as model_size_buckets in appendix-reliability-setup
+    preserves_rendered_value: true
+    narrative_check: Using exact model-scale constants preserves all rendered checkpoint-size
+      rows.
+  - name: checkpoint_write_bandwidth
+    value: R.ckpt_write_bw from CHECKPOINT_WRITE_BW_GBS
+    kind: reliability_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The caption's 100 GB/s write-bandwidth assumption is already
+      MLSysIM-backed.
+- label: worked-example-young-daly
+  start_line: 467
+  end_line: 525
+  lego_class: WorkedExampleYoungDaly
+  purpose: Formats the 175B-on-10K Young-Daly worked example and a doubled 20K-GPU
+    comparison.
+  constants:
+  - name: base_175b_10k_values
+    value: R.cluster_mtbf_10k, R.ckpt_write_time_s, R.tau_opt_s
+    kind: reliability_system_constant
+    current_source: mixed
+    should_change: false
+    target_source: setup-cell fixes for 10K cluster size, GPT3_PARAMS or exact 175B
+      model-scale constant, and checkpoint bytes per parameter
+    preserves_rendered_value: true
+    narrative_check: The worked example must continue rendering 4.14 hours MTBF, 2,450
+      GB checkpoint size, 24.5 s write time, and 14.2 min optimal interval unless
+      the prose is intentionally revised.
+  - name: doubled_cluster_size
+    value: 20_000 GPUs
+    kind: cluster_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: 2 * proposed mlsysim.core.units.CLUSTER_10K_GPUS, or proposed
+      CLUSTER_20K_GPUS if this scale is reused
+    preserves_rendered_value: true
+    narrative_check: The prose says the cluster is doubled to 20,000 GPUs; deriving
+      it from the 10K constant preserves the intended comparison and 10.1 min interval.
+  - name: seconds_per_hour_in_display_math
+    value: 3{,}600 s/h in rendered equation string
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The rendered equation should still show 3,600 s/h, but the value
+      should trace to the shared time constant.
+- label: recovery-anatomy-table
+  start_line: 561
+  end_line: 584
+  lego_class: RecoveryAnatomy
+  purpose: Formats detection, rescheduling, reload, replay, and total recovery durations
+    for @tbl-recovery-anatomy.
+  constants:
+  - name: recovery_phase_durations
+    value: R.t_detect, R.t_reschedule, R.t_reload_s, R.t_replay_s, R.t_recovery_total_s
+    kind: reliability_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The table already consumes values computed from MLSysIM constants
+      in the setup cell.
+- label: availability-stacking-table
+  start_line: 659
+  end_line: 694
+  lego_class: null
+  purpose: Formats availability, nines, and annual downtime for k independent replicas.
+  constants:
+  - name: availability_replicas_and_baseline
+    value: R.avail_replicas and R.avail_stacked(k), with duplicated 0.99 inside R.avail_stacked
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: R.avail_single for local scenario reuse; optional proposed mlsysim.core.units.SINGLE_REPLICA_AVAILABILITY_EXAMPLE
+      only if reused across chapters
+    preserves_rendered_value: true
+    narrative_check: The prose says the table starts from a single-replica availability
+      of 99 percent. Reusing R.avail_single preserves the 99 percent, 99.99 percent,
+      and higher stacked rows.
+  - name: downtime_time_conversions
+    value: HOURS_PER_YEAR and MINUTES_PER_HOUR from MLSysIM; local 60 and 60000 for
+      seconds/ms display
+    kind: unit_conversion
+    current_source: mixed
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Annual downtime strings should remain 87.6 hours, 53 minutes,
+      31.5 seconds, 315.4 ms, and 5.3 ms after replacing local conversion literals.
+findings:
+- id: appendix-reliability-001
+  severity: high
+  cell: appendix-reliability-setup
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:58
+  issue: Node reliability topology uses local NIC and PSU counts while only GPU count
+    comes from Systems.Nodes.DGX_H100.accelerators_per_node.
+  current_literal_or_local: n_nics_per_node = 2; n_psus_per_node = 2
+  recommended_change: Move the reliability node composition into MLSysIM, then have
+    the chapter read GPU/NIC/PSU counts from that profile.
+  mlsysim_target: new mlsysim.Systems.Nodes reliability reference profile, or Node
+    fields matching the appendix's 8 GPU / 2 NIC / 2 PSU composition
+  render_impact: 'Do not blindly switch to Nodes.DGX_H100: it currently has 8 NICs,
+    which would reduce node MTBF from 5,172 hours and change the 10K cluster MTBF
+    from 4.14 hours. A profile preserving 2 NICs keeps the rendered table and prose
+    unchanged.'
+  prose_validation: Adjacent prose and @tbl-mtbf-cluster caption explicitly state
+    8 GPUs, 2 NICs, and 2 PSUs per node.
+- id: appendix-reliability-002
+  severity: medium
+  cell: appendix-reliability-setup
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:62
+  issue: The cluster-size sweep mixes MLSysIM cluster constants with local 1,024-GPU
+    and 10,000-GPU anchors.
+  current_literal_or_local: 1024 in R.cluster_sizes; 10_000 in R.cluster_sizes and
+    nodes_10k; n_gpus == 10000 guard in mtbf-cluster-table; 20_000 in worked-example-young-daly
+  recommended_change: Add or reuse named MLSysIM cluster-scale constants for 1K and
+    10K, and derive the 20K comparison as 2 * the 10K anchor unless a reusable 20K
+    constant is desired.
+  mlsysim_target: new mlsysim.core.units.CLUSTER_1K_GPUS and CLUSTER_10K_GPUS;
+    optional CLUSTER_20K_GPUS
+  render_impact: Exact-value constants preserve the six MTBF rows, the 10K failure-every-few-hours
+    prose, and the 20K Young-Daly comparison.
+  prose_validation: The chapter repeatedly treats 10,000 GPUs as the canonical worked
+    example; 1,024 is a table scale anchor.
+- id: appendix-reliability-003
+  severity: medium
+  cell: appendix-reliability-setup
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:76
+  issue: Checkpoint model-size buckets are local numeric literals, and the 175B worked
+    example repeats 175e9 directly.
+  current_literal_or_local: model_sizes_params = [7e9, 13e9, 70e9, 175e9, 1e12]; calc_checkpoint_size(175e9,
+    14)
+  recommended_change: Use existing MLSysIM model constants where available and add
+    named model-scale constants or registry entries for the generic 7B, 13B, and 1T
+    rows.
+  mlsysim_target: mlsysim.core.units.LLAMA2_70B_PARAMS, GPT3_PARAMS, plus proposed
+    MODEL_SCALE_7B_PARAMS, MODEL_SCALE_13B_PARAMS, MODEL_SCALE_1T_PARAMS
+  render_impact: Preserve exact values so the table still renders 98 GB, 182 GB, 980
+    GB, 2,450 GB, and 14,000 GB checkpoint sizes at 14 bytes per parameter.
+  prose_validation: The table is framed as model scale, not a specific family; central
+    constants should preserve labels unless the prose is revised to named models.
+- id: appendix-reliability-004
+  severity: medium
+  cell: appendix-reliability-setup
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:104
+  issue: Mixed-precision Adam checkpoint state width is passed as a local 14-byte
+    literal even though the decomposition is a reusable data-format assumption.
+  current_literal_or_local: calc_checkpoint_size(175e9, 14) and calc_checkpoint_size(n_params,
+    14)
+  recommended_change: Call calc_checkpoint_size with its MLSysIM default when preserving
+    the current convention, or expose a named constant derived from BYTES_FP16 + 3
+    * BYTES_FP32 and pass that.
+  mlsysim_target: mlsysim.physics.calc_checkpoint_size default; proposed mlsysim.core.units.MIXED_PRECISION_ADAM_CHECKPOINT_BYTES_PER_PARAM
+  render_impact: Must preserve the 14 bytes/parameter formula, the 2,450 GB 175B checkpoint,
+    the 24.5 s write time, and the 14.2 min optimal interval.
+  prose_validation: The checkpoint-sizing prose enumerates 2 + 4 + 4 + 4 bytes; a
+    named MLSysIM constant should match that prose.
+- id: appendix-reliability-005
+  severity: low
+  cell: appendix-reliability-setup
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:91
+  issue: FIT conversion repeats the 10^9 device-hour scale as local 1e9 literals.
+  current_literal_or_local: 1e9 / gpu_mttf and equivalent HBM/NIC/PSU/PCIe/cable/ToR
+    calculations
+  recommended_change: Use BILLION from MLSysIM for the FIT scale.
+  mlsysim_target: mlsysim.core.units.BILLION
+  render_impact: No rendered-value change; FIT rates remain identical.
+  prose_validation: The equation immediately above the table defines MTTF = 10^9 /
+    FIT.
+- id: appendix-reliability-006
+  severity: low
+  cell: failure-probability-table
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:351
+  issue: Job-duration columns use local hour literals for one day, one week, and 30
+    days.
+  current_literal_or_local: '[24, 168, 720]'
+  recommended_change: Derive durations from MLSysIM time constants.
+  mlsysim_target: mlsysim.core.units.HOURS_PER_DAY, 7 * HOURS_PER_DAY, DAYS_PER_MONTH
+    * HOURS_PER_DAY
+  render_impact: No rendered-value change; table headings and probabilities remain
+    based on 24 h, 168 h, and 720 h.
+  prose_validation: The table labels explicitly say 1 Day (24 h), 1 Week (168 h),
+    and 30 Days (720 h).
+- id: appendix-reliability-007
+  severity: low
+  cell: worked-example-young-daly
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:520
+  issue: The display equation hardcodes 3,600 s/h inside the rendered Markdown math.
+  current_literal_or_local: 3{,}600 \text{s/h}
+  recommended_change: Format the value from SEC_PER_HOUR while preserving the comma-rendered
+    equation text.
+  mlsysim_target: mlsysim.core.units.SEC_PER_HOUR
+  render_impact: Rendered equation should remain 3,600 s/h.
+  prose_validation: This value is consumed only in the Step 2 Young-Daly equation
+    display.
+- id: appendix-reliability-008
+  severity: low
+  cell: availability-stacking-table
+  location: book/quarto/contents/vol2/backmatter/appendix_reliability.qmd:684
+  issue: Availability table uses local minute-to-second and minute-to-millisecond
+    conversion literals, and the setup method duplicates the 0.99 availability literal
+    instead of using R.avail_single.
+  current_literal_or_local: downtime_yr_min * 60; downtime_yr_min * 60000; calc_availability_stacked(0.99,
+    k)
+  recommended_change: Use SECONDS_PER_MINUTE and MS_PER_SEC for display conversions,
+    and use cls.avail_single for the scenario baseline.
+  mlsysim_target: mlsysim.core.units.SECONDS_PER_MINUTE, MS_PER_SEC; local R.avail_single
+    or optional shared SINGLE_REPLICA_AVAILABILITY_EXAMPLE
+  render_impact: No intended rendered-value change; preserve the current availability
+    rows and annual downtime strings.
+  prose_validation: The prose frames 99 percent as the starting single-replica availability
+    for this example.

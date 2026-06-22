@@ -1,4 +1,3 @@
-# mlsysim.viz — Plots and visualization helpers only
-# dashboard.py is marimo-only; import explicitly: from mlsysim.viz.dashboard import ...
+# mlsysim.viz: simulator-aware plots plus compatibility style exports.
 
 from .plots import *

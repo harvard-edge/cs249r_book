@@ -68,6 +68,8 @@ Run the one-time setup command:
 
 This installs the pre-commit hooks declared in `.pre-commit-config.yaml` (EPUB source hygiene, vault corpus-guard, BibTeX validation, figure-div syntax, and ~60 other checks) and runs `./binder doctor` to report the state of your tooling (Python, Quarto, Java, epubcheck, and so on).
 
+Every `book-check-*` hook calls `./book/binder check <group>` — the same commands you can run locally. See [BINDER.md](BINDER.md) for the full check/fix reference and pre-commit mapping.
+
 Without this step, the config file ships with the repo but the framework is never actually invoked on your commits — so bugs that the hooks would have blocked can slip through to CI and waste the maintainers' review time. Run it once per fresh clone.
 
 If setup reports `pre-commit` is missing, install it with `pip install pre-commit` (or activate the project's virtualenv that includes it) and re-run.
@@ -91,6 +93,7 @@ Please make sure that your changes are consistent with the style of the existing
 - **Chapter content** lives in `book/quarto/contents/vol1/` or `vol2/`. Each chapter has its own directory.
 - **Images** go in the chapter's `images/png/` (raster) or `images/svg/` (vector) subdirectory.
 - **Editorial standards**: For prose contributions, please review the style conventions in the repository. We follow an academic textbook register (active voice, quantitative claims, no blog-post informality).
+- **Inline Python (LEGO cells)**: Quantitative examples use `{python}` cells with small scenario classes. See [LEGO cell contract](LEGO_CELLS.md) for placement, naming, and fmt conventions. Fmt/notation audits use [book/tools/audit/fmt/README.md](../tools/audit/fmt/README.md).
 
 ### 6. Commit Your Changes
 

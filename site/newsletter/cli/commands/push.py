@@ -26,6 +26,12 @@ except ImportError:
 # Match `![alt](path)` where path is NOT an absolute URL.
 LOCAL_IMAGE_RE = re.compile(r"!\[([^\]]*)\]\(((?!https?://)[^)]+)\)")
 
+# Buttondown reads this comment to decide which editor opens the email.
+# Without it, the email opens in Fancy (WYSIWYG) mode, which round-trips
+# the markdown into a flattened internal representation on first edit.
+# See https://docs.buttondown.com/editor-modes (FAQ).
+BUTTONDOWN_EDITOR_MODE_TAG = "<!-- buttondown-editor-mode: plaintext -->"
+
 logger = logging.getLogger(__name__)
 
 
@@ -77,6 +83,7 @@ class PushCommand(BaseCommand):
         post = frontmatter.load(draft_path)
         title = post.metadata.get("title")
         description = post.metadata.get("description")
+        cover_image_rel = post.metadata.get("image")
         if not title:
             error(f"Draft has no `title` in frontmatter: {draft_path}")
             return 1
@@ -112,11 +119,52 @@ class PushCommand(BaseCommand):
             info("No local images to upload")
         self.console.print()
 
-        # 2. Create Buttondown draft.
+        # 2. Upload cover image (from frontmatter `image:`).
+        cover_image_url: str | None = None
+        if cover_image_rel:
+            cover_image_path = (draft_path.parent / cover_image_rel).resolve()
+            if cover_image_path.exists():
+                self.console.print(f"[{Theme.SECTION}]Cover image[/]")
+                self.console.print(
+                    f"  [{Theme.DIM}]uploading[/] "
+                    f"{cover_image_path.relative_to(self.config.newsletter_root.parent)}"
+                )
+                # Reuse the rewrite cache so we do not double-upload an
+                # image that also appears in the body.
+                uploaded = getattr(self, "_uploaded_images", {})
+                if cover_image_rel in uploaded:
+                    cover_image_url = uploaded[cover_image_rel]
+                    self.console.print(f"  [{Theme.SUCCESS}]\u2713[/] (reused) {cover_image_url}")
+                else:
+                    try:
+                        cover_image_url = upload_image(api_key, cover_image_path)
+                        self.console.print(f"  [{Theme.SUCCESS}]\u2713[/] {cover_image_url}")
+                    except ButtondownError as exc:
+                        error(f"Cover image upload failed: {exc}")
+                        return 1
+                self.console.print()
+            else:
+                info(f"Cover image not found at {cover_image_path}; skipping")
+
+        # 3. Create Buttondown draft.
+        # Prepend the editor-mode tag so the draft opens in Markdown mode
+        # rather than Fancy mode (which mangles paragraph breaks on edit).
+        # Idempotent: if the source already has the tag, do not double-add.
+        if "buttondown-editor-mode:" in body[:200]:
+            body_with_mode = body
+        else:
+            body_with_mode = f"{BUTTONDOWN_EDITOR_MODE_TAG}\n\n{body}"
+
         self.console.print(f"[{Theme.SECTION}]Draft[/]")
         try:
             with self.console.status("Creating draft in Buttondown..."):
-                email = create_draft(api_key, title, body, description)
+                email = create_draft(
+                    api_key,
+                    title,
+                    body_with_mode,
+                    description,
+                    image_url=cover_image_url,
+                )
         except ButtondownError as exc:
             error(str(exc))
             return 1
@@ -135,6 +183,7 @@ class PushCommand(BaseCommand):
         summary_lines = [
             f"[{Theme.EMPHASIS}]Title[/]    {title}",
             f"[{Theme.EMPHASIS}]Images[/]   {len(uploaded)} uploaded",
+            f"[{Theme.EMPHASIS}]Cover[/]    {'set' if cover_image_url else 'none (no image: in frontmatter)'}",
             f"[{Theme.EMPHASIS}]Email[/]    id={email_id or 'unknown'}",
         ]
         self.console.print(Panel(

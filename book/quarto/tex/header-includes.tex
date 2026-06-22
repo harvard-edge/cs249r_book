@@ -20,6 +20,8 @@
 % PACKAGE IMPORTS
 % =============================================================================
 
+\PassOptionsToPackage{hyphens}{url}  % Add URL breakpoints before hyperref loads url
+
 % Layout and positioning
 % \usepackage[outercaption, ragged]{sidecap}  % Commented out to make figure captions inline instead of in margin
 \usepackage{adjustbox}      % Adjusting box dimensions
@@ -61,6 +63,16 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 % Utility packages
 \usepackage{etoolbox}       % For patching commands and environments
 
+% Algorithm pseudocode (algpseudocodex): in the narrow text column, forbid
+% mid-word hyphenation so algorithm steps wrap at spaces, not inside words.
+% Deferred to begin-document and guarded so it applies only when a chapter
+% actually loads the pseudocode package.
+\AtBeginDocument{%
+  \ifdef{\algorithmic}{%
+    \AtBeginEnvironment{algorithmic}{\hyphenpenalty=10000\exhyphenpenalty=10000\tolerance=3000\emergencystretch=2.5em}%
+  }{}%
+}
+
 % Page layout and headers
 \usepackage{fancyhdr}       % Custom headers and footers
 \usepackage{geometry}       % Page dimensions and margins
@@ -79,6 +91,11 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 \usepackage{mathptmx}       % Times-like math fonts
 \usepackage{newpxtext}      % Palatino-like font for body text
 \usepackage[scaled=0.92]{helvet}  % Helvetica for sans-serif (sidenotes, captions, TikZ labels); scaled to match Palatino x-height
+\IfFontExistsTF{Vatico}{%
+  \newfontfamily\mlsysFigureSans{Vatico}%
+}{%
+  \newcommand{\mlsysFigureSans}{\usefont{T1}{phv}{m}{n}}%
+}
 
 % Colors and visual elements
 \usepackage[dvipsnames]{xcolor}  % Extended color support
@@ -112,6 +129,15 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 
 % Hyperlinks
 \usepackage{hyperref}       % Clickable links in PDF
+\IfFileExists{xurl.sty}{\usepackage{xurl}}{}  % More URL breakpoints in long references
+\urlstyle{same}
+
+% Textbook PDFs should not make citations visually read like web links.
+% Pandoc/Quarto may emit its own \hypersetup later in the preamble, so defer
+% this override until the document begins.
+\AtBeginDocument{%
+  \hypersetup{citecolor=black}%
+}
 
 % Conditional logic
 \usepackage{ifthen}         % If-then-else commands
@@ -134,6 +160,50 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 \usepackage{sidenotes}      % Academic-style sidenotes
 \renewcommand\raggedrightmarginnote{\sloppy}
 \renewcommand\raggedleftmarginnote{\sloppy}
+
+% --- Auto-keep margin figures on the page (margin-overflow fix) --------------
+% Quarto emits every ::: {.column-margin} block as \marginnote{...}. The
+% marginnote package places content at a FIXED vertical position and is NOT
+% managed by marginfix (which only governs \marginpar). A tall margin figure
+% anchored low on the page therefore runs straight off the bottom past the
+% footer. Rerouting \marginnote through \marginpar hands it to marginfix,
+% which floats it UP to stay within the column, exactly as it already does for
+% the \sidenote marginpars.
+% The body of a margin figure can contain blank lines (\par), so the wrapper
+% uses xparse's +m argument. It must also consume marginnote's trailing
+% optional vertical offset because the sidenotes package emits
+% \marginnote{...}[<offset>] for adjusted sidenotes; failing to consume that
+% argument leaves literal "[-20mm]" text in the rendered PDF.
+% \marginpar is marginfix-managed (floats to stay on the page) but is ILLEGAL
+% in inner mode (inside a callout/tcolorbox, float, minipage, or box) where it
+% raises "Not in outer par mode". \marginnote works everywhere but is
+% unmanaged. So we route to \marginpar only in outer par mode and fall back to
+% the original \marginnote inside boxes. \ifinner is true inside tcolorbox
+% content / boxes / restricted modes, which is exactly where \marginpar fails.
+\makeatletter
+\let\mfxOrigMarginnote\marginnote
+% \normalcolor resets the color inside the \marginpar: marginpar content is
+% typeset in the output routine, so one shipped out next to a crimson heading
+% would otherwise inherit that crimson (the original \marginnote typeset at the
+% definition point, always black). This is why some margin captions went red.
+\ExplSyntaxOn
+\RenewDocumentCommand{\marginnote}{ O{} +m O{\z@} }{%
+  \tl_if_in:nnTF {#2} { \chapterminitoc }
+    {%
+      % Chapter mini-TOCs rely on etoc's current chapter context. Keep them
+      % as immediate marginnote content; routing through marginpar makes the
+      % first opener collect later chapters and leaves later openers empty.
+      \mfxOrigMarginnote[#1]{#2}[#3]%
+    }{%
+      \ifinner
+        \mfxOrigMarginnote[#1]{#2}[#3]%
+      \else
+        \marginpar{\normalcolor\vspace*{#3}#2}%
+      \fi
+    }%
+}
+\ExplSyntaxOff
+\makeatother
 
 % Safety fallback: ensure \sidenote is defined even if sidenotes package fails
 % This allows graceful degradation to footnotes
@@ -189,12 +259,15 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 % defaults to black so a missing theme file still produces a sane TOC.
 \providecolor{toccolor}{HTML}{000000}
 
-% Fleet Stack Part colors (matching diagram.yml TikZ colors)
-% Used by \mlfleetstack and \mlfleetstackfull for 4-Part layered visualization
-\definecolor{fleetinfra}{RGB}{143,120,116}    % Brown  — Part I: The Fleet
-\definecolor{fleetdist}{HTML}{006395}         % Blue   — Part II: Distributed ML
-\definecolor{fleetserve}{HTML}{008F45}        % Green  — Part III: Deployment at Scale
-\definecolor{fleetgov}{HTML}{D9534F}          % Red    — Part IV: The Responsible Fleet
+% Fleet Stack color aliases
+% Keep the Volume 2 stack as one visual system: hue identifies the volume;
+% intensity identifies chapter relevance. Part structure is carried by the
+% rotated Roman labels, not by separate colors.
+\colorlet{fleetinfra}{accentcolor}            % Part I: The Fleet
+\colorlet{fleetdist}{accentcolor}             % Part II: Distributed ML
+\colorlet{fleetserve}{accentcolor}            % Part III: Deployment at Scale
+\colorlet{fleetassure}{accentcolor}           % Assurance layer within Part IV
+\colorlet{fleetgov}{accentcolor}              % Part IV: The Responsible Fleet
 
 % Quiz element colors
 \definecolor{quiz-question-color1}{RGB}{225,243,248}  % Light blue background
@@ -224,6 +297,12 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 \floatplacement{codelisting}{!htb}
 \captionsetup[codelisting]{labelfont={bf,ninept},labelformat=mylabel,
   singlelinecheck=false,width=\linewidth,labelsep=none,font={ninept}}%
+% Prevent a code listing from stubbing at a page bottom (caption + 2-3 lines,
+% then a break). Listings are placed [H] (forced here), so when figures float
+% onto the same page they cram the listing to the bottom (e.g. p265 Listing
+% 6.7 under two QKV figures). Reserve ~6 lines: if fewer fit, the whole listing
+% (caption + code) moves to the next page instead of leaving an orphaned stub.
+\BeforeBeginEnvironment{codelisting}{\needspace{6\baselineskip}}%
 \renewenvironment{snugshade}{%
    \def\OuterFrameSep{3pt}%
    \def\FrameCommand{\fboxsep=5pt\colorbox{shadecolor}}%
@@ -350,13 +429,13 @@ aboveskip=0pt
 \renewcommand{\sidenote}[1]{%
   \oldsidenote{%
     \noindent
-    \color{crimson!100}                        % Crimson vertical line
+    \color{crimson!100}%                       % Crimson vertical line
     \raisebox{0em}{%
-      \rule{0.5pt}{1.5em}                      % Thin vertical line
+      \rule{0.5pt}{1.2em}%                     % Thin vertical line
     }
-    \hspace{0.3em}                             % Space after line
-    \color{black}                              % Reset text color
-    \footnotesize #1                           % Sidenote content
+    \hspace{0.3em}%                            % Space after line
+    \color{black}%                             % Reset text color
+    \footnotesize\ignorespaces#1\unskip%       % Sidenote content
   }%
 }
 
@@ -392,6 +471,16 @@ aboveskip=0pt
 % standard academic book front-matter sequence: cover art -> blank verso
 % -> half-title -> blank verso -> title page.
 \providecommand{\halftitle}{}
+
+% Copyright/dedication hooks. Same pattern as \halftitle above: the shared
+% titlepage extension (before-body.tex) calls \copyrightpage and
+% \dedicationpage unconditionally, so they must exist as no-ops for any
+% volume that does not define them. Volume I \renewcommand-s both in
+% tex/frontmatter-vol1.tex. (2026-06-07: added after the Vol II PDF build
+% failed with "Undefined control sequence \copyrightpage" — the macros were
+% \newcommand-ed only in the vol1 include.)
+\providecommand{\copyrightpage}{}
+\providecommand{\dedicationpage}{}
 
 \let\originalfrontmatter\frontmatter
 \renewcommand{\frontmatter}{%
@@ -1003,16 +1092,22 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 
 % Numbered chapters: switch to Arabic on first occurrence
 \newcommand{\numbered@chapter}[1]{%
-  \if@firstnumbered%
-    \cleardoublepage%
-    \setcounter{lastRomanPage}{\value{page}}%
-    \pagenumbering{arabic}%
-    \@firstnumberedfalse%
+  \if\relax\detokenize{#1}\relax
+    % Quarto emits an empty numbered chapter for the root index.qmd in some
+    % per-volume PDF builds. It should anchor cleanly but not consume Chapter 1.
+    \phantomsection%
   \else
-    \setcounter{page}{\value{page}}%
+    \if@firstnumbered%
+      \cleardoublepage%
+      \setcounter{lastRomanPage}{\value{page}}%
+      \pagenumbering{arabic}%
+      \@firstnumberedfalse%
+    \else
+      \setcounter{page}{\value{page}}%
+    \fi
+    \setcounter{sidenote}{1}                    % Reset footnote counter per chapter
+    \old@chapter{#1}%
   \fi
-  \setcounter{sidenote}{1}                    % Reset footnote counter per chapter
-  \old@chapter{#1}%
 }
 
 % Unnumbered chapters: stay in Roman numerals
@@ -1109,6 +1204,77 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
   \mlsys@orig@label{#1}%
 }
 
+\makeatother
+
+% =============================================================================
+% IN-CALLOUT TABLES: render Pandoc longtables as confined (non-breaking) tabulars
+% =============================================================================
+% longtable runs LaTeX's output routine to page-break, so it cannot live inside
+% a tcolorbox callout: it escapes the box and the continuation renders unframed
+% (the "broken callout" symptom). Inside our callouts (flag \ifmfxInCallout,
+% set by the fbx / fbxSimple environments) we redefine longtable to a plain
+% tabular confined to the box. Pandoc's longtable body has a fixed shape, so we
+% redirect \caption/\label, swallow the caption-row terminator, and gobble the
+% repeated header + foot scaffolding (\endfirsthead ... \endlastfoot), then add
+% a closing rule. Non-callout longtables are untouched: the \else branch runs
+% the original, fully patched by the counter hooks above.
+\makeatletter
+\newif\ifmfxInCallout
+\let\mfx@orig@longtable\longtable
+\let\mfx@orig@endlongtable\endlongtable
+\long\def\mfx@tbl@gobble#1\endlastfoot{}
+% Start the tabular lazily at the first \toprule. Pandoc emits \caption BEFORE
+% \toprule, so deferring the tabular lets the caption typeset ABOVE the table
+% (matching body tables) instead of below.
+\def\mfx@tbl@starttable{%
+  \let\toprule\mfx@tbl@realtoprule
+  \par\noindent
+  % expand the stored colspec into tabular's preamble (array does not expand it)
+  \expandafter\mfx@tbl@dostart\expandafter{\mfx@tbl@colspec}%
+}
+% \footnotesize matches the original longtable (\AtBeginEnvironment{longtable}
+% {\footnotesize}); without it the confined tabular renders at the callout's
+% larger font, wrapping more and looking squished.
+\def\mfx@tbl@dostart#1{\footnotesize\begin{tabular}{#1}\mfx@tbl@realtoprule}
+% How many lines must remain in the current box-part for the caption+table to
+% start here; otherwise the breakable foldbox breaks BEFORE the caption and the
+% whole (unbreakable) caption+table block moves to the next page-part, framed.
+% Tunable: raise to push more tables to a fresh part, lower to break less often.
+\def\mfx@tbl@needlines{6}
+\newcount\mfx@tbl@nexttable
+\def\mfx@tbl@begin[#1]#2{%
+  \gdef\mfx@tbl@colspec{#2}%
+  % space above (separate caption from preceding body text) and below (separate
+  % from the table). The callout sets parskip=2pt, so add it explicitly or the
+  % caption jams against the text and the rule. \needspace REPLACES the old
+  % \nopagebreak: it still keeps the caption off a page bottom, but it now lets
+  % the foldbox break right before the caption when fewer than N lines remain,
+  % so a tall in-callout table no longer shoves the whole callout (large gap).
+  \def\caption##1{\par\addvspace{8\p@}\needspace{\mfx@tbl@needlines\baselineskip}%
+    \global\mlsys@longtable@numberedtrue
+    \global\mfx@tbl@nexttable=\c@table
+    \global\advance\mfx@tbl@nexttable by 1%
+    \c@table=\numexpr\mfx@tbl@nexttable-1\relax
+    \captionof{table}{##1}%
+    \c@table=\mfx@tbl@nexttable
+    \global\c@table=\mfx@tbl@nexttable
+    \par\nobreak\vskip 3\p@\nobreak}%
+  \let\label\mlsys@orig@label
+  \let\tabularnewline\relax
+  \let\endfirsthead\mfx@tbl@gobble
+  \let\endhead\mfx@tbl@gobble
+  \let\mfx@tbl@realtoprule\toprule
+  \let\toprule\mfx@tbl@starttable
+}
+\def\mfx@tbl@end{%
+  \bottomrule
+  \end{tabular}\par\vspace{12\p@}%
+}
+\def\mfx@tbl@longtable{\@ifnextchar[\mfx@tbl@begin{\mfx@tbl@begin[]}}
+\def\longtable{\ifmfxInCallout\expandafter\mfx@tbl@longtable\else
+  \expandafter\mfx@orig@longtable\fi}
+\def\endlongtable{\ifmfxInCallout\expandafter\mfx@tbl@end\else
+  \expandafter\mfx@orig@endlongtable\fi}
 \makeatother
 
 % =============================================================================
@@ -1265,14 +1431,36 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 % =============================================================================
 % BIBLIOGRAPHY FONT SIZE (MIT Press page reduction)
 % =============================================================================
-% Shrink bibliography entries to footnotesize for space efficiency
-\AtBeginEnvironment{CSLReferences}{\footnotesize}
-\AtBeginEnvironment{thebibliography}{\footnotesize}
-
-% Tighter spacing between bibliography entries
+% Shrink bibliography entries to footnotesize and allow long URLs to break.
+\ExplSyntaxOn
+\cs_new_protected:Npn \mlsysbookbibliographyhrefclean #1#2
+  {
+    \tl_set:Nn \l_tmpa_tl {#2}
+    \tl_trim_spaces:N \l_tmpa_tl
+    \exp_args:NV \mlsysbookbibliographyhref \l_tmpa_tl { \nolinkurl{#2} }
+  }
+\ExplSyntaxOff
 \AtBeginEnvironment{CSLReferences}{%
   \footnotesize%
+  \sloppy%
+  \setlength{\emergencystretch}{2em}%
   \setlength{\parskip}{1pt plus 0.5pt}%
+  \ifdefined\Urlmuskip
+    \Urlmuskip=0mu plus 2mu\relax
+  \fi
+  % citeproc can emit wrapped URL fields as \href targets with encoded
+  % source newlines. Use the visible URL for both target and text here,
+  % then route the text through \nolinkurl for URL-safe breakpoints.
+  \let\mlsysbookbibliographyhref\href%
+  \renewcommand{\href}[2]{\mlsysbookbibliographyhrefclean{#1}{#2}}%
+}
+\AtBeginEnvironment{thebibliography}{%
+  \footnotesize%
+  \sloppy%
+  \setlength{\emergencystretch}{2em}%
+  \ifdefined\Urlmuskip
+    \Urlmuskip=0mu plus 2mu\relax
+  \fi
 }
 
 % =============================================================================
@@ -1426,7 +1614,7 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
         % a visibly different typeface from body text in the chapter opener.
         \etocifnumbered{%
           \noindent
-          \makebox[2em][l]{%
+          \makebox[2.3em][l]{%
             \rmfamily\fontsize{6.5}{8}\selectfont\bfseries\color{accentcolor}%
             \etocnumber
           }%
@@ -1812,237 +2000,220 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 % =============================================================================
 % ML FLEET STACK DIAGRAM (VOLUME 2)
 % =============================================================================
-% Renders a vertical stack of 8 layers with configurable shading (0-100).
-% Used in Volume 2 "Purpose" sections to show which layers a chapter touches.
+% Renders the Volume 2 deep stack with configurable shading (0-100).
+% The interface mirrors Volume 1's \mlsysstack: a primary chapter focus is
+% usually 90-100, neighboring/context rows use lower intensities, and inactive
+% rows use 0. The margin stack is capped at 3.15 cm, matching the Volume 1
+% margin-stack width target.
 %
-% Fleet Stack Visualization
-% =========================
-% An 8-layer abstraction stack for distributed ML systems at fleet scale.
-% Mirrors \mlsysstack from Volume 1 but reflects the distributed systems
-% taxonomy: infrastructure through governance.
-%
-% Two variants:
-%   \mlfleetstack     — Margin figure: 8 layers + data bar (9 args)
-%   \mlfleetstackfull — Full-size with subtitles + data bar (9 args, for About page)
-%
-% Usage: \mlfleetstack{<infra>}{<para>}{<comm>}{<orch>}{<serve>}{<ops>}{<sec>}{<gov>}{<data>}
-%
-% Arguments 1-8: Layer intensities (0 to 100, Integer)
-%   0:   Gray (inactive / not covered)
-%   100: Crimson (primary focus)
-%   1-99: Gradient shading (contextual relevance)
-%
-% Argument 9: Data flow intensity (0 to 100)
+% Usage:
+%   \mlfleetstack{<facility>}{<fabric>}{<execution>}{<control>}
+%                {<serving>}{<operations>}{<assurance>}{<governance>}
+%   \mlfleetstacknoparts{...same 8 args...}
+%   \mlfleetstackfull{...same 8 args...}
 %
 % Stack (bottom to top):
-%   1. Infrastructure  — Physical fleet: accelerators, power, cooling
-%   2. Parallelism     — Distributed computation: DP, TP, PP, EP
-%   3. Communication   — Collective operations: AllReduce, AllGather, AllToAll
-%   4. Orchestration    — Resource management: schedulers, Slurm, K8s
-%   5. Serving         — Inference at scale: batching, routing, KV cache
-%   6. Operations      — Fleet ops: monitoring, CI/CD, platform engineering
-%   7. Security        — Security and privacy: TEEs, DP, adversarial defense
-%   8. Governance      — Responsible fleet: fairness, sustainability, policy
-%   (Data)             — Cross-cutting flow: pipelines, storage, movement
+%   Part I:   Facility & Accelerators, Fabric & Storage
+%   Part II:  Distributed Execution, Reliability & Control
+%   Part III: Runtime & Serving, Operations
+%   Part IV:  Assurance, Governance & Sustainability
+
+% Toggle for camera-ready margin-width checks. Production default is off.
+\newif\ifMLFleetStackGuides
+\MLFleetStackGuidesfalse
 
 % --- Fleet Stack Icons --------------------------------------------------------
 \tikzset{
-    % Infrastructure: Server rack (two stacked boxes with dots)
-    icon_fleet_infra/.pic={
-        \draw[thick] (-0.25,-0.22) rectangle (0.25,0.22);
-        \draw (-0.25,0) -- (0.25,0);
-        \fill (0.15, 0.11) circle (0.03);
-        \fill (0.15, -0.11) circle (0.03);
-        \draw (-0.15, 0.11) -- (0.05, 0.11);
-        \draw (-0.15, -0.11) -- (0.05, -0.11);
+    icon_fleet_facility/.pic={
+        \draw[thick] (-0.24,-0.22) rectangle (0.24,0.22);
+        \draw (-0.24,-0.04) -- (0.24,-0.04);
+        \foreach \x in {-0.13,0.02,0.17} \fill (\x,0.10) circle (0.023);
+        \draw (-0.12,-0.15) -- (0.12,-0.15);
     },
-    % Distribution: Connected cluster (nodes in mesh topology)
-    icon_fleet_parallel/.pic={
-        \fill (-0.18, 0.18) circle (0.04);
-        \fill (0.18, 0.18) circle (0.04);
-        \fill (-0.18, -0.18) circle (0.04);
-        \fill (0.18, -0.18) circle (0.04);
-        \draw[thick] (-0.18, 0.18) -- (0.18, 0.18) -- (0.18, -0.18) -- (-0.18, -0.18) -- cycle;
-        \draw[thick] (-0.18, 0.18) -- (0.18, -0.18);
-        \draw[thick] (0.18, 0.18) -- (-0.18, -0.18);
+    icon_fleet_fabric/.pic={
+        \foreach \p in {(-0.22,0.13),(0.22,0.13),(-0.22,-0.13),(0.22,-0.13)}
+            \fill \p circle (0.035);
+        \draw[thick] (-0.22,0.13)--(0.22,0.13)--(0.22,-0.13)--(-0.22,-0.13)--cycle;
+        \draw[thick] (-0.22,0.13)--(0.22,-0.13);
+        \draw[thick] (0.22,0.13)--(-0.22,-0.13);
     },
-    % Communication: Signal waves (broadcast pattern)
-    icon_fleet_comm/.pic={
-        \fill (-0.2,0) circle (0.04);
-        \draw[thick] (-0.08, 0.18) arc (60:-60:0.21);
-        \draw[thick] (0.05, 0.22) arc (60:-60:0.25);
-        \draw[thick] (0.18, 0.26) arc (60:-60:0.30);
+    icon_fleet_execution/.pic={
+        \draw[thick,->] (-0.26,0.10)--(0.24,0.10);
+        \draw[thick,->] (0.26,-0.10)--(-0.24,-0.10);
+        \draw[thick] (-0.02,-0.20)--(0.02,0.20);
     },
-    % Orchestration: Flow chart (diamond with two boxes)
-    icon_fleet_orch/.pic={
-        \draw[thick] (0,0.2) -- (0.15,0) -- (0,-0.2) -- (-0.15,0) -- cycle;
-        \fill (0,0) circle (0.03);
+    icon_fleet_control/.pic={
+        \draw[thick] (-0.22,-0.16) rectangle (0.22,0.16);
+        \draw (-0.13,0.06)--(0.13,0.06);
+        \draw[thick,->] (0.12,-0.07) arc (-35:210:0.12);
     },
-    % Serving: Load balancer (one input splitting to three)
-    icon_fleet_serve/.pic={
-        \fill (-0.25,0) circle (0.04);
-        \draw[thick] (-0.25,0) -- (0,0);
-        \draw[thick] (0,0) -- (0.25, 0.15);
-        \draw[thick] (0,0) -- (0.25, 0);
-        \draw[thick] (0,0) -- (0.25, -0.15);
-        \fill (0.25, 0.15) circle (0.03);
-        \fill (0.25, 0) circle (0.03);
-        \fill (0.25, -0.15) circle (0.03);
+    icon_fleet_serving/.pic={
+        \fill (-0.25,0) circle (0.035);
+        \draw[thick] (-0.25,0)--(-0.03,0);
+        \draw[thick] (-0.03,0)--(0.24,0.14);
+        \draw[thick] (-0.03,0)--(0.24,0);
+        \draw[thick] (-0.03,0)--(0.24,-0.14);
+        \foreach \p in {(0.24,0.14),(0.24,0),(0.24,-0.14)}
+            \fill \p circle (0.027);
     },
-    % Operations: Dashboard (monitor with graph line)
-    icon_fleet_ops/.pic={
-        \draw[thick] (-0.25,-0.15) rectangle (0.25,0.15);
-        \draw (-0.18,-0.05) -- (-0.08,0.08) -- (0.02,-0.02) -- (0.12,0.10) -- (0.20,0.03);
-        \draw (-0.05,-0.15) -- (-0.05,-0.22);
-        \draw (0.05,-0.15) -- (0.05,-0.22);
-        \draw (-0.12,-0.22) -- (0.12,-0.22);
+    icon_fleet_operations/.pic={
+        \draw[thick] (-0.24,-0.16) rectangle (0.24,0.16);
+        \draw (-0.18,-0.07)--(-0.07,0.07)--(0.04,-0.02)--(0.16,0.10);
+        \draw (-0.08,-0.16)--(-0.08,-0.23);
+        \draw (0.08,-0.16)--(0.08,-0.23);
+        \draw (-0.15,-0.23)--(0.15,-0.23);
     },
-    % Security: Shield
-    icon_fleet_security/.pic={
-        \draw[thick] (0,0.22) -- (-0.18,0.12) -- (-0.18,-0.05)
-            .. controls (-0.18,-0.18) and (0,-0.25) .. (0,-0.25)
-            .. controls (0,-0.25) and (0.18,-0.18) .. (0.18,-0.05)
-            -- (0.18,0.12) -- cycle;
-        \draw (0,0.05) -- (0,-0.10);
-        \draw (-0.07,-0.02) -- (0.07,-0.02);
+    icon_fleet_assurance/.pic={
+        \draw[thick] (0,0.23)--(-0.19,0.12)--(-0.17,-0.05)
+            .. controls (-0.14,-0.17) and (0,-0.24) .. (0,-0.24)
+            .. controls (0,-0.24) and (0.14,-0.17) .. (0.17,-0.05)
+            --(0.19,0.12)--cycle;
+        \draw (-0.07,-0.02)--(-0.01,-0.08)--(0.10,0.07);
     },
-    % Governance: Scales of justice (balance)
     icon_fleet_governance/.pic={
-        \draw[thick] (0,-0.22) -- (0,0.12);
-        \draw[thick] (-0.22,0.12) -- (0.22,0.12);
-        \fill (0,0.12) circle (0.03);
-        \draw (-0.22,0.12) -- (-0.28,0) -- (-0.16,0);
-        \draw (0.22,0.12) -- (0.16,0) -- (0.28,0);
+        \draw[thick] (0,-0.24)--(0,0.14);
+        \draw[thick] (-0.24,0.12)--(0.24,0.12);
+        \draw (-0.19,0.12)--(-0.26,-0.02)--(-0.12,-0.02)--cycle;
+        \draw (0.19,0.12)--(0.12,-0.02)--(0.26,-0.02)--cycle;
     }
 }
 
-% --- Fleet Stack Layer Helper (margin: title only, no subtitle) -----------------
-% Used in chapter Purpose sections. Subtitle text reserved for About page.
-% Part color + intensity gradient: fades by relevance (10=light tint, 100=focal).
-% #1: y-position (bottom), #2: label, #3: intensity (0-100), #4: base color, #5: icon
-\newcommand{\fleetstacklayernostub}[5]{
-    \ifnum#3=0
-        \def\fillcol{black!5}
-        \def\textcol{black!30}
+\newcommand{\fleetstacksetcolors}[2]{%
+    \pgfmathtruncatemacro{\fleetint}{#2}%
+    \ifnum\fleetint=0
+        \def\fleetfill{black!5}%
+        \def\fleettext{black!30}%
     \else
-        \def\fillcol{#4!#3}
-        \ifnum#3>50
-            \def\textcol{white}
+        \edef\fleetfill{#1!\fleetint}%
+        \ifnum\fleetint>55
+            \def\fleettext{white}%
         \else
-            \def\textcol{#4}
+            \def\fleettext{#1}%
         \fi
     \fi
-    \node[draw=white, line width=0.5pt, fill=\fillcol,
-          minimum width=2.6cm, minimum height=1.0cm,
-          anchor=south west, rounded corners=0pt, inner sep=0pt
-    ] (box) at (0,#1) {};
-    % Text (same positioning as \stacklayer)
-    % Font note: \rmfamily for Palatino body-font consistency (see \stacklayer).
-    \node[anchor=west, text=\textcol, font=\rmfamily\scriptsize\bfseries]
-        at ($(box.west)+(0.12,0)$) {#2};
-    % Icon (same scale/position as \stacklayer)
-    \path (box.east) +(-0.50,0)
-        pic[scale=0.78, draw=\textcol, fill=\textcol, text=\textcol] {#5};
 }
 
-
-% --- Fleet Stack Layer Helper (full-size, with subtitle for About page) ----------
-% #1: y-position, #2: label, #3: subtitle, #4: intensity (0-100),
-% #5: base color, #6: icon
-% Part color + intensity gradient: fades by relevance (matches margin version).
-\newcommand{\fleetstacklayerfull}[6]{
-    \ifnum#4=0
-        \def\fillcol{black!5}
-        \def\textcol{black!30}
-    \else
-        \def\fillcol{#5!#4}
-        \ifnum#4>50
-            \def\textcol{white}
-        \else
-            \def\textcol{#5}
-        \fi
-    \fi
-    \node[draw=white, line width=0.5pt, fill=\fillcol,
-          minimum width=4.2cm, minimum height=2.2cm,
-          anchor=south west, rounded corners=0pt, inner sep=0pt
-    ] (box) at (0,#1) {};
-    % Title and subtitle — spread for 2.2cm height (matches vol1 stacklayerfull style)
-    % Font note: \rmfamily for Palatino body-font consistency (see \stacklayer).
-    \node[anchor=west, text=\textcol, font=\rmfamily\scriptsize\bfseries]
-        at ($(box.west)+(0.2,0.45)$) {#2};
-    \node[anchor=west, text=\textcol,
-          font=\rmfamily\fontsize{5}{6}\selectfont, opacity=0.9,
-          text width=3.2cm, align=left]
-        at ($(box.west)+(0.2,-0.35)$) {#3};
-    \path (box.east) +(-0.7,0)
-        pic[scale=0.78, draw=\textcol, fill=\textcol, text=\textcol] {#6};
+\newcommand{\fleetstackpartboxmargin}[3]{%
+    % #1 y-position, #2 color, #3 Roman numeral
+    \draw[#2,line width=0.68pt,rounded corners=1pt]
+        (0,#1+0.03) rectangle ++(0.44,1.54);
+    \node[font=\rmfamily\fontsize{4.6}{5.0}\selectfont\bfseries,
+          text=#2,rotate=90,inner sep=0pt]
+        at (0.22,#1+0.80) {Part~#3};
 }
 
-% 4-Part Fleet Stack for chapter margin figures (title only; subtitles in About)
-% Arguments: {Infrastructure}{Distribution}{Serving}{Governance}
-% Maps to book Parts: I (The Fleet), II (Distributed ML),
-%                     III (Deployment at Scale), IV (The Responsible Fleet)
-% Visual: colored layers + upward constraint arrows + Part number accents
-% Node styling matches \stacklayer (Vol1) for consistency
-\newcommand{\mlfleetstack}[4]{
+\newcommand{\fleetstackpartboxfull}[3]{%
+    % #1 y-position, #2 color, #3 Roman numeral
+    \draw[#2,line width=0.8pt,rounded corners=1.4pt]
+        (0,#1) rectangle ++(1.08,1.68);
+    \node[font=\rmfamily\fontsize{8.4}{8.8}\selectfont\bfseries,
+          text=#2,rotate=90,inner sep=0pt]
+        at (0.54,#1+0.84) {Part~#3};
+}
+
+\newcommand{\fleetstacklayermarginparts}[5]{%
+    % #1 y, #2 label, #3 intensity, #4 color, #5 icon
+    \fleetstacksetcolors{#4}{#3}%
+    \node[draw=white,line width=0.45pt,fill=\fleetfill,
+          minimum width=2.60cm,minimum height=0.80cm,
+          anchor=south west,rounded corners=0pt,inner sep=0pt] (fleetbox) at (0.52,#1) {};
+    \node[anchor=west,text=\fleettext,
+          font=\rmfamily\fontsize{5.35}{5.75}\selectfont\bfseries]
+        at ($(fleetbox.west)+(0.16,0)$) {#2};
+    \path (fleetbox.east)+(-0.30,0)
+        pic[scale=0.49,draw=\fleettext,fill=\fleettext,text=\fleettext] {#5};
+}
+
+\newcommand{\fleetstacklayermarginnoparts}[5]{%
+    % #1 y, #2 label, #3 intensity, #4 color, #5 icon
+    \fleetstacksetcolors{#4}{#3}%
+    \node[draw=white,line width=0.45pt,fill=\fleetfill,
+          minimum width=3.12cm,minimum height=0.80cm,
+          anchor=south west,rounded corners=0pt,inner sep=0pt] (fleetbox) at (0,#1) {};
+    \node[anchor=west,text=\fleettext,
+          font=\rmfamily\fontsize{5.75}{6.15}\selectfont\bfseries]
+        at ($(fleetbox.west)+(0.16,0)$) {#2};
+    \path (fleetbox.east)+(-0.30,0)
+        pic[scale=0.52,draw=\fleettext,fill=\fleettext,text=\fleettext] {#5};
+}
+
+\newcommand{\fleetstacklayerfull}[6]{%
+    % #1 y, #2 title, #3 subtitle, #4 intensity, #5 color, #6 icon
+    \fleetstacksetcolors{#5}{#4}%
+    \node[draw=white,line width=0.5pt,fill=\fleetfill,
+          minimum width=8.05cm,minimum height=0.86cm,
+          anchor=south west,rounded corners=0pt,inner sep=0pt] (fleetfullbox) at (1.24,#1) {};
+    \node[anchor=west,text=\fleettext,
+          font=\rmfamily\fontsize{8.5}{9.1}\selectfont\bfseries]
+        at ($(fleetfullbox.west)+(0.22,0.18)$) {#2};
+    \node[anchor=west,text=\fleettext,
+          font=\rmfamily\fontsize{5.4}{5.9}\selectfont,opacity=0.86]
+        at ($(fleetfullbox.west)+(0.22,-0.16)$) {#3};
+    \path (fleetfullbox.east)+(-0.48,0)
+        pic[scale=0.60,draw=\fleettext,fill=\fleettext,text=\fleettext] {#6};
+}
+
+\newcommand{\mlfleetstackwithparts}[8]{%
     \begin{tikzpicture}
-        % 4 layers at 1.0cm each = 4.0cm total (matches Vol1 stack layer height)
+        \fleetstackpartboxmargin{0.00}{fleetinfra}{I}
+        \fleetstackpartboxmargin{1.60}{fleetdist}{II}
+        \fleetstackpartboxmargin{3.20}{fleetserve}{III}
+        \fleetstackpartboxmargin{4.80}{fleetgov}{IV}
 
-        % Part IV: Governance (top) — ETH Zurich Blue intensity
-        \fleetstacklayernostub{3.0}{Governance}{#4}{accentcolor}{icon_fleet_governance}
+        \fleetstacklayermarginparts{0.00}{Facility}{#1}{fleetinfra}{icon_fleet_facility}
+        \fleetstacklayermarginparts{0.80}{Fabric}{#2}{fleetinfra}{icon_fleet_fabric}
+        \fleetstacklayermarginparts{1.60}{Execution}{#3}{fleetdist}{icon_fleet_execution}
+        \fleetstacklayermarginparts{2.40}{Control}{#4}{fleetdist}{icon_fleet_control}
+        \fleetstacklayermarginparts{3.20}{Serving}{#5}{fleetserve}{icon_fleet_serving}
+        \fleetstacklayermarginparts{4.00}{Operations}{#6}{fleetserve}{icon_fleet_operations}
+        \fleetstacklayermarginparts{4.80}{Assurance}{#7}{fleetassure}{icon_fleet_assurance}
+        \fleetstacklayermarginparts{5.60}{Governance}{#8}{fleetgov}{icon_fleet_governance}
 
-        % Part III: Serving — ETH Zurich Blue intensity
-        \fleetstacklayernostub{2.0}{Serving}{#3}{accentcolor}{icon_fleet_serve}
-
-        % Part II: Distribution — ETH Zurich Blue intensity
-        \fleetstacklayernostub{1.0}{Distribution}{#2}{accentcolor}{icon_fleet_parallel}
-
-        % Part I: Infrastructure (bottom) — ETH Zurich Blue intensity
-        \fleetstacklayernostub{0.0}{Infrastructure}{#1}{accentcolor}{icon_fleet_infra}
-
-        % --- Part labels (left accent) — ETH Zurich Blue ---
-        % Font note: \rmfamily for Palatino body-font consistency (see \stacklayer).
-        \node[font=\rmfamily\fontsize{5}{6}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 0.5) {Part~I};
-        \node[font=\rmfamily\fontsize{5}{6}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 1.5) {Part~II};
-        \node[font=\rmfamily\fontsize{5}{6}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 2.5) {Part~III};
-        \node[font=\rmfamily\fontsize{5}{6}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 3.5) {Part~IV};
-
+        \ifMLFleetStackGuides
+            \draw[red!45,line width=0.25pt] (0,-0.06) rectangle (3.15,6.46);
+            \draw[red!45,line width=0.25pt] (3.15,-0.11)--(3.15,6.51);
+        \fi
     \end{tikzpicture}
 }
 
-% Full-size 4-Part Fleet Stack with subtitles for introductory/about pages
-% Arguments: {Infrastructure}{Distribution}{Serving}{Governance}
-\newcommand{\mlfleetstackfull}[4]{
+\newcommand{\mlfleetstacknoparts}[8]{%
     \begin{tikzpicture}
-        % 4 layers at 2.2cm each = 8.8cm total
+        \fleetstacklayermarginnoparts{0.00}{Facility}{#1}{fleetinfra}{icon_fleet_facility}
+        \fleetstacklayermarginnoparts{0.80}{Fabric}{#2}{fleetinfra}{icon_fleet_fabric}
+        \fleetstacklayermarginnoparts{1.60}{Execution}{#3}{fleetdist}{icon_fleet_execution}
+        \fleetstacklayermarginnoparts{2.40}{Control}{#4}{fleetdist}{icon_fleet_control}
+        \fleetstacklayermarginnoparts{3.20}{Serving}{#5}{fleetserve}{icon_fleet_serving}
+        \fleetstacklayermarginnoparts{4.00}{Operations}{#6}{fleetserve}{icon_fleet_operations}
+        \fleetstacklayermarginnoparts{4.80}{Assurance}{#7}{fleetassure}{icon_fleet_assurance}
+        \fleetstacklayermarginnoparts{5.60}{Governance}{#8}{fleetgov}{icon_fleet_governance}
 
-        % Part IV: Governance — ETH Zurich Blue intensity
-        \fleetstacklayerfull{6.60}{Governance}{Security, robustness,\\sustainability, responsibility}{#4}{accentcolor}{icon_fleet_governance}
+        \ifMLFleetStackGuides
+            \draw[red!45,line width=0.25pt] (0,-0.06) rectangle (3.15,6.46);
+            \draw[red!45,line width=0.25pt] (3.15,-0.11)--(3.15,6.51);
+        \fi
+    \end{tikzpicture}
+}
 
-        % Part III: Serving — ETH Zurich Blue intensity
-        \fleetstacklayerfull{4.40}{Serving}{Inference, performance,\\edge, operations}{#3}{accentcolor}{icon_fleet_serve}
+% Default production margin stack: compact D-prime layout with rotated Part boxes.
+\newcommand{\mlfleetstack}[8]{%
+    \mlfleetstackwithparts{#1}{#2}{#3}{#4}{#5}{#6}{#7}{#8}%
+}
 
-        % Part II: Distribution — ETH Zurich Blue intensity
-        \fleetstacklayerfull{2.20}{Distribution}{Training, communication,\\fault tolerance, orchestration}{#2}{accentcolor}{icon_fleet_parallel}
+\newcommand{\mlfleetstackfull}[8]{%
+    \begin{tikzpicture}
+        \fleetstackpartboxfull{0.00}{fleetinfra}{I}
+        \fleetstackpartboxfull{1.72}{fleetdist}{II}
+        \fleetstackpartboxfull{3.44}{fleetserve}{III}
+        \fleetstackpartboxfull{5.16}{fleetgov}{IV}
 
-        % Part I: Infrastructure — ETH Zurich Blue intensity
-        \fleetstacklayerfull{0.0}{Infrastructure}{Compute, network,\\data storage}{#1}{accentcolor}{icon_fleet_infra}
-
-        % --- Part labels (left accent) — ETH Zurich Blue ---
-        % Font note: \rmfamily for Palatino body-font consistency (see \stacklayer).
-        \node[font=\rmfamily\fontsize{6}{7}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 1.1) {Part~I};
-        \node[font=\rmfamily\fontsize{6}{7}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 3.3) {Part~II};
-        \node[font=\rmfamily\fontsize{6}{7}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 5.5) {Part~III};
-        \node[font=\rmfamily\fontsize{6}{7}\selectfont\bfseries,
-              text=accentcolor, opacity=0.75, rotate=90] at (-0.45, 7.7) {Part~IV};
-
+        \fleetstacklayerfull{0.00}{Facility \& Accelerators}{power, cooling, racks, GPUs/TPUs, HBM}{#1}{fleetinfra}{icon_fleet_facility}
+        \fleetstacklayerfull{0.86}{Fabric \& Storage}{topology, bandwidth, storage tiers, data movement}{#2}{fleetinfra}{icon_fleet_fabric}
+        \fleetstacklayerfull{1.72}{Distributed Execution}{parallelism strategies, collectives, synchronization}{#3}{fleetdist}{icon_fleet_execution}
+        \fleetstacklayerfull{2.58}{Reliability \& Control}{checkpointing, recovery, schedulers, placement}{#4}{fleetdist}{icon_fleet_control}
+        \fleetstacklayerfull{3.44}{Runtime \& Serving}{kernels, inference, batching, routing, KV cache, edge}{#5}{fleetserve}{icon_fleet_serving}
+        \fleetstacklayerfull{4.30}{Operations}{SLOs, monitoring, drift, incidents, lifecycle}{#6}{fleetserve}{icon_fleet_operations}
+        \fleetstacklayerfull{5.16}{Assurance}{security, privacy, robustness, risk controls}{#7}{fleetassure}{icon_fleet_assurance}
+        \fleetstacklayerfull{6.02}{Governance \& Sustainability}{auditability, policy, carbon budgets, accountable release}{#8}{fleetgov}{icon_fleet_governance}
     \end{tikzpicture}
 }
 
@@ -2052,3 +2223,23 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 
 \makeatother
 
+
+% Fallback for \tcbbreak (used by callout-audit PR #1789 to force tcolorbox
+% page-breaks). If a runtime tcolorbox version doesn't define it, no-op so
+% the PDF builds cleanly. See dev commit fee17cc2c0 and downstream merges.
+\providecommand{\tcbbreak}{}
+
+
+% ─────────────────────────────────────────────────────────────────────────────
+% MARGIN ALIGNMENT GUIDES (development aid — toggle)
+% Draws light frames around the text block, header/footer, and the margin-note
+% column, so margin figures can be aligned during authoring.
+% Set \MarginDebugfalse for production builds; \MarginDebugtrue to show guides.
+% ─────────────────────────────────────────────────────────────────────────────
+\newif\ifMarginDebug
+\MarginDebugfalse   % <<< set to \MarginDebugtrue to show margin alignment guides
+\ifMarginDebug
+  \usepackage{showframe}
+  \renewcommand*\ShowFrameLinethickness{0.2pt}
+  \renewcommand*\ShowFrameColor{\color{red!45}}
+\fi

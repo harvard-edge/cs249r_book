@@ -9,6 +9,7 @@
 #     book-check-refs        →  ./book/binder check refs
 #     book-check-prose       →  ./book/binder check prose
 #     book-check-footnotes   →  ./book/binder check footnotes
+#     book-check-cli-contract → ./book/binder check cli
 #     book-format-python     →  ./book/binder format python
 #
 # Each `binder check <group>` invocation runs only the curated default scopes
@@ -102,7 +103,7 @@ repos:
         name: "Bib: Apply safe §5 mechanical fixes"
         # Same logic as the first step of `book/binder bib normalize`.
         # Exits 1 if it rewrote a file (re-stage and commit again).
-        entry: python3 book/tools/bib_apply_mechanical_fixes.py --pre-commit
+        entry: ./book/binder bib mechanical --pre-commit
         language: system
         pass_filenames: true
         files: \.bib$
@@ -123,15 +124,16 @@ repos:
     hooks:
       - id: book-check-bib
         name: "Bib: Validate against §5 (semantic)"
-        # Runs binder check bib → curated scopes (currently: hygiene only).
-        # The key-content scope is default=False until legacy keys are
-        # cleaned up; opt in via `./book/binder check bib --all-scopes`.
-        # Baseline allow-list at book/tools/bib_lint_baseline.json
-        # grandfathers pre-existing violations; only NEW violations block.
+        # Runs binder check bib → curated scopes (hygiene + style ratchet +
+        # volume-scoped citation integrity). The key-content and orphan scopes are
+        # default=False until legacy keys/orphans are cleaned up; opt in via
+        # `./book/binder check bib --all-scopes`.
+        # Baseline allow-lists under book/tools/ grandfather pre-existing
+        # hard errors and warning/info metadata debt; only NEW issues block.
         entry: ./book/binder check bib
         language: system
         pass_filenames: false
-        files: \.bib$
+        files: ^book/quarto/contents/.*\.(bib|qmd)$
 
   # ===========================================================================
   # SECTION 3: REPO GUARDS — cross-cutting checks not tied to one binder group
@@ -194,7 +196,7 @@ repos:
     hooks:
       # Order: structure → whitespace → lists → tables.
       - id: book-format-python
-        name: "Book: Format Python code blocks (Black, 70 chars)"
+        name: "Book: Format Python code blocks (Black; display 70, LEGO cells 150)"
         entry: ./book/binder format python
         language: system
         pass_filenames: true
@@ -210,6 +212,28 @@ repos:
       - id: book-format-lists
         name: "Book: Fix list spacing (blank before lists, tight items)"
         entry: ./book/binder format lists
+        language: system
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-format-percent-tables
+        name: "Book: Rewrite 'percent' → % inside pipe tables"
+        # Tables invert the prose convention (the % symbol, not the word).
+        # Runs BEFORE prettify so prettify re-aligns the columns that this
+        # substitution shortens. Shares its logic with the percent-in-tables
+        # validator scope via cli/checks/percent_tables.py.
+        entry: ./book/binder format percent-tables
+        language: system
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
+
+      - id: book-format-mitpress-terms
+        name: "Book: Apply §10.7 canonical spellings (trade-off, Wi-Fi, …)"
+        # MIT Press canonical spelling dictionary. Runs before prettify so
+        # prettify re-aligns columns that term substitutions widen/shorten.
+        # Shares logic with the spelling-dict validator scope via
+        # cli/checks/mitpress_terms.py; skips glossary files.
+        entry: ./book/binder format mitpress-terms
         language: system
         pass_filenames: true
         files: ^book/quarto/contents/.*\.qmd$
@@ -236,6 +260,17 @@ repos:
 
   - repo: local
     hooks:
+      # ---- CLI surface ------------------------------------------------
+
+      - id: book-check-cli-contract
+        name: "Book: check Binder CLI command contract"
+        # Always-run because this guards the public command/help surface, not
+        # content files. It is read-only and does not invoke builds.
+        entry: ./book/binder check cli
+        language: system
+        pass_filenames: false
+        always_run: true
+
       # ---- Structural / cross-file ------------------------------------
 
       - id: book-check-headers
@@ -246,23 +281,23 @@ repos:
         files: ^book/quarto/contents/.*\.qmd$
 
       - id: book-check-structure
-        name: "Book: check structure (heading levels, parts, Purpose)"
+        name: "Book: check structure (heading levels, H2 landings, parts, Purpose)"
         entry: ./book/binder check structure
         language: system
         pass_filenames: false
         files: ^book/quarto/contents/.*\.qmd$
 
-      # `labels` is split by scope for the same reason as headers:
-       #   orphans     — vol1 only (vol2 has many forward references to
-      #                  chapters not yet authored, all valid by design).
+      # `labels` is split by scope:
+      #   orphans     — both vols (10 vol2 orphans were resolved 2026-05;
+      #                  any new ones should fail the gate immediately so
+      #                  authors wire up labels at the same time they
+      #                  introduce them).
       #   duplicates  — both vols, with the binder default of
       #                  figures+tables+listings only (sections /
       #                  equations have legitimate dup-keys in vol2 WIP).
-      # Once vol2 chapters are all authored, collapse back into a single
-      # `book-check-labels` running `./book/binder check labels`.
       - id: book-check-labels-orphans
-        name: "Book: check labels --scope orphans (vol1 only)"
-        entry: ./book/binder check labels --scope orphans --vol1
+        name: "Book: check labels --scope orphans (both vols)"
+        entry: ./book/binder check labels --scope orphans
         language: system
         pass_filenames: false
         files: ^book/quarto/contents/.*\.qmd$
@@ -346,8 +381,14 @@ repos:
         files: ^book/quarto/contents/.*\.qmd$
 
       - id: book-check-code
-        name: "Book: check code (python-echo, _str LaTeX leak, LEGO dead code)"
-        # Includes the migrated lego-dead-code scope (was scripts/check_lego_vars.py).
+        name: "Book: check code (python-echo, _str LaTeX leak, LEGO dead code + units)"
+        # Runs the curated default scopes of `binder check code`, which include
+        # lego-dead-code AND lego-units (default=yes; _run_lego_units wraps
+        # book/tools/scripts/lint_lego_units.py with --fail-on warning, and a
+        # run fails on ANY issue regardless of severity — so warnings block the
+        # commit exactly as a standalone hook would). There is deliberately no
+        # separate book-check-lego-units hook: it would call the same linter a
+        # second time, off-Binder. See .pre-commit-history.md (2026-06-10).
         entry: ./book/binder check code
         language: system
         pass_filenames: false
@@ -370,14 +411,15 @@ repos:
         files: ^book/quarto/contents/.*\.qmd$
 
       - id: book-check-numbers
-        name: "Book: check numbers (units, percent, binary units)"
+        name: "Book: check numbers (units, percent, binary units, currency)"
         entry: ./book/binder check numbers
         language: system
         pass_filenames: false
-        files: ^book/quarto/contents/.*\.qmd$
+        files: ^book/quarto/contents/.*\.(qmd|json|svg)$|^book/cli/checks/currency_style\.py$|^book/cli/commands/validate\.py$
 
       - id: book-check-math
-        name: "Book: check math (\\times spacing, attr-leaks)"
+        name: "Book: check math (spacing, attr-leaks, fmt/suffix canonical)"
+        # Includes canonical scope (LEGO fmt-family + _str/_math suffix discipline).
         # render-audit scope is default=False (10 min HTML build). Run
         # manually via book-check-math-render-audit (manual stage).
         entry: ./book/binder check math
@@ -395,10 +437,13 @@ repos:
         files: ^book/quarto/contents/.*\.qmd$
 
       - id: book-check-index
-        name: "Book: check index (placement + anti-patterns + xrefs)"
+        name: "Book: check index (placement + anti-patterns + xrefs + forbidden contexts)"
         # Includes 3 scopes migrated from book/tools/audit/index/* (2026-05-06):
         # anti-patterns, tag-placement, xref-resolves. Plus the original
         # placement scope. The audit scripts remain callable standalone.
+        # Added 2026-05-17: forbidden-contexts catches \index{} inside Python
+        # code fences, $..$/$$..$$ math, and fig-cap/fig-alt/tbl-cap/lst-cap/
+        # title= attribute strings (audit.checks.index_placement).
         entry: ./book/binder check index
         language: system
         pass_filenames: false
@@ -408,16 +453,42 @@ repos:
         name: "Book: check source-note formatting"
         entry: ./book/binder check sources
         language: system
-        # Trigger on chapter content + the checker's own source files so
-        # devs notice if the check fails after editing the checker itself.
-        files: \.qmd$|^book/cli/commands/validate\.py$|^book/tools/audit/checks/source_citations\.py$
+        # The ONE binder-check hook that consumes the changed-file list:
+        # _run_sources (validate.py) scopes to ns.files when given them, so we
+        # keep pass_filenames: true (explicit, not the inherited default — do
+        # not "fix" this to false or the per-file scoping breaks). Anchored to
+        # book/quarto/contents/ like every sibling; the previous unanchored
+        # \.qmd$ fired on the 250+ qmd files outside contents (instructors/,
+        # kits/, slides/). The old validate.py / source_citations.py triggers
+        # were dropped: with pass_filenames: true they made the hook check the
+        # .py file itself (a silent no-op), defeating the "re-run on checker
+        # change" intent rather than serving it.
+        pass_filenames: true
+        files: ^book/quarto/contents/.*\.qmd$
 
-      - id: book-check-json
-        name: "Book: validate JSON files"
-        entry: ./book/binder check json
+      # NOTE: no book-check-json hook. JSON *syntax* validation is generic file
+      # hygiene owned by the third-party `check-json` hook in SECTION 1 (runs
+      # repo-wide, same json.load parser, identical file:line error output).
+      # A book-scoped Binder duplicate added nothing. The `check json` Binder
+      # scope still exists for ad-hoc/CI use. Retired 2026-06-10.
+
+      - id: mlsysim-check-registry-gates
+        name: "MLSysIM: constants allowlist + no legacy imports + appendix verify"
+        entry: ./book/binder check registry --scope tests
         language: system
         pass_filenames: false
-        files: ^book/.*\.json$
+        # The broad book/quarto/contents/.*\.qmd alternative already covers
+        # appendix_assumptions.qmd, so no appendix-specific alternative is
+        # listed (it would be dead). The gate runs on any chapter qmd because
+        # appendix constants can be referenced from anywhere in the corpus.
+        files: ^(mlsysim/mlsysim/core/constants\.py|mlsysim/mlsysim/core/defaults\.py|mlsysim/tests/test_constants_allowlist\.py|mlsysim/tests/test_no_legacy_constant_refs\.py|mlsysim/tests/test_appendix_constants\.py|book/tools/audit/generate_appendix_constants\.py|book/quarto/contents/.*\.qmd|labs/.*\.py|mlsysim/mlsysim/.*\.py)$
+
+      - id: book-check-registry-sources
+        name: "Book: check registry sources in LEGO cells"
+        entry: ./book/binder check registry --scope sources
+        language: system
+        pass_filenames: false
+        files: ^book/quarto/contents/.*\.qmd$
 
       - id: book-check-units
         name: "Book: check physics-engine unit conversion tests"
@@ -454,6 +525,16 @@ repos:
         # the static math checks don't cover yet (and the source of truth
         # for the lightbox-tooltip leak class).
         entry: ./book/binder check math --scope render-audit
+        language: system
+        pass_filenames: false
+        stages: [manual]
+
+      - id: book-check-rendered-currency
+        name: "Book: check rendered currency artifacts"
+        # Scans cached HTML under book/quarto/_build/html-audit for visible
+        # USD, doubled dollar signs, and raw LaTeX in prose. Populate that
+        # cache first with book/tools/audit/fmt/render_html.sh.
+        entry: ./book/binder check numbers --scope rendered-currency
         language: system
         pass_filenames: false
         stages: [manual]

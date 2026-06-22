@@ -11,9 +11,9 @@ This paper **ended the AI Winter** and launched modern deep learning. Now it's y
 
 ## What You're Building
 
-Multi-layer perceptrons (MLPs) on real image classification tasks:
-1. **TinyDigits** - Learn hierarchical features on 8×8 handwritten digits
-2. **MNIST** - Scale up to the full 28×28 benchmark dataset
+Multi-layer perceptrons (MLPs) on non-linear and image classification tasks:
+1. **XOR Solved** - Use hidden layers plus backpropagation to solve the 1969 crisis
+2. **TinyDigits** - Learn hierarchical features on 8×8 handwritten digits
 
 ## Required Modules
 
@@ -43,12 +43,20 @@ Multi-layer perceptrons (MLPs) on real image classification tasks:
 
 This milestone uses **progressive scaling** with 2 scripts:
 
+### ../02_1969_xor/02_xor_solved.py
+**Purpose:** Prove hidden layers plus backpropagation solve XOR
+
+- **Dataset:** XOR truth table
+- **Architecture:** Input(2) → Linear → ReLU → Linear → Sigmoid
+- **Expected:** 100% accuracy
+- **Key Learning:** "Depth plus gradients solves non-linear problems!"
+
 ### 01_rumelhart_tinydigits.py
 **Purpose:** Prove MLPs work on real images (fast iteration)
 
 - **Dataset:** TinyDigits (1000 train + 200 test, 8×8 images)
 - **Architecture:** Input(64) → Linear(64→32) → ReLU → Linear(32→10)
-- **Expected:** 75-85% accuracy in 3-5 minutes
+- **Expected:** 85%+ accuracy in a few minutes
 - **Key Learning:** "MLPs can learn hierarchical features from images!"
 
 **Why TinyDigits First?**
@@ -56,16 +64,6 @@ This milestone uses **progressive scaling** with 2 scripts:
 - Small size = easy to understand what's happening
 - Decent accuracy = proves concept works
 - Ships with TinyTorch = no downloads needed
-
-### 02_rumelhart_mnist.py
-**Purpose:** Scale to the classic benchmark
-
-- **Dataset:** MNIST (60K train + 10K test, 28×28 images)
-- **Architecture:** Input(784) → Linear(784→128) → ReLU → Linear(128→10)
-- **Expected:** 94-97% accuracy (competitive for MLPs!)
-- **Key Learning:** "Same principles scale to larger problems!"
-
-**Historical Note:** MNIST (1998) became THE benchmark for evaluating learning algorithms. MLPs hitting 95%+ proved neural networks were back!
 
 ## Expected Results
 
@@ -82,8 +80,8 @@ This milestone uses **progressive scaling** with 2 scripts:
 </tr>
 </thead>
 <tbody>
-<tr><td><b>01 (TinyDigits)</b></td><td>1K train</td><td>8×8</td><td>~2.4K</td><td>< 0.5</td><td>75-85%</td><td>3-5 min</td></tr>
-<tr><td><b>02 (MNIST)</b></td><td>60K train</td><td>28×28</td><td>~100K</td><td>< 0.2</td><td>94-97%</td><td>10-15 min</td></tr>
+<tr><td><b>01 (XOR Solved)</b></td><td>4 examples</td><td>N/A</td><td>small</td><td>→ 0.0</td><td>100%</td><td>&lt;1 min</td></tr>
+<tr><td><b>02 (TinyDigits)</b></td><td>1K train</td><td>8×8</td><td>~2.4K</td><td>&lt; 0.5</td><td>85%+</td><td>3-5 min</td></tr>
 </tbody>
 </table>
 
@@ -108,17 +106,20 @@ This is **representation learning** - the foundation of deep learning's power.
 ```bash
 cd milestones/03_1986_mlp
 
-# Step 1: Quick validation on TinyDigits (run after Module 08)
+# Quick validation on TinyDigits (run after Module 08)
 python 01_rumelhart_tinydigits.py
 
-# Step 2: Scale to MNIST benchmark (run after Module 08)
-python 02_rumelhart_mnist.py
+# Or run the full milestone from the TinyTorch project root:
+tito milestone run 03
+
+# Run individual parts:
+tito milestone run 03 --part 1  # XOR Solved
+tito milestone run 03 --part 2  # TinyDigits
 ```
 
 ## Further Reading
 
 - **The Backprop Paper**: Rumelhart, Hinton, Williams (1986). "Learning representations by back-propagating errors"
-- **MNIST Dataset**: LeCun et al. (1998). "Gradient-based learning applied to document recognition"
 - **Why MLPs Work**: Cybenko (1989). "Approximation by superpositions of a sigmoidal function" (Universal Approximation Theorem)
 
 ## Achievement Unlocked

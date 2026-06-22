@@ -6,8 +6,8 @@ Pytest discovers this file automatically — no imports needed in test files.
 
 import pytest
 
-from mlsysim.core.constants import Q_
-from mlsysim.core.solver import (
+from mlsysim.core.units import Q_
+from mlsysim.engine.solvers import (
     CheckpointModel,
     ContinuousBatchingModel,
     CompressionModel,
@@ -31,7 +31,7 @@ from mlsysim.core.solver import (
     WeightStreamingModel,
 )
 from mlsysim.hardware.registry import Hardware
-from mlsysim.infra.registry import Grids, Infra
+from mlsysim.infrastructure.registry import Grids, Infrastructure
 from mlsysim.models.registry import Models
 from mlsysim.models.types import TransformerWorkload
 from mlsysim.systems.registry import Systems
@@ -69,12 +69,12 @@ def esp32():
 
 @pytest.fixture(scope="session")
 def resnet():
-    return Models.ResNet50
+    return Models.Vision.ResNet50
 
 
 @pytest.fixture(scope="session")
 def gpt3():
-    return Models.GPT3
+    return Models.Language.GPT3
 
 
 @pytest.fixture(scope="session")
@@ -108,12 +108,12 @@ def frontier_cluster():
 
 @pytest.fixture(scope="session")
 def grid_quebec():
-    return Infra.Quebec
+    return Infrastructure.Grids.Quebec
 
 
 @pytest.fixture(scope="session")
 def grid_us_avg():
-    return Infra.Grids.US_Avg
+    return Infrastructure.Grids.US_Avg
 
 
 # ── Solver Fixtures ─────────────────────────────────────────────

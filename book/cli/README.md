@@ -1,6 +1,10 @@
 # MLSysBook CLI (`binder`) — Architecture & Reference
 
-The `./book/binder` CLI is the single entry point for building, validating, and formatting the MLSysBook. All pre-commit hooks route through binder.
+The `./book/binder` CLI is the **single source of truth** for building, checking, fixing, and formatting MLSysBook. Every `book-check-*` pre-commit hook dispatches through `./book/binder check <group>`; CI uses the same commands.
+
+**User-facing command reference:** [`book/docs/BINDER.md`](../docs/BINDER.md) (check/fix tables, pre-commit mapping, examples).
+
+**This file** covers implementation: architecture, scope registry, pre-commit contract, EPUB layers, and how to add new checks.
 
 ## Architecture
 
@@ -13,20 +17,96 @@ cli/
 ├── commands/
 │   ├── build.py             # Build HTML/PDF/EPUB (full book or chapters)
 │   ├── preview.py           # Live dev server with hot reload
-│   ├── validate.py          # All validation checks (check group)
+│   ├── validate.py          # Check router: dispatches scopes → cli/checks or inline
 │   ├── formatting.py        # Auto-formatters (format group)
 │   ├── reference_check.py   # Bibliography verification (Crossref/DOI)
+│   ├── _epub_checks.py      # EPUB hygiene / smoke / epubcheck primitives
 │   ├── bib.py               # Bibliography management
-│   ├── info.py              # Stats, figures, concepts, headers, acronyms
-│   ├── render.py            # Plot rendering to PNG gallery
-│   ├── newsletter.py        # Newsletter drafts and publishing
-│   ├── clean.py             # Build artifact cleanup
-│   ├── debug.py             # Failing chapter/section finder
-│   ├── doctor.py            # Health check
-│   └── maintenance.py       # Image compression, repo health
+│   └── …
+├── checks/                  # Check implementations (canonical home — grow here)
+│   ├── cli_contract.py             # cli --scope contract (public command surface)
+│   ├── lego_dead_code.py           # code --scope lego-dead-code (LEGO liveness)
+│   ├── math_canonical.py           # math --scope canonical (LEGO fmt discipline)
+│   └── math_multiplier_style.py    # math --scope multiplier-style (prose × rules)
 ├── formats/                 # Format-specific handlers
 └── utils/                   # Shared utilities
 ```
+
+## Check implementation layout
+
+**Goal:** every `./book/binder check …` scope is backed by code under `book/cli/`,
+not by loading arbitrary scripts from `book/tools/` at runtime.
+
+| Layer | Location | Status |
+|-------|----------|--------|
+| **Router + inline checks** | `commands/validate.py` | ~75 scopes (regex walks, graphs) live here today |
+| **Extracted check modules** | `cli/checks/*.py` | Preferred home for new checks and migrations |
+| **Shared primitives** | `commands/_epub_checks.py`, `reference_check.py`, `core/*.py` | Native CLI modules |
+| **Fix / maintenance** | `commands/maintenance.py` | Self-contained (no script delegation) |
+
+**Anti-pattern (being phased out):** `importlib` or `subprocess` from Binder into
+`book/tools/scripts/*.py` or `book/tools/bib_lint.py`. Older files may remain
+temporarily as standalone CLIs, but Binder-owned behavior should live in
+`cli/checks/` or `cli/core/` and be imported normally.
+
+**Migrated examples:**
+
+- `cli --scope contract` -> `cli/checks/cli_contract.py`
+- `math --scope canonical` -> `cli/checks/math_canonical.py`
+- `math --scope multiplier-style` -> `cli/checks/math_multiplier_style.py`
+- `code --scope lego-dead-code` -> `cli/checks/lego_dead_code.py`
+- `bib mechanical` -> `cli/core/bib_mechanical.py`
+- `bib hygiene/style` -> `cli/checks/bib_lint.py`
+- `clean artifacts` -> `cli/core/artifacts.py`
+
+**Still transitional:** `bib update` (reviewed betterbib helper), several
+table/image scopes, spelling scopes, and `audit.checks.*` adapters. Bib
+publication scopes such as `bib --scope hygiene`, `bib --scope style`,
+`bib --scope integrity`, `bib --scope orphans`, and `bib --scope key-content`
+run through Binder and emit `ValidationIssue` records directly.
+
+## Script Ownership Rules
+
+To keep the CLI clean:
+
+1. User-facing book automation belongs in Binder: `check`, `fix`, `format`,
+   `bib`, `render`, `audit`, `layout`, `clean`, `doctor`, `build`, `preview`.
+2. Pre-commit and CI integrations should call `./book/binder ...` for
+   book workflows. Do not add new hooks that invoke `python3 book/tools/...`
+   directly.
+3. Standalone scripts are allowed only when they are one of:
+   - Quarto post-render hooks that Quarto itself calls;
+   - cross-repository/shared-site tools outside the book CLI's ownership;
+   - explicitly documented one-off research/release audit tools;
+   - temporary migration shims with a documented removal path.
+4. New checks start in `book/cli/checks/` unless they are tiny enough to keep as
+   an inline `_run_*` in `validate.py`.
+
+Do **not** add new pre-commit hooks that call `python3 book/tools/...` directly.
+Use the full "Adding a new check" flow below so implementation, diagnostics,
+examples, and pre-commit behavior stay in one contract.
+
+## Public Command Taxonomy
+
+Binder uses verbs for workflow ownership. Keep new commands inside this shape:
+
+| Verb | Implementation home | Rule |
+|------|---------------------|------|
+| `build`, `preview` | `commands/build.py`, `commands/preview.py` | Render outputs and run live authoring. |
+| `check` | `commands/validate.py` + `cli/checks/` | Read-only validation; pre-commit/CI entry point. |
+| `format` | `commands/formatting.py` | Deterministic source formatting; support `--check` for hooks. |
+| `fix` | `commands/maintenance.py` | Targeted maintenance that may write source files. |
+| `bib` | `commands/bib.py` + `cli/core/bib_*` | Bibliography lifecycle and §5 normalization. |
+| `clean` | `commands/clean.py` + `cli/core/artifacts.py` | Remove generated artifacts/local build state only. |
+| `reset` | `commands/reset.py` + `commands/build.py` reset primitive | Restore build YAML manifests after scoped builds. |
+| `info` | `commands/info.py` | Read-only reports and inventories. |
+| `render` | `commands/render.py` | Generate derived assets such as plot galleries. |
+| `audit` | `commands/audit.py` | Heavier or ledgered audits outside normal commit checks. |
+| `doctor`, `status`, `list`, `setup`, `switch`, `debug`, `layout`, `headings` | main router or focused modules | Environment, state, diagnostics, and specialized maintenance. |
+
+Prefer canonical verbs in documentation and automation. `validate -> check` and
+`maintain -> fix` remain compatibility aliases; do not add new aliases unless
+there is a migration plan and a removal date.
 
 ## Command Groups
 
@@ -34,11 +114,42 @@ cli/
 
 ```bash
 ./binder build pdf --vol1          # Build Volume I PDF
+./binder build pdf --vol1 --layout # Build Volume I PDF, then emit auto-layout plan
 ./binder build html --vol2         # Build Volume II website
 ./binder build pdf intro           # Single chapter PDF
+./binder reset pdf --vol1          # Reset Volume I PDF YAML after scoped builds
+./binder reset all                 # Reset all build YAML configs
 ./binder preview                   # Live dev server (full book)
 ./binder preview intro             # Live dev server (single chapter)
 ```
+
+### Layout (PDF auto-layout)
+
+Layout is a rendered-PDF workflow. Keep the high-level planner and the
+low-level scanners separate:
+
+```bash
+./binder layout --vol1                     # Build PDF, then emit one layout plan
+./binder layout --vol1 --no-build          # Reuse existing PDF for the plan
+./binder layout --vol1 --no-build --json /tmp/layout-plan.json
+./binder layout check <pdf> --csv          # Main-flow whitespace scanner only
+./binder layout margins <pdf> --csv        # Native margin-geometry scanner only
+```
+
+Implementation contract:
+
+- `commands/layout.py` owns both the high-level planner and the scanner
+  primitives. Avoid one-off scripts for layout repair logic.
+- The planner emits rows with `phase`, `channel`, `strategy`, `confidence`,
+  `automatable`, `deferred`, `ready`, source coordinates, and `suggested_fix`.
+- `1-main-flow` is always repaired before `2-margin-calibration`; margin rows
+  can be reported while main flow is unstable, but they are deferred.
+- `main-flow` strategies cover callouts, tables, figures, paragraphs, and
+  structural accepts.
+- `margin-geometry` strategies cover footnote `[offset=...]`, in-block
+  `.column-margin` `\vspace*`, and margin stack solving.
+- Source-writing should be explicit and iterative: plan, apply only ready
+  high-confidence rows in the active phase, rebuild, re-plan.
 
 ### Check (Validation)
 
@@ -51,6 +162,7 @@ All validation lives in `validate.py`. Each check belongs to a **group** and has
 ./binder check all                      # every group's default=True scopes
 ./binder check all --vol1               # ... scoped to Volume I
 ./binder check <group> help             # per-group scope listing
+./binder check cli                      # read-only Binder command contract
 ```
 
 #### How scopes are discovered
@@ -58,6 +170,31 @@ All validation lives in `validate.py`. Each check belongs to a **group** and has
 `./binder check` (no args) prints the full group catalogue. Scopes marked with `*` are `default=False` — opt-in only, reachable via `--scope` or `--all-scopes`. Per-group help (`./binder check <group> help`) prints the same catalogue with one row per scope, plus the runner method name and a one-line note.
 
 The authoritative list is the `GROUPS` dict in `book/cli/commands/validate.py`. That dict is the only place a new scope needs to be wired; pre-commit, CI, and ad-hoc invocations all read from it.
+
+#### Bibliography checks
+
+Bibliography publication gates belong under `./binder check bib`, not under
+table/prose/image hooks and not in standalone scripts. The curated bib set runs:
+
+- `hygiene`: §5 BibTeX schema and MIT Press field hygiene.
+- `style`: baseline-ratcheted metadata warnings/info, including suspicious
+  title case, initials-only authors, missing journal volumes, acronym-only
+  venues, and non-canonical publishers.
+- `integrity`: every book citation resolves in the bibliography used for that
+  volume; cross-volume leaks fail even if the key exists elsewhere.
+
+Opt-in bib cleanup scopes are:
+
+- `orphans`: unused volume BibTeX entries; each finding says remove, cite, or
+  document as canonical background.
+- `key-content`: citekey author/year drift; each finding says whether to rename
+  the key/update citations or correct the entry body/year.
+
+The pre-commit hook triggers on `book/quarto/contents/**/*.qmd` and `.bib`
+changes because citation integrity depends on both prose and bibliography
+source. `hygiene` and `style` use reviewed baselines under `book/tools/` so
+known debt is documented but new debt fails. Use `./binder check bib --json`
+for structured fix output.
 
 #### Default vs. opt-in: the contract
 
@@ -106,7 +243,9 @@ Every `book-*` pre-commit hook routes through `./book/binder`. The hook tree mir
   files: ^book/quarto/contents/.*\.qmd$
 ```
 
-Two structural exceptions, both documented inline in `.pre-commit-config.yaml`:
+Structural exceptions, all documented inline in `.pre-commit-config.yaml`:
+
+- **CLI contract hook** (`book-check-cli-contract`) — always runs `./book/binder check cli` because it guards help text, removed command aliases, and reset/build command shape. It is read-only and does not inspect staged files.
 
 - **Per-scope split for `labels`** — the `orphans` scope is currently clean only on Vol I (Vol II has forward references to unwritten chapters). The split lets the universally-clean `duplicates` scope cover both volumes while `orphans` stays vol1-only:
 
@@ -119,18 +258,52 @@ Two structural exceptions, both documented inline in `.pre-commit-config.yaml`:
 
 - **Format-vs-content split** (`book-check-tables` runs `binder check tables` for content; `book-check-tables-format` runs `binder format tables --check` for whitespace) — these are different binder commands.
 
-No inline bash scripts. One CLI, one validation framework, one error format. Retired-hook history lives in `.pre-commit-history.md` so the live config is not a graveyard.
+No inline bash scripts. One CLI, one validation framework, one error format. Retired-hook context belongs in the commit or PR that removes the hook, not in a repo-side graveyard file.
 
 ## Adding a new check
 
 The flow that a future maintainer should mimic:
 
-1. **Implement the runner** in `book/cli/commands/validate.py` as `_run_<scope>(self, root: Path) -> ValidationRunResult`. For per-file regex checks, walk `self._qmd_files(root)`. For graph / corpus checks, build the model once and emit `ValidationIssue` entries. For external scripts you want to keep callable standalone, wrap with `self._delegate_script(script_path, args, run_name)`.
+1. **Implement the runner** in `book/cli/commands/validate.py` as `_run_<scope>(self, root: Path) -> ValidationRunResult`. For per-file regex checks, walk `self._qmd_files(root)`. For graph / corpus checks, build the model once and emit `ValidationIssue` entries. If the logic is reusable or more than a few lines, put it in `book/cli/checks/` and have the runner adapt those structured results to Binder's `ValidationIssue` format.
 2. **Register the scope** by adding a `Scope("<name>", "_run_<scope>", default=...)` entry to the right group in the `GROUPS` dict at the top of the file. Mark `default=False` if the scope still fails on dev or is intentionally opt-in.
-3. **Surface any new flags** in the argparse block in `ValidateCommand.run()`, and dispatch them in `_run_group` if the runner needs them as kwargs.
-4. **Stop.** Pre-commit picks up the new scope automatically because the existing `book-check-<group>` hook already runs every default-True scope in the group. You only add a new pre-commit hook for a brand-new group, or to pass a scope-specific flag (the vol1 / format-check exceptions above).
+3. **Document examples in the code and CLI docs**: every new check module should include bad/good source examples in its module docstring, one example per error code. User-facing scopes should also add the same examples to [`book/docs/BINDER.md`](../docs/BINDER.md) or the relevant Binder doc page. The goal is that a maintainer, author, or automated repair pass can open either the checker or CLI docs and immediately see what mistake it is looking for and what the canonical fix looks like.
+4. **Surface any new flags** in the argparse block in `ValidateCommand.run()`, and dispatch them in `_run_group` if the runner needs them as kwargs.
+5. **Stop.** Pre-commit picks up the new scope automatically because the existing `book-check-<group>` hook already runs every default-True scope in the group. You only add a new pre-commit hook for a brand-new group, or to pass a scope-specific flag (the vol1 / format-check exceptions above).
 
 When you flip a scope from `default=False` → `default=True`, that single edit in `validate.py` ships the scope to every developer's pre-commit and to CI on the next push.
+
+### Diagnostic output contract
+
+Binder check failures should be easy to fix from the CLI output alone. Each `ValidationIssue` should include:
+
+| Field | Purpose |
+|-------|---------|
+| `file` + `line` | Exact source location to edit. |
+| `code` | Stable machine-readable error code, such as `body_multiplier_suffix`. |
+| `message` | One-sentence diagnosis of what is wrong. |
+| `context` | The offending source line or narrow snippet. Human output prints this as `source:`. |
+| `suggestion` | Optional canonical rewrite guidance. Human output prints this as `fix:` and JSON includes it when present. |
+
+Use `cli/checks/cli_contract.py` and `cli/checks/math_multiplier_style.py` as
+models for example-rich diagnostics.
+
+CLI contract examples:
+
+| Error code | Bad source / command surface | Fix guidance |
+|------------|------------------------------|--------------|
+| `cli_contract_exit` | `./book/binder pdf reset --vol1` exits `0`, or help paths exit `1` | Preserve the public CLI contract: help returns `0`; removed commands and parse errors return `1`. |
+| `cli_contract_missing_output` | `./book/binder check` no longer lists `cli` / `contract` | Update help text and docs when the command tree intentionally changes. |
+| `cli_contract_unexpected_output` | `./book/binder build --help` still mentions `build reset` | Remove stale help; YAML reset is `./book/binder reset <fmt\|all>`. |
+
+Math multiplier examples:
+
+| Error code | Bad source | Fix guidance |
+|------------|------------|--------------|
+| `body_multiplier_suffix` | `speedup_str = fmt(speedup, suffix="×")` | Use `speedup_mult_str = fmt_multiple(speedup, ...)`; prose uses `` `{python} speedup_mult_str` `` by itself. |
+| `mult_double_glyph` | `` `{python} speedup_mult_str`$\times$ `` | Remove the prose glyph; `fmt_multiple` / `fmt_multiple_range` already emit `×`. |
+| `unicode_times_in_prose` | `A100 × H100` | Use `A100 $\times$ H100` in rendered prose; raw `×` only in plain-text contexts. |
+| `times_product_spacing` | `` `{python} a_str`$\times$`{python} b_str` `` | Use spaces around product operators: `` `{python} a_str` $\times$ `{python} b_str` ``. Computed prose multipliers use `*_mult_str`. |
+| `fmt_sci_math_context` | `MarkdownStr(f"${fmt_sci(flops)}$")` | Use `fmt_math(sci_latex(...))` for prose math; keep `fmt_sci()` for plain text. |
 
 ## EPUB Checks — Two Layers, One CLI Surface
 

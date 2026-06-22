@@ -29,6 +29,26 @@ SHARED_DIR = "shared"
 SKIP_STEMS = frozenset({"index", "references"})
 
 
+
+def _chapters_from_html_sidebar(book_dir: Path, volume: str) -> List[str]:
+    """Extract buildable chapter stems from the HTML config sidebar (href entries)."""
+    html_config = book_dir / "config" / f"_quarto-html-{volume}.yml"
+    if not html_config.is_file():
+        return []
+    content = html_config.read_text(encoding="utf-8")
+    chapters: List[str] = []
+    seen: set = set()
+    for m in re.finditer(r'href:\s*(contents/[^\s#]+\.qmd)', content):
+        path_str = m.group(1)
+        if f"/{volume}/" not in path_str:
+            continue
+        stem = Path(path_str).stem
+        if stem in SKIP_STEMS or stem in seen:
+            continue
+        seen.add(stem)
+        chapters.append(stem)
+    return chapters
+
 def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
     """Return the ordered list of buildable file stems from the PDF config.
 
@@ -75,32 +95,35 @@ def get_chapters_from_config(book_dir: Path, volume: str) -> List[str]:
             if stem and stem not in seen:
                 seen.add(stem)
                 chapters.append(stem)
-        return chapters
-
     except Exception:
         pass
 
-    # --- Regex fallback (no PyYAML) ---
-    content = config_file.read_text()
+    if len(chapters) < 5:
+        content = config_file.read_text()
+        chapters_block_match = re.search(
+            r'^\s{2}chapters:\s*\n(.*?)(?=^\s{2}\w|\Z)',
+            content,
+            re.MULTILINE | re.DOTALL,
+        )
+        block = chapters_block_match.group(1) if chapters_block_match else content
+        for line in block.splitlines():
+            if line.lstrip().startswith("#"):
+                continue
+            m = re.search(r'-\s*(contents/[^\s#]+\.qmd)', line)
+            if not m:
+                continue
+            path_str = m.group(1)
+            if not _is_testable(path_str):
+                continue
+            stem = Path(path_str).stem
+            if stem not in seen:
+                seen.add(stem)
+                chapters.append(stem)
 
-    # Isolate the chapters: block (stop before appendices:)
-    chapters_block_match = re.search(
-        r'^\s{2}chapters:\s*\n(.*?)(?=^\s{2}\w|\Z)',
-        content,
-        re.MULTILINE | re.DOTALL,
-    )
-    block = chapters_block_match.group(1) if chapters_block_match else content
-
-    chapters = []
-    seen = set()
-    for m in re.finditer(r'\s*-\s*(contents/[^\s#]+\.qmd)', block):
-        path_str = m.group(1)
-        if not _is_testable(path_str):
-            continue
-        stem = Path(path_str).stem
-        if stem not in seen:
-            seen.add(stem)
-            chapters.append(stem)
+    if len(chapters) < 5:
+        sidebar = _chapters_from_html_sidebar(book_dir, volume)
+        if len(sidebar) > len(chapters):
+            return sidebar
 
     return chapters
 

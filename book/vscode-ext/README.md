@@ -19,13 +19,15 @@ The editor runs **one** copy of the extension. Reload only reloads that copy. If
 3. Reload the window when prompted.
 4. After code changes: run **`npm run compile`** in `book/vscode-ext`, then **Developer: Reload Window**. No need to install again unless you remove the extension.
 
-## Binder-First Integration
+## Binder-first integration
 
 This extension treats `./book/binder` as the operational backend.
 
 - Build and debug commands execute Binder subcommands.
-- Validation actions execute `binder validate ...`.
-- Maintenance actions execute `binder maintain ...`.
+- Validation actions execute `binder check <group> [--scope …]`.
+- Maintenance actions execute `binder fix <topic> <action>` (`maintain` is an alias).
+
+See [`book/docs/BINDER.md`](../docs/BINDER.md) for the check/fix reference and pre-commit mapping.
 
 ## Work vs Configuration
 
@@ -46,8 +48,8 @@ This keeps daily actions focused while preserving easy access to tuning controls
 
 - Build chapter: `./book/binder build html <chapter>` / `./book/binder build pdf <chapter>`
 - Debug failures: `./book/binder debug <pdf|html|epub> --vol1|--vol2`
-- Validate content: `./book/binder validate all`
-- Maintenance checks: `./book/binder maintain repo-health`
+- Validate content: `./book/binder check all` or `./book/binder check refs`
+- Maintenance: `./book/binder fix repo-health`
 
 ## Parallel builds (Test All Chapters)
 

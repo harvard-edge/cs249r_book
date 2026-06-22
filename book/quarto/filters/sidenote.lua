@@ -42,6 +42,29 @@ function Note(note)
       table.insert(out, pandoc.RawInline('latex', '\\sidenote{'))
     end
 
+    -- Color the first Strong (bold headword) in accentcolor so readers can
+    -- scan the margin for term names without reading every definition.
+    local colored_first_strong = false
+    for _, block in ipairs(note.content) do
+      if block.t == "Para" or block.t == "Plain" then
+        if not colored_first_strong then
+          for i, inline in ipairs(block.content) do
+            if inline.t == "Strong" and not colored_first_strong then
+              -- Wrap the Strong's content in \textcolor{accentcolor}{...}
+              local wrapped = pandoc.List({})
+              wrapped:insert(pandoc.RawInline('latex', '\\textcolor{accentcolor}{'))
+              wrapped:insert(inline)
+              wrapped:insert(pandoc.RawInline('latex', '}'))
+              -- Replace the Strong node with the wrapped inlines
+              block.content[i] = pandoc.Span(wrapped)
+              colored_first_strong = true
+              break
+            end
+          end
+        end
+      end
+    end
+
     -- Add the note content directly as inlines (not converted to latex yet)
     -- This allows citations to be processed by citeproc later
     for _, block in ipairs(note.content) do

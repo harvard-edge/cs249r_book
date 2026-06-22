@@ -57,8 +57,11 @@ export function simulate(config: SimConfig): SimResult {
   const numNodes = Math.ceil(numGpus / gpusPerNode);
   const tpCrossesNodes = tpDegree > gpusPerNode;
 
-  // Memory: model params + optimizer states (14 bytes/param for mixed-precision Adam)
-  // + activation memory (approximate: selective recompute formula 10 * L * B * S * H)
+  // Memory: model weights (precision bytes/param) + optimizer states
+  // (12 bytes/param for mixed-precision Adam: fp32 master copy + momentum +
+  // variance) + activation memory (approximate selective-recompute formula
+  // 10 * L * B * S * H). The inline comment previously said "14 bytes/param,"
+  // which matched neither the code nor the standard Adam breakdown.
   const modelMemoryGb = FORMULAS.model_memory_gb(model.params_b, precision);
   const optimizerMemoryGb = FORMULAS.model_memory_gb(model.params_b, 12); // 12 bytes for Adam states (fp32 master + momentum + variance)
   const activationMemoryGb = (10 * model.layers * (batchSize / dpDegree) * seqLen * model.hidden_dim) / (tpDegree * 1e9);
@@ -73,10 +76,16 @@ export function simulate(config: SimConfig): SimResult {
 
   // Communication — AllReduce for data parallelism
   const gradientSizeGb = FORMULAS.model_memory_gb(model.params_b, precision) / tpDegree;
-  // Hierarchical AllReduce: bottleneck is inter-node link, but intra-node reduce
-  // shrinks the message by gpusPerNode before crossing the network
+  // Hierarchical AllReduce: bottleneck is the inter-node link, but an intra-node
+  // reduce shrinks the message by gpusPerNode before it crosses the network —
+  // modeled here as a bandwidth multiplier. When TP > 1 the intra-node links are
+  // already saturated by tensor-parallel traffic, so no DP reduction benefit is
+  // available and the multiplier collapses to 1. (Equivalent to the prior
+  // `Math.min(gpusPerNode, tpDegree>1?1:gpusPerNode)`, which always reduced to
+  // this ternary since gpusPerNode >= 1.)
+  const dpReductionFactor = tpDegree > 1 ? 1 : gpusPerNode;
   const effectiveBandwidth = numNodes > 1
-    ? interConnect.bandwidth_gbs * Math.min(gpusPerNode, tpDegree > 1 ? 1 : gpusPerNode)
+    ? interConnect.bandwidth_gbs * dpReductionFactor
     : intraConnect.bandwidth_gbs;
   // If TP crosses nodes, add TP communication overhead via inter-node link
   const tpCommPenalty = tpCrossesNodes ? 1.5 : 1.0;
@@ -95,8 +104,13 @@ export function simulate(config: SimConfig): SimResult {
   // Total iteration time (with partial compute-comm overlap: ~30% overlap for well-optimized systems)
   const overlapFactor = 0.7; // 30% of AllReduce overlaps with backward compute
   const bubbleOverhead = computeTimeMs * (pipelineBubblePct / 100);
-  const iterTimeMs = computeTimeMs + allreduceTimeMs * overlapFactor + bubbleOverhead;
-  const commOverheadPct = iterTimeMs > 0 ? (allreduceTimeMs / iterTimeMs) * 100 : 0;
+  const overlappedCommMs = allreduceTimeMs * overlapFactor;
+  const iterTimeMs = computeTimeMs + overlappedCommMs + bubbleOverhead;
+  // Communication overhead as a fraction of iteration time. Use the NON-overlapped
+  // contribution (overlappedCommMs) that actually lands in iterTimeMs — the prior
+  // code divided the RAW allreduce time by an iterTime that only counted 70% of
+  // it, so the percentage referenced time the comm didn't fully occupy.
+  const commOverheadPct = iterTimeMs > 0 ? (overlappedCommMs / iterTimeMs) * 100 : 0;
 
   // Throughput
   const tokensPerSec = tokensPerIter / (iterTimeMs / 1000);

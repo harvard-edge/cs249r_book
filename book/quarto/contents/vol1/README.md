@@ -119,7 +119,7 @@ Volume I content is **complete and undergoing final editorial polish.** It is re
     <tr>
       <td>10</td>
       <td><b>Model Compression</b></td>
-      <td><code>optimizations/</code></td>
+      <td><code>model_compression/</code></td>
       <td>How do you shrink models without losing accuracy?</td>
     </tr>
     <tr>

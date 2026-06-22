@@ -1,0 +1,812 @@
+chapter: vol1/data_engineering
+source_file: book/quarto/contents/vol1/data_engineering/data_engineering.qmd
+status: migrated
+python_cells:
+- label: data-eng-setup
+  start_line: 49
+  end_line: 162
+  lego_class: DataEngineeringSetup
+  purpose: Shared data-engineering chapter setup for energy movement, data-prep effort,
+    KWS objectives, labeling prices, storage prices, and retrieval ratios.
+  constants:
+  - name: compute_and_dram_energy
+    value: ENERGY_FLOP_FP32_PJ, ENERGY_DRAM_ACCESS_PJ
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: The energy table remains source-of-truth for FP32 MAC and DRAM
+      access values.
+  - name: local_ssd_and_network_energy_per_bit
+    value: local SSD 10000 pJ/bit; datacenter network 50000 pJ/bit
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: Add mlsysim.core.units.ENERGY_LOCAL_SSD_PJ_PER_BIT and ENERGY_DATACENTER_NETWORK_PJ_PER_BIT.
+    preserves_rendered_value: true
+    narrative_check: Adding same-valued constants preserves the relative-cost multipliers
+      and the prose about movement dominating compute.
+  - name: data_prep_effort_range
+    value: 60-80 percent
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose ties the range to an earlier figure, not to a durable
+      MLSysIM system constant.
+  - name: kws_case_study_objectives
+    value: 98 percent accuracy; 200 ms latency; 64 KB model; 1 false wake/month; $150K
+      budget; 6 months
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: Add KWS case-study registry anchors if reused across chapters.
+    preserves_rendered_value: true
+    narrative_check: Single-sourcing preserves the KWS design-space prose while avoiding
+      drift across later KWS cells.
+  - name: labeling_and_storage_prices
+    value: LABELING_COST_*, STORAGE_COST_S3_STD, RETRIEVAL_COST_GLACIER
+    kind: empirical_value
+    current_source: mlsysim
+    should_change: false
+    target_source: Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate, Infrastructure.Pricing.Storage.GlacierRetrievalPerGB.rate
+    preserves_rendered_value: true
+    narrative_check: The cost table is already sourced from 2024 MLSysIM pricing baselines.
+  - name: glacier_expedited_retrieval_multiplier
+    value: '3'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The footnote frames this as a paid-tier comparison, not a hardware
+      invariant.
+- label: data-gravity-calc
+  start_line: 192
+  end_line: 267
+  lego_class: DataGravity
+  purpose: Quantifies time, egress cost, and TPU-hour equivalence for moving a 1 PB
+    dataset.
+  constants:
+  - name: dataset_size_pb
+    value: '1'
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly defines the 1 PB transfer scenario.
+  - name: network_and_cloud_costs
+    value: NETWORK_100G_BW, CLOUD_EGRESS_PER_GB, TPU_V4_PER_HOUR
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: Infrastructure.Pricing.Cloud.EgressPerGB.rate, Infrastructure.Pricing.Cloud.TpuV4PerHour.rate
+    preserves_rendered_value: true
+    narrative_check: The 100 Gbps, egress, and TPU cost values are already source-of-truth.
+  - name: ten_gigabit_reference_link
+    value: 10 Gbps
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Replacing the local 10/BITS_PER_BYTE expression with NETWORK_10G_BW
+      preserves the rendered 10 Gbps transfer-days result.
+  - name: time_and_size_conversions
+    value: MILLION, SEC_PER_HOUR, SEC_PER_DAY, BITS_PER_BYTE
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Unit conversions are already MLSysIM-sourced.
+- label: feeding-tax-calc
+  start_line: 280
+  end_line: 341
+  lego_class: FeedingProblem
+  purpose: Computes A100 ResNet-50 image throughput, required input bandwidth, and
+    feeding tax from a baseline cloud disk.
+  constants:
+  - name: A100_and_ResNet50_specs
+    value: A100_FLOPS_FP16_TENSOR, RESNET50_FLOPs, IMAGE_DIM_RESNET, IMAGE_CHANNELS_RGB,
+      BYTES_FP32
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.Hardware.Cloud.A100.compute.peak_flops
+    preserves_rendered_value: true
+    narrative_check: Accelerator, model, image, and precision values are already source-of-truth.
+  - name: standard_cloud_disk_bandwidth
+    value: 250 MB/s
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: Add mlsysim.core.units.CLOUD_DISK_BASELINE_BW or a storage-tier
+      registry entry for gp3-like baseline volumes.
+    preserves_rendered_value: true
+    narrative_check: Same-valued sourcing preserves the feeding-tax percentage and
+      the claim that a standard cloud volume starves the GPU.
+- label: false-positive-calc
+  start_line: 840
+  end_line: 896
+  lego_class: FalsePositiveTarget
+  purpose: Converts a one-false-wake-per-month KWS SLA into monthly windows and required
+    nonkeyword rejection rate.
+  constants:
+  - name: calendar_conversions
+    value: SECONDS_PER_MINUTE, MINUTES_PER_HOUR, HOURS_PER_DAY, DAYS_PER_MONTH, SEC_PER_HOUR
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: Use imported SECONDS_PER_MINUTE, MINUTES_PER_HOUR, and HOURS_PER_DAY
+      for display strings instead of MarkdownStr literals.
+    preserves_rendered_value: true
+    narrative_check: The rendered 60 x 60 x 24 x 30 expression is unchanged and becomes
+      fully source-of-truth.
+  - name: always_on_detection_sla
+    value: 24 h/day; 1 s windows; 1 false wake/month
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are the callout's KWS operating assumptions.
+- label: budget-allocation-calc
+  start_line: 944
+  end_line: 999
+  lego_class: BudgetAllocation
+  purpose: Allocates a KWS data-engineering budget across labeling, storage, and governance
+    to compute affordable labels.
+  constants:
+  - name: total_kws_budget
+    value: $150000
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: DataEngineeringSetup.kws_budget or proposed KWS case-study registry anchors (TODO).
+    preserves_rendered_value: true
+    narrative_check: Reuse preserves the $150K budget shown in the preceding scenario.
+  - name: budget_allocation_percentages
+    value: 60 percent labeling; 25 percent storage; 15 percent governance
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose introduces these as a concrete allocation, not a system
+      invariant.
+  - name: label_cost_and_review_overhead
+    value: $0.10/label; 20 percent review overhead
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: This is a worked budget assumption distinct from the general
+      labeling-cost table.
+- label: data-engineering-time-constants-calc
+  start_line: 1102
+  end_line: 1138
+  lego_class: DataEngineeringTimeConstants
+  purpose: Computes the order-of-magnitude span between feature lookup and labeling
+    durations.
+  constants:
+  - name: time_constants_table_bounds
+    value: 1 ms lookup; 4 weeks labeling
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Values come from the adjacent characteristic-duration table.
+  - name: seconds_per_week
+    value: 7 * 24 * 60 * 60
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: Derive from mlsysim.core.units.DAYS_PER_WEEK if added, or from
+      HOURS_PER_DAY and SEC_PER_HOUR.
+    preserves_rendered_value: true
+    narrative_check: Using MLSysIM time conversions preserves the 9-order span.
+- label: labeling-compute-ratio-calc
+  start_line: 1152
+  end_line: 1205
+  lego_class: LabelingComputeRatio
+  purpose: Compares a $100K labeling budget with one 8x A100 ResNet-50 training run.
+  constants:
+  - name: cloud_gpu_hour_rate_high
+    value: CLOUD_GPU_TRAINING_PER_HOUR
+    kind: empirical_value
+    current_source: mlsysim
+    should_change: false
+    target_source: Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
+    preserves_rendered_value: true
+    narrative_check: The high end of the cloud GPU cost range is already source-of-truth.
+  - name: labeling_budget_and_training_configuration
+    value: $100K labels; 8 A100s; 4-6 hours; $2/hour low rate
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These define the reference comparison and remain internally consistent.
+- label: kws-acquisition-scale-calc
+  start_line: 1827
+  end_line: 1864
+  lego_class: KWSAcquisitionScale
+  purpose: Formats MSWC corpus scale and language count for KWS acquisition prose.
+  constants:
+  - name: mswc_corpus_scale
+    value: 23.4M examples; 50 languages
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: Add mlsysim.core.units.KWS_MSWC_EXAMPLES and KWS_MSWC_LANGUAGES,
+      or a KWS dataset registry entry.
+    preserves_rendered_value: true
+    narrative_check: Single-sourcing preserves 23 million and 50 languages while avoiding
+      repeated local literals later in the chapter.
+  - name: display_scaling
+    value: MILLION
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Display scaling is already sourced.
+- label: ks-test-calc
+  start_line: 2000
+  end_line: 2042
+  lego_class: KSTest
+  purpose: Computes the two-sample Kolmogorov-Smirnov critical value for n=1000 and
+    alpha=0.05.
+  constants:
+  - name: ks_alpha_005_coefficient
+    value: KS_TEST_COEFFICIENT
+    kind: derived_quantity
+    current_source: mlsysim
+    should_change: false
+    target_source: Ops.Monitoring.KsTestCoefficient
+    preserves_rendered_value: true
+    narrative_check: The 1.36 coefficient in the displayed formula is already MLSysIM-sourced.
+  - name: sample_sizes
+    value: 1000 training; 1000 serving
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout explicitly sets both samples to 1000 observations.
+- label: cohens-kappa-chance-calc
+  start_line: 2176
+  end_line: 2208
+  lego_class: CohensKappaChance
+  purpose: Computes chance agreement for a 90/10 binary label marginal in Cohen's
+    kappa prose.
+  constants:
+  - name: binary_label_marginal
+    value: 90 percent majority; 10 percent minority
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The footnote uses the 90/10 split as an illustrative class-imbalance
+      example.
+  - name: chance_agreement_formula
+    value: p_majority^2 + p_minority^2
+    kind: derived_quantity
+    current_source: derived
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Formula matches the kappa definition in the prose.
+- label: dataloader-stats-calc
+  start_line: 2266
+  end_line: 2304
+  lego_class: DataloaderStats
+  purpose: Sets dataloader worker throughput, GPU consumption capacity, and plot limits
+    for the choke-point figure.
+  constants:
+  - name: dataloader_throughput_scenario
+    value: 3000 img/s GPU limit; 375 img/s per worker; 3500 img/s CPU cap; 16 workers
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose and figure caption both describe these as representative/illustrative
+      throughput levels.
+- label: null
+  start_line: 2312
+  end_line: 2367
+  lego_class: null
+  purpose: Draws the dataloader choke-point figure using values defined by DataloaderStats.
+  constants:
+  - name: dataloader_plot_values
+    value: DataloaderStats.max_workers, worker_img_sec, cpu_throughput_cap_img_sec,
+      gpu_limit_img_sec
+    kind: scenario_assumption
+    current_source: prior_cell
+    should_change: false
+    target_source: DataloaderStats
+    preserves_rendered_value: true
+    narrative_check: The figure consumes prior-cell scenario values and has no independent
+      source-of-truth constants.
+  - name: plot_annotation_positions
+    value: Starvation at (4.5,1500); Saturated at (10,3100)
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are visual placement parameters only.
+- label: realtime-cost-calc
+  start_line: 2389
+  end_line: 2449
+  lego_class: RealtimeCost
+  purpose: Compares always-on streaming cost with hourly batch processing for a 1M
+    events/s stream.
+  constants:
+  - name: streaming_workload
+    value: 1M events/s; 1 KB/event; 100 cores; 24 hours; $0.05/core-hour
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The callout defines these as the real-time cost scenario.
+  - name: batch_processing_workload
+    value: 200 cores for 10 minutes/hour over 24 hours
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The batch comparator is a local worked example.
+  - name: time_and_data_conversions
+    value: KB, GB, TB, MILLION, SEC_PER_HOUR
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: Also use HOURS_PER_DAY and MINUTES_PER_HOUR for the 24-hour and
+      10-minute conversions.
+    preserves_rendered_value: true
+    narrative_check: Replacing remaining time literals with MLSysIM conversions preserves
+      the daily costs and 4x premium.
+- label: etl-elt-calc
+  start_line: 2708
+  end_line: 2792
+  lego_class: EtlEltCost
+  purpose: Computes monthly ETL and ELT storage/query/compute costs for a 10 TB/day
+    warehouse scenario.
+  constants:
+  - name: s3_storage_price
+    value: $23/TB/month
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Existing MLSysIM storage cost matches the rendered $23/TB/month
+      and preserves ETL/ELT totals.
+  - name: retention_period
+    value: 30 days
+    kind: unit_conversion
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Using DAYS_PER_MONTH keeps the monthly storage arithmetic unchanged.
+  - name: etl_elt_scenario_values
+    value: 10 TB/day; $5/TB Spark; 3 models; $5/query; 3 datasets; 2 TB each; 4 h
+      vs 30 min schema change
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These define the transformation-placement example and should
+      remain local unless reused elsewhere.
+- label: kws-quality-thresholds-calc
+  start_line: 2904
+  end_line: 2943
+  lego_class: KWSQualityThresholds
+  purpose: Formats KWS audio SNR and wake-word duration filtering thresholds.
+  constants:
+  - name: kws_audio_quality_thresholds
+    value: 20 dB SNR; 500-800 ms duration
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: Add KWS case-study registry anchors (TODO) such as KWS_AUDIO_SNR_THRESHOLD_DB,
+      KWS_SAMPLE_DURATION_MS_LOW, and KWS_SAMPLE_DURATION_MS_HIGH if the same thresholds
+      remain reused.
+    preserves_rendered_value: true
+    narrative_check: Single-sourcing preserves filtering prose and the automated-labeling
+      reuse of the same duration bounds.
+- label: kws-scalability-targets-calc
+  start_line: 3023
+  end_line: 3064
+  lego_class: KWSScalabilityTargets
+  purpose: Formats KWS corpus scale, edge preprocessing-state memory, and model-size
+    memory limits for scalability prose.
+  constants:
+  - name: mswc_corpus_scale_duplicate
+    value: 23.4M examples
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: Proposed KWS_MSWC_EXAMPLES or KWS dataset registry entry.
+    preserves_rendered_value: true
+    narrative_check: Reusing the same source as KWSAcquisitionScale preserves the
+      23 million example claim.
+  - name: edge_preprocessing_memory_budget
+    value: 16 KB
+    kind: architecture_constant
+    current_source: local_literal
+    should_change: false
+    target_source: Proposed KWS case-study default KWS_PREPROCESSING_STATE_LIMIT_KB.
+    preserves_rendered_value: true
+    narrative_check: This is a KWS deployment budget repeatedly compared with the
+      64 KB model limit; a case-study default would prevent drift.
+  - name: kws_model_size_limit
+    value: DataEngineeringSetup.kws_memory_limit_design_kb
+    kind: scenario_assumption
+    current_source: prior_cell
+    should_change: false
+    target_source: DataEngineeringSetup or proposed KWS case-study registry anchors (TODO).
+    preserves_rendered_value: true
+    narrative_check: The model-size limit is already reused from the setup cell.
+- label: segmentation-label-scale-calc
+  start_line: 3102
+  end_line: 3146
+  lego_class: SegmentationLabelScale
+  purpose: Compares scalar entries in a 1080p segmentation mask against ten bounding
+    boxes.
+  constants:
+  - name: hd_image_dimensions
+    value: 1920 x 1080
+    kind: system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Existing MLSysIM video constants preserve the 2.1M-pixel label
+      count.
+  - name: bounding_box_shape
+    value: 10 boxes; 4 coordinates/box
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Ten boxes is an example; four coordinates follows the local bounding-box
+      representation described in prose.
+- label: active-learning-budget-calc
+  start_line: 3287
+  end_line: 3355
+  lego_class: ActiveLearningBudget
+  purpose: Normalizes active-learning label and inference costs under a fixed $50K
+    budget for a 10M-image candidate pool.
+  constants:
+  - name: active_learning_budget_scenario
+    value: 10M images; $50K budget; $0.50/label; $0.01/image inference; 1M random
+      labels; 100K-200K active labels; 10 percent compute allocation
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These values define the callout's budget model and should not
+      be promoted as durable MLSysIM constants.
+  - name: display_scaling
+    value: THOUSAND, MILLION
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Display scaling is already source-of-truth.
+- label: kws-automated-labeling-scale-calc
+  start_line: 3384
+  end_line: 3441
+  lego_class: KWSAutomatedLabelingScale
+  purpose: Converts MSWC corpus scale and manual label time into person-hours and
+    person-years.
+  constants:
+  - name: mswc_corpus_scale_duplicate
+    value: 23.4M examples; 50 languages
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: Proposed KWS_MSWC_EXAMPLES and KWS_MSWC_LANGUAGES or KWS dataset
+      registry entry.
+    preserves_rendered_value: true
+    narrative_check: Reusing the acquisition-scale source preserves the automated-labeling
+      prose and figure caption.
+  - name: manual_labeling_rate
+    value: 10 seconds/example; 2000 hours/person-year
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These are workload assumptions used to show manual annotation
+      infeasibility.
+  - name: kws_accuracy_and_duration_duplicate
+    value: 98 percent accuracy; 500-800 ms duration
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: Proposed KWS case-study registry anchors (TODO) from data-eng-setup and kws-quality-thresholds-calc.
+    preserves_rendered_value: true
+    narrative_check: Reuse keeps the KWS case-study target and duration bounds consistent.
+  - name: time_conversion
+    value: SEC_PER_HOUR
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Seconds-to-hours conversion is already sourced.
+- label: kws-storage-economics-calc
+  start_line: 3518
+  end_line: 3590
+  lego_class: KWSRawAudioStorage, KWSStorageEconomics
+  purpose: Computes rounded KWS raw-audio size, monthly storage costs, and NVMe/object-storage
+    loading speedup.
+  constants:
+  - name: kws_raw_audio_encoding
+    value: 23M samples; 1 s/sample; 16 kHz; 2 bytes/sample
+    kind: system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: Datasets.MSWC.training_examples, sample_duration, sample_rate,
+      and sample_width.
+    preserves_rendered_value: true
+    narrative_check: MSWC dataset metadata now owns the audio encoding; rounding
+      the example count in the cell preserves the 736 GB rendered KWS raw-audio size.
+  - name: storage_costs
+    value: STORAGE_COST_S3_STD, STORAGE_COST_NVME_LOW, STORAGE_COST_NVME_HIGH
+    kind: empirical_value
+    current_source: mlsysim
+    should_change: false
+    target_source: Infrastructure.Pricing.Storage.S3StandardPerTbMonth.rate, Infrastructure.Pricing.Storage.NvmeLowPerTbMonth.rate,
+      Infrastructure.Pricing.Storage.NvmeHighPerTbMonth.rate
+    preserves_rendered_value: true
+    narrative_check: Monthly object and NVMe storage costs are already sourced.
+  - name: effective_storage_bandwidths
+    value: NVMe 5 GB/s; object storage 0.1 GB/s
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: Add storage-tier defaults such as STORAGE_BW_NVME_EFFECTIVE_LOW
+      and STORAGE_BW_OBJECT_SINGLE_CONNECTION_LOW.
+    preserves_rendered_value: true
+    narrative_check: Do not replace with existing NVME_SEQUENTIAL_BW=7 GB/s unless
+      the prose/table also changes; same-valued effective bandwidth constants preserve
+      the 50x speedup.
+- label: storage-loading-calc
+  start_line: 3606
+  end_line: 3647
+  lego_class: StorageLoading
+  purpose: Computes full KWS dataset load time from NVMe versus object storage.
+  constants:
+  - name: kws_dataset_size
+    value: KWSStorageEconomics.dataset_size_gb
+    kind: derived_quantity
+    current_source: prior_cell
+    should_change: false
+    target_source: KWSStorageEconomics
+    preserves_rendered_value: true
+    narrative_check: Load-time math correctly reuses the prior KWS size.
+  - name: effective_storage_bandwidths_duplicate
+    value: NVMe 5 GB/s; object storage 0.1 GB/s
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: Proposed storage-tier effective bandwidth constants or reuse KWSStorageEconomics.nvme_bw_gbs/obj_bw_gbs.
+    preserves_rendered_value: true
+    narrative_check: Single-sourcing preserves the 147 s, 7360 s, and 50x rendered
+      values.
+- label: model-storage-scale-calc
+  start_line: 3672
+  end_line: 3722
+  lego_class: ModelStorageScale
+  purpose: Computes GPT-3 FP32/FP16 storage footprint and AlexNet-to-GPT-3 parameter
+    growth.
+  constants:
+  - name: model_architecture_specs
+    value: Models.Language.GPT3, Models.Vision.AlexNet
+    kind: model_architecture_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.Models
+    preserves_rendered_value: true
+    narrative_check: Model parameter counts and derived storage values are already
+      source-of-truth.
+  - name: precision_and_display_units
+    value: BYTES_FP32, BYTES_FP16, Bparam, Mparam, GB, BILLION, MILLION
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Precision byte widths and unit scaling are already sourced.
+- label: storage-bandwidth-calc
+  start_line: 3734
+  end_line: 3799
+  lego_class: StorageBandwidth
+  purpose: Derives storage bandwidth needed to saturate an A100 training ResNet-50
+    and compares SATA/object-storage limits.
+  constants:
+  - name: A100_and_ResNet50_specs
+    value: Hardware.Cloud.A100, Models.Vision.ResNet50
+    kind: hardware_system_constant
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.Hardware and mlsysim.Models
+    preserves_rendered_value: true
+    narrative_check: Hardware peak and ResNet FLOPs already come from MLSysIM.
+  - name: training_flop_multiplier
+    value: 3x inference FLOPs
+    kind: derived_quantity
+    current_source: local_literal
+    should_change: false
+    target_source: mlsysim.physics training FLOP helper if generalized.
+    preserves_rendered_value: true
+    narrative_check: The prose explicitly interprets the factor as forward plus backward
+      work.
+  - name: image_file_size
+    value: 150 KB
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: Proposed ML_IMAGE_COMPRESSED_SIZE_KB_EXAMPLE if reused with lifecycle-storage-requirements-calc.
+    preserves_rendered_value: true
+    narrative_check: Single-sourcing the example size preserves the required bandwidth
+      and later lifecycle prose.
+  - name: storage_bandwidth_references
+    value: SATA 500 MB/s; S3 100 MB/s
+    kind: hardware_system_constant
+    current_source: local_literal
+    should_change: false
+    target_source: Add STORAGE_BW_SATA_SSD and STORAGE_BW_OBJECT_SINGLE_CONNECTION_LOW.
+    preserves_rendered_value: true
+    narrative_check: Same-valued storage-tier constants preserve 13 percent utilization
+      and worker-count results.
+- label: format-efficiency-calc
+  start_line: 3845
+  end_line: 3890
+  lego_class: FormatEfficiency
+  purpose: Models I/O waste for scanning 20 needed columns out of a 100-column dataset
+    with CSV versus Parquet.
+  constants:
+  - name: column_projection_scenario
+    value: 20 needed columns out of 100; Parquet eta 1.0
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: This is the callout's fraud-model example, not a durable system
+      constant.
+  - name: format_efficiency_formula
+    value: eta_csv = needed_cols / total_cols; throughput_ratio = eta_parquet / eta_csv
+    kind: derived_quantity
+    current_source: derived
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Formula aligns with the effective-bandwidth equation in prose.
+- label: compression-trade-off-calc
+  start_line: 3914
+  end_line: 3972
+  lego_class: CompressionTradeoff
+  purpose: Compares Gzip and Snappy decompression time over a 100 GB dataset and 50
+    epochs.
+  constants:
+  - name: decompression_throughputs
+    value: Snappy 500 MB/s; Gzip 120 MB/s
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: The prose presents these as representative compression algorithm
+      speeds.
+  - name: compression_training_scenario
+    value: 100 GB dataset; 50 epochs
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: Dataset size and epoch count define the local worked example.
+  - name: data_units
+    value: GB, MB
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Unit conversions are already sourced.
+- label: lifecycle-storage-requirements-calc
+  start_line: 3984
+  end_line: 4043
+  lego_class: LifecycleStorageRequirements
+  purpose: Contrasts training sequential bandwidth, feature-vector storage reduction,
+    and online serving random-read fanout.
+  constants:
+  - name: training_storage_scenario
+    value: 40000 img/s; 150 KB/image
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: Reuse proposed ML_IMAGE_COMPRESSED_SIZE_KB_EXAMPLE for image_size_kb;
+      keep throughput as scenario unless a benchmark default is added.
+    preserves_rendered_value: true
+    narrative_check: Reusing the image-size default preserves the 6 GB/s rendered
+      training bandwidth.
+  - name: feature_serving_scenario
+    value: 5 KB feature vector; 10000 RPS; 10 feature reads/request
+    kind: scenario_assumption
+    current_source: local_literal
+    should_change: false
+    target_source: null
+    preserves_rendered_value: true
+    narrative_check: These define a recommendation-serving example, not a system constant.
+  - name: data_units
+    value: KB, GB
+    kind: unit_conversion
+    current_source: mlsysim
+    should_change: false
+    target_source: mlsysim.core.units (physics/units) or mlsysim.physics
+    preserves_rendered_value: true
+    narrative_check: Unit conversions are already sourced.
+- label: data-engineering-summary-recap-calc
+  start_line: 4469
+  end_line: 4522
+  lego_class: DataEngineeringSummaryRecap
+  purpose: Recomputes summary labeling/compute ratios and KWS dataset size recap.
+  constants:
+  - name: labeling_compute_ratio_duplicate
+    value: $100K labels; 8 A100s; 4-6 hours; $2-4/hour
+    kind: scenario_assumption
+    current_source: local_literal_and_mlsysim
+    should_change: false
+    target_source: Reuse LabelingComputeRatio outputs or factor the shared calculation
+      into a single earlier class.
+    preserves_rendered_value: true
+    narrative_check: Reusing the prior class preserves the summary ratio range and
+      avoids duplicate local assumptions.
+  - name: mswc_corpus_scale_duplicate
+    value: 23.4M examples
+    kind: empirical_value
+    current_source: local_literal
+    should_change: false
+    target_source: Proposed KWS_MSWC_EXAMPLES or KWS dataset registry entry.
+    preserves_rendered_value: true
+    narrative_check: Reusing the KWS scale source preserves the rounded 23 million
+      summary claim.
+  - name: kws_dataset_size_gb
+    value: KWSStorageEconomics.dataset_size_gb
+    kind: derived_quantity
+    current_source: prior_cell
+    should_change: false
+    target_source: KWSStorageEconomics
+    preserves_rendered_value: true
+    narrative_check: Summary storage size is already reused from the storage economics
+      calculation.
+  - name: cloud_gpu_hour_rate_high
+    value: CLOUD_GPU_TRAINING_PER_HOUR
+    kind: empirical_value
+    current_source: mlsysim
+    should_change: false
+    target_source: Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate
+    preserves_rendered_value: true
+    narrative_check: The high end of the GPU-hour range remains source-of-truth.

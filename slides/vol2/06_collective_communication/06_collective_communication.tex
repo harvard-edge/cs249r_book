@@ -67,6 +67,7 @@
 % =============================================================================
 \begin{frame}{Learning Objectives}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Ch5 established the physical network --- NVLink, InfiniBand, fat-tree topologies. This chapter asks: what traffic patterns actually flow over those wires during training?
 
@@ -98,6 +99,7 @@ IF SHORT: Read only objectives 1, 2, and 6 aloud; let students read the rest.
 
 \begin{frame}{Visual Language}
 \note{
+[0.5 min]
 % -- NARRATE: What to SAY while showing this slide
 Point to each card: ``Blue is compute --- GPU ops, forward and backward passes. Green is data flow and healthy paths. Orange is routing and scheduling. Red is error, cost, or bottleneck.'' These colors are consistent across every diagram in this course.
 
@@ -143,6 +145,7 @@ Throughout this course, colors carry meaning:
 
 \begin{frame}{The Communication Bottleneck}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Ch5 showed that InfiniBand NDR delivers 50 GB/s per port. This slide reveals what happens when you actually need to move hundreds of gigabytes of gradients across that fabric.
 
@@ -187,6 +190,7 @@ IF AHEAD: Ask ``At what GPU count does communication exceed 50\% of the step?''
 
 \begin{frame}{The Compute-Communication Timeline}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The previous slide stated 40--70\% overhead abstractly. This diagram shows the concrete breakdown as GPU count grows from 8 to 4,096.
 
@@ -214,6 +218,7 @@ IF SHORT: Point to the 4,096-GPU bar and state the 80\% figure; skip the interme
 
 \begin{frame}{The Physics of Data Movement}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The timeline showed communication growing with scale. This slide explains the three physical constraints that make communication fundamentally expensive, regardless of the algorithm.
 
@@ -254,6 +259,7 @@ IF AHEAD: Discuss the energy implications at 10K GPUs where communication power 
 % --- ACTIVE LEARNING 1: Predict ---
 \begin{frame}{Predict: What Determines Communication Cost?}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Students just learned about the three physics constraints. This prediction exercise primes them for the alpha-beta model by asking them to reason about message size before seeing the formula.
 
@@ -294,6 +300,7 @@ $T(n) = \underbrace{\alpha}_{\text{Startup latency}} + \underbrace{\dfrac{n}{\be
 
 \begin{frame}{Two Regimes, One Crossover}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The prediction exercise showed that small and large messages behave very differently. The alpha-beta model formalizes this into two regimes separated by the critical message size n*.
 
@@ -338,6 +345,7 @@ IF AHEAD: Ask students to calculate n* for PCIe Gen5 (alpha=5us, beta=64 GB/s) a
 
 \begin{frame}{Your Turn: Critical Message Size}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 Students just learned the alpha-beta model conceptually. This exercise makes them apply it quantitatively for the first time.
 
@@ -395,6 +403,7 @@ IF SHORT: Show the solution immediately (skip the 90-second work period) and nar
 
 \begin{frame}{The Six Core Primitives}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The alpha-beta model tells us how expensive a single message is. But distributed training does not send single messages --- it uses collective operations involving all GPUs simultaneously. This slide catalogs the six primitives.
 
@@ -422,6 +431,7 @@ IF AHEAD: Ask students to sketch how FSDP uses ReduceScatter during backward and
 
 \begin{frame}{Matching Primitives to Parallelism}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The six primitives are tools. This slide is the ``travel manifest'' that maps each parallelism strategy to its required primitive.
 
@@ -464,8 +474,89 @@ IF SHORT: Focus on data parallel (AllReduce) and MoE (AllToAll) rows; skip the m
 \section{AllReduce Algorithms}
 % =============================================================================
 
+% --- War Story: Horovod / Parameter-Server Bottleneck ---
+\begin{frame}{War Story: Parameter Server Bottleneck (1/2)}
+\note{
+[1 min]
+% -- LINK: What prior concept connects to this slide
+Students saw that AllReduce is the workhorse primitive. This slide explains WHY the field adopted Ring AllReduce --- what failed before it, and what real production failure motivated the switch.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through Context and Failure: ``Uber's Michelangelo platform in 2017 ran large TensorFlow jobs using a parameter-server pattern --- all N workers funnel gradients through a central aggregator. That central NIC saturates as N grows --- per-step traffic scales as O(N times M), so doubling the cluster doubled the bottleneck. Sharding the server to K shards still scales linearly per shard.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``Why did sharding the parameter server help but not fully solve the problem?'' Expected answer: each shard still scales as O(N times M/K) --- linear in cluster size. Only Ring achieves O(1) per-node traffic.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume the failure was about hardware. The deeper issue is algorithmic: any star topology concentrates traffic linearly. Hardware improvements cannot overcome this.
+
+% -- FLEX: [CORE] Part 1 of 2 --- do not skip.
+IF SHORT: State ``star topology scales as O(N), Ring scales as O(1) per node'' and jump to Part 2.
+}
+
+\footnotesize
+\begin{mlsyscard}{errorstroke}
+\textbf{Context:} Uber's TensorFlow training (2017). Parameter-server pattern: all $N$ workers send gradients to a central aggregator. Per-step traffic $\propto O(N \times M)$.
+
+\vspace{0.15cm}
+\textbf{Failure:} Central NIC saturates as $N$ grows. Sharding to $K$ servers still scales linearly per shard --- each shard carries $O(N \times M/K)$ traffic.
+
+\vspace{0.15cm}
+\textbf{Root cause:} Any star topology concentrates traffic. Hardware improvements cannot overcome an $O(N)$ algorithmic pattern at production scale.
+\end{mlsyscard}
+
+\vspace{0.1cm}
+\mlsysalert{Key:}{The bottleneck is \textbf{algorithmic}, not hardware. A faster NIC still receives $O(N \times M)$ bytes.}
+
+\end{frame}
+
+\begin{frame}{War Story: Parameter Server Bottleneck (2/2)}
+\note{
+[1 min]
+% -- LINK: What prior concept connects to this slide
+Part 1 showed the failure. This slide covers the fix: Horovod and Ring AllReduce, plus the systems lesson.
+
+% -- NARRATE: What to SAY while showing this slide
+``Alexander Sergeev and Mike Del Balso released Horovod, wrapping Baidu's ring-allreduce prototype behind a 4-line API. Bandwidth bottleneck shifted from a central server to O(1)-per-node peer-to-peer communication.'' Point to the card: ``Ring AllReduce achieves O(1) per-node bandwidth regardless of cluster size because each node sends and receives the same fixed-size chunk.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What made Horovod stick while previous ring-allreduce implementations did not?'' Expected: the 4-line API made adoption easy enough that teams actually used it correctly.
+
+% -- WARN: What students will get wrong on THIS topic
+Students think the algorithm alone solved the problem. The systems lesson is that adoption matters: a bandwidth-optimal primitive that nobody uses correctly still fails.
+
+% -- FLEX: [CORE] Completes the war-story arc.
+IF SHORT: State the one-sentence systems lesson and move on.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.55\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{Consequence:} Horovod (Sergeev \& Del Balso) wraps ring-allreduce behind a 4-line API. Bandwidth moves off the central server onto $O(1)$-per-node peer-to-peer communication.
+
+    \vspace{0.1cm}
+    \textbf{Systems lesson:} A collective algorithm is also a developer interface. Scaling improves when the primitive is both bandwidth-efficient \emph{and} easy enough that teams actually use it correctly.
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.42\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    \textbf{Why Ring wins:}\\[0.1cm]
+    \textbf{Parameter server:}\\
+    Traffic $\propto O(N \times M)$ at server\\[0.1cm]
+    \textbf{Ring AllReduce:}\\
+    Traffic $= 2\frac{N-1}{N}M$ per node\\
+    --- constant as $N \to \infty$\\[0.1cm]
+    \textcolor{datastroke}{\textbf{That is bandwidth optimality.}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
 \begin{frame}{Ring AllReduce: Bandwidth-Optimal}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The primitives table showed AllReduce is the workhorse for data-parallel and tensor-parallel training. This slide examines the simplest bandwidth-optimal implementation: the Ring algorithm.
 
@@ -511,21 +602,22 @@ IF AHEAD: Ask students to calculate the Ring latency overhead for N=10,000 at al
 
 \begin{frame}{Algorithm Comparison}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 Ring AllReduce is bandwidth-optimal but has O(N) latency. This slide introduces three alternatives that trade bandwidth efficiency for lower latency, and identifies when each wins.
 
 % -- NARRATE: What to SAY while showing this slide
-Walk through the table: ``Ring: O(N) latency, bandwidth-optimal --- best for large gradients on small-to-medium clusters. Tree: O(log N) latency, but log N bandwidth penalty --- best for small messages. Butterfly: best of both but requires N to be a power of 2. Double Binary Tree: NCCL's default, near-optimal in both.'' Then point to the crossover formula: ``M-crossover equals N times alpha times beta. Below this message size, Tree wins. Above it, Ring wins. For 64 GPUs on IB NDR, the crossover is about 6.4 MB.''
+Walk through the table: ``Ring: O(N) latency, bandwidth-optimal --- best for large gradients on small-to-medium clusters. Tree: O(log N) latency, but log N bandwidth penalty --- best for small messages. Butterfly: best of both but requires N to be a power of 2. Double Binary Tree: NCCL's default, near-optimal in both.'' Then point to the crossover formula: ``The derived crossover is M equals N alpha beta divided by log-base-2 of N. Engineers also use the simpler coarse approximation N alpha beta for a back-of-envelope upper bound. For 64 GPUs on IB NDR with the log-corrected form, the crossover is about 0.94 MB; the simpler upper bound gives 6.4 MB.''
 
 % -- ENGAGE: Specific question, prediction, or task for THIS slide
-Ask: ``For a 1 MB AllReduce across 64 GPUs, which algorithm wins?'' Expected answer: Tree, because 1 MB is below the 6.4 MB crossover.
+Ask: ``For a 1 MB AllReduce across 64 GPUs, which algorithm wins?'' Expected answer: depends on which formula you use --- the log-corrected form gives crossover $\approx$1 MB (borderline), while the coarse upper bound gives 6.4 MB (Tree wins). In either case the message is near the crossover.
 
 % -- WARN: What students will get wrong on THIS topic
-Students memorize ``Ring is optimal'' without qualifying it. Ring is bandwidth-optimal but latency-poor. The crossover formula quantifies exactly when Ring loses to Tree.
+Students memorize ``Ring is optimal'' without qualifying it. Ring is bandwidth-optimal but latency-poor. The crossover formula quantifies exactly when Ring loses to Tree. Also warn: the simplified $N\alpha\beta$ form is a coarse upper bound --- the chapter derives $N\alpha\beta/\log_2 N$ as the correct result.
 
 % -- FLEX: [CORE] This slide is essential --- do not skip.
 IF SHORT: Focus on Ring vs Tree only. Skip Butterfly and Double Tree rows.
-IF AHEAD: Ask students to calculate the crossover for 256 GPUs.
+IF AHEAD: Ask students to calculate the log-corrected crossover for 256 GPUs and compare with the coarse approximation.
 }
 
 \footnotesize
@@ -543,15 +635,17 @@ IF AHEAD: Ask students to calculate the crossover for 256 GPUs.
 
 \vspace{0.15cm}
 \begin{mlsyscard}{routingstroke}
-\textbf{Crossover formula:} $M_{\text{crossover}} \approx N \cdot \alpha \cdot \beta$\\[0.05cm]
+\textbf{Crossover formula (derived):} $M_{\text{crossover}} \approx \dfrac{N \cdot \alpha \cdot \beta}{\log_2 N}$\\[0.05cm]
 {\footnotesize Below $M_{\text{crossover}}$: Tree wins (latency dominates). Above: Ring wins (bandwidth dominates).\\
-For 64 GPUs on IB NDR: $M_{\text{crossover}} \approx 64 \times 2\ \mu\text{s} \times 50\ \text{GB/s} \approx 6.4$ MB.}
+Coarse upper-bound heuristic: $N \cdot \alpha \cdot \beta$ (drops the $\log_2 N$ divisor).\\
+For 64 GPUs on IB NDR (log-corrected): $M_{\text{crossover}} \approx \frac{64 \times 2\ \mu\text{s} \times 50\ \text{GB/s}}{\log_2 64} \approx 1.1$ MB.}
 \end{mlsyscard}
 
 \end{frame}
 
 \begin{frame}{Double Binary Tree: Best of Both Worlds}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The comparison table listed Double Binary Tree as ``near optimal in both'' latency and bandwidth. This slide explains how it achieves that.
 
@@ -591,6 +685,7 @@ IF SHORT: State ``NCCL default, O(log N) latency, near-optimal BW'' and move on.
 
 \begin{frame}{The LogP Model and the NCCL Reality Gap}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The alpha-beta model is a first approximation. Real NCCL performance differs because of software overhead, GPU kernel launch latency, and protocol negotiation.
 
@@ -610,8 +705,8 @@ IF SHORT: State ``NCCL alpha is 5--10x wire alpha'' and skip the LogP details.
 \footnotesize
 \textbf{LogP extends $\alpha$-$\beta$ with two additional terms:}
 
-\vspace{0.1cm}
-\renewcommand{\arraystretch}{1.1}
+\vspace{0.05cm}
+\renewcommand{\arraystretch}{1.05}
 \begin{tabular}{@{}llp{5.5cm}@{}}
   \toprule
   \textbf{Parameter} & \textbf{Meaning} & \textbf{Impact} \\
@@ -623,7 +718,7 @@ IF SHORT: State ``NCCL alpha is 5--10x wire alpha'' and skip the LogP details.
   \bottomrule
 \end{tabular}
 
-\vspace{0.15cm}
+\vspace{0.08cm}
 \begin{mlsyscard}{errorstroke}
 \textbf{The NCCL Reality Gap:}\\[0.05cm]
 {\scriptsize Wire $\alpha$: 1--2 $\mu$s. \quad NCCL $\alpha$: 10--20 $\mu$s (5--10$\times$ higher).\\
@@ -639,6 +734,7 @@ Small-message throughput: 30--50\% of theoretical peak.}
 
 \begin{frame}{The Bandwidth Hierarchy}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The algorithm comparison assumed a flat network where every link has the same bandwidth. Real clusters have a hierarchy: NVLink at 900 GB/s within a node, InfiniBand at 50 GB/s between nodes. Ignoring this hierarchy wastes NVLink bandwidth.
 
@@ -680,24 +776,25 @@ IF SHORT: State the three phases and the 1/G reduction; skip the detailed bandwi
 
 \begin{frame}{Llama 70B Communication Budget}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 The hierarchy concept was introduced abstractly. This worked example uses the Llama 70B model --- the most widely deployed open LLM --- to quantify real communication costs.
 
 % -- NARRATE: What to SAY while showing this slide
-``Llama 70B has 70 billion FP16 parameters: 140 GB of gradients per step. On 64 GPUs across 8 nodes with 8 GPUs each.'' Walk through the table: ``Flat Ring across 64 GPUs over IB: the bandwidth term alone is 2 times 140 GB / 50 GB/s = 5,600 ms. Hierarchical: Phase 1, intra-node ReduceScatter sends 122.5 GB over 900 GB/s NVLink: 136 ms. Phase 2, inter-node AllReduce sends only 17.5 GB (140/8) over IB: 700 ms. Phase 3, intra-node AllGather: another 136 ms. Total: 972 ms vs 5,600 ms --- a 5.8x speedup.''
+``Llama 70B has 70 billion BF16 parameters: 140 GB of gradients per step. On 128 GPUs across 16 nodes with 8 GPUs each.'' Walk through the table: ``Flat Ring across 128 GPUs over IB: bandwidth term $2 \times (127/128) \times 140/50 \approx$ 5,557 ms. Hierarchical: Phase 1, intra-node ReduceScatter sends 122.5 GB over 900 GB/s NVLink: 136 ms. Phase 2, inter-node AllReduce sends only 17.5 GB (140/8) over IB: 700 ms. Phase 3, intra-node AllGather: another 136 ms. Total: about 972 ms vs 5,557 ms --- a 5.7x speedup.''
 
 % -- ENGAGE: Specific question, prediction, or task for THIS slide
 Ask: ``Where did the 17.5 GB come from?'' Expected answer: 140 GB divided by 8 GPUs per node. Each node reduces locally first, so only 1/G of the data crosses the network.
 
 % -- WARN: What students will get wrong on THIS topic
-Students forget that the inter-node data volume shrinks by 1/G. They apply the original 140 GB to the IB bandwidth and get the wrong answer. Emphasize: local reduction is the key step.
+Students forget that the inter-node data volume shrinks by 1/G. They apply the original 140 GB to the IB bandwidth and get the wrong answer. Emphasize: local reduction is the key step. Also note the BF16 precision: 2 bytes per parameter gives 140 GB, not the 280 GB that FP32 would require.
 
 % -- FLEX: [CORE] This slide is essential --- do not skip.
 IF AHEAD: Ask ``What happens with 16 GPUs per node (DGX B200)?'' (Answer: inter-node traffic drops to 8.75 GB.)
 }
 
 \footnotesize
-\textbf{Llama 70B: 140 GB gradients (FP16), 8 nodes $\times$ 8 GPUs = 64 total}
+\textbf{Llama 70B: 140 GB gradients (BF16), 16 nodes $\times$ 8 GPUs = 128 total}
 
 \vspace{0.1cm}
 \renewcommand{\arraystretch}{1.1}
@@ -705,7 +802,7 @@ IF AHEAD: Ask ``What happens with 16 GPUs per node (DGX B200)?'' (Answer: inter-
   \toprule
   \textbf{Phase} & \textbf{Data} & \textbf{BW} & \textbf{Time} \\
   \midrule
-  \textcolor{errorstroke}{\textbf{Flat Ring}} --- all over IB & 280 GB & 50 GB/s & \textbf{5,600 ms} \\
+  \textcolor{errorstroke}{\textbf{Flat Ring}} --- all over IB & 140 GB & 50 GB/s & \textbf{5,557 ms} \\
   \midrule
   \textcolor{datastroke}{\textbf{Hierarchical}} 1. ReduceScatter & 122.5 GB & 900 GB/s & 136 ms \\
   \quad 2. Inter-node AllReduce & 17.5 GB & 50 GB/s & 700 ms \\
@@ -717,7 +814,7 @@ IF AHEAD: Ask ``What happens with 16 GPUs per node (DGX B200)?'' (Answer: inter-
 
 \vspace{0.1cm}
 \begin{mlsyscard}{datastroke}
-\textbf{5.8$\times$ speedup} --- inter-node traffic drops from 140 GB to 17.5 GB. IB becomes the bottleneck at 72\% of total time.
+\textbf{5.7$\times$ speedup} --- inter-node traffic drops from 140 GB to 17.5 GB. IB becomes the bottleneck at 72\% of total time.
 \end{mlsyscard}
 
 \end{frame}
@@ -725,6 +822,7 @@ IF AHEAD: Ask ``What happens with 16 GPUs per node (DGX B200)?'' (Answer: inter-
 % --- ACTIVE LEARNING: Micro-Retrieval Cue ---
 \begin{frame}{Quick Check}
 \note{
+[1 min]
 % -- NARRATE: What to SAY while showing this slide
 Read the question. Give 15 seconds of silence. Then cold-call. Expected answer: hierarchical AllReduce confines expensive IB traffic to 1/G of the data by reducing locally first within each NVLink domain.
 
@@ -749,6 +847,7 @@ IF SHORT: Ask the question aloud and answer it yourself in 20 seconds.
 % --- ACTIVE LEARNING 2: Discussion ---
 \begin{frame}{Discussion: AllReduce vs.\ AllToAll Scaling}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Students learned that AllReduce is bandwidth-bound and AllToAll creates O(N^2) connections. This discussion forces them to reason about which scaling limit is hit first.
 
@@ -785,6 +884,7 @@ and a MoE model using AllToAll on the same 512-GPU cluster.\\[0.3cm]
 
 \begin{frame}{Gradient Compression: Quantitative Comparison}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Hierarchical AllReduce minimizes wasted bandwidth. But when even the fastest wires are not enough, the next strategy is to send fewer bits per gradient element.
 
@@ -822,6 +922,7 @@ IF AHEAD: Ask students to calculate the communication time savings of PowerSGD (
 
 \begin{frame}{Error Feedback: No Information Lost}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 The previous slide stated the Error Feedback rule. This slide proves why it works by walking through the mathematical guarantee step by step.
 
@@ -889,6 +990,7 @@ IF SHORT: Skip rows 3--4 in the table walkthrough; show rows 1, 2, and 5 to demo
 
 \begin{frame}{Communication-Computation Overlap}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Hierarchical AllReduce and gradient compression reduce communication time. Overlap is the final strategy: hide whatever communication remains behind computation.
 
@@ -917,6 +1019,7 @@ IF AHEAD: Ask students to derive the condition for full overlap: T_bwd/layer mus
 
 \begin{frame}{Overlap Budget: Worked Example}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The overlap concept was introduced qualitatively. This slide quantifies it for a 32-layer 7B model to show 73\% savings.
 
@@ -958,6 +1061,7 @@ IF SHORT: State the 73\% savings result and the condition T_bwd/layer > T_AR/lay
 % --- ACTIVE LEARNING 3: Exercise ---
 \begin{frame}{Your Turn: Overlap Budget Calculation}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 Students just saw the overlap worked example. This exercise tests their ability to calculate exposed communication time for a different scenario.
 
@@ -1017,29 +1121,34 @@ IF SHORT: Show the solution immediately and narrate.
 
 \begin{frame}{Fallacies}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Students have seen the full optimization stack. These fallacies test whether they internalized the key distinctions: latency vs bandwidth, Ring vs Tree, sync vs async, flat vs hierarchical.
 
 % -- NARRATE: What to SAY while showing this slide
-Read each fallacy and its rebuttal. For the first: ``Bandwidth is not the only metric --- for 4 KB MoE tokens, latency dominates and 400G networking gives zero benefit.'' For the second: ``Ring pays O(N) latency --- for small messages across 64 GPUs, Tree wins.'' For the third: ``The LogP overhead o is non-overlappable --- if GPU compute is less than o, the GPU still stalls.'' For the fourth: ``Hierarchical achieves 5--6x speedup by cutting inter-node traffic 8x.''
+Read each fallacy and its rebuttal. For the first: ``Bandwidth is not the only metric --- for 4 KB MoE tokens, latency dominates and 400G networking gives zero benefit.'' For the second: ``Ring pays O(N) latency --- for small messages across 64 GPUs, Tree wins.'' For the third: ``Pipeline parallelism trades AllReduce for point-to-point transfers, but introduces bubble idleness --- (p-1)/(p-1+m) of GPU time is idle while the pipeline fills.'' For the fourth: ``The LogP overhead o is non-overlappable --- if GPU compute is less than o, the GPU still stalls.'' For the fifth: ``Hierarchical achieves 5--6x speedup by cutting inter-node traffic 8x.''
 
 % -- FLEX: [CORE] This slide is essential --- do not skip.
-IF SHORT: Cover fallacies 1 and 4 only; skip 2 and 3.
+IF SHORT: Cover fallacies 1, 3, and 5 only; skip 2 and 4.
 }
 
 \footnotesize
 \textbf{Fallacy:} \textit{Bandwidth is the only metric that matters.}\\
 For MoE tokens ($\sim$4 KB), \textbf{latency} ($\alpha$) dominates. 400G networking will not help if serialization takes 5 $\mu$s.
 
-\vspace{0.08cm}
+\vspace{0.02cm}
 \textbf{Fallacy:} \textit{Ring AllReduce is always optimal.}\\
 Ring pays $O(N)$ latency. For 1 MB across 64 GPUs, Tree wins because Ring's 1,260 $\mu$s latency exceeds Tree's BW penalty.
 
-\vspace{0.08cm}
+\vspace{0.02cm}
+\textbf{Fallacy:} \textit{Pipeline parallelism eliminates communication overhead.}\\
+Bubble idleness replaces AllReduce: $(p{-}1)/(p{-}1{+}m)$ of GPU-time idles while the pipeline fills. With $p{=}8$ stages, need $m{\geq}32$ microbatches to keep bubble $<$20\%.
+
+\vspace{0.02cm}
 \textbf{Fallacy:} \textit{Async collectives always hide latency.}\\
 LogP overhead $o$ is non-overlappable. If GPU compute $< o$, the GPU still stalls.
 
-\vspace{0.08cm}
+\vspace{0.02cm}
 \textbf{Fallacy:} \textit{Flat AllReduce is good enough for multi-node.}\\
 Hierarchical achieves 5--6$\times$ speedup on 8-node clusters by cutting inter-node traffic 8$\times$.
 
@@ -1047,6 +1156,7 @@ Hierarchical achieves 5--6$\times$ speedup on 8-node clusters by cutting inter-n
 
 \begin{frame}{Pitfalls}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Fallacies addressed conceptual errors. Pitfalls address operational mistakes that teams make when deploying collective communication in production.
 
@@ -1080,6 +1190,7 @@ At 10K nodes, ``rare'' bit flips ($1$ in $10^{15}$) happen multiple times per da
 % --- MUDDIEST POINT ---
 \begin{frame}{Muddiest Point}
 \note{
+[1 min]
 % -- NARRATE: What to SAY while showing this slide
 Say: ``Before we close, write down the one concept from today that you found most confusing. This is anonymous --- one sentence, submit before you leave. I will address the top two or three confusions at the start of next lecture.''
 
@@ -1101,6 +1212,7 @@ IF SHORT: Reduce to 30 seconds. Students can submit digitally after class.
 
 \begin{frame}{What Were the Key Ideas?}
 \note{
+[1.5 min]
 % -- NARRATE: What to SAY while showing this slide
 Say: ``Close your notes. No screens. Write down the four most important concepts from today's lecture. You have 90 seconds.'' Walk around the room to observe. Do NOT show the next slide yet --- the retrieval effort is the learning event.
 
@@ -1122,6 +1234,7 @@ IF SHORT: Reduce to 60 seconds but do not skip entirely.
 
 \begin{frame}{Key Takeaways}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Students just attempted retrieval. This slide reveals the answers so they can compare and fill gaps.
 
@@ -1135,7 +1248,7 @@ IF SHORT: Read only bullets 1, 3, and 7.
 \scriptsize
 \begin{itemize}\setlength\itemsep{0pt}
   \item \textbf{$\alpha$-$\beta$ model}: $n^* = \alpha \cdot \beta$ separates latency-bound from bandwidth-bound. NCCL's effective $\alpha$ is 5--10$\times$ wire-level.
-  \item \textbf{Algorithm crossover}: Ring = BW-optimal, $O(N)$ latency. Tree = $O(\log N)$ latency, BW penalty. Crossover: $M \approx N\alpha\beta$.
+  \item \textbf{Algorithm crossover}: Ring = BW-optimal, $O(N)$ latency. Tree = $O(\log N)$ latency, BW penalty. Crossover (derived): $M \approx N\alpha\beta/\log_2 N$ (coarse upper bound: $N\alpha\beta$).
   \item \textbf{Hierarchical AllReduce}: Reduces inter-node traffic by $G\times$ (GPUs/node), achieving 5--6$\times$ speedup.
   \item \textbf{AllToAll}: $O(N^2)$ connections make MoE/RecSys harder to scale than dense LLMs.
   \item \textbf{Error Feedback}: Makes lossy compression safe. $\sum v_t + e_{T+1} = \sum g_t$.
@@ -1147,6 +1260,7 @@ IF SHORT: Read only bullets 1, 3, and 7.
 
 \begin{frame}{References}
 \note{
+[1 min]
 % -- NARRATE: What to SAY while showing this slide
 Point students to the Patarasuk paper for Ring AllReduce theory and the Gibiansky blog post for intuitive explanation. Sergeev for Horovod. Tang for 1-bit Adam. Stich for error feedback theory. Rajbhandari for ZeRO.
 
@@ -1165,6 +1279,7 @@ Point students to the Patarasuk paper for Ring AllReduce theory and the Gibiansk
 
 \begin{frame}{Next Lecture: Fault Tolerance}
 \note{
+[1 min]
 % -- LINK: What prior concept connects to this slide
 This chapter built the communication patterns for distributed training. The next chapter asks: what happens when the infrastructure breaks?
 
@@ -1212,16 +1327,17 @@ Say: ``The fleet has its traffic patterns, but the roads are crumbling. GPUs ove
 
 \begin{frame}{Backup: Algorithm Selection Quick Reference}
 \note{
+[2 min]
 % -- NARRATE: Decision tree for choosing the right AllReduce algorithm.
 % -- FLEX: [OPTIONAL] Use during problem sets or office hours.
 }
 
-\footnotesize
+\scriptsize
 \textbf{Which AllReduce algorithm should I use?}
 
-\vspace{0.15cm}
-\renewcommand{\arraystretch}{1.15}
-\begin{tabular}{@{}p{3.5cm}lp{4.5cm}@{}}
+\vspace{0.1cm}
+\renewcommand{\arraystretch}{1.05}
+\begin{tabular}{@{}p{3.2cm}lp{4.5cm}@{}}
   \toprule
   \textbf{Scenario} & \textbf{Algorithm} & \textbf{Why} \\
   \midrule
@@ -1233,13 +1349,14 @@ Say: ``The fleet has its traffic patterns, but the roads are crumbling. GPUs ove
   \bottomrule
 \end{tabular}
 
-\vspace{0.1cm}
-{\footnotesize\textbf{Key formula:} $M_{\text{crossover}} = N \cdot \alpha \cdot \beta$. Below: latency-optimal. Above: bandwidth-optimal.}
+\vspace{0.08cm}
+{\scriptsize\textbf{Key formula (derived):} $M_{\text{crossover}} = N \cdot \alpha \cdot \beta / \log_2 N$. Coarse upper bound: $N\alpha\beta$. Below crossover: latency-optimal. Above: bandwidth-optimal.}
 
 \end{frame}
 
 \begin{frame}{Backup: NCCL Tuning Cheat Sheet}
 \note{
+[2 min]
 % -- NARRATE: Practical NCCL environment variables for tuning.
 % -- FLEX: [OPTIONAL] Use when students start hands-on cluster work.
 }

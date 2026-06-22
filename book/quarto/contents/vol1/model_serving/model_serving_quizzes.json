@@ -164,32 +164,32 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A ResNet-50 image-classification service on a GPU measures its end-to-end request latency before any model optimization. Based on the chapter's breakdown, which phase is most likely to dominate the budget, and which other phase is the most realistic competitor if the team misreads the trace?",
+            "question": "A ResNet-50 image-classification service on a GPU measures its end-to-end request latency after runtime optimization has reduced accelerator inference to roughly 2 ms. Based on the chapter's breakdown, which phase is most likely to dominate the budget, and which other phase is the most realistic competitor if the team misreads the trace?",
             "choices": [
-              "JPEG decode and resize dominates; CPU-to-GPU tensor transfer is the most realistic competitor because both are pre-accelerator costs paid on every request.",
+              "JPEG decode and resize dominate; optimized GPU inference is the most realistic competitor because both remain visible millisecond-scale phases.",
               "Top-k postprocessing dominates; the network response path is the competitor because both run after the model.",
               "GPU inference dominates; JPEG decode is the competitor because neural network math is usually the longest single phase.",
               "HTTP ingress dominates; TLS handshake is the competitor because connection setup is almost always the primary cost for image workloads."
             ],
-            "answer": "The correct answer is A. The chapter's ResNet-50 breakdown shows that preprocessing (JPEG decode plus resize) is the largest single phase, and CPU-to-GPU tensor transfer is the next largest pre-accelerator cost, so a team that misreads the preprocessing trace as 'transfer' is making a plausible but diagnostic error. The 'GPU inference dominates' framing is exactly the misconception the section exists to correct, and the HTTP-and-TLS framing is not supported by the chapter's numbers for image classification with persistent connections.",
+            "answer": "The correct answer is A. After TensorRT-style optimization, the chapter's ResNet-50 example has about 4.5 ms of preprocessing against roughly 2 ms of accelerator inference, so JPEG decode and resize become the dominant budget terms. A team can still plausibly over-focus on the optimized inference slice because it is the model stage, but the measured path says the CPU-side image pipeline is now the larger target. Top-k postprocessing is tiny in the chapter's numbers, and HTTP/TLS is not the primary cost for this persistent image-serving path.",
             "learning_objective": "Identify which phase actually dominates a measured ResNet-50 serving latency budget, and which adjacent phase is the most realistic source of diagnostic confusion."
           },
           {
             "question_type": "SHORT",
-            "question": "A team accelerates ResNet-50 inference from 5 ms to 0.5 ms on the accelerator but leaves JPEG decode, resize, normalization, and CPU-to-GPU transfer unchanged. Explain why the end-to-end speedup is nowhere near 10x, using the chapter's Amdahl-style framing.",
-            "answer": "Most of the original budget sits outside the model, so accelerating inference shrinks only one term in the Iron Law sum. If inference was roughly 5 ms of a 15 ms end-to-end budget, the post-optimization budget is about 10.5 ms, which is a 1.4x speedup despite a 10x kernel speedup. The chapter's Amdahl-style example shows exactly this: once preprocessing and transfer dominate, the remaining gain per unit of model optimization is small. The practical implication is that the next optimization target must be chosen by profiling the full request path; doubling down on the model returns less and less as the non-model terms come to dominate the denominator.",
+            "question": "A team accelerates ResNet-50 inference from 5 ms to 0.5 ms on the accelerator but leaves JPEG decode, resize, normalization, and CPU-to-GPU transfer unchanged. Explain why the end-to-end speedup is nowhere near 10$\\times$, using the chapter's Amdahl-style framing.",
+            "answer": "Most of the original budget sits outside the model, so accelerating inference shrinks only one term in the Iron Law sum. In the chapter's ResNet-50 budget, the original path is about 10.1 ms: 5 ms of inference plus 5.1 ms of preprocessing, transfer, and postprocessing. Cutting inference to 0.5 ms produces about 5.6 ms end-to-end latency, or roughly a 1.8$\\times$ speedup despite a 10$\\times$ kernel speedup. The practical implication is that the next optimization target must be chosen by profiling the full request path; doubling down on the model returns less and less as the non-model terms come to dominate the denominator.",
             "learning_objective": "Analyze why model-only acceleration yields sub-proportional end-to-end gains once other latency-budget terms dominate, and derive the next optimization target from the profile."
           },
           {
             "question_type": "MCQ",
-            "question": "A vision service doubles input resolution from 224x224 to 448x448 and measures a slowdown of roughly 3x rather than the 4x a FLOPs-only argument predicts. Which explanation best fits the chapter?",
+            "question": "A vision service doubles input resolution from 224x224 to 448x448 and measures a slowdown of roughly 3$\\times$ rather than the 4$\\times$ a FLOPs-only argument predicts. Which explanation best fits the chapter?",
             "choices": [
               "Latency is independent of input size once the model is JIT-compiled for the first request.",
               "Fixed preprocessing and transfer overheads are being amortized across more compute, and the kernel may shift between compute-bound and memory-bound regimes, so observed scaling departs from a pure FLOPs calculation.",
               "Postprocessing complexity drops as image size increases, which offsets model slowdown and produces sub-linear scaling.",
               "Higher-resolution inputs automatically improve batch formation efficiency and recover the difference."
             ],
-            "answer": "The correct answer is B. Quadratic compute scaling is the naive starting point, but real kernels carry a per-request fixed cost (decode, resize, transfer) that is independent of resolution, and the operating point on the roofline can shift as activation memory grows. The 'independent of input size' and 'postprocessing shrinks' framings contradict the chapter's measured behavior, and adaptive batch formation is not what's driving the sub-4x slowdown in this scenario.",
+            "answer": "The correct answer is B. Quadratic compute scaling is the naive starting point, but real kernels carry a per-request fixed cost (decode, resize, transfer) that is independent of resolution, and the operating point on the roofline can shift as activation memory grows. The 'independent of input size' and 'postprocessing shrinks' framings contradict the chapter's measured behavior, and adaptive batch formation is not what's driving the sub-4$\\times$ slowdown in this scenario.",
             "learning_objective": "Interpret why observed resolution scaling can fall below the simple FLOP-based prediction on a real serving node."
           },
           {
@@ -237,11 +237,11 @@
             "question": "A serving replica must sustain 1,000 QPS with a p99 end-to-end latency SLO of 50 ms. Each replica's unloaded service time is 20 ms. A capacity planner uses Little's Law at the SLO bound to estimate the minimum standing concurrency the fleet must support. Which interpretation is correct?",
             "choices": [
               "Required concurrency is 20, because 1,000 QPS times 20 ms of service time gives the number of requests simultaneously executing.",
-              "Required concurrency is 50, because 1,000 QPS times 50 ms (lambda times W at the SLO bound) gives the standing population in the system, and real provisioning must exceed this because bursts push the realized W above the mean.",
+              "Required concurrency is 50, because 1,000 QPS times 50 ms ($\\lambda T_{\\text{lat}}$ at the SLO bound) gives the standing population in the system, and real provisioning must exceed this because bursts push the realized $T_{\\text{lat}}$ above the mean.",
               "Required concurrency is 1,000, because one QPS equals one concurrent request under any SLO.",
               "Required concurrency is 5, because throughput divided by service time is the number of replicas needed."
             ],
-            "answer": "The correct answer is B. Little's Law applied at the SLO bound gives L = lambda * W = 1,000 * 0.050 = 50 requests standing in the system across the fleet. That is the arithmetic floor; in practice the planner provisions above 50 because p99 is not the mean, arrival processes are bursty, and headroom is what keeps queueing delay from collapsing the SLO. The service-time-based framing confuses 'in service' with 'in system' (it ignores queue wait), and both the 1,000 and 5 answers misapply the law to unrelated quantities.",
+            "answer": "The correct answer is B. Little's Law applied at the SLO bound gives $N_{\\text{req}} = \\lambda T_{\\text{lat}} = 1,000 \\times 0.050 = 50$ requests standing in the system across the fleet. That is the arithmetic floor; in practice the planner provisions above 50 because p99 is not the mean, arrival processes are bursty, and headroom is what keeps queueing delay from collapsing the SLO. The service-time-based framing confuses 'in service' with 'in system' (it ignores queue wait), and both the 1,000 and 5 answers misapply the law to unrelated quantities.",
             "learning_objective": "Apply Little's Law at a tail-latency SLO bound to compute minimum standing concurrency for a serving fleet, and explain why the arithmetic floor is not the provisioned capacity."
           },
           {
@@ -259,7 +259,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain why production serving systems target roughly 40 to 60 percent utilization instead of trying to run near 100 percent busy all the time, grounding your answer in the chapter's queuing analysis.",
-            "answer": "The M/M/1-style wait formula has time-in-system growing as 1/(1 - rho), so as utilization rho approaches 1 the delay term blows up nonlinearly even if mean service time is unchanged. A modest 10 percent traffic spike at 85 percent utilization can push p99 latency many times above service time, while the same spike at 50 percent utilization barely moves the curve. The practical consequence is that the 'wasted' 40-60 percent of capacity is not waste at all: it is the margin that converts the nonlinear latency-vs-utilization curve into a workable SLO. Planners provision for tail behavior, not mean throughput, and the headroom is the single biggest lever for keeping tails bounded under bursts and partial failures.",
+            "answer": "The M/M/1-style wait formula has time-in-system growing as $1/(1 - \\rho)$, so as utilization $\\rho$ approaches 1 the delay term blows up nonlinearly even if mean service time is unchanged. A modest 10 percent traffic spike at 85 percent utilization can push p99 latency many times above service time, while the same spike at 50 percent utilization barely moves the curve. The practical consequence is that the 'wasted' 40-60 percent of capacity is not waste at all: it is the margin that converts the nonlinear latency-vs-utilization curve into a workable SLO. Planners provision for tail behavior, not mean throughput, and the headroom is the single biggest lever for keeping tails bounded under bursts and partial failures.",
             "learning_objective": "Justify conservative utilization targets using the nonlinear latency behavior of M/M/1-style queues."
           },
           {
@@ -314,7 +314,7 @@
             "choices": [
               "User behavior changes seasonally and the model's target distribution shifts gradually over several months.",
               "The serving pipeline uses OpenCV-resize on BGR images with one set of normalization constants, while training used PIL-resize on RGB with different constants.",
-              "Holiday traffic produces a 5x QPS spike and replica queue depth grows for several minutes before autoscaling catches up.",
+              "Holiday traffic produces a 5$\\times$ QPS spike and replica queue depth grows for several minutes before autoscaling catches up.",
               "A new GPU SKU enters the fleet and model loading time doubles during autoscaling events."
             ],
             "answer": "The correct answer is B. Training-serving skew is an internal implementation inconsistency: the serving pipeline computes features differently than the training pipeline did, so identical weights see different inputs. Seasonal target drift is an external distribution shift, traffic spikes are a capacity problem, and a slower-loading SKU is a cold-start problem, none of which are skew.",
@@ -486,7 +486,7 @@
               "Beam search removes most memory traffic, leaving only arithmetic work, which is why decode is bandwidth-bound in practice.",
               "Prefill and decode have identical hardware bottlenecks, so both are bandwidth-bound by definition."
             ],
-            "answer": "The correct answer is A. Per-token decode issues a small number of FLOPs per byte of weight and KV state moved through HBM, so the roofline places the kernel well below the ridge point and the HBM traffic is the binding resource. The CPU-only framing is empirically wrong, beam search does not eliminate the per-token weight read, and the chapter's entire section exists to contrast prefill (compute-bound) with decode (bandwidth-bound).",
+            "answer": "The correct answer is A. Per-token decode has low FLOP/byte arithmetic intensity from weight and KV state moved through HBM, so the roofline places the kernel well below the ridge point and the HBM traffic is the binding resource. The CPU-only framing is empirically wrong, beam search does not eliminate the per-token weight read, and the chapter's entire section exists to contrast prefill (compute-bound) with decode (bandwidth-bound).",
             "learning_objective": "Explain why token generation is limited primarily by memory movement rather than raw compute."
           },
           {
@@ -509,10 +509,10 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A team serving a 70B-class LLM can afford exactly one GPU upgrade. Option X doubles peak FP16 TFLOPS while HBM bandwidth stays roughly flat. Option Y holds peak TFLOPS roughly flat but increases HBM bandwidth by 60 percent. Assuming typical long-output chat traffic where decode dominates the budget, which option improves TPOT more, and why?",
+            "question": "A team serving a 70-billion-parameter-class LLM can afford exactly one GPU upgrade. Option X doubles peak FP16 TFLOP/s while HBM bandwidth stays roughly flat. Option Y holds peak TFLOP/s roughly flat but increases HBM bandwidth by 60 percent. Assuming typical long-output chat traffic where decode dominates the budget, which option improves TPOT more, and why?",
             "choices": [
               "Option X, because more compute always lowers per-token latency regardless of where the bottleneck sits.",
-              "Option Y, because decode is memory-bandwidth bound: each token requires moving weights and KV state through HBM, so faster HBM directly shrinks per-token kernel time while extra FLOPS sit idle.",
+              "Option Y, because decode is memory-bandwidth bound: each token requires moving weights and KV state through HBM, so faster HBM directly shrinks per-token kernel time while extra FLOP/s sits idle.",
               "Neither option changes TPOT; per-token time depends only on model architecture, not hardware.",
               "Both options improve TPOT equally, because TPOT scales with the geometric mean of compute and bandwidth."
             ],
@@ -719,7 +719,7 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A team serving a quantized 70B-class LLM can pick between two single-GPU upgrades on the same $/hour. Upgrade P keeps VRAM at 80 GB but raises HBM bandwidth by 50 percent. Upgrade Q keeps HBM bandwidth roughly flat but raises VRAM to 140 GB. For a workload with long-running conversations and significant KV-cache demand, how should the team decide, and why?",
+            "question": "A team serving a quantized 70-billion-parameter-class LLM can pick between two single-GPU upgrades on the same $/hour. Upgrade P keeps VRAM at 80 GB but raises HBM bandwidth by 50 percent. Upgrade Q keeps HBM bandwidth roughly flat but raises VRAM to 140 GB. For a workload with long-running conversations and significant KV-cache demand, how should the team decide, and why?",
             "choices": [
               "Upgrade P, because bandwidth always dominates both latency and cost in LLM serving.",
               "Upgrade P lowers TPOT and improves per-user latency, while Upgrade Q lifts the concurrency ceiling (more KV cache fits, so more conversations run side-by-side) and directly increases throughput and lowers cost per token. If the service is latency-constrained, pick P; if it is throughput or unit-cost constrained, pick Q.",
@@ -731,15 +731,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "In the Llama-3-8B case study, once the model weights are already quantized and loaded, which resource primarily determines achievable throughput and therefore cost per token?",
+            "question": "In the 8-billion-parameter Llama 3 case study's traffic mix, once the model weights are already quantized and loaded, which resource primarily determines realized full-request throughput and therefore cost per token?",
             "choices": [
-              "KV-cache memory capacity, because it bounds how many concurrent request tokens can be kept in flight before the scheduler must drop or queue new sessions.",
+              "Prefill compute throughput, because the case study's 10 requests/s prefill admission rate is below the KV-residency ceiling.",
               "FLOP count alone, because autoregressive decoding is compute-bound.",
               "Network bandwidth, because prompt tokens dominate end-to-end economics.",
-              "Container image size, because deployment artifact size fixes the achievable token rate."
+              "KV-cache memory capacity alone, because concurrency always dominates throughput and cost for every traffic mix."
             ],
-            "answer": "The correct answer is A. The case study argues that once weights fit in VRAM, the remaining VRAM determines how much KV cache can be held, which caps the standing concurrent batch and therefore the tokens-per-second the device can produce. Treating decode as compute-bound misses the memory-bandwidth argument, and network and container-image size are not the binding constraints on per-token cost for this workload.",
-            "learning_objective": "Identify the memory-capacity constraint that governs LLM throughput and unit economics."
+            "answer": "The correct answer is A. The case study separates residency from realized throughput: remaining VRAM bounds the maximum concurrent KV-cache residency, but the worked traffic mix admits only 10 requests/s from prefill while the KV-residency ceiling is much higher. Cost per token in this example is therefore computed from prefill-limited full-request throughput. Treating decode as compute-bound misses the memory-bandwidth argument, network bandwidth is not the binding quantity in the arithmetic, and saying KV capacity always dominates collapses a concurrency ceiling into a throughput claim.",
+            "learning_objective": "Distinguish KV-cache concurrency limits from the prefill-limited realized throughput used in LLM serving unit economics."
           }
         ]
       }
@@ -765,14 +765,14 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A team makes model inference 2.5x faster on the accelerator. The service was previously running at 70 percent utilization on replicas whose end-to-end budget was split evenly between model inference and everything else. Compared to the original, what should happen to end-to-end p99 user latency?",
+            "question": "A team makes model inference 2.5$\\times$ faster on the accelerator. The service was previously running at 70 percent utilization on replicas whose end-to-end budget was split evenly between model inference and everything else. Compared to the original, what should happen to end-to-end p99 user latency?",
             "choices": [
-              "It should improve by exactly 2.5x, matching the model speedup one-to-one.",
-              "It should improve by much less than 2.5x in nominal load (because the non-model half of the budget is unchanged), and under the same traffic it may improve even more than 2.5x because lower per-request service time also lowers utilization and shrinks the queueing term.",
+              "It should improve by exactly 2.5$\\times$, matching the model speedup one-to-one.",
+              "It should improve by much less than 2.5$\\times$ in nominal load (because the non-model half of the budget is unchanged), and under the same traffic it may improve even more than 2.5$\\times$ because lower per-request service time also lowers utilization and shrinks the queueing term.",
               "It should stay exactly the same because latency is determined only by network overhead.",
               "It should get worse because faster inference destabilizes batching."
             ],
-            "answer": "The correct answer is B. End-to-end latency is an Iron Law sum, so halving only the model term cannot halve the total; on the other hand, lower per-request service time also pushes the utilization rho down, which can shrink the queueing term more than proportionally at moderate-to-high load. The 1:1 mapping confuses model speedup with end-to-end speedup, the 'exactly the same' framing ignores the entire chapter, and faster inference does not destabilize batching as a matter of course.",
+            "answer": "The correct answer is B. End-to-end latency is an Iron Law sum, so halving only the model term cannot halve the total; on the other hand, lower per-request service time also pushes the utilization $\\rho$ down, which can shrink the queueing term more than proportionally at moderate-to-high load. The 1:1 mapping confuses model speedup with end-to-end speedup, the 'exactly the same' framing ignores the entire chapter, and faster inference does not destabilize batching as a matter of course.",
             "learning_objective": "Evaluate why model-speed improvements do not translate one-to-one into end-to-end latency gains, and why queueing can amplify or damp the model-level change."
           },
           {
@@ -784,7 +784,7 @@
               "Model loading stops working once average utilization exceeds 80 percent.",
               "High utilization prevents the dynamic batcher from running at all."
             ],
-            "answer": "The correct answer is B. The chapter's queueing analysis makes the 1/(1 - rho) curve explicit: the move from 50 percent to 90 percent utilization saves a chunk of fleet cost but multiplies the queueing term, and any traffic variability near saturation produces SLO-breaking tails. Accuracy does not degrade with utilization, model loading is unaffected, and batching runs regardless of utilization.",
+            "answer": "The correct answer is B. The chapter's queueing analysis makes the $1/(1 - \\rho)$ curve explicit: the move from 50 percent to 90 percent utilization saves a chunk of fleet cost but multiplies the queueing term, and any traffic variability near saturation produces SLO-breaking tails. Accuracy does not degrade with utilization, model loading is unaffected, and batching runs regardless of utilization.",
             "learning_objective": "Analyze why high apparent hardware efficiency is incompatible with latency SLOs in queueing-limited regimes."
           },
           {
@@ -854,7 +854,7 @@
           {
             "question_type": "SHORT",
             "question": "Explain why a serving team that optimizes only the model, ignores queueing headroom, and never checks preprocessing consistency is likely to fail in production even if offline benchmarks look strong.",
-            "answer": "Offline benchmarks measure the accelerator kernel in isolation, which the chapter shows can be a small fraction of real end-to-end latency once preprocessing, transfer, queueing, and serialization are included. A fleet run near saturation for efficiency will trip the 1/(1 - rho) queueing curve on the first traffic burst, and a preprocessing pipeline that diverges from training will produce confident but wrong predictions that infrastructure dashboards cannot detect. The combined failure mode is a service that looks fast on the bench, violates SLOs the first time traffic spikes, and silently drifts on accuracy the whole time; passing any one of latency, tail, or correctness is not enough when a production deployment demands all three.",
+            "answer": "Offline benchmarks measure the accelerator kernel in isolation, which the chapter shows can be a small fraction of real end-to-end latency once preprocessing, transfer, queueing, and serialization are included. A fleet run near saturation for efficiency will trip the $1/(1 - \\rho)$ queueing curve on the first traffic burst, and a preprocessing pipeline that diverges from training will produce confident but wrong predictions that infrastructure dashboards cannot detect. The combined failure mode is a service that looks fast on the bench, violates SLOs the first time traffic spikes, and silently drifts on accuracy the whole time; passing any one of latency, tail, or correctness is not enough when a production deployment demands all three.",
             "learning_objective": "Integrate latency, headroom, and correctness concerns into a production-serving evaluation that spans the full chapter."
           },
           {
