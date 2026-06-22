@@ -76,6 +76,13 @@ for (const name of targets) {
       if (!found) siteResult.errors.push(`expected heading "${h}" not found`);
     }
 
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    for (const text of (cfg.expectedText || [])) {
+      if (!bodyText.includes(text)) {
+        siteResult.errors.push(`expected text "${text}" not found`);
+      }
+    }
+
     const linkHrefs = await page.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href')).filter(Boolean));
     const sameOrigin = [...new Set(linkHrefs
       .map((h) => { try { return new URL(h, cfg.url).toString(); } catch { return null; } })
@@ -94,6 +101,7 @@ for (const name of targets) {
     }
     siteResult.checks.brokenLinkCount = brokenLinks.length;
     if (brokenLinks.length > 0) siteResult.brokenLinks = brokenLinks;
+    if (brokenLinks.length > 0) siteResult.errors.push(`${brokenLinks.length} broken same-origin links`);
 
     const additional = cfg.additionalPages || [];
     const additionalResults = {};
