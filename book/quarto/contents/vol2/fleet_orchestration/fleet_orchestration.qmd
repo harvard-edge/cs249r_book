@@ -145,68 +145,7 @@ To make the scheduling problem concrete, consider a research organization operat
 
 The economic stakes make these decisions consequential at every scale. A `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster at `{python} ClusterEconomicsContext.gpu_hour_cost_str` costs `{python} ClusterEconomicsContext.daily_cost_str` per day to operate, whether the GPUs are computing useful work or sitting idle in a queue. If scheduling inefficiencies leave `{python} ClusterEconomicsContext.idle_pct_str` of GPUs idle, that translates to `{python} ClusterEconomicsContext.daily_waste_str` per day in wasted capacity, or about `{python} ClusterEconomicsContext.annual_waste_str` annually. Conversely, improving utilization from `{python} ClusterEconomicsContext.util_low_pct_str` to `{python} ClusterEconomicsContext.util_high_pct_str` adds `{python} ClusterEconomicsContext.productive_gpu_gain_str` fully utilized GPU-equivalents of productive capacity without purchasing additional hardware. That gain is equivalent to buying `{python} ClusterEconomicsContext.raw_gpu_equivalent_gain_str` raw GPUs if they ran at the old `{python} ClusterEconomicsContext.util_low_pct_str` utilization. At this scale, a 1 percentage-point improvement in utilization is worth more annually than the salary of the engineer who achieves it. *Scheduling is not operational overhead; it is one of the highest-leverage engineering investments in ML infrastructure.*
 
-ML workloads present scheduling challenges that distinguish them from ordinary cloud service placement and from HPC workloads that can tolerate flexible resource counts. **Gang scheduling**\index{Gang Scheduling!definition}[^fn-gang-scheduling] represents the most critical difference for synchronous distributed training: a job requiring 1,024 GPUs *cannot* make useful iteration progress with only 512. Many HPC jobs also need co-scheduled ranks, but synchronous data parallel training exposes the cost at every AllReduce. Every worker must participate in every collective, and a missing worker blocks all others. @Sec-appdx-comm-foundations-allreduce develops the ring and tree AllReduce cost model that makes this constraint physical: the collective stalls until the last worker arrives, so allocating $N$ GPUs but landing $N-1$ leaves the missing rank's peers burning fully idle on the synchronization barrier. A scheduler that partially allocates resources creates deadlocks where multiple jobs each hold some GPUs while waiting for more, with none able to proceed. This all-or-nothing requirement means the scheduler cannot simply "pack jobs tightly" as a traditional bin packer would; it must reason about atomic, multi-resource allocations across the entire cluster.
-
-::: {#dfn-fleet-orchestration-gang-scheduling .callout-definition title="Gang scheduling"}
-
-***Gang Scheduling***\index{Gang Scheduling!definition} is the ML cluster scheduling policy that allocates all of a job's accelerators atomically (all-or-nothing) because synchronous distributed training makes the marginal value of a partial allocation zero: every worker must reach every collective, so a job cannot trade fewer GPUs for proportionally slower progress.
-
-1.  **Significance**: A 1,024-GPU synchronous job holding 512 GPUs completes zero training steps, not half as many: each AllReduce stalls until every rank arrives, so the held GPUs burn power and capital at 0 percent useful output. Without atomic allocation, two such jobs can each acquire half the cluster and deadlock, both at zero progress while consuming the full cluster's operating cost.
-2.  **Distinction**: Unlike cloud service placement (where a service granted half its requested replicas serves roughly half its traffic) and unlike flexible HPC workloads (which degrade gracefully with fewer ranks), synchronous training has step-function utility: full allocation or nothing, which forces the scheduler to reason about atomic multi-resource allocations rather than incremental bin packing.
-3.  **Common pitfall**: A frequent misconception is that priorities or quotas alone solve this. Atomicity must extend to every co-scheduled resource the job needs to make progress (accelerators, high-bandwidth interconnect domains, network capacity for collectives); enforcing it at GPU granularity alone recreates the deadlock one resource layer down.
-
-:::
-
-```{python}
-#| echo: false
-
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GANG SCHEDULING DEADLOCK (NOTEBOOK)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Physics of Deadlock" .callout-notebook
-# │
-# │ Goal: Quantify the risk of cluster deadlock without gang scheduling.
-# │ Show: deadlock_prob_pct ≈ 100%—inline in notebook result.
-# │ How: Estimate allocation probability from free GPUs, requested GPUs, and job count. (Conceptual)
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check, fmt_percent, fmt_usd
-
-class GangSchedulingDeadlock:
-    # ┌── 1. LOAD ──────────────────────────────────────────
-    n_total_gpus = Systems.Clusters.Training_1K.total_accelerators
-    n_jobs = 2
-    gpus_per_job = n_total_gpus  # Each job needs the full cluster
-    # ┌── 2. EXECUTE ───────────────────────────────────────
-    # If scheduler allocates partially (e.g. 256 to each), no job can run.
-    # Total idle waste per hour if deadlock occurs:
-    gpu_hour_cost = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
-    waste_per_hour = n_total_gpus * gpu_hour_cost
-    # ┌── 3. GUARD ─────────────────────────────────────────
-    check(waste_per_hour == 2048, f"Waste ${waste_per_hour} unexpected")
-    # ┌── 4. OUTPUT ────────────────────────────────────────
-    partial_gpus = n_total_gpus // n_jobs
-    gs_n_gpus_str = fmt(n_total_gpus, precision=0, commas=False)
-    gs_n_jobs_str = fmt(n_jobs, precision=0, commas=False)
-    gs_gpus_per_job_str = fmt(gpus_per_job, precision=0, commas=False)
-    gs_partial_gpus_str = fmt(partial_gpus, precision=0, commas=False)
-    gs_waste_m_str = fmt_usd(waste_per_hour, precision=0, commas=False)
-```
-
-::: {#nbk-fleet-orchestration-physics-deadlock .callout-notebook title="The physics of deadlock"}
-
-**Problem**: A `{python} GangSchedulingDeadlock.gs_n_gpus_str`-GPU cluster receives `{python} GangSchedulingDeadlock.gs_n_jobs_str` large training jobs from separate teams, each requiring the full cluster. A naive non-gang scheduler allocates `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team A and `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team B, then waits for more GPUs to become available. What is the steady-state outcome?
-
-**Math**:
-
-1. **Team A status**: Holds `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs, Needs `{python} GangSchedulingDeadlock.gs_gpus_per_job_str` GPUs. Progress = 0 percent.
-2. **Team B status**: Holds `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs, Needs `{python} GangSchedulingDeadlock.gs_gpus_per_job_str` GPUs. Progress = 0 percent.
-3. **Cluster status**: `{python} GangSchedulingDeadlock.gs_n_gpus_str` GPUs allocated, 0 samples processed.
-4. **Waste**: `{python} GangSchedulingDeadlock.gs_waste_m_str` per hour in idle electricity and capital.
-
-**Systems insight**: This is a circular dependency\index{Deadlock!circular dependency}: Team A is waiting for Team B's GPUs, and Team B is waiting for Team A's. Without gang scheduling (all-or-nothing allocation), cluster efficiency drops to zero. In a large fleet, even a 5-minute deadlock can cost thousands of dollars. Batch schedulers and Kubernetes batch extensions address this by enforcing a job-level admission boundary: if the full gang cannot start, the job should remain queued rather than hold a partial allocation.
-
-:::
+ML workloads present scheduling challenges that distinguish them from ordinary cloud service placement and from HPC workloads that can tolerate flexible resource counts. Gang scheduling[^fn-gang-scheduling] represents the most critical difference for synchronous distributed training: a job requiring 1,024 GPUs *cannot* make useful iteration progress with only 512. Many HPC jobs also need co-scheduled ranks, but synchronous data parallel training exposes the cost at every AllReduce. Every worker must participate in every collective, and a missing worker blocks all others. @Sec-appdx-comm-foundations-allreduce develops the ring and tree AllReduce cost model that makes this constraint physical: the collective stalls until the last worker arrives, so allocating $N$ GPUs but landing $N-1$ leaves the missing rank's peers burning fully idle on the synchronization barrier. A scheduler that partially allocates resources creates deadlocks where multiple jobs each hold some GPUs while waiting for more, with none able to proceed. This all-or-nothing requirement means the scheduler cannot simply "pack jobs tightly" as a traditional bin packer would; it must reason about atomic, multi-resource allocations across the entire cluster.
 
 If gang scheduling is the first hard constraint, topology awareness via **placement groups**\index{Placement Group!topology-aware scheduling}[^fn-placement-groups] is the second: to support tensor parallelism, the scheduler must ensure GPUs are placed within the same high-bandwidth NVLink domain rather than scattered across the data center.
 
@@ -496,7 +435,68 @@ Partial allocation of multi-GPU jobs creates a failure mode unique to ML cluster
 
 :::
 
-The partial-allocation deadlock established in @sec-fleet-orchestration-introduction names what gang scheduling must prevent: the **hold-and-wait deadlock**\index{Deadlock!hold-and-wait}[^fn-deadlock-scheduling] in which two jobs each hold half the cluster and neither can proceed. The remaining question is the implementation guarantee. The formal requirement is straightforward: for a job $J$ requesting $N$ GPUs, the scheduler must guarantee that either all $N$ GPUs are allocated atomically, or the job remains in the queue without holding any resources. This binary outcome eliminates deadlock by construction, since a job that holds no resources cannot block other jobs. Implementing this guarantee efficiently, however, is the challenge that defines much of cluster scheduling algorithm design.
+::: {#dfn-fleet-orchestration-gang-scheduling .callout-definition title="Gang scheduling"}
+
+***Gang Scheduling***\index{Gang Scheduling!definition} is the ML cluster scheduling policy that allocates all of a job's accelerators atomically (all-or-nothing) because synchronous distributed training makes the marginal value of a partial allocation zero: every worker must reach every collective, so a job cannot trade fewer GPUs for proportionally slower progress.
+
+1.  **Significance**: A 1,024-GPU synchronous job holding 512 GPUs completes zero training steps, not half as many: each AllReduce stalls until every rank arrives, so the held GPUs burn power and capital at 0 percent useful output. Without atomic allocation, two such jobs can each acquire half the cluster and deadlock, both at zero progress while consuming the full cluster's operating cost.
+2.  **Distinction**: Unlike cloud service placement (where a service granted half its requested replicas serves roughly half its traffic) and unlike flexible HPC workloads (which degrade gracefully with fewer ranks), synchronous training has step-function utility: full allocation or nothing, which forces the scheduler to reason about atomic multi-resource allocations rather than incremental bin packing.
+3.  **Common pitfall**: A frequent misconception is that priorities or quotas alone solve this. Atomicity must extend to every co-scheduled resource the job needs to make progress (accelerators, high-bandwidth interconnect domains, network capacity for collectives); enforcing it at GPU granularity alone recreates the deadlock one resource layer down.
+
+:::
+
+```{python}
+#| echo: false
+
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ GANG SCHEDULING DEADLOCK (NOTEBOOK)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: "The Physics of Deadlock" .callout-notebook
+# │
+# │ Goal: Quantify the risk of cluster deadlock without gang scheduling.
+# │ Show: deadlock_prob_pct ≈ 100%—inline in notebook result.
+# │ How: Estimate allocation probability from free GPUs, requested GPUs, and job count. (Conceptual)
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.fmt import fmt, check, fmt_percent, fmt_usd
+
+class GangSchedulingDeadlock:
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    n_total_gpus = Systems.Clusters.Training_1K.total_accelerators
+    n_jobs = 2
+    gpus_per_job = n_total_gpus  # Each job needs the full cluster
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    # If scheduler allocates partially (e.g. 256 to each), no job can run.
+    # Total idle waste per hour if deadlock occurs:
+    gpu_hour_cost = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
+    waste_per_hour = n_total_gpus * gpu_hour_cost
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(waste_per_hour == 2048, f"Waste ${waste_per_hour} unexpected")
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    partial_gpus = n_total_gpus // n_jobs
+    gs_n_gpus_str = fmt(n_total_gpus, precision=0, commas=False)
+    gs_n_jobs_str = fmt(n_jobs, precision=0, commas=False)
+    gs_gpus_per_job_str = fmt(gpus_per_job, precision=0, commas=False)
+    gs_partial_gpus_str = fmt(partial_gpus, precision=0, commas=False)
+    gs_waste_m_str = fmt_usd(waste_per_hour, precision=0, commas=False)
+```
+
+::: {#nbk-fleet-orchestration-physics-deadlock .callout-notebook title="The physics of deadlock"}
+
+**Problem**: A `{python} GangSchedulingDeadlock.gs_n_gpus_str`-GPU cluster receives `{python} GangSchedulingDeadlock.gs_n_jobs_str` large training jobs from separate teams, each requiring the full cluster. A naive non-gang scheduler allocates `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team A and `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team B, then waits for more GPUs to become available. What is the steady-state outcome?
+
+**Math**:
+
+1. **Team A status**: Holds `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs, Needs `{python} GangSchedulingDeadlock.gs_gpus_per_job_str` GPUs. Progress = 0 percent.
+2. **Team B status**: Holds `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs, Needs `{python} GangSchedulingDeadlock.gs_gpus_per_job_str` GPUs. Progress = 0 percent.
+3. **Cluster status**: `{python} GangSchedulingDeadlock.gs_n_gpus_str` GPUs allocated, 0 samples processed.
+4. **Waste**: `{python} GangSchedulingDeadlock.gs_waste_m_str` per hour in idle electricity and capital.
+
+**Systems insight**: This is a circular dependency\index{Deadlock!circular dependency}: Team A is waiting for Team B's GPUs, and Team B is waiting for Team A's. Without gang scheduling (all-or-nothing allocation), cluster efficiency drops to zero. In a large fleet, even a 5-minute deadlock can cost thousands of dollars. Batch schedulers and Kubernetes batch extensions address this by enforcing a job-level admission boundary: if the full gang cannot start, the job should remain queued rather than hold a partial allocation.
+
+:::
+
+The partial-allocation pattern in @fig-gang-scheduling-deadlock is a **hold-and-wait deadlock**\index{Deadlock!hold-and-wait}[^fn-deadlock-scheduling] in which two jobs each hold half the cluster and neither can proceed. The implementation guarantee is straightforward: for a job $J$ requesting $N$ GPUs, the scheduler must guarantee that either all $N$ GPUs are allocated atomically, or the job remains in the queue without holding any resources. This binary outcome eliminates deadlock by construction, since a job that holds no resources cannot block other jobs. Implementing this guarantee efficiently, however, is the challenge that defines much of cluster scheduling algorithm design.
 
 [^fn-deadlock-scheduling]: **Hold-and-Wait Deadlock**\index{Deadlock!hold-and-wait}: One of the four classical conditions jointly sufficient for deadlock in resource-allocation systems. In GPU clusters, this condition is uniquely expensive: two jobs each holding 500 GPUs while waiting for 200 more strand 1,000 GPUs indefinitely, burning approximately \$2,000/hour. Gang scheduling eliminates hold-and-wait by construction, requiring atomic all-or-nothing allocation at the cost of reduced packing flexibility.
 

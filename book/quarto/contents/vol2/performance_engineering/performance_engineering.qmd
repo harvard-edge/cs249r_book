@@ -157,21 +157,9 @@ The same diagnostic process can be codified as a decision flowchart, mapping eac
 
 :::
 
-The central lesson of @fig-iron-law-flowchart is that profiling must precede optimization: applying operator fusion to a compute-bound workload, or precision engineering to an overhead-bound one, yields zero improvement regardless of implementation quality. Misdiagnosis is not only wasted effort; a performance change shipped blind can become an outage.
+The central lesson of @fig-iron-law-flowchart is that profiling must precede optimization: applying operator fusion to a compute-bound workload, or precision engineering to an overhead-bound one, yields zero improvement regardless of implementation quality. Misdiagnosis is not only wasted effort; a performance change shipped blind can move the system to the wrong point on its operating boundary.
 
-::: {#ws-performance-engineering-cloudflare-regex-outage .callout-war-story title="The regex that saturated the edge"}
-
-**Context**: Cloudflare's Web Application Firewall runs on edge machines that process HTTP and HTTPS traffic across the global network [@cloudflare2019outage].
-
-**Failure mode**: On July 2, 2019, a newly deployed managed WAF rule caused excessive CPU consumption on every HTTP/HTTPS-handling core across Cloudflare's network.
-
-**Consequence**: Cloudflare reported losing most of its traffic until the team identified the WAF as the cause and used a global disable mechanism to restore service.
-
-**Systems lesson**: Performance engineering includes algorithmic complexity and rollout design. A small rule change can become a global outage when it is deployed everywhere before bounded-runtime checks, canaries, and kill switches catch the cost. ML deployments follow the same pattern: a new model, a recalibrated threshold, or a retrained feature can ship a worst-case latency cliff into production that no unit test catches, which is why canarying, request shadowing, and per-request kill switches are first-class ML serving infrastructure.
-
-:::
-
-That discipline of bounding the worst case before a global rollout is the operational complement to throughput-vs-quality tuning, and that tuning implies a trade-off space with a boundary. The **efficiency frontier**\index{Efficiency Frontier!definition} is the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. Performance engineering pushes the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
+That boundary is the **efficiency frontier**\index{Efficiency Frontier!definition}, the Pareto-optimal curve of model quality vs. system throughput. A model on the frontier cannot improve throughput without sacrificing quality, or vice versa. @thompson2021 show why this frontier matters for deep learning: quality improvements have required rapidly increasing compute, making efficiency gains central to continued progress. Performance engineering pushes the frontier outward by making each quality level achievable at higher throughput, or equivalently, by making each throughput level achievable at higher quality. An organization's goal is not merely to reach the frontier but to find the point on it that best matches their latency, throughput, cost, and quality requirements.
 
 The multi-dimensional nature of this frontier makes optimization challenging. @Tbl-performance-engineering-frontier-dimensions identifies the five dimensions that performance engineers must balance before choosing an optimization target.
 
@@ -187,9 +175,7 @@ The multi-dimensional nature of this frontier makes optimization challenging. @T
 
 The dimensions in @tbl-performance-engineering-frontier-dimensions interact in nonobvious ways. Increasing batch size improves throughput and cost efficiency but degrades latency. Reducing precision improves throughput and memory but may degrade quality. Speculative decoding improves latency but may increase per-token cost. The performance engineer's task is to navigate these trade-offs guided by the application's specific requirements.
 
-A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the performance-engineering toolbox provides the methods for reaching that point.
-
-To make this concrete, consider two deployment configurations for the same 70B large language model (LLM).
+A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the performance-engineering toolbox provides the methods for reaching that point. To make this concrete, consider two deployment configurations for the same 70B large language model (LLM).
 
 Configuration A is latency-optimized: FP16 weights, batch size 1, speculative decoding enabled. The model replica produces approximately 50 tokens/second with 20 ms inter-token latency while occupying 8 H100 GPUs for a single user stream. Cost: approximately \$0.12 per 1,000 output tokens.
 
@@ -2395,9 +2381,21 @@ Step 3: Identify optimization targets.
 
 Effective performance engineering follows an iterative cycle: *profile, diagnose, optimize, verify*. The verification step is critical and often skipped. After applying an optimization, reprofile to confirm that the targeted bottleneck was addressed and that no new bottleneck emerged. Performance optimization is a waterbed problem: fixing one bottleneck often exposes the next.
 
-A common trap is optimizing based on microbenchmarks rather than end-to-end traces. A kernel that appears 2$\times$ faster in isolation may deliver only 5 percent improvement in end-to-end throughput if it was not the bottleneck, or if the surrounding code cannot take advantage of its speedup due to data dependencies. Always measure impact at the application level (tokens/second, step time, P99 latency) in addition to kernel-level metrics.
+A common trap is optimizing based on microbenchmarks rather than end-to-end traces. A kernel that appears 2$\times$ faster in isolation may deliver only 5 percent improvement in end-to-end throughput if it was not the bottleneck, or if the surrounding code cannot take advantage of its speedup due to data dependencies. Always measure impact at the application level (tokens/second, step time, P99 latency) in addition to kernel-level metrics. The same measurement discipline governs rollout risk: a change that looks local can consume a global resource once it reaches production traffic.
 
-Another subtlety is that profiling itself can perturb the system being measured. The PyTorch profiler adds approximately 10--20 percent overhead when recording full traces with memory profiling enabled. Nsight Systems adds less overhead but still affects scheduling. Profile warmup steps before active measurement, and discount the first few profiled iterations where JIT compilation or CUDA context initialization may dominate.
+::: {#ws-performance-engineering-cloudflare-regex-outage .callout-war-story title="The regex that saturated the edge"}
+
+**Context**: Cloudflare's Web Application Firewall runs on edge machines that process HTTP and HTTPS traffic across the global network [@cloudflare2019outage].
+
+**Failure mode**: On July 2, 2019, a newly deployed managed WAF rule caused excessive CPU consumption on every HTTP/HTTPS-handling core across Cloudflare's network.
+
+**Consequence**: Cloudflare reported losing most of its traffic until the team identified the WAF as the cause and used a global disable mechanism to restore service.
+
+**Systems lesson**: Performance engineering includes algorithmic complexity and rollout design. A small rule change can become a global outage when it is deployed everywhere before bounded-runtime checks, canaries, and kill switches catch the cost. ML deployments follow the same pattern: a new model, a recalibrated threshold, or a retrained feature can ship a worst-case latency cliff into production that no unit test catches, which is why canarying, request shadowing, and per-request kill switches are first-class ML serving infrastructure.
+
+:::
+
+Profiling itself can also perturb the system being measured. The PyTorch profiler adds approximately 10--20 percent overhead when recording full traces with memory profiling enabled. Nsight Systems adds less overhead but still affects scheduling. Profile warmup steps before active measurement, and discount the first few profiled iterations where JIT compilation or CUDA context initialization may dominate.
 
 ### Profiling at scale {#sec-performance-engineering-profiling-scale}
 
