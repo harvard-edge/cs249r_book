@@ -98,11 +98,9 @@ I offer the piece as a data point from the edge, not a model to transplant: one 
 
 ---
 
-**Jeremy Ellis**  
-High School Robotics and Machine Learning Educator, MSS, Mission SD75, BC, Canada  
-Co-Chair, AIEng4D Show & Tell  
-LinkedIn: [Jeremy Ellis](https://www.linkedin.com/in/jeremy-ellis-4237a9bb)  
+**Jeremy Ellis**
+High School Robotics and Machine Learning Educator, MSS, Mission SD75, BC, Canada
+Co-Chair, AIEng4D Show & Tell
+LinkedIn: [Jeremy Ellis](https://www.linkedin.com/in/jeremy-ellis-4237a9bb)
 Course GitHub: [The XIAO ML Kit Course](https://github.com/hpssjellis/maker100-xiaoML-kit)
 ![Screenshot 2026-05-20 at 11.25.10 AM.png](https://assets.buttondown.email/images/b5adfdcb-3487-4830-8619-5c375fabe1b5.png?w=960&fit=max)
-
-
