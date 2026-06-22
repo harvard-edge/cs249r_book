@@ -47,7 +47,6 @@ class UpdateCommand(BaseCommand):
     UPDATE_FILES = [
         "requirements.txt",
         "pyproject.toml",
-        "settings.ini",
         "README.md",
         "LICENSE",
     ]

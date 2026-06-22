@@ -2518,21 +2518,19 @@ def enable_autograd(quiet=False):
         """
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed for consistency
         if not isinstance(other, Tensor):
             other_tensor = Tensor(other)
         else:
             other_tensor = other
         _ensure_grad_attrs(other_tensor)
 
-        # Call original operation
         result = _original_mul(self, other)
         _ensure_grad_attrs(result)
 
-        # Track gradient if needed
+        # Pass other_tensor (always a Tensor) so MulBackward can call .data on it.
         if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = MulBackward(self, other)
+            result._grad_fn = MulBackward(self, other_tensor)
 
         return result
 
