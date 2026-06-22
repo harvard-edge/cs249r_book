@@ -626,6 +626,17 @@ class ModuleWorkflowCommand(BaseCommand):
 
             self.console.print(f"   ✅ Unit tests: {unit_result['passed']}/{unit_result['passed']} passed")
 
+        # Step 1.5: Catch notebook syntax errors before export. Unit tests run
+        # against the instructor src/ file, so a SyntaxError in the student
+        # notebook would otherwise slip through to a silent, broken export.
+        if not skip_export:
+            syntax_check = self._check_notebook_syntax(module_name)
+            if not syntax_check['ok']:
+                self.console.print()
+                self.console.print(f"[red]   ❌ {syntax_check['error']}[/red]")
+                self.console.print("   💡 Fix the syntax error in your notebook and try again")
+                return 1
+
         # Step 2: Export to package (BEFORE integration tests, since they need the export)
         if not skip_export:
             self.console.print()
@@ -820,6 +831,13 @@ class ModuleWorkflowCommand(BaseCommand):
             if unit_result['failed'] > 0:
                 return 1
 
+        # Catch notebook syntax errors before export (see complete_module Step 1.5)
+        if not skip_export:
+            syntax_check = self._check_notebook_syntax(module_name)
+            if not syntax_check['ok']:
+                self.console.print(f"[red]❌ {syntax_check['error']}[/red]")
+                return 1
+
         # Export to package
         if not skip_export:
             export_result = self.export_module(module_name)
@@ -859,7 +877,7 @@ class ModuleWorkflowCommand(BaseCommand):
         """
         Run comprehensive tests for a module:
         1. Inline unit tests (from src/XX_modulename/XX_modulename.py)
-        2. Progressive integration tests (from tests/XX_modulename/test_progressive_integration.py)
+        2. Progressive integration tests (from tests/XX_modulename/test_XX_modulename_progressive.py)
         """
         from rich.table import Table
         from rich import box
@@ -977,8 +995,15 @@ class ModuleWorkflowCommand(BaseCommand):
         """Run progressive integration tests using pytest."""
         project_root = Path.cwd()
 
-        # Find integration test file
-        integration_test_file = project_root / "tests" / module_name / "test_progressive_integration.py"
+        # Find integration test file. Files are named
+        # tests/<module>/test_<module>_progressive.py (e.g. test_01_tensor_progressive.py),
+        # so match that first and fall back to any test_*_progressive.py in the dir.
+        module_test_dir = project_root / "tests" / module_name
+        integration_test_file = module_test_dir / f"test_{module_name}_progressive.py"
+        if not integration_test_file.exists() and module_test_dir.exists():
+            matches = sorted(module_test_dir.glob("test_*_progressive.py"))
+            if matches:
+                integration_test_file = matches[0]
 
         if not integration_test_file.exists():
             # No integration tests for this module yet
@@ -1149,6 +1174,52 @@ class ModuleWorkflowCommand(BaseCommand):
                     return line.strip()
 
         return "Test failed (see output for details)"
+
+    def _check_notebook_syntax(self, module_name: str) -> dict:
+        """Compile each code cell of the student notebook to catch syntax errors
+        before export. Unit tests run against the instructor ``src/`` file, while
+        export runs nbdev on the student notebook, so a SyntaxError in the
+        notebook would otherwise slip silently into a broken package.
+
+        Returns ``{'ok': bool, 'error': Optional[str]}``. A missing notebook is
+        not an error; some flows have nothing to check yet.
+        """
+        import json
+
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_path = self.config.project_root / "modules" / module_name / f"{short_name}.ipynb"
+        if not notebook_path.exists():
+            return {'ok': True, 'error': None}
+        try:
+            nb = json.loads(notebook_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, OSError) as e:
+            return {'ok': False, 'error': f"Could not read {notebook_path.name}: {e}"}
+
+        for idx, cell in enumerate(nb.get("cells", [])):
+            if cell.get("cell_type") != "code":
+                continue
+            source = cell.get("source", "")
+            if isinstance(source, list):
+                source = "".join(source)
+            # Drop IPython magics and shell escapes, which are not valid Python
+            # and would otherwise raise a spurious SyntaxError.
+            code = "\n".join(
+                ln for ln in source.splitlines()
+                if not ln.lstrip().startswith(("%", "!"))
+            )
+            if not code.strip():
+                continue
+            try:
+                compile(code, f"{notebook_path.name}[cell {idx}]", "exec")
+            except SyntaxError as e:
+                return {
+                    'ok': False,
+                    'error': (
+                        f"SyntaxError in {notebook_path.name} cell {idx}"
+                        f" (line {e.lineno}): {e.msg}"
+                    ),
+                }
+        return {'ok': True, 'error': None}
 
     def export_module(self, module_name: str) -> int:
         """Export student's notebook to the TinyTorch package.
