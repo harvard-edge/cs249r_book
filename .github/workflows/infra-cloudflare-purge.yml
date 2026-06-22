@@ -41,7 +41,7 @@ name: '🔧 Infra · 🧹 Purge Cloudflare Cache'
 #   - workflow_run: completion of any *-publish-live.yml workflow
 #   - workflow_dispatch: manual purge (e.g., after a hand-fix to gh-pages)
 #
-# Required configuration:
+# Configuration:
 #   - secrets.CLOUDFLARE_API_TOKEN  — Token scoped to Zone.Cache Purge
 #                                     on the mlsysbook.ai zone. Already
 #                                     used by staffml-publish-live.yml
@@ -49,6 +49,8 @@ name: '🔧 Infra · 🧹 Purge Cloudflare Cache'
 #   - vars.CLOUDFLARE_ZONE_ID       — Zone id for mlsysbook.ai. Set once
 #                                     in Settings → Secrets and variables
 #                                     → Variables. Not a secret.
+#   Automatic workflow_run triggers warn and skip when configuration is
+#   incomplete; manual workflow_dispatch purges still fail fast.
 #
 # Related:
 #   - book-publish-live.yml         — Upstream deploy (book content)
@@ -116,22 +118,31 @@ jobs:
           fi
 
       - name: '✅ Verify required configuration'
+        id: config
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
         run: |
           missing=0
           if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::error::secrets.CLOUDFLARE_API_TOKEN is not set. Add it under Settings → Secrets and variables → Actions → Secrets."
+            echo "::warning::secrets.CLOUDFLARE_API_TOKEN is not set. Skipping automatic Cloudflare cache purge."
             missing=1
           fi
           if [ -z "$CLOUDFLARE_ZONE_ID" ]; then
-            echo "::error::vars.CLOUDFLARE_ZONE_ID is not set. Add the mlsysbook.ai zone id under Settings → Secrets and variables → Actions → Variables (this is NOT a secret — zone ids are public-by-design)."
+            echo "::warning::vars.CLOUDFLARE_ZONE_ID is not set. Skipping automatic Cloudflare cache purge."
             missing=1
           fi
-          exit $missing
+          if [ "$missing" -eq 0 ]; then
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "configured=false" >> "$GITHUB_OUTPUT"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            exit 1
+          fi
 
       - name: '🧹 Purge Cloudflare cache'
+        if: ${{ steps.config.outputs.configured == 'true' }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
