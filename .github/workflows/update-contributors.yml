@@ -67,7 +67,7 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r .github/workflows/contributors/requirements.txt
-          pip install requests>=2.31.0
+          pip install "requests>=2.31.0"
 
       - name: Configure Git
         run: |
@@ -101,10 +101,21 @@ jobs:
         run: |
           # Build the file list dynamically from projects.json so adding a new
           # project (or renaming a directory) in the SSOT is a one-line change.
-          mapfile -t FILES_TO_CHECK < <(python3 .github/workflows/contributors/projects.py update-files)
+          mapfile -t CANDIDATE_FILES < <(python3 .github/workflows/contributors/projects.py update-files)
+          FILES_TO_CHECK=()
+          for file in "${CANDIDATE_FILES[@]}"; do
+            if [ -e "$file" ] || git ls-files --error-unmatch "$file" >/dev/null 2>&1; then
+              FILES_TO_CHECK+=("$file")
+            fi
+          done
 
           if [ -f "${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd" ]; then
             FILES_TO_CHECK+=("${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd")
+          fi
+
+          if [ "${#FILES_TO_CHECK[@]}" -eq 0 ]; then
+            echo "changes_made=false" >> $GITHUB_OUTPUT
+            exit 0
           fi
 
           if git status "${FILES_TO_CHECK[@]}" --porcelain 2>/dev/null | grep .; then
@@ -121,15 +132,29 @@ jobs:
           # Stage every contributor-related file derived from projects.json.
           # Same source of truth as the change-detection step above; keeps the
           # two from drifting and makes a new project a one-line edit.
-          mapfile -t TRACKED < <(python3 .github/workflows/contributors/projects.py update-files)
-          git add -A "${TRACKED[@]}" 2>/dev/null || true
+          mapfile -t CANDIDATE_FILES < <(python3 .github/workflows/contributors/projects.py update-files)
+          TRACKED=()
+          for file in "${CANDIDATE_FILES[@]}"; do
+            if [ -e "$file" ] || git ls-files --error-unmatch "$file" >/dev/null 2>&1; then
+              TRACKED+=("$file")
+            fi
+          done
+
+          if [ "${#TRACKED[@]}" -gt 0 ]; then
+            git add -A "${TRACKED[@]}"
+          fi
 
           if [ -f "${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd" ]; then
             git add "${{ vars.BOOK_QUARTO }}/contents/frontmatter/acknowledgements/acknowledgements.qmd" 2>/dev/null || true
           fi
-          
+
+          if git diff --cached --quiet; then
+            echo "ℹ️ Contributor files changed, but no existing tracked/generated files need committing on this branch."
+            exit 0
+          fi
+
           git commit -m "Update contributors list [skip ci]"
-          
+
           # Retry push with rebase up to 3 times to handle concurrent pushes
           MAX_RETRIES=3
           for i in $(seq 1 $MAX_RETRIES); do
