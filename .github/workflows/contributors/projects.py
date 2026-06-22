@@ -12,7 +12,8 @@ CLI commands (used from workflows that don't import Python directly):
     python3 projects.py keys             # PROJECTS env value
     python3 projects.py aliases          # PROJECT_ALIASES env value
     python3 projects.py dirs-overrides   # PROJECT_DIRS env value
-    python3 projects.py update-files     # newline-separated file list
+    python3 projects.py update-files     # configured generated files
+    python3 projects.py active-update-files
     python3 projects.py json             # pretty-printed config dump
 
 The Python API (``projects()``, ``keys()``, ``dirs()`` …) is what the
@@ -22,10 +23,12 @@ generator scripts use directly via ``from projects import ...``.
 from __future__ import annotations
 
 import json
+import subprocess
 import sys
 from pathlib import Path
 
 CONFIG_PATH = Path(__file__).parent / "projects.json"
+REPO_ROOT = CONFIG_PATH.parents[3]
 
 
 def _config() -> dict:
@@ -99,11 +102,31 @@ def update_files() -> list[str]:
     return out
 
 
+def _is_tracked(path: str) -> bool:
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "--error-unmatch", path],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+        check=False,
+    )
+    return result.returncode == 0
+
+
+def active_update_files() -> list[str]:
+    """Generated contributor files present in the current branch checkout."""
+    return [
+        path
+        for path in update_files()
+        if (REPO_ROOT / path).exists() or _is_tracked(path)
+    ]
+
+
 _COMMANDS = {
     "keys": lambda: print(env_projects()),
     "aliases": lambda: print(env_aliases()),
     "dirs-overrides": lambda: print(env_dirs_overrides()),
     "update-files": lambda: print("\n".join(update_files())),
+    "active-update-files": lambda: print("\n".join(active_update_files())),
     "json": lambda: print(json.dumps(_config(), indent=2)),
 }
 
