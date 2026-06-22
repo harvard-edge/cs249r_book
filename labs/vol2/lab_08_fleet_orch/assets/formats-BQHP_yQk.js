@@ -1,0 +1,1 @@
+import{c as a}from"./utils-BZwMGX81.js";function o(r){function n(t){return!!(t!=null&&t.schema)&&Array.isArray(t.schema.fields)&&typeof t.toArray=="function"}return(n(r)?r:f(r)).toArray()}o.responseType="arrayBuffer";function f(r,n){return a(r,n??{useProxy:!0})}export{o as t};
