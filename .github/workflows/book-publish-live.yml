@@ -1403,6 +1403,7 @@ jobs:
           NEW_VOL2: ${{ needs.validate-inputs.outputs.new_vol2_version }}
           PREV_VOL1: ${{ needs.validate-inputs.outputs.previous_vol1_version }}
           PREV_VOL2: ${{ needs.validate-inputs.outputs.previous_vol2_version }}
+          SITE_ONLY: ${{ inputs.site_only }}
         run: |
           set -euo pipefail
 
@@ -1445,8 +1446,16 @@ jobs:
             echo "📦 ${volume}: v${release_id} (hash ${release_hash:0:12}) → ${site_dir}/release-manifest.json"
           }
 
-          emit_manifest "vol1-site" "vol1" "$NEW_VOL1"
-          emit_manifest "vol2-site" "vol2" "$NEW_VOL2"
+          MANIFEST_VOL1="$NEW_VOL1"
+          MANIFEST_VOL2="$NEW_VOL2"
+          if [ "$SITE_ONLY" = "true" ]; then
+            MANIFEST_VOL1="$PREV_VOL1"
+            MANIFEST_VOL2="$PREV_VOL2"
+            echo "ℹ️ site_only=true — keeping release manifests at $MANIFEST_VOL1 / $MANIFEST_VOL2"
+          fi
+
+          emit_manifest "vol1-site" "vol1" "$MANIFEST_VOL1"
+          emit_manifest "vol2-site" "vol2" "$MANIFEST_VOL2"
 
       - name: 🔧 Setup Quarto (for landing page)
         if: inputs.deploy_target == 'all'
@@ -1607,9 +1616,15 @@ jobs:
             echo "📊 Files to be deployed: $CHANGED_FILES"
           fi
 
+          RELEASE_LABEL="${{ needs.validate-inputs.outputs.new_version }}"
+          if [ "${{ inputs.site_only }}" = "true" ]; then
+            RELEASE_LABEL="${{ needs.validate-inputs.outputs.previous_version }}"
+            echo "ℹ️ site_only=true — deployment commit will use current release label: $RELEASE_LABEL"
+          fi
+
           # Commit with comprehensive validation
           echo "📝 Creating deployment commit..."
-          COMMIT_MSG="🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} to /$VOL1_PATH/ + /$VOL2_PATH/ from commit ${{ github.sha }}
+          COMMIT_MSG="🚀 Deploy release $RELEASE_LABEL to /$VOL1_PATH/ + /$VOL2_PATH/ from commit ${{ github.sha }}
 
           Two-volume textbook with PDF and EPUB assets for download.
 
@@ -1617,7 +1632,7 @@ jobs:
           - Vol1 PDF/EPUB: /$VOL1_PATH/assets/downloads/
           - Vol2 HTML: /$VOL2_PATH/
           - Vol2 PDF/EPUB: /$VOL2_PATH/assets/downloads/
-          - Release: ${{ needs.validate-inputs.outputs.new_version }}
+          - Release: $RELEASE_LABEL
           - Files updated: $CHANGED_FILES"
 
           if git commit -m "$COMMIT_MSG"; then
