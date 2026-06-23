@@ -114,9 +114,10 @@ class ConfigManager:
         self.active_config = self.book_dir / "_quarto.yml"
         self.active_index = self.book_dir / "index.qmd"
 
-        # Volume-specific index files
-        self.index_vol1 = self.book_dir / "contents" / "vol1" / "index.qmd"
-        self.index_vol2 = self.book_dir / "contents" / "vol2" / "index.qmd"
+        # Volume-specific site entry points. Keep this aligned with the
+        # GitHub build matrix, which symlinks index.qmd to index-vol{N}.qmd.
+        self.index_vol1 = self.book_dir / "index-vol1.qmd"
+        self.index_vol2 = self.book_dir / "index-vol2.qmd"
 
     def get_config_file(self, format_type: str, volume: Optional[str] = None) -> Path:
         """Get the configuration file for a specific format and optional volume.
