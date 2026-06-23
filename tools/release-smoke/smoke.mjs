@@ -45,6 +45,7 @@ for (const name of targets) {
   const siteResult = { url: cfg.url, checks: {}, warnings: [], errors: [] };
 
   try {
+    const linkScope = cfg.linkScope || `${new URL(cfg.url).origin}/`;
     const resp = await page.goto(cfg.url, { waitUntil: cfg.waitUntil || 'domcontentloaded', timeout: 30000 });
     siteResult.checks.httpStatus = resp ? resp.status() : null;
     if (!resp || resp.status() !== 200) {
@@ -91,7 +92,7 @@ for (const name of targets) {
     const linkHrefs = await page.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href')).filter(Boolean));
     const sameOrigin = [...new Set(linkHrefs
       .map((h) => { try { return new URL(h, cfg.url).toString(); } catch { return null; } })
-      .filter((u) => u && u.startsWith('https://mlsysbook.ai/'))
+      .filter((u) => u && u.startsWith(linkScope))
     )];
     siteResult.checks.sameOriginLinkCount = sameOrigin.length;
 
