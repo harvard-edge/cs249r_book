@@ -13,8 +13,9 @@
 # Why relative paths need fixing:
 #   Quarto generates ../../../site_libs/ (3 levels up from contents/vol{N}/chapter/).
 #   After the move to {chapter}/ (depth 1), those same assets are at ../site_libs/.
-#   We fix ONLY the files being moved — files staying in place (e.g. contents/frontmatter/)
-#   are left untouched.
+#   The generated sidebar, breadcrumbs, and next/prev links also point at the
+#   pre-flatten contents/vol{N}/ paths, so after moving files we rewrite links
+#   across the full prepared volume site.
 #
 # Usage:
 #   flatten-vol-urls.sh <site-dir> <vol>
@@ -40,14 +41,39 @@ echo "🔧 Flattening $VOL: contents/$VOL/* → site root..."
 # at depth 1 ({chapter}/). All Quarto-generated relative refs use exactly 3
 # levels of ../../../  since every rendered file is at the same depth.
 echo "  Fixing relative paths (../../../ → ../) in moved files..."
-find "$NESTED_DIR" -name "*.html" -type f \
-  -exec sed -i 's|\.\./\.\./\.\./|../|g' {} \;
+python3 - "$NESTED_DIR" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+for path in root.rglob("*.html"):
+    text = path.read_text(encoding="utf-8")
+    updated = text.replace("../../../", "../")
+    if updated != text:
+        path.write_text(updated, encoding="utf-8")
+PY
 
 # Step 2: Fix absolute https://mlsysbook.ai/{vol}/contents/{vol}/ refs.
 # These appear in og:image, twitter:image, and any full-URL inline refs.
 echo "  Fixing absolute URL refs in moved files..."
-find "$NESTED_DIR" -name "*.html" -type f \
-  -exec sed -i "s|https://mlsysbook\.ai/${VOL}/contents/${VOL}/|https://mlsysbook.ai/${VOL}/|g" {} \;
+python3 - "$NESTED_DIR" "$VOL" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+root = Path(sys.argv[1])
+vol = sys.argv[2]
+old = f"https://mlsysbook.ai/{vol}/contents/{vol}/"
+new = f"https://mlsysbook.ai/{vol}/"
+for path in root.rglob("*.html"):
+    text = path.read_text(encoding="utf-8")
+    updated = text.replace(old, new)
+    if updated != text:
+        path.write_text(updated, encoding="utf-8")
+PY
 
 # Step 3: Move all content from contents/vol{N}/ up to the site root.
 # --ignore-existing: the real homepage is at root index.html; any
@@ -60,7 +86,17 @@ rsync -a --ignore-existing "$NESTED_DIR/" "$SITE_DIR/"
 # After:  "chapter/chapter.html"
 if [ -f "$SITE_DIR/search.json" ]; then
   echo "  Fixing search.json hrefs..."
-  sed -i "s|\"contents/${VOL}/|\"|g" "$SITE_DIR/search.json"
+  python3 - "$SITE_DIR/search.json" "$VOL" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+vol = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+path.write_text(text.replace(f'"contents/{vol}/', '"'), encoding="utf-8")
+PY
 fi
 
 # Step 5: Fix sitemap.xml (full absolute URLs).
@@ -68,10 +104,93 @@ fi
 # After:  https://mlsysbook.ai/vol{N}/...
 if [ -f "$SITE_DIR/sitemap.xml" ]; then
   echo "  Fixing sitemap.xml..."
-  sed -i "s|/${VOL}/contents/${VOL}/|/${VOL}/|g" "$SITE_DIR/sitemap.xml"
+  python3 - "$SITE_DIR/sitemap.xml" "$VOL" <<'PY'
+from __future__ import annotations
+
+import sys
+from pathlib import Path
+
+path = Path(sys.argv[1])
+vol = sys.argv[2]
+text = path.read_text(encoding="utf-8")
+path.write_text(text.replace(f"/{vol}/contents/{vol}/", f"/{vol}/"), encoding="utf-8")
+PY
 fi
 
 # Step 6: Remove the now-copied nested directory.
 rm -rf "$NESTED_DIR"
+
+# Step 7: Rewrite generated links across the whole prepared volume site.
+# Root pages need ./chapter/..., pages one directory deep need ../chapter/...,
+# and deeper pages need the corresponding parent prefix. The shared SocratiQ
+# page intentionally remains under contents/frontmatter/ unless the build
+# manifest changes.
+echo "  Rewriting generated sidebar/breadcrumb links..."
+python3 - "$SITE_DIR" "$VOL" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+site_dir = Path(sys.argv[1])
+vol = sys.argv[2]
+
+volume_path = re.compile(r'(?:(?:\./|\.\./)+)?contents/' + re.escape(vol) + r'/')
+volume_index = re.compile(r'(?:(?:\./|\.\./)+)?contents/' + re.escape(vol) + r'/index\.qmd')
+shared_frontmatter = re.compile(r'(?:(?:\./|\.\./)+)?contents/frontmatter/')
+
+
+def prefix_for(path: Path) -> str:
+    rel_parent = path.relative_to(site_dir).parent
+    if str(rel_parent) == ".":
+        return "./"
+    return "../" * len(rel_parent.parts)
+
+
+for path in site_dir.rglob("*.html"):
+    text = path.read_text(encoding="utf-8")
+    prefix = prefix_for(path)
+    updated = text
+    updated = updated.replace(
+        f"https://mlsysbook.ai/{vol}/contents/{vol}/",
+        f"https://mlsysbook.ai/{vol}/",
+    )
+    updated = volume_index.sub(prefix, updated)
+    updated = volume_path.sub(prefix, updated)
+    updated = shared_frontmatter.sub(prefix + "contents/frontmatter/", updated)
+    if updated != text:
+        path.write_text(updated, encoding="utf-8")
+PY
+
+# Step 8: Fail before deployment if any generated link still targets the
+# removed contents/vol{N}/ tree.
+echo "  Checking for stale contents/$VOL links..."
+python3 - "$SITE_DIR" "$VOL" <<'PY'
+from __future__ import annotations
+
+import re
+import sys
+from pathlib import Path
+
+site_dir = Path(sys.argv[1])
+vol = sys.argv[2]
+stale_attr = re.compile(r'(?:href|src|action)=["\'][^"\']*contents/' + re.escape(vol) + r'/')
+failures: list[str] = []
+
+for path in site_dir.rglob("*.html"):
+    text = path.read_text(encoding="utf-8", errors="replace")
+    for line_no, line in enumerate(text.splitlines(), start=1):
+        if stale_attr.search(line):
+            failures.append(f"{path.relative_to(site_dir)}:{line_no}: {line.strip()[:220]}")
+
+if failures:
+    print(f"stale contents/{vol}/ links remain after flatten:", file=sys.stderr)
+    for failure in failures[:50]:
+        print(f"  {failure}", file=sys.stderr)
+    if len(failures) > 50:
+        print(f"  ... {len(failures) - 50} more", file=sys.stderr)
+    sys.exit(1)
+PY
 
 echo "✅ $VOL flattened — chapter URLs now at mlsysbook.ai/$VOL/{chapter}/{chapter}.html"
