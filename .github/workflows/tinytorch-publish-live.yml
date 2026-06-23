@@ -581,14 +581,62 @@ jobs:
           cat ${{ vars.TINYTORCH_SITE }}/_build/release-manifest.json
 
       - name: 🚀 Deploy to GitHub Pages
-        uses: peaceiris/actions-gh-pages@v4
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: ./${{ vars.TINYTORCH_SITE }}/_build
-          destination_dir: tinytorch
-          publish_branch: gh-pages
-          keep_files: true
-          commit_message: '${{ needs.validate-inputs.outputs.site_only == ''true'' && ''🌐 TinyTorch website update'' || format(''🔥 Deploy TinyTorch {0}'', needs.validate-inputs.outputs.new_version) }} - ${{ github.sha }}'
+        run: |
+          set -euo pipefail
+
+          rm -rf gh-pages-repo
+          git clone --depth=1 --branch=gh-pages \
+            https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
+            gh-pages-repo
+
+          cd gh-pages-repo
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+          BUILD_DIR="${{ github.workspace }}/${{ vars.TINYTORCH_SITE }}/_build"
+
+          [ -f "$BUILD_DIR/index.html" ] || {
+            echo "❌ CRITICAL: TinyTorch build index.html missing."
+            exit 1
+          }
+
+          # Replace only the TinyTorch subtree. The previous peaceiris overlay
+          # deploy used keep_files=true, which preserved retired Sphinx pages
+          # such as /tinytorch/intro.html beside the Quarto site.
+          rm -rf tinytorch
+          mkdir -p tinytorch
+          cp -a "$BUILD_DIR"/. tinytorch/
+          touch .nojekyll
+
+          if [ -f tinytorch/intro.html ] || [ -d tinytorch/_sources ] || [ -d tinytorch/_static ]; then
+            echo "❌ CRITICAL: retired Sphinx TinyTorch artifacts remain after clean deploy staging."
+            exit 1
+          fi
+
+          git add -A tinytorch .nojekyll
+
+          if [ "${{ needs.validate-inputs.outputs.site_only }}" = "true" ]; then
+            COMMIT_MESSAGE="🌐 TinyTorch website update - ${{ github.sha }}"
+          else
+            COMMIT_MESSAGE="🔥 Deploy TinyTorch ${{ needs.validate-inputs.outputs.new_version }} - ${{ github.sha }}"
+          fi
+
+          git commit -m "$COMMIT_MESSAGE" --allow-empty || echo "🟡 Nothing to commit"
+
+          PUSHED=false
+          for i in 1 2 3; do
+            if git push origin gh-pages 2>/dev/null; then
+              echo "✅ Push succeeded on attempt $i"
+              PUSHED=true
+              break
+            fi
+            echo "⚠️ Push failed (attempt $i/3), pulling with rebase..."
+            git pull --rebase origin gh-pages || true
+          done
+          if [ "$PUSHED" != "true" ]; then
+            echo "❌ Push failed after 3 attempts."
+            exit 1
+          fi
 
   create-tag:
     name: '🏷️ Create Tag & Release'
