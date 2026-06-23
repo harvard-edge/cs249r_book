@@ -43,11 +43,15 @@ name: '🔧 Infra · 🧹 Purge Cloudflare Cache'
 #   - workflow_dispatch: manual purge (e.g., after a hand-fix to gh-pages)
 #
 # Configuration:
-#   - secrets.CLOUDFLARE_API_TOKEN  — Token scoped to Zone.Cache Purge
-#                                     on the mlsysbook.ai zone. Already
-#                                     used by staffml-publish-live.yml
+#   - secrets.CLOUDFLARE_CACHE_PURGE_TOKEN
+#                                   — Dedicated token scoped to Zone.Cache
+#                                     Purge on the mlsysbook.ai zone.
+#                                     Keep separate from deploy tokens used
 #                                     for D1/Worker shipments.
 #   - vars.CLOUDFLARE_ZONE_ID       — Optional zone id for mlsysbook.ai.
+#   - secrets.CLOUDFLARE_ZONE_ID    — Optional fallback if the zone id is
+#                                     stored as a repository secret instead
+#                                     of a repository variable.
 #                                     If absent, the workflow resolves it
 #                                     through Cloudflare's zone lookup API.
 #   Automatic workflow_run triggers warn and skip when configuration is
@@ -121,20 +125,22 @@ jobs:
       - name: '✅ Verify required configuration'
         id: config
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ vars.CLOUDFLARE_ZONE_ID }}
+          CLOUDFLARE_ZONE_ID_SECRET: ${{ secrets.CLOUDFLARE_ZONE_ID }}
         run: |
           missing=0
-          if [ -z "$CLOUDFLARE_API_TOKEN" ]; then
-            echo "::warning::secrets.CLOUDFLARE_API_TOKEN is not set. Skipping automatic Cloudflare cache purge."
+          if [ -z "$CLOUDFLARE_CACHE_PURGE_TOKEN" ]; then
+            echo "::warning::secrets.CLOUDFLARE_CACHE_PURGE_TOKEN is not set. Skipping automatic Cloudflare cache purge."
             missing=1
           fi
+          CLOUDFLARE_ZONE_ID="${CLOUDFLARE_ZONE_ID:-${CLOUDFLARE_ZONE_ID_SECRET:-}}"
           if [ -z "$CLOUDFLARE_ZONE_ID" ] && [ "$missing" -eq 0 ]; then
             echo "CLOUDFLARE_ZONE_ID is not set; resolving zone id for mlsysbook.ai."
             response=$(curl --silent --show-error --fail-with-body \
               --get \
               --url "https://api.cloudflare.com/client/v4/zones" \
-              --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+              --header "Authorization: Bearer ${CLOUDFLARE_CACHE_PURGE_TOKEN}" \
               --data-urlencode "name=mlsysbook.ai" \
               --data-urlencode "status=active")
             CLOUDFLARE_ZONE_ID=$(echo "$response" | python3 -c "import json, sys; data = json.load(sys.stdin); zones = data.get('result') or []; print(zones[0].get('id', '') if zones else '')")
@@ -156,14 +162,14 @@ jobs:
       - name: '🧹 Purge Cloudflare cache'
         if: ${{ steps.config.outputs.configured == 'true' }}
         env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_CACHE_PURGE_TOKEN: ${{ secrets.CLOUDFLARE_CACHE_PURGE_TOKEN }}
           CLOUDFLARE_ZONE_ID: ${{ steps.config.outputs.zone_id }}
         run: |
           set -euo pipefail
           response=$(curl --silent --show-error --fail-with-body \
             --request POST \
             --url "https://api.cloudflare.com/client/v4/zones/${CLOUDFLARE_ZONE_ID}/purge_cache" \
-            --header "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+            --header "Authorization: Bearer ${CLOUDFLARE_CACHE_PURGE_TOKEN}" \
             --header "Content-Type: application/json" \
             --data '{"purge_everything": true}')
           echo "$response" | python3 -m json.tool
