@@ -117,8 +117,71 @@ path.write_text(text.replace(f"/{vol}/contents/{vol}/", f"/{vol}/"), encoding="u
 PY
 fi
 
-# Step 6: Remove the now-copied nested directory.
-rm -rf "$NESTED_DIR"
+# Step 6: Replace the old nested tree with compatibility redirects.
+# Cached pages, old bookmarks, and search results may still point at
+# /vol{N}/contents/vol{N}/... after a release. Keep those paths alive as
+# lightweight static redirects to the clean canonical chapter URLs.
+echo "  Creating compatibility redirects for old contents/$VOL paths..."
+python3 - "$SITE_DIR" "$NESTED_DIR" "$VOL" <<'PY'
+from __future__ import annotations
+
+import html
+import os
+import shutil
+import sys
+from pathlib import Path
+from urllib.parse import quote
+
+site_dir = Path(sys.argv[1])
+nested_dir = Path(sys.argv[2])
+vol = sys.argv[3]
+
+legacy_pages = sorted(path.relative_to(nested_dir) for path in nested_dir.rglob("*.html"))
+
+shutil.rmtree(nested_dir)
+nested_dir.mkdir(parents=True, exist_ok=True)
+
+
+def relative_target(alias_path: Path, rel: Path) -> str:
+    if rel.name == "index.html":
+        target = site_dir
+    else:
+        target = site_dir / rel
+    return quote(os.path.relpath(target, start=alias_path.parent), safe="/#?=&")
+
+
+def redirect_page(target: str) -> str:
+    escaped = html.escape(target, quote=True)
+    script_target = target.replace("\\", "\\\\").replace('"', '\\"')
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="refresh" content="0; url={escaped}">
+  <link rel="canonical" href="{escaped}">
+  <meta name="robots" content="noindex">
+  <title>Redirecting...</title>
+  <script>
+    const target = new URL("{script_target}", window.location.href);
+    target.search = window.location.search;
+    target.hash = window.location.hash;
+    window.location.replace(target.href);
+  </script>
+</head>
+<body>
+  <p>Redirecting to <a href="{escaped}">the current {html.escape(vol)} page</a>.</p>
+</body>
+</html>
+"""
+
+
+for rel in legacy_pages:
+    alias_path = nested_dir / rel
+    alias_path.parent.mkdir(parents=True, exist_ok=True)
+    alias_path.write_text(redirect_page(relative_target(alias_path, rel)), encoding="utf-8")
+
+print(f"  Created {len(legacy_pages)} compatibility redirect pages.")
+PY
 
 # Step 7: Rewrite generated links across the whole prepared volume site.
 # Root pages need ./chapter/..., pages one directory deep need ../chapter/...,
