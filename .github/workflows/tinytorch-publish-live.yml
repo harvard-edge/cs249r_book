@@ -585,7 +585,7 @@ jobs:
           set -euo pipefail
 
           rm -rf gh-pages-repo
-          git clone --depth=1 --branch=gh-pages \
+          git clone --depth=50 --branch=gh-pages \
             https://x-access-token:${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}.git \
             gh-pages-repo
 
@@ -594,11 +594,42 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
 
           BUILD_DIR="${{ github.workspace }}/${{ vars.TINYTORCH_SITE }}/_build"
+          PRESERVED_DOWNLOADS="$(mktemp -d)"
 
           [ -f "$BUILD_DIR/index.html" ] || {
             echo "❌ CRITICAL: TinyTorch build index.html missing."
             exit 1
           }
+
+          preserve_site_only_download() {
+            local filename="$1"
+            local source_path="tinytorch/assets/downloads/$filename"
+            local dest_path="$PRESERVED_DOWNLOADS/$filename"
+
+            if [ -f "$source_path" ]; then
+              cp "$source_path" "$dest_path"
+              echo "✅ Preserved existing $filename from gh-pages"
+              return 0
+            fi
+
+            # A prior clean deploy may already have removed site-only PDFs.
+            # Recover the latest historical copy from recent gh-pages history.
+            while read -r rev; do
+              if git cat-file -e "$rev:$source_path" 2>/dev/null; then
+                git show "$rev:$source_path" > "$dest_path"
+                echo "✅ Recovered $filename from gh-pages history ($rev)"
+                return 0
+              fi
+            done < <(git rev-list --max-count=50 HEAD -- "$source_path")
+
+            echo "⚠️ No existing $filename found to preserve"
+            return 1
+          }
+
+          if [ "${{ needs.validate-inputs.outputs.site_only }}" = "true" ]; then
+            preserve_site_only_download TinyTorch-Guide.pdf || true
+            preserve_site_only_download TinyTorch-Paper.pdf || true
+          fi
 
           # Replace only the TinyTorch subtree. The previous peaceiris overlay
           # deploy used keep_files=true, which preserved retired Sphinx pages
@@ -607,6 +638,16 @@ jobs:
           mkdir -p tinytorch
           cp -a "$BUILD_DIR"/. tinytorch/
           touch .nojekyll
+
+          if [ "${{ needs.validate-inputs.outputs.site_only }}" = "true" ]; then
+            mkdir -p tinytorch/assets/downloads
+            for filename in TinyTorch-Guide.pdf TinyTorch-Paper.pdf; do
+              if [ ! -f "tinytorch/assets/downloads/$filename" ] && [ -f "$PRESERVED_DOWNLOADS/$filename" ]; then
+                cp "$PRESERVED_DOWNLOADS/$filename" "tinytorch/assets/downloads/$filename"
+                echo "✅ Restored $filename for site-only deploy"
+              fi
+            done
+          fi
 
           if [ -f tinytorch/intro.html ] || [ -d tinytorch/_sources ] || [ -d tinytorch/_static ]; then
             echo "❌ CRITICAL: retired Sphinx TinyTorch artifacts remain after clean deploy staging."
