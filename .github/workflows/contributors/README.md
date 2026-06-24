@@ -39,6 +39,7 @@ reply text — reads from a single config file:
 |---|---|
 | `generate_main_readme.py` | imports `projects.projects()` for section list |
 | `generate_readme_tables.py` | imports `projects.dirs()` for the path map |
+| `add_contributor.py` | imports `projects.keys()` and `projects.dirs()` to update project configs |
 | `all-contributors-add.yml` | sparse-checkouts the file, runs `projects.py keys/aliases/dirs-overrides`, exports to `$GITHUB_ENV` |
 | `update-contributors.yml` | runs `projects.py update-files` to derive the change-detection and `git add` lists |
 
@@ -117,9 +118,25 @@ python scan_contributors.py [--project PROJECT] [--output FORMAT] [--update]
 - Maps git emails to GitHub usernames
 - Filters out bots and AI tools
 
+### `add_contributor.py`
+
+Applies one credit to one or more project contributor configs, then regenerates
+the affected project README tables and the root README contributor sections.
+
+```bash
+python add_contributor.py \
+  --username username \
+  --types '["bug", "code"]' \
+  --projects '["book"]'
+```
+
+Both contributor workflows call this helper so the comment-triggered path and
+merge-triggered path produce the same project-specific metadata and README
+output.
+
 ## Workflow Integration
 
-There are two workflows that manage contributors:
+There are three workflows that manage contributors:
 
 ### 1. `all-contributors-add.yml` - Comment-Triggered (Recommended)
 
@@ -163,6 +180,26 @@ Steps:
 4. Commit and push changes
 ```
 
+### 3. `all-contributors-auto-credit.yml` - Merge-Triggered
+
+Runs when a pull request is merged into `dev`.
+
+```
+Trigger: pull_request_target closed, merged into dev
+
+Steps:
+1. Skip bots and maintainers
+2. Detect project from changed file paths
+3. Classify contribution type from PR title/body/files
+4. Run add_contributor.py directly
+5. Commit README and .all-contributorsrc changes
+6. Post a confirmation comment
+```
+
+This workflow does not post an `@all-contributors` command and wait for another
+workflow. GitHub suppresses most workflow runs caused by the default
+`GITHUB_TOKEN`, so a bot-created command comment is not a reliable trigger.
+
 ## Adding Contributors
 
 ### Method 1: Comment Command (Recommended)
@@ -197,11 +234,13 @@ Common types: `bug`, `code`, `doc`, `design`, `ideas`, `review`, `test`, `tool`,
 ```
 .github/workflows/
 ├── all-contributors-add.yml     # Comment-triggered workflow (main)
+├── all-contributors-auto-credit.yml # Merge-triggered workflow
 ├── update-contributors.yml      # Push-triggered workflow
 └── contributors/
     ├── README.md                 # This file
     ├── projects.json             # ⭐ Single source of truth
     ├── projects.py               # Loader + CLI for projects.json
+    ├── add_contributor.py         # Shared contributor update helper
     ├── requirements.txt          # Python dependencies
     ├── update_contributors.py    # GitHub API updater
     ├── generate_main_readme.py   # Main README generator (reads projects.json)

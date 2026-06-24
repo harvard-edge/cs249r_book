@@ -452,136 +452,16 @@ jobs:
         with:
           python-version: '3.11'
 
-      - name: Get user info from GitHub
-        if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
-        id: userinfo
-        uses: actions/github-script@v9
-        with:
-          script: |
-            const username = '${{ steps.parse.outputs.username }}';
-
-            try {
-              const { data: user } = await github.rest.users.getByUsername({
-                username: username
-              });
-
-              core.setOutput('name', user.name || username);
-              core.setOutput('avatar_url', user.avatar_url);
-              core.setOutput('profile', user.html_url);
-              core.setOutput('found', 'true');
-            } catch (error) {
-              console.log(`User ${username} not found, using defaults`);
-              core.setOutput('name', username);
-              core.setOutput('avatar_url', `https://avatars.githubusercontent.com/${username}`);
-              core.setOutput('profile', `https://github.com/${username}`);
-              core.setOutput('found', 'false');
-            }
-
-      - name: Update contributor config
-        id: update_config
+      - name: Apply contributor credit
+        id: apply
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
         env:
-          PROJECTS: ${{ env.PROJECTS }}
-          PROJECT_DIRS: ${{ env.PROJECT_DIRS }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          python3 << 'EOF'
-          import json
-          import os
-          import sys
-
-          projects = json.loads('${{ steps.parse.outputs.projects }}')
-          username = "${{ steps.parse.outputs.username }}"
-          types = json.loads('${{ steps.parse.outputs.types }}')
-          name = "${{ steps.userinfo.outputs.name }}"
-          avatar_url = "${{ steps.userinfo.outputs.avatar_url }}"
-          profile = "${{ steps.userinfo.outputs.profile }}"
-
-          valid_projects = os.environ.get('PROJECTS', 'book').split(',')
-
-          # project key → on-disk directory (defaults to project name).
-          # Override entries come from PROJECT_DIRS env (e.g. "staffml:interviews").
-          project_dirs = {p: p for p in valid_projects}
-          for pair in os.environ.get('PROJECT_DIRS', '').split(','):
-              pair = pair.strip()
-              if ':' in pair:
-                  proj, _, d = pair.partition(':')
-                  if proj and d:
-                      project_dirs[proj.strip()] = d.strip()
-
-          config_paths = {p: f'{project_dirs[p]}/.all-contributorsrc' for p in valid_projects}
-          updated_paths = []
-          updated_project_keys = []
-          missing = []
-
-          for project in projects:
-              config_path = config_paths.get(project)
-              if not config_path or not os.path.isfile(config_path):
-                  missing.append((project, config_path or f'{project}/.all-contributorsrc'))
-                  continue
-
-              with open(config_path, 'r') as f:
-                  config = json.load(f)
-
-              contributors = config.get('contributors', [])
-
-              existing = None
-              for i, c in enumerate(contributors):
-                  if c.get('login', '').lower() == username.lower():
-                      existing = i
-                      break
-
-              if existing is not None:
-                  existing_types = set(contributors[existing].get('contributions', []))
-                  new_types = existing_types | set(types)
-                  contributors[existing]['contributions'] = sorted(list(new_types))
-                  print(f"[{project}] Updated existing contributor {username} with types: {sorted(list(new_types))}")
-              else:
-                  new_contributor = {
-                      'login': username,
-                      'name': name,
-                      'avatar_url': avatar_url,
-                      'profile': profile,
-                      'contributions': sorted(types)
-                  }
-                  contributors.append(new_contributor)
-                  print(f"[{project}] Added new contributor {username} with types: {sorted(types)}")
-
-              config['contributors'] = contributors
-
-              with open(config_path, 'w') as f:
-                  json.dump(config, f, indent=4)
-                  f.write('\n')
-
-              print(f"Updated {config_path}")
-              updated_paths.append(config_path)
-              if project not in updated_project_keys:
-                  updated_project_keys.append(project)
-
-          if missing:
-              for proj, path in missing:
-                  print(f"ERROR: Missing contributor config for project '{proj}' (expected {path})")
-              print("Add or restore .all-contributorsrc for each project listed in .github/workflows/contributors/projects.json.")
-              sys.exit(1)
-
-          with open(os.environ['GITHUB_OUTPUT'], 'a') as f:
-              f.write(f"updated_configs={json.dumps(updated_paths)}\n")
-              f.write(f"updated_projects={json.dumps(updated_project_keys)}\n")
-          EOF
-
-      - name: Generate README tables
-        if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
-        run: |
-          set -euo pipefail
-          UPDATED_JSON='${{ steps.update_config.outputs.updated_projects }}'
-          N=$(echo "$UPDATED_JSON" | python3 -c "import sys,json; print(len(json.load(sys.stdin)))")
-          if [ "$N" -eq 0 ]; then
-            echo "No contributor configs were updated; skipping README regeneration."
-            exit 0
-          fi
-          for project in $(echo "$UPDATED_JSON" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
-            python3 ${{ github.workspace }}/.github/workflows/contributors/generate_readme_tables.py --project "$project" --update
-          done
-          python3 ${{ github.workspace }}/.github/workflows/contributors/generate_main_readme.py
+          python3 .github/workflows/contributors/add_contributor.py \
+            --username '${{ steps.parse.outputs.username }}' \
+            --types '${{ steps.parse.outputs.types }}' \
+            --projects '${{ steps.parse.outputs.projects }}'
 
       - name: Configure Git
         if: steps.extract.outputs.should_run == 'true' && steps.parse.outputs.success == 'true'
@@ -594,7 +474,7 @@ jobs:
         env:
           PROJECT_DIRS: ${{ env.PROJECT_DIRS }}
         run: |
-          PROJECTS_JSON='${{ steps.update_config.outputs.updated_projects }}'
+          PROJECTS_JSON='${{ steps.apply.outputs.updated_projects }}'
           USERNAME="${{ steps.parse.outputs.username }}"
           TYPES=$(echo '${{ steps.parse.outputs.types }}' | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
           PROJECTS_LIST=$(echo "$PROJECTS_JSON" | python3 -c "import sys,json; print(', '.join(json.load(sys.stdin)))")
@@ -645,7 +525,7 @@ jobs:
             });
 
             const username = '${{ steps.parse.outputs.username }}';
-            const projects = JSON.parse('${{ steps.update_config.outputs.updated_projects }}');
+            const projects = JSON.parse('${{ steps.apply.outputs.updated_projects }}');
             const projectSource = '${{ steps.parse.outputs.project_source }}';
             const types = JSON.parse('${{ steps.parse.outputs.types }}');
             const triggerLine = `${{ steps.extract.outputs.trigger_line }}`;
