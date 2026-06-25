@@ -423,10 +423,6 @@ This shift from *code-centric* to *data-centric* development erodes more than ju
 
 [^fn-locality-violation-cost]: **Locality of Reference**: Formalized by @denning1968 as the principle governing virtual memory design. The cost of violating locality is quantitative: an L1 cache hit costs approximately 1 ns, while a DRAM access costs 50--100 ns (50--100$\times$ penalty), and a Non-Volatile Memory Express (NVMe) SSD read costs 10--100 $\mu$s (10,000--100,000$\times$ penalty). Random shuffling of multi-terabyte datasets during each training epoch triggers the worst case at every level of the memory hierarchy, explaining why ML data loaders must implement their own prefetching logic rather than relying on OS page cache heuristics. \index{Locality of Reference!ML workload violation}
 
-ML workflows violate these abstractions at scale. A multi-terabyte dataset being randomly shuffled during every training epoch (one full pass over the dataset) presents a "worst-case" workload for traditional file system buffers and virtual memory prefetchers. When every "instruction" (a sample) is fetched stochastically from a massive pool, the OS's predictive caching logic fails, and the system defaults to expensive disk I/O or network transfers. A systems engineer must acknowledge that the "Abstractions of the 1970s," once designed to hide hardware latency, are often the primary sources of the overhead term $(L_{\text{lat}})$ in the iron law for Software 2.0. Bridging this gap requires the specialized data engineering and hardware-aware optimizations we examine in the following Parts.
-
-Before introducing the six-stage framework, the key distinction is worth making explicit.
-
 ::: {#chk-ml-workflow-ml-vs-traditional-devops .callout-checkpoint title="ML vs. traditional software"}
 
 ML systems are not traditional software with a model attached. Check the differences that force a separate workflow:
@@ -436,6 +432,10 @@ ML systems are not traditional software with a model attached. Check the differe
 - [ ] **Iteration**: Can you explain why ML requires continuous retraining loops rather than static release cycles?
 
 :::
+
+ML workflows violate these abstractions at scale. A multi-terabyte dataset being randomly shuffled during every training epoch (one full pass over the dataset) presents a "worst-case" workload for traditional file system buffers and virtual memory prefetchers. When every "instruction" (a sample) is fetched stochastically from a massive pool, the OS's predictive caching logic fails, and the system defaults to expensive disk I/O or network transfers. A systems engineer must acknowledge that the "Abstractions of the 1970s," once designed to hide hardware latency, are often the primary sources of the overhead term $(L_{\text{lat}})$ in the iron law for Software 2.0. Bridging this gap requires the specialized data engineering and hardware-aware optimizations we examine in the following Parts.
+
+Before introducing the six-stage framework, the key distinction is worth making explicit.
 
 ## Lifecycle Stages {#sec-ml-workflow-six-core-lifecycle-stages-00b0}
 
@@ -806,6 +806,16 @@ The ML lifecycle is not a straight line; it is a spiral of continuous refinement
 
 The binding constraint differs dramatically across workload archetypes, causing each lifecycle stage to optimize different iron law terms. ResNet-50, DLRM, and keyword spotting (KWS)\index{Keyword Spotting!energy constraint} are useful anchors because each stresses a different part of the system: dense vision training tries to keep accelerators busy, sparse recommendation spends much of its time moving embedding rows, and keyword spotting is constrained first by tiny memory and always-on energy budgets. @Tbl-lighthouse-workflow-comparison shows how the same workflow stages manifest for these three recurring workload archetypes.
 
+| **Stage**    | **ResNet-50 vision training**                                                                             | **DLRM recommendation**                                                                                            | **KWS TinyML**\index{Keyword Spotting!energy constraint}                                |
+|:-------------|:----------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|
+| **Data Eng** | Keep image batches available fast enough to sustain >80% GPU utilization.                                 | Keep online feature-store lookups (model-input reads) below 2 ms; embedding tables dominate storage and freshness. | Curate short audio clips for a 256 KB SRAM-class device.                                |
+| **Training** | Coordinate preprocessing, batching, mixed precision, and model execution to reduce accelerator idle time. | Optimize sparse embedding lookups because memory bandwidth limits throughput.                                      | Search for the smallest model family that still recognizes the trigger phrase reliably. |
+| **Deploy**   | Use large batches, often >128, when throughput and cost matter more than single-request latency.          | Meet strict interactive latency targets, such as <10 ms p99, while keeping features fresh.                         | Stay within an always-on energy budget, often below 1 mW.                               |
+
+: **Workflow Variations by Lighthouse Model**: The same lifecycle stages target different iron law terms depending on the workload's binding constraint. ResNet-50 emphasizes useful computation per unit time, DLRM emphasizes data movement and embedding freshness, and KWS is strictly bound by energy and memory capacity. {#tbl-lighthouse-workflow-comparison tbl-colwidths="[9,30,31,30]"}
+
+Production systems rarely fall neatly into a single archetype. A medical imaging classifier, for instance, may require sustained computation while being trained over large image datasets yet face strict energy and memory constraints when deployed to portable clinic devices. Understanding *how* the same workflow framework adapts to each archetype, and *how* a single project can span multiple archetypes simultaneously, is essential for making sound engineering decisions.
+
 ::: {#psp-ml-workflow-iron-law-workflow .callout-perspective title="The iron law of workflow"}
 
 The six lifecycle stages are not merely procedural steps; they are the engineering levers used to optimize the variables in the iron law of ML systems $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}})$:
@@ -820,16 +830,6 @@ The six lifecycle stages are not merely procedural steps; they are the engineeri
 Viewed this way, managing the workflow is mathematically equivalent to minimizing the total system latency and cost.
 
 :::
-
-| **Stage**    | **ResNet-50 vision training**                                                                             | **DLRM recommendation**                                                                                            | **KWS TinyML**\index{Keyword Spotting!energy constraint}                                |
-|:-------------|:----------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------|
-| **Data Eng** | Keep image batches available fast enough to sustain >80% GPU utilization.                                 | Keep online feature-store lookups (model-input reads) below 2 ms; embedding tables dominate storage and freshness. | Curate short audio clips for a 256 KB SRAM-class device.                                |
-| **Training** | Coordinate preprocessing, batching, mixed precision, and model execution to reduce accelerator idle time. | Optimize sparse embedding lookups because memory bandwidth limits throughput.                                      | Search for the smallest model family that still recognizes the trigger phrase reliably. |
-| **Deploy**   | Use large batches, often >128, when throughput and cost matter more than single-request latency.          | Meet strict interactive latency targets, such as <10 ms p99, while keeping features fresh.                         | Stay within an always-on energy budget, often below 1 mW.                               |
-
-: **Workflow Variations by Lighthouse Model**: The same lifecycle stages target different iron law terms depending on the workload's binding constraint. ResNet-50 emphasizes useful computation per unit time, DLRM emphasizes data movement and embedding freshness, and KWS is strictly bound by energy and memory capacity. {#tbl-lighthouse-workflow-comparison tbl-colwidths="[9,30,31,30]"}
-
-Production systems rarely fall neatly into a single archetype. A medical imaging classifier, for instance, may require sustained computation while being trained over large image datasets yet face strict energy and memory constraints when deployed to portable clinic devices. Understanding *how* the same workflow framework adapts to each archetype, and *how* a single project can span multiple archetypes simultaneously, is essential for making sound engineering decisions.
 
 Each stage of this workflow presents distinct engineering challenges, from curating high-quality datasets to maintaining model performance in production. DR screening earns its place as the case study that threads through every stage by passing three tests: it appears simple on the surface but reveals deep complexity in practice, it spans enough of the deployment spectrum to exercise the workflow framework, and its journey from research to production is well documented, so we can learn from real decisions rather than hypothetical ones.
 
