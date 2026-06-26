@@ -3509,7 +3509,7 @@ The complementary case is bandwidth bound, where the speedup tracks the reductio
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
-from mlsysim.fmt import fmt_int, fmt, fmt_params, fmt_qty, fmt_qty_int, check, fmt_time, fmt_rate
+from mlsysim.fmt import fmt_int, fmt, fmt_params, fmt_qty, fmt_qty_int, check, fmt_time, fmt_rate, fmt_memory
 from mlsysim.core.units import ms
 from mlsysim.physics import memory_from_params
 from mlsysim.physics.quantities import token_throughput
@@ -3522,15 +3522,20 @@ class QuantizationSpeedup:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    params_b = Models.Language.Llama2_7B.parameters.to(Bparam).magnitude
+    model = Models.Language.Llama2_7B
+    params_b = model.parameters.to(Bparam).magnitude
     bytes_fp16 = BYTES_FP16.to(byte).magnitude
     bytes_int4 = BYTES_INT4.to(byte).magnitude
 
     device_ram_gb = 16
     device_ram = device_ram_gb * GB
     mem_bw = Hardware.Tech.Storage.SystemMemory.bandwidth
-    kv_cache_gb = 1.0
-    kv_cache = kv_cache_gb * GB
+    context_tokens = 4096
+    batch_size = 1
+    kv_heads = model.kv_heads or model.heads
+    head_dim = model.hidden_dim // model.heads
+    kv_cache = model.get_kv_cache_size(seq_len=context_tokens, batch_size=batch_size, precision=BYTES_FP16)
+    kv_cache_gb = kv_cache.to(GB).magnitude
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     # Step 1: Sizes
@@ -3555,18 +3560,24 @@ class QuantizationSpeedup:
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(3.5 <= speedup <= 4.5, f"INT4 should yield ~4x speedup vs FP16, got {speedup:.1f}x")
     check(bytes_fp16 / bytes_int4 == 4, "FP16-to-INT4 weight traffic should fall by 4x.")
+    check(kv_cache_gb > 2, "Llama2-7B 4K FP16 KV cache should exceed 2 GB under the full-head cache model.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    params_b_str = fmt_params(Models.Language.Llama2_7B.parameters, scale="B", precision=0, commas=False)
+    params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
     params_b_value_str = fmt(params_b, precision=0, commas=False)
     bytes_fp16_value_str = fmt_int(bytes_fp16, commas=False)
     bytes_int4_value_str = fmt(bytes_int4, precision=1, commas=False)
     device_ram_gb_str = fmt_qty(device_ram, GB, precision=0, commas=False)
     mem_bw_gb_per_s_str = fmt_qty_int(mem_bw, GB / second, commas=False)
-    kv_cache_gb_str = fmt_qty_int(kv_cache, GB, commas=False)
+    context_tokens_str = fmt_int(context_tokens)
+    kv_layers_str = fmt_int(model.layers, commas=False)
+    kv_heads_str = fmt_int(kv_heads, commas=False)
+    kv_head_dim_str = fmt_int(head_dim, commas=False)
+    kv_bytes_str = fmt_int(bytes_fp16, commas=False)
+    kv_cache_gb_str = fmt_memory(kv_cache, unit=GB, precision=1, commas=False)
 
     fp16_size_gb_str = fmt_qty_int(fp16_size, GB, commas=False)
-    fp16_total_gb_str = fmt_qty_int(fp16_total, GB, commas=False)
+    fp16_total_gb_str = fmt_memory(fp16_total, unit=GB, precision=1, commas=False)
     fp16_latency_ms_str = fmt_time(round(fp16_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
     fp16_tokens_per_s_str = fmt_rate(fp16_toks, 'tokens/s', precision=1, commas=False)
 
@@ -3585,7 +3596,7 @@ The result is a bandwidth-driven speedup: fewer bits moved per token means more 
 **Math**:
 
 1.  **Model size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_fp16_value_str` bytes = `{python} QuantizationSpeedup.fp16_size_gb_str`.
-2.  **KV cache**: Context window (4096 tokens) requires ≈ `{python} QuantizationSpeedup.kv_cache_gb_str`.
+2.  **KV cache**: A `{python} QuantizationSpeedup.context_tokens_str`-token FP16 KV cache uses two tensors (keys and values) across `{python} QuantizationSpeedup.kv_layers_str` layers, `{python} QuantizationSpeedup.kv_heads_str` KV heads, `{python} QuantizationSpeedup.kv_head_dim_str` dimensions per head, and `{python} QuantizationSpeedup.kv_bytes_str` bytes per value, requiring approximately `{python} QuantizationSpeedup.kv_cache_gb_str`.
 3.  **Total memory**: `{python} QuantizationSpeedup.fp16_size_gb_str` + `{python} QuantizationSpeedup.kv_cache_gb_str` = `{python} QuantizationSpeedup.fp16_total_gb_str`. This barely fits, leaving no room for OS or buffers.
 4.  **Bandwidth cost**: Loading `{python} QuantizationSpeedup.fp16_size_gb_str` at `{python} QuantizationSpeedup.mem_bw_gb_per_s_str` takes `{python} QuantizationSpeedup.fp16_latency_ms_str` per token. That is `{python} QuantizationSpeedup.fp16_tokens_per_s_str`, too slow for chat.
 
