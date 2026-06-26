@@ -411,16 +411,29 @@ export default function ExplorePage() {
                   </defs>
 
                   <circle cx={CX} cy={CY} r="108" className="fill-surface stroke-border" strokeWidth="1" />
-                  <button
-                    type="button"
+                  {/*
+                    Mouse affordance to zoom out (clicking the hub jumps to the
+                    parent focus). An HTML <button> is not valid SVG content and
+                    won't focus reliably across browsers, so the click handler
+                    lives on the <circle> directly. The keyboard-accessible
+                    equivalents are the Breadcrumb above and the ExplorerPanel
+                    beside this chart; the whole SVG is exposed to assistive
+                    tech as a single labelled role="img".
+                  */}
+                  <circle
+                    cx={CX}
+                    cy={CY}
+                    r="92"
                     onClick={() => {
                       const parent = focusParent(focus);
                       if (parent) goToFocus(parent);
                     }}
-                    className="cursor-pointer"
-                  >
-                    <circle cx={CX} cy={CY} r="92" className="fill-background stroke-borderSubtle hover:stroke-accentBlue transition-colors" strokeWidth="1" />
-                  </button>
+                    className={clsx(
+                      "fill-background stroke-borderSubtle transition-colors",
+                      focusParent(focus) && "cursor-pointer hover:stroke-accentBlue"
+                    )}
+                    strokeWidth="1"
+                  />
                   <text x={CX} y={CY - 8} textAnchor="middle" className="fill-textPrimary text-[18px] font-bold">
                     {focusLabel(focus)}
                   </text>
