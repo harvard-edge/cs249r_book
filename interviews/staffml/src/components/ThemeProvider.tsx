@@ -25,12 +25,33 @@ export function useTheme() {
 // and shared/config/site-head.html.
 const QUARTO_KEY = "quarto-color-scheme";
 
+// localStorage access can throw — not just on the method call, but on the
+// property access itself — in strict-storage browsers (Safari "Block all
+// cookies") and sandboxed iframes without allow-same-origin. Funnel every
+// access through these guards so a future caller can't reintroduce an
+// unguarded read/write that aborts a mount effect.
+function safeGet(key: string): string | null {
+  try {
+    return localStorage.getItem(key);
+  } catch (_) {
+    return null;
+  }
+}
+
+function safeSet(key: string, value: string): void {
+  try {
+    localStorage.setItem(key, value);
+  } catch (_) {
+    /* storage unavailable; in-memory state still updates. */
+  }
+}
+
 function getInitialTheme(): Theme {
   if (typeof window === "undefined") return "light";
-  const stored = localStorage.getItem("staffml_theme") as Theme | null;
+  const stored = safeGet("staffml_theme");
   if (stored === "light" || stored === "dark") return stored;
   // Secondary source: pick up the choice last set on a sibling subsite.
-  const fromQuarto = localStorage.getItem(QUARTO_KEY) as Theme | null;
+  const fromQuarto = safeGet(QUARTO_KEY);
   if (fromQuarto === "light" || fromQuarto === "dark") return fromQuarto;
   // Light is the ecosystem-wide default (matches the book, labs, kits,
   // slides, etc.). OS preference is intentionally NOT honored here — users
@@ -54,14 +75,10 @@ export default function ThemeProvider({ children }: { children: React.ReactNode 
     setTheme((prev) => {
       const next = prev === "dark" ? "light" : "dark";
       document.documentElement.dataset.theme = next;
-      try {
-        localStorage.setItem("staffml_theme", next);
-        // Mirror to the ecosystem-shared key so Quarto subsites (book,
-        // labs, kits, slides, ...) inherit the choice on next nav.
-        localStorage.setItem(QUARTO_KEY, next);
-      } catch (_) {
-        /* localStorage unavailable; in-memory state still updates. */
-      }
+      safeSet("staffml_theme", next);
+      // Mirror to the ecosystem-shared key so Quarto subsites (book,
+      // labs, kits, slides, ...) inherit the choice on next nav.
+      safeSet(QUARTO_KEY, next);
       return next;
     });
   }, []);

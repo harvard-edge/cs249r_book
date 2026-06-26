@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState, useEffect, useCallback } from "react";
+import { useMemo, useState, useEffect, useCallback, useRef } from "react";
 import Link from "next/link";
 import { ArrowLeft, Search, X } from "lucide-react";
 import {
@@ -494,7 +494,7 @@ function ExpressionRender({ tokens }: { tokens: ExpressionToken[] }) {
 // Pixel-port of the original .panel CSS from design-grammar/index.html.
 // Sizes use arbitrary Tailwind values to match the original's rems/px
 // exactly rather than rounding to nearest preset.
-function PrimitiveDetail({
+export function PrimitiveDetail({
   primitive,
   onClose,
   onLinkClick,
@@ -506,11 +506,51 @@ function PrimitiveDetail({
   const role = roles[primitive.role];
   const color = role.color;
   const layerName = layerLabels[primitive.layer - 1];
+  const previouslyFocused = useRef<HTMLElement | null>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+  const closeBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Focus management: move focus into the dialog on open, restore it on close.
+  // Escape is handled by the page-level listener. Mirrors the pattern in
+  // KeyboardShortcutsOverlay / CommandPalette.
+  useEffect(() => {
+    previouslyFocused.current = document.activeElement as HTMLElement | null;
+    const id = setTimeout(() => closeBtnRef.current?.focus(), 0);
+    return () => {
+      clearTimeout(id);
+      previouslyFocused.current?.focus?.();
+    };
+  }, []);
+
+  // Trap Tab/Shift+Tab within the panel so focus can't reach the dimmed page.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Tab" || !panelRef.current) return;
+      const focusables = panelRef.current.querySelectorAll<HTMLElement>(
+        'a[href], button:not([disabled]), input:not([disabled]), [tabindex]:not([tabindex="-1"])'
+      );
+      if (focusables.length === 0) return;
+      const first = focusables[0];
+      const last = focusables[focusables.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <div
       className="fixed inset-0 z-[100] bg-black/60 flex items-center justify-center p-4"
       onClick={onClose}
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="primitive-detail-title"
     >
       {/*
         Two-layer modal panel:
@@ -523,10 +563,12 @@ function PrimitiveDetail({
         unreachable on small/landscape viewports.
       */}
       <div
+        ref={panelRef}
         className="relative w-full max-w-[500px]"
         onClick={(e) => e.stopPropagation()}
       >
         <button
+          ref={closeBtnRef}
           onClick={onClose}
           className="absolute top-[0.7rem] right-[1rem] z-10 w-10 h-10 flex items-center justify-center bg-transparent border-0 text-textTertiary hover:text-textPrimary text-[1.4rem] leading-none cursor-pointer"
           aria-label="Close"
@@ -551,7 +593,7 @@ function PrimitiveDetail({
             </span>
           </div>
           <div className="min-w-0">
-            <div className="text-[1.15rem] font-bold text-textPrimary leading-tight">
+            <div id="primitive-detail-title" className="text-[1.15rem] font-bold text-textPrimary leading-tight">
               {primitive.name}
             </div>
             <div
