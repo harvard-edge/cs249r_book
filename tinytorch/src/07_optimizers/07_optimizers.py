@@ -475,13 +475,13 @@ Loss Surface (side view, imagine plane):
      |    |
      |   /|
      |  / |\
-     | /  |\\ gradient points uphill
-     |/   | \\
-     ●----|--\\--→ parameter
-    / \\  •   \\ ↘️ SGD steps downhill (opposite to gradient)
-   /   \\         
-  /     \\   ⭐ ← goal (minimum loss)     
- ↙       \\
+     | /  |\ gradient points uphill
+     |/   | \
+     ●----|--\--→ parameter
+    / \  •   \ ↘️ SGD steps downhill (opposite to gradient)
+   /   \         
+  /     \   ⭐ ← goal (minimum loss)     
+ ↙       \
  other
 parameter
 ```
@@ -496,11 +496,11 @@ Narrow valley (side view, two different gradients shown as planes):
     first position
           |
      -----+---------- 
-     \\ / |     \\ /
-      \\  •→ ←•  \\
-      /\\     |  /\\
-     /  \\ ⭐ | /  \\
-    /    \\|  |/    \\
+     \ / |     \ /
+      \  •→ ←•  \
+      /\     |  /\
+     /  \ ⭐ | /  \
+    /    \|  |/    \
     -------+--+-------  
            |  |
            | second position
@@ -518,11 +518,11 @@ With momentum:
 starting position
           |
      -----|---------- 
-     \\ / •↘     \\ /
-      \\    ↙•    \\
-      /\\ •↘     / \\
-     /  \\ ⭐   /   \\
-    /    \\|   /     \\
+     \ / •↘     \ /
+      \    ↙•    \
+      /\ •↘     / \
+     /  \ ⭐   /   \
+    /    \|   /     \
     -------+----------  
            | 
            | 
