@@ -68,7 +68,7 @@ from mlsysim.core.units import *
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @sec-appdx-algorithm-foundations-general-matrix-multiply-gemm-b55d
 # │ Goal: GEMM intensity formula and small-matrix roofline example
-from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity
+from mlsysim.fmt import fmt_int, fmt, check, fmt_arithmetic_intensity, fmt_display_math
 
 class GemmIntensityExample:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
@@ -91,12 +91,16 @@ class GemmIntensityExample:
     small_intensity_str = fmt_arithmetic_intensity(small_intensity * flop / byte, unit=flop / byte, precision=1, commas=False)
     small_efficiency_pct_str = fmt_percent(small_efficiency_pct / 100, precision=1, commas=False, style='prose')
     a100_ridge_str = fmt_arithmetic_intensity(Hardware.Cloud.A100.ridge_point(), unit=flop / byte, precision=1, commas=False)
+    intensity_formula_math = fmt_display_math(
+        rf"\text{{Intensity}} = \frac{{O}}{{D_{{\text{{vol}}}}}} = "
+        rf"\frac{{2n^3}}{{3n^2 \times {bytes_fp16_value_str}}} = "
+        rf"\frac{{n}}{{3}}\text{{ FLOP/byte}}"
+    )
 ```
 
 The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n{\times}n$ matrices in FP16 (`{python} GemmIntensityExample.bytes_fp16_value_str` bytes/element):
-$$
-\text{Intensity} = \frac{O}{D_{\text{vol}}} = \frac{2n^3}{3n^2 \times `{python} GemmIntensityExample.bytes_fp16_value_str`} = \frac{n}{3} \text{ FLOP/byte}
-$$
+
+`{python} GemmIntensityExample.intensity_formula_math`
 
 This explains several important phenomena:
 
@@ -306,13 +310,14 @@ class TrainingMemoryBytes:
     bytes_fp32_str = fmt_memory(BYTES_FP32, unit=byte, precision=0, commas=False)
     optimizer_overhead_min = int(BYTES_ADAM_STATE.to(byte).magnitude)
     optimizer_overhead_max = optimizer_overhead_min + int(BYTES_FP32.to(byte).magnitude)
+    optimizer_overhead_min_str = fmt(optimizer_overhead_min, precision=0, commas=False)
     optimizer_overhead_str = fmt_range(optimizer_overhead_min, optimizer_overhead_max, precision=0, commas=False)
 ```
 
 *   **Weights**: `{python} TrainingMemoryBytes.bytes_fp16_str` (FP16/BF16) or `{python} TrainingMemoryBytes.bytes_fp32_str` (FP32).
 *   **Gradients**: Same size as weights.
-*   **Optimizer State**: `{python} TrainingMemoryBytes.optimizer_overhead_str` bytes per parameter (Momentum + Variance + FP32 Master Weights).
-*   **Activations**: The hidden giant. $\mathcal{O}(B \times S \times N_L \times d)$.
+*   **Optimizer State**: Adam moments require `{python} TrainingMemoryBytes.optimizer_overhead_min_str` bytes per parameter; an FP32 master copy adds another `{python} TrainingMemoryBytes.bytes_fp32_str`, giving `{python} TrainingMemoryBytes.optimizer_overhead_str` bytes per parameter.
+*   **Activations**: The hidden giant. A recomputation- or tiled-attention-friendly estimate scales as $\mathcal{O}(B \times S \times N_L \times d)$; a full no-recompute attention implementation also materializes attention-score tensors that scale with $S^2$.
 
 To see how these components interact in practice, consider a concrete model.
 
@@ -330,7 +335,7 @@ To see how these components interact in practice, consider a concrete model.
 # │ How:     Scalar arithmetic from pint constants.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, fmt_ratio, check, sci_latex, fmt_math, fmt_percent, fmt_memory_capacity, fmt_qty
+from mlsysim.fmt import fmt_int, fmt, fmt_ratio, check, sci_latex, fmt_math, fmt_display_math, fmt_percent, fmt_memory_capacity, fmt_qty
 from mlsysim.core.units import GiB
 
 class GPT2TrainingMem:
@@ -353,7 +358,7 @@ class GPT2TrainingMem:
     model_state_q = weights_q + grads_q + optim_q
     remaining_q = accel_q - model_state_q
 
-    # Per-layer activation ≈ 12 * B * S * d * bytes_bf16:
+    # Per-layer retained activation estimate excluding full S^2 attention-score storage:
     # input(1d) + QKV(3d) + attn_out(1d) + FFN(4d) + output(1d) + norms/masks(2d)
     act_factor = 12
     act_small_q = layers * act_factor * batch_small * seq_len * d * bf16 * byte
@@ -387,6 +392,10 @@ class GPT2TrainingMem:
     act_factor_str = fmt_ratio(act_factor, precision=0, commas=False)
     accel_class_gb_str = fmt_memory_capacity(accel_q, unit=GiB, precision=0, commas=False)
     grad_ckpt_overhead_pct_str = fmt_percent(33 / 100, precision=0, commas=False, style='prose')
+    act_small_display_math = fmt_display_math(
+        rf"{layers_str} \times {act_factor_str} \times {batch_small_str} \times {seq_len_str} \times "
+        rf"{d_str} \times {bf16_bytes_value_str}\text{{ bytes }} \approx {act_small_gb_str}"
+    )
 ```
 
 ::: {#nbk-appendix-algorithm-gpt-2-training-memory .callout-notebook title="Worked example: GPT-2 (1.5B) training memory"}
@@ -402,12 +411,11 @@ class GPT2TrainingMem:
 
 **Activations (scale with batch)**:
 
-Per-layer retained activations for a transformer are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
-$$
-`{python} GPT2TrainingMem.layers_str` \times `{python} GPT2TrainingMem.act_factor_str` \times `{python} GPT2TrainingMem.batch_small_str` \times `{python} GPT2TrainingMem.seq_len_str` \times `{python} GPT2TrainingMem.d_str` \times `{python} GPT2TrainingMem.bf16_bytes_value_str` \text{ bytes } \approx `{python} GPT2TrainingMem.act_small_gb_str`
-$$
+Per-layer retained activations for this quick estimate are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. This estimate assumes the implementation does not retain the full $B \times H \times S^2$ attention-score tensor, as in recomputation- or tiled-attention-friendly accounting. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
 
-**Total**: `{python} GPT2TrainingMem.total_small_gb_str`—fits on one `{python} GPT2TrainingMem.accel_gb_str` accelerator. However, increase the batch to `{python} GPT2TrainingMem.batch_large_str` and activations grow to `{python} GPT2TrainingMem.act_large_gb_str`, exceeding the remaining capacity. This is the threshold where gradient checkpointing (trading ~`{python} GPT2TrainingMem.grad_ckpt_overhead_pct_str` more compute for $\mathcal{O}(\sqrt{N_L})$ activation memory) becomes necessary.
+`{python} GPT2TrainingMem.act_small_display_math`
+
+**Total**: `{python} GPT2TrainingMem.total_small_gb_str` under this activation-accounting convention, which fits on one `{python} GPT2TrainingMem.accel_gb_str` accelerator. However, increase the batch to `{python} GPT2TrainingMem.batch_large_str` and activations grow to `{python} GPT2TrainingMem.act_large_gb_str`, exceeding the remaining capacity. This is the threshold where gradient checkpointing (trading ~`{python} GPT2TrainingMem.grad_ckpt_overhead_pct_str` more compute for $\mathcal{O}(\sqrt{N_L})$ activation memory) becomes necessary.
 
 :::
 

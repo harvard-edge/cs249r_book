@@ -2620,6 +2620,7 @@ class TensorParallelAllReduce:
     cumulative = sync_events * per_allreduce
     pcie_per_allreduce = (allreduce_bytes / pcie_bw).to(millisecond)
     pcie_cumulative = sync_events * pcie_per_allreduce
+    pcie_cumulative_display = round(pcie_cumulative.to(millisecond).magnitude) * millisecond
     pcie_wait_fraction = (pcie_cumulative / (compute_step + pcie_cumulative)).to_base_units().magnitude
     nvlink_utilization = (compute_step / (compute_step + cumulative)).to_base_units().magnitude
     hidden_disp = format(hidden, ",").replace(",", "{,}")
@@ -2640,7 +2641,7 @@ class TensorParallelAllReduce:
     sync_events_str = fmt_int(sync_events)
     cumulative_ms_str = fmt_time(cumulative, "millisecond", precision=1, commas=False)
     pcie_per_allreduce_ms_str = fmt_time(pcie_per_allreduce, millisecond, precision=1, commas=False)
-    pcie_cumulative_ms_str = fmt_time(pcie_cumulative, millisecond, precision=1, commas=False)
+    pcie_cumulative_ms_str = fmt_time(pcie_cumulative_display, millisecond, precision=0, commas=False)
     compute_step_ms_str = fmt_time(compute_step, millisecond, precision=0, commas=False)
     pcie_wait_pct_str = fmt_percent(pcie_wait_fraction, precision=1, commas=False, style='prose')
     nvlink_util_pct_str = fmt_percent(nvlink_utilization, precision=1, commas=False, style='prose')
@@ -3147,6 +3148,7 @@ class InterconnectCommMath:
     _ib_bw_gbs_val = _ib_bw.to(GB / second).magnitude
     _t_intra_ms = (gradient_buffer / _nvlink_bw).to(millisecond).magnitude
     _t_inter_ms = (gradient_buffer / _ib_bw).to(millisecond).magnitude
+    _gap_nv_ib = (_nvlink_bw / _ib_bw).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     t_intra_math = fmt_math(
@@ -3156,6 +3158,7 @@ class InterconnectCommMath:
         f"T_{{\\text{{inter}}}} = {gradient_buffer_value}\\text{{ GB}} / {_ib_bw_gbs_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{{_t_inter_ms:.0f} \\text{{ ms}}}}"
     )
     gradient_buffer_gb_str = fmt_memory(gradient_buffer, unit=GB, precision=0, commas=False)
+    gap_nv_ib_mult_str = fmt_multiple(_gap_nv_ib, precision=0, commas=False)
 ```
 
 ```{python}
@@ -3190,7 +3193,7 @@ class BandwidthHierarchyPodRecap:
 2. **Inter-Node (InfiniBand NDR)**: Bandwidth = `{python} BandwidthHierarchyPodRecap.ib_bw_gb_per_s_str`.
    `{python} InterconnectCommMath.t_inter_math`
 
-**Systems insight**: Crossing the node boundary increases communication time by approximately `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str`. In a training loop where gradient synchronization happens at every step, this penalty would stall the accelerators for the majority of each iteration, reducing utilization to well below 50 percent. This is why training frameworks use tensor parallelism within the node (fast NVLink) and data parallelism across nodes (tolerant of slower InfiniBand).
+**Systems insight**: Crossing the node boundary increases communication time by approximately `{python} InterconnectCommMath.gap_nv_ib_mult_str`. In a training loop where gradient synchronization happens at every step, this penalty would stall the accelerators for the majority of each iteration, reducing utilization to well below 50 percent. This is why training frameworks use tensor parallelism within the node (fast NVLink) and data parallelism across nodes (tolerant of slower InfiniBand).
 
 :::
 
@@ -4006,7 +4009,7 @@ The resulting hierarchy mirrors the classical memory hierarchy at warehouse scal
 # │ How: pulling constants from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_multiple
 
 class SummaryScaleScenario:
     """Namespace for summary scale reference."""
@@ -4033,6 +4036,11 @@ class SummaryScaleScenario:
     h100_bw_tb_per_s_str = fmt_bandwidth(bw, unit=TB / second, precision=2, commas=False)
     h100_tdp_w_str = fmt_power(tdp, unit=watt, precision=0, commas=False)
     rack_power_kw_str = fmt_power(rack_power, unit=kilowatt, precision=1, commas=False)
+    nvlink_ib_gap_mult_str = fmt_multiple(
+        (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to_base_units().magnitude,
+        precision=0,
+        commas=False,
+    )
 ```
 
 ```{python}
@@ -4052,7 +4060,7 @@ The practical method transfers beyond this particular model. Identify the bindin
 
 * **The generality tax**: Accelerators achieve 10--100$\times$ higher throughput than CPUs by dedicating silicon area to matrix arithmetic rather than branch prediction and out-of-order execution. The trade-off is reduced flexibility. Each step along the spectrum from GPU to TPU to custom ASIC reclaims more die area for arithmetic.
 * **Memory wall diagnosis starts with roofline**: For single-request LLM inference, memory bandwidth\index{Memory Wall!dominance} determines latency because arithmetic completes in microseconds while data transfer takes milliseconds. The ridge point ($I_{\text{ridge}}$ = peak FLOP/s divided by memory BW) separates memory-bound LLM decode ($I \approx 1$) from compute-bound training ($I > 2{,}000$).
-* **Bandwidth hierarchy dictates parallelism**: The `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str` per-direction bandwidth cliff between NVLink and InfiniBand\index{Bandwidth Hierarchy!parallelism placement} confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
+* **Bandwidth hierarchy dictates parallelism**: The `{python} SummaryScaleScenario.nvlink_ib_gap_mult_str` per-direction bandwidth cliff between NVLink and InfiniBand\index{Bandwidth Hierarchy!parallelism placement} confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
 * **Peak vs. sustained**: Model FLOPs Utilization (MFU)\index{MFU!sustained vs. peak} of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.
 * **Facility efficiency is part of the computer**: Liquid cooling can deliver 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. At pod scale, network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 * **Failure at scale**: A 10,000-GPU cluster\index{Failure!at scale} experiences roughly one GPU failure every five hours. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
@@ -4064,7 +4072,7 @@ For most of computing history, the computer was the chip. This chapter marks whe
 
 ::: {.callout-chapter-connection title="From silicon to wires"}
 
-We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them. The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed a `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str` cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
+We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them. The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed a `{python} SummaryScaleScenario.nvlink_ib_gap_mult_str` cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
 
 :::
 
