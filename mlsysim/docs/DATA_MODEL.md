@@ -39,7 +39,7 @@ that populate Layers A–D of that stack.
 
 ## Validation invariants
 
-MLSysIM is used to generate textbook calculations, so registry and CLI data are
+MLSys·im is used to generate textbook calculations, so registry and CLI data are
 validated before they reach solver equations.
 
 - **Explicit units are required for physical quantities.** A capacity must be
@@ -49,7 +49,7 @@ validated before they reach solver equations.
   as TOPS) live on a dedicated `[flop]` pint dimension (2026-06-06), so
   `1 TFLOP/s` can never silently add to or convert into `900 GB/s` — pint
   itself raises `DimensionalityError`. Bytes, counts, parameters, and dollars
-  remain dimensionless aliases, and MLSysIM's unit-family checks keep those
+  remain dimensionless aliases, and MLSys·im's unit-family checks keep those
   semantically distinct at every schema boundary.
 - **Precision names are closed vocabulary.** Use the precision names in
   `core.units.PRECISION_MAP`; unsupported values fail instead of silently using

@@ -18,7 +18,7 @@ cited literature anchors. The executable validation contract in
 `mlsysim.engine.empirical` only composes those literature values with canonical
 `Models.*` and `Hardware.*` registry entries, plus the tolerance/range and review
 rationale. This keeps model definitions, hardware specifications, and published
-benchmark numbers single-sourced inside MLSysIM.
+benchmark numbers single-sourced inside MLSys·im.
 
 ---
 

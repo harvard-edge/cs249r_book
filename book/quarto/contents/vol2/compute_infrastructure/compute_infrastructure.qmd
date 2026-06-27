@@ -661,7 +661,199 @@ class MemoryBandwidthIntroRecap:
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
 ```
 
-The implications are concrete and perceptible in our running example. Our `{python} InfraFrontierMemoryWallRecap.frontier_params_b_str` model's weights occupy 350 GB in FP16. During autoregressive decoding, this entire 350 GB tensor must be streamed from off-chip memory into the processor's registers for every single token generated. A single H100 cannot hold that tensor, so this is a bandwidth-floor calculation after sharding or quantization has solved the capacity problem. At H100-class HBM bandwidths (~`{python} MemoryBandwidthIntroRecap.h100_bw_tb_per_s_str` per accelerator), the data movement alone dictates a latency floor of over 100 ms per token if one accelerator-equivalent bandwidth path must stream the weights. The memory wall is not an abstract architectural concept: it is the physical reason a chatbot takes a perceptible pause between words. Three engineering responses address this constraint: high bandwidth memory (HBM) widens the data pipe, the roofline model rigorously diagnoses whether a workload is starving for data or for compute, and Tensor Cores maximize the arithmetic value of every byte fetched. The same resource-accounting lens then carries into power delivery, thermal design, and workload-specific accelerator selection, because memory bandwidth is only the first physical ceiling the package exposes.
+The implications are concrete and perceptible in our running example. Our `{python} InfraFrontierMemoryWallRecap.frontier_params_b_str` model's weights occupy 350 GB in FP16. During autoregressive decoding, this entire 350 GB tensor must be streamed from off-chip memory into the processor's registers for every single token generated. A single H100 cannot hold that tensor, so this is a bandwidth-floor calculation after sharding or quantization has solved the capacity problem. At H100-class HBM bandwidths (~`{python} MemoryBandwidthIntroRecap.h100_bw_tb_per_s_str` per accelerator), the data movement alone dictates a latency floor of over 100 ms per token if one accelerator-equivalent bandwidth path must stream the weights. The memory wall is not an abstract architectural concept: it is the physical reason a chatbot takes a perceptible pause between words. Three engineering responses address this constraint: high bandwidth memory (HBM) widens the data pipe, the roofline model rigorously diagnoses whether a workload is starving for data or for compute, and Tensor Cores maximize the arithmetic value of every byte fetched. As @fig-accelerator-memory-tier-map shows, memory bandwidth is also a placement trade-off: moving the working set closer to compute raises bandwidth, but it usually reduces the amount of state that can stay there.
+
+::: {#fig-accelerator-memory-tier-map fig-env="figure" fig-pos="htb" fig-cap="**Accelerator Memory Tiers**: Peak memory bandwidth and capacity separate local-SRAM designs, HBM accelerators, and edge/shared-LPDDR devices. The dotted arrow marks the design trade-off: moving data closer to compute raises bandwidth but reduces capacity." fig-alt="Log-log scatter plot of memory capacity versus peak memory bandwidth. Purple star markers appear at low capacity and very high bandwidth, blue circles appear at tens to hundreds of gigabytes and lower bandwidth, and green plus markers appear at lower bandwidth."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ ACCELERATOR MEMORY TIER MAP (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-accelerator-memory-tier-map -- memory wall tier comparison
+# │
+# │ Goal: Show how accelerator memory tiers trade capacity against bandwidth.
+# │ Show: Log-log scatter; local SRAM, HBM, and edge/shared-LPDDR clusters;
+# │       dotted arrow for the capacity/bandwidth placement trade-off.
+# │ How: Read accelerator capacity and bandwidth values from the hardware
+# │      registry; plot tier placement on log-log axes.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from dataclasses import dataclass
+import math
+from book.tools.figures import style as book_style
+
+@dataclass(frozen=True)
+class MemoryTierPoint:
+    label: str
+    capacity_gb: float
+    bandwidth_gb_per_s: float
+    tier: str
+
+def registry_memory_point(label, node, tier):
+    return MemoryTierPoint(
+        label=label,
+        capacity_gb=node.memory.capacity.to(GB).magnitude,
+        bandwidth_gb_per_s=node.memory.bandwidth.to(GB / second).magnitude,
+        tier=tier,
+    )
+
+memory_tier_points = [
+    registry_memory_point("V100", Hardware.Cloud.V100, "HBM"),
+    registry_memory_point("A100", Hardware.Cloud.A100, "HBM"),
+    registry_memory_point("H100", Hardware.Cloud.H100, "HBM"),
+    registry_memory_point("H200", Hardware.Cloud.H200, "HBM"),
+    registry_memory_point("B200", Hardware.Cloud.B200, "HBM"),
+    registry_memory_point("MI300X", Hardware.Cloud.MI300X, "HBM"),
+    registry_memory_point("TPU v5p", Hardware.Cloud.TPUv5p, "HBM"),
+    registry_memory_point("TPU v6", Hardware.Cloud.TPUv6, "HBM"),
+    registry_memory_point("Trainium2", Hardware.Cloud.Trainium2, "HBM"),
+    registry_memory_point("Gaudi 3", Hardware.Cloud.Gaudi3, "HBM"),
+    registry_memory_point("WSE-3", Hardware.Cloud.Cerebras_CS3, "local SRAM"),
+    registry_memory_point("Groq LPU", Hardware.Cloud.Groq_LPU, "local SRAM"),
+    registry_memory_point("Graphcore GC200", Hardware.Cloud.Graphcore_GC200, "local SRAM"),
+    registry_memory_point("Untether speedAI240", Hardware.Cloud.Untether_speedAI240, "local SRAM"),
+    registry_memory_point("d-Matrix Corsair", Hardware.Cloud.DMatrix_Corsair, "local SRAM"),
+    registry_memory_point("Coral Edge TPU", Hardware.Edge.Coral, "edge LPDDR"),
+    registry_memory_point("Jetson Orin Nano", Hardware.Edge.JetsonOrinNano, "edge LPDDR"),
+    registry_memory_point("Jetson Orin NX", Hardware.Edge.JetsonOrinNX, "edge LPDDR"),
+    registry_memory_point("Jetson AGX Orin", Hardware.Edge.JetsonAGXOrin, "edge LPDDR"),
+]
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8.0, 4.65))
+
+def fill_log_ellipse(center, width_decades, height_decades, color, alpha=0.065):
+    cx, cy = math.log10(center[0]), math.log10(center[1])
+    theta = [2 * math.pi * i / 260 for i in range(261)]
+    xs = [10 ** (cx + (width_decades / 2) * math.cos(t)) for t in theta]
+    ys = [10 ** (cy + (height_decades / 2) * math.sin(t)) for t in theta]
+    ax.fill(xs, ys, color=color, alpha=alpha, linewidth=0, zorder=1)
+
+fill_log_ellipse((1.15, 2.5e5), 2.45, 2.05, COLORS["VioletLine"])
+fill_log_ellipse((105, 2600), 1.55, 1.25, COLORS["BlueLine"])
+fill_log_ellipse((18, 82), 1.42, 1.0, COLORS["GreenLine"])
+
+tier_styles = {
+    "local SRAM": (COLORS["VioletLine"], "*", 145, 0.95, 5),
+    "HBM": (COLORS["BlueLine"], "o", 50, 0.84, 4),
+    "edge LPDDR": (COLORS["GreenLine"], "P", 72, 0.90, 4),
+}
+
+for point in memory_tier_points:
+    color, marker, size, alpha, z_order = tier_styles[point.tier]
+    ax.scatter(
+        point.capacity_gb,
+        point.bandwidth_gb_per_s,
+        s=size,
+        marker=marker,
+        facecolor=color,
+        edgecolor=COLORS["primary"],
+        linewidth=0.55,
+        alpha=alpha,
+        zorder=z_order,
+    )
+
+label_offsets = {
+    "WSE-3": (5, 0, COLORS["VioletLine"], "left"),
+    "Untether speedAI240": (5, -8, COLORS["VioletLine"], "left"),
+    "Groq LPU": (5, -3, COLORS["VioletLine"], "left"),
+    "Graphcore GC200": (5, -2, COLORS["VioletLine"], "left"),
+    "d-Matrix Corsair": (5, 1, COLORS["VioletLine"], "left"),
+    "V100": (-15, -13, COLORS["BlueLine"], "right"),
+    "H100": (-11, 10, COLORS["BlueLine"], "right"),
+    "B200": (6, 7, COLORS["BlueLine"], "left"),
+    "Jetson AGX Orin": (5, 2, COLORS["GreenLine"], "left"),
+}
+
+for point in memory_tier_points:
+    if point.label not in label_offsets:
+        continue
+    dx, dy, color, ha = label_offsets[point.label]
+    ax.annotate(
+        point.label,
+        (point.capacity_gb, point.bandwidth_gb_per_s),
+        textcoords="offset points",
+        xytext=(dx, dy),
+        fontsize=6.8,
+        color=color,
+        ha=ha,
+        va="center",
+        zorder=6,
+    )
+
+ax.annotate(
+    "",
+    xy=(0.75, 1.35e5),
+    xytext=(55, 7000),
+    arrowprops=dict(
+        arrowstyle="->",
+        linestyle=":",
+        color=COLORS["primary"],
+        lw=1.0,
+        shrinkA=2,
+        shrinkB=4,
+    ),
+    zorder=3,
+)
+ax.text(
+    6.8,
+    4.2e4,
+    "closer to compute:\nmore bandwidth, less capacity",
+    fontsize=7.1,
+    color=COLORS["primary"],
+    ha="center",
+    va="center",
+    rotation=23,
+)
+
+ax.text(
+    0.058,
+    1.75e5,
+    "local SRAM\nsmall capacity, very high bandwidth",
+    color=COLORS["VioletLine"],
+    fontsize=8.1,
+    fontstyle="italic",
+    ha="left",
+    va="center",
+)
+ax.text(
+    47,
+    660,
+    "HBM accelerators\nlarger capacity\nlower bandwidth per stored byte",
+    color=COLORS["BlueLine"],
+    fontsize=8.1,
+    fontstyle="italic",
+    ha="left",
+    va="center",
+)
+ax.text(
+    6.5,
+    38,
+    "edge/shared LPDDR",
+    color=COLORS["GreenLine"],
+    fontsize=8.1,
+    fontstyle="italic",
+    ha="left",
+    va="center",
+)
+
+ax.set_xscale("log")
+ax.set_yscale("log")
+ax.set_xlim(0.018, 650)
+ax.set_ylim(5, 3.2e7)
+ax.set_xlabel("Memory capacity per accelerator (GB, log scale)")
+ax.set_ylabel("Peak memory bandwidth per accelerator (GB/s, log scale)")
+ax.grid(True, which="major", alpha=0.40, linestyle="--", linewidth=0.75)
+ax.grid(True, which="minor", alpha=0.13, linestyle="--", linewidth=0.45)
+fig.tight_layout(pad=0.8)
+fig.subplots_adjust(left=0.11, right=0.985, bottom=0.14, top=0.975)
+plt.show()
+plt.close()
+```
+
+:::
+
+@Fig-accelerator-memory-tier-map is not a ranking of accelerators; it is a map of where each design chooses to place bytes. Edge devices keep memory cheap and compact, but bandwidth stays low. HBM moves memory onto the accelerator package, buying enough capacity and enough bandwidth for active model state. Local-SRAM designs push the working set still closer to arithmetic, buying extraordinary bandwidth at the cost of much smaller resident capacity. That tier map explains why HBM is the next engineering response: it is not the fastest memory in the system, but it is the highest-bandwidth tier that can hold tens to hundreds of gigabytes next to the compute die.
 
 ### HBM: Breaking the memory wall {#sec-compute-hbm}
 
