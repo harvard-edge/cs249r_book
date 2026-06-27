@@ -1177,7 +1177,7 @@ from mlsysim.fmt import fmt, check, fmt_math, fmt_flop_rate, fmt_memory, fmt_per
 # ┌── LEGO ───────────────────────────────────────────────
 class TokenLatencyScenario:
     h_h100 = Hardware.Cloud.H100
-    m_llama70b = Models.Language.Llama2_70B
+    m_llama70b = Models.Language.Llama3_70B
     weight_vol = m_llama70b.size_in_bytes(BYTES_FP16)
     token_flops = 2 * m_llama70b.parameters * flop / param
     t_mem = (weight_vol / h_h100.memory.bandwidth).to(millisecond)
@@ -1187,7 +1187,7 @@ class TokenLatencyScenario:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h_h100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
     dominance_str = fmt_percent(dominance, precision=1, commas=False, style="prose")
-    weight_gb_str = fmt_memory(weight_vol, unit=GB, precision=0, commas=False)
+    weight_gb_str = fmt_memory(weight_vol, unit=GB, precision=1, commas=False)
     t_comp_math = fmt_math(f"T_{{\\text{{compute}}}} \\approx \\mathbf{{{t_comp.to(millisecond).magnitude:.2f} \\text{{ ms}}}}")
     t_mem_math = fmt_math(f"T_{{\\text{{mem}}}} \\approx \\mathbf{{{t_mem.to(millisecond).magnitude:.1f} \\text{{ ms}}}}")
 ```
@@ -1228,20 +1228,25 @@ Loading `{python} TokenLatencyScenario.weight_gb_str` of weights from HBM at `{p
 # └─────────────────────────────────────────────────────────────────────────────
 import mlsysim
 from mlsysim.solvers import ServingModel
-from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_params, fmt_power
+from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_int, fmt_multiple, fmt_params, fmt_power
 
 class H200Comparison:
     h_h100 = mlsysim.Hardware.Cloud.H100
     h200 = mlsysim.Hardware.Cloud.H200
-    model = mlsysim.Models.Language.Llama2_70B
+    model = mlsysim.Models.Language.Llama3_70B
+    seq_len = 2048
+    batch_size = 1
 
     serving_model = ServingModel()
-    res_h100 = serving_model.solve(model, h_h100, seq_len=2048, batch_size=1)
-    res_h200 = serving_model.solve(model, h200, seq_len=2048, batch_size=1)
+    res_h100 = serving_model.solve(model, h_h100, seq_len=seq_len, batch_size=batch_size)
+    res_h200 = serving_model.solve(model, h200, seq_len=seq_len, batch_size=batch_size)
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     bw_gain_mult_str = fmt_multiple((h200.memory.bandwidth / h_h100.memory.bandwidth).to_base_units().magnitude, precision=1, commas=True)
     cap_gain_mult_str = fmt_multiple((h200.memory.capacity / h_h100.memory.capacity).to_base_units().magnitude, precision=1, commas=True)
+    model_params_str = fmt_params(model.parameters, scale="B", precision=1, commas=False)
+    seq_len_str = fmt_int(seq_len)
+    batch_size_str = fmt_int(batch_size, commas=False)
 
     itl_h100 = res_h100.itl
     itl_h200 = res_h200.itl
@@ -1255,6 +1260,8 @@ That bandwidth floor also gives us a clean way to compare adjacent hardware gene
 
 To understand *why* the "memory wall" is the primary constraint for modern large language models (LLMs)\index{LLM!inference, memory bottleneck}, we compare the NVIDIA H100 against its successor, the H200\index{NVIDIA!H200, memory wall}. While both chips share the same compute cores (same peak TFLOP/s), the H200 provides `{python} H200Comparison.bw_gain_mult_str` higher memory bandwidth and `{python} H200Comparison.cap_gain_mult_str` more HBM capacity.
 
+This LEGO comparison uses a Llama 3 model with `{python} H200Comparison.model_params_str` parameters, sequence length `{python} H200Comparison.seq_len_str`, and batch size `{python} H200Comparison.batch_size_str`; the reported speedup is the serving solver's inter-token latency estimate, not a raw bandwidth ratio alone.
+
 **Systems insight**: For LLM decoding, the H200 is `{python} H200Comparison.speedup_mult_str` faster than the H100 despite having identical compute power. This proves that for large-scale autoregressive models, the "Wall" is the memory interface, not the arithmetic logic.
 
 :::
@@ -1266,7 +1273,7 @@ The napkin math reveals a profound asymmetry at the heart of modern ML infrastru
 # ┌── LEGO ───────────────────────────────────────────────
 class TokenLatencyDominanceRecap:
     h_h100 = Hardware.Cloud.H100
-    m_llama70b = Models.Language.Llama2_70B
+    m_llama70b = Models.Language.Llama3_70B
     weight_vol = m_llama70b.size_in_bytes(BYTES_FP16)
     token_flops = 2 * m_llama70b.parameters * flop / param
     t_mem = (weight_vol / h_h100.memory.bandwidth).to(millisecond)
@@ -2781,7 +2788,7 @@ The NVSwitch chips themselves consume approximately 200 W each (800 W total for 
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt_time, MarkdownStr
+from mlsysim.fmt import fmt_int, fmt_percent, fmt_time, MarkdownStr
 
 # ┌── LEGO ───────────────────────────────────────────────
 class TensorParallelAllReduce:
@@ -2791,15 +2798,23 @@ class TensorParallelAllReduce:
     microbatch = 4  # sequences per microbatch (scenario)
     seq_len = 2048  # tokens per sequence (scenario)
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
+    compute_step = 200 * millisecond  # scenario anchor for the diagnostic below
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     hidden = model.hidden_dim
     layers = model.layers
+    sync_events = 2 * layers
     shard_cols = hidden // tp_gpus
     bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
     allreduce_bytes = microbatch * seq_len * hidden * bytes_fp16 * byte
     per_allreduce = (allreduce_bytes / nvlink_bw).to("millisecond")
-    cumulative = 2 * layers * per_allreduce
+    cumulative = sync_events * per_allreduce
+    pcie_per_allreduce = (allreduce_bytes / pcie_bw).to(millisecond)
+    pcie_cumulative = sync_events * pcie_per_allreduce
+    pcie_cumulative_display = round(pcie_cumulative.to(millisecond).magnitude) * millisecond
+    pcie_wait_fraction = (pcie_cumulative / (compute_step + pcie_cumulative)).to_base_units().magnitude
+    nvlink_utilization = (compute_step / (compute_step + cumulative)).to_base_units().magnitude
     hidden_disp = format(hidden, ",").replace(",", "{,}")
     shard_disp = format(shard_cols, ",").replace(",", "{,}")
     seq_disp = format(seq_len, ",").replace(",", "{,}")
@@ -2815,7 +2830,13 @@ class TensorParallelAllReduce:
     allreduce_mb_str = fmt_int(allreduce_bytes.to(MB).magnitude)
     per_allreduce_ms_str = fmt_time(per_allreduce, "millisecond", precision=1, commas=False)
     layers_str = fmt_int(layers)
+    sync_events_str = fmt_int(sync_events)
     cumulative_ms_str = fmt_time(cumulative, "millisecond", precision=1, commas=False)
+    pcie_per_allreduce_ms_str = fmt_time(pcie_per_allreduce, millisecond, precision=1, commas=False)
+    pcie_cumulative_ms_str = fmt_time(pcie_cumulative_display, millisecond, precision=0, commas=False)
+    compute_step_ms_str = fmt_time(compute_step, millisecond, precision=0, commas=False)
+    pcie_wait_pct_str = fmt_percent(pcie_wait_fraction, precision=1, commas=False, style='prose')
+    nvlink_util_pct_str = fmt_percent(nvlink_utilization, precision=1, commas=False, style='prose')
 ```
 
 During a tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension `{python} TensorParallelAllReduce.hidden_str` (typical for a `{python} TensorParallelAllReduce.model_params_b_str`B model), each of the `{python} TensorParallelAllReduce.tp_gpus_str` GPUs holds a `{python} TensorParallelAllReduce.shard_math` slice of the weight matrix. After each GPU computes its partial result, an AllReduce operation sums the partial results across all `{python} TensorParallelAllReduce.tp_gpus_str` GPUs over NVLink.
@@ -2844,7 +2865,7 @@ class BandwidthHierarchyPcieExampleRecap:
 <!-- lego-ok-block: PCIe-vs-NVLink tensor-parallel diagnostic narrative -->
 **Scenario**: Early users of multi-GPU nodes often attempted tensor parallelism over PCIe, expecting the `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth to suffice.
 
-**Diagnosis**: Tensor parallelism requires AllReduce after *every* Transformer layer, not just *once* per training step. A model with ninety-six layers generates ninety-six AllReduce operations per forward pass and another ninety-six during the backward pass, totaling 192 synchronization events per step. At PCIe bandwidth, each AllReduce for a 12,288-dimensional hidden state takes approximately 4 ms, accumulating to 768 ms of pure communication overhead per step. The compute per step is roughly 200 ms. The accelerators were spending nearly 80 percent of their time waiting for PCIe transfers. Switching to NVLink reduced each AllReduce to 0.2 ms, bringing total communication overhead to 38 ms and restoring accelerator utilization to over 80 percent.
+**Diagnosis**: Tensor parallelism requires AllReduce after *every* Transformer layer, not just *once* per training step. A model with `{python} TensorParallelAllReduce.layers_str` layers generates `{python} TensorParallelAllReduce.layers_str` AllReduce operations per forward pass and another `{python} TensorParallelAllReduce.layers_str` during the backward pass, totaling `{python} TensorParallelAllReduce.sync_events_str` synchronization events per step. At PCIe bandwidth, each AllReduce for a `{python} TensorParallelAllReduce.hidden_str`-dimensional hidden state takes approximately `{python} TensorParallelAllReduce.pcie_per_allreduce_ms_str`, accumulating to `{python} TensorParallelAllReduce.pcie_cumulative_ms_str` of pure communication overhead per step. With a `{python} TensorParallelAllReduce.compute_step_ms_str` compute-step anchor, the accelerators spend roughly `{python} TensorParallelAllReduce.pcie_wait_pct_str` of their time waiting for PCIe transfers. Switching to NVLink reduces each AllReduce to `{python} TensorParallelAllReduce.per_allreduce_ms_str`, bringing total communication overhead to `{python} TensorParallelAllReduce.cumulative_ms_str` and restoring accelerator utilization to over `{python} TensorParallelAllReduce.nvlink_util_pct_str`.
 
 **Systems lesson**: For tensor parallelism, the interconnect is the bottleneck, and the difference between PCIe and NVLink is not incremental; it is the difference between a functional and a nonfunctional system.
 <!-- end lego-ok-block -->
@@ -3319,6 +3340,7 @@ class InterconnectCommMath:
     _ib_bw_gbs_val = _ib_bw.to(GB / second).magnitude
     _t_intra_ms = (gradient_buffer / _nvlink_bw).to(millisecond).magnitude
     _t_inter_ms = (gradient_buffer / _ib_bw).to(millisecond).magnitude
+    _gap_nv_ib = (_nvlink_bw / _ib_bw).to_base_units().magnitude
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     t_intra_math = fmt_math(
@@ -3328,6 +3350,7 @@ class InterconnectCommMath:
         f"T_{{\\text{{inter}}}} = {gradient_buffer_value}\\text{{ GB}} / {_ib_bw_gbs_val:.0f}\\text{{ GB/s}} \\approx \\mathbf{{{_t_inter_ms:.0f} \\text{{ ms}}}}"
     )
     gradient_buffer_gb_str = fmt_memory(gradient_buffer, unit=GB, precision=0, commas=False)
+    gap_nv_ib_mult_str = fmt_multiple(_gap_nv_ib, precision=0, commas=False)
 ```
 
 ```{python}
@@ -3338,14 +3361,15 @@ from mlsysim.fmt import fmt_qty
 class BandwidthHierarchyNvlinkPodRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    nvlink_bw_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB / second, precision=0, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, GB / second, precision=0, commas=False)
+    nvlink_bidirectional_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB / second, precision=0, commas=False)
 ```
 
 ::: {#nbk-comm-overhead .callout-notebook title="The cost of crossing the cliff"}
 
 **Problem**: A training step must synchronize a `{python} InterconnectCommMath.gradient_buffer_gb_str` gradient buffer. How much longer does the synchronization take when it crosses the node boundary (InfiniBand) compared to staying within the node (NVLink)?
 
-1. **Intra-Node (NVLink)**: Bandwidth = `{python} BandwidthHierarchyNvlinkPodRecap.nvlink_bw_gb_per_s_str`.
+1. **Intra-Node (NVLink)**: Bandwidth = `{python} BandwidthHierarchyNvlinkPodRecap.nvlink_bw_gb_per_s_str` one-way effective bandwidth; the bidirectional aggregate is `{python} BandwidthHierarchyNvlinkPodRecap.nvlink_bidirectional_gb_per_s_str`, but this transfer-time calculation moves one buffer in one direction.
    `{python} InterconnectCommMath.t_intra_math`
 ```{python}
 #| echo: false
@@ -3361,7 +3385,7 @@ class BandwidthHierarchyPodRecap:
 2. **Inter-Node (InfiniBand NDR)**: Bandwidth = `{python} BandwidthHierarchyPodRecap.ib_bw_gb_per_s_str`.
    `{python} InterconnectCommMath.t_inter_math`
 
-**Systems insight**: Crossing the node boundary increases communication time by approximately `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str`. In a training loop where gradient synchronization happens at every step, this penalty would stall the accelerators for the majority of each iteration, reducing utilization to well below 50 percent. This is why training frameworks use tensor parallelism within the node (fast NVLink) and data parallelism across nodes (tolerant of slower InfiniBand).
+**Systems insight**: Crossing the node boundary increases communication time by approximately `{python} InterconnectCommMath.gap_nv_ib_mult_str`. In a training loop where gradient synchronization happens at every step, this penalty would stall the accelerators for the majority of each iteration, reducing utilization to well below 50 percent. This is why training frameworks use tensor parallelism within the node (fast NVLink) and data parallelism across nodes (tolerant of slower InfiniBand).
 
 :::
 
@@ -4177,7 +4201,7 @@ The resulting hierarchy mirrors the classical memory hierarchy at warehouse scal
 # │ How: pulling constants from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt
+from mlsysim.fmt import fmt, fmt_multiple
 
 class SummaryScaleScenario:
     """Namespace for summary scale reference."""
@@ -4204,6 +4228,11 @@ class SummaryScaleScenario:
     h100_bw_tb_per_s_str = fmt_bandwidth(bw, unit=TB / second, precision=2, commas=False)
     h100_tdp_w_str = fmt_power(tdp, unit=watt, precision=0, commas=False)
     rack_power_kw_str = fmt_power(rack_power, unit=kilowatt, precision=1, commas=False)
+    nvlink_ib_gap_mult_str = fmt_multiple(
+        (Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to_base_units().magnitude,
+        precision=0,
+        commas=False,
+    )
 ```
 
 ```{python}
@@ -4223,7 +4252,7 @@ The practical method transfers beyond this particular model. Identify the bindin
 
 * **The generality tax**: Accelerators achieve 10--100$\times$ higher throughput than CPUs by dedicating silicon area to matrix arithmetic rather than branch prediction and out-of-order execution. The trade-off is reduced flexibility. Each step along the spectrum from GPU to TPU to custom ASIC reclaims more die area for arithmetic.
 * **Memory wall diagnosis starts with roofline**: For single-request LLM inference, memory bandwidth\index{Memory Wall!dominance} determines latency because arithmetic completes in microseconds while data transfer takes milliseconds. The ridge point ($I_{\text{ridge}}$ = peak FLOP/s divided by memory BW) separates memory-bound LLM decode ($I \approx 1$) from compute-bound training ($I > 2{,}000$).
-* **Bandwidth hierarchy dictates parallelism**: The `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str` per-direction bandwidth cliff between NVLink and InfiniBand\index{Bandwidth Hierarchy!parallelism placement} confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
+* **Bandwidth hierarchy dictates parallelism**: The `{python} SummaryScaleScenario.nvlink_ib_gap_mult_str` per-direction bandwidth cliff between NVLink and InfiniBand\index{Bandwidth Hierarchy!parallelism placement} confines tensor parallelism to within a node and data parallelism to across nodes. Pipeline parallelism spans nodes when model depth exceeds a single node's capacity.
 * **Peak vs. sustained**: Model FLOPs Utilization (MFU)\index{MFU!sustained vs. peak} of 40--50 percent is considered good for large-scale training. Capacity planning must use sustained throughput, not peak specifications.
 * **Facility efficiency is part of the computer**: Liquid cooling can deliver 90--95 percent of facility power to computation, compared to 50--65 percent for air-cooled facilities. At pod scale, network topology, cooling architecture, and power delivery must be co-designed for the dominant workload.
 * **Failure at scale**: A 10,000-GPU cluster\index{Failure!at scale} experiences roughly one GPU failure every five hours. Checkpointing strategy is a first-order performance concern that must be designed into the system from the start.
@@ -4235,7 +4264,7 @@ For most of computing history, the computer was the chip. This chapter marks whe
 
 ::: {.callout-chapter-connection title="From silicon to wires"}
 
-We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them. The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed a `{python} BandwidthStaircase.bs_gap_nv_ib_mult_str` cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
+We have mapped physical infrastructure from Tensor Core transistors to megawatt data-center substations. A fleet of disconnected nodes, however, is not yet a computer; it is a warehouse of expensive accelerators. The network fabric turns those nodes into a unified training system by carrying gradients, activations, and checkpoints between them. The chapter repeatedly exposed the same constraint: communication bandwidth limits scaling efficiency. The bandwidth hierarchy showed a `{python} SummaryScaleScenario.nvlink_ib_gap_mult_str` cliff between NVLink and InfiniBand, and the topology examples showed that fabric design can change AllReduce time by 2--3$\times$. @Sec-network-fabrics examines the physics, protocols, collectives, and topology decisions that determine whether a 10,000-GPU cluster behaves like one coherent machine or thousands of isolated devices.
 
 :::
 

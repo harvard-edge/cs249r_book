@@ -862,13 +862,14 @@ Translating these batch-level equations into system-wide capacity planning requi
 # │          the Application, Capacity Planning, and Verification prose below.
 # │
 # │ Goal:    Apply Little's Law (Q = λ·T) to size a serving fleet against an SLO.
-# │ Show:    Required concurrency, per-replica throughput, replicas needed, total
-# │          system concurrency, and the queue shortfall.
+# │ Show:    Required concurrency, per-replica throughput, throughput-only lower
+# │          bound, SLO-sized replica count, and resulting headroom.
 # │ How:     Scenario throughput target and latency SLO give required concurrency;
 # │          replica batch/latency give per-replica throughput and replica count.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt_time, fmt_math
+import math
+from mlsysim.fmt import fmt_int, check, fmt_time, fmt_math, fmt_percent
 
 class LittlesLawExample:
     # ┌── 1. LOAD ──────────────────────────────────────────
@@ -881,22 +882,30 @@ class LittlesLawExample:
     replica_latency_s = replica_latency.to(second).magnitude
     required_concurrency = int(target_throughput * latency_slo_s)
     replica_throughput = int(batch_size / replica_latency_s)
-    replicas_needed = int(target_throughput / replica_throughput)
+    throughput_floor = math.ceil(target_throughput / replica_throughput)
+    slo_replicas = math.ceil(required_concurrency / batch_size)
+    replicas_needed = max(throughput_floor, slo_replicas)
     total_concurrency = replicas_needed * batch_size
-    queue_shortfall = required_concurrency - total_concurrency
+    concurrency_headroom = total_concurrency - required_concurrency
+    service_utilization = target_throughput / (replicas_needed * replica_throughput)
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(required_concurrency == 100, "required concurrency should be 100")
-    check(replicas_needed == 10, "Should need 10 replicas")
-    check(queue_shortfall == 20, "queue shortfall should be 20")
+    check(throughput_floor == 10, "Throughput-only lower bound should be 10 replicas")
+    check(replicas_needed == 13, "SLO-sized replica count should be 13")
+    check(concurrency_headroom == 4, "concurrency headroom should be 4")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     required_concurrency_math = fmt_math(rf"Q_{{\text{{req}}}} = {target_throughput} \times {latency_slo_s} =")
     required_concurrency_str = fmt_int(required_concurrency, commas=False)
     replica_throughput_calc_math = fmt_math(rf"{batch_size}/{replica_latency_s} =")
     replica_throughput_str = fmt_int(replica_throughput, commas=False)
+    throughput_floor_calc_math = fmt_math(rf"\lceil {target_throughput}/{replica_throughput}\rceil =")
+    throughput_floor_str = fmt_int(throughput_floor, commas=False)
+    slo_replicas_calc_math = fmt_math(rf"\lceil {required_concurrency}/{batch_size}\rceil =")
     replicas_needed_str = fmt_int(replicas_needed, commas=False)
     total_concurrency_calc_math = fmt_math(rf"{replicas_needed}\text{{ replicas}} \times {batch_size}\text{{ batch}} =")
     total_concurrency_str = fmt_int(total_concurrency, commas=False)
-    queue_shortfall_str = fmt_int(queue_shortfall, commas=False)
+    concurrency_headroom_str = fmt_int(concurrency_headroom, commas=False)
+    service_utilization_pct_str = fmt_percent(service_utilization, precision=1, commas=False, style="prose")
     target_throughput_str = fmt_int(target_throughput)
     latency_slo_ms_str = fmt_time(latency_slo, millisecond, precision=0, commas=False)
     latency_slo_s_str = fmt_time(latency_slo, second, precision=1, commas=False)
@@ -921,14 +930,15 @@ $$ Q_{\text{req}} = \lambda_{\text{arr}} \cdot T_{\text{lat}} $$
 If a single GPU replica handles batch size `{python} LittlesLawExample.batch_size_str` with `{python} LittlesLawExample.replica_latency_ms_str` latency:
 
 1. Replica Throughput $=$ `{python} LittlesLawExample.replica_throughput_calc_math` `{python} LittlesLawExample.replica_throughput_str` req/s
-2. Replicas Needed = `{python} LittlesLawExample.target_throughput_str` divided by `{python} LittlesLawExample.replica_throughput_str` = `{python} LittlesLawExample.replicas_needed_str` replicas
+2. Throughput-only lower bound $=$ `{python} LittlesLawExample.throughput_floor_calc_math` `{python} LittlesLawExample.throughput_floor_str` replicas
+3. SLO-sized replica count $=$ `{python} LittlesLawExample.slo_replicas_calc_math` `{python} LittlesLawExample.replicas_needed_str` replicas
 
 **Verification**:
-Total system concurrency $=$ `{python} LittlesLawExample.total_concurrency_calc_math` `{python} LittlesLawExample.total_concurrency_str`, short of the `{python} LittlesLawExample.required_concurrency_str` required. The shortfall is the queue: with `{python} LittlesLawExample.replicas_needed_str` replicas actively processing `{python} LittlesLawExample.total_concurrency_str` requests, the remaining `{python} LittlesLawExample.queue_shortfall_str` wait in queues, and that queue wait must fit inside the SLO.
+Total system concurrency $=$ `{python} LittlesLawExample.total_concurrency_calc_math` `{python} LittlesLawExample.total_concurrency_str`, which leaves `{python} LittlesLawExample.concurrency_headroom_str` request slots above the `{python} LittlesLawExample.required_concurrency_str` required by Little's Law. The throughput-only lower bound would run at the stability boundary; the SLO-sized fleet runs at about `{python} LittlesLawExample.service_utilization_pct_str` service utilization, leaving finite headroom for queueing variance and tail latency.
 
 :::
 
-The 20-request queue depth and the unresolved question of whether queue wait time fits inside the SLO are exactly what queuing theory formalizes; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 derives the M/D/1 wait-time distribution that determines whether queue delay fits inside a serving SLO.
+The distinction between throughput capacity and latency capacity is exactly what queuing theory formalizes; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 derives the M/D/1 wait-time distribution that determines how much headroom a serving SLO needs.
 
 ### Static and dynamic batching for vision models {#sec-inference-scale-static-dynamic-batching-vision-models-4623}
 
@@ -967,7 +977,7 @@ class DynamicBatchingResNet50:
     replicas = 10  # scenario assumption: replica count
     latency_slo_ms = 50  # scenario assumption: P99 latency SLO
     svc_b1_ms = 5  # scenario assumption: per-image time at batch=1
-    svc_b32_ms = 25  # scenario assumption: per-image time at batch=32
+    svc_b32_ms = 25  # scenario assumption: total batch service time at batch=32
     # Option B / C serving-policy knobs
     bmax_b = 16
     twindow_b_ms = 10
@@ -1040,7 +1050,7 @@ Consider a vision classification service with the following requirements:
 
 - **Arrival rate**: `{python} DynamicBatchingResNet50.arrival_qps_str`
 - **Latency SLO**: `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99
-- **Per-image inference time**: `{python} DynamicBatchingResNet50.svc_b1_ms_str` at batch=1, `{python} DynamicBatchingResNet50.svc_b32_ms_str` at batch=32
+- **Batch service time**: `{python} DynamicBatchingResNet50.svc_b1_ms_str` at batch=1, `{python} DynamicBatchingResNet50.svc_b32_ms_str` total for batch=32
 - **Number of replicas**: `{python} DynamicBatchingResNet50.replicas_str` (each handling `{python} DynamicBatchingResNet50.per_replica_qps_str`)
 
 For a single replica with Poisson arrivals at $\lambda_{\text{arr}} =$ `{python} DynamicBatchingResNet50.per_replica_qps_str`:
@@ -1388,7 +1398,7 @@ where $k$ is the number of standard deviations the maximum output exceeds the me
 # │      the assumed realized speedup via W = 1 - 1 / speedup.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, fmt_percent, fmt_count
+from mlsysim.fmt import fmt_int, check, fmt, fmt_percent, fmt_multiple
 
 class ContinuousBatchingBenefit:
     """Conservative realized-speedup table for continuous batching."""
@@ -1437,38 +1447,38 @@ class ContinuousBatchingBenefit:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     code_cv_str = fmt(code_cv, precision=1, commas=False)
-    code_tokens_k_str = fmt_count(code_k * THOUSAND, scale="K", precision=1, commas=False)
+    code_k_str = fmt(code_k, precision=1, commas=False)
     code_waste_pct_str = fmt_percent(code_waste_pct / 100, precision=1, commas=False, style='symbol')
     code_speedup_mult_str = fmt_multiple(code_speedup, precision=1, commas=False)
 
     chat_cv_str = fmt(chat_cv, precision=1, commas=False)
-    chat_tokens_k_str = fmt_count(chat_k * THOUSAND, scale="K", precision=0, commas=False)
+    chat_k_str = fmt_int(chat_k, commas=False)
     chat_waste_pct_str = fmt_percent(chat_waste_pct / 100, precision=1, commas=False, style='symbol')
     chat_speedup_mult_str = fmt_multiple(chat_speedup, precision=1, commas=False)
 
     text_cv_str = fmt_int(text_cv, commas=False)
-    text_tokens_k_str = fmt_count(text_k * THOUSAND, scale="K", precision=1, commas=False)
+    text_k_str = fmt(text_k, precision=1, commas=False)
     text_waste_pct_str = fmt_percent(round(text_waste_pct) / 100, precision=0, commas=False, style='symbol')
     text_speedup_mult_str = fmt_multiple(text_speedup, commas=False, precision=0)
 
     creative_cv_str = fmt(creative_cv, precision=1, commas=False)
-    creative_tokens_k_str = fmt_count(creative_k * THOUSAND, scale="K", precision=0, commas=False)
+    creative_k_str = fmt_int(creative_k, commas=False)
     creative_waste_pct_str = fmt_percent(creative_waste_pct / 100, precision=1, commas=False, style='symbol')
     creative_speedup_mult_str = fmt_multiple(creative_speedup, precision=1, commas=False)
 
     rag_cv_str = fmt_int(rag_cv, commas=False)
-    rag_tokens_k_str = fmt_count(rag_k * THOUSAND, scale="K", precision=1, commas=False)
+    rag_k_str = fmt(rag_k, precision=1, commas=False)
     rag_waste_pct_str = fmt_percent(rag_waste_pct / 100, precision=1, commas=False, style='symbol')
     rag_speedup_mult_str = fmt_multiple(rag_speedup, precision=1, commas=False)
 ```
 
-| **Workload Type**           |                        **CV**                        |                           **k**                            |                      **Waste (Trad.)**                      |                    **Speedup (Continuous)**                    |
-|:----------------------------|:----------------------------------------------------:|:----------------------------------------------------------:|:-----------------------------------------------------------:|:--------------------------------------------------------------:|
-| **Code completion**         |   `{python} ContinuousBatchingBenefit.code_cv_str`   |   `{python} ContinuousBatchingBenefit.code_tokens_k_str`   |   `{python} ContinuousBatchingBenefit.code_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.code_speedup_mult_str`   |
-| **Chat (short responses)**  |   `{python} ContinuousBatchingBenefit.chat_cv_str`   |   `{python} ContinuousBatchingBenefit.chat_tokens_k_str`   |   `{python} ContinuousBatchingBenefit.chat_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.chat_speedup_mult_str`   |
-| **General text generation** |   `{python} ContinuousBatchingBenefit.text_cv_str`   |   `{python} ContinuousBatchingBenefit.text_tokens_k_str`   |   `{python} ContinuousBatchingBenefit.text_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.text_speedup_mult_str`   |
-| **Creative writing**        | `{python} ContinuousBatchingBenefit.creative_cv_str` | `{python} ContinuousBatchingBenefit.creative_tokens_k_str` | `{python} ContinuousBatchingBenefit.creative_waste_pct_str` | `{python} ContinuousBatchingBenefit.creative_speedup_mult_str` |
-| **RAG with variable docs**  |   `{python} ContinuousBatchingBenefit.rag_cv_str`    |   `{python} ContinuousBatchingBenefit.rag_tokens_k_str`    |    `{python} ContinuousBatchingBenefit.rag_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.rag_speedup_mult_str`    |
+| **Workload Type**           |                        **CV**                        |                        **k**                        |                      **Waste (Trad.)**                      |                    **Speedup (Continuous)**                    |
+|:----------------------------|:----------------------------------------------------:|:---------------------------------------------------:|:-----------------------------------------------------------:|:--------------------------------------------------------------:|
+| **Code completion**         |   `{python} ContinuousBatchingBenefit.code_cv_str`   |   `{python} ContinuousBatchingBenefit.code_k_str`   |   `{python} ContinuousBatchingBenefit.code_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.code_speedup_mult_str`   |
+| **Chat (short responses)**  |   `{python} ContinuousBatchingBenefit.chat_cv_str`   |   `{python} ContinuousBatchingBenefit.chat_k_str`   |   `{python} ContinuousBatchingBenefit.chat_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.chat_speedup_mult_str`   |
+| **General text generation** |   `{python} ContinuousBatchingBenefit.text_cv_str`   |   `{python} ContinuousBatchingBenefit.text_k_str`   |   `{python} ContinuousBatchingBenefit.text_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.text_speedup_mult_str`   |
+| **Creative writing**        | `{python} ContinuousBatchingBenefit.creative_cv_str` | `{python} ContinuousBatchingBenefit.creative_k_str` | `{python} ContinuousBatchingBenefit.creative_waste_pct_str` | `{python} ContinuousBatchingBenefit.creative_speedup_mult_str` |
+| **RAG with variable docs**  |   `{python} ContinuousBatchingBenefit.rag_cv_str`    |    `{python} ContinuousBatchingBenefit.rag_k_str`   |    `{python} ContinuousBatchingBenefit.rag_waste_pct_str`   |   `{python} ContinuousBatchingBenefit.rag_speedup_mult_str`    |
 
 : **Continuous Batching Benefit by Workload Type**: Higher output length variance (CV) yields greater improvement from continuous batching. Workloads with predictable output lengths (code completion) see modest gains, while highly variable workloads (RAG with documents of varying length) see dramatic improvement. {#tbl-continuous-batching-benefit}
 
@@ -2482,15 +2492,12 @@ class KVCacheCalc:
     gqa_kv_fp16 = kv_fp16 * (8 / kv_heads)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt_int, check, MarkdownStr, fmt_memory, fmt_memory_capacity, fmt_qty
+    from mlsysim.fmt import fmt_int, check, fmt_display_math, fmt_memory, fmt_memory_capacity, fmt_qty
 
     check(kv_fp16 > 5 * GB, f"KV cache should be substantial, got {kv_fp16.to(GB).magnitude:.1f} GB")
     check(abs((gqa_kv_fp16 / (kv_fp16 / 8)).to("").magnitude - 1) < 1e-6, "GQA cache should be 8x smaller than MHA baseline")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    # MarkdownStr wraps the values so Quarto inserts them verbatim inside the
-    # $$..$$ display math below — a bare f-string here lands as 10\.7 instead
-    # of 10.7 (\. is a LaTeX dot accent, not a literal period).
     kv_fp16_gb_str = fmt_memory(kv_fp16, unit=GB, precision=1, commas=False)
     kv_int4_gb_str = fmt_memory(kv_int4, unit=GB, precision=1, commas=False)
     kv_compression_mult_str = fmt_multiple(kv_compression, precision=0, commas=False)
@@ -2498,18 +2505,17 @@ class KVCacheCalc:
     batch8_kv_fp16_gb_str = fmt_memory(batch8_kv_fp16, unit=GB, precision=1, commas=False)
     gqa_kv_fp16_gb_str = fmt_memory(gqa_kv_fp16, unit=GB, precision=1, commas=False)
     gqa_kv_heads = 8
-    kv_fp16_formula_math = MarkdownStr(
-        rf"2 \times {kv_layers} \times {kv_heads} \times {kv_head_dim} \times {kv_seq_len} \times 2 " rf"\approx {kv_fp16.to(GB).magnitude:.1f}"
+    kv_fp16_display_math = fmt_display_math(
+        rf"\text{{KV cache}} = 2 \times {kv_layers} \times {kv_heads} \times {kv_head_dim} \times {kv_seq_len} \times 2 "
+        rf"\approx {kv_fp16.to(GB).magnitude:.1f}\text{{ GB (FP16)}}"
     )
-    gqa_kv_fp16_formula_math = MarkdownStr(
-        rf"2 \times {kv_layers} \times {gqa_kv_heads} \times {kv_head_dim} \times {kv_seq_len} \times 2 "
-        rf"\approx {gqa_kv_fp16.to(GB).magnitude:.1f}"
+    gqa_kv_fp16_display_math = fmt_display_math(
+        rf"\text{{KV cache (GQA)}} = 2 \times {kv_layers} \times {gqa_kv_heads} \times {kv_head_dim} \times {kv_seq_len} \times 2 "
+        rf"\approx {gqa_kv_fp16.to(GB).magnitude:.1f}\text{{ GB (FP16)}}"
     )
 ```
 
-$$
-\text{KV cache} = `{python} KVCacheCalc.kv_fp16_formula_math` \text{ GB (FP16)}
-$$
+`{python} KVCacheCalc.kv_fp16_display_math`
 
 A single request's KV cache alone consumes a substantial fraction of the H100's `{python} KVCacheCalc.h100_mem_gb_str` of HBM. For a batch of 8 concurrent requests, the KV cache would require `{python} KVCacheCalc.batch8_kv_fp16_gb_str`, exceeding single-GPU capacity. Reducing this footprint requires two complementary strategies: quantization and architectural optimization.
 
@@ -2523,9 +2529,7 @@ Compressing the KV cache to INT4 reduces it to approximately `{python} KVCacheCa
 
 Grouped query attention\index{Grouped Query Attention} [@ainslie2023], the shared-KV-head architecture established in @sec-performance-engineering-quant-strategies, is the second lever on cache size, complementary to quantization: where quantization shrinks the bytes per cached element, GQA shrinks how many key-value heads are cached per layer. The serving consequence is the head-count arithmetic. For our earlier 70B model, switching from the multi-head attention (MHA) baseline of 64 KV heads to GQA with 8 KV heads shrinks the KV cache by 8$\times$:
 
-$$
-\text{KV cache (GQA)} = `{python} KVCacheCalc.gqa_kv_fp16_formula_math` \text{ GB (FP16)}
-$$
+`{python} KVCacheCalc.gqa_kv_fp16_display_math`
 
 At `{python} KVCacheCalc.gqa_kv_fp16_gb_str`, the GQA cache is dramatically more manageable than the `{python} KVCacheCalc.kv_fp16_gb_str` required by MHA. Combining GQA with INT8 KV cache quantization yields sub-gigabyte per-request cache sizes, often enabling substantially larger batches on a single GPU. GQA has become a common architectural choice for inference-optimized LLMs because it reduces KV-cache bandwidth and capacity pressure with comparatively small quality impact in many deployments.
 
@@ -3899,8 +3903,10 @@ The procedure is deliberately small, but the load signal must match the serving 
 \State sample two candidate replicas $s_a, s_b$ from $\mathcal{S}$ \Comment{capacity-weighted}
 \State query $W_{s_a}, W_{s_b}$; estimate incremental work $\hat{c}(r)$ (expected output tokens or KV pages)
 \State $u_s \gets (W_s + \hat{c}(r)) / w_s$ for $s \in \{s_a, s_b\}$ \Comment{post-admission load}
-\State route $r$ to the candidate with smaller $u_s$ \Comment{ties: cache affinity}
-\State update the chosen replica's local admission state
+\State $s^\star \gets$ candidate with smaller $u_s$ \Comment{ties: cache affinity}
+\State route $r$ to $s^\star$
+\State update $s^\star$'s local admission state
+\State \Return $s^\star$
 \end{algorithmic}
 \end{algorithm}
 ```
