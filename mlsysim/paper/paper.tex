@@ -333,7 +333,7 @@ Existing tools are constrained along three axes (fidelity, speed, and scope), an
 
 Each of the resolvers computes structural physics from first-principles equations and hardware datasheet constants, then bridges the gap to measured performance through a single, explicit efficiency coefficient~$\eta$ that absorbs second-order effects (kernel launch overhead, straggler variance, framework dispatch costs). This is the same abstraction that makes the Roofline model useful: replacing peak bandwidth with \emph{achievable} bandwidth sacrifices cycle-level precision for the ability to reason correctly about which constraint binds and why~\citep{williams2009}.
 
-\mlsysim serves three communities. \emph{Students} build quantitative intuition through hands-on tutorials where changing a single parameter reveals which wall binds and why. \emph{Instructors} run live classroom demonstrations that produce concrete numbers in real time, replacing hand-waving with Roofline diagrams. \emph{Researchers} perform rapid what-if analysis by comparing parallelism strategies, evaluating procurement decisions, or projecting carbon footprints before committing resources. Designed as the analytical companion to the \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025}, \mlsysim is fully open-source (Apache-2.0 license) with deterministic, hardware-free execution, ensuring that every result in this paper is independently reproducible. This matters for educational equity. A student at a community college with a Chromebook can run the same quantitative exercises and verify the same binding constraints as one with access to a university GPU cluster. We validate against published empirical anchors spanning five taxonomy domains, matching values within 7\% error while sweeping over 1{,}000 configurations in under one second.
+\mlsysim serves three communities. \emph{Students} build quantitative intuition through hands-on tutorials where changing a single parameter reveals which wall binds and why. \emph{Instructors} run live classroom demonstrations that produce concrete numbers in real time, replacing hand-waving with Roofline diagrams. \emph{Researchers} perform rapid what-if analysis by comparing parallelism strategies, evaluating procurement decisions, or projecting carbon footprints before committing resources. Designed as the analytical companion to the \emph{Machine Learning Systems} textbook~\citep{mlsysbook2025} (see \Cref{sec:appendix-mlsysbook} and \Cref{sec:appendix-hardware} for pedagogical integration examples and registry snapshots), \mlsysim is fully open-source (Apache-2.0 license) with deterministic, hardware-free execution, ensuring that every result in this paper is independently reproducible. This matters for educational equity. A student at a community college with a Chromebook can run the same quantitative exercises and verify the same binding constraints as one with access to a university GPU cluster. We validate against published empirical anchors spanning five taxonomy domains, matching values within 7\% error while sweeping over 1{,}000 configurations in under one second.
 
 This paper makes the following contributions:
 
@@ -661,7 +661,7 @@ The taxonomy proceeds outward from the silicon. \Cref{sec:walls-node} covers the
 
 The Node walls define what a single accelerator (one physical processing unit such as a GPU, TPU, or wafer-scale engine, used interchangeably with ``individual accelerator'') can achieve in isolation, before any distributed coordination is considered. Multi-node analysis, where a server hosts several such accelerators on intra-node links such as NVLink, falls under the Fleet domain (\Cref{sec:walls-fleet}). Node walls are the innermost constraints and the first a practitioner should evaluate.
 
-\textbf{Wall~1: The Compute Wall.} Every accelerator has a hard throughput ceiling determined by the number of arithmetic units and the clock frequency. An H100, for example, provides a peak of \cvalint{\HhPeakTFLOPS}\,TFLOP/s at FP16 with Tensor Cores, establishing an upper bound that no software optimization can exceed. The \texttt{SingleNodeModel} resolves this wall via Roofline analysis~\citep{williams2009}:
+\textbf{Wall~1: The Compute Wall.} Every accelerator has a hard throughput ceiling determined by the number of arithmetic units and the clock frequency. An H100, for example, provides a peak of \cvalint{\HhPeakTFLOPS}\,TFLOP/s at FP16 with Tensor Cores, establishing an upper bound that no software optimization can exceed. The \texttt{SingleNodeModel} evaluates the classical Roofline model bounds~\citep{williams2009}. If execution is entirely compute-bound, the minimum time to process the workload is dictated by the \emph{Iron Law of ML Systems}:
 \begin{equation}
 \label{eq:tcompute}
 T_{\text{compute}} = \frac{\text{OPs}}{\text{Peak}_{\text{FLOPS}} \times \eta}
@@ -883,7 +883,7 @@ E_{\text{total}} &= E_{\text{IT}} \times \text{PUE} \\
 \end{align}
 where PUE is the power usage effectiveness of the datacenter, $\text{CI}_{\text{region}}$ is the carbon intensity of the local grid, and WUE is the water usage effectiveness. This model captures \emph{operational} carbon only. For edge and IoT deployments at scale ($>10^6$ devices), \emph{embodied} carbon from manufacturing can dominate operational carbon by 10--100$\times$~\citep{gupta2022chasing}. The \texttt{SustainabilityModel} accepts an optional \texttt{embodied\_carbon\_per\_device} parameter for lifecycle analysis. \textbf{Assumption:} Grid carbon intensity is a static regional constant; temporal variation (e.g., renewable intermittency) is not modeled. Energy-proportional power follows~\citet{barroso2007}: idle power is 30\% of TDP, with the remaining 70\% scaling linearly with MFU.
 
-\textbf{Wall~19: The Checkpoint Wall.} Long-running training jobs must periodically save model state (weights and optimizer states) to persistent storage, incurring an I/O penalty that directly reduces effective MFU. The \texttt{CheckpointModel} models the I/O burst penalty~\citep{eisenman2022checknrun}:
+\textbf{Wall~19: The Checkpoint Wall.} Long-running training jobs must periodically save model state (weights and optimizer states) to persistent storage, incurring an I/O penalty that directly reduces effective MFU. This is a classic manifestation of Amdahl's Law: as fleet size scales to accelerate the parallel forward/backward passes, the serial time spent writing to persistent storage begins to dominate. The \texttt{CheckpointModel} models the I/O burst penalty~\citep{eisenman2022checknrun}:
 \begin{equation}
 \label{eq:checkpoint2}
 \text{MFU}_{\text{penalty}} = \frac{T_{\text{write}}}{T_{\text{interval}}} = \frac{|W| \times \beta_{\text{opt}} / BW_{\text{storage}}}{T_{\text{ckpt\_interval}}}
@@ -1001,7 +1001,7 @@ The three levels are evaluated in order; a feasibility failure at Level~1 short-
 \label{fig:solver-chaining}
 \end{figure*}
 
-An analytical framework earns trust through transparent confrontation with empirical ground truth. We validate \mlsysim along two axes: \emph{accuracy} against published benchmarks, and \emph{speed} relative to alternative modeling tools. Crucially, our goal in validation is not to ``curve-fit'' the model to perfectly match empirical results by introducing arbitrary fudge factors. Rather, it is to demonstrate that a first-principles application of physics and generalized efficiency constants places the prediction squarely in the correct ballpark. As we argue in \Cref{sec:discussion}, a model that is off by 10\% because it structurally ignores L2 cache misses is functioning exactly as intended, trading cycle-level precision for architectural intuition. The anchors below illustrate this philosophy.
+An analytical framework earns trust through transparent confrontation with empirical ground truth. We validate \mlsysim along two axes: \emph{accuracy} against published benchmarks, and \emph{speed} relative to alternative modeling tools. Crucially, our goal in validation is not to ``curve-fit'' the model to perfectly match empirical results by introducing arbitrary magic numbers. Rather, it is to demonstrate that a first-principles application of physics and generalized efficiency constants places the prediction squarely in the correct ballpark. As we argue in \Cref{sec:discussion}, a model that is off by 10\% because it structurally ignores L2 cache misses is functioning exactly as intended, trading cycle-level precision for architectural intuition. The anchors below illustrate this philosophy.
 
 The remainder of this section presents the validation in four parts. \Cref{sec:validation-anchors} anchors \mlsysim predictions against seven published benchmarks spanning single-node training, distributed training, inference, scaling laws, sustainability, and automated parallelism search. \Cref{sec:validation-speed} reports the design-space exploration speed relative to cycle-accurate simulators. \Cref{sec:accuracy} discusses the accuracy scope and the empirical role of the efficiency parameter $\eta$. Finally, \Cref{sec:validation-dim} argues that runtime dimensional strictness is itself a structural form of validation that numerical accuracy alone cannot supply.
 
@@ -1287,13 +1287,663 @@ That artifact is also pedagogical. Paired with TinyTorch~\citep{tinytorch2025} a
 
 \section*{Generative AI Usage Statement}
 
-The author used a variety of generative AI tools during the development of \mlsysim and the preparation of this manuscript. These tools supported literature discovery, landscape exploration, brainstorming, code prototyping, implementation iteration, prose editing, figure refinement, and pedagogical organization. The author designed the framework, taxonomy, registry hierarchy, modeling abstractions, evaluation methodology, and educational framing; reviewed and revised AI-assisted outputs; and verified the final code, equations, citations, figures, and claims. Generative AI tools were not treated as authors or sources of scientific authority. The author remains fully responsible for the originality, correctness, and integrity of the work.
+I used a variety of generative AI tools during the development of \mlsysim and the preparation of this manuscript. These tools supported literature discovery, landscape exploration, brainstorming, code prototyping, implementation iteration, prose editing, figure refinement, and pedagogical organization. I designed the framework, taxonomy, registry hierarchy, modeling abstractions, evaluation methodology, and educational framing; reviewed and revised AI-assisted outputs; and verified the final code, equations, citations, figures, and claims. Generative AI tools were not treated as authors or sources of scientific authority. I remain fully responsible for the originality, correctness, and integrity of the work.
 
-\bibliography{references}
+\begin{thebibliography}{69}
+\providecommand{\natexlab}[1]{#1}
+\providecommand{\url}[1]{\texttt{#1}}
+\expandafter\ifx\csname urlstyle\endcsname\relax
+  \providecommand{\doi}[1]{doi: #1}\else
+  \providecommand{\doi}{doi: \begingroup \urlstyle{rm}\Url}\fi
+
+\bibitem[Abadi et~al.(2016)Abadi, Chu, Goodfellow, et~al.]{abadi2016}
+Martin Abadi, Andy Chu, Ian Goodfellow, et~al.
+\newblock Deep learning with differential privacy.
+\newblock In \emph{Proceedings of the 2016 ACM SIGSAC Conference on Computer
+  and Communications Security}, pages 308--318. ACM, 2016.
+\newblock \doi{10.1145/2976749.2978318}.
+\newblock URL \url{https://doi.org/10.1145/2976749.2978318}.
+
+\bibitem[Agrawal et~al.(2024{\natexlab{a}})Agrawal, Kedia, Panwar, Mohan,
+  Kwatra, Gulavani, Tumanov, and Ramjee]{agrawal2025}
+Amey Agrawal, Nitin Kedia, Ashish Panwar, Jayashree Mohan, Nipun Kwatra,
+  Bhargav Gulavani, Alexey Tumanov, and Ramachandran Ramjee.
+\newblock Taming {Throughput-Latency} tradeoff in {LLM} inference with
+  {Sarathi-Serve}.
+\newblock In \emph{18th USENIX Symposium on Operating Systems Design and
+  Implementation (OSDI 24)}, pages 117--134. USENIX Association, July
+  2024{\natexlab{a}}.
+\newblock ISBN 978-1-939133-40-3.
+\newblock URL
+  \url{https://www.usenix.org/conference/osdi24/presentation/agrawal}.
+
+\bibitem[Agrawal et~al.(2024{\natexlab{b}})Agrawal, Kedia, Panwar, Mohan,
+  Kwatra, Gulavani, Tumanov, and Ramjee]{agrawal2024vidur}
+Amey Agrawal, Nitin Kedia, Ashish Panwar, Jayashree Mohan, Nipun Kwatra,
+  Bhargav~S. Gulavani, Alexey Tumanov, and Ramachandran Ramjee.
+\newblock Vidur: A large-scale simulation framework for {LLM} inference.
+\newblock In \emph{Proceedings of Machine Learning and Systems (MLSys)}.
+  mlsys.org, 2024{\natexlab{b}}.
+\newblock URL \url{https://arxiv.org/abs/2405.05465}.
+
+\bibitem[Bambhaniya et~al.(2024)Bambhaniya, Raj, Jeong, Kundu, Srinivasan,
+  Elavazhagan, Kumar, and Krishna]{bambhaniya2024genz}
+Abhimanyu Bambhaniya, Ritik Raj, Geonhwa Jeong, Souvik Kundu, Sudarshan
+  Srinivasan, Midhilesh Elavazhagan, Madhu Kumar, and Tushar Krishna.
+\newblock Demystifying platform requirements for diverse {LLM} inference use
+  cases.
+\newblock \emph{arXiv preprint arXiv:2406.01698}, 2024.
+
+\bibitem[Barroso and H{\"o}lzle(2007)]{barroso2007}
+Luiz~Andr{\'e} Barroso and Urs H{\"o}lzle.
+\newblock The case for energy-proportional computing.
+\newblock \emph{Computer}, 40\penalty0 (12):\penalty0 33--37, 2007.
+\newblock ISSN 0018-9162.
+\newblock \doi{10.1109/mc.2007.443}.
+\newblock URL \url{https://doi.org/10.1109/mc.2007.443}.
+
+\bibitem[Barroso et~al.(2018)Barroso, H{\"o}lzle, and Ranganathan]{barroso2019}
+Luiz~Andr{\'e} Barroso, Urs H{\"o}lzle, and Parthasarathy Ranganathan.
+\newblock \emph{The Datacenter as a Computer}.
+\newblock Synthesis Lectures on Computer Architecture. Springer International
+  Publishing, 3rd edition, 2018.
+\newblock ISBN 9783031006333, 9783031017612.
+\newblock \doi{10.1007/978-3-031-01761-2}.
+\newblock URL \url{https://doi.org/10.1007/978-3-031-01761-2}.
+
+\bibitem[Binkert et~al.(2011)Binkert, Beckmann, Black, et~al.]{binkert2011}
+Nathan Binkert, Bradford Beckmann, Gabriel Black, et~al.
+\newblock The gem5 simulator.
+\newblock \emph{ACM SIGARCH Computer Architecture News}, 39\penalty0
+  (2):\penalty0 1--7, 2011.
+\newblock ISSN 0163-5964.
+\newblock \doi{10.1145/2024716.2024718}.
+\newblock URL \url{https://doi.org/10.1145/2024716.2024718}.
+
+\bibitem[Box(1976)]{box1976}
+George E.~P. Box.
+\newblock Science and statistics.
+\newblock \emph{J. Am. Stat. Assoc.}, 71\penalty0 (356):\penalty0 791--799,
+  None 1976.
+\newblock ISSN 0162-1459, 1537-274X.
+\newblock \doi{10.1080/01621459.1976.10480949}.
+\newblock URL \url{https://doi.org/10.1080/01621459.1976.10480949}.
+
+\bibitem[Chowdhery et~al.(2023)Chowdhery, Narang, Devlin,
+  et~al.]{chowdhery2022palm}
+Aakanksha Chowdhery, Sharan Narang, Jacob Devlin, et~al.
+\newblock {PaLM}: Scaling language modeling with pathways.
+\newblock \emph{Journal of Machine Learning Research}, 24\penalty0
+  (240):\penalty0 1--113, 2023.
+
+\bibitem[Cox et~al.(2011)Cox, Kaashoek, and Morris]{cox2011xv6}
+Russ Cox, M.~Frans Kaashoek, and Robert Morris.
+\newblock xv6: A simple, {Unix}-like teaching operating system.
+\newblock MIT PDOS, 2011.
+\newblock URL \url{https://pdos.csail.mit.edu/6.828/xv6}.
+
+\bibitem[Daly(2006)]{daly2006}
+John~T. Daly.
+\newblock A higher order estimate of the optimum checkpoint interval for
+  restart dumps.
+\newblock \emph{Future Gener. Comput. Syst.}, 22\penalty0 (3):\penalty0
+  303--312, 2006.
+\newblock ISSN 0167-739X.
+\newblock \doi{10.1016/j.future.2004.11.016}.
+\newblock URL \url{https://doi.org/10.1016/j.future.2004.11.016}.
+
+\bibitem[Dao et~al.(2022)Dao, Fu, Ermon, Rudra, and R{\'e}]{dao2022}
+Tri Dao, Daniel~Y. Fu, Stefano Ermon, Atri Rudra, and Christopher R{\'e}.
+\newblock Flashattention: Fast and memory-efficient exact attention with
+  io-awareness.
+\newblock In \emph{Advances in Neural Information Processing Systems 35},
+  volume~35, pages 16344--16359. Neural Information Processing Systems
+  Foundation, Inc. (NeurIPS), 2022.
+\newblock \doi{10.52202/068431-1189}.
+\newblock URL \url{https://doi.org/10.52202/068431-1189}.
+
+\bibitem[Dean and Barroso(2013)]{dean2013}
+Jeffrey Dean and Luiz~Andr{\'e} Barroso.
+\newblock The tail at scale.
+\newblock \emph{Communications of the ACM}, 56\penalty0 (2):\penalty0 74--80,
+  2013.
+\newblock ISSN 0001-0782, 1557-7317.
+\newblock \doi{10.1145/2408776.2408794}.
+\newblock URL \url{https://doi.org/10.1145/2408776.2408794}.
+
+\bibitem[Dean et~al.(2012)Dean, Corrado, Monga, et~al.]{dean2012large}
+Jeffrey Dean, Greg~S. Corrado, Rajat Monga, et~al.
+\newblock Large scale distributed deep networks.
+\newblock \emph{Advances in Neural Information Processing Systems},
+  25:\penalty0 1223--1231, 2012.
+
+\bibitem[{DeepSeek-AI}(2025)]{deepseek2025v3}
+{DeepSeek-AI}.
+\newblock Insights into deepseek-v3: Scaling challenges and reflections on
+  hardware for ai architectures.
+\newblock In \emph{Proceedings of the 52nd Annual International Symposium on
+  Computer Architecture}, pages 1731--1745. ACM, 2025.
+\newblock \doi{10.1145/3695053.3731412}.
+\newblock URL \url{https://doi.org/10.1145/3695053.3731412}.
+
+\bibitem[Eisenman et~al.(2022)Eisenman, Matam, Ingram, Mudigere,
+  Krishnamoorthi, Nair, Smelyanskiy, and Annavaram]{eisenman2022checknrun}
+Assaf Eisenman, Kiran~Kumar Matam, Steven Ingram, Dheevatsa Mudigere,
+  Raghuraman Krishnamoorthi, Krishnakumar Nair, Misha Smelyanskiy, and Murali
+  Annavaram.
+\newblock Check-n-run: a checkpointing system for training deep learning
+  recommendation models.
+\newblock In \emph{Proceedings of the 19th USENIX Symposium on Networked
+  Systems Design and Implementation (NSDI)}. USENIX Association, 2022.
+
+\bibitem[Faiz et~al.(2024)Faiz, Kaneda, Wang, Osi, Sharma, Chen, and
+  Jiang]{faiz2024llmcarbon}
+Ahmad Faiz, Sotaro Kaneda, Ruhan Wang, Rita Osi, Prateek Sharma, Fan Chen, and
+  Lei Jiang.
+\newblock {LLMCarbon}: Modeling the end-to-end carbon footprint of large
+  language models.
+\newblock In \emph{Proceedings of the 12th International Conference on Learning
+  Representations (ICLR)}. OpenReview.net, 2024.
+
+\bibitem[Fedus et~al.(2022)Fedus, Zoph, and Shazeer]{fedus2022switch}
+William Fedus, Barret Zoph, and Noam Shazeer.
+\newblock Switch transformers: Scaling to trillion parameter models with simple
+  and efficient sparsity.
+\newblock \emph{Journal of Machine Learning Research}, 23\penalty0
+  (120):\penalty0 1--39, 2022.
+\newblock URL \url{https://www.jmlr.org/papers/v23/21-0998.html}.
+
+\bibitem[Frantar et~al.(2023)Frantar, Ashkboos, Hoefler, and
+  Alistarh]{frantar2023gptq}
+Elias Frantar, Saleh Ashkboos, Torsten Hoefler, and Dan Alistarh.
+\newblock {GPTQ}: Accurate post-training quantization for generative
+  pre-trained transformers.
+\newblock In \emph{Proceedings of the 11th International Conference on Learning
+  Representations (ICLR)}. OpenReview.net, 2023.
+
+\bibitem[Gholami et~al.(2021)Gholami, Kim, Dong, et~al.]{gholami2022}
+Amir Gholami, Sehoon Kim, Zhen Dong, et~al.
+\newblock \emph{A Survey of Quantization Methods for Efficient Neural Network
+  Inference}, pages 291--326.
+\newblock Chapman and Hall/CRC, 2021.
+\newblock ISBN 9781003162810.
+\newblock \doi{10.1201/9781003162810-13}.
+\newblock URL \url{https://doi.org/10.1201/9781003162810-13}.
+
+\bibitem[Gupta et~al.(2022)Gupta, Kim, Lee, Tse, Lee, Wei, Brooks, and
+  Wu]{gupta2022chasing}
+Udit Gupta, Young~Geun Kim, Sylvia Lee, Jordan Tse, Hsien-Hsin~S Lee, Gu-Yeon
+  Wei, David Brooks, and Carole-Jean Wu.
+\newblock Chasing carbon: The elusive environmental footprint of computing.
+\newblock In \emph{IEEE International Symposium on High-Performance Computer
+  Architecture (HPCA)}, pages 85--99. IEEE, 2022.
+\newblock \doi{10.1109/hpca53966.2022.00013}.
+\newblock URL \url{https://doi.org/10.1109/hpca53966.2022.00013}.
+
+\bibitem[Han et~al.(2016)Han, Mao, and Dally]{han2016deep}
+Song Han, Huizi Mao, and William~J. Dally.
+\newblock Deep compression: Compressing deep neural networks with pruning,
+  trained quantization and huffman coding.
+\newblock In \emph{Proceedings of the 4th International Conference on Learning
+  Representations (ICLR)}. OpenReview.net, 2016.
+
+\bibitem[Hennessy et~al.(2024)Hennessy, Patterson, and
+  Kozyrakis]{hennessy2024architecture}
+John~L. Hennessy, David~A. Patterson, and Christos Kozyrakis.
+\newblock \emph{Computer Architecture: A Quantitative Approach}.
+\newblock Morgan Kaufmann, 7th edition, 2024.
+\newblock ISBN 978-0443154065.
+
+\bibitem[Hoffmann et~al.(2022)Hoffmann, Borgeaud, Mensch,
+  et~al.]{hoffmann2022chinchilla}
+Jordan Hoffmann, Sebastian Borgeaud, Arthur Mensch, et~al.
+\newblock Training compute-optimal large language models.
+\newblock In \emph{Advances in Neural Information Processing Systems 35},
+  volume~35, pages 30016--30030. Neural Information Processing Systems
+  Foundation, Inc. (NeurIPS), 2022.
+\newblock \doi{10.52202/068431-2176}.
+\newblock URL \url{https://doi.org/10.52202/068431-2176}.
+
+\bibitem[Isaev et~al.(2023)Isaev, McDonald, Dennison, and Vuduc]{isaev2023}
+Mikhail Isaev, Nic McDonald, Larry Dennison, and Richard Vuduc.
+\newblock Calculon: A methodology and tool for high-level co-design of systems
+  and large language models.
+\newblock In \emph{Proceedings of the International Conference for High
+  Performance Computing, Networking, Storage and Analysis}, pages 1--14. ACM,
+  2023.
+\newblock \doi{10.1145/3581784.3607102}.
+\newblock URL \url{https://doi.org/10.1145/3581784.3607102}.
+
+\bibitem[Jia et~al.(2019)Jia, Zaharia, and Aiken]{jia2019flexflow}
+Zhihao Jia, Matei Zaharia, and Alex Aiken.
+\newblock Beyond data and model parallelism for deep neural networks.
+\newblock In \emph{Proceedings of Machine Learning and Systems (MLSys)}.
+  mlsys.org, 2019.
+\newblock URL \url{https://arxiv.org/abs/1807.05358}.
+
+\bibitem[Korthikanti et~al.(2023)Korthikanti, Casper, Lym, McAfee, Andersch,
+  Shoeybi, and Catanzaro]{korthikanti2023}
+Vijay~Anand Korthikanti, Jared Casper, Sangkug Lym, Lawrence McAfee, Michael
+  Andersch, Mohammad Shoeybi, and Bryan Catanzaro.
+\newblock Reducing activation recomputation in large transformer models.
+\newblock \emph{Proceedings of Machine Learning and Systems}, 5, 2023.
+\newblock URL
+  \url{https://proceedings.mlsys.org/paper_files/paper/2023/hash/80083951326cf5b35e5100260d64ed81-Abstract-mlsys2023.html}.
+
+\bibitem[Kwon et~al.(2023)Kwon, Li, Zhuang, et~al.]{kwon2023}
+Woosuk Kwon, Zhuohan Li, Siyuan Zhuang, et~al.
+\newblock Efficient memory management for large language model serving with
+  pagedattention.
+\newblock In \emph{Proceedings of the 29th Symposium on Operating Systems
+  Principles}, pages 611--626. ACM, 2023.
+\newblock \doi{10.1145/3600006.3613165}.
+\newblock URL \url{https://doi.org/10.1145/3600006.3613165}.
+
+\bibitem[Leiserson(1985)]{leiserson1985}
+Charles~E. Leiserson.
+\newblock Fat-trees: Universal networks for hardware-efficient supercomputing.
+\newblock \emph{IEEE Transactions on Computers}, C-34\penalty0 (10):\penalty0
+  892--901, 1985.
+\newblock ISSN 0018-9340.
+\newblock \doi{10.1109/tc.1985.6312192}.
+\newblock URL \url{https://doi.org/10.1109/tc.1985.6312192}.
+
+\bibitem[Lepikhin et~al.(2020)Lepikhin, Lee, Xu, Chen, Firat, Huang, Krikun,
+  Shazeer, and Chen]{lepikhin2020gshard}
+Dmitry Lepikhin, HyoukJoong Lee, Yuanzhong Xu, Dehao Chen, Orhan Firat, Yanping
+  Huang, Maxim Krikun, Noam Shazeer, and Zhifeng Chen.
+\newblock {GShard}: Scaling giant models with conditional computation and
+  automatic sharding.
+\newblock \emph{arXiv preprint arXiv:2006.16668}, 2020.
+\newblock URL \url{https://arxiv.org/abs/2006.16668}.
+
+\bibitem[Leviathan et~al.(2023)Leviathan, Kalman, and
+  Matias]{leviathan2023fast}
+Yaniv Leviathan, Matan Kalman, and Yossi Matias.
+\newblock Fast inference from transformers via speculative decoding.
+\newblock In \emph{Proceedings of the 40th International Conference on Machine
+  Learning (ICML)}. PMLR, 2023.
+
+\bibitem[Li(2023)]{kim2023llmanalysis}
+Cheng Li.
+\newblock llm-analysis: Latency and memory analysis of transformer models.
+\newblock \url{https://github.com/cli99/llm-analysis}, 2023.
+\newblock Accessed: 2025-01-15.
+
+\bibitem[Liang et~al.(2025)Liang, Kassa, Fu, Coutinho, Feng, and
+  Delimitrou]{liang2025lumos}
+Mingyu Liang, Hiwot~Tadese Kassa, Wenyin Fu, Brian Coutinho, Louis Feng, and
+  Christina Delimitrou.
+\newblock Lumos: Efficient performance modeling and estimation for large-scale
+  {LLM} training.
+\newblock In \emph{Proceedings of Machine Learning and Systems (MLSys)}.
+  mlsys.org, 2025.
+
+\bibitem[Lie(2022)]{lie2022cerebras}
+Sean Lie.
+\newblock Cerebras architecture deep dive: First look inside the {HW/SW}
+  co-design for deep learning.
+\newblock In \emph{IEEE Hot Chips 34 Symposium}. IEEE, 2022.
+
+\bibitem[Lin et~al.(2024)Lin, Tang, Tang, Yang, Chen, Wang, Xiao, Dang, Gan,
+  and Han]{lin2025}
+Ji~Lin, Jiaming Tang, Haotian Tang, Shang Yang, Wei-Ming Chen, Wei-Chen Wang,
+  Guangxuan Xiao, Xingyu Dang, Chuang Gan, and Song Han.
+\newblock Awq: Activation-aware weight quantization for on-device llm
+  compression and acceleration.
+\newblock \emph{GetMobile: Mobile Computing and Communications}, 28\penalty0
+  (4):\penalty0 12--17, 2024.
+\newblock ISSN 2375-0529, 2375-0537.
+\newblock \doi{10.1145/3714983.3714987}.
+\newblock URL \url{https://doi.org/10.1145/3714983.3714987}.
+
+\bibitem[Little(1961)]{little1961}
+John D.~C. Little.
+\newblock A proof for the queuing formula: <i>l</i> =
+  \ensuremath{\Lambda}<i>w</i>.
+\newblock \emph{Oper. Res.}, 9\penalty0 (3):\penalty0 383--387, 1961.
+\newblock ISSN 0030-364X, 1526-5463.
+\newblock \doi{10.1287/opre.9.3.383}.
+\newblock URL \url{https://doi.org/10.1287/opre.9.3.383}.
+
+\bibitem[{Llama Team, AI \@ Meta}(2024)]{llama3team2024}
+{Llama Team, AI \@ Meta}.
+\newblock The {Llama} 3 herd of models.
+\newblock \emph{arXiv preprint arXiv:2407.21783}, 2024.
+
+\bibitem[Lottick et~al.(2019)Lottick, Susai, Friedler, and
+  Wilson]{lottick2019codecarbon}
+Kadan Lottick, Silvia Susai, Sorelle~A. Friedler, and Jonathan~P. Wilson.
+\newblock Energy usage reports: Environmental awareness as part of algorithmic
+  accountability.
+\newblock arXiv preprint arXiv:1911.08354, 2019.
+
+\bibitem[Mattson et~al.(2020)Mattson, Cheng, Diamos, et~al.]{mattson2020}
+Peter Mattson, Christine Cheng, Gregory Diamos, et~al.
+\newblock Mlperf: An industry standard benchmark suite for machine learning
+  performance.
+\newblock \emph{IEEE Micro}, 40\penalty0 (2):\penalty0 8--16, 2020.
+\newblock ISSN 0272-1732, 1937-4143.
+\newblock \doi{10.1109/mm.2020.2974843}.
+\newblock URL \url{https://doi.org/10.1109/mm.2020.2974843}.
+
+\bibitem[Mohan et~al.(2021)Mohan, Phanishayee, Raniwala, and
+  Chidambaram]{mohan2021}
+Jayashree Mohan, Amar Phanishayee, Ashish Raniwala, and Vijay Chidambaram.
+\newblock Analyzing and mitigating data stalls in dnn training.
+\newblock \emph{Proc. VLDB Endow.}, 14\penalty0 (5):\penalty0 771--784, 2021.
+\newblock ISSN 2150-8097.
+\newblock \doi{10.14778/3446095.3446100}.
+\newblock URL \url{https://doi.org/10.14778/3446095.3446100}.
+
+\bibitem[Murray et~al.(2021)Murray, Simsa, Klimovic, and Indyk]{murray2021tf}
+Derek~G. Murray, Jiri Simsa, Ana Klimovic, and Ihor Indyk.
+\newblock tf.data: A machine learning data processing framework.
+\newblock \emph{Proceedings of the VLDB Endowment}, 14\penalty0 (12):\penalty0
+  2945--2958, 2021.
+
+\bibitem[Narayanan et~al.(2021)Narayanan, Shoeybi, Casper,
+  et~al.]{narayanan2021}
+Deepak Narayanan, Mohammad Shoeybi, Jared Casper, et~al.
+\newblock Efficient large-scale language model training on gpu clusters using
+  megatron-lm.
+\newblock In \emph{Proceedings of the International Conference for High
+  Performance Computing, Networking, Storage and Analysis}, pages 1--15. ACM,
+  2021.
+\newblock \doi{10.1145/3458817.3476209}.
+\newblock URL \url{https://doi.org/10.1145/3458817.3476209}.
+
+\bibitem[{NVIDIA Corporation}(2023)]{nvidia2023h100}
+{NVIDIA Corporation}.
+\newblock {NVIDIA H100 Tensor Core GPU} datasheet.
+\newblock \url{https://www.nvidia.com/en-us/data-center/h100/}, 2023.
+\newblock Accessed: 2024-06-15.
+
+\bibitem[Parashar et~al.(2019)Parashar, Raina, Shao, Chen, Emer,
+  et~al.]{parashar2019}
+Angshuman Parashar, Priyanka Raina, Yakun~Sophia Shao, Yu-Hsin Chen, Joel Emer,
+  et~al.
+\newblock Timeloop: A systematic approach to dnn accelerator evaluation.
+\newblock In \emph{2019 IEEE International Symposium on Performance Analysis of
+  Systems and Software (ISPASS)}, pages 304--315. IEEE, 2019.
+\newblock \doi{10.1109/ispass.2019.00042}.
+\newblock URL \url{https://doi.org/10.1109/ispass.2019.00042}.
+
+\bibitem[Patel et~al.(2024)Patel, Choukse, Zhang, Shah, Goiri, Maleki, and
+  Bianchini]{patel2024}
+Pratyush Patel, Esha Choukse, Chaojie Zhang, Aashaka Shah, {\'I}{\~n}igo Goiri,
+  Saeed Maleki, and Ricardo Bianchini.
+\newblock Splitwise: Efficient generative llm inference using phase splitting.
+\newblock In \emph{2024 ACM/IEEE 51st Annual International Symposium on
+  Computer Architecture (ISCA)}, pages 118--132. IEEE, 2024.
+\newblock \doi{10.1109/isca59077.2024.00019}.
+\newblock URL \url{https://doi.org/10.1109/isca59077.2024.00019}.
+
+\bibitem[Patterson et~al.(2021)Patterson, Gonzalez, Le,
+  et~al.]{patterson2021carbon}
+David Patterson, Joseph Gonzalez, Quoc Le, et~al.
+\newblock Carbon emissions and large neural network training.
+\newblock \emph{arXiv preprint arXiv:2104.10350}, 2021.
+
+\bibitem[Patterson and Hennessy(2014)]{patterson2014organization}
+David~A. Patterson and John~L. Hennessy.
+\newblock \emph{Computer Organization and Design: The Hardware/Software
+  Interface}.
+\newblock Morgan Kaufmann, 5th edition, 2014.
+\newblock ISBN 978-0124077263.
+
+\bibitem[Pope et~al.(2023)Pope, Douglas, Chowdhery, et~al.]{pope2023llm}
+Reiner Pope, Sholto Douglas, Aakanksha Chowdhery, et~al.
+\newblock Efficiently scaling transformer inference.
+\newblock In \emph{Proceedings of Machine Learning and Systems (MLSys)},
+  volume~5. mlsys.org, 2023.
+\newblock URL
+  \url{https://proceedings.mlsys.org/paper_files/paper/2023/hash/c4be71ab8d24cdfb45e3d06dbfca2780-Abstract-mlsys2023.html}.
+
+\bibitem[Qi et~al.(2017)Qi, Sparks, and Talwalkar]{qi2017paleo}
+Hang Qi, Evan~R. Sparks, and Ameet Talwalkar.
+\newblock {PALEO}: A performance model for deep neural networks.
+\newblock In \emph{Proceedings of the 5th International Conference on Learning
+  Representations (ICLR)}. OpenReview.net, 2017.
+
+\bibitem[Rajbhandari et~al.(2020)Rajbhandari, Rasley, Ruwase, and
+  He]{rajbhandari2020}
+Samyam Rajbhandari, Jeff Rasley, Olatunji Ruwase, and Yuxiong He.
+\newblock Zero: Memory optimizations toward training trillion parameter models.
+\newblock In \emph{SC20: International Conference for High Performance
+  Computing, Networking, Storage and Analysis}, pages 1--16. IEEE, 2020.
+\newblock \doi{10.1109/sc41405.2020.00024}.
+\newblock URL \url{https://doi.org/10.1109/sc41405.2020.00024}.
+
+\bibitem[Reddi et~al.(2025{\natexlab{a}})]{mlsysbook2025}
+Vijay~Janapa Reddi et~al.
+\newblock \emph{Machine Learning Systems: Principles and Practices of
+  Engineering Artificially Intelligent Systems}.
+\newblock Harvard University, 2025{\natexlab{a}}.
+\newblock URL \url{https://mlsysbook.ai}.
+
+\bibitem[Reddi et~al.(2025{\natexlab{b}})]{tinytorch2025}
+Vijay~Janapa Reddi et~al.
+\newblock {TinyTorch}: A progressive educational framework for machine learning
+  systems.
+\newblock Harvard University, 2025{\natexlab{b}}.
+\newblock URL \url{https://mlsysbook.ai/tinytorch}.
+
+\bibitem[Shazeer et~al.(2017)Shazeer, Mirhoseini, Maziarz,
+  et~al.]{shazeer2017outrageously}
+Noam Shazeer, Azalia Mirhoseini, Krzysztof Maziarz, et~al.
+\newblock Outrageously large neural networks: The sparsely-gated
+  mixture-of-experts layer.
+\newblock In \emph{Proceedings of the 5th International Conference on Learning
+  Representations (ICLR)}. OpenReview.net, 2017.
+
+\bibitem[Shoeybi et~al.(2019)Shoeybi, Patwary, Puri, LeGresley, Casper, and
+  Catanzaro]{shoeybi2019megatron}
+Mohammad Shoeybi, Mostofa Patwary, Raul Puri, Patrick LeGresley, Jared Casper,
+  and Bryan Catanzaro.
+\newblock {Megatron-LM}: Training multi-billion parameter language models using
+  model parallelism.
+\newblock \emph{arXiv preprint arXiv:1909.08053}, 2019.
+
+\bibitem[Snell et~al.(2025)Snell, Lee, Xu, and Kumar]{snell2025scaling}
+Charlie Snell, Jaehoon Lee, Kelvin Xu, and Aviral Kumar.
+\newblock Scaling {LLM} test-time compute optimally can be more effective than
+  scaling model parameters.
+\newblock In \emph{Proceedings of the 13th International Conference on Learning
+  Representations (ICLR)}. OpenReview.net, 2025.
+
+\bibitem[Stephenson et~al.(1999)Stephenson, LaPiana, Mulville, Rutledge, Bauer,
+  Folta, Dukeman, Sackheim, and Norvig]{stephenson1999mco}
+Arthur~G. Stephenson, Lia~S. LaPiana, Daniel~R. Mulville, Peter~J. Rutledge,
+  Frank~H. Bauer, David Folta, Greg~A. Dukeman, Robert Sackheim, and Peter
+  Norvig.
+\newblock {Mars Climate Orbiter Mishap Investigation Board Phase I Report}.
+\newblock Technical report, National Aeronautics and Space Administration, None
+  1999.
+
+\bibitem[Sutton(2019)]{sutton2019bitter}
+Rich Sutton.
+\newblock The bitter lesson.
+\newblock \url{http://www.incompleteideas.net/IncIdeas/BitterLesson.html},
+  2019.
+\newblock Accessed: 2024-06-15.
+
+\bibitem[Tanenbaum and Woodhull(2006)]{tanenbaum2006minix}
+Andrew~S. Tanenbaum and Albert~S. Woodhull.
+\newblock \emph{Operating Systems: Design and Implementation}.
+\newblock Prentice Hall, 3rd edition, 2006.
+
+\bibitem[Wang et~al.(2025)]{wang2025simai}
+Xizheng Wang et~al.
+\newblock {SimAI}: Unifying architecture design and performance tuning for
+  large-scale large language model training with scalability and precision.
+\newblock In \emph{Proceedings of the 22nd USENIX Symposium on Networked
+  Systems Design and Implementation (NSDI)}. USENIX Association, 2025.
+
+\bibitem[Williams et~al.(2009)Williams, Waterman, and Patterson]{williams2009}
+Samuel Williams, Andrew Waterman, and David Patterson.
+\newblock Roofline.
+\newblock \emph{Communications of the ACM}, 52\penalty0 (4):\penalty0 65--76,
+  2009.
+\newblock ISSN 0001-0782, 1557-7317.
+\newblock \doi{10.1145/1498765.1498785}.
+\newblock URL \url{https://doi.org/10.1145/1498765.1498785}.
+
+\bibitem[Won et~al.(2023)Won, Heo, Rashidi, Sridharan, Srinivasan, and
+  Krishna]{won2023}
+William Won, Taekyung Heo, Saeed Rashidi, Srinivas Sridharan, Sudarshan
+  Srinivasan, and Tushar Krishna.
+\newblock Astra-sim2.0: Modeling hierarchical networks and disaggregated
+  systems for large-model training at scale.
+\newblock In \emph{2023 IEEE International Symposium on Performance Analysis of
+  Systems and Software (ISPASS)}, pages 283--294. IEEE, 2023.
+\newblock \doi{10.1109/ispass57527.2023.00035}.
+\newblock URL \url{https://doi.org/10.1109/ispass57527.2023.00035}.
+
+\bibitem[Wongpanich et~al.(2025)Wongpanich, Oguntebi, Baiocchi~Paredes, Wang,
+  Phothilimthana, Mitra, Zhou, Kumar, and Reddi]{wongpanich2025fleet}
+Arissa Wongpanich, Tayo Oguntebi, Jose Baiocchi~Paredes, Yu~Emma Wang,
+  Phitchaya~Mangpo Phothilimthana, Ritwika Mitra, Zongwei Zhou, Naveen Kumar,
+  and Vijay~Janapa Reddi.
+\newblock Machine learning fleet efficiency: Analyzing and optimizing
+  large-scale {Google TPU} systems with {ML} productivity goodput, 2025.
+\newblock arXiv:2502.06982.
+
+\bibitem[Wu et~al.(2019)Wu, Emer, and Sze]{wu2019}
+Yannan~Nellie Wu, Joel~S. Emer, and Vivienne Sze.
+\newblock Accelergy: An architecture-level energy estimation methodology for
+  accelerator designs.
+\newblock In \emph{2019 IEEE/ACM International Conference on Computer-Aided
+  Design (ICCAD)}, pages 1--8. IEEE, 2019.
+\newblock \doi{10.1109/iccad45719.2019.8942149}.
+\newblock URL \url{https://doi.org/10.1109/iccad45719.2019.8942149}.
+
+\bibitem[Young(1974)]{young1974}
+John~W. Young.
+\newblock A first order approximation to the optimum checkpoint interval.
+\newblock \emph{Communications of the ACM}, 17\penalty0 (9):\penalty0 530--531,
+  1974.
+\newblock ISSN 0001-0782, 1557-7317.
+\newblock \doi{10.1145/361147.361115}.
+\newblock URL \url{https://doi.org/10.1145/361147.361115}.
+
+\bibitem[Yu et~al.(2021)Yu, Gao, Golikov, and Pekhimenko]{yu2021habitat}
+Geoffrey~X. Yu, Yubo Gao, Pavel Golikov, and Gennady Pekhimenko.
+\newblock Habitat: A runtime-based computational performance predictor for deep
+  neural network training.
+\newblock In \emph{Proceedings of the 2021 USENIX Annual Technical Conference
+  (ATC)}. USENIX Association, 2021.
+
+\bibitem[Yuan et~al.(2024)Yuan, Shang, Zhou, et~al.]{yuan2024llmviewer}
+Zhihang Yuan, Yuzhang Shang, Yang Zhou, et~al.
+\newblock {LLM} inference unveiled: Survey and roofline model insights.
+\newblock \emph{arXiv preprint arXiv:2402.16363}, 2024.
+
+\bibitem[Zhang et~al.(2024)Zhang, Ning, Prabhakar, and Wentzlaff]{zhang2024}
+Hengrui Zhang, August Ning, Rohan~Baskar Prabhakar, and David Wentzlaff.
+\newblock Llmcompass: Enabling efficient hardware design for large language
+  model inference.
+\newblock In \emph{2024 ACM/IEEE 51st Annual International Symposium on
+  Computer Architecture (ISCA)}, pages 1080--1096. IEEE, 2024.
+\newblock \doi{10.1109/isca59077.2024.00082}.
+\newblock URL \url{https://doi.org/10.1109/isca59077.2024.00082}.
+
+\bibitem[Zheng et~al.(2024)Zheng, Yin, Xie, et~al.]{zheng2024sglang}
+Lianmin Zheng, Liangsheng Yin, Zhiqiang Xie, et~al.
+\newblock Sglang: Efficient execution of structured language model programs.
+\newblock In \emph{Advances in Neural Information Processing Systems 37}, pages
+  62557--62583. Neural Information Processing Systems Foundation, Inc.
+  (NeurIPS), 2024.
+\newblock \doi{10.52202/079017-2000}.
+\newblock URL \url{https://doi.org/10.52202/079017-2000}.
+
+\bibitem[Zhong et~al.(2024)Zhong, Liu, Chen, Hu, Zhu, Liu, Jin, and
+  Zhang]{zhong2024distserve}
+Yinmin Zhong, Shengyu Liu, Junda Chen, Jianbo Hu, Yibo Zhu, Xuanzhe Liu, Xin
+  Jin, and Hao Zhang.
+\newblock {DistServe}: Disaggregating prefill and decoding for
+  goodput-optimized large language model serving.
+\newblock In \emph{18th USENIX Symposium on Operating Systems Design and
+  Implementation (OSDI 24)}, pages 193--210. USENIX Association, July 2024.
+\newblock ISBN 978-1-939133-40-3.
+\newblock URL
+  \url{https://www.usenix.org/conference/osdi24/presentation/zhong-yinmin}.
+
+\end{thebibliography}
+
 
 \clearpage
 \onecolumn
 \appendix
+
+\section{MLSysBook Integration (LEGO Cells)}
+\label{sec:appendix-mlsysbook}
+
+\mlsysim serves as the executable backbone for \emph{Machine Learning Systems} (Volume 1: \url{https://mlsysbook.ai/vol1} and Volume 2: \url{https://mlsysbook.ai/vol2})~\citep{mlsysbook2025}. To seamlessly weave quantitative analysis into the prose without disrupting readability, the textbook introduces the concept of \textbf{LEGO Cells}. LEGO is an acronym for the four structural phases of each cell: \textbf{Load} (importing registries and constraints), \textbf{Execute} (invoking the physics solvers), \textbf{Guard} (asserting dimensional and logical invariants), and \textbf{Output} (formatting physical quantities for inline prose). A LEGO Cell is a standalone, self-contained Python snippet that answers a specific design question posed in the text. Isolating the simulation logic into these executable blocks allows readers to read the code to understand the mechanics, execute it to verify the results, and modify the parameters to explore alternative scenarios.
+
+Below, we provide three representative LEGO Cells used in the textbook to illustrate this pedagogical integration.
+
+\subsection{Volume 1 Example: Hardware Constraints}
+In Volume 1, LEGO Cells are heavily used to demystify hardware constraints. For example, when introducing the Roofline model, a LEGO Cell demonstrates how memory bandwidth dictates the maximum batch size for a given latency SLA:
+
+\begin{lstlisting}[language=Python, caption={\textbf{Volume 1 LEGO Cell: Roofline Analysis.} This snippet from Volume 1 uses the \texttt{Engine} to find the batch size where a model transitions from memory-bound to compute-bound.}, label={lst:lego-vol1}]
+from mlsysim.engine.engine import Engine
+from mlsysim.hardware.registry import Hardware
+from mlsysim.models.registry import Models
+
+model = Models.Language.Llama3_8B
+hw = Hardware.Cloud.H100
+
+for b in [1, 16, 128, 512]:
+    perf = Engine.solve(model, hw, batch_size=b, precision="fp16")
+    print(f"Batch {b}: {perf.bottleneck}-bound, MFU={perf.mfu:.3f}")
+\end{lstlisting}
+
+\subsection{Volume 2 Example: Distributed Training}
+In Volume 2, the focus shifts to distributed systems and fleet-level economics. LEGO Cells here compose multiple solvers to estimate the time and cost of training frontier models across thousands of GPUs:
+
+\begin{lstlisting}[language=Python, caption={\textbf{Volume 2 LEGO Cell: Training Economics.} This snippet from Volume 2 calculates the duration and carbon footprint of a large-scale training run.}, label={lst:lego-vol2}]
+from mlsysim.solvers import DistributedModel, SustainabilityModel
+from mlsysim.systems.registry import Systems
+from mlsysim.models.registry import Models
+from mlsysim.infrastructure.registry import Infrastructure
+
+fleet = Systems.Clusters.Frontier_8K
+model = Models.Language.Llama3_70B
+
+perf = DistributedModel().solve(
+    model, fleet, batch_size=4096, seq_len=4096, tp_size=8, pp_size=8
+)
+training_days = (perf.step_latency_total * 1e12 / (4096 * 4096)).to("day")
+
+sust = SustainabilityModel().solve(
+    fleet, duration_days=training_days.magnitude,
+    datacenter=Infrastructure.Datacenters.Iowa_Reference, mfu=0.45
+)
+print(f"Training Time: {training_days.magnitude:.0f} days")
+print(f"Carbon: {sust.carbon_footprint_kg / 1000:.0f} tonnes")
+\end{lstlisting}
+
+\subsection{Volume 1 Example: Model Serving}
+Another common pattern in Volume 1 evaluates inference systems. Here, a LEGO Cell uses the \texttt{ServingModel} to calculate the inter-token latency (ITL) for Llama-3 8B on an NVIDIA A100 GPU:
+
+\begin{lstlisting}[language=Python, caption={\textbf{Volume 1 LEGO Cell: Model Serving.} This snippet uses the \texttt{ServingModel} to find the theoretical inter-token latency for an autoregressive generation step. It also demonstrates the structural \textbf{LOAD}, \textbf{EXECUTE}, and \textbf{OUTPUT} phases of the LEGO pattern.}, label={lst:lego-vol1-serving}]
+from mlsysim.solvers import ServingModel
+from mlsysim.models.registry import Models
+from mlsysim.hardware.registry import Hardware
+
+# 1. LOAD (Constants)
+model = Models.Language.Llama3_8B
+hw = Hardware.Cloud.A100
+
+# 2. EXECUTE (The Compute)
+perf = ServingModel().solve(
+    model, hw, seq_len=1256, batch_size=1, precision="int4", efficiency=1.0
+)
+
+# 3. OUTPUT (Formatting)
+print(f"Inter-Token Latency (ITL): {perf.itl.to('ms'):.2f}")
+\end{lstlisting}
 
 \section{Registry Snapshot}
 \label{sec:appendix-hardware}
