@@ -7260,6 +7260,7 @@ from mlsysim.fmt import (
 class ResNet50Int8Metrics:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim import Models, Hardware, Engine
+    from mlsysim.solvers import CompressionModel
 
     m = Models.Vision.ResNet50
     h = Hardware.Cloud.V100
@@ -7276,19 +7277,23 @@ class ResNet50Int8Metrics:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # V100 registry has only fp32 in precision_flops; INT8 falls back to
     # default peak_flops (FP16), a reasonable proxy for V100 INT8 throughput
-    # via TensorRT.  Suppress the fallback warning.
-    p_fp32 = Engine.solve(m, h, batch_size=1, precision="fp32")
+    # via TensorRT.  Suppress the fallback warning for FP32 base metrics.
     _prev_filters = warnings.filters[:]
     warnings.filterwarnings("ignore", message="Precision.*not in", category=UserWarning)
-    p_int8 = Engine.solve(m, h, batch_size=1, precision="int8")
+    from mlsysim.solvers import SingleNodeModel
+
+    p_fp32 = SingleNodeModel().solve(m, h, batch_size=1, precision="fp32")
     warnings.filters[:] = _prev_filters
 
+    # Use CompressionModel to quantify INT8 gains
+    c_int8 = CompressionModel().solve(m, h, method="quantization", target_bitwidth=8)
+
     fp32_latency = p_fp32.latency
-    int8_latency = p_int8.latency
+    int8_latency = fp32_latency / c_int8.inference_speedup
     fp32_size = p_fp32.memory_footprint
-    int8_size = p_int8.memory_footprint
+    int8_size = fp32_size / c_int8.compression_ratio
     fp32_energy = p_fp32.energy
-    int8_energy = p_int8.energy
+    int8_energy = fp32_energy / c_int8.inference_speedup
 
     top1_drop = fp32_top1 - int8_top1
     latency_speedup = (fp32_latency / int8_latency).to("").magnitude
@@ -7315,9 +7320,9 @@ class ResNet50Int8Metrics:
     calibration_error_int8_str = fmt_percent(calibration_error_int8 / 100, precision=1, commas=False, style='symbol')
     cpu_speedup_mult_str = fmt_multiple(cpu_speedup, precision=1, commas=False)
     top1_drop_pp_str = fmt_pp(top1_drop, precision=1, commas=False, style="symbol")
-    latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=1, commas=False)
+    latency_speedup_mult_str = fmt_multiple(latency_speedup, precision=0, commas=False)
     size_reduction_mult_str = fmt_multiple(size_reduction, precision=0, commas=False)
-    energy_improvement_mult_str = fmt_multiple(energy_improvement, precision=1, commas=False)
+    energy_improvement_mult_str = fmt_multiple(energy_improvement, precision=0, commas=False)
 ```
 
 ::: {.column-margin}

@@ -946,10 +946,11 @@ class ResnetSetup:
 # │
 # │ Goal: Identify the bottleneck for single-image cloud inference.
 # │ Show: A100 inference is memory-bound at batch=1.
-# │ How: Engine.solve for A100 roofline bounds at FP16.
+# │ How: SingleNodeModel for A100 roofline bounds at FP16.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
+from mlsysim.solvers import SingleNodeModel
 from mlsysim.fmt import fmt, sci_latex, fmt_frac, MarkdownStr, fmt_flop_rate, fmt_bandwidth
 from mlsysim.core.units import flop, byte, TFLOPs, TB, millisecond, second
 
@@ -962,7 +963,7 @@ class ResnetCloud:
     h = Hardware.Cloud.A100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    p = Engine.solve(m, h, batch_size=1, precision="fp16", efficiency=1.0)
+    p = SingleNodeModel().solve(m, h, batch_size=1, precision="fp16", efficiency=1.0)
     cloud_compute_ms_value = p.latency_compute.to(millisecond).magnitude
     cloud_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).to(millisecond).magnitude
     cloud_ratio_x_value = cloud_memory_ms_display / cloud_compute_ms_value
@@ -999,10 +1000,11 @@ class ResnetCloud:
 # │
 # │ Goal: Identify the mobile bottleneck and compare against cloud memory time.
 # │ Show: Bandwidth gap drives cross-platform inference speedup.
-# │ How: Engine.solve for mobile NPU; duplicate cloud FP16 memory time locally.
+# │ How: SingleNodeModel for mobile NPU; duplicate cloud FP16 memory time locally.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
+from mlsysim.solvers import SingleNodeModel
 from mlsysim.fmt import sci_latex, fmt_frac, fmt, MarkdownStr, fmt_qty
 from mlsysim.core.units import flop, byte, TOPS, GB, millisecond, second
 
@@ -1016,8 +1018,8 @@ class ResnetMobile:
     h_cloud = Hardware.Cloud.A100
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    p = Engine.solve(m, h, batch_size=1, precision="int8", efficiency=1.0)
-    p_cloud = Engine.solve(m, h_cloud, batch_size=1, precision="fp16", efficiency=1.0)
+    p = SingleNodeModel().solve(m, h, batch_size=1, precision="int8", efficiency=1.0)
+    p_cloud = SingleNodeModel().solve(m, h_cloud, batch_size=1, precision="fp16", efficiency=1.0)
     cloud_memory_ms_display = (p_cloud.memory_footprint / p_cloud.peak_bw_actual).to(millisecond).magnitude
     mobile_compute_ms_display = (m.inference_flops / p.peak_flops_actual).to(millisecond).magnitude
     mobile_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).to(millisecond).magnitude
@@ -3031,12 +3033,14 @@ class EnergyInference:
     isolated_a100_resnet_energy = 0.3 * joule
     full_server_draw = 1 * ureg.kW
 
-    # Use Engine.solve() to derive vetted energy bounds for lighthouse models
+    # Use SingleNodeModel().solve() to derive vetted energy bounds for lighthouse models
     # Note: Cloud LLM (GPT-4) estimate includes system-level overhead (approx 1 kJ)
-    p_resnet_cloud = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
-    p_resnet_edge = Engine.solve(Models.Vision.ResNet50, Hardware.Edge.JetsonOrinNX, batch_size=1)
-    p_mobilenet = Engine.solve(Models.Vision.MobileNetV2, Hardware.Mobile.iPhone15Pro, batch_size=1)
-    p_kws = Engine.solve(Models.Tiny.DS_CNN, Hardware.Tiny.ESP32_S3, batch_size=1)
+    from mlsysim.solvers import SingleNodeModel
+
+    p_resnet_cloud = SingleNodeModel().solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
+    p_resnet_edge = SingleNodeModel().solve(Models.Vision.ResNet50, Hardware.Edge.JetsonOrinNX, batch_size=1)
+    p_mobilenet = SingleNodeModel().solve(Models.Vision.MobileNetV2, Hardware.Mobile.iPhone15Pro, batch_size=1)
+    p_kws = SingleNodeModel().solve(Models.Tiny.DS_CNN, Hardware.Tiny.ESP32_S3, batch_size=1)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     e_gpt4_j = 1000 * joule  # ~1 kJ cloud LLM query (empirical anchor)
