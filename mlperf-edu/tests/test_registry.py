@@ -1,4 +1,5 @@
 from collections import Counter
+from pathlib import Path
 
 from mlperf.assets import asset_dossier, has_asset_dossier
 from mlperf.registry import (
@@ -30,6 +31,13 @@ def test_registry_loads_current_workloads():
     assert STARTER_WORKLOADS.issubset(workloads)
     assert STANDARD_WORKLOADS.issubset(workloads)
     assert RESEARCH_WORKLOADS.issubset(workloads)
+
+
+def test_packaged_registry_copy_matches_flat_registry():
+    repo_root = Path(__file__).resolve().parents[1]
+    flat = repo_root / "workloads.yaml"
+    packaged = repo_root / "src" / "mlperf_edu" / "workloads.yaml"
+    assert packaged.read_text() == flat.read_text()
 
 
 def test_registry_loads_native_suite_workload_variant_layout(tmp_path):

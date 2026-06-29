@@ -13,28 +13,50 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Export the native registry layout into legacy workloads.yaml.")
     parser.add_argument("--source", default="registry", help="Native registry directory to export.")
     parser.add_argument("--output", default="workloads.yaml", help="Compatibility flat registry YAML path.")
+    parser.add_argument(
+        "--package-output",
+        default="src/mlperf_edu/workloads.yaml",
+        help="Packaged flat registry YAML copy included in wheels.",
+    )
     parser.add_argument("--check", action="store_true", help="Verify workloads.yaml is current without writing.")
     args = parser.parse_args()
 
     workloads = load_registry(args.source)
     content = dump_yaml(native_to_flat(workloads))
     output = Path(args.output)
+    package_output = Path(args.package_output) if args.package_output else None
 
     if args.check:
-        if not output.exists():
-            print(f"missing {output}")
+        problems = check_output(output, content)
+        if package_output is not None:
+            problems.extend(check_output(package_output, content))
+        if problems:
+            for problem in problems:
+                print(problem)
             print("run: python3 tools/export_flat_registry.py")
             return 1
-        if output.read_text(encoding="utf-8") != content:
-            print(f"stale {output}")
-            print("run: python3 tools/export_flat_registry.py")
-            return 1
-        print(f"{output} is current ({len(workloads)} workload(s))")
+        checked = f"{output}"
+        if package_output is not None:
+            checked += f" and {package_output}"
+        print(f"{checked} are current ({len(workloads)} workload(s))")
         return 0
 
     output.write_text(content, encoding="utf-8")
-    print(f"wrote {len(workloads)} workload(s) to {output}")
+    written = [str(output)]
+    if package_output is not None:
+        package_output.parent.mkdir(parents=True, exist_ok=True)
+        package_output.write_text(content, encoding="utf-8")
+        written.append(str(package_output))
+    print(f"wrote {len(workloads)} workload(s) to {', '.join(written)}")
     return 0
+
+
+def check_output(path: Path, expected: str) -> list[str]:
+    if not path.exists():
+        return [f"missing {path}"]
+    if path.read_text(encoding="utf-8") != expected:
+        return [f"stale {path}"]
+    return []
 
 
 def native_to_flat(workloads: dict[str, Workload]) -> dict[str, Any]:

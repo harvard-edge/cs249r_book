@@ -75,6 +75,8 @@ continues. Update this board every time a workstream or workload moves.
 | Done | Current smoke validation | Packaged `mlperf validate smoke --keep-going --skip-doctor` passed 12/12 in 11.9s with 0 warnings |
 | Done | Current full max validation | Packaged `mlperf validate max --keep-going --skip-doctor` passed 30/30 in 95.3s with 0 warnings |
 | Done | Current release validation | Packaged `mlperf validate release --keep-going --skip-doctor` passed 60/60 in 115.9s with 0 warnings |
+| Done | uv packaging contract | `INSTALL.md` documents `uv sync`, `uv tool install`, and `uv build`; packaged `src/mlperf_edu/workloads.yaml` is now a real wheel data file checked by `tools/export_flat_registry.py --check` |
+| Done | Release/quality review docs | `RELEASE_CHECKLIST.md` and `QUALITY_TARGET_REVIEW.md` capture the remaining non-runtime work for public release and expert target review |
 | Open | Public dataset release decisions | `DATASET_RELEASE_REVIEW.md` records the remaining MovieLens-100K decision needed for endorsement; MovieLens remains runnable locally |
 
 Last validation artifacts:

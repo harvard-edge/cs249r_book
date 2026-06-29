@@ -22,6 +22,8 @@ MLPerf EDU brings industry-standard ML benchmarking into teaching and research. 
 
 🧭 **North star**: See [`NORTH_STAR.md`](NORTH_STAR.md) for the two-year goal: MLPerf EDU as the SPEC-like, runnable academic benchmark substrate for ML systems papers.
 
+📦 **Install**: See [`INSTALL.md`](INSTALL.md) for the `uv sync`, `uv tool install`, and `uv build` package workflow.
+
 📋 **Product contract**: See [`SPEC.md`](SPEC.md) for the CLI, suite/profile vocabulary, backend policy, and validation presets that keep this tree runnable from a fresh clone.
 
 🗂️ **Workload registry**: See [`registry/`](registry/) for the native suite/workload/variant metadata layout. [`workloads.yaml`](workloads.yaml) is kept as a generated compatibility mirror.
@@ -31,6 +33,10 @@ MLPerf EDU brings industry-standard ML benchmarking into teaching and research. 
 ⚖️ **Public rules**: See [`PUBLIC_RULES.md`](PUBLIC_RULES.md) for score-bearing, performance-bearing, systems-only, and scenario promotion rules.
 
 🧾 **Dataset release review**: See [`DATASET_RELEASE_REVIEW.md`](DATASET_RELEASE_REVIEW.md) for the public dataset decisions that remain before endorsement.
+
+🎯 **Quality target review**: See [`QUALITY_TARGET_REVIEW.md`](QUALITY_TARGET_REVIEW.md) for the expert-review matrix behind score-bearing and performance-bearing rows.
+
+🚢 **Release checklist**: See [`RELEASE_CHECKLIST.md`](RELEASE_CHECKLIST.md) for the packaging and endorsement release bars.
 
 📝 **MLCommons proposal**: See [`PROPOSAL.md`](PROPOSAL.md) for the endorsement path and staged review plan.
 
@@ -42,23 +48,23 @@ MLPerf EDU brings industry-standard ML benchmarking into teaching and research. 
 # Clone and install
 git clone https://github.com/harvard-edge/cs249r_book.git
 cd cs249r_book/mlperf-edu
-pip install -e ".[dev]"
+uv sync --extra dev
 
 # Check that this machine can run MLPerf EDU
-mlperf doctor
+uv run mlperf doctor
 
 # See available workloads
-mlperf list
-mlperf list matrix --profile max
-mlperf info --dataset tinyshakespeare
-mlperf info --model smollm2-135m
+uv run mlperf list
+uv run mlperf list matrix --profile max
+uv run mlperf info --dataset tinyshakespeare
+uv run mlperf info --model smollm2-135m
 
 # Run the smallest local confidence path
-mlperf init --profile min
+uv run mlperf init --profile min
 
 # Run the max benchmark profile
-mlperf fetch --profile max
-mlperf run --profile max --open-report
+uv run mlperf fetch --profile max
+uv run mlperf run --profile max --open-report
 ```
 
 Every run writes JSON, HTML, and CSV reports. `--open-report` opens the HTML
@@ -373,15 +379,16 @@ Each asset has source, license, public-release status, cache behavior, and next-
 
 ## Requirements
 
-- Python 3.9+
+- Python 3.10+
+- `uv` for the recommended install path
 - PyTorch 2.0+
 - `torchvision` (for Fashion-MNIST, MNIST, and optional CIFAR experiments)
 - `transformers` (for SLM workloads)
 - Optional: `torchaudio` for full Speech Commands experiments
 
 ```bash
-pip install torch torchvision transformers
-pip install -e .
+uv sync --extra dev
+uv run mlperf doctor
 ```
 
 For Apple Silicon: set `PYTORCH_ENABLE_MPS_FALLBACK=1` for full MPS compatibility.

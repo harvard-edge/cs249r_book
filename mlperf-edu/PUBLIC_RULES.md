@@ -42,6 +42,7 @@ mlperf validate coverage
 mlperf validate max
 mlperf validate release
 pytest
+uv build
 ```
 
 ## Dataset Release Status
@@ -198,6 +199,8 @@ A public release candidate must satisfy:
   quality checks; public-release warnings are reviewed through
   `mlperf audit --policy public`, with release-blocking warnings resolved or
   explicitly accepted by the maintainers and MLCommons reviewers.
+- `uv build` produces a wheel and source distribution whose packaged registry
+  matches the source registry.
 - Every public result has JSON, HTML, CSV, provenance, verification, and grade
   artifacts.
 - Documentation distinguishes MLPerf EDU educational results from official
