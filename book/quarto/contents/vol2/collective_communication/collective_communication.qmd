@@ -1753,9 +1753,7 @@ The bandwidth wall arises most acutely in two scenarios: training across data ce
 Quantization is the least disruptive compression lever when bandwidth is binding because it keeps every gradient element but reduces the bits used to represent it. Most gradients are computed in FP32 (32-bit floating point) or BF16 (16-bit brain float), so reducing bit-width directly reduces communication volume. The useful question is how much gradient fidelity the optimizer can absorb, and the progression from mild to aggressive quantization illustrates the trade-off between compression ratio and gradient fidelity:
 
 1. **FP16 (16-bit)**: A common baseline for accelerator training. Half the bits of FP32, with minimal impact on convergence for many models. Provides 2$\times$ compression over FP32.
-
 2. **INT8 (8-bit)**: Quantize each gradient vector to 256 discrete levels. This requires computing a scaling factor per tensor: $g_{\text{int8}} = \text{round}(g/s)$ where $s = \max(|g|) / 127$. The receiver reconstructs $\hat{g} = g_{\text{int8}} \times s$. Provides 4$\times$ compression over FP32 but introduces quantization noise proportional to the gradient magnitude.
-
 3. **1-bit SGD**\index{1-bit SGD}: The extreme case: transmit only the sign of each gradient element (+1 or -1). The receiver reconstructs using a learned or adaptive scaling factor. This achieves 32$\times$ compression over FP32 but introduces substantial noise that can degrade convergence without additional mechanisms [@seide2014; @karimireddy2019error].
 
 #### Block quantization for gradient communication {#sec-collective-communication-block-quantization-gradient-communication-c883}
@@ -2114,13 +2112,9 @@ The broader pattern is a standardized front-end API with hardware-specific backe
 When a distributed training job runs slower than expected, the communication library provides the first diagnostic signals because it exposes the selected algorithm, measured bandwidth, rank mapping, and overlap behavior. A systematic workflow isolates whether the bottleneck is in computation, communication, or their interaction:
 
 1. **Profile with NCCL debug logging**: Set `NCCL_DEBUG=INFO` to see which algorithm (Ring, Tree) and protocol (Simple for bulk bandwidth, LL/LL128 as lower-latency protocols for small messages) NCCL selects for each collective. Unexpected algorithm choices often indicate topology mis-detection.
-
 2. **Measure bare collective performance**: Run NCCL's built-in benchmarks (`nccl-tests`) with the cluster's exact topology to establish the achievable bandwidth baseline. If `nccl-tests` achieves 90 percent of theoretical bandwidth but the training job achieves only 50 percent, the bottleneck is in how the training framework invokes collectives, not in the communication library itself.
-
 3. **Check for stragglers**: Use `torch.cuda.synchronize()` before and after each collective to measure per-operation time. A collective that takes 2$\times$ longer than expected often indicates one GPU is delayed (thermal throttling, ECC error recovery, or unbalanced data loading), which stalls the entire barrier.
-
 4. **Verify overlap effectiveness**: Use NVIDIA Nsight Systems to visualize the timeline of compute kernels and communication operations on the same axis. Effective overlap shows communication operations running in parallel with backward pass kernels. Poor overlap shows gaps where the GPU is idle during communication.
-
 5. **Isolate network vs. host overhead**: If `nccl-tests` shows low bandwidth, the issue is network-level (bad cables, congestion, misconfigured routing). If `nccl-tests` shows full bandwidth but training is slow, the issue is host-level (insufficient overlap, small bucket sizes, CPU bottlenecks in data loading).
 
 :::
