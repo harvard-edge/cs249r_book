@@ -156,13 +156,13 @@ As @fig-mlfm-timeline illustrates, this progression reveals a critical insight: 
 \node[Box={col7},right=of B6](B7){2018};
 %%
 \foreach \x in{1,2,...,7}
-\draw[dashed,thick,-latex](B\x)--++(270:4.25);
+\draw[dashed,thick,-latex](B\x)--++(270:4.1);
 
-\path[red]([yshift=-8mm]B1.south west)coordinate(P)-|coordinate(K)(B7.south east);
+\path[red]([yshift=-7mm]B1.south west)coordinate(P)-|coordinate(K)(B7.south east);
 
 \draw[line width=2pt,-latex](P)--(K)--++(0:3mm);
 
-\def\vi{1.6}
+\def\vi{1.4}
 \node[Box={col1!50},below=\vi of B1](BB1){BLAS introduced};
 \node[Box={col2!50},below=\vi of B2](BB2){LAPACK extends BLAS};
 \node[Box={col3!50},below=\vi of B3](BB3){NumPy becomes Python's numerical backbone};
@@ -177,6 +177,8 @@ As @fig-mlfm-timeline illustrates, this progression reveals a critical insight: 
 
 Each generation abstracted away details that consumed engineering effort in the previous one, yet each abstraction introduced new trade-offs. BLAS hid assembly-level optimization but fixed the interface. NumPy hid memory management but required manual differentiation. Modern frameworks hide gradient computation but introduce the execution model choice we examine next. The deeper pattern is that every abstraction hides details by preserving a contract about shape, dtype, device, and sometimes units; when that contract becomes implicit, correct components can still compose into a wrong system.
 
+With that contract risk in view, modern frameworks converge on the same three core problems: *how* to execute computation, *how* to differentiate it, and *how* to abstract across hardware. We begin with the most visible of these: the execution problem, because its resolution determines what optimizations the other two problems can exploit.
+
 ::: {#ws-frameworks-mars-climate-orbiter-units .callout-war-story title="The interface that forgot its units"}
 
 **Context**: NASA's Mars Climate Orbiter depended on ground software, spacecraft software, navigation teams, and contractor interfaces all agreeing on the physical meaning of exchanged values [@nasa1999marsclimateorbiter]. The roughly \$327M mission included a small-forces interface (SM_FORCES) that carried thruster-impulse measurements from ground operations into the navigation filter.
@@ -186,8 +188,6 @@ Each generation abstracted away details that consumed engineering effort in the 
 **Systems lesson**: Framework abstractions are valuable because they carry contracts: shape, dtype, device placement, and sometimes units. If those contracts are implicit, two pieces of correct code can still compose into a wrong system.
 
 :::
-
-With that contract risk in view, modern frameworks converge on the same three core problems: *how* to execute computation, *how* to differentiate it, and *how* to abstract across hardware. We begin with the most visible of these: the execution problem, because its resolution determines what optimizations the other two problems can exploit.
 
 ## Execution Problem {#sec-ml-frameworks-execution-problem-e1e1}
 
@@ -231,10 +231,10 @@ To ground this abstraction, examine @fig-comp-graph: computing $z = x \times y$ 
     minimum width=8mm,
   },
 }
-\node[Box,fill=GreenFill,draw=GreenLine,minimum width=13mm, ](B1){$f(x,y)$};
+\node[Box,fill=GreenFill,draw=GreenLine,minimum width=15mm, ](B1){$f(x,y)$};
 \node[Box,right=of B1,fill=GreenFill,draw=GreenLine](B2){$z$};
-\node[Box,above left=0.1 and 2 of B1,fill=GreenFill,draw=GreenLine](B3){$x$};
-\node[Box,below left=0.1 and 2 of B1,fill=GreenFill,draw=GreenLine](B4){y};
+\node[Box,above left=-0.10 and 2 of B1,fill=GreenFill,draw=GreenLine](B3){$x$};
+\node[Box,below left=-0.10 and 2 of B1,fill=GreenFill,draw=GreenLine](B4){y};
 \draw[-latex,Line](B1)--(B2);
 \draw[-latex,Line](B3)to[bend left=25](B1);
 \draw[-latex,Line](B4)to[bend right=25](B1);
@@ -248,7 +248,7 @@ Real machine learning models require much more complex graph structures. @Fig-ml
 ::: {#fig-mlfm-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Computation Graph with System Interactions**: A neural network computation graph (left) alongside system components including memory management and device placement (right) that interact with the graph to optimize resource allocation before execution." fig-alt="Left side shows computational graph with six operation nodes connected by data flow edges. Right side shows system components box with memory management and device placement nodes that interact with the computational graph."}
 
 ```{.tikz}
-\scalebox{0.8}{%
+\scalebox{0.9}{%
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
 
 \tikzset{
@@ -815,8 +815,6 @@ Static graph execution\index{Static Graph!define-then-run model} defines the com
 
 Static graphs implement a clear separation between graph construction and execution. @Lst-tf-static-graph illustrates the two phases using TensorFlow 1.x, which exemplified this approach. It deliberately runs the same `x * 2` then `+ 1` computation shown under eager execution in @lst-autograd-tape-example, holding the arithmetic fixed so that the only thing that changes is *when* it executes: symbolic definition creates placeholders and operations without computation, while explicit execution triggers actual arithmetic.
 
-Compare this with the dynamic model by examining @fig-mlfm-static-graph. Notice the clear boundary between phases: in the definition phase (left), the framework builds a complete blueprint without touching any data; in the execution phase (right), data flows through an already-optimized graph. This separation enables the framework to resolve questions during the definition phase that are unreachable operation-by-operation: which intermediate tensors can share memory, which operations can fuse into a single kernel, and what the total memory footprint will be. By the time execution begins, these optimizations are already baked in.
-
 ::: {#lst-tf-static-graph lst-cap="**Static Graph Two-Phase Execution**: Graph construction (symbolic definition) is separated from execution (actual computation), enabling ahead-of-time optimization."}
 
 ```{.python}
@@ -838,6 +836,8 @@ with tf.Session() as sess:
 ```
 
 :::
+
+Compare this with the dynamic model by examining @fig-mlfm-static-graph. Notice the clear boundary between phases: in the definition phase (left), the framework builds a complete blueprint without touching any data; in the execution phase (right), data flows through an already-optimized graph. This separation enables the framework to resolve questions during the definition phase that are unreachable operation-by-operation: which intermediate tensors can share memory, which operations can fuse into a single kernel, and what the total memory footprint will be. By the time execution begins, these optimizations are already baked in.
 
 The key difference from eager execution is that during construction, `x`, `y`, and `z` are not tensors containing values but rather symbolic nodes in a graph. Operations like `*` and `+` add nodes to the graph definition without performing any arithmetic. The `print(y)` line in the code example would reveal this distinction---it would print tensor metadata, not a computed value. Execution is triggered explicitly through `sess.run()`, at which point the framework analyzes the complete graph, optimizes it, and executes the optimized version with the provided input data.
 
@@ -1216,8 +1216,6 @@ traced = torch.jit.trace(forward, x_example)
 
 The critical limitation of tracing reveals the fidelity-generality trade-off concretely. Because tracing records a single execution path, it cannot handle data-dependent control flow. @Lst-tracing-silent-failure illustrates a silent correctness failure.
 
-Tracing records whichever branch executed during the example input. Subsequent executions always follow the traced path regardless of input values, silently producing incorrect results for inputs that would have taken the other branch. This failure mode is particularly dangerous because it produces no error, only wrong outputs. In production, such bugs can persist for months before anyone notices that a small fraction of inputs are being misclassified---and by then, debugging is a forensic exercise.
-
 ::: {#lst-tracing-silent-failure lst-cap="**Tracing Silent Failure**: Tracing records only the execution path taken by the example input, silently ignoring all other branches of data-dependent control flow."}
 
 ```{.python}
@@ -1235,6 +1233,8 @@ traced = torch.jit.trace(conditional_forward, torch.tensor([1.0]))
 ```
 
 :::
+
+Tracing records whichever branch executed during the example input. Subsequent executions always follow the traced path regardless of input values, silently producing incorrect results for inputs that would have taken the other branch. This failure mode is particularly dangerous because it produces no error, only wrong outputs. In production, such bugs can persist for months before anyone notices that a small fraction of inputs are being misclassified---and by then, debugging is a forensic exercise.
 
 The alternative, scripting\index{JIT Compilation!scripting}, achieves generality by analyzing Python source code directly and compiling it to TorchScript IR without executing [@pytorchTorchScriptDocs]. The scripting compiler parses the abstract syntax tree (AST), converts supported operations to IR operations, and preserves the branching structure so that both branches of a conditional exist in the compiled representation. The cost of this generality is a restricted Python subset: type annotations are required where inference fails, arbitrary Python objects and standard library modules are excluded, and dynamic metaprogramming is forbidden.
 
@@ -1283,6 +1283,13 @@ print(example.graph)
 
 However, scripting imposes constraints on what Python constructs are supported. Because TorchScript must statically analyze code that Python normally interprets dynamically, it accepts only a restricted Python subset. Function signatures and variables need explicit type annotations when type inference fails, and only tensor operations, numeric types, and standard containers (lists, dicts, tuples) are permitted---no arbitrary Python objects, no standard library modules like `os` or `sys`, and no dynamic class modification or metaprogramming, so an `import numpy` or an f-string inside a scripted function is a compile-time error. These constraints are the price of compilation: every feature that makes Python flexible also makes it unpredictable for a compiler. @Tbl-tracing-vs-scripting summarizes the resulting decision rule: trace static feed-forward code when simplicity matters, and script conditional code when correctness requires preserving runtime branches.
 
+The TorchScript IR represents operations using the `aten` namespace for core tensor operations, the `prim` namespace for primitives and control flow, static types for every value, and static single-assignment (SSA)\index{Single Static Assignment!compiler IR} form, where each variable is assigned exactly once to simplify compiler analysis. This IR enables optimizations independent of Python: operator fusion combines adjacent operations into single kernels, constant folding evaluates constant expressions at compile time, dead code elimination removes unused operations, and memory optimization reuses buffers when possible.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Aspect**            | **Tracing**                  | **Scripting**                 |
 |:----------------------|:-----------------------------|:------------------------------|
 | **Input requirement** | Example inputs needed        | No inputs needed              |
@@ -1294,7 +1301,9 @@ However, scripting imposes constraints on what Python constructs are supported. 
 
 : **Tracing vs. Scripting Trade-Offs**: The fidelity-generality trade-off manifests concretely: tracing is simpler to use but silently ignores data-dependent control flow, while scripting preserves all branches at the cost of a restricted Python subset. Choose tracing for static architectures and scripting for models with runtime conditionals. {#tbl-tracing-vs-scripting}
 
-The TorchScript IR represents operations using the `aten` namespace for core tensor operations, the `prim` namespace for primitives and control flow, static types for every value, and static single-assignment (SSA)\index{Single Static Assignment!compiler IR} form, where each variable is assigned exactly once to simplify compiler analysis. This IR enables optimizations independent of Python: operator fusion combines adjacent operations into single kernels, constant folding evaluates constant expressions at compile time, dead code elimination removes unused operations, and memory optimization reuses buffers when possible.
+```{=latex}
+\endgroup
+```
 
 #### Modern compilation: Graph-capture JIT {#sec-ml-frameworks-modern-compilation-torchcompile-d025}
 
@@ -1391,6 +1400,10 @@ The compiler fuses this into one kernel: `FusedAddRelu`.
 
     1.  Launch `Fused` Kernel: `{python} FusionSpeedup.compiled_overhead_str` overhead.
     2.  Read/Write Memory: $2N$ bytes (intermediate result stays in registers).
+
+```{=latex}
+\tcbbreak
+```
 *   **Total overhead**: `{python} FusionSpeedup.compiled_overhead_str` (`{python} FusionSpeedup.overhead_speedup_mult_str` speedup).
 *   **Total memory traffic**: 2N bytes (`{python} FusionSpeedup.bw_efficiency_mult_str` bandwidth efficiency).
 
@@ -2305,6 +2318,8 @@ These control mechanisms share a common systems design: they are callback-based 
 
 One mechanism deserves a closer look because it exposes the differentiation contract most directly. Custom autograd functions\index{Custom Autograd Function!backward implementation} move part of that contract from the framework to the implementer: the developer explicitly specifies what to save for the backward pass and how to compute gradients. @Lst-custom-autograd-function shows the pattern.
 
+These three principles connect directly to the framework's role as a compiler for the silicon contract. The reverse-linked graph determines which operations the backward pass must execute (the $O$ term). The memory-compute trade-off governs how much data the framework must move through the memory hierarchy (the $D_{\text{vol}}$ term). The extensibility mechanisms, in turn, allow engineers to tune both terms for their specific workload. The interaction between autograd memory management and numerical precision leads naturally to mixed-precision training, which further reduces the $D_{\text{vol}}$ term.
+
 ::: {#lst-custom-autograd-function lst-cap="**Custom Autograd Function**: Implement forward and backward methods to define custom differentiable operations, explicitly specifying tensors to save for gradient computation."}
 
 ```{.python}
@@ -2343,7 +2358,6 @@ print(
 
 :::
 
-These three principles connect directly to the framework's role as a compiler for the silicon contract. The reverse-linked graph determines which operations the backward pass must execute (the $O$ term). The memory-compute trade-off governs how much data the framework must move through the memory hierarchy (the $D_{\text{vol}}$ term). The extensibility mechanisms, in turn, allow engineers to tune both terms for their specific workload. The interaction between autograd memory management and numerical precision leads naturally to mixed-precision training, which further reduces the $D_{\text{vol}}$ term.
 
 #### Mixed-precision training support {#sec-ml-frameworks-mixedprecision-training-support-d31d}
 
@@ -2454,6 +2468,8 @@ Resuming training after interruption requires restoring model weights and optimi
 
 @Sec-model-training covers optimizer memory requirements and optimization strategies for large-scale training, where checkpoint size becomes a binding constraint. Frameworks provide the `state_dict()` interface to access optimizer state for serialization (@lst-state-dict-interface), and resuming training requires loading both model parameters and optimizer state (@lst-checkpoint-save-load).
 
+The mathematics of automatic differentiation were established decades before deep learning's resurgence. What changed was the systems engineering. Before framework automation, implementing gradient computation for a single fully connected layer meant writing separate forward and backward functions, manually tracking intermediate values, and verifying mathematical correctness across dozens of operations. A modern transformer involves hundreds of operations with complex dependencies; manual gradient derivation for attention, layer normalization, and residual connections would require months of careful work per architecture variant.
+
 ::: {#lst-state-dict-interface lst-cap="**State Dictionary Interface**: Optimizers expose internal state through state_dict(), enabling serialization of momentum buffers and adaptive learning rate estimates for checkpointing."}
 
 ```{.python}
@@ -2495,7 +2511,6 @@ optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
 
 :::
 
-The mathematics of automatic differentiation were established decades before deep learning's resurgence. What changed was the systems engineering. Before framework automation, implementing gradient computation for a single fully connected layer meant writing separate forward and backward functions, manually tracking intermediate values, and verifying mathematical correctness across dozens of operations. A modern transformer involves hundreds of operations with complex dependencies; manual gradient derivation for attention, layer normalization, and residual connections would require months of careful work per architecture variant.
 
 The breakthrough was turning this manual process into software infrastructure. A single matrix multiplication requires different gradient computations depending on which inputs require gradients, tensor shapes, hardware capabilities, and memory constraints. Autograd systems handle these variations transparently, which is why the rate of architectural innovation accelerated after frameworks matured. The mathematics did not change; software engineering made the mathematics practical to apply at scale.
 
@@ -2658,6 +2673,10 @@ class TensorFootprint:
     tensor_1024_fp32_mb_str = fmt_qty(footprint, MB, precision=1, commas=False)
 ```
 
+Every computation in a neural network operates on tensors.[^fn-tensor-hardware-contract] Training batches, activation maps, parameter gradients, and optimizer states are all tensors. This unified representation lets frameworks optimize a single data structure for hardware rather than managing separate containers for each role.
+
+[^fn-tensor-hardware-contract]: **Tensor**: From Latin *tendere* ("to stretch"), coined in its mathematical sense by physicist Woldemar Voigt in 1898 for objects defined by how they transform under coordinate changes. ML inherited the term because framework tensors are similarly defined by transformation behavior: transposing changes strides but not data, reshaping changes metadata without moving bytes. This transformation-centric design is also the source of layout sensitivity: choosing NCHW when the target accelerator prefers NHWC (or vice versa) can halve computational throughput, because misaligned memory access patterns break hardware coalescing. \index{Tensor!hardware contract}
+
 ::: {#dfn-frameworks-tensor .callout-definition title="Tensor"}
 
 ***Tensors***\index{Tensor!definition} are $n$-dimensional arrays with explicit shape, data type, and memory layout metadata that allow ML frameworks to map mathematical operations directly onto hardware vector units without intermediate data transformation.
@@ -2667,10 +2686,6 @@ class TensorFootprint:
 3.  **Common pitfall**: A frequent misconception is that tensor operations are always in-place. Framework tensor operations return new tensors by default, allocating fresh GPU memory for each intermediate result. In a long computation graph, these intermediate allocations accumulate and can exhaust GPU memory before any weights are updated.
 
 :::
-
-Every computation in a neural network operates on tensors.[^fn-tensor-hardware-contract] Training batches, activation maps, parameter gradients, and optimizer states are all tensors. This unified representation lets frameworks optimize a single data structure for hardware rather than managing separate containers for each role.
-
-[^fn-tensor-hardware-contract]: **Tensor**: From Latin *tendere* ("to stretch"), coined in its mathematical sense by physicist Woldemar Voigt in 1898 for objects defined by how they transform under coordinate changes. ML inherited the term because framework tensors are similarly defined by transformation behavior: transposing changes strides but not data, reshaping changes metadata without moving bytes. This transformation-centric design is also the source of layout sensitivity: choosing NCHW when the target accelerator prefers NHWC (or vice versa) can halve computational throughput, because misaligned memory access patterns break hardware coalescing. \index{Tensor!hardware contract}
 
 The tensor abstraction consumes far more memory than model weights alone suggest. Engineers who estimate memory from parameter count alone allocate accordingly and encounter out-of-memory errors that seem inexplicable. A quick memory accounting makes the hidden cost concrete: gradients, optimizer momentum, and stored activations accompany every weight tensor.
 
@@ -2772,7 +2787,6 @@ The memory breakdown for ResNet-50 in @sec-ml-frameworks-principle-2-memorycompu
 2.  **Gradients**: `{python} AdminTax.admin_grads_gb_str` (same size as weights).
 3.  **Optimizer states (Adam)**: `{python} AdminTax.admin_opt_gb_str` ($4 \times$ FP16 weight memory for momentum and velocity stored in FP32).
 4.  **Activations**: For a batch size of `{python} AdminTax.admin_batch_str` and a `{python} AdminTax.admin_layers_str`-layer network, the framework must store every intermediate layer output for the backward pass.
-
     $$ \text{Activations} \approx B \times N_L \times S \times d_{\text{model}} \times n_{\text{saved}} \times 2 \text{ bytes} $$
     For a `{python} AdminTax.admin_seq_len_str`-token sequence, `{python} AdminTax.admin_width_str`-wide hidden state, and `{python} AdminTax.admin_saved_tensors_str` saved tensor per layer: `{python} AdminTax.admin_act_calc_math`. Materialized attention terms can add a separate $B \times N_{\text{heads}} \times S^2$ component, which is why memory-efficient attention kernels matter.
 
@@ -2787,7 +2801,7 @@ A tensor generalizes the familiar hierarchy\index{Tensor!rank hierarchy} of scal
 ::: {#fig-tensor-data-structure-a fig-env="figure" fig-pos="htb" fig-cap="**Tensor Rank Hierarchy**: Four shapes illustrating tensor ranks from left to right: a single value (rank 0, scalar), a column of values (rank 1, vector), a grid of values (rank 2, matrix), and a cube of values (rank 3, three-dimensional tensor)." fig-alt="Four shapes showing tensor ranks left to right: single box labeled Rank 0, vertical column of numbers labeled Rank 1, 2D grid of numbers labeled Rank 2, and 3D cube labeled Rank 3."}
 
 ```{.tikz}
-\scalebox{0.8}{%
+\scalebox{0.77}{%
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \begin{scope}
 \pgfmathsetmacro{\cubex}{2.5}
@@ -2838,7 +2852,7 @@ In ML data terms, a color image is a rank-3 tensor of height, width, and three c
 ::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as RGB Tensor**: Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. Credit: Niklas Lang." fig-alt="Three stacked grids in red, green, and blue representing RGB channels. Dimension labels show width three pixels, height three pixels, and three color channels, forming a rank-3 tensor for image data."}
 
 ```{.tikz}
-\scalebox{0.7}{%
+\scalebox{0.67}{%
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\Large]
 %
 \tikzset{
@@ -2908,12 +2922,12 @@ Memory layout\index{Memory Layout!stride patterns} implementation introduces dis
   }
 }
 \node[above=2pt of B01]{\textbf{2D Tensor ($2{\times}3$)}};
-\path[red](B02.north east)--++(1.35,0)coordinate(CR);
-\path[red](B12.340)--++(1.35,0)coordinate(ZE);
+\path[red](B02.north east)--++(3.5,0)coordinate(CR);
+\path[red](B12.340)--++(3.5,0)coordinate(ZE);
 % Row-major memory layout (RIGHT SIDE)
 \foreach \i in {0,1,2,3,4,5} {
   \pgfmathsetmacro{\val}{\i + 1}
-  \node[draw, minimum width=10mm, minimum height=8mm,
+  \node[draw, minimum width=11mm, minimum height=8mm,
         anchor=north west,fill=col2!50](CB\i) at ($(CR)+(\i*1.1, 0)$) {\val};
   \node[below=0pt of CB\i, font=\tiny\usefont{T1}{phv}{m}{n}]  {[\i]};
 }
@@ -2921,7 +2935,7 @@ Memory layout\index{Memory Layout!stride patterns} implementation introduces dis
 % Column-major memory layout (RIGHT SIDE)
 \foreach \i in {0,1,2,3,4,5} {
   \pgfmathtruncatemacro{\val}{mod(\i,2)*3 + int(\i/2) + 1}
-  \node[draw, minimum width=10mm, minimum height=8mm,
+  \node[draw, minimum width=11mm, minimum height=8mm,
          anchor=north west,fill=col3!50](ZE\i) at ($(ZE)+(\i*1.1, 0)$) {\val};
   \node[below=0pt of ZE\i, font=\tiny\usefont{T1}{phv}{m}{n}] {[\i]};
 }
@@ -3160,7 +3174,7 @@ The movement mechanism is explicit. The `.to()` method moves tensors between dev
 
 The performance discipline follows from the bandwidth gap: allocate tensors on the target device from the start rather than creating them on CPU and transferring them, reuse GPU memory across iterations rather than reallocating it, and colocate inputs, labels, and model parameters on the same device to eliminate implicit transfers. At `{python} DeviceBandwidthHierarchy.pcie4_gb_per_s_str`, violating any of these principles inserts PCIe transfers into the critical path that can dominate a training iteration that otherwise runs at `{python} DeviceBandwidthHierarchy.a100_bw_tb_per_s_str` on-device.
 
-The same synchronization discipline has one operational trap: debug code often leaves `torch.cuda.synchronize()` in the hot path, turning an overlapped pipeline into a serialized one. When overlap remains poor, profiling must separate scheduling stalls from kernel inefficiency. NVIDIA Nsight Systems\index{Nsight Systems!profiling tool} (`nsys profile`) shows CPU activity, GPU kernels, and memory transfers on one timeline. NVIDIA Nsight Compute\index{Nsight Compute!profiling tool} (`ncu`) then explains kernel behavior with hardware counters.
+The same synchronization discipline has one operational trap: debug code often leaves `torch.` `cuda.synchronize()` in the hot path, turning an overlapped pipeline into a serialized one. When overlap remains poor, profiling must separate scheduling stalls from kernel inefficiency. NVIDIA Nsight Systems\index{Nsight Systems!profiling tool} (`nsys profile`) shows CPU activity, GPU kernels, and memory transfers on one timeline. NVIDIA Nsight Compute\index{Nsight Compute!profiling tool} (`ncu`) then explains kernel behavior with hardware counters.
 
 @Tbl-nsight-metrics is the diagnostic map for that second step. SM means streaming multiprocessor, the GPU block that schedules groups of threads; a warp is one scheduled thread group.
 
@@ -3245,6 +3259,8 @@ The third mechanism is *pinned memory for DMA transfers*. The `pin_memory=True` 
 
 The DataLoader configuration is useful only when each parameter is tied to a bottleneck. In @lst-dataloader-throughput, `num_workers` enables parallel loading, `prefetch_factor` controls pipeline depth, and `pin_memory` enables DMA transfers. The worker count is a throughput/memory trade-off, not a universal constant. A practical starting point is setting `num_workers` equal to the number of available CPU cores, then adjusting based on whether loading is I/O-bound or CPU-bound. For I/O-bound workloads such as reading images from network storage, more workers overlap disk latency and improve throughput. For CPU-bound workloads involving heavy augmentation, the benefit saturates once all cores are in use. Too many workers waste memory, since each maintains a copy of the Dataset\index{Dataset!map-style}\index{Dataset!iterable-style} object.
 
+Once throughput is high enough, worker process management becomes a correctness constraint. Because workers are separate processes, random number generators used in data augmentation must be explicitly seeded per worker via `worker_init_fn` to ensure reproducibility. Without proper seeding, workers may produce identical augmentation sequences, reducing effective data diversity. Shared state between workers presents a separate challenge: each worker has its own memory space, so modifications to global variables in one worker do not propagate to others or to the main process. For large datasets where caching matters, memory-mapped files or shared memory regions that persist across processes are the standard solution.
+
 ::: {#lst-dataloader-throughput lst-cap="**DataLoader Throughput Configuration**: Each parameter addresses a specific throughput bottleneck. num_workers parallelizes I/O and preprocessing across CPU cores, prefetch_factor controls pipeline depth, and pin_memory enables DMA transfers to the GPU."}
 
 ```{.python}
@@ -3266,8 +3282,6 @@ loader = DataLoader(
 ```
 
 :::
-
-Once throughput is high enough, worker process management becomes a correctness constraint. Because workers are separate processes, random number generators used in data augmentation must be explicitly seeded per worker via `worker_init_fn` to ensure reproducibility. Without proper seeding, workers may produce identical augmentation sequences, reducing effective data diversity. Shared state between workers presents a separate challenge: each worker has its own memory space, so modifications to global variables in one worker do not propagate to others or to the main process. For large datasets where caching matters, memory-mapped files or shared memory regions that persist across processes are the standard solution.
 
 The Dataset choice is another throughput decision because it determines how samples can be scheduled. PyTorch supports two dataset paradigms. *Map-style* datasets implement `__len__` and `__getitem__`, enabling random access to samples by index---this pattern works well for datasets that fit in memory or support efficient random access on disk. *Iterable-style* datasets implement `__iter__` instead, yielding samples sequentially for streaming data sources where random access is impractical. The choice between paradigms determines whether the DataLoader can shuffle samples (map-style only) or must process them in arrival order (iterable-style).
 
@@ -3645,7 +3659,7 @@ The abstraction problem is the bridge between *portable code* and *efficient exe
 - [ ] **Two dimensions**: Can you distinguish *data representation* (layout, dtype, placement) from *execution mapping* (kernel selection, scheduling), and explain how they constrain each other?
 - [ ] **Kernel dispatch**: Can you explain why the same high-level operation (for example, GEMM) needs multiple implementations (CPU vector path vs. GPU Tensor Core path) and how shapes/dtypes affect the choice?
 - [ ] **Memory abstraction**: Can you explain why frameworks use caching allocators and layout transforms (NCHW↔NHWC) rather than calling device allocators on every tensor?
-- [ ] **Execution control**: Can you describe what the runtime is doing when it overlaps independent work (streams) and inserts synchronization only where dependencies require it?
+- [ ] **Execution control**: Can you describe what the runtime is doing when it overlaps independent work (streams) and inserts synchronization only where dependencies require&nbsp;it?
 
 :::
 
@@ -3753,7 +3767,6 @@ Complex models compose from reusable submodules\index{nn.Module!hierarchical com
 import torch
 import torch.nn as nn
 
-
 class ResidualBlock(nn.Module):
     def __init__(self, channels):
         super().__init__()
@@ -3767,7 +3780,6 @@ class ResidualBlock(nn.Module):
         x = torch.relu(self.bn1(self.conv1(x)))
         x = self.bn2(self.conv2(x))
         return torch.relu(x + residual)
-
 
 class ResNet(nn.Module):
     def __init__(self, num_blocks, channels=64):
@@ -3784,7 +3796,6 @@ class ResNet(nn.Module):
             x = block(x)
         x = x.mean(dim=[2, 3])  # Global average pooling
         return self.fc(x)
-
 
 model = ResNet(num_blocks=4)
 total = sum(p.numel() for p in model.parameters())
@@ -3854,6 +3865,10 @@ Module hooks\index{Module Hooks!forward and backward} are the inspection counter
 
 Together, these patterns---parameter discovery, freezing, and hooks---demonstrate how the three principles translate into practical APIs. The preceding `nn.Module` patterns illustrate PyTorch's approach to the abstraction problem. PyTorch, however, is only one of several major frameworks, and its choices (mutable state, class inheritance, eager execution by default) are not the only valid design points. TensorFlow centralizes state differently, and JAX avoids mutable state entirely. These are not superficial API differences; they reflect deeply different answers to the three problems we examined at the chapter's start.
 
+## Framework Platform Analysis {#sec-ml-frameworks-major-framework-platform-analysis-fe96}
+
+A team that prototypes quickly but cannot deploy the resulting model, or deploys reliably but cannot debug training failures, has run into a framework design trade-off rather than a missing API call. Each major framework\index{ML Framework!platform comparison} represents a distinct point in the design space defined by the three core problems: TensorFlow prioritizes the Abstraction Problem through its comprehensive deployment ecosystem, PyTorch prioritizes the Execution Problem through its dynamic graph approach, and JAX reframes the Differentiation Problem through composable function transformations. These differences are architectural, reflecting fundamental capability trade-offs that determine what each framework can and cannot do well.
+
 ::: {#lst-module_hooks lst-cap="**Module Hooks**: Shows forward and backward hooks for inspecting activations and gradients during training."}
 
 ```{.python}
@@ -3895,10 +3910,6 @@ handle_bwd.remove()
 
 :::
 
-## Framework Platform Analysis {#sec-ml-frameworks-major-framework-platform-analysis-fe96}
-
-A team that prototypes quickly but cannot deploy the resulting model, or deploys reliably but cannot debug training failures, has run into a framework design trade-off rather than a missing API call. Each major framework\index{ML Framework!platform comparison} represents a distinct point in the design space defined by the three core problems: TensorFlow prioritizes the Abstraction Problem through its comprehensive deployment ecosystem, PyTorch prioritizes the Execution Problem through its dynamic graph approach, and JAX reframes the Differentiation Problem through composable function transformations. These differences are architectural, reflecting fundamental capability trade-offs that determine what each framework can and cannot do well.
-
 ::: {.column-margin}
 ![](images/svg/vol1_frameworks_margin_004.svg){width="100%" fig-alt="TensorFlow, PyTorch, and JAX mapped to their strongest design emphasis."}
 
@@ -3920,11 +3931,11 @@ The graph-first approach prioritizes the deployment spectrum: because the framew
 },
   Box/.style={align=flush center,
     inner xsep=4pt,
-    node distance=0.8,
+    node distance=0.6,
     draw=BlueLine,
     line width=0.75pt,
     fill=BlueL,,
-    minimum height=11mm
+    minimum height=10mm
   },
 }
 
@@ -3969,8 +3980,8 @@ The graph-first approach prioritizes the deployment spectrum: because the framew
 \draw[latex-,Line](B6)--(B5.south-|B6);
 \draw[latex-,Line](B7)--(B5.south-|B7);
 \draw[latex-,Line](B8)--(B5.south-|B8);
-\draw[Line](B6)--++(270:1)-|(B7);
-\draw[-latex,Line](B8)-++(270:1.35)-|(B9);
+\draw[Line](B6)--++(270:0.8)-|(B7);
+\draw[-latex,Line](B8)-++(270:1.1)-|(B9);
 \foreach \x in {1,2,3,4}
 \draw[-latex,Line](B9.east)--(L\x.west);
 \end{tikzpicture}
@@ -4152,7 +4163,7 @@ As ML models move from cloud servers to edge devices\index{Deployment Target!clo
 | **Mobile**                   | App-integrated runtime with delegates    | Accelerator delegates, compact model formats | Battery, thermal, app size limits |
 | **Microcontroller (TinyML)** | Tiny runtime with fixed allocation       | Static allocation, small integer kernels     | <256 KB RAM, no dynamic memory    |
 
-: **Deployment Target Constraint Map**: Runtime assumptions, optimization levers, and binding constraints for each deployment tier, from cloud servers to microcontrollers. {#tbl-deployment-frameworks tbl-colwidths="[19,31,25,25]"}
+: **Deployment Target Constraint Map**: Runtime assumptions, optimization levers, and binding constraints for each deployment tier, from cloud servers to microcontrollers. {#tbl-deployment-frameworks tbl-colwidths="[15,35,25,25]"}
 
 @Tbl-deployment-frameworks shows why deployment target is a hard constraint rather than a late packaging step. The Smart Doorbell KWS model from @sec-ml-frameworks-tinyml-micro-runtimes-2a1b exemplifies the microcontroller tier: a runtime with a fixed memory arena and compact C/C++ footprint is not a preference but a condition for fitting the device. This constraint creates the practical framework problem that ONNX addresses: organizations often train in one environment but deploy into another whose runtime assumptions are stricter.
 
@@ -4160,7 +4171,7 @@ The **Open Neural Network Exchange (ONNX)**\index{ONNX!definition}\index{ONNX!cr
 
 ::: {#fig-onnx fig-env="figure" fig-pos="htb" fig-cap="**Framework Interoperability**: ONNX enables model portability across frameworks, allowing training in one framework and deployment in another." fig-alt="Hub diagram with ONNX at center. Left side (export): PyTorch, TensorFlow, Keras, Caffe2, MXNet, Microsoft CNTK with arrows pointing inward. Right side (load): ONNX Runtime plus the same six frameworks with arrows pointing outward."}
 
-![](images/jpeg/onnx_new.jpg){width=75%}
+![](images/jpeg/onnx_new.jpg){width=70%}
 
 :::
 
@@ -4186,6 +4197,8 @@ Rather than seeking the "best" framework, effective selection first eliminates c
 
 The TensorFlow ecosystem illustrates how these axes interact concretely. Its three variants (TensorFlow\index{TensorFlow!full framework}, TensorFlow Lite\index{TensorFlow Lite!mobile deployment}, TensorFlow Lite Micro\index{TensorFlow Lite Micro!microcontroller deployment}) trace a single design philosophy across progressively tighter constraints, a pattern that generalizes to any framework family. @Tbl-tf-comparison quantifies the trade-offs.
 
+The principle is progressive constraint leading to progressive optimization: fewer supported operations enable smaller binaries, tighter memory budgets, and native lower-precision execution. Three dimensions structure this analysis: model requirements define the supported operations, software dependencies define the runtime environment, and hardware constraints define the physical limits.
+
 |                                    |         **TensorFlow**        | **TensorFlow Lite** | **TensorFlow Lite for Microcontrollers** |
 |:-----------------------------------|:-----------------------------:|:-------------------:|:----------------------------------------:|
 | **Training**                       |              Yes              |          No         |                    No                    |
@@ -4194,8 +4207,6 @@ The TensorFlow ecosystem illustrates how these axes interact concretely. Its thr
 | **Native Lower-Precision Tooling** |               No              |         Yes         |                   Yes                    |
 
 : **TensorFlow Variant Software Comparison**: Design trade-offs across TensorFlow, TensorFlow Lite, and TensorFlow Lite Micro, balancing model expressiveness, binary size, and resource constraints. Supported operations decrease from approximately 1,400 in full TensorFlow to approximately fifty in TensorFlow Lite Micro, reflecting a shift from training capability to efficient edge inference. Native lower-precision tooling enables further optimization for constrained environments. {#tbl-tf-comparison tbl-colwidths="[28,26,20,26]"}
-
-The principle is progressive constraint leading to progressive optimization: fewer supported operations enable smaller binaries, tighter memory budgets, and native lower-precision execution. Three dimensions structure this analysis: model requirements define the supported operations, software dependencies define the runtime environment, and hardware constraints define the physical limits.
 
 ### Framework selection criteria {#sec-ml-frameworks-model-requirements-2e01}
 
@@ -4463,6 +4474,11 @@ class TrainingStepCalc:
     train_bwd_ai_str = fmt_arithmetic_intensity((bwd_flops / bwd_mem), unit=flop / byte, commas=False)
 ```
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Component**                    |                                              **FLOPs**                                              |                 **Memory Traffic**                |            **Arithmetic Intensity**           |
 |:---------------------------------|:---------------------------------------------------------------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
 | **MatMul (x @ W1)**              |  `{python} TrainingStepCalc.train_mm1_dims_math` = `{python} TrainingStepCalc.train_mm1_mflop_str`  |  `{python} TrainingStepCalc.train_mm1_mem_mb_str` |  `{python} TrainingStepCalc.train_mm1_ai_str` |
@@ -4471,7 +4487,11 @@ class TrainingStepCalc:
 | **Cross-entropy**                |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
 | **Backward (2$\times$ forward)** |                           ~`{python} TrainingStepCalc.train_bwd_mflop_str`                          |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
 
-: **Per-Operation Roofline Analysis**: FLOPs, memory traffic, and arithmetic intensity for each operation in a two-layer MLP training step. MatMul operations have much higher arithmetic intensity than element-wise operations, while ReLU and cross-entropy are memory-bound; on high-end GPUs, small MatMuls may still fall below the ridge point (the intensity at which compute rather than memory bandwidth becomes the limit), which is why this training step remains overhead- and memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[29,29,20,22]"}
+: **Per-Operation Roofline Analysis**: FLOPs, memory traffic, and arithmetic intensity for each operation in a two-layer MLP training step. MatMul operations have much higher arithmetic intensity than element-wise operations, while ReLU and cross-entropy are memory-bound; on high-end GPUs, small MatMuls may still fall below the ridge point (the intensity at which compute rather than memory bandwidth becomes the limit), which is why this training step remains overhead- and memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[27,33,18,22]"}
+
+```{=latex}
+\endgroup
+```
 
 The arithmetic-intensity column is the diagnostic column. Matrix multiplications reuse operands enough to move toward the compute roof, while ReLU and cross-entropy move too little work per byte to escape the memory and launch-overhead regime. This is why fusion and dispatch reduction matter even when the model is written in high-level tensor code.
 
@@ -4564,7 +4584,7 @@ The same Python code runs on different hardware through abstraction layers, each
 | TPU\index{TPU!XLA compilation}                  | XLA [@GoogleXLA]                                       | Compilation to TPU-specific high-level optimizer (HLO) operations |
 | Apple Silicon                                   | Metal Performance Shaders                              | MPS backend                                                       |
 
-: **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[22,33,45]"}
+: **Hardware Backends Behind a Single Code Path**: Each backend implements the same tensor operations through a different library and execution mechanism, so identical Python maps onto distinct silicon. {#tbl-framework-backends tbl-colwidths="[22,37,41]"}
 
 Each backend implements the same tensor operations with hardware-specific optimizations. The framework's abstraction layer (@sec-ml-frameworks-abstraction-problem-37a5) ensures identical numerical results (within floating-point tolerance) across platforms. This is the abstraction problem solved: a single `loss.backward()` call triggers completely different code paths depending on hardware, yet produces mathematically equivalent gradients.
 

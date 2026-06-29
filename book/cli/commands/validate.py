@@ -461,6 +461,8 @@ class ValidateCommand:
         "markup": [
             Scope("patterns", "_run_rendering",
                   note="low-level markup (backticks, dollar signs, asterisks)"),
+            Scope("list-spacing", "_run_markdown_list_spacing",
+                  note="blank line required between bold lead-in paragraphs and lists"),
             Scope("div-fences", "_run_div_fences",
                   note=":::/ :::: balance and form"),
             Scope("callouts", "_run_callout_structure",
@@ -4413,6 +4415,39 @@ class ValidateCommand:
         return ValidationRunResult(
             name="rendering",
             description="Check for problematic rendering patterns",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_markdown_list_spacing(self, root: Path) -> ValidationRunResult:
+        """Flag bold lead-in paragraphs that need a blank line before a list."""
+        start = time.time()
+        from cli.checks import markdown_list_spacing
+
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            for issue in markdown_list_spacing.check_file(file):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file),
+                        line=issue.line_number,
+                        code="bold_leadin_list_spacing",
+                        message=(
+                            "Bold lead-in paragraph is immediately followed by a list item; "
+                            "Pandoc may render the list marker inline."
+                        ),
+                        severity="error",
+                        context=issue.context[:160],
+                        suggestion=issue.suggestion,
+                    )
+                )
+
+        return ValidationRunResult(
+            name="markdown-list-spacing",
+            description="Check bold lead-in paragraphs before Markdown lists",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

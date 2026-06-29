@@ -321,7 +321,7 @@ The memory wall is not static; in the accelerator generations compared here, com
 # │      and memory.bandwidth from the registry; ridge = peak/bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_magnitude, fmt_multiple, check
+from mlsysim.fmt import fmt_display_math, fmt_int, fmt_magnitude, fmt_multiple, check
 
 class WideningGap:
     """Generational FP16 peak, bandwidth, and ridge point for V100 through B200."""
@@ -354,11 +354,13 @@ class WideningGap:
     a100_peak_tflop_per_s_str = fmt_int(round(a100.compute.peak_flops.to(TFLOP / second).magnitude))
     h100_peak_tflop_per_s_str = fmt_int(round(h100.compute.peak_flops.to(TFLOP / second).magnitude))
     b200_peak_tflop_per_s_str = fmt_int(round(b200.compute.peak_flops.to(TFLOP / second).magnitude))
+    h100_peak_value_str = h100_peak_tflop_per_s_str
 
     v100_bw_tb_per_s_str = fmt_magnitude(v100.memory.bandwidth, unit=TB / second, precision=1, commas=False)
     a100_bw_tb_per_s_str = fmt_magnitude(a100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
     h100_bw_tb_per_s_str = fmt_magnitude(h100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
     b200_bw_tb_per_s_str = fmt_int(round(b200.memory.bandwidth.to(TB / second).magnitude))
+    h100_bw_value_str = h100_bw_tb_per_s_str
 
     v100_ridge_str = fmt_int(round(v100_ridge))
     a100_ridge_str = fmt_int(round(a100_ridge))
@@ -368,6 +370,11 @@ class WideningGap:
     compute_growth_mult_str = fmt_multiple(compute_growth, precision=0, commas=False)
     bw_growth_mult_str = fmt_multiple(bw_growth, precision=1, commas=False)
     ridge_ratio_mult_str = fmt_multiple(round(ridge_ratio), precision=0, commas=False)
+    h100_ridge_display_math = fmt_display_math(
+        rf"I_{{\text{{ridge}}}}^{{\text{{H100, FP16}}}} = "
+        rf"\frac{{{h100_peak_value_str}\text{{ TFLOP/s}}}}{{{h100_bw_value_str}\text{{ TB/s}}}} "
+        rf"\approx {h100_ridge_str}\text{{ FLOP/byte}}"
+    )
 ```
 
 @Tbl-widening-gap quantifies how the hardware balance shifts across accelerator generations. The key column is the ridge point: as compute grows faster than bandwidth, more operators need higher arithmetic intensity just to remain compute-bound.
@@ -387,7 +394,7 @@ For the FP16/BF16 table as written, the ridge point increased from `{python} Wid
 
 @Sec-compute-roofline introduced the Roofline Model[^fn-roofline-origin] [@williams2009] and arithmetic intensity as the framework for diagnosing whether a workload is compute-bound or memory-bound on a given accelerator, and computed the H100's ridge point. We recall it here only to push it to fleet scale: how the ridge point shifts across hardware generations, how FP8 moves it, where production ML workloads fall relative to it, and how batch size walks a workload across it. As a reminder, the model plots achievable performance as a function of arithmetic intensity, the ratio of floating-point operations to bytes transferred from memory, and the intersection of the two regimes is the ridge point[^fn-roofline-ridge].
 
-[^fn-roofline-ridge]: **Ridge Point**\index{Roofline Model!ridge point}: The intersection of the memory-bound and compute-bound lines on a Roofline plot. It represents the minimum arithmetic intensity required to reach peak hardware performance $(R_{\text{peak}})$. For an H100 GPU (FP16), the ridge point is roughly 295 FLOP/byte; if an operator's intensity is below this "ridge," it will never saturate the Tensor Cores, regardless of how much compute is available.
+[^fn-roofline-ridge]: **Ridge Point**\index{Roofline Model!ridge point}: The intersection of the memory-bound and compute-bound lines on a Roofline plot. It represents the minimum arithmetic intensity required to reach peak hardware performance $(R_{\text{peak}})$. For an H100 GPU (FP16), the ridge point is roughly `{python} WideningGap.h100_ridge_str` FLOP/byte; if an operator's intensity is below this "ridge," it will never saturate the Tensor Cores, regardless of how much compute is available.
 
 [^fn-roofline-origin]: **Roofline Model**\index{Roofline Model!performance engineering}: The original framing targets multicore CPUs, but the same ceiling diagram applies to accelerators: two numbers (peak FLOP/s and peak bandwidth) define the entire performance envelope. This same simplicity informs GPU purchasing decisions for ML inference, where the ridge point determines whether a workload benefits from faster compute or faster memory.
 
@@ -415,15 +422,13 @@ $$ {#eq-ridge-point}
 
 Workloads with $I < I_{\text{ridge}}$ are memory-bound\index{Memory-Bound}: their performance is limited by how fast data can be loaded, not how fast it can be processed. Workloads with $I > I_{\text{ridge}}$ are compute-bound: the arithmetic units are the bottleneck. @Fig-roofline-model illustrates this relationship graphically.
 
-::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately 2,000 TFLOP/s); their intersection is the ridge point at roughly 600 FLOP/byte for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly 295 FLOP/byte (989 TFLOP/s divided by 3.35 TB/s)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOP/s. Ridge point around 600 FLOP/byte. Workload markers: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
+::: {#fig-roofline-model fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Achievable performance (y-axis) as a function of arithmetic intensity (x-axis) on a log-log plot. The sloped line represents the memory bandwidth ceiling; the flat line represents the compute ceiling at the labeled precision (FP8 tensor-core throughput on H100, approximately `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str`); their intersection is the ridge point at roughly `{python} MemoryWallScenario.h100_ridge_fp8_str` for FP8. Most transformer inference operations fall in the memory-bound region (left of the ridge point), while large batched GEMMs fall in the compute-bound region (right). The corresponding FP16 ridge point is roughly `{python} WideningGap.h100_ridge_str` FLOP/byte (`{python} WideningGap.h100_peak_value_str` TFLOP/s divided by `{python} WideningGap.h100_bw_value_str` TB/s)." fig-alt="Log-log roofline plot with diagonal memory-bandwidth ceiling and horizontal compute ceiling labeled at FP8 throughput around 2,000 TFLOP/s. Ridge point around 600 FLOP/byte. Workload markers: LLM decode and element-wise ops on the left (memory-bound), large GEMM on the right (compute-bound)."}
 ![](images/svg/roofline-model.svg)
 :::
 
-The ridge point of the NVIDIA H100 at FP16 precision is:
+The ridge point of the NVIDIA H100 at FP16 precision follows directly from the same peak-compute and bandwidth values used in @tbl-widening-gap:
 
-$$
-I_{\text{ridge}}^{\text{H100, FP16}} = \frac{989 \text{ TFLOP/s}}{3.35 \text{ TB/s}} \approx 295 \text{ FLOP/byte}
-$$
+`{python} WideningGap.h100_ridge_display_math`
 
 ```{python}
 #| echo: false
@@ -732,10 +737,10 @@ Diagnosis locates a workload on the roofline; the serving regime determines whic
 For memory-bound LLM serving, batch size is often the first performance lever to test, and also one of the most constrained. Increasing the batch size transforms the arithmetic intensity of every operation. For an LLM decode step, the arithmetic intensity scales linearly with batch size:
 
 $$
-I_{\text{decode}}(B) = \frac{2PB}{P b_{\text{param}} + B d_{\text{model}} b_{\text{elem}}}
+I_{\text{decode}}(B) = \frac{2PB}{P s_{\text{param}} + B d_{\text{model}} s_{\text{elem}}}
 $$
 
-Here, $P$ is parameter count, $B$ is batch size, $d_{\text{model}}$ is hidden width, $b_{\text{param}}$ is bytes per stored parameter, and $b_{\text{elem}}$ is bytes per activation element. At batch size 1, the denominator is dominated by the weight term $(P b_{\text{param}})$, and $I \approx 2/b_{\text{param}} \approx 1$ FLOP/byte for FP16. At batch size 256, the weight term still dominates, but the same weight bytes are amortized across more requests, so $I \approx 2 \times 256/b_{\text{param}} \approx 256$ FLOP/byte, approaching the compute-bound regime.
+Here, $P$ is parameter count, $B$ is batch size, $d_{\text{model}}$ is hidden width, $s_{\text{param}}$ is bytes per stored parameter, and $s_{\text{elem}}$ is bytes per activation element. At batch size 1, the denominator is dominated by the weight term $(P s_{\text{param}})$, and $I \approx 2/s_{\text{param}} \approx 1$ FLOP/byte for FP16. At batch size 256, the weight term still dominates, but the same weight bytes are amortized across more requests, so $I \approx 2 \times 256/s_{\text{param}} \approx 256$ FLOP/byte, approaching the compute-bound regime.
 
 ::: {.column-margin}
 ![](images/svg/vol2_performance_engineering_margin_002.svg){width="100%" fig-alt="Roofline thumbnail with a B equals 1 point on the memory-bound slope and a B equals 256 point near the compute plateau."}
@@ -2187,7 +2192,7 @@ class MemoryWallProfilingRecap:
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_arithmetic_intensity, fmt_flop_rate, fmt_qty
+from mlsysim.fmt import fmt_arithmetic_intensity, fmt_flop_rate, fmt_percent, fmt_qty
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: Roofline diagnosis — LayerNorm profiling example.
@@ -2198,13 +2203,15 @@ class LayerNormRoofline:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     arithmetic_intensity_q = achieved_flops / achieved_bw
+    bandwidth_utilization = (achieved_bw / Hardware.Cloud.H100.memory.bandwidth).to("").magnitude
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     achieved_tflop_per_s_str = fmt_flop_rate(achieved_flops, unit=TFLOPs / second, precision=0, commas=False)
     achieved_tb_per_s_str = fmt_qty(achieved_bw, TB / second, precision=1, commas=False)
     arithmetic_intensity_str = fmt_arithmetic_intensity(arithmetic_intensity_q, precision=1, commas=False)
+    bandwidth_utilization_pct_str = fmt_percent(bandwidth_utilization, precision=1, commas=False, style="prose")
 ```
-Consider a concrete example: a LayerNorm kernel profiled on an H100 reports `{python} LayerNormRoofline.achieved_tflop_per_s_str` of achieved compute and `{python} LayerNormRoofline.achieved_tb_per_s_str` of achieved memory bandwidth. Its arithmetic intensity is `{python} LayerNormRoofline.achieved_tflop_per_s_str` / `{python} LayerNormRoofline.achieved_tb_per_s_str` $\approx$ `{python} LayerNormRoofline.arithmetic_intensity_str`. The H100's ridge point is approximately `{python} RooflineProfilingRecap.h100_fp16_ridge_str` at FP16. Since `{python} LayerNormRoofline.arithmetic_intensity_str` is far below `{python} RooflineProfilingRecap.h100_fp16_ridge_str`, the kernel is strictly memory-bound. Its achieved `{python} LayerNormRoofline.achieved_tb_per_s_str` (84 percent of the H100's `{python} MemoryWallProfilingRecap.h100_hbm_bw_tb_per_s_str` peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield little gain; performance can only be improved materially by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
+Consider a concrete example: a LayerNorm kernel profiled on an H100 reports `{python} LayerNormRoofline.achieved_tflop_per_s_str` of achieved compute and `{python} LayerNormRoofline.achieved_tb_per_s_str` of achieved memory bandwidth. Its arithmetic intensity is `{python} LayerNormRoofline.achieved_tflop_per_s_str` / `{python} LayerNormRoofline.achieved_tb_per_s_str` $\approx$ `{python} LayerNormRoofline.arithmetic_intensity_str`. The H100's ridge point is approximately `{python} RooflineProfilingRecap.h100_fp16_ridge_str` at FP16. Since `{python} LayerNormRoofline.arithmetic_intensity_str` is far below `{python} RooflineProfilingRecap.h100_fp16_ridge_str`, the kernel is strictly memory-bound. Its achieved `{python} LayerNormRoofline.achieved_tb_per_s_str` (`{python} LayerNormRoofline.bandwidth_utilization_pct_str` of the H100's `{python} MemoryWallProfilingRecap.h100_hbm_bw_tb_per_s_str` peak bandwidth) confirms it is operating near the physical limit of the memory subsystem. The diagnosis is clear: further FLOP-level optimizations will yield little gain; performance can only be improved materially by reducing data movement, either through fusion (eliminating the HBM round-trip) or precision reduction (halving the bytes per element).
 
 ### PyTorch profiler workflow {#sec-performance-engineering-pytorch-profiler}
 

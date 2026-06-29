@@ -28,7 +28,9 @@ def main():
         print("\n--- Evaluating Mistral-7B on a single H100 ---")
         
         # 2. Evaluate the imported model just like a built-in model
-        prof = mlsysim.Engine.solve(
+        # (See Vol 1, Benchmarking)
+        from mlsysim.solvers import SingleNodeModel
+        prof = SingleNodeModel().solve(
             model=mistral,
             hardware=mlsysim.Hardware.Cloud.H100,
             batch_size=1,
