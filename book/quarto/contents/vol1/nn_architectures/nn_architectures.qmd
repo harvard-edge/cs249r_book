@@ -708,9 +708,7 @@ This distinction resolves the apparent paradox of universal approximation and ar
 Three factors create the *learnability gap*\index{Learnability Gap}:
 
 1. **Sample complexity**\index{Sample Complexity}: The UAT provides no bounds on training examples needed. For 28 by 28 images, an MLP treats `{python} MLPDim.mlp_28_dim_str` pixels independently, requiring exponentially many samples to learn spatial correlations. A CNN embeds locality bias, drastically reducing sample requirements. Mathematically, sample complexity can scale exponentially with input dimension for MLPs but polynomially for architectures matching data structure.
-
 2. **Parameter efficiency**\index{Network Width}: The UAT guarantees some width suffices, but provides no constructive bounds. Required width can be exponential in input dimension: approximating $\sin(x_1) + \cdots + \sin(x_{d_{\text{in}}})$ may require $\mathcal{O}(\exp(d_{\text{in}}))$ MLP neurons vs. $\mathcal{O}(d_{\text{in}})$ for architectures processing dimensions independently.
-
 3. **Optimization difficulty**\index{Optimization Difficulty}: Even when optimal weights exist, gradient descent may not find them. MLP loss surfaces exhibit complex topology without the regularizing effect of architectural constraints. Specialized architectures reduce the search space, introducing symmetries that gradient descent exploits.
 
 The classic MNIST\index{MNIST} handwritten digit benchmark illustrates this gap between *representation* and *learnability* concretely.
@@ -1114,7 +1112,6 @@ def mlp_layer_compute(X, W, b):
 :::
 
 In our reference MNIST layer, each output neuron requires `{python} MLPLayerStats.mnist_mlp_macs_str` divided by 100, or 784, multiply-accumulate operations and at least `{python} MLPLayerStats.mnist_neuron_mem_acc_str` memory accesses (784 for inputs, 784 for weights). Production implementations call optimized matrix libraries such as Basic Linear Algebra Subprograms (BLAS)[^fn-dnn-blas], but the same nested-loop pattern still determines the system design problem. The hardware architectures that accelerate these matrix operations, including GPU Tensor Cores[^fn-tensor-cores] and specialized AI accelerators, are covered in @sec-hardware-acceleration.
-
 
 [^fn-dnn-blas]: **BLAS (Basic Linear Algebra Subprograms)**: This standard API for matrix operations enables the use of highly optimized libraries (for example, cuBLAS) to accelerate the 784 multiply-accumulates per neuron. These libraries are tuned for large, square matrices and hit an "efficiency cliff" with the $784{\times}100$ matrix of the MNIST example. This nonstandard shape fails to saturate the hardware's parallel compute units, yielding utilization far below the 80–95 percent of peak throughput achieved in larger transformer layers. \index{BLAS!neural networks}\index{BLAS!utilization}
 
@@ -1961,8 +1958,6 @@ ResNet-50's compute-bound profile assumes abundant hardware resources, yet most 
 
 : **MobileNetV2 systems profile**: Quantitative properties of the efficiency lighthouse and their system consequences. Roughly an order of magnitude smaller than ResNet-50 in both parameters and FLOPs, MobileNetV2's low arithmetic intensity makes single-image latency---driven by kernel-launch overhead and memory access---the binding constraint on mobile CPUs. {#tbl-nn-architectures-mobilenet-profile tbl-colwidths="[16,25,59]"}
 
-
-
 :::
 
 The ResNet-50 and MobileNetV2 profiles create a natural expectation: a model with `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` fewer FLOPs should execute proportionally faster. On mobile CPUs, where compute and memory bandwidth are roughly balanced, that expectation holds. On data center GPUs, where peak FLOP/s outpaces memory bandwidth by 10--20$\times$, the relationship inverts: MobileNetV2's low arithmetic intensity starves the hardware of useful work, and kernel launch overhead dominates the execution timeline.
@@ -2731,11 +2726,13 @@ class AttentionComputeCosts:
 ```{.python}
 def attention_layer_matrix(Q, K, V):
     # Q, K, V: (batch_size × seq_len × d_model)
-    scores = matmul(Q, K.transpose(-2, -1)) / sqrt(d_k
+    scores = matmul(Q, K.transpose(-2, -1)) / sqrt(
+        d_k
     )  # Compute attention scores
     weights = softmax(scores)  # Normalize scores
     output = matmul(weights, V)  # Combine values
     return output
+
 
 # Core computational pattern
 def attention_layer_compute(Q, K, V):
@@ -3150,6 +3147,7 @@ def self_attention_layer(X, W_Q, W_K, W_V, d_k):
     output = matmul(attention_weights, V)
 
     return output
+
 
 def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
     outputs = []
@@ -3675,7 +3673,7 @@ At 100 million IDs and 128 FP32 values per ID, one embedding table already consu
 
 :::
 
-Once those tables no longer fit on one device, the bottleneck shifts from storing embeddings to moving sparse embedding lookups across memory and network boundaries. Partitioning an embedding table means that one request may need rows owned by several devices; the local dense MLP cannot continue until those remote rows have been gathered. In a single node, that exchange stresses the accelerator interconnect. Across nodes, the same pattern becomes a many-device exchange problem because each device may need different sparse rows at the same time. Volume I needs only the architectural consequence: DLRM is not merely "large"; its memory layout determines the communication pattern any serving or training system must pay.
+Once those tables no longer fit on one device, the bottleneck shifts from storing embeddings to moving sparse embedding lookups across memory and network boundaries. Partitioning an embedding table means that one request may need rows owned by several devices; the local dense MLP cannot continue until those remote rows have been gathered. In a single node, that exchange stresses the accelerator interconnect. Across nodes, the same pattern becomes a many-device exchange problem because each device may need different sparse rows at the same time. For a foundational understanding, we need only the architectural consequence: DLRM is not merely "large"; its memory layout determines the communication pattern any serving or training system must pay. Later at fleet scale, this becomes a distributed coordination challenge.
 
 ::: {#chk-nn-architectures-dlrm-sparse-scatter .callout-checkpoint title="DLRM and sparse scatter"}
 
@@ -4233,7 +4231,6 @@ Where:
 | **Transformers** | $\mathcal{O}(d_{\text{model}}^2)$ QKV/O projections plus $\mathcal{O}(d_{\text{model}}d_{\text{ff}})$ feed-forward layers | $\mathcal{O}(S^2 \times d_{\text{model}} + S \times d_{\text{model}}^2)$ per layer                        | $\mathcal{O}(S^2)$ attention $\mathcal{O}(S \times d_{\text{model}})$ sequences                             | Excellent (positions) Limited by memory | Memory $(S^2)$                                                         |
 
 : **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d_{\text{in}}$ = input dimension, $d_{\text{out}}$ = output dimension, $d_{\text{model}}$ = transformer model dimension, $d_{\text{hidden}}$ = RNN hidden-state dimension, $k$ = kernel size, $c$ = channels, $H_{\text{img}}, W_{\text{img}}$ = spatial dimensions, $S$ = sequence length (time steps), $B$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. {#tbl-computational-complexity tbl-colwidths="[12,18,16,20,18,16]"}
-
 
 The impact of these patterns becomes clear when we consider data reuse opportunities. In CNNs, each input pixel participates in multiple convolution windows (typically nine times for a $3{\times}3$ filter), making effective data reuse necessary for performance. Modern GPUs provide multi-level cache hierarchies (L1, L2, shared memory) to capture this reuse, while software techniques like loop tiling ensure data remains in cache once loaded.
 
@@ -4967,7 +4964,6 @@ With the constraints fixed, the third step evaluates candidate architectures aga
 - **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` params, `{python} WildlifeModelSizing.resnet_gflop_str`): Too compute- and power-heavy for this device. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` FP32, it is also marginal against the `{python} WildlifeModelSizing.model_budget_mb_str` model budget before lower-precision weights, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
 - **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` params, `{python} WildlifeModelSizing.mnv1_mflop_str`): Promising. It needs `{python} WildlifeModelSizing.mnv1_fp32_mb_str` at FP32, or `{python} WildlifeModelSizing.mnv1_int8_mb_str` when each weight is stored as an 8-bit integer (INT8). Its depthwise separable convolutions are power-efficient.
 - **KWS DS-CNN** (`{python} WildlifeModelSizing.kws_example_params_str` params, `{python} WildlifeModelSizing.kws_example_mflop_str`): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
-
 
 This points to a MobileNetV2 variant with width multiplier 0.75 as the chosen model. It carries ~`{python} WildlifeModelSizing.mnv2_params_str` (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights) and costs ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$. It offers sufficient capacity for the 50-class problem, fits the memory budget with margin, and its depthwise separable convolutions are power-efficient.
 
