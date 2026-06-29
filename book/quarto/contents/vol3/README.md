@@ -35,13 +35,14 @@ through since the reasoning-model era:
 That framing is durable because it is a claim about *what the system becomes when it spends runtime
 compute*, not about which framework wins, and it sits at a different altitude than the companion
 volume's serving treatment (see "Boundaries" below). It also makes the series legible as one
-progression. Each volume is defined by what the **unit of the system** is:
+progression, each volume defined by its **unit of engineering**, which shifts from a structure you
+build (the model, the fleet) to a process you must govern (the trajectory):
 
-| Volume | Title | Unit of system | You learn to |
+| Volume | Title | Unit of engineering | You learn to |
 | --- | --- | --- | --- |
 | I | *Introduction to Machine Learning Systems* | the model | build one system |
 | II | *Machine Learning Systems at Scale* | the fleet | run many, where scaling laws bite |
-| III | *Agentic Machine Learning Systems* | the agent | engineer a system that acts |
+| III | *Agentic Machine Learning Systems* | the trajectory | engineer a system that acts |
 
 > **Note on the title:** keeping "Learning" in the name holds the series family
 > (`Machine Learning Systems`). "Agentic Machine Systems" drops it; use that only if broadening past
@@ -88,10 +89,13 @@ The spine of each earlier volume is a small set of durable laws (the bitter less
 roofline, and serving-cost laws). Volume III is viable only if it has its own. These are the
 candidates, each a claim about compute or systems, not about any tool:
 
-- **The Trajectory Reliability Law.** End-to-end success decays roughly geometrically with horizon
-  length: for per-step reliability `p`, an `n`-step task succeeds at about `p^n`. Horizon length is
-  therefore bounded by per-step reliability, and verification and recovery are mandatory, not
-  optional. (The agentic analog of the scaling laws.)
+- **The Compounding Baseline.** To first order, end-to-end success decays geometrically with horizon
+  length: for per-step reliability `p`, an `n`-step task succeeds at about `p^n`. This is the
+  baseline, not a scaling law. Real trajectories deviate in both directions: cascading errors let one
+  bad step poison the rest (worse than `p^n`), while verification, recovery, and self-correction
+  raise the effective per-step reliability (better than `p^n`). The durable claim is that horizon
+  length is bounded by per-step reliability, so verification and recovery are mandatory, not optional;
+  the engineering question is what bounds the decay.
 - **Inference-Time Scaling.** Capability improves with runtime compute (samples, steps, search),
   with diminishing returns; "thinking" becomes a schedulable resource. (The successor axis to
   training-time scaling.)
