@@ -2419,9 +2419,9 @@ After a thousand GPUs have been training for six hours, a power supply failure t
 A `{python} CheckpointModelIntro.gpt3_params_b_str` parameter model with Adam optimizer\index{Adam Optimizer!state size} generates checkpoints of approximately `{python} CheckpointModelIntro.ckpt_total_gb_str`. The checkpoint includes `{python} CheckpointModelIntro.weights_fp16_gb_str` of FP16 model weights, `{python} CheckpointModelIntro.optimizer_state_gb_str` of FP32 optimizer state for momentum and variance, learning rate scheduler state, random number generator state, and the current data loader position. Every GPU in the cluster saves its shard of the checkpoint simultaneously, creating a checkpoint storm that the storage system must absorb without disrupting ongoing training reads.
 
 ::: {.column-margin}
-![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Margin ladder comparing a naive checkpoint storm taking about 23.9 minutes with a ZeRO-3 sharded write taking about 11.2 seconds, annotated as a 128 times reduction."}
+![](images/svg/data_storage_checkpoint_storm_write_time.svg){width="100%" fig-alt="Margin ladder comparing naive replicated checkpoint write time with ZeRO-3 sharded checkpoint write time."}
 
-*Sharding collapses checkpoint-storm write time by two orders of magnitude.*
+*Sharding turns replicated checkpoint storms into sharded writes.*
 :::
 
 ```{python}
@@ -2727,9 +2727,46 @@ Feature stores and model registries, the operational systems that manage feature
 
 The storage hierarchy so far has optimized the training fuel line: large shards, sequential reads, and checkpoint bursts. Retrieval-augmented inference adds a storage workload that belongs in the same chapter because it reverses the access pattern again. A retrieval system first converts documents into vectors that represent semantic meaning, then serves an inference request by finding nearby vectors and returning their source documents as context. Instead of streaming sequential blobs via formats like TFRecord or Parquet, the storage system now traverses high-dimensional vector graphs.
 
+```{python}
+#| echo: false
+#| label: vector-index-footprint-calc
+from mlsysim.fmt import fmt_int, fmt_memory
+
+class VectorIndexFootprint:
+    """Storage footprint for a billion-entry FP32 vector index."""
+
+    # ┌── 1. LOAD ──────────────────────────────────────────
+    embedding_count = 1_000_000_000
+    embedding_dim = 1536
+    bytes_per_element = int(BYTES_FP32.to(byte).magnitude)
+    adjacency_bytes_low = 50
+    adjacency_bytes_high = 100
+
+    # ┌── 2. EXECUTE ───────────────────────────────────────
+    per_vector_storage = embedding_dim * bytes_per_element * byte
+    raw_vector_storage = embedding_count * embedding_dim * bytes_per_element * byte
+    adjacency_overhead_low = embedding_count * adjacency_bytes_low * byte
+    adjacency_overhead_high = embedding_count * adjacency_bytes_high * byte
+    total_low = raw_vector_storage + adjacency_overhead_low
+    total_high = raw_vector_storage + adjacency_overhead_high
+
+    # ┌── 3. GUARD ─────────────────────────────────────────
+    check(round(raw_vector_storage.to(TB).magnitude, 1) == 6.1, "1B 1536-d FP32 vectors should be about 6.1 TB")
+    check(adjacency_overhead_high.to(TB).magnitude < 0.2, "100 bytes/node should add about 0.1 TB, not multiple TB")
+
+    # ┌── 4. OUTPUT ────────────────────────────────────────
+    embedding_dim_str = fmt_int(embedding_dim)
+    bytes_per_element_str = fmt_int(bytes_per_element, commas=False)
+    per_vector_kb_str = fmt_memory(per_vector_storage, unit=KB, precision=1, commas=False)
+    raw_vector_tb_str = fmt_memory(raw_vector_storage, unit=TB, precision=1, commas=False)
+    adjacency_bytes_range_str = f"{fmt_int(adjacency_bytes_low, commas=False)} to {fmt_int(adjacency_bytes_high, commas=False)} bytes"
+    adjacency_overhead_range_str = f"{fmt_memory(adjacency_overhead_low, unit=GB, precision=0, commas=False)} to {fmt_memory(adjacency_overhead_high, unit=GB, precision=0, commas=False)}"
+    total_high_str = fmt_memory(total_high, unit=TB, precision=1, commas=False)
+```
+
 ::: {#psp-data-storage-iops-bottleneck-high-dimensional-search .callout-perspective title="The IOPS bottleneck in high-dimensional search"}
 
-This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth**\index{Sequential Read Bandwidth} to **random-access IOPS**\index{Random-Access IOPS}. Vector databases must traverse high-dimensional graph indexes to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. The index is large because each embedded document chunk occupies substantial storage: a 1,536-dimension embedding in FP32 consumes approximately 6 KB per vector, so a billion-document corpus requires roughly 6 TB of raw vector storage before the graph adjacency lists that enable fast navigation. Those adjacency lists typically add another 50 to 100 bytes per node, pushing the total searchable graph to 8–10 TB for a billion-entry corpus. At that scale, the index no longer fits in DRAM\index{HNSW!DRAM footprint}, which is the design pressure that motivates disk-backed alternatives. In-memory hierarchical navigable small world (HNSW) graph indexes\index{HNSW} make the same graph-navigation idea fast when the index fits in DRAM [@malkov2020hnsw], while hybrid search\index{Hybrid Search} combines vector similarity with lexical or metadata filters and therefore stresses both random vector traversal and document fetches. Disk-backed graph indexes such as DiskANN show how billion-scale search can trade DRAM footprint against SSD-backed graph traversal while targeting high recall and low query latency [@subramanya2019diskann].
+This architectural pattern shifts the primary storage bottleneck from **sequential read bandwidth**\index{Sequential Read Bandwidth} to **random-access IOPS**\index{Random-Access IOPS}. Vector databases must traverse high-dimensional graph indexes to find approximate nearest neighbors across billions of embeddings. The performance is governed by a strict physical constraint: the **Recall vs. Latency vs. Capacity**\index{Recall vs. Latency vs. Capacity} trade-off. Maximizing recall requires traversing a larger portion of the index, driving up IOPS and latency. The index is large because each embedded document chunk occupies substantial storage: a `{python} VectorIndexFootprint.embedding_dim_str`-dimension embedding in FP32 (`{python} VectorIndexFootprint.bytes_per_element_str` bytes per value) consumes approximately `{python} VectorIndexFootprint.per_vector_kb_str` per vector, so a billion-document corpus requires roughly `{python} VectorIndexFootprint.raw_vector_tb_str` of raw vector storage before the graph adjacency lists that enable fast navigation. If those adjacency lists add `{python} VectorIndexFootprint.adjacency_bytes_range_str` per node, they add roughly `{python} VectorIndexFootprint.adjacency_overhead_range_str`, making raw vectors plus minimal graph metadata about `{python} VectorIndexFootprint.total_high_str` at the high end for a billion-entry corpus. Full production indexes can be larger once identifiers, graph levels, allocator overhead, deleted-entry slack, and replication are included, but those are implementation overheads rather than the raw vector-plus-adjacency footprint. At that scale, the index no longer fits in DRAM\index{HNSW!DRAM footprint}, which is the design pressure that motivates disk-backed alternatives. In-memory hierarchical navigable small world (HNSW) graph indexes\index{HNSW} make the same graph-navigation idea fast when the index fits in DRAM [@malkov2020hnsw], while hybrid search\index{Hybrid Search} combines vector similarity with lexical or metadata filters and therefore stresses both random vector traversal and document fetches. Disk-backed graph indexes such as DiskANN show how billion-scale search can trade DRAM footprint against SSD-backed graph traversal while targeting high recall and low query latency [@subramanya2019diskann].
 
 :::
 

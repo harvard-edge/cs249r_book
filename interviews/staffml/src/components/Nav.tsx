@@ -127,6 +127,9 @@ export default function Nav() {
             <div ref={toolsRef} className="relative">
               <button
                 onClick={() => setToolsOpen(!toolsOpen)}
+                aria-haspopup="true"
+                aria-expanded={toolsOpen}
+                aria-controls="nav-tools-menu"
                 className={clsx(
                   "flex items-center gap-1 px-2.5 py-1.5 rounded-md text-[13px] font-medium transition-colors",
                   toolLinks.some(l => isActive(l.href))
@@ -135,10 +138,10 @@ export default function Nav() {
                 )}
               >
                 Tools
-                <ChevronDown className={clsx("w-3 h-3 transition-transform", toolsOpen && "rotate-180")} />
+                <ChevronDown aria-hidden="true" className={clsx("w-3 h-3 transition-transform", toolsOpen && "rotate-180")} />
               </button>
               {toolsOpen && (
-                <div className="absolute top-full left-0 mt-1 w-48 bg-background border border-border rounded-lg shadow-lg py-1 z-50">
+                <div id="nav-tools-menu" className="absolute top-full left-0 mt-1 w-48 bg-background border border-border rounded-lg shadow-lg py-1 z-50">
                   {toolLinks.map(({ href, label, icon: Icon }) => (
                     <Link
                       key={href}
@@ -169,15 +172,18 @@ export default function Nav() {
             onClick={() => setMobileOpen(!mobileOpen)}
             className="md:hidden p-2 text-textTertiary hover:text-textPrimary transition-colors"
             aria-label="Toggle navigation menu"
+            aria-haspopup="true"
+            aria-expanded={mobileOpen}
+            aria-controls="nav-mobile-menu"
           >
-            {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            {mobileOpen ? <X aria-hidden="true" className="w-5 h-5" /> : <Menu aria-hidden="true" className="w-5 h-5" />}
           </button>
         </div>
       </div>
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div className="md:hidden border-t border-border bg-surface px-4 py-3 space-y-1">
+        <div id="nav-mobile-menu" className="md:hidden border-t border-border bg-surface px-4 py-3 space-y-1">
           {primaryLinks.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}

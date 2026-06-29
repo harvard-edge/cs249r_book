@@ -35,8 +35,9 @@ def main():
     print("-" * 65)
     
     for hw in [v100, a100, h100]:
-        # Calculate Compute Time
-        prof = mlsysim.Engine.solve(
+        # Calculate Compute Time (See Vol 1, Data Engineering)
+        from mlsysim.solvers import SingleNodeModel
+        prof = SingleNodeModel().solve(
             model=model,
             hardware=hw,
             batch_size=batch_size,

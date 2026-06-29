@@ -119,7 +119,7 @@ class FleetNumbersHighlights:
 
 ::: {#psp-appendix-fleet-three-numbers .callout-perspective title="Three fleet numbers that matter most"}
 
-* **Bandwidth gap**: NVLink bandwidth within a node is ~`{python} FleetNumbersHighlights.nvlink_to_ib_ratio_mult_str` faster than InfiniBand between nodes. This ratio determines where parallelism boundaries belong---model parallelism within a node, data parallelism across nodes.
+* **Bandwidth gap**: NVLink per-direction bandwidth within a node is ~`{python} FleetNumbersHighlights.nvlink_to_ib_ratio_mult_str` faster than an InfiniBand NDR port between nodes. This ratio determines where parallelism boundaries belong---model parallelism within a node, data parallelism across nodes.
 * **MTBF scaling**: A cluster's mean time between failures is the single-component MTBF divided by the number of components ($1/N$ scaling). At `{python} FleetNumbersHighlights.cl_mega_str` GPUs, expect a failure every `{python} FleetNumbersHighlights.mtbf_100k_min_str`.
 * **Effective utilization**: After MFU, scaling efficiency, and overhead losses compound, a cluster with `{python} FleetNumbersHighlights.cluster_1024_gpus_str` delivers roughly `{python} FleetNumbersHighlights.eff_fraction_pct_str` of its peak FLOP/s as useful training work.
 
@@ -177,7 +177,7 @@ class FleetQuickRef:
 
 | **Category**               | **Number**                                                                                                                                                                                                                                        | **Use**                                                                   |
 |:---------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:--------------------------------------------------------------------------|
-| **Communication**          | NVLink ~`{python} FleetQuickRef.nvlink_ib_ratio_mult_str` IB NDR                                                                                                                                                                                  | Parallelism boundary (in-node vs. cross-node)                             |
+| **Communication**          | NVLink per-direction bandwidth ~`{python} FleetQuickRef.nvlink_ib_ratio_mult_str` IB NDR                                                                                                                                                          | Parallelism boundary (in-node vs. cross-node)                             |
 | **Communication**          | IB NDR ~`{python} FleetQuickRef.ib_ndr_gb_per_s_str`, ~`{python} FleetQuickRef.ib_ndr_us_str` one-way                                                                                                                                             | Inter-node bandwidth and latency                                          |
 | **Compute**                | MFU `{python} FleetQuickRef.mfu_range_str`, $\eta_{\text{scaling}}$ ~`{python} FleetQuickRef.eff_1024_str` @ 1K, ~`{python} FleetQuickRef.eff_8192_str` @ 8K                                                                                      | Effective FLOP/s and scaling sanity checks                                |
 | **Coordination**           | MTBF 8K: ~`{python} FleetQuickRef.mtbf_8k_min_str`; 100K: ~`{python} FleetQuickRef.mtbf_100k_min_str`                                                                                                                                             | Failure expectation and checkpoint cadence                                |
@@ -212,7 +212,7 @@ These relationships are governed by physics or architecture---they will still be
 
 The bandwidth gap between intra-node and inter-node communication is an architectural invariant. Chip-to-chip links (NVLink, ICI) connect through short, wide, dedicated paths on a shared substrate. Inter-node links (InfiniBand, Ethernet) must traverse cables, switches, and protocol stacks. This structural difference guarantees that intra-node bandwidth will always be an order of magnitude higher than inter-node bandwidth.
 
-Currently, NVLink 4.0 provides `{python} FleetInvariantNumbers.nvlink_to_ib_ratio_mult_str` more bandwidth than InfiniBand NDR. Even as both technologies improve, the ratio persists because both are constrained by the same physics: signaling rates, lane counts, and connector density. This ratio is the single most important number for parallelism strategy: any operation requiring more bandwidth than the inter-node link can provide must be confined within a single node.
+Currently, NVLink 4.0 provides `{python} FleetInvariantNumbers.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than an InfiniBand NDR port. Even as both technologies improve, the ratio persists because both are constrained by the same physics: signaling rates, lane counts, and connector density. This ratio is the single most important number for parallelism strategy: any operation requiring more bandwidth than the inter-node link can provide must be confined within a single node.
 
 #### Failure scaling law {.unnumbered}
 
@@ -250,7 +250,7 @@ from mlsysim.physics import calc_mtbf_cluster, calc_failure_probability, calc_ch
 
 class FleetCommNumbers:
     nvlink_to_ib = int((Hardware.Cloud.H100.nvlink.bandwidth_per_direction / Systems.Fabrics.InfiniBand_NDR.bandwidth).to("").magnitude)
-    nvlink_bw_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB / second, precision=0, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, GB / second, precision=0, commas=False)
     pcie5_bw_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.interconnect.bandwidth, GB / second, precision=0, commas=False)
     ib_ndr_bw_gb_per_s_str = fmt_qty(Systems.Fabrics.InfiniBand_NDR.bandwidth, GB / second, precision=0, commas=False)
     ib_hdr_bw_gb_per_s_str = fmt_qty(Systems.Fabrics.InfiniBand_HDR.bandwidth, GB / second, precision=0, commas=False)
@@ -279,7 +279,7 @@ class FleetCommNumbers:
 | **IB HDR (200 Gbps)**  |  `{python} FleetCommNumbers.ib_hdr_bw_gb_per_s_str` | Previous-gen inter-node                     |
 | **RoCE v2 (100 GbE)**  |   `{python} FleetCommNumbers.roce_bw_gb_per_s_str`  | Budget clusters, inference fleets           |
 
-: **Communication Bandwidth Hierarchy**: Bandwidth drops by roughly `{python} FleetCommNumbers.nvlink_to_ib_ratio_mult_str` crossing from intra-node (NVLink) to inter-node (InfiniBand). This ratio determines parallelism placement. {#tbl-fleet-bandwidth-hierarchy}
+: **Communication Bandwidth Hierarchy**: Per-direction bandwidth drops by roughly `{python} FleetCommNumbers.nvlink_to_ib_ratio_mult_str` crossing from intra-node (NVLink) to inter-node (InfiniBand). This ratio compares the H100 NVLink one-way rate against one InfiniBand NDR port and determines parallelism placement. {#tbl-fleet-bandwidth-hierarchy}
 
 @Tbl-fleet-latency-hierarchy shows the one-way latency at each tier. For collective operations on small messages, latency---not bandwidth---is the bottleneck.
 
@@ -1055,7 +1055,7 @@ class FleetSummaryRecap:
 ::: {.callout-takeaways title="Fleet scale changes every constraint"}
 
 * **Three paradigms, one hybrid**: ML fleets combine HPC's tight coupling (for training) with WSC's elastic fault tolerance (for inference), creating a new architectural paradigm that cannot adopt either predecessor's patterns wholesale.
-* **Bandwidth gap**: NVLink provides ~`{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more bandwidth than InfiniBand. This invariant ratio determines parallelism placement: tensor parallelism within nodes, data parallelism across nodes.
+* **Bandwidth gap**: NVLink provides ~`{python} FleetSummaryRecap.nvlink_to_ib_ratio_mult_str` more per-direction bandwidth than InfiniBand NDR. This invariant ratio determines parallelism placement: tensor parallelism within nodes, data parallelism across nodes.
 * **Failures become routine at scale**: Cluster MTBF scales as $1/N$. At 8,192 GPUs, expect a GPU failure about every `{python} FleetSummaryRecap.mtbf_8192_min_str`, with `{python} FleetSummaryRecap.pfail_8192_str` probability over 24 hours. Fault tolerance is not optional---it is a prerequisite for completing any fleet-scale training job.
 * **Compound utilization loss**: After MFU (~`{python} FleetSummaryRecap.mfu_pct_str`), scaling efficiency (~`{python} FleetSummaryRecap.scaling_pct_str`), and goodput after operational overhead (~`{python} FleetSummaryRecap.goodput_pct_str`) compound, a 1,024-GPU cluster delivers ~`{python} FleetSummaryRecap.eff_pct_str` of peak FLOP/s as useful work.
 * **Power density demands liquid cooling**: AI racks consume `{python} FleetSummaryRecap.rack_ratio_mult_str` the power of traditional racks. Air cooling fails above ~`{python} FleetSummaryRecap.air_limit_kw_str` per rack, making liquid cooling a physical requirement for modern AI clusters.

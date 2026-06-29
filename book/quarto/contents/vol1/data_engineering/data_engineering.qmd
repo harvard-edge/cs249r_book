@@ -216,6 +216,8 @@ class FeedingProblem:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     from mlsysim import Models, Hardware, Engine, Datasets, Systems
+    from mlsysim.solvers import DataModel
+    import copy
 
     m = Models.Vision.ResNet50
     h = Hardware.Cloud.A100
@@ -227,18 +229,25 @@ class FeedingProblem:
     # Standard Cloud Disk (e.g. AWS gp3 baseline)
     disk_profile = Systems.Storage.CloudBlockStorageBaseline
 
+    # Custom hardware with disk profile for DataModel
+    h_custom = h.model_copy(update={'storage': disk_profile})
+
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    # Step 1: Throughput using Engine.solve() with 100% efficiency
-    p = Engine.solve(m, h, efficiency=1.0)
+    # Step 1: Throughput using SingleNodeModel().solve() with 100% efficiency
+    from mlsysim.solvers import SingleNodeModel
+
+    p = SingleNodeModel().solve(m, h, efficiency=1.0)
     img_per_sec = p.throughput.to(1 / second).magnitude
 
-    # Step 2: Required bandwidth (bytes/s) = img_per_sec * img_size_bytes
+    # Step 2: Required bandwidth (bytes/s)
     req_bw_bytes_sec = img_per_sec * img_size_bytes
     req_bw = req_bw_bytes_sec * byte / second
-    disk_bw = disk_profile.bandwidth
 
-    # Step 3: Feeding efficiency = disk BW / required BW
-    eta_feed = min((disk_bw / req_bw).to("").magnitude, 1.0)
+    # Step 3: Evaluate data wall using DataModel
+    data_res = DataModel().solve(req_bw, h_custom)
+
+    # Step 4: Feeding efficiency derived from utilization
+    eta_feed = 1.0 / max(data_res.utilization, 1.0)
     feeding_tax_pct = (1.0 - eta_feed) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -248,7 +257,7 @@ class FeedingProblem:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     req_bw_gb_per_s_str = fmt_qty(req_bw, GB / second, precision=1, commas=False)
-    disk_bw_mb_per_s_str = fmt_qty(disk_bw, MB / second, precision=0, commas=False)
+    disk_bw_mb_per_s_str = fmt_qty(data_res.supply_bw, MB / second, precision=0, commas=False)
     feeding_tax_pct_str = fmt_percent(feeding_tax_pct / 100, precision=1, commas=False, style='prose')
     img_per_s_str = fmt_rate(round(img_per_sec), 'img/s', precision=0, commas=True)
 ```
@@ -2318,7 +2327,8 @@ suite.add_expectation(
     gx.expectations.ExpectColumnValuesToBeUnique(column="user_id")
 )
 
-# Categorical validation: detects unexpected values from upstream changes
+# Categorical validation: detects unexpected values from upstream
+# changes
 suite.add_expectation(
     gx.expectations.ExpectColumnDistinctValuesToBeInSet(
         column="country_code",
@@ -2326,7 +2336,8 @@ suite.add_expectation(
     )
 )
 
-# Link the suite to a preconfigured Batch Definition and run validation
+# Link the suite to a preconfigured Batch Definition and run
+# validation
 # (the Batch Definition connects GX to the training_users data asset)
 validation_definition = gx.ValidationDefinition(
     name="training_users_validation",

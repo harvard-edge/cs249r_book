@@ -1316,17 +1316,17 @@ def data_storage_egress_cost(candidate=None):
 
 
 def data_storage_checkpoint_storm_write_time():
-    from mlsysim import Models, Systems, Bparam, BYTES_FP16, BYTES_FP32, GB, THOUSAND, byte, second
+    from mlsysim import Models, Systems, Bparam, BYTES_FP16, BYTES_FP32, GB, byte, second
 
     params_b = Models.Language.Llama2_70B.parameters.m_as(Bparam)
-    nodes = Systems.Clusters.Training_1K.total_accelerators
+    replicas = Systems.Clusters.Training_1K.total_accelerators
     fabric_bw_gbs = Systems.Fabrics.InfiniBand_XDR.bandwidth.m_as(GB / second)
     weights_gb = params_b * BYTES_FP16.m_as(byte)
     gradients_gb = weights_gb
     optimizer_state_gb = params_b * BYTES_FP32.m_as(byte) * 3
     zero3_total_gb = weights_gb + gradients_gb + optimizer_state_gb
     zero3_write_s = zero3_total_gb / fabric_bw_gbs
-    naive_write_s = weights_gb * nodes / fabric_bw_gbs
+    naive_write_s = zero3_total_gb * replicas / fabric_bw_gbs
     ratio_annotation_ladder(
         "vol2/data_storage",
         "data_storage_checkpoint_storm_write_time",
