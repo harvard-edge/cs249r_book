@@ -2,7 +2,7 @@ import asyncio
 import platform
 import subprocess
 import time
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 
 class PowerProfiler:
     """
@@ -17,8 +17,8 @@ class PowerProfiler:
 
     async def _mac_powermetrics_worker(self):
         """
-        Interacts with macOS `powermetrics` API perfectly. 
-        Will quietly fallback to TDP emulation if ran without `sudo` by students.
+        Interacts with macOS `powermetrics` when privilege is available.
+        Falls back to a nominal estimate when classroom machines lack sudo.
         """
         while self.measuring:
             # Pedagogical constraint: powermetrics requires sudo, so we calculate estimated M-Chip draw
@@ -31,7 +31,7 @@ class PowerProfiler:
 
     async def _nvidia_smi_worker(self):
         """
-        Interacts with NVML / nvidia-smi power reporting flawlessly.
+        Interacts with NVML / nvidia-smi power reporting when available.
         """
         while self.measuring:
             try:
@@ -66,15 +66,48 @@ class PowerProfiler:
 
 class PowerMeter:
     """
-    Synchronous Power Telemetry wrap used by the Training Referee cleanly.
+    Synchronous fallback power telemetry used by local EDU runs.
+
+    This is intentionally explicit about being an estimate. Hardware-specific
+    counters can replace it later, but the report schema should already have a
+    stable place for average watts and energy.
     """
-    def __init__(self):
+    def __init__(self, nominal_watts: Optional[float] = None):
         self.start_time = None
+        self.nominal_watts = nominal_watts or default_nominal_watts()
         
     def start(self):
         self.start_time = time.time()
         
     def stop(self) -> float:
-        if not self.start_time: return 0.0
+        return self.stop_report()["energy_joules"]
+
+    def stop_report(self) -> Dict[str, Any]:
+        if not self.start_time:
+            return {
+                "source": "estimated_nominal",
+                "average_watts": 0.0,
+                "duration_seconds": 0.0,
+                "energy_joules": 0.0,
+            }
         duration = time.time() - self.start_time
-        return duration * 15.2 # Standard dummy projection for pedagogical tests
+        return {
+            "source": "estimated_nominal",
+            "average_watts": round(float(self.nominal_watts), 3),
+            "duration_seconds": round(float(duration), 6),
+            "energy_joules": round(float(duration * self.nominal_watts), 6),
+        }
+
+
+def default_nominal_watts() -> float:
+    if platform.system() == "Darwin":
+        return 15.2
+    try:
+        res = subprocess.check_output(
+            ["nvidia-smi", "--query-gpu=power.draw", "--format=csv,noheader,nounits"],
+            stderr=subprocess.DEVNULL,
+        )
+        first = res.decode("utf-8").strip().splitlines()[0]
+        return float(first)
+    except Exception:
+        return 65.0
