@@ -328,7 +328,8 @@ class FormatCommand:
     # Lists  (native — ported from fix_bullet_spacing.py)
     # ------------------------------------------------------------------
 
-    _LIST_ITEM_RE = re.compile(r"^(\*   |-   |- |\d+\.\s\s)")
+    _LIST_ITEM_RE = re.compile(r"^\s*(?:[-*+]\s+\S|\d+[.)]\s+\S)")
+    _BOLD_MARKDOWN_RE = re.compile(r"(?<!\\)\*\*[^*\n]+\*\*")
 
     def _run_lists(self, file_args: List[str], check_only: bool) -> bool:
         """Fix list spacing: blank line before lists, tight consecutive items."""
@@ -365,10 +366,16 @@ class FormatCommand:
         return bool(cls._LIST_ITEM_RE.match(line))
 
     @classmethod
+    def _has_bold_markdown(cls, line: str) -> bool:
+        """Check if a line contains Markdown bold text."""
+        return bool(cls._BOLD_MARKDOWN_RE.search(line))
+
+    @classmethod
     def _fix_list_spacing(cls, content: str) -> str:
         """Fix list spacing in content.
 
         1. Add blank line before lists when preceded by paragraph text ending with ':'
+           or a bold lead-in paragraph
         2. Remove blank lines between consecutive list items (tight lists)
 
         Skips code blocks.
@@ -398,7 +405,7 @@ class FormatCommand:
             if i < len(lines) - 1:
                 next_line = lines[i + 1]
                 if (
-                    stripped.endswith(":")
+                    (stripped.endswith(":") or cls._has_bold_markdown(stripped))
                     and not stripped.startswith("```")
                     and not stripped.startswith("#|")
                     and "://" not in stripped
