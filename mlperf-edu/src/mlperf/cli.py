@@ -963,7 +963,7 @@ def main():
         'train',
         help="Train workloads (use --all for entire suite)"
     )
-    train_parser.add_argument('--all', action='store_true', help="Train all 16 workloads")
+    train_parser.add_argument('--all', action='store_true', help="Train all legacy workloads")
     train_parser.add_argument('--division', dest='division_filter', type=str,
                              choices=['cloud', 'edge', 'tiny', 'agent'],
                              help="Filter to a specific division")

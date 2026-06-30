@@ -13,6 +13,7 @@ Smoke gate (Q4 in Dean's iter-10 spec):
 from __future__ import annotations
 
 import os
+import platform
 import time
 
 import torch
@@ -21,6 +22,15 @@ import torch.multiprocessing as mp
 import torch.nn as nn
 
 from reference.cloud.micro_dlrm import MicroDLRMWhiteBox
+
+
+def _set_default_gloo_interface() -> None:
+    if os.environ.get("GLOO_SOCKET_IFNAME"):
+        return
+    if platform.system() == "Darwin":
+        os.environ["GLOO_SOCKET_IFNAME"] = "lo0"
+    elif platform.system() == "Linux":
+        os.environ["GLOO_SOCKET_IFNAME"] = "lo"
 
 
 def _build_inputs(batch: int, seed: int = 42) -> tuple:
@@ -43,6 +53,7 @@ def _ddp_worker(rank: int, world_size: int,
     """One DDP rank: init Gloo, build model, run n_steps, push final loss."""
     os.environ["MASTER_ADDR"] = "127.0.0.1"
     os.environ["MASTER_PORT"] = "29500"
+    _set_default_gloo_interface()
 
     dist.init_process_group(backend="gloo", init_method=init_method,
                               rank=rank, world_size=world_size)

@@ -1206,7 +1206,6 @@ class MemoryBandwidthLatencyRecap:
 **Problem**: Generating one token from Llama-3 70B (`{python} TokenLatencyScenario.weight_gb_str` of FP16 weights) requires both arithmetic and a full weight load from HBM. Assuming capacity has been solved (by sharding, a higher-capacity device, or quantization), which dominates the per-token time on an H100: compute or memory transfer?
 
 1. **Compute Time**\index{Latency!compute time}: Each token requires $2 \times 70 \times 10^9 = 1.4 \times 10^{11}$ floating-point operations. At `{python} TokenLatencyScenario.h100_fp16_tflop_per_s_str` of FP16/BF16 Tensor Core peak throughput, the arithmetic takes `{python} TokenLatencyScenario.t_comp_math`.
-
 2. **Memory Time**\index{Latency!memory time}:
 
 Loading `{python} TokenLatencyScenario.weight_gb_str` of weights from HBM at `{python} MemoryBandwidthLatencyRecap.h100_bw_tb_per_s_str` takes `{python} TokenLatencyScenario.t_mem_math`.
@@ -3394,13 +3393,9 @@ The discussion so far has focused on how data moves within the node (HBM to Tens
 For language model training, the training throughput determines the data consumption rate. If the cluster processes 500,000 tokens per second and each token requires 2 bytes of input data (token ID), the raw data ingestion rate is only 1 MB/s, which is trivially handled by any storage system. However, the actual I/O demand is much larger because training data must be tokenized, shuffled, batched, and transferred to GPU memory. A realistic data pipeline turns raw bytes into GPU-ready batches through five ordered stages:
 
 1. **Reading**\index{Data Loading!reading}: Raw text is read from a distributed file system (NFS, Lustre, or cloud object storage like S3) into host memory. For large datasets (terabytes of text), the data is typically stored in a binary format (TFRecord, WebDataset, or memory-mapped files) to minimize parsing overhead.
-
 2. **Preprocessing**\index{Data Loading!preprocessing}: Tokenization, sequence packing, and random cropping are performed on the host CPU. These operations are parallelized across multiple CPU cores using data loader workers (typically 4--8 workers per GPU).
-
 3. **Batching**\index{Data Loading!batching}: Individual sequences are assembled into microbatches, padded to uniform length, and organized into tensors.
-
 4. **Transfer**\index{Data Loading!host-to-GPU transfer}: The assembled batch is transferred from host DRAM to GPU HBM over PCIe. For tokenized language modeling, this transfer is usually small because token IDs and masks are compact; multimodal batches or pipelines that materialize FP16 embeddings on the host can reach 100--200 MB and take milliseconds at PCIe Gen5 bandwidth.
-
 5. **Prefetching**\index{Prefetching}: While the GPU processes the current batch, the data loader prefetches and preprocesses the next 2--4 batches in parallel, ensuring that the next batch is already in GPU HBM when the current computation completes.
 
 The critical design goal is to make the data pipeline invisible to the GPU: the prefetching must be deep enough that a batch is always ready when the GPU needs it, regardless of transient variations in storage bandwidth or preprocessing time. When this pipeline is well-tuned, the GPU utilization is limited only by compute and communication, not by data loading. When it is poorly tuned, the GPU can spend 10--30 percent of its time waiting for data, which directly reduces training throughput.

@@ -16,7 +16,6 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
-import os
 import secrets
 import subprocess
 from dataclasses import dataclass, field
@@ -25,6 +24,9 @@ from typing import Any
 
 
 SCHEMA_VERSION = "mlperf-edu-provd/1.0"
+PORTABLE_SIGNATURE_ALGO = "sha256-merkle-root-v1"
+PORTABLE_SIGNATURE_KEY_ID = "mlperf-edu-public-v1"
+PORTABLE_SIGNATURE_DOMAIN = "mlperf-edu-provd-signature-v1"
 
 
 # ---------- canonical encoders ----------
@@ -59,11 +61,16 @@ def _git_leaf(repo_root: Path) -> dict:
     """Leaf binding source-tree state (sha + dirty + tree hash)."""
     try:
         sha = subprocess.check_output(
-            ["git", "rev-parse", "HEAD"], cwd=repo_root, text=True
+            ["git", "rev-parse", "HEAD"],
+            cwd=repo_root,
+            text=True,
+            stderr=subprocess.DEVNULL,
         ).strip()
         dirty = subprocess.run(
             ["git", "diff-index", "--quiet", "HEAD", "--"],
             cwd=repo_root,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
         ).returncode != 0
     except (subprocess.CalledProcessError, FileNotFoundError):
         return {"git_sha": None, "git_dirty": True,
@@ -73,7 +80,10 @@ def _git_leaf(repo_root: Path) -> dict:
     # Hash the contents of every tracked file; not a real git tree hash
     # but a portable equivalent that doesn't need libgit2.
     files = subprocess.check_output(
-        ["git", "ls-files"], cwd=repo_root, text=True
+        ["git", "ls-files"],
+        cwd=repo_root,
+        text=True,
+        stderr=subprocess.DEVNULL,
     ).splitlines()
     tree_h = hashlib.sha256()
     for f in sorted(files):
@@ -85,7 +95,12 @@ def _git_leaf(repo_root: Path) -> dict:
 
     patch_hash = None
     if dirty:
-        diff = subprocess.check_output(["git", "diff"], cwd=repo_root, text=True)
+        diff = subprocess.check_output(
+            ["git", "diff"],
+            cwd=repo_root,
+            text=True,
+            stderr=subprocess.DEVNULL,
+        )
         patch_hash = _sha256(diff.encode())
 
     return {
@@ -173,7 +188,7 @@ def merkle_root(leaves: dict) -> str:
     return "sha256:" + _sha256(b"\x00".join(parts))
 
 
-def _signing_key() -> bytes:
+def _legacy_signing_key() -> bytes:
     """HMAC key for tamper-evident signing.
 
     Local-only, per-install. Auto-generated on first use. Sufficient for
@@ -187,9 +202,19 @@ def _signing_key() -> bytes:
     return key_path.read_bytes()
 
 
-def sign_manifest(merkle: str, key_id: str = "student-local-2026") -> dict:
-    sig = hmac.new(_signing_key(), merkle.encode(), hashlib.sha256).hexdigest()
-    return {"algo": "hmac-sha256", "key_id": key_id, "signature": sig}
+def _portable_signature(merkle: str) -> str:
+    return _sha256(f"{PORTABLE_SIGNATURE_DOMAIN}:{merkle}".encode())
+
+
+def sign_manifest(merkle: str, key_id: str = PORTABLE_SIGNATURE_KEY_ID) -> dict:
+    """Return a portable, public-verifiable manifest signature.
+
+    MLPerf EDU manifests are meant to be graded on machines that do not share a
+    student-local secret. The Merkle root binds the artifacts; this signature is
+    a domain-separated checksum over that root so third-party graders can verify
+    it without a private key.
+    """
+    return {"algo": PORTABLE_SIGNATURE_ALGO, "key_id": key_id, "signature": _portable_signature(merkle)}
 
 
 # ---------- public API ----------
@@ -254,7 +279,7 @@ def build_provd(*, workload: str, scenario: str, division: str,
     return ProvdManifest(
         workload=workload, scenario=scenario, division=division,
         leaves=leaves, merkle_root=root, signature=sign_manifest(root),
-        utc=datetime.datetime.utcnow().strftime("%Y-%m-%dT%H:%M:%SZ"),
+        utc=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         nonce=secrets.token_hex(8),
     )
 
@@ -289,6 +314,20 @@ def verify_provd(manifest_path: str | Path,
         res.add("source_tree.git_sha", ok,
                 f"claimed {leaves['source_tree']['git_sha'][:12] if leaves['source_tree']['git_sha'] else 'None'}, "
                 f"current HEAD {actual_git['git_sha'][:12] if actual_git['git_sha'] else 'None'}")
+        if leaves["source_tree"].get("tree_hash"):
+            res.add(
+                "source_tree.tree_hash",
+                actual_git.get("tree_hash") == leaves["source_tree"].get("tree_hash"),
+                f"claimed {str(leaves['source_tree'].get('tree_hash'))[:18]}, "
+                f"recomputed {str(actual_git.get('tree_hash'))[:18]}",
+            )
+        if leaves["source_tree"].get("git_dirty"):
+            res.add(
+                "source_tree.patch_hash",
+                actual_git.get("patch_hash") == leaves["source_tree"].get("patch_hash"),
+                f"claimed {str(leaves['source_tree'].get('patch_hash'))[:18]}, "
+                f"recomputed {str(actual_git.get('patch_hash'))[:18]}",
+            )
 
         # Closed-division rejection of dirty trees (Dean's iter-5 sign-off).
         # Open division allows dirty trees with patch_hash as a courtesy.
@@ -346,6 +385,9 @@ def verify_provd(manifest_path: str | Path,
         res.add("measurement.report_canonical_sha256",
                 actual == m["report_canonical_sha256"],
                 f"recomputed {actual[:18]}")
+    elif m.get("report_path"):
+        res.add("measurement.report_canonical_sha256", False,
+                f"missing: {m['report_path']}")
 
     # Merkle root over leaves.
     recomputed_root = merkle_root(leaves)
@@ -353,12 +395,21 @@ def verify_provd(manifest_path: str | Path,
             f"recomputed {recomputed_root[:18]} vs claimed {manifest['merkle_root'][:18]}")
 
     # Signature.
-    sig_ok = hmac.compare_digest(
-        manifest["signature"]["signature"],
-        hmac.new(_signing_key(), manifest["merkle_root"].encode(),
-                 hashlib.sha256).hexdigest(),
-    )
-    res.add("signature", sig_ok,
-            "signed by local install" if sig_ok else "INVALID signature")
+    signature = manifest.get("signature") or {}
+    algo = signature.get("algo")
+    if algo == PORTABLE_SIGNATURE_ALGO:
+        expected = _portable_signature(manifest["merkle_root"])
+        sig_ok = hmac.compare_digest(str(signature.get("signature", "")), expected)
+        detail = "portable signature" if sig_ok else "INVALID portable signature"
+    elif algo == "hmac-sha256":
+        sig_ok = hmac.compare_digest(
+            str(signature.get("signature", "")),
+            hmac.new(_legacy_signing_key(), manifest["merkle_root"].encode(), hashlib.sha256).hexdigest(),
+        )
+        detail = "legacy local install signature" if sig_ok else "INVALID legacy local signature"
+    else:
+        sig_ok = False
+        detail = f"unsupported signature algorithm: {algo}"
+    res.add("signature", sig_ok, detail)
 
     return res

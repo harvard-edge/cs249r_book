@@ -1,0 +1,76 @@
+name: 'MLPerf EDU - Validate (Dev)'
+
+# Fast validation for the educational MLPerf harness. The actual CI job runs
+# the short smoke suite; longer coverage/max expansions are checked as
+# dry-runs so fork PRs get useful feedback without multi-minute benchmark jobs.
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'mlperf-edu/**'
+      - '.github/workflows/mlperf-edu-validate-dev.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'mlperf-edu/**'
+      - '.github/workflows/mlperf-edu-validate-dev.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  MLPERF_EDU_ROOT: mlperf-edu
+
+jobs:
+  validate:
+    name: 'Validate CLI, reports, and smoke suite'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+          cache-dependency-path: '${{ env.MLPERF_EDU_ROOT }}/pyproject.toml'
+
+      - name: Install MLPerf EDU
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+
+      - name: Run unit tests
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: pytest
+
+      - name: Check local environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: mlperf doctor
+
+      - name: Run smoke validation
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: mlperf validate smoke --output-dir submissions/ci-smoke
+
+      - name: Check longer validation expansion
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          mlperf validate coverage --dry-run
+          mlperf validate max --dry-run
+          mlperf validate release --dry-run
+
+      - name: Upload smoke reports
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mlperf-edu-smoke-reports
+          path: ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-smoke/**
