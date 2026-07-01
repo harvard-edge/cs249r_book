@@ -6581,6 +6581,7 @@ class ValidateCommand:
         "callout-notebook",
         "callout-perspective",
         "callout-principle",
+        "callout-research-questions",
         "callout-takeaways",
         "callout-theorem",
         "callout-tip",
