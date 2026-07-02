@@ -736,7 +736,14 @@ class BertRoofline:
 
     # Is it compute bound now?
     is_compute_bound_b32 = p_b32.bottleneck == "Compute"
-    perf_b32 = (p_b32.throughput * m_bert.inference_flops).to(TFLOP / second)
+    # Step 4 displays the compute-bound identity perf = util x peak using the FP16
+    # Tensor Core peak from Step 1 (312 TFLOP/s), matching "$$GPU utilization ~ 85%$$".
+    # Compute the displayed value from that identity, NOT p_b32.throughput: p_b32 is
+    # solved at fp32 (peak ~19.5 TFLOP/s), so throughput x flops gave 16.5 TFLOP/s,
+    # contradicting the displayed "85% x 312". This mirrors the Step 3 note above.
+    util_peak = 0.85
+    perf_b32 = (util_peak * h_a100.compute.peak_flops).to(TFLOP / second)
+    check(perf_b32 > perf_b1, "Step 4: batch-32 achievable perf must exceed batch-1 perf; guards the FP16/FP32 peak mismatch (old value 16.5 < 102).")
 
     peak_flops = h_a100.compute.peak_flops
     peak_bw = h_a100.memory.bandwidth
@@ -757,6 +764,8 @@ class BertRoofline:
     bert_ai_b1_str = fmt_arithmetic_intensity((m_bert.inference_flops / p_b1.memory_footprint), unit=flop / byte, precision=0, commas=False)
     bert_perf_b1_tflop_per_s_str = fmt_flop_rate(perf_b1, unit=TFLOP / second, commas=False)
     bert_util_b1_str = fmt_percent(util_b1 / 100, precision=1, commas=False, style='prose')
+    # "%"-glyph math form for the Step-3 worked-calc line; the prose twin (bert_util_b1_str) keeps the word.
+    bert_util_b1_pct_math = fmt_math(rf"{util_b1:.1f}\%")
 
     bert_batch32_gflop_value_str = fmt_magnitude(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
     bert_batch32_gflop_str = fmt_flops(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
@@ -772,8 +781,8 @@ class BertRoofline:
     batch1_str = fmt(batch_1, precision=0, commas=False)
     batch32_str = fmt(batch_32, precision=0, commas=False)
     batch32_mult_str = fmt_multiple(batch_32, precision=0, commas=False)
-    util_peak = 0.85
-    utilization_peak_str = fmt_percent(util_peak, precision=0, commas=False, style='prose')
+    # "%"-glyph math form for the Step-4 worked-calc line; the prose twin (utilization_peak_pct_str) keeps the word.
+    utilization_peak_pct_math = fmt_math(rf"{util_peak * 100:.0f}\%")
     utilization_peak_pct_str = fmt_percent(util_peak, precision=0, commas=False, style='prose')
 
     a100_fp16_tflop_per_s_str = fmt_flop_rate(peak_flops, unit=TFLOP / second, precision=0, commas=False)
@@ -809,7 +818,7 @@ Since `{python} BertRoofline.bert_ai_b1_str` < `{python} BertRoofline.a100_ridge
 
 Achievable perf = `{python} BertRoofline.bert_ai_b1_str` $\times$ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str`
 
-GPU utilization = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str` ÷ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_util_b1_str`
+GPU utilization = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str` ÷ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_util_b1_pct_math`
 
 **Step 4**: Optimization via batching.
 Increase batch size to `{python} BertRoofline.batch32_str`:
@@ -820,7 +829,7 @@ Increase batch size to `{python} BertRoofline.batch32_str`:
 
 Since `{python} BertRoofline.bert_ai_b32_str` > `{python} BertRoofline.a100_ridge_str`, batch = `{python} BertRoofline.batch32_str` is compute bound:
 
-Achievable perf ≈ `{python} BertRoofline.utilization_peak_str` $\times$ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_perf_b32_tflop_per_s_str`
+Achievable perf ≈ `{python} BertRoofline.utilization_peak_pct_math` $\times$ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_perf_b32_tflop_per_s_str`
 $$\text{GPU utilization} \approx 85\%$$
 
 **Systems insight**: Batch size transforms memory-bound inference (`{python} BertRoofline.bert_util_b1_str` utilization) into compute-bound inference (`{python} BertRoofline.utilization_peak_pct_str` utilization). Batching, however, increases latency because the system must wait to accumulate requests. This is the fundamental throughput-latency trade-off that MLPerf scenarios capture: SingleStream (batch = 1, latency-optimized) vs. Offline (maximum batch, throughput-optimized).
