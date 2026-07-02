@@ -1225,7 +1225,7 @@ Loading `{python} TokenLatencyScenario.weight_gb_str` of weights from HBM at `{p
 # └─────────────────────────────────────────────────────────────────────────────
 import mlsysim
 from mlsysim.solvers import ServingModel
-from mlsysim.fmt import fmt_bandwidth, fmt_flop_rate, fmt_int, fmt_multiple, fmt_params, fmt_power
+from mlsysim.fmt import check, fmt_bandwidth, fmt_flop_rate, fmt_int, fmt_multiple, fmt_params, fmt_power
 
 class H200Comparison:
     h_h100 = mlsysim.Hardware.Cloud.H100
@@ -1248,7 +1248,16 @@ class H200Comparison:
     itl_h100 = res_h100.itl
     itl_h200 = res_h200.itl
     speedup = (itl_h100 / itl_h200).to_base_units().magnitude
+    # Bracketing estimate: decode is memory-bound, so the solver's ITL speedup
+    # should land on the raw HBM bandwidth ratio.
+    bw_ratio = (h200.memory.bandwidth / h_h100.memory.bandwidth).to_base_units().magnitude
+    check(
+        abs(speedup - bw_ratio) / bw_ratio < 0.10,
+        "Solver ITL speedup should track the HBM bandwidth ratio for memory-bound decode",
+    )
     speedup_mult_str = fmt_multiple(speedup, precision=1, commas=True)
+    h100_bw_tb_per_s_str = fmt_bandwidth(h_h100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
+    h200_bw_tb_per_s_str = fmt_bandwidth(h200.memory.bandwidth, unit=TB / second, precision=1, commas=False)
 ```
 
 That bandwidth floor also gives us a clean way to compare adjacent hardware generations: if compute stays fixed while HBM capacity and bandwidth improve, decode latency should move with the memory system rather than the arithmetic units.
@@ -1257,9 +1266,9 @@ That bandwidth floor also gives us a clean way to compare adjacent hardware gene
 
 To understand *why* the "memory wall" is the primary constraint for modern large language models (LLMs)\index{LLM!inference, memory bottleneck}, we compare the NVIDIA H100 against its successor, the H200\index{NVIDIA!H200, memory wall}. While both chips share the same compute cores (same peak TFLOP/s), the H200 provides `{python} H200Comparison.bw_gain_mult_str` higher memory bandwidth and `{python} H200Comparison.cap_gain_mult_str` more HBM capacity.
 
-This LEGO comparison uses a Llama 3 model with `{python} H200Comparison.model_params_str` parameters, sequence length `{python} H200Comparison.seq_len_str`, and batch size `{python} H200Comparison.batch_size_str`; the reported speedup is the serving solver's inter-token latency estimate, not a raw bandwidth ratio alone.
+This LEGO comparison uses a Llama 3 model with `{python} H200Comparison.model_params_str` parameters, sequence length `{python} H200Comparison.seq_len_str`, and batch size `{python} H200Comparison.batch_size_str`; the reported speedup is the serving solver's inter-token latency estimate, not a raw bandwidth ratio alone. A napkin estimate brackets that solver number: decode spends `{python} TokenLatencyScenario.dominance_str` of its per-token time on the weight load, so the expected gain is the HBM bandwidth ratio, `{python} H200Comparison.h200_bw_tb_per_s_str` $\div$ `{python} H200Comparison.h100_bw_tb_per_s_str` $\approx$ `{python} H200Comparison.bw_gain_mult_str`.
 
-**Systems insight**: For LLM decoding, the H200 is `{python} H200Comparison.speedup_mult_str` faster than the H100 despite having identical compute power. This proves that for large-scale autoregressive models, the "Wall" is the memory interface, not the arithmetic logic.
+**Systems insight**: For LLM decoding, the H200 is `{python} H200Comparison.speedup_mult_str` faster than the H100 despite having identical compute power; the solver's estimate lands almost exactly on the bandwidth ratio because decode is bandwidth-bound. This proves that for large-scale autoregressive models, the "Wall" is the memory interface, not the arithmetic logic.
 
 :::
 

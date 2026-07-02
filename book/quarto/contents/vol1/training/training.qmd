@@ -4065,7 +4065,7 @@ Memory savings alone do not guarantee correct or stable training. FP16's limited
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt, MarkdownStr, fmt_int, fmt_time, fmt_usd
+from mlsysim.fmt import fmt, MarkdownStr, fmt_int, fmt_multiple, fmt_time, fmt_usd
 
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Goal: Loss-scaling exponent, gradient range, learning rate, and V100
@@ -4082,6 +4082,8 @@ class MixedPrecisionLossScaling:
     fp16_cost_usd = 28_000
     savings_usd = fp32_cost_usd - fp16_cost_usd
     savings_days = (fp32_weeks - fp16_weeks) * 7
+    savings_weeks = fp32_weeks - fp16_weeks
+    wallclock_speedup = fp32_weeks / fp16_weeks
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     loss_scale_eqn_str = fmt_math(f"2^{{{loss_scale_exp}}}")
@@ -4095,6 +4097,8 @@ class MixedPrecisionLossScaling:
     fp16_cost_str = fmt_usd(fp16_cost_usd, precision=0, commas=True)
     savings_cost_str = fmt_usd(savings_usd, precision=0, commas=True)
     savings_days_str = fmt_time(savings_days, 'day', precision=1, commas=False, style='word')
+    savings_weeks_str = fmt_time(savings_weeks, 'week', precision=1, commas=False, style='word')
+    wallclock_speedup_mult_str = fmt_multiple(wallclock_speedup, precision=1, commas=False)
 ```
 
 Three implementation details make mixed precision viable:
@@ -4149,13 +4153,15 @@ class MixedPrecisionSpeedup:
 
 - FP32 throughput: ~`{python} MixedPrecisionSpeedup.throughput_fp32_samples_per_s_str`
 - FP16 throughput: ~`{python} MixedPrecisionSpeedup.throughput_fp16_samples_per_s_str`
-- Speedup: `{python} MixedPrecisionSpeedup.v100_mp_speedup_mult_str` faster training
+- Speedup: `{python} MixedPrecisionSpeedup.throughput_fp16_samples_per_s_str` ÷ `{python} MixedPrecisionSpeedup.throughput_fp32_samples_per_s_str` ≈ `{python} MixedPrecisionSpeedup.v100_mp_speedup_mult_str` faster training
 
 Cost impact on a cluster of `{python} MixedPrecisionLossScaling.n_v100_gpus_str`:
 
-- FP32: `{python} MixedPrecisionLossScaling.fp32_cost_str` for `{python} MixedPrecisionLossScaling.fp32_weeks_str`
-- FP16: `{python} MixedPrecisionLossScaling.fp16_cost_str` for `{python} MixedPrecisionLossScaling.fp16_weeks_str`
-- Savings: `{python} MixedPrecisionLossScaling.savings_cost_str` and `{python} MixedPrecisionLossScaling.savings_days_str` faster iteration
+- Assumed FP32 billing: `{python} MixedPrecisionLossScaling.fp32_cost_str` for `{python} MixedPrecisionLossScaling.fp32_weeks_str`
+- Assumed FP16 billing: `{python} MixedPrecisionLossScaling.fp16_cost_str` for `{python} MixedPrecisionLossScaling.fp16_weeks_str`
+- Wall-clock gain: `{python} MixedPrecisionLossScaling.fp32_weeks_str` ÷ `{python} MixedPrecisionLossScaling.fp16_weeks_str` ≈ `{python} MixedPrecisionLossScaling.wallclock_speedup_mult_str`, below the `{python} MixedPrecisionSpeedup.v100_mp_speedup_mult_str` throughput speedup, since the assumed schedule includes work the FP16 kernels do not accelerate
+- Time saved: `{python} MixedPrecisionLossScaling.fp32_weeks_str` − `{python} MixedPrecisionLossScaling.fp16_weeks_str` = `{python} MixedPrecisionLossScaling.savings_weeks_str` (`{python} MixedPrecisionLossScaling.savings_days_str`)
+- Cost saved: `{python} MixedPrecisionLossScaling.fp32_cost_str` − `{python} MixedPrecisionLossScaling.fp16_cost_str` = `{python} MixedPrecisionLossScaling.savings_cost_str`
 
 **Quality impact**: minimal. GPT-2 perplexity stays within 0.5 percent of the FP32 baseline, well within noise margin.
 
