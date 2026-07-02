@@ -6162,30 +6162,15 @@ class SingleNodeInterconnect:
 
 Within a single node, GPUs communicate via high-bandwidth interconnects like NVLink\index{NVLink!GPU interconnect}\index{NVLink!gradient synchronization}[^fn-nvlink-training] (up to `{python} SingleNodeInterconnect.nvlink_h100_gb_per_s_str` on H100-class systems), making gradient synchronization and activation transfers fast. Data parallelism transfers gradients, which are proportional to model size. Model parallelism transfers activations, proportional to batch size times hidden dimension, at every partition boundary. The 10--50$\times$ bandwidth advantage of NVLink over PCIe makes both strategies practical within a node. This intra-node parallelism forms the building block for larger distributed systems. Choosing between data and model parallelism requires comparing how each splits compute, memory, and communication.
 
-::: {#nbk-training-data-vs-model-parallelism .callout-notebook title="Data vs. model parallelism"}
+::: {#psp-training-data-vs-model-parallelism .callout-perspective title="Data vs. model parallelism"}
 
-**Problem**: How should a model that is too big or too slow be split across multiple devices?
+A model that is too big or too slow for a single device must be split across multiple devices. For a model with parameters $P$ and batch size $B$ trained across $N_{\text{GPU}}$ GPUs, the split can divide either the batch or the weights.
 
-**Scenario**: Training a model with parameters $P$ and batch size $B$ across $N_{\text{GPU}}$ GPUs.
+**Data parallelism (split the batch)**: Compute $(O)$ splits by $N_{\text{GPU}}$, with each GPU processing $1/N_{\text{GPU}}$ of the batch, but the memory footprint is replicated: every GPU must hold the full model weights $\theta$ ($P$ parameters). Communication consists of gradients, with size $\propto P$, exchanged at the end of the backward pass. The bottleneck arrives when the model size $P$ exceeds a single GPU's memory.
 
-**Data parallelism (split the batch)**
+**Model parallelism (split the weights)**: Compute $(O)$ again splits by $N_{\text{GPU}}$, with each accelerator computing part of the layer, and the memory footprint splits with it: each GPU holds a shard of $\theta$ containing approximately $P/N_{\text{GPU}}$ parameters. Communication consists of activations, with size $\propto B \times d$, exchanged at every layer boundary. The bottleneck arrives when the activation size is large, because the communication frequency is high.
 
-*   **Compute $(O)$**: Split by $N_{\text{GPU}}$ (each GPU does $1/N_{\text{GPU}}$ of the batch).
-*   **Memory footprint**: Replicated. Every GPU must hold the full model weights $\theta$ ($P$ parameters).
-*   **Communication**: Gradients. Size $\propto P$. Occurs at end of backward pass.
-*   **Bottleneck**: When Model Size $P >$ GPU Memory.
-
-**Model parallelism (split the weights)**
-
-*   **Compute $(O)$**: Split by $N_{\text{GPU}}$ (each accelerator computes part of the layer).
-*   **Memory footprint**: Split. Each GPU holds a shard of $\theta$ containing approximately $P/N_{\text{GPU}}$ parameters.
-*   **Communication**: Activations. Size $\propto B \times d$. Occurs at every layer boundary.
-*   **Bottleneck**: When Activation Size is large (high communication frequency).
-
-**Systems insight**:
-
-*   Use data parallelism\index{Data Parallelism!selection rule} when the model fits in memory but training is too slow.
-*   Use model parallelism\index{Model Parallelism!selection rule} when the model is too big to fit in a single GPU's memory.
+**Systems insight**: Use data parallelism\index{Data Parallelism!selection rule} when the model fits in memory but training is too slow; use model parallelism\index{Model Parallelism!selection rule} when the model is too big to fit in a single GPU's memory.
 
 :::
 
