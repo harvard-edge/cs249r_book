@@ -121,6 +121,8 @@ class BlackFridayCalc:
 
 :::
 
+@Fig-tail-latency-explosion shows that latency remains manageable at moderate utilization and then rises rapidly as the system approaches saturation; this is *why* production systems reserve headroom rather than planning for a permanently saturated accelerator\index{Tail Latency!utilization threshold} (p99). @Sec-appdx-data-foundations-distributions-long-tail-901f gives a mathematical treatment of long-tailed distributions and why p99 latency dominates the user experience at scale. The curve is a simple queueing approximation intended for intuition rather than a specific workload.
+
 ::: {#fig-tail-latency-explosion fig-env="figure" fig-pos="htb" fig-cap="**The Tail Latency Explosion**: Request latency vs. serving utilization $\rho_{\text{serv}}$. While mean latency (blue) remains moderate, tail latency (red, p99) explodes once utilization passes the knee at ~70 percent. This uses the simple M/M/1 approximation introduced later in @sec-model-serving-queuing-theory-tail-latency-29a6 (p99 ≈ 4.6$\times$ mean), so the curve is illustrative rather than workload-specific." fig-alt="Line plot showing latency growing with serving utilization. Blue line (mean) rises gradually then steeply. Red line (Tail, p99) curves upward sharply at 70 percent utilization. Shaded regions indicate safe zone and danger zone."}
 
 ```{python}
@@ -207,8 +209,6 @@ plt.close()
 
 :::
 
-@Fig-tail-latency-explosion shows that latency remains manageable at moderate utilization and then rises rapidly as the system approaches saturation; this is *why* production systems reserve headroom rather than planning for a permanently saturated accelerator\index{Tail Latency!utilization threshold} (p99). @Sec-appdx-data-foundations-distributions-long-tail-901f gives a mathematical treatment of long-tailed distributions and why p99 latency dominates the user experience at scale. The curve is a simple queueing approximation intended for intuition rather than a specific workload.
-
 Beyond the technical limits of latency, the economics of serving have undergone a radical transformation. As models become more efficient and hardware becomes more specialized, the cost of "intelligence" is collapsing[^fn-jevons-paradox]. Facebook's experience at fleet scale illustrates the magnitude of this serving cost problem.
 
 [^fn-jevons-paradox]: **Jevons Paradox**\index{Jevons Paradox!inference demand}: William Stanley Jevons observed in 1865 that efficiency improvements in coal-powered steam engines increased total coal consumption by making steam power economically viable for applications previously too costly [@jevons1865coal]. The same dynamic can apply to AI inference: each 10$\times$ cost reduction opens application classes that were economically infeasible at the previous price point, expanding aggregate demand by more than the efficiency gain. This is why cheaper inference can increase, not decrease, total GPU fleet demand---efficiency and demand are often complements in AI, not substitutes.
@@ -250,7 +250,7 @@ The same serving-economics pressure appears in public API prices. To grasp the s
 import numpy as np
 from book.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.35))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
 # =============================================================================
 # DATA: Representative input-token pricing snapshots over time
 # =============================================================================
@@ -882,6 +882,10 @@ Typical hardware includes mobile NPUs (Apple Neural Engine, Qualcomm Hexagon) an
 
 In TinyML serving\index{Serving!TinyML}\index{TinyML!bare-metal serving}, the model is compiled into the firmware of a microcontroller, the extreme end of the deployment spectrum @sec-ml-systems-tinyml-ubiquitous-sensing-scale-a67b introduced as ubiquitous sensing at microwatt power budgets. There is no operating system or dynamic memory allocator. "Serving" is a tight loop reading sensors and invoking the interpreter. Optimization focuses on static memory usage (fitting in SRAM) because all memory is preallocated in the Tensor Arena\index{Tensor Arena!TinyML memory} and dynamic batching is impossible. Typical hardware includes ARM Cortex-M series, ESP32, and specialized TinyML accelerators. Cold start falls in microseconds because model weights live in flash and the tensor arena is preallocated, while the power budget ranges from microwatts to milliwatts for battery operation over months or years. @Tbl-serving-spectrum summarizes how these deployment contexts shape serving system design.
 
+To make these architectural differences concrete, consider how a single model must adapt to each deployment context.
+
+The same ResNet-50 architecture requires dramatically different serving strategies across deployment contexts. @Tbl-resnet-serving-spectrum compares the three tiers side by side: cloud serving runs the full FP16 engine at millisecond latency on a data center GPU; mobile serving compresses to INT8 and dispatches to an NPU at a fraction of the energy; TinyML cannot run ResNet-50 at all and instead serves a downsized MobileNetV2 in kilobytes of SRAM.
+
 | **Characteristic**   | **Cloud/Data center** | **Mobile/Edge**      | **TinyML**                  |
 |:---------------------|:----------------------|:---------------------|:----------------------------|
 | **Latency Target**   | 10–100 ms             | 20–50 ms             | 1–100 ms                    |
@@ -894,7 +898,6 @@ In TinyML serving\index{Serving!TinyML}\index{TinyML!bare-metal serving}, the mo
 
 : **Serving Architecture Spectrum**: The deployment paradigm selected in @sec-ml-systems-comparative-analysis-paradigm-selection-bf66 shapes every aspect of serving system design. Cloud systems optimize for throughput with dynamic batching; mobile systems optimize for energy with fixed batch-1; TinyML systems operate under extreme memory and power constraints with no dynamic allocation. The physical walls (light, power, memory) that created these paradigms now dictate the serving constraints each must satisfy. {#tbl-serving-spectrum}
 
-To make these architectural differences concrete, consider how a single model must adapt to each deployment context.
 
 ```{python}
 #| echo: false
@@ -991,7 +994,11 @@ class ResNetServingSpectrum:
     tiny_energy_mj_str = fmt_energy(tiny_energy, unit=mJ, precision=0, commas=False)
 ```
 
-The same ResNet-50 architecture requires dramatically different serving strategies across deployment contexts. @Tbl-resnet-serving-spectrum compares the three tiers side by side: cloud serving runs the full FP16 engine at millisecond latency on a data center GPU; mobile serving compresses to INT8 and dispatches to an NPU at a fraction of the energy; TinyML cannot run ResNet-50 at all and instead serves a downsized MobileNetV2 in kilobytes of SRAM.
+::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
+
+**Systems insight**: The "same model" claim is misleading: each row of @tbl-resnet-serving-spectrum is a different optimization, and often a different architecture entirely. The cloud and mobile tiers share the ResNet-50 graph but diverge in precision, runtime, and memory by three to four orders of magnitude; the TinyML tier cannot run ResNet-50 at all and substitutes an architecture designed for the constraints from the start. Treating these as one model hides the work that makes each deployment possible.
+
+:::
 
 | **Dimension**           |                                  **`{python} ResNetServingSpectrum.cloud_name_str`**                                   |                                       **`{python} ResNetServingSpectrum.mobile_name_str`**                                       |                                                    **`{python} ResNetServingSpectrum.tiny_name_str`**                                                    |
 |:------------------------|:----------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------:|:--------------------------------------------------------------------------------------------------------------------------------------------------------:|
@@ -1003,11 +1010,6 @@ The same ResNet-50 architecture requires dramatically different serving strategi
 
 : **ResNet-50 Across the Serving Spectrum**: Side-by-side comparison of cloud, mobile, and TinyML serving for the same target architecture, showing how the model format, latency, throughput, memory footprint, and energy budget shift by three to four orders of magnitude across deployment contexts. {#tbl-resnet-serving-spectrum tbl-colwidths="[20,26,27,27]"}
 
-::: {#psp-resnet-serving .callout-perspective title="ResNet-50 across the serving spectrum"}
-
-**Systems insight**: The "same model" claim is misleading: each row of @tbl-resnet-serving-spectrum is a different optimization, and often a different architecture entirely. The cloud and mobile tiers share the ResNet-50 graph but diverge in precision, runtime, and memory by three to four orders of magnitude; the TinyML tier cannot run ResNet-50 at all and substitutes an architecture designed for the constraints from the start. Treating these as one model hides the work that makes each deployment possible.
-
-:::
 
 ### The load balancer layer {#sec-model-serving-load-balancer-layer-9c4d}
 
@@ -1059,9 +1061,9 @@ The internal anatomy of these servers reveals how they bridge the gap between ir
     Box/.style={draw=none,minimum width=20mm, minimum height=15mm, node distance=18mm},
     Arr/.style={-{Triangle[width=10pt,length=8pt]}, line width=5pt,cyan!40,shorten >=1pt, shorten <=2pt},
  Box2/.style={align=flush center, inner xsep=2pt,draw=OrangeLine,
-  font=\fontsize{8pt}{10}\usefont{T1}{phv}{m}{n},
+  font=\fontsize{7pt}{9}\usefont{T1}{phv}{m}{n},
     line width=0.75pt, rounded corners,fill=OrangeL!30, text width=16mm,
-    minimum width=16mm, minimum height=10mm},
+    minimum width=16mm, minimum height=9mm},
 LineA/.style = {violet!60,{Circle[line width=1.0pt,fill=white,length=5.5pt]}-,line width=1.5pt,shorten <=-3pt}
 }
 %laptop
@@ -1625,6 +1627,11 @@ class LatencyBudgetCalc:
 
 @Tbl-model-serving-resnet50-latency-budget breaks a typical ResNet-50 serving request down per phase:
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.2}
+```
+
 | **Phase**          | **Operation**              |                    **Time**                    |               **Percentage**               |
 |:-------------------|:---------------------------|:----------------------------------------------:|:------------------------------------------:|
 | **Preprocessing**  | JPEG decode                |   `{python} LatencyTableCalc.l_jpeg_ms_str`    |   `{python} LatencyTableCalc.p_jpeg_str`   |
@@ -1636,6 +1643,10 @@ class LatencyBudgetCalc:
 | **Total**          |                            | **`{python} LatencyTableCalc.l_total_ms_str`** |                  **100%**                  |
 
 : **ResNet-50 latency budget**: Per-phase breakdown of a single serving request, showing that preprocessing and data transfer together rival the cost of the ResNet-50 forward pass itself. The percentages expose where engineering effort actually pays off, which is rarely in the model. Per-phase percentages are rounded to the nearest whole number and may not sum to exactly 100. {#tbl-model-serving-resnet50-latency-budget tbl-colwidths="[28,28,22,22]"}
+
+```{=latex}
+\endgroup
+```
 
 **Systems insight**: The ResNet-50\index{ResNet-50!latency budget} serving budget shows preprocessing consumes `{python} LatencyBudgetCalc.preprocess_pct_str` of latency despite model inference being the computationally intensive phase. With TensorRT optimization reducing inference to `{python} LatencyBudgetCalc.tensorrt_inference_ms_str`, preprocessing would dominate at `{python} LatencyBudgetCalc.tensorrt_preprocess_pct_str`.
 
@@ -1688,6 +1699,11 @@ class DlrmLatencyCalc:
 
 **Analysis**: While ResNet-50's model stage is dominated by convolutional neural network (CNN) compute, DLRM's dominant model-stage cost is embedding-table memory access. End-to-end serving bottlenecks still require measuring the full path: preprocessing, inference, postprocessing, and data movement. @Tbl-model-serving-dlrm-latency-budget breaks the recommendation request down by phase:
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.25}
+```
+
 | **Phase**          | **Operation**            |                     **Time**                     |  **Bottleneck**  |
 |:-------------------|:-------------------------|:------------------------------------------------:|:----------------:|
 | **Input Parsing**  | Request parsing          |   `{python} DlrmLatencyCalc.dlrm_input_ms_str`   |       CPU        |
@@ -1697,6 +1713,10 @@ class DlrmLatencyCalc:
 | **Total**          |                          | **`{python} DlrmLatencyCalc.dlrm_total_ms_str`** |                  |
 
 : **DLRM serving latency**: Per-phase breakdown of a recommendation request under a 10 ms p99 budget, contrasting DLRM's memory-bandwidth-bound embedding lookups against ResNet-50's compute-bound forward pass. Adding compute to the inference stage does not help once embedding-table bandwidth is the binding constraint. {#tbl-model-serving-dlrm-latency-budget tbl-colwidths="[28,28,22,22]"}
+
+```{=latex}
+\endgroup
+```
 
 **Systems insight**: In DLRM, the "Inference" multilayer perceptron (MLP) stage is only ~`{python} DlrmLatencyCalc.dlrm_mlp_pct_str` of the latency. The majority of time is spent in embedding lookups, retrieving massive 128-dim vectors from terabyte-scale tables. This is a memory-bandwidth and capacity-bound workload where adding more compute does not help unless the embedding tables can be served faster.
 
@@ -1761,16 +1781,6 @@ Moving preprocessing closer to the accelerator\index{Preprocessing!gpu, accelera
 
 Beyond the model execution itself, every request pays a "tax" to the serving infrastructure. @Tbl-serving-tax gives representative overhead ranges for a high-performance inference request (for example, ResNet-50 classification).
 
-| **Tax Component** |    **Typical Cost**   | **Scaling Behavior** | **Tax Evasion Strategy**        |
-|:------------------|:---------------------:|:---------------------|:--------------------------------|
-| **Network I/O**   |         1-5 ms        | Linear with payload  | Compression, Region Colocation  |
-| **Serialization** |  50–500 $\mu\text{s}$ | Linear with payload  | gRPC/Protobuf (vs. JSON)        |
-| **Queuing**       |       0.1-10 ms       | Exponential w/ load  | Dynamic Batching, Autoscaling   |
-| **Dispatch**      |  10–50 $\mu\text{s}$  | Constant per batch   | Kernel Fusion (reduce launches) |
-| **Data Copy**     | 100–500 $\mu\text{s}$ | Linear with tensor   | Zero-Copy/Shared Memory         |
-
-: **The Serving Tax Bill**: A representative breakdown of noninference latency sources. While individual components like serialization seem small ($<1$ ms), they compound. In a 5 ms inference service, this "tax" can easily consume 50 percent of the latency budget. The primary engineering goal is to reduce these costs through architectural choices like binary protocols, persistent connections, and zero-copy data paths. {#tbl-serving-tax}
-
 ```{python}
 #| echo: false
 #| label: serving-tax-microseconds-calc
@@ -1819,6 +1829,25 @@ class ServingTaxMicrosecondsCalc:
 #### The killer microseconds problem {#sec-model-serving-killer-microseconds-problem-bc00}
 
 Barroso, Patterson, and colleagues identified a critical gap in how systems handle latency at different time scales\index{Killer Microseconds!latency gap} [@barroso2017]. Operations in the microsecond range are too short for traditional OS scheduling (which operates at millisecond granularity) yet too long to simply spin-wait without wasting CPU cycles. This "killer microseconds" regime matters in modern serving workloads. Using the representative ranges in @tbl-serving-tax, serialization at 50–500 μs, dispatch at 10–50 μs, and data copy at 100–500 μs are each individually small, but for a 5 ms inference service, these named microsecond-scale overheads collectively consume about `{python} ServingTaxMicrosecondsCalc.micro_tax_min_pct_str` to `{python} ServingTaxMicrosecondsCalc.micro_tax_max_pct_str` of the latency budget before network and queuing delays are counted. No single overhead justifies optimization in isolation, yet together they determine whether the system meets its SLO.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.23}
+```
+
+| **Tax Component** |    **Typical Cost**   | **Scaling Behavior** | **Tax Evasion Strategy**        |
+|:------------------|:---------------------:|:---------------------|:--------------------------------|
+| **Network I/O**   |         1-5 ms        | Linear with payload  | Compression, Region Colocation  |
+| **Serialization** |  50–500 $\mu\text{s}$ | Linear with payload  | gRPC/Protobuf (vs. JSON)        |
+| **Queuing**       |       0.1-10 ms       | Exponential w/ load  | Dynamic Batching, Autoscaling   |
+| **Dispatch**      |  10–50 $\mu\text{s}$  | Constant per batch   | Kernel Fusion (reduce launches) |
+| **Data Copy**     | 100–500 $\mu\text{s}$ | Linear with tensor   | Zero-Copy/Shared Memory         |
+
+: **The Serving Tax Bill**: A representative breakdown of noninference latency sources. While individual components like serialization seem small ($<1$ ms), they compound. In a 5 ms inference service, this "tax" can easily consume 50 percent of the latency budget. The primary engineering goal is to reduce these costs through architectural choices like binary protocols, persistent connections, and zero-copy data paths. {#tbl-serving-tax}
+
+```{=latex}
+\endgroup
+```
 
 The latency budget framework provides a systematic approach to this compound problem. Measurement comes first: without per-phase instrumentation, engineers cannot distinguish a preprocessing bottleneck from a serialization bottleneck, and optimization effort gets misallocated to the most visible component (the model) rather than the most expensive one. Once measurement reveals the true distribution of time, engineering effort should flow proportionally—a phase consuming 50 percent of latency deserves more attention than one consuming 5 percent, regardless of which feels more tractable. Architectural changes such as GPU-accelerated preprocessing or aggressive batching can shift work between phases entirely, sometimes eliminating a bottleneck rather than merely reducing it.
 
@@ -1937,7 +1966,12 @@ class ResolutionBottleneckCalc:
     v100_bw_str = fmt_bandwidth(v100_pcie.memory.bandwidth, unit=GB / second, precision=0, commas=False)
 ```
 
-@Tbl-resolution-bottleneck quantifies this transition for ResNet-50:
+@Tbl-resolution-bottleneck quantifies this transition for ResNet-50.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.23}
+```
 
 | **Resolution**       |                **Activation Size**                 |                      **Arith. Intensity**                     | **Bottleneck** |
 |:---------------------|:--------------------------------------------------:|:-------------------------------------------------------------:|:--------------:|
@@ -1948,9 +1982,14 @@ class ResolutionBottleneckCalc:
 
 : **Resolution and Compute Bottleneck**: ResNet-50 arithmetic intensity rises with resolution: FLOPs and activation traffic grow quadratically while the fixed weight traffic is amortized over more spatial positions. For a V100 PCIe (`{python} ResolutionBottleneckCalc.v100_pcie_fp32_str` FP32; the SXM2 variant runs `{python} ResolutionBottleneckCalc.v100_sxm2_fp32_str` FP32) with `{python} ResolutionBottleneckCalc.v100_bw_str` of HBM2 memory bandwidth, the ridge point is approximately `{python} ResolutionBottleneckCalc.ridge_point_flops_per_byte_str`; every row sits above it, so higher resolution drives the workload deeper into the compute-bound regime. The serving costs of resolution are quadratic latency and activation-memory growth, not memory bandwidth. {#tbl-resolution-bottleneck tbl-colwidths="[25,25,25,25]"}
 
+```{=latex}
+\endgroup
+```
+
 #### Resolution strategies in production {#sec-model-serving-deploymentspecific-resolution-decisions-1d76}
 
 Different deployment contexts impose distinct resolution requirements shaped by their dominant constraints. Mobile applications often accept lower resolution ($224{\times}224$) for object detection in camera viewfinders, where latency and battery life outweigh marginal accuracy gains. Medical imaging sits at the opposite extreme, requiring $512{\times}512$ or higher for diagnostic accuracy, with relaxed latency requirements that permit the additional compute. Autonomous vehicles split the difference by using multiple resolutions for different tasks: low resolution for rapid detection across wide fields of view and high-resolution crops for fine-grained recognition of detected objects. Cloud APIs face yet another challenge—they typically receive images at whatever resolution the client uploads and must handle the resulting range gracefully. This variability makes cloud APIs ideal candidates for adaptive resolution strategies, where the system selects resolution dynamically based on content characteristics.
+
 
 ```{python}
 #| echo: false
@@ -2016,7 +2055,7 @@ The two timing diagrams in @fig-serving-pipeline-timing illustrate the impact of
 \node[Pre,right=of R3](R4){Pre};
 \node[Gpu,right=of R4](R5){GPU};
 %
-\node[Pre,below=1.25of R1](R11){Pre1};
+\node[Pre,below=0.99 of R1](R11){Pre1};
 \node[Pre,right=of R11](R12){Pre 2};
 \node[Pre,right=of R12](R13){Pre 3};
 \node[Pre,right=of R13](R14){Pre 4};
@@ -2027,9 +2066,9 @@ The two timing diagrams in @fig-serving-pipeline-timing illustrate the impact of
 \node[Gpu,right=of R23](R24){GPU 4};
 %
 \node[draw=none,fit=(R1)(R5)](T1){};
-\node[above=0pt of T1]{\textbf{A. Serial Execution} (Low Utilization)};
+\node[above=-5pt of T1]{\textbf{A. Serial Execution} (Low Utilization)};
 \node[draw=none,fit=(R11)(R24)](T2){};
-\node[above=0pt of T2]{\textbf{B. Pipelined Execution} (High Utilization)};
+\node[above=-5pt of T2]{\textbf{B. Pipelined Execution} (High Utilization)};
 \end{tikzpicture}
 ```
 
@@ -2051,6 +2090,12 @@ The request lifecycle concludes with postprocessing\index{Postprocessing!logits 
 #### From logits to predictions {#sec-model-serving-logits-predictions-09df}
 
 Classification models output logits\index{Logits!classification output} or probabilities across classes. Converting these raw outputs to predictions involves several steps. The simplest is argmax selection\index{Argmax!prediction selection}, which returns the highest-probability class. Thresholding\index{Thresholding!confidence cutoff} applies a confidence cutoff, returning predictions only when the model is sufficiently certain. Top-$k$ extraction returns multiple high-probability classes with their scores, useful when applications need ranked alternatives. Calibration adjusts raw probabilities to better reflect true likelihoods, a step that adds computation but is essential when downstream systems make decisions based on confidence scores. For ResNet-50 image classification, @lst-resnet-postprocessing shows the full postprocessing path from raw logits to an API-ready response, including probability normalization, top-$k$ extraction, label lookup, and response formatting.
+
+For this example, total postprocessing time is approximately 0.1 ms, negligible compared to preprocessing and inference. Each step adds latency but improves response utility. Calibration in particular can add significant computation but is necessary when downstream systems make decisions based on confidence scores.
+
+#### Output formatting {#sec-model-serving-output-formatting-753f}
+
+Production systems rarely return raw predictions. Outputs must conform to API contracts that specify JSON serialization schemas, confidence score formatting, and thresholding rules. Error handling must address edge cases: the system must define behavior when no prediction exceeds the confidence threshold or when the input appears out-of-distribution. Response metadata (model version, inference time, feature attributions) enables downstream monitoring and debugging.
 
 ::: {#lst-resnet-postprocessing lst-cap="**ResNet-50 Postprocessing**: Transforms raw logits to calibrated probabilities, extracts top-$k$ predictions, and formats the API response."}
 
@@ -2087,11 +2132,6 @@ response = {
 
 :::
 
-For this example, total postprocessing time is approximately 0.1 ms, negligible compared to preprocessing and inference. Each step adds latency but improves response utility. Calibration in particular can add significant computation but is necessary when downstream systems make decisions based on confidence scores.
-
-#### Output formatting {#sec-model-serving-output-formatting-753f}
-
-Production systems rarely return raw predictions. Outputs must conform to API contracts that specify JSON serialization schemas, confidence score formatting, and thresholding rules. Error handling must address edge cases: the system must define behavior when no prediction exceeds the confidence threshold or when the input appears out-of-distribution. Response metadata (model version, inference time, feature attributions) enables downstream monitoring and debugging.
 
 The latency budget analysis reveals *where* time goes within a single request. Production systems, however, do not process requests in isolation: they must handle hundreds or thousands of concurrent requests competing for finite resources. Understanding this concurrency requires a different analytical framework.
 
@@ -2324,6 +2364,11 @@ class UtilizationLatency:
     service_ms_str = fmt_time(service_ms_value, 'millisecond', precision=0, commas=False)
 ```
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 |  **Utilization $(\rho_{\text{serv}})$**  |                    **Latency Multiple**                    | **Example (`{python} UtilizationLatency.service_ms_str` service)** |
 |:----------------------------------------:|:----------------------------------------------------------:|:------------------------------------------------------------------:|
 | `{python} UtilizationLatency.rho_str[0]` | `{python} UtilizationLatency.latency_multiple_mult_str[0]` |          `{python} UtilizationLatency.example_ms_str[0]`           |
@@ -2333,6 +2378,10 @@ class UtilizationLatency:
 | `{python} UtilizationLatency.rho_str[4]` | `{python} UtilizationLatency.latency_multiple_mult_str[4]` |          `{python} UtilizationLatency.example_ms_str[4]`           |
 
 : **Utilization-Latency Relationship**: Average time in system (wait + service) as a multiple of service time for an M/M/1 queue. At `{python} UtilizationLatency.rho_prose_str[0]` utilization, time in system is `{python} UtilizationLatency.latency_multiple_mult_str[0]` service time; at `{python} UtilizationLatency.rho_prose_str[3]`, it reaches `{python} UtilizationLatency.latency_multiple_mult_str[3]`. This nonlinear growth explains why systems that perform well at moderate load suddenly violate SLOs when traffic increases: moving from 80 percent to 90 percent utilization doubles latency. {#tbl-utilization-latency}
+
+```{=latex}
+\endgroup
+```
 
 The M/M/1 model assumes exponentially distributed service times, but ML inference typically has near-constant service time for fixed batch sizes, making the M/D/1\index{M/D/1 Queue!deterministic service} (deterministic service) model more accurate in practice. We use M/M/1 here because it yields closed-form solutions and produces conservative estimates. For M/D/1 queues, average wait time is approximately half of M/M/1 at the same utilization, which matters for capacity planning: M/M/1 analysis will slightly over-provision, erring on the side of meeting SLOs rather than violating them.[^fn-kendall-notation-serving]
 
@@ -2550,6 +2599,9 @@ A model that performed well during validation may silently degrade when deployed
 - **Color space handling**: JPEG loading in different libraries may produce BGR vs. RGB ordering. If the model trained on RGB but serves BGR inputs, predictions are essentially random.
 - **Normalization constants**: ImageNet normalization uses specific mean/std values. Using `mean=[0.5, 0.5, 0.5]` instead of `mean=[0.485, 0.456, 0.406]` shifts inputs out of the training distribution.
 
+```{=latex}
+\vspace*{-1.5ex}
+```
 **Systems lesson**: The safest approach is to export the exact preprocessing code used during training and run it identically in serving, or use a framework like NVIDIA DALI that can help standardize preprocessing across training and serving environments.
 
 :::
@@ -2620,6 +2672,11 @@ class ColdStartCalc:
 
 @Tbl-model-serving-resnet-coldstart traces the per-phase duration of a ResNet-50 cold start:
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.15}
+```
+
 | **Phase**                       |                    **Duration**                    | **Notes**                                           |
 |:--------------------------------|:--------------------------------------------------:|:----------------------------------------------------|
 | **Weight loading (SSD)**        |       `{python} ColdStartCalc.cs_ssd_s_str`        | 98 MB FP32 weights from local storage               |
@@ -2631,8 +2688,11 @@ class ColdStartCalc:
 | **Total (local, optimized)**    |    **`{python} ColdStartCalc.cs_local_s_str`**     | With precompiled TensorRT engine, warm container    |
 | **Total (cloud, first deploy)** |    **`{python} ColdStartCalc.cs_cloud_s_str`**     | Including compilation from cold state               |
 
-: **ResNet-50 cold start timeline**: Per-phase durations for weight loading, CUDA context creation, TensorRT compilation, and warmup, with totals for the optimized local case and the first-deploy cloud case showing where the dominant cost lives. {#tbl-model-serving-resnet-coldstart tbl-colwidths="[30,12,48]"}
+: **ResNet-50 cold start timeline**: Per-phase durations for weight loading, CUDA context creation, TensorRT compilation, and warmup, with totals for the optimized local case and the first-deploy cloud case showing where the dominant cost lives. {#tbl-model-serving-resnet-coldstart tbl-colwidths="[30,20,50]"}
 
+```{=latex}
+\endgroup
+```
 **Systems insight**: Precompiling models and storing the optimized engine eliminates the 30-second compilation phase on subsequent deployments.
 
 :::
@@ -3331,8 +3391,6 @@ The two regimes optimize opposite quantities, so a model that is "fast" at batch
 
 The same batch-size dependence drives how the serving system shapes its batches in the first place. Fixed batching windows waste latency budget during high traffic when large batches form quickly. @Lst-adaptive-batching demonstrates how adaptive strategies adjust the window based on queue depth.
 
-This approach reduces average wait time during high traffic while maintaining batch sizes. For traffic varying between 200–1000 QPS, a fixed 10 ms window produces 15 ms average latency at 650 img/s, while an adaptive window cuts average latency to 11 ms (27 percent reduction) and improves throughput to 680 img/s (5 percent improvement). The interplay between window size and batch limits creates a space of possible configurations, each representing a different balance between throughput and latency.
-
 ::: {#lst-adaptive-batching lst-cap="**Adaptive Batching Window**: Dynamically adjusts batch timeout based on queue depth and arrival rate, reducing average latency by 27 percent compared to fixed windows while maintaining throughput."}
 
 ```{.python}
@@ -3366,6 +3424,8 @@ def adaptive_batching_window(
 ```
 
 :::
+
+This approach reduces average wait time during high traffic while maintaining batch sizes. For traffic varying between 200–1000 QPS, a fixed 10 ms window produces 15 ms average latency at 650 img/s, while an adaptive window cuts average latency to 11 ms (27 percent reduction) and improves throughput to 680 img/s (5 percent improvement). The interplay between window size and batch limits creates a space of possible configurations, each representing a different balance between throughput and latency.
 
 The batching configuration space forms a Pareto frontier\index{Pareto Frontier!throughput-latency} where improving throughput requires accepting higher latency. @Tbl-pareto-batching traces this frontier across five representative configurations:
 
@@ -3513,7 +3573,7 @@ The calculation turns the SLO and arrival-rate assumptions into two deployable k
 | Predicted peak capacity      | `{python} PracticalConfigCalc.pc_predicted_throughput_img_per_s_str`                                                                                | Capacity if the selected batch cap is saturated.      |
 | Served throughput            | `{python} PracticalConfigCalc.pc_qps_img_per_s_str`                                                                                                 | Arrival-limited load handled by the configuration.    |
 
-: **Practical Batching Configuration**: Working backward from a 50 ms SLO and 500 QPS traffic estimate yields a 12 ms batching window and batch-32 cap. The predicted p99 latency remains within the SLO, while the batch cap leaves headroom for bursts. {#tbl-practical-batching-config tbl-colwidths="[30,30,40]"}
+: **Practical Batching Configuration**: Working backward from a 50 ms SLO and 500 QPS traffic estimate yields a 12 ms batching window and batch-32 cap. The predicted p99 latency remains within the SLO, while the batch cap leaves headroom for bursts. {#tbl-practical-batching-config tbl-colwidths="[30,27,43]"}
 
 ### Continuous batching {#sec-model-serving-continuous-batching-8bb6}
 
@@ -3661,11 +3721,6 @@ class TrafficAdaptiveBatchingCalc:
     latency_5000_ms_str = fmt_time(rows[3][3], 'millisecond', precision=1, commas=False)
 ```
 
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25} % default is 1,
-```
-
 | **Arrival Rate**                                        |                     **Optimal Window**                    |                     **Avg Batch Size**                    |                    **Approx. Latency**                     |
 |:--------------------------------------------------------|:---------------------------------------------------------:|:---------------------------------------------------------:|:----------------------------------------------------------:|
 | **`{python} TrafficAdaptiveBatchingCalc.qps_100_str`**  |  `{python} TrafficAdaptiveBatchingCalc.window_100_ms_str` |  `{python} TrafficAdaptiveBatchingCalc.avg_batch_100_str` | `{python} TrafficAdaptiveBatchingCalc.latency_100_ms_str`  |
@@ -3675,9 +3730,6 @@ class TrafficAdaptiveBatchingCalc:
 
 : **Traffic-Adaptive Batching**: Higher traffic enables shorter windows while still achieving larger average batches. Values are computed from @eq-optimal-window with a 50 ms SLO and a 25 ms service-time assumption, so the latency column is the approximate service-plus-window budget rather than a measured production p99. {#tbl-traffic-adaptive}
 
-```{=latex}
-\endgroup
-```
 
 #### Streaming traffic (correlated arrivals) {#sec-model-serving-streaming-traffic-correlated-arrivals-32b6}
 
@@ -3685,7 +3737,7 @@ Autonomous vehicles\index{Streaming Traffic!sensor synchronization}, video analy
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.25} % default is 1,
+\renewcommand{\arraystretch}{1.35}
 ```
 
 | **Time**    | **Event**                         |
@@ -3795,12 +3847,12 @@ class MobileServingCalc:
 
 ::: {#nbk-model-serving-resnet-50-mobile-serving .callout-notebook title="ResNet-50: Mobile serving"}
 
-@Tbl-model-serving-mobile-pipeline-breakdown decomposes per-phase latency and energy for a single-user mobile vision inference:
-
 ```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25} % default is 1,
+\begin{minipage}{1\linewidth}
+\renewcommand{\arraystretch}{1.35}  
 ```
+
+@Tbl-model-serving-mobile-pipeline-breakdown decomposes per-phase latency and energy for a single-user mobile vision inference:
 
 | **Phase**              |                   **Duration**                  |                    **Energy**                   | **Notes**                                      |
 |:-----------------------|:-----------------------------------------------:|:-----------------------------------------------:|:-----------------------------------------------|
@@ -3814,7 +3866,7 @@ class MobileServingCalc:
 : **Mobile ResNet-50 pipeline**: Per-phase latency and energy for a single-user mobile vision inference, showing that JPEG decode on the CPU dominates the energy budget even though the NPU inference stage carries the model's compute. Optimization targets shift from throughput to energy-per-inference at the edge. {#tbl-model-serving-mobile-pipeline-breakdown tbl-colwidths="[30,20,20,30]"}
 
 ```{=latex}
-\endgroup
+\end{minipage}
 ```
 
 The mobile serving node is governed by four metrics:
@@ -4022,7 +4074,6 @@ As LLMs scale, joules per token becomes a first-class operational metric alongsi
 1.  **Throughput**: `{python} CarbonCostCalc.cc_concurrent_str` concurrent requests $\times$ `{python} CarbonCostCalc.cc_tokens_req_tokens_per_s_str` per request ≈ `{python} CarbonCostCalc.cc_total_tokens_per_s_str`.
 2.  **Power**: `{python} CarbonCostH100Tdp.h100_tdp_w_str` (GPU) + `{python} CarbonCostCalc.cc_host_overhead_w_str` (Host/Overhead) = `{python} CarbonCostCalc.cc_total_power_w_str`.
 3.  **Energy per token**:
-
     `{python} CarbonCostCalc.cc_total_power_w_str` / `{python} CarbonCostCalc.cc_total_tokens_per_s_str` ≈ `{python} CarbonCostCalc.cc_joules_token_j_str`
 
 **Systems insight**: A typical response of `{python} CarbonCostCalc.cc_response_tokens_str` consumes ≈ `{python} CarbonCostCalc.cc_response_joules_j_str`.
@@ -4163,11 +4214,6 @@ class RuntimeComparisonCalc:
 
 @Tbl-model-serving-runtime-comparison compares ResNet-50 inference latency and speedup across runtimes on a V100 GPU at batch size one:
 
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.25} % default is 1,
-```
-
 | **Runtime**     |                      **Latency**                       |                           **Speedup**                            | **Notes**                 |
 |:----------------|:------------------------------------------------------:|:----------------------------------------------------------------:|:--------------------------|
 | PyTorch (eager) |   `{python} RuntimeComparisonCalc.rt_pytorch_ms_str`   |   `{python} RuntimeComparisonCalc.rt_pytorch_speedup_mult_str`   | Baseline, no optimization |
@@ -4178,10 +4224,6 @@ class RuntimeComparisonCalc:
 | TensorRT INT8   |  `{python} RuntimeComparisonCalc.rt_trt_int8_ms_str`   |  `{python} RuntimeComparisonCalc.rt_trt_int8_speedup_mult_str`   | Requires calibration      |
 
 : **Inference runtime comparison**: Latency and speedup for ResNet-50 (batch size one) across PyTorch eager, TorchScript, ONNX Runtime, and TensorRT in three precisions on a V100. Each step down the table trades portability for raw speed, exposing the optimization-compatibility trade-off that defines runtime selection. {#tbl-model-serving-runtime-comparison tbl-colwidths="[30,20,20,30]"}
-
-```{=latex}
-\endgroup
-```
 
 **Systems insight**: The `{python} RuntimeComparisonCalc.rt_trt_int8_speedup_mult_str` speedup from TensorRT INT8 comes at the cost of: (1) quantization calibration data, (2) potential accuracy loss (<1 percent for ResNet-50), and (3) NVIDIA-specific deployment.
 
@@ -4621,7 +4663,7 @@ The dominant cost in serving a large language model\index{LLM Serving!production
 import numpy as np
 from book.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.75))
 # =============================================================================
 # PLOT: The KV-Cache Explosion
 # =============================================================================
@@ -4796,7 +4838,7 @@ The end-to-end request latency is governed by the two-phase execution model of a
 
 ##### Prefill phase (time to first token) {.unnumbered}
 
-The model processes the 1,000-token prompt in parallel\index{Prefill Phase!compute-bound}\index{Prefill Phase!parallel processing}. In this scenario, the H100 prefill rate is set to approximately 10,000 tokens/s: $T_{\text{prefill}} = 1000\text{ tokens} / 10{,}000\text{ tokens/s} = 100\text{ ms}$. Accounting for 20 ms of system overhead (network ingress, tokenization), the TTFT is 120 ms, comfortably within the 200 ms SLO.
+The model processes the 1,000-token prompt in parallel\index{Prefill Phase!compute-bound}\index{Prefill Phase!parallel processing}. In this scenario, the H100 prefill rate is set to approximately 10,000 tokens/s: $T_{\text{prefill}} =$ 1000 tokens / 10,000 tokens/s = 100 ms. Accounting for 20 ms of system overhead (network ingress, tokenization), the TTFT is 120 ms, comfortably within the 200 ms SLO.
 
 ##### Decode phase (time per output token) {.unnumbered}
 
