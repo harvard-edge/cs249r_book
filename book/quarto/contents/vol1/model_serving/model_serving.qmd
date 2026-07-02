@@ -1392,8 +1392,8 @@ A concrete payload comparison shows how the serialization choice changes both wi
 # │ How: Calculate parsing overhead and wire size for a 1000-float payload.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory
-from mlsysim.core.units import byte, KB
+from mlsysim.fmt import fmt_int, MarkdownStr, check, fmt, fmt_time, fmt_memory, fmt_percent
+from mlsysim.core.units import byte, KB, microsecond, second
 
 # ┌── LEGO ───────────────────────────────────────────────
 class SerializationEfficiency:
@@ -1414,10 +1414,15 @@ class SerializationEfficiency:
     efficiency_gain = json_parse_us / proto_parse_us
     json_size = floats_count * json_bytes_per_float * byte
     protobuf_size = floats_count * protobuf_bytes_per_float * byte
+    # Napkin chain: per-request saving -> CPU-seconds per second -> core fraction
+    parse_saving_us = json_parse_us - proto_parse_us
+    cpu_saving_per_s = requests_per_sec * parse_saving_us * microsecond  # CPU time saved per wall-clock second
+    core_fraction = (cpu_saving_per_s / second).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(efficiency_gain >= 5, f"Protobuf gain ({efficiency_gain:.1f}x) is too small to justify switching.")
     check(json_size > protobuf_size, "JSON wire size must exceed Protobuf.")
+    check(0 < core_fraction < 1, "Per-second parse savings should stay below one full CPU core.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     serial_floats_str = fmt(floats_count, precision=0)
@@ -1427,6 +1432,9 @@ class SerializationEfficiency:
     protobuf_parse_us_str = fmt_time(round(proto_parse_us), 'microsecond', precision=0, commas=False)
     requests_per_sec_str = fmt(requests_per_sec, precision=0)
     efficiency_gain_mult_str = fmt_multiple(efficiency_gain, precision=0, commas=False)
+    parse_saving_us_str = fmt_time(round(parse_saving_us), 'microsecond', precision=0, commas=False)
+    cpu_saving_s_str = fmt_time(cpu_saving_per_s, 'second', precision=2, commas=False)
+    core_fraction_pct_str = fmt_percent(core_fraction, precision=0, commas=False, style='prose')
 ```
 
 ::: {#nbk-model-serving-json-vs-protobuf-serialization .callout-notebook title="JSON vs. Protobuf serialization"}
@@ -1436,7 +1444,9 @@ Consider a request payload containing `{python} SerializationEfficiency.serial_f
 *   **JSON**\index{JSON!serialization overhead}: Uses ~`{python} SerializationEfficiency.json_size_str` on the wire. Requires ~`{python} SerializationEfficiency.json_parse_us_str` to parse.
 *   **Protobuf**: Uses ~`{python} SerializationEfficiency.protobuf_size_str` on the wire. Requires ~`{python} SerializationEfficiency.protobuf_parse_us_str` to parse.
 
-For this illustrative system processing `{python} SerializationEfficiency.requests_per_sec_str` requests per second, switching to a binary tensor payload saves nearly half a core of CPU time in serialization overhead alone. This `{python} SerializationEfficiency.efficiency_gain_mult_str` scenario gain makes gRPC/Protobuf, FlatBuffers, or another binary protocol a strong candidate for high-throughput internal microservices when serialization is a visible part of the latency budget.
+**Math**: Switching one request to the binary payload saves `{python} SerializationEfficiency.json_parse_us_str` − `{python} SerializationEfficiency.protobuf_parse_us_str` = `{python} SerializationEfficiency.parse_saving_us_str` of parse time. For this illustrative system processing `{python} SerializationEfficiency.requests_per_sec_str` requests per second, the savings compound to `{python} SerializationEfficiency.requests_per_sec_str` $\times$ `{python} SerializationEfficiency.parse_saving_us_str` = `{python} SerializationEfficiency.cpu_saving_s_str` of CPU time reclaimed every wall-clock second, which is `{python} SerializationEfficiency.core_fraction_pct_str` of one core freed from serialization overhead alone.
+
+**Systems insight**: This `{python} SerializationEfficiency.efficiency_gain_mult_str` scenario gain makes gRPC/Protobuf, FlatBuffers, or another binary protocol a strong candidate for high-throughput internal microservices when serialization is a visible part of the latency budget.
 
 :::
 
@@ -2859,7 +2869,9 @@ class BatchThroughputCalc:
 
 ::: {#nbk-model-serving-resnet-50-batching-efficiency .callout-notebook title="ResNet-50 batching efficiency"}
 
-@Tbl-model-serving-batching-throughput-tradeoff illustrates the throughput-latency trade-off for a ResNet-50/V100 scenario across batch sizes one through thirty-two:
+@Tbl-model-serving-batching-throughput-tradeoff illustrates the throughput-latency trade-off for a ResNet-50/V100 scenario across batch sizes one through thirty-two. The batch sizes, measured inference times, and GPU utilization are the scenario givens; the per-image compute and throughput columns are derived from them.
+
+**Math**: For the batch-`{python} BatchThroughputCalc.batch_size_str[2]` row, per-image compute is the batch latency divided by the batch size, `{python} BatchThroughputCalc.inference_ms_str[2]` ÷ `{python} BatchThroughputCalc.batch_size_str[2]` images ≈ `{python} BatchThroughputCalc.per_image_ms_str[2]` per image, and throughput is the batch size divided by the same latency, `{python} BatchThroughputCalc.batch_size_str[2]` images ÷ `{python} BatchThroughputCalc.inference_ms_str[2]` ≈ `{python} BatchThroughputCalc.throughput_img_per_s_str[2]`. The same two divisions produce every derived row.
 
 ```{=latex}
 \begingroup
