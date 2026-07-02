@@ -3295,7 +3295,7 @@ The interpretation is deliberately coarse. PSI below 0.1 usually leaves the mode
 # │      power target, baseline rate, and shifted rate.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt_percent, fmt_rate, fmt_time
+from mlsysim.fmt import fmt_int, check, fmt_math, fmt_percent, fmt_rate, fmt_time
 import math
 
 class DriftLatency:
@@ -3323,6 +3323,11 @@ class DriftLatency:
     dl_samples_per_hour_str = fmt_rate(dl_samples_per_hour, "samples/hour", precision=0, commas=False)
     dl_detection_hours_str = fmt_time(dl_detection_hours, 'hour', precision=1, commas=False, style='word')
     dl_confidence_pct_str = fmt_percent(95 / 100, precision=0, commas=False, style='prose')
+    dl_power_pct_str = fmt_percent(power, precision=0, commas=False, style='prose')
+    dl_z_quantiles_math = fmt_math(f"z_{{\\alpha/2}} = {z_a},\\ z_{{\\beta}} = {z_b}")
+    dl_n_plug_math = fmt_math(
+        f"n \\approx ({z_a} + {z_b})^2 \\times \\left[ {p1}(1 - {p1}) + {p2}(1 - {p2}) \\right] / ({p1} - {p2})^2 \\approx {n:,.0f}"
+    )
 ```
 
 ::: {#nbk-ops-scale-time-detection-monitoring-lag .callout-notebook title="Time-to-detection: The monitoring lag"}
@@ -3330,9 +3335,11 @@ class DriftLatency:
 **Problem**: A production model has a baseline accuracy of `{python} DriftLatency.dl_base_acc_str`. A data drift event causes accuracy to drop by `{python} DriftLatency.dl_drop_str`. If labeled outcomes arrive at `{python} DriftLatency.dl_samples_per_hour_str`, how long is needed to statistically prove the model has degraded?
 
 **Math**:
-Detection requires enough samples to distinguish the signal (the `{python} DriftLatency.dl_drop_str` drop) from the noise (random variance).
+Detection requires enough samples to distinguish the signal (the `{python} DriftLatency.dl_drop_str` drop) from the noise (random variance). A two-sample proportion test sets that sample count from the baseline and degraded accuracies ($p_1$, $p_2$) and the confidence and power targets ($z_{\alpha/2}$, $z_{\beta}$):
 
-1. **Samples Required**\index{Samples Required}: Using a two-sample proportion test, detecting a `{python} DriftLatency.dl_drop_str` drop with `{python} DriftLatency.dl_confidence_pct_str` confidence requires `{python} DriftLatency.dl_samples_needed_str` samples.
+$$n \approx \frac{(z_{\alpha/2} + z_{\beta})^2 \left[ p_1(1 - p_1) + p_2(1 - p_2) \right]}{(p_1 - p_2)^2}$$
+
+1. **Samples Required**\index{Samples Required}: At `{python} DriftLatency.dl_confidence_pct_str` confidence and `{python} DriftLatency.dl_power_pct_str` power, the standard normal quantiles are `{python} DriftLatency.dl_z_quantiles_math`, and plugging in gives `{python} DriftLatency.dl_n_plug_math` samples.
 2. **Detection Latency**\index{Latency!detection}: `{python} DriftLatency.dl_samples_needed_str` samples / `{python} DriftLatency.dl_samples_per_hour_str` $\approx$ `{python} DriftLatency.dl_detection_hours_str`.
 
 **Systems insight**: Monitoring is not instantaneous. For a `{python} DriftLatency.dl_drop_prose_str` degradation, the model operates in a broken state for approximately `{python} DriftLatency.dl_detection_hours_str` before there is enough data to trigger an alert. This is the *monitoring lag*. Reducing this lag requires either increasing the volume of labeled data (expensive) or monitoring "proxy" metrics like PSI\index{Population Stability Index!proxy metric} (faster but noisier). In a high-stakes fleet, the alert triggers on *input drift* as a leading indicator rather than waiting for accuracy to drop.

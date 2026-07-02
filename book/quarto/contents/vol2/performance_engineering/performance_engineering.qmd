@@ -2448,7 +2448,7 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_transformer_training_flops
-from mlsysim.fmt import check, MarkdownStr, fmt_count, fmt_percent, fmt_time
+from mlsysim.fmt import check, MarkdownStr, fmt_count, fmt_flop_rate, fmt_flops, fmt_percent, fmt_time
 
 class FleetEfficiencyCalc:
     """Calculates Fleet MFU and identifies the Scaling Tax."""
@@ -2469,6 +2469,7 @@ class FleetEfficiencyCalc:
     fleet_flops_per_step = calc_transformer_training_flops(Models.Language.Llama2_70B.parameters, fleet_tokens_per_step)
 
     # Step 2: MFU is useful FLOPs divided by peak cluster FLOPs over wall time
+    fleet_peak_flops_per_step = n_gpus * r_peak_per_gpu * t_fleet_step  # the fleet MFU denominator, surfaced in the callout
     local_mfu = (local_flops_per_step / (8 * r_peak_per_gpu * t_local_step)).to("").magnitude
     global_mfu = (fleet_flops_per_step / (n_gpus * r_peak_per_gpu * t_fleet_step)).to("").magnitude
 
@@ -2481,6 +2482,9 @@ class FleetEfficiencyCalc:
     fleet_params_b_str = MarkdownStr("70B")
     fleet_nodes_str = fmt_count(n_gpus, commas=False, label="GPU")
     fleet_t_step_ms_str = fmt_time(t_fleet_step, millisecond, precision=0, commas=False)
+    fleet_useful_flops_pflop_str = fmt_flops(fleet_flops_per_step, unit=PFLOP, commas=False)
+    fleet_r_peak_tflop_per_s_str = fmt_flop_rate(r_peak_per_gpu, unit=TFLOP / second, precision=0, commas=False)
+    fleet_peak_budget_pflop_str = fmt_flops(fleet_peak_flops_per_step, unit=PFLOP, commas=False)
     fleet_local_mfu_str = fmt_percent(round(local_mfu * 100) / 100, precision=0, commas=False, style='prose')
     fleet_global_mfu_str = fmt_percent(round(global_mfu * 100) / 100, precision=0, commas=False, style='prose')
     fleet_scaling_tax_str = fmt_percent(scaling_tax, precision=1, commas=False, style='prose')
@@ -2504,7 +2508,11 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 *   **Local node baseline**\index{Model FLOPs Utilization!local node baseline}: A single 8-GPU node achieves `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU.
 *   **Fleet performance**\index{Model FLOPs Utilization!fleet performance}: At `{python} FleetEfficiencyCalc.fleet_nodes_str`, the step time increases to `{python} FleetEfficiencyCalc.fleet_t_step_ms_str`, dropping MFU to `{python} FleetEfficiencyCalc.fleet_global_mfu_str`.
 
-**Math**: Scaling tax is computed as $1 - \text{Fleet MFU}/\text{Local MFU}$, giving `{python} FleetEfficiencyCalc.fleet_scaling_tax_str`.
+**Math**: Both MFU figures come from the same ratio, the useful FLOPs a step performs divided by the FLOPs the cluster could execute at peak in that step's wall time:
+
+$$\text{MFU} = \frac{\text{FLOPs}_{\text{useful}}}{N \times R_{\text{peak}} \times t_{\text{step}}}$$
+
+For the fleet case, a step performs `{python} FleetEfficiencyCalc.fleet_useful_flops_pflop_str` of useful work, while `{python} FleetEfficiencyCalc.fleet_nodes_str` $\times$ `{python} FleetEfficiencyCalc.fleet_r_peak_tflop_per_s_str` per GPU $\times$ `{python} FleetEfficiencyCalc.fleet_t_step_ms_str` of wall time could execute `{python} FleetEfficiencyCalc.fleet_peak_budget_pflop_str` at peak; the quotient `{python} FleetEfficiencyCalc.fleet_useful_flops_pflop_str` ÷ `{python} FleetEfficiencyCalc.fleet_peak_budget_pflop_str` $\approx$ `{python} FleetEfficiencyCalc.fleet_global_mfu_str`. The same substitution on the single node yields `{python} FleetEfficiencyCalc.fleet_local_mfu_str`, and the scaling tax is $1 - \text{Fleet MFU}/\text{Local MFU}$, giving `{python} FleetEfficiencyCalc.fleet_scaling_tax_str`.
 
 **Systems insight**: The `{python} FleetEfficiencyCalc.fleet_scaling_tax_str` scaling tax represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a scaling regression\index{Scaling!regression}, typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
 
