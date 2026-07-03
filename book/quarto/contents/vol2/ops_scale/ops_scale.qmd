@@ -972,7 +972,7 @@ Beyond scale considerations, different model types require fundamentally differe
 
 The table is a risk-to-cadence map, not a model catalog. Large language models sit at the slow end because size, cost, and subtle quality regressions make every release a high-stakes event. A minor degradation in response quality might not appear in automated metrics but could erode user satisfaction measurably, so LLM updates typically involve extended shadow deployment, human evaluation alongside automated metrics, staged rollouts over days or weeks, and safety evaluation before any production exposure.
 
-The cost of regression becomes concrete in the general-purpose LLM archetype:
+The cost of regression becomes concrete when one model must preserve every capability at once:
 
 ::: {#lhs-ops-scale-archetype-gpt-4-llama-3-cost-regression .callout-lighthouse title="Archetype A (GPT-4/Llama-3): cost of regression"}
 
@@ -1052,7 +1052,7 @@ The decision to establish a platform team typically occurs when organizations re
 
 ::: {#psp-ops-scale-platform-superlinear-returns .callout-perspective title="Platform returns improve with every model added"}
 
-Platform economics improve monotonically with fleet size. Because @eq-platform-roi scales the numerator linearly with $N_{\text{models}}$ while platform cost stays roughly fixed, the ROI ratio rises with every model the platform serves: the per-model savings are recovered against a denominator that barely moves. The benefit is not a faster-than-linear payoff but a ratio that keeps climbing past break-even, which is why organizations that delay platform investment accumulate operational debt that becomes progressively more expensive to address as the fleet grows.
+Because @eq-platform-roi scales the numerator linearly with $N_{\text{models}}$ while platform cost stays roughly fixed, the ROI ratio rises with every model the platform serves: the per-model savings are recovered against a denominator that barely moves. The benefit is not a faster-than-linear payoff but a ratio that keeps climbing past break-even, which is why organizations that delay platform investment accumulate operational debt that becomes progressively more expensive to address as the fleet grows.
 
 :::
 
@@ -1402,7 +1402,7 @@ That utilization threshold explains why infrastructure scale can become a compet
 
 ::: {#psp-ops-scale-infrastructure-moat .callout-perspective title="The infrastructure moat"}
 
-The economics of ML infrastructure create a self-reinforcing advantage for organizations that can sustain high utilization. Building a 10,000-GPU cluster saves hundreds of millions over cloud rental, but only if the organization has enough workloads to keep it busy. Large technology companies with continuous training pipelines, frequent model refreshes, and massive inference workloads achieve 70--90 percent utilization, making on-premises infrastructure highly cost-effective. Smaller organizations with sporadic training needs may achieve only 20--30 percent utilization, making cloud rental cheaper despite the higher per-hour cost. This dynamic creates an infrastructure moat: organizations with scale can afford to build, and building makes scale cheaper, which enables more ambitious models, which require more infrastructure. The gap compounds over time, giving high-utilization organizations a structural advantage when training the largest models.
+Building a 10,000-GPU cluster saves hundreds of millions over cloud rental, but only if the organization has enough workloads to keep it busy. Large technology companies with continuous training pipelines, frequent model refreshes, and massive inference workloads achieve 70--90 percent utilization, making on-premises infrastructure highly cost-effective. Smaller organizations with sporadic training needs may achieve only 20--30 percent utilization, making cloud rental cheaper despite the higher per-hour cost. This dynamic creates an infrastructure moat: organizations with scale can afford to build, and building makes scale cheaper, which enables more ambitious models, which require more infrastructure. The gap compounds over time, giving high-utilization organizations a structural advantage when training the largest models.
 
 :::
 
@@ -2067,15 +2067,10 @@ A complete training pipeline includes data validation, training execution, model
 :::
 
 1. Data validation\index{Data Validation} pins the data version and rejects schema, freshness, or distribution failures before they consume training capacity.
-
 2. Feature engineering\index{Feature Engineering} preserves the feature contract between training and serving, so preprocessing changes do not become silent production regressions.
-
 3. Training\index{Training} records code, data, hyperparameters, hardware envelope, and random seeds so a promising artifact can be reproduced or challenged later.
-
 4. Evaluation\index{Evaluation} compares the candidate with baselines, slice metrics, latency budgets, and task-specific gates before any user traffic is exposed.
-
 5. Artifact generation packages the model with its serving configuration, dependency versions, and rollback target.
-
 6. Registration\index{Registration} records the artifact in the model registry with lineage, approvals, and deployment eligibility.
 
 Each stage should be independently executable and idempotent. If the pipeline fails at evaluation, restarting should not re-execute data validation and feature engineering unless their inputs have changed.
@@ -2403,7 +2398,7 @@ class SilentFailure:
 
 ### Multi-region deployment coordination {#sec-ml-operations-scale-multiregion-deployment-coordination-ab6a}
 
-@Sec-fault-tolerance-reliability will develop checkpointing, elastic training, and recovery mechanisms for handling failures within distributed training jobs. Multi-region deployment uses the same fault-tolerance idea [preserve useful work and state across failures] in the inference plane, where coordination across geographic regions introduces challenges absent from single-region operations. Model version consistency, traffic routing during transitions, and coordinated rollback require explicit protocol design to prevent mixed-version serving that can corrupt A/B test validity and user experience.
+@Sec-fault-tolerance-reliability developed checkpointing, elastic training, and recovery mechanisms for handling failures within distributed training jobs. Multi-region deployment uses the same fault-tolerance idea [preserve useful work and state across failures] in the inference plane, where coordination across geographic regions introduces challenges absent from single-region operations. Model version consistency, traffic routing during transitions, and coordinated rollback require explicit protocol design to prevent mixed-version serving that can corrupt A/B test validity and user experience.
 
 #### Coordination challenges {#sec-ml-operations-scale-coordination-challenges-085c}
 
@@ -3300,7 +3295,7 @@ The interpretation is deliberately coarse. PSI below 0.1 usually leaves the mode
 # │      power target, baseline rate, and shifted rate.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt_percent, fmt_rate, fmt_time
+from mlsysim.fmt import fmt_int, check, fmt_math, fmt_percent, fmt_rate, fmt_time
 import math
 
 class DriftLatency:
@@ -3328,6 +3323,11 @@ class DriftLatency:
     dl_samples_per_hour_str = fmt_rate(dl_samples_per_hour, "samples/hour", precision=0, commas=False)
     dl_detection_hours_str = fmt_time(dl_detection_hours, 'hour', precision=1, commas=False, style='word')
     dl_confidence_pct_str = fmt_percent(95 / 100, precision=0, commas=False, style='prose')
+    dl_power_pct_str = fmt_percent(power, precision=0, commas=False, style='prose')
+    dl_z_quantiles_math = fmt_math(f"z_{{\\alpha/2}} = {z_a},\\ z_{{\\beta}} = {z_b}")
+    dl_n_plug_math = fmt_math(
+        f"n \\approx ({z_a} + {z_b})^2 \\times \\left[ {p1}(1 - {p1}) + {p2}(1 - {p2}) \\right] / ({p1} - {p2})^2 \\approx {n:,.0f}"
+    )
 ```
 
 ::: {#nbk-ops-scale-time-detection-monitoring-lag .callout-notebook title="Time-to-detection: The monitoring lag"}
@@ -3335,9 +3335,11 @@ class DriftLatency:
 **Problem**: A production model has a baseline accuracy of `{python} DriftLatency.dl_base_acc_str`. A data drift event causes accuracy to drop by `{python} DriftLatency.dl_drop_str`. If labeled outcomes arrive at `{python} DriftLatency.dl_samples_per_hour_str`, how long is needed to statistically prove the model has degraded?
 
 **Math**:
-Detection requires enough samples to distinguish the signal (the `{python} DriftLatency.dl_drop_str` drop) from the noise (random variance).
+Detection requires enough samples to distinguish the signal (the `{python} DriftLatency.dl_drop_str` drop) from the noise (random variance). A two-sample proportion test sets that sample count from the baseline and degraded accuracies ($p_1$, $p_2$) and the confidence and power targets ($z_{\alpha/2}$, $z_{\beta}$):
 
-1. **Samples Required**\index{Samples Required}: Using a two-sample proportion test, detecting a `{python} DriftLatency.dl_drop_str` drop with `{python} DriftLatency.dl_confidence_pct_str` confidence requires `{python} DriftLatency.dl_samples_needed_str` samples.
+$$n \approx \frac{(z_{\alpha/2} + z_{\beta})^2 \left[ p_1(1 - p_1) + p_2(1 - p_2) \right]}{(p_1 - p_2)^2}$$
+
+1. **Samples Required**\index{Samples Required}: At `{python} DriftLatency.dl_confidence_pct_str` confidence and `{python} DriftLatency.dl_power_pct_str` power, the standard normal quantiles are `{python} DriftLatency.dl_z_quantiles_math`, and plugging in gives `{python} DriftLatency.dl_n_plug_math` samples.
 2. **Detection Latency**\index{Latency!detection}: `{python} DriftLatency.dl_samples_needed_str` samples / `{python} DriftLatency.dl_samples_per_hour_str` $\approx$ `{python} DriftLatency.dl_detection_hours_str`.
 
 **Systems insight**: Monitoring is not instantaneous. For a `{python} DriftLatency.dl_drop_prose_str` degradation, the model operates in a broken state for approximately `{python} DriftLatency.dl_detection_hours_str` before there is enough data to trigger an alert. This is the *monitoring lag*. Reducing this lag requires either increasing the volume of labeled data (expensive) or monitoring "proxy" metrics like PSI\index{Population Stability Index!proxy metric} (faster but noisier). In a high-stakes fleet, the alert triggers on *input drift* as a leading indicator rather than waiting for accuracy to drop.
@@ -3961,7 +3963,7 @@ where:
 - $\text{PUE}$ is the Power Usage Effectiveness multiplier applied to the energy term
 - $F_{\text{fail}}$ is the failure overhead factor (fraction of training lost to failures and restarts)
 
-The PUE factor captures data center efficiency: a PUE of 1.2 means 20 percent additional power for cooling and infrastructure. It applies to energy consumption, not to the whole accelerator-hour rate. The failure overhead $F_{\text{fail}}$ accounts for checkpoint-and-restart costs; at scale, @sec-fault-tolerance-reliability will establish how component failures translate into checkpointing and restart overhead for long-running fleet jobs.
+The PUE factor captures data center efficiency: a PUE of 1.2 means 20 percent additional power for cooling and infrastructure. It applies to energy consumption, not to the whole accelerator-hour rate. The failure overhead $F_{\text{fail}}$ accounts for checkpoint-and-restart costs; at scale, @sec-fault-tolerance-reliability established how component failures translate into checkpointing and restart overhead for long-running fleet jobs.
 
 #### Worked example: Training cost calculation {#sec-ml-operations-scale-worked-example-training-cost-calculation-6535}
 
@@ -5273,6 +5275,15 @@ The operational machinery is now in place. Platform economics, fleet monitoring,
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
+
+::: {.callout-research-questions title="For further inquiry"}
+
+* How should an organization decide when platform investment is cheaper than continued per-model operations?
+* How should platform abstractions preserve the C$^3$ constraints exposed by training, serving, edge, and fault tolerance rather than hiding them?
+* What lineage and release-gate structure prevents one model, data, or feature change from silently breaking dependent systems?
+* How should monitoring aggregate fleet-wide signal without creating alert fatigue or losing model-specific failures?
+
+:::
 
 ::: { .quiz-end }
 :::

@@ -1,0 +1,3839 @@
+from __future__ import annotations
+
+import argparse
+import csv
+import hashlib
+import json
+import os
+import platform
+import shutil
+import sys
+import time
+import webbrowser
+import zipfile
+from datetime import datetime, timezone
+from html import escape
+from importlib import import_module
+from importlib.util import find_spec
+from pathlib import Path
+from typing import Any
+
+from rich.console import Console
+from rich.table import Table
+
+from .assets import (
+    CIFAR100_URL,
+    FASHION_MNIST_SOURCE,
+    MOVIELENS_100K_URL,
+    MNIST_SOURCE,
+    TINY_SHAKESPEARE_URL,
+    asset_dossier,
+    cifar100_paths,
+    data_root,
+    ensure_cifar100,
+    ensure_fashion_mnist,
+    ensure_mnist,
+    ensure_movielens_100k,
+    ensure_tinyshakespeare,
+    fashion_mnist_paths,
+    huggingface_model_dossier,
+    mnist_paths,
+    movielens_paths,
+    sha256_file,
+    tinyshakespeare_paths,
+)
+from .fingerprint import detect_hardware
+from .manifest import build_provd, measurement_leaf, merkle_root, sign_manifest, verify_provd
+from .power import PowerMeter
+from .registry import (
+    DEFAULT_WORKLOAD_COLLECTION,
+    PRODUCT_SUITES,
+    PROFILES,
+    PUBLIC_STATUSES,
+    RESEARCH_WORKLOADS,
+    STANDARD_WORKLOADS,
+    STARTER_WORKLOADS,
+    Workload,
+    default_registry_path,
+    find_project_root,
+    load_registry,
+    public_contract_report,
+    select_workloads,
+)
+
+
+console = Console(width=140)
+DEFAULT_MLPERF_SUITE = "mlperf-edu"
+VALIDATE_PRESETS = ("smoke", "coverage", "max", "release")
+PROFILE_CHOICES = PROFILES
+LEGACY_VALIDATE_LEVELS = {
+    "quick": "smoke",
+    "min": "coverage",
+    "max": "max",
+    "release": "release",
+}
+PROFILE_DESCRIPTIONS = {
+    "min": "Minimum representative path for setup, CI, and quick instructional checks.",
+    "max": "Full MLPerf EDU suite at comparable scale.",
+    "pro": "Research envelope exposing controlled variants and optimization knobs.",
+}
+LEGACY_QUALITY_REQUIRED_FIELD = "gated"
+
+
+def quality_required_value(quality: dict[str, Any], default: Any = False) -> Any:
+    return quality.get("quality_required", quality.get(LEGACY_QUALITY_REQUIRED_FIELD, default))
+
+
+def build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(
+        prog="mlperf",
+        description=(
+            "MLPerf EDU command harness. Defaults to the mlperf-edu suite. "
+            "Common user path: init, list, fetch, audit, run, report. "
+            "Instructor/maintainer path: audit, validate, grade."
+        ),
+        epilog=(
+            "Common user commands:\n"
+            "  doctor   check this machine\n"
+            "  init     prepare caches and optionally smoke-test the setup\n"
+            "  list     discover workloads\n"
+            "  fetch    download or verify needed assets\n"
+            "  audit    check source, license, dataset, model, and quality metadata\n"
+            "  run      run a workload, suite, or default profile\n"
+            "  report   open/export a result\n\n"
+            "Instructor and maintainer commands:\n"
+            "  validate run validation presets that execute workloads and grade artifacts\n"
+            "  audit    check public-result metadata without running workloads\n"
+            "  grade    grade a submissions directory\n"
+            "  verify   verify one provenance manifest\n"
+            "  package  bundle a verified submission"
+        ),
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    parser.add_argument(
+        "--registry",
+        type=str,
+        default=None,
+        help="Path to workloads.yaml. Defaults to the nearest project registry.",
+    )
+
+    subparsers = parser.add_subparsers(dest="command", required=True)
+
+    doctor = subparsers.add_parser("doctor", help="Check local environment and registry")
+    doctor_selection = doctor.add_mutually_exclusive_group()
+    doctor_selection.add_argument("--suite", choices=PRODUCT_SUITES, help="Check one workload domain, such as slm or vision")
+    doctor_selection.add_argument("--workload", default=None, help="Check one workload id or canonical workload family")
+    add_profile(doctor)
+    doctor.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    doctor.add_argument("--format", choices=("summary", "json"), default="summary")
+    doctor.set_defaults(func=cmd_doctor)
+
+    init = subparsers.add_parser("init", help="Prepare local caches for a profile")
+    add_profile(init)
+    init_selection = init.add_mutually_exclusive_group()
+    init_selection.add_argument("--suite", choices=PRODUCT_SUITES, help="Prepare one workload domain, such as slm or vision")
+    init_selection.add_argument("--workload", default=None, help="Prepare one workload id or canonical workload family")
+    init.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    init.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    init.add_argument("--no-smoke", action="store_true")
+    init.add_argument(
+        "--output-dir",
+        default="submissions/init_smoke",
+        help="Directory for init smoke-validation artifacts.",
+    )
+    init.set_defaults(func=cmd_init)
+
+    fetch = subparsers.add_parser("fetch", help="Fetch or verify assets for workloads")
+    add_selection(fetch)
+    add_profile(fetch)
+    fetch.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    fetch.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    fetch.add_argument("--dry-run", action="store_true")
+    fetch.set_defaults(func=cmd_fetch)
+
+    run = subparsers.add_parser("run", help="Run workloads by profile, suite, or workload id")
+    add_selection(run)
+    add_profile(run)
+    run.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    run.add_argument(
+        "--output-dir",
+        default="submissions",
+        help="Directory for report artifacts.",
+    )
+    run.add_argument(
+        "--open-report",
+        action="store_true",
+        help="Open the generated HTML report in the default browser.",
+    )
+    run.add_argument("--dry-run", action="store_true", help="Print selected workloads without running them")
+    run.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    run.add_argument("--power", action="store_true", help="Add estimated aggregate power and energy telemetry to the run report")
+    run.set_defaults(func=cmd_run)
+
+    verify = subparsers.add_parser("verify", help="Verify a provenance manifest")
+    verify.add_argument("manifest", type=str)
+    verify.set_defaults(func=cmd_verify)
+
+    report = subparsers.add_parser("report", help="Print a compact report summary")
+    report.add_argument("report", type=str, help="Path to a workload/aggregate report JSON, or a run directory")
+    report.add_argument("--format", choices=("summary", "json", "csv", "html"), default="summary")
+    report.add_argument("--output", type=str, default=None, help="Output path for json/csv/html formats")
+    report.add_argument("--open", action="store_true", help="Open generated HTML in the default browser")
+    report.set_defaults(func=cmd_report)
+
+    package = subparsers.add_parser("package", help="Package a verified submission")
+    package.add_argument("manifest", type=str)
+    package.add_argument("--output", "-o", type=str, default=None, help="Output .zip path")
+    package.set_defaults(func=cmd_package)
+
+    grade = subparsers.add_parser("grade", help="Grade a directory of submissions")
+    grade.add_argument("submissions_dir", nargs="?", default="submissions")
+    grade.add_argument("--output", type=str, default=None, help="Write grading summary JSON")
+    grade.set_defaults(func=cmd_grade)
+
+    validate = subparsers.add_parser(
+        "validate",
+        help="Run bundled validation presets",
+        description="Run MLPerf EDU validation presets. This executes workloads and grades artifacts.",
+    )
+    add_validate_arguments(validate)
+    validate.set_defaults(func=cmd_validate)
+
+    audit = subparsers.add_parser(
+        "audit",
+        help="Audit the public result contract",
+        description="Maintainer command: audit registry metadata and public-result labels. This does not run benchmarks.",
+    )
+    audit.add_argument("--suite", choices=PRODUCT_SUITES, help="Audit one workload domain, such as slm or vision")
+    audit.add_argument("--workload", default=None, help="Audit one workload id or canonical workload family")
+    audit.add_argument("--profile", choices=PROFILE_CHOICES, default=None)
+    audit.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    audit.add_argument("--status", dest="public_status", choices=PUBLIC_STATUSES)
+    audit.add_argument(
+        "--policy",
+        choices=("development", "public"),
+        default="development",
+        help="Use public to fail on unresolved endorsement warnings.",
+    )
+    audit.add_argument("--format", choices=("summary", "json"), default="summary")
+    audit.set_defaults(func=cmd_audit)
+
+    list_parser = subparsers.add_parser("list", help="List workloads")
+    list_parser.add_argument(
+        "subject",
+        nargs="?",
+        choices=("suites", "profiles", "workloads", "variants", "matrix"),
+        default="workloads",
+        help="Discovery subject to list.",
+    )
+    list_parser.add_argument("--suite", choices=PRODUCT_SUITES, help="Filter by workload domain, such as slm or vision")
+    list_parser.add_argument("--profile", choices=PROFILE_CHOICES, default=None)
+    list_parser.add_argument("--workload", default=None, help="Filter by workload id or canonical workload")
+    list_parser.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    list_parser.add_argument("--maturity", choices=("base", "research", "experimental"), help=argparse.SUPPRESS)
+    list_parser.add_argument("--public-status", choices=PUBLIC_STATUSES)
+    list_parser.add_argument("--format", choices=("summary", "json"), default="summary")
+    list_parser.set_defaults(func=cmd_list)
+
+    show = subparsers.add_parser("show", help="Show one workload")
+    show.add_argument("workload", type=str)
+    show.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    show.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    show.set_defaults(func=cmd_show)
+
+    info = subparsers.add_parser("info", help="Show suite, profile, workload, model, dataset, or run details")
+    info_group = info.add_mutually_exclusive_group(required=True)
+    info_group.add_argument("--suite", choices=PRODUCT_SUITES, help="Show one workload domain, such as slm or vision")
+    info_group.add_argument("--profile", choices=PROFILE_CHOICES)
+    info_group.add_argument("--workload", default=None, help="Show one workload id or canonical workload family")
+    info_group.add_argument("--model", default=None)
+    info_group.add_argument("--dataset", default=None)
+    info_group.add_argument("--run", default=None)
+    info.add_argument("--variant", default=None)
+    info.set_defaults(func=cmd_info)
+
+    cache = subparsers.add_parser("cache", help="Inspect and verify local MLPerf EDU assets")
+    cache.add_argument("action", nargs="?", choices=("list", "verify"), default="list")
+    cache_selection = cache.add_mutually_exclusive_group()
+    cache_selection.add_argument("--suite", choices=PRODUCT_SUITES, help="Inspect assets for one workload domain")
+    cache_selection.add_argument("--workload", default=None, help="Inspect assets for one workload id or canonical workload family")
+    add_profile(cache)
+    cache.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    cache.add_argument("--format", choices=("summary", "json"), default="summary")
+    cache.set_defaults(func=cmd_cache)
+
+    return parser
+
+
+def add_validate_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "preset",
+        metavar="preset",
+        nargs="?",
+        choices=VALIDATE_PRESETS,
+        default=None,
+        help="Validation preset: smoke=fast default/min, coverage=all workloads/min, max=all workloads/max, release=all workloads/min+max.",
+    )
+    parser.add_argument(
+        "--preset",
+        dest="preset_option",
+        choices=VALIDATE_PRESETS,
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--level",
+        dest="legacy_level",
+        choices=tuple(LEGACY_VALIDATE_LEVELS),
+        default=None,
+        help=argparse.SUPPRESS,
+    )
+    parser.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        action="append",
+        default=None,
+        help="Restrict validation to one or more suites. Can be passed multiple times.",
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="submissions/validation",
+        help="Root directory for validation artifacts.",
+    )
+    parser.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    parser.add_argument("--skip-doctor", action="store_true", help="Skip the doctor preflight")
+    parser.add_argument("--skip-grade", action="store_true", help="Skip manifest grading after each run")
+    parser.add_argument("--keep-going", action="store_true", help="Continue after a failed validation item")
+    parser.add_argument("--dry-run", action="store_true", help="Print planned validation items without running them")
+    parser.add_argument("--open-report", action="store_true", help="Open the generated validation HTML summary")
+
+
+def add_profile(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--profile",
+        choices=PROFILE_CHOICES,
+        default="min",
+        help=(
+            "Run scale: min=quick representative path, max=full suite, "
+            "pro=research variants and knobs. Defaults to min."
+        ),
+    )
+
+
+def normalize_profile(profile: str) -> str:
+    return profile
+
+
+def add_selection(parser: argparse.ArgumentParser) -> None:
+    group = parser.add_mutually_exclusive_group()
+    group.add_argument("--suite", choices=PRODUCT_SUITES, default=None, help="Run one workload domain, such as slm or vision")
+    group.add_argument("--workload", default=None, help="Run one workload id or canonical workload family")
+
+
+def load_workloads(args: argparse.Namespace) -> dict[str, Workload]:
+    return load_registry(args.registry)
+
+
+def default_collection_for(args: argparse.Namespace) -> str | None:
+    if getattr(args, "collection", None):
+        return args.collection
+    if getattr(args, "suite", None) or getattr(args, "workload", None):
+        return None
+    return profile_collection(getattr(args, "profile", "min"))
+
+
+def select_cli_workloads(workloads: dict[str, Workload], args: argparse.Namespace) -> list[Workload]:
+    workload = getattr(args, "workload", None)
+    variant = getattr(args, "variant", None)
+    if workload and not variant and workload not in workloads:
+        selected_ids = resolve_workload_ids(workloads, workload)
+        if not selected_ids:
+            raise ValueError(f"unknown workload or canonical workload '{workload}'")
+        selected = [workloads[workload_id] for workload_id in selected_ids]
+        suite = getattr(args, "suite", None)
+        if suite:
+            selected = [item for item in selected if item.suite == suite]
+        return selected
+
+    resolved_workload = resolve_cli_workload_id(workloads, workload, variant)
+    return select_workloads(
+        workloads,
+        suite=getattr(args, "suite", None),
+        collection=default_collection_for(args),
+        workload_id=resolved_workload,
+    )
+
+
+def selection_label(*, suite: str | None, workload: str | None = None) -> str:
+    if workload:
+        return workload
+    if suite:
+        return suite
+    return "default"
+
+
+class ModelOverride:
+    def __init__(self, model: str | None) -> None:
+        self.model = model
+        self.previous: str | None = None
+
+    def __enter__(self):
+        if not self.model:
+            return self
+        self.previous = os.environ.get("MLPERF_EDU_SLM_MODEL_ID")
+        os.environ["MLPERF_EDU_SLM_MODEL_ID"] = self.model
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if not self.model:
+            return
+        if self.previous is None:
+            os.environ.pop("MLPERF_EDU_SLM_MODEL_ID", None)
+        else:
+            os.environ["MLPERF_EDU_SLM_MODEL_ID"] = self.previous
+
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    checks: list[dict[str, str]] = []
+    selected: list[Workload] = []
+    workloads: dict[str, Workload] = {}
+    profile = getattr(args, "profile", "min")
+
+    def add_check(name: str, detail: str, status: str) -> None:
+        checks.append({"name": name, "detail": detail, "status": status})
+
+    add_check("mlperf suite", DEFAULT_MLPERF_SUITE, "ok")
+    add_check("python", platform.python_version(), "ok")
+    add_check("platform", platform.platform(), "ok")
+    add_check("data cache", str(data_root()), "ok")
+    add_check("model cache", str(default_model_cache_dir()), "ok")
+
+    try:
+        import torch
+
+        backends = ["cpu"]
+        if torch.cuda.is_available():
+            backends.append("cuda")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            backends.append("mps")
+        add_check("torch", f"{torch.__version__} ({', '.join(backends)})", "ok")
+    except Exception as exc:
+        add_check("torch", str(exc), "fail")
+
+    for module_name in ("onnxruntime", "mlx", "llama_cpp"):
+        status = "ok" if find_spec(module_name) else "optional"
+        detail = "installed" if status == "ok" else "not installed"
+        add_check(module_name, detail, status)
+
+    try:
+        workloads = load_workloads(args)
+        registry_path = default_registry_path(args.registry)
+        add_check("registry", f"{len(workloads)} workloads at {registry_path}", "ok")
+    except Exception as exc:
+        add_check("registry", str(exc), "fail")
+
+    if workloads:
+        try:
+            selected = select_cli_workloads(workloads, args)
+            selector = selection_label(suite=getattr(args, "suite", None), workload=getattr(args, "workload", None))
+            if getattr(args, "variant", None):
+                selector = f"{selector}:{args.variant}"
+            add_check("selection", f"{len(selected)} workload(s) for profile {profile} ({selector})", "ok")
+        except Exception as exc:
+            add_check("selection", str(exc), "fail")
+
+    try:
+        hw = detect_hardware()
+        add_check("hardware", f"{hw.get('chip')} / {hw.get('backend')}", "ok")
+    except Exception as exc:
+        add_check("hardware", str(exc), "warn")
+
+    if getattr(args, "format", "summary") == "json":
+        payload = {
+            "schema": "mlperf-edu-doctor/0.1",
+            "mlperf_suite": DEFAULT_MLPERF_SUITE,
+            "profile": profile,
+            "suite": getattr(args, "suite", None),
+            "workload": getattr(args, "workload", None),
+            "variant": getattr(args, "variant", None),
+            "checks": checks,
+            "selected_workloads": [workload_summary(workload) for workload in selected],
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 1 if any(check["status"] == "fail" for check in checks) else 0
+
+    table = Table(title="MLPerf EDU Doctor")
+    table.add_column("Check")
+    table.add_column("Detail")
+    table.add_column("Status")
+    for check in checks:
+        name = check["name"]
+        detail = check["detail"]
+        status = check["status"]
+        style = "green" if status == "ok" else "yellow" if status in {"optional", "warn"} else "red"
+        table.add_row(name, detail, f"[{style}]{status}[/{style}]")
+    console.print(table)
+
+    return 1 if any(check["status"] == "fail" for check in checks) else 0
+
+
+def cmd_init(args: argparse.Namespace) -> int:
+    console.print("[bold]Init preflight: doctor[/bold]")
+    doctor_status = cmd_doctor(args)
+    if doctor_status != 0:
+        console.print("[red]init failed during doctor preflight[/red]")
+        return doctor_status
+
+    with ModelOverride(args.model):
+        workloads = load_workloads(args)
+        selected = select_cli_workloads(workloads, args)
+        label = selection_label(suite=args.suite, workload=args.workload)
+        if args.variant:
+            label = f"{label}:{args.variant}"
+        console.print(f"[bold]Initialized profile[/bold] {args.profile} for {label}")
+        console.print(f"Validated {len(selected)} workload definitions.")
+        print_run_selection(args.profile, selected, suite=args.suite, workload=args.workload, variant=args.variant)
+        output_dir = Path(args.output_dir).resolve()
+        print_init_locations(output_dir)
+
+        if args.profile != "min":
+            console.print(f"Preparing assets for {args.profile}.")
+            for workload in selected:
+                console.print(fetch_workload_asset(workload, dry_run=False))
+        else:
+            console.print("No profile assets required beyond min-profile runner-local data.")
+
+        if args.no_smoke:
+            print_next_commands(args)
+            return 0
+
+        console.print("Running min-profile smoke validation.")
+        workload_reports = [run_workload(workload, "min", output_dir) for workload in selected]
+        enrich_reports_for_display(workload_reports, workloads)
+        export_workload_reports(workload_reports, workloads)
+        _, report_path, exports = write_aggregate_report(
+            profile="min",
+            suite=args.suite,
+            workload=args.workload,
+            variant=args.variant,
+            workload_reports=workload_reports,
+            output_dir=output_dir,
+            open_report=False,
+        )
+        status = print_run_summary("min", workload_reports, report_path, exports)
+        print_next_commands(args)
+        return status
+
+
+def print_init_locations(output_dir: Path) -> None:
+    table = Table(title="MLPerf EDU Local Paths")
+    table.add_column("Purpose", no_wrap=True)
+    table.add_column("Path", overflow="fold")
+    table.add_row("data cache", str(data_root()))
+    table.add_row("model cache", str(default_model_cache_dir()))
+    table.add_row("reports", str(output_dir))
+    console.print(table)
+
+
+def default_model_cache_dir() -> Path:
+    if os.environ.get("HF_HOME"):
+        return Path(os.environ["HF_HOME"]).expanduser().resolve()
+    return (Path.home() / ".cache" / "huggingface").resolve()
+
+
+def print_next_commands(args: argparse.Namespace) -> None:
+    selector = []
+    if getattr(args, "suite", None):
+        selector.extend(["--suite", args.suite])
+    if getattr(args, "workload", None):
+        selector.extend(["--workload", args.workload])
+    if getattr(args, "variant", None):
+        selector.extend(["--variant", args.variant])
+    selector_text = " ".join(selector)
+    suffix = f" {selector_text}" if selector_text else ""
+    console.print("[bold]Next commands[/bold]")
+    print(f"  mlperf fetch --profile {args.profile}{suffix} --dry-run")
+    print(f"  mlperf run --profile {args.profile}{suffix} --output-dir {Path(args.output_dir).resolve()}")
+    print(f"  mlperf report {Path(args.output_dir).resolve()} --format html --open")
+
+
+def cmd_fetch(args: argparse.Namespace) -> int:
+    with ModelOverride(args.model):
+        workloads = load_workloads(args)
+        selected = select_cli_workloads(workloads, args)
+        action = "Would fetch" if args.dry_run else "Fetched/validated"
+        print_run_selection(args.profile, selected, suite=args.suite, workload=args.workload, variant=args.variant)
+        console.print(f"{action} {len(selected)} workload(s) for profile {args.profile}.")
+        for workload in selected:
+            console.print(fetch_workload_asset(workload, dry_run=args.dry_run))
+    return 0
+
+
+def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
+    model_source = workload.raw.get("model_source") or {}
+    if model_source.get("type") == "huggingface":
+        from mlperf.runners.slm import DEFAULT_MODEL_ID, resolve_model_id, snapshot_model
+
+        requested_model = os.environ.get("MLPERF_EDU_SLM_MODEL_ID") or model_source.get("default_model_id") or DEFAULT_MODEL_ID
+        model_id = resolve_model_id(str(requested_model))
+        dossier = huggingface_model_dossier(model_source, model_name=workload.model, model_id=model_id)
+        terms = asset_terms_summary(dossier)
+        if dry_run:
+            return f"- {workload.id}: huggingface model -> {model_id}; {terms}"
+        local_only = os.environ.get("MLPERF_EDU_SLM_LOCAL_ONLY", "0") == "1"
+        path = snapshot_model(model_id, local_only=local_only)
+        return f"- {workload.id}: huggingface model {model_id} at {path}; {terms}"
+
+    shared_checkpoint = workload.raw.get("shared_checkpoint")
+    if shared_checkpoint:
+        dependency = workload.raw.get("quality_dependency") or shared_checkpoint
+        prompt_asset = ""
+        if workload.dataset:
+            dossier = asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source"))
+            terms = asset_terms_summary(dossier) if dossier else "no structured asset dossier"
+            prompt_asset = f"; prompt_fixture={workload.dataset}; {terms}"
+        return (
+            f"- {workload.id}: shared checkpoint -> {shared_checkpoint}; "
+            f"quality_dependency={dependency}; source=MLPerf EDU training workload"
+            f"{prompt_asset}"
+        )
+
+    dataset = workload.dataset or "no dataset declared"
+    dossier = asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source"))
+    terms = asset_terms_summary(dossier) if dossier else "no structured asset dossier"
+    if dataset == "tinyshakespeare":
+        if dry_run:
+            paths = tinyshakespeare_paths()
+            return f"- {workload.id}: {dataset} -> {paths['full']} ({TINY_SHAKESPEARE_URL}); {terms}"
+        asset = ensure_tinyshakespeare(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "movielens-100k":
+        if dry_run:
+            paths = movielens_paths()
+            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({MOVIELENS_100K_URL}); {terms}"
+        asset = ensure_movielens_100k(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "mnist":
+        if dry_run:
+            paths = mnist_paths()
+            return f"- {workload.id}: {dataset} -> {paths['root']} ({MNIST_SOURCE}); {terms}"
+        asset = ensure_mnist(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "cifar100":
+        if dry_run:
+            paths = cifar100_paths()
+            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({CIFAR100_URL}); {terms}"
+        asset = ensure_cifar100(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "fashion-mnist":
+        if dry_run:
+            paths = fashion_mnist_paths()
+            return f"- {workload.id}: {dataset} -> {paths['root']} ({FASHION_MNIST_SOURCE}); {terms}"
+        asset = ensure_fashion_mnist(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    return f"- {workload.id}: {dataset}; {terms}"
+
+
+def asset_terms_summary(dossier: dict[str, Any]) -> str:
+    license_value = dossier.get("license", "unknown")
+    status = dossier.get("license_status", "unknown")
+    use = dossier.get("public_result_use", "requires review")
+    release = dossier.get("public_release_status", "needs-release-decision")
+    return f"license={license_value}; terms={status}; release={release}; public_use={use}"
+
+
+def cmd_run(args: argparse.Namespace) -> int:
+    with ModelOverride(args.model):
+        workloads = load_workloads(args)
+        selected = select_cli_workloads(workloads, args)
+        if not selected:
+            console.print("[red]No workloads selected.[/red]")
+            return 1
+
+        print_run_selection(args.profile, selected, suite=args.suite, workload=args.workload, variant=args.variant)
+        if getattr(args, "dry_run", False):
+            console.print("[green]dry-run complete[/green]")
+            return 0
+
+        output_dir = Path(args.output_dir).resolve()
+        power_meter = PowerMeter()
+        if args.power:
+            power_meter.start()
+        workload_reports = [run_workload(workload, args.profile, output_dir) for workload in selected]
+        enrich_reports_for_display(workload_reports, workloads)
+        export_workload_reports(workload_reports, workloads)
+        power_report = power_meter.stop_report() if args.power else None
+        _, report_path, exports = write_aggregate_report(
+            profile=args.profile,
+            suite=args.suite,
+            workload=args.workload,
+            variant=args.variant,
+            workload_reports=workload_reports,
+            output_dir=output_dir,
+            open_report=args.open_report,
+            power=power_report,
+        )
+        return print_run_summary(args.profile, workload_reports, report_path, exports)
+
+
+def print_run_selection(
+    profile: str,
+    selected: list[Workload],
+    *,
+    suite: str | None,
+    workload: str | None,
+    variant: str | None,
+) -> None:
+    selector = selection_label(suite=suite, workload=workload)
+    if variant:
+        selector = f"{selector}:{variant}"
+    console.print(f"Selected {len(selected)} workload(s) for profile {profile} ({selector}).")
+    if not selected:
+        return
+
+    if len(selected) <= 10:
+        for item in selected:
+            console.print(f"  - {item.id} | run as: {workload_run_selector(item)} | suite: {item.suite}")
+        return
+
+    counts: dict[str, int] = {}
+    for item in selected:
+        counts[item.suite] = counts.get(item.suite, 0) + 1
+    summary = ", ".join(f"{suite_name}={count}" for suite_name, count in sorted(counts.items()))
+    console.print(f"  Suite coverage: {summary}")
+
+
+def write_aggregate_report(
+    *,
+    profile: str,
+    suite: str | None,
+    workload: str | None,
+    variant: str | None = None,
+    workload_reports: list[dict[str, Any]],
+    output_dir: Path,
+    open_report: bool,
+    power: dict[str, Any] | None = None,
+) -> tuple[dict[str, Any], Path, dict[str, Path]]:
+    output_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    report_path = output_dir / f"mlperf_edu_{profile}_{timestamp}.json"
+    hardware = detect_hardware()
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "mlperf_suite": DEFAULT_MLPERF_SUITE,
+        "profile": profile,
+        "suite": suite,
+        "workload": workload,
+        "variant": variant,
+        "selection": {
+            "kind": "workload" if workload else "suite" if suite else "default",
+            "name": f"{workload}:{variant}" if workload and variant else workload or suite or "default",
+        },
+        "hardware": hardware,
+        "workloads": workload_reports,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if power:
+        report["power"] = power
+    attach_run_fingerprints(report, hardware=hardware)
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    exports = write_report_exports(report, report_path, open_report=open_report)
+    return report, report_path, exports
+
+
+def export_workload_reports(workload_reports: list[dict[str, Any]], workloads: dict[str, Workload] | None = None) -> None:
+    """Create HTML/CSV siblings for per-workload JSON reports.
+
+    Runners write the measurement JSON before building provenance manifests, so
+    this function deliberately does not rewrite workload JSON. It only derives
+    human/spreadsheet views and records their paths in the aggregate in-memory
+    report.
+    """
+    for item in workload_reports:
+        artifacts = item.get("artifacts")
+        if not isinstance(artifacts, dict):
+            if item.get("status") in {"passed", "quality_failed"}:
+                console.print(f"[yellow]No workload artifacts declared for:[/yellow] {item.get('workload', item.get('id', 'unknown'))}")
+            continue
+        report_value = artifacts.get("report")
+        if not report_value:
+            if item.get("status") in {"passed", "quality_failed"}:
+                console.print(f"[yellow]No workload report path declared for:[/yellow] {item.get('workload', item.get('id', 'unknown'))}")
+            continue
+        report_path = Path(str(report_value))
+        if not report_path.exists() or not report_path.is_file():
+            console.print(f"[yellow]Workload report missing; skipped HTML/CSV export:[/yellow] {report_path}")
+            continue
+        try:
+            # Re-read the on-disk JSON so derived views match the exact report
+            # bytes that the provenance manifest binds.
+            report = json.loads(report_path.read_text())
+        except json.JSONDecodeError as exc:
+            console.print(f"[yellow]Workload report is not valid JSON; skipped HTML/CSV export:[/yellow] {report_path} ({exc})")
+            continue
+        try:
+            enrich_report_for_display(report, workloads or {})
+            attach_run_fingerprints(report)
+            report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+            update_measurement_manifest(report, report_path, artifacts.get("provenance"))
+            exports = write_report_exports(report, report_path, open_report=False)
+        except Exception as exc:
+            console.print(f"[yellow]Could not export workload HTML/CSV:[/yellow] {report_path} ({exc})")
+            continue
+        artifacts["html"] = str(exports["html"])
+        artifacts["csv"] = str(exports["csv"])
+
+
+def enrich_reports_for_display(reports: list[dict[str, Any]], workloads: dict[str, Workload]) -> None:
+    for report in reports:
+        enrich_report_for_display(report, workloads)
+
+
+def enrich_report_for_display(report: dict[str, Any], workloads: dict[str, Workload]) -> None:
+    if "workloads" in report:
+        for item in report.get("workloads", []):
+            if isinstance(item, dict):
+                enrich_report_for_display(item, workloads)
+        return
+
+    workload_id = report.get("workload") or report.get("id")
+    if not workload_id or workload_id not in workloads:
+        return
+    workload = workloads[str(workload_id)]
+
+    quality = report.setdefault("quality", {})
+    if isinstance(quality, dict):
+        raw_quality = workload.raw.get("quality") or workload.raw.get("quality_target") or {}
+        legacy_required = bool(raw_quality.get(LEGACY_QUALITY_REQUIRED_FIELD, workload.public_status == "score-bearing"))
+        quality["quality_required"] = bool(quality_required_value(quality, legacy_required))
+        quality.pop(LEGACY_QUALITY_REQUIRED_FIELD, None)
+        if workload.quality_direction:
+            quality.setdefault("direction", workload.quality_direction)
+        if workload.quality_target_basis:
+            quality.setdefault("target_basis", workload.quality_target_basis)
+        if workload.quality_tolerance is not None:
+            quality.setdefault("tolerance", workload.quality_tolerance)
+        if workload.quality_reference_runs:
+            quality.setdefault("reference_runs", workload.quality_reference_runs)
+        if workload.quality_variance_summary:
+            quality.setdefault("variance_summary", workload.quality_variance_summary)
+        if workload.quality_reference_protocol:
+            quality.setdefault("reference_protocol", workload.quality_reference_protocol)
+        if workload.quality_reviewer_notes:
+            quality.setdefault("reviewer_notes", list(workload.quality_reviewer_notes))
+        functional_check = workload.raw.get("functional_check")
+        if isinstance(functional_check, dict):
+            quality.setdefault("functional_check", functional_check)
+
+    report.setdefault(
+        "public",
+        {
+            "status": workload.public_status,
+            "rationale": workload.public_rationale,
+        },
+    )
+    if workload.dataset:
+        report.setdefault("dataset", workload.dataset)
+        report.setdefault(
+            "dataset_asset",
+            asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source")),
+        )
+    if workload.raw.get("dataset_source"):
+        report.setdefault("dataset_source", workload.raw.get("dataset_source"))
+    if workload.raw.get("model_source"):
+        report.setdefault("model_source", workload.raw.get("model_source"))
+        model_source = workload.raw.get("model_source") or {}
+        if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
+            report.setdefault(
+                "model_asset",
+                huggingface_model_dossier(model_source, model_name=workload.model),
+            )
+    if workload.raw.get("quality_dependency"):
+        report.setdefault("quality_dependency", workload.raw.get("quality_dependency"))
+    if workload.raw.get("shared_checkpoint"):
+        report.setdefault("shared_checkpoint", workload.raw.get("shared_checkpoint"))
+        report.setdefault("checkpoint_provenance", checkpoint_provenance_for(workload, workloads))
+    canonical = canonical_workload_for_id(workload)
+    if canonical:
+        report.setdefault("canonical_workload", canonical)
+        report.setdefault("variant", workload_variant_name(workload))
+        report.setdefault("run_selector", workload_run_selector(workload))
+
+
+def checkpoint_provenance_for(workload: Workload, workloads: dict[str, Workload]) -> dict[str, Any]:
+    shared_checkpoint = workload.raw.get("shared_checkpoint")
+    if not shared_checkpoint:
+        return {}
+    source = workloads.get(str(shared_checkpoint))
+    quality_dependency = workload.raw.get("quality_dependency") or shared_checkpoint
+    provenance = {
+        "artifact_role": "trained-checkpoint",
+        "source_workload": str(shared_checkpoint),
+        "quality_dependency": str(quality_dependency),
+        "source_run_selector": workload_run_selector(source) if source else str(shared_checkpoint),
+        "artifact_policy": "Preserve the source training report and .provd.json alongside checkpoint-backed inference results for public review.",
+    }
+    if source:
+        provenance.update(
+            {
+                "source_public_status": source.public_status,
+                "source_quality_metric": source.quality_metric,
+                "source_quality_target": source.quality_value,
+                "source_quality_direction": source.quality_direction,
+                "source_target_basis": source.quality_target_basis,
+                "source_reference_runs": source.quality_reference_runs,
+                "source_verified_baseline": source.raw.get("verified_baseline", {}),
+            }
+        )
+    return {key: value for key, value in provenance.items() if value not in (None, "")}
+
+
+def attach_run_fingerprints(report: dict[str, Any], *, hardware: dict[str, Any] | None = None) -> None:
+    """Attach stable machine-readable execution fingerprints to reports."""
+    if "workloads" in report:
+        aggregate_hardware = hardware or report.get("hardware") or detect_hardware()
+        for item in report.get("workloads", []):
+            if isinstance(item, dict):
+                attach_run_fingerprints(item, hardware=aggregate_hardware)
+        report["run_fingerprint"] = build_run_fingerprint(report, hardware=aggregate_hardware)
+        return
+
+    report["run_fingerprint"] = build_run_fingerprint(report, hardware=hardware)
+
+
+def build_run_fingerprint(report: dict[str, Any], *, hardware: dict[str, Any] | None = None) -> dict[str, Any]:
+    hw = hardware or report.get("hardware") or detect_hardware()
+    manifest = load_report_manifest(report)
+    fingerprint = {
+        "schema": "mlperf-edu-run-fingerprint/0.1",
+        "hardware": hardware_fingerprint_summary(hw),
+        "software": software_fingerprint_summary(),
+        "execution": execution_fingerprint_summary(report),
+    }
+    asset_hashes = asset_hashes_from_manifest(manifest)
+    if asset_hashes:
+        fingerprint["asset_hashes"] = asset_hashes
+    return fingerprint
+
+
+def hardware_fingerprint_summary(hardware: dict[str, Any]) -> dict[str, Any]:
+    keys = (
+        "machine_model",
+        "chip",
+        "cpu",
+        "gpu",
+        "memory_gb",
+        "os",
+        "os_version",
+        "python_version",
+        "pytorch_version",
+        "backend",
+        "fingerprint_hash",
+    )
+    return {key: hardware.get(key) for key in keys if hardware.get(key) is not None}
+
+
+def software_fingerprint_summary() -> dict[str, Any]:
+    return {
+        "python": platform.python_version(),
+        "python_executable": sys.executable,
+        "platform": platform.platform(),
+        "torch": package_version("torch"),
+        "torchvision": package_version("torchvision"),
+        "transformers": package_version("transformers"),
+        "mlperf_edu": package_version("mlperf-edu"),
+    }
+
+
+def package_version(package: str) -> str | None:
+    try:
+        from importlib.metadata import version
+
+        return version(package)
+    except Exception:
+        return None
+
+
+def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
+    workloads = report.get("workloads") if isinstance(report.get("workloads"), list) else None
+    if workloads:
+        backends = sorted({str(item.get("backend")) for item in workloads if isinstance(item, dict) and item.get("backend")})
+        data_modes = sorted({str(item.get("data_mode")) for item in workloads if isinstance(item, dict) and item.get("data_mode")})
+    else:
+        backends = [str(report.get("backend"))] if report.get("backend") else []
+        data_modes = [str(report.get("data_mode"))] if report.get("data_mode") else []
+    summary = {
+        "profile": report.get("profile"),
+        "suite": report.get("suite"),
+        "workload": report.get("workload") or report.get("id"),
+        "variant": report.get("variant"),
+        "seed": report.get("seed"),
+        "status": report.get("status"),
+        "backends": backends,
+        "data_modes": data_modes,
+    }
+    return {key: value for key, value in summary.items() if value not in (None, [], "")}
+
+
+def load_report_manifest(report: dict[str, Any]) -> dict[str, Any] | None:
+    artifacts = report.get("artifacts")
+    if not isinstance(artifacts, dict):
+        return None
+    manifest_value = artifacts.get("provenance")
+    if not manifest_value:
+        return None
+    path = Path(str(manifest_value))
+    if not path.exists():
+        return None
+    try:
+        return json.loads(path.read_text())
+    except json.JSONDecodeError:
+        return None
+
+
+def asset_hashes_from_manifest(manifest: dict[str, Any] | None) -> dict[str, Any]:
+    if not manifest:
+        return {}
+    leaves = manifest.get("leaves") or {}
+    hashes: dict[str, Any] = {}
+
+    weights = leaves.get("weights") or {}
+    if weights.get("sha256"):
+        hashes["weights"] = {
+            "path": weights.get("path"),
+            "sha256": weights.get("sha256"),
+            "n_bytes": weights.get("n_bytes"),
+        }
+
+    dataset = leaves.get("dataset") or {}
+    dataset_hashes: dict[str, Any] = {}
+    if dataset.get("merkle_root"):
+        dataset_hashes["merkle_root"] = dataset.get("merkle_root")
+    files = []
+    for item in dataset.get("files") or []:
+        if isinstance(item, dict) and item.get("sha256"):
+            files.append(
+                {
+                    "path": item.get("path"),
+                    "sha256": item.get("sha256"),
+                    "n_bytes": item.get("n_bytes"),
+                }
+            )
+    if files:
+        dataset_hashes["files"] = files
+    if dataset_hashes:
+        if dataset.get("name"):
+            dataset_hashes["name"] = dataset.get("name")
+        hashes["dataset"] = dataset_hashes
+
+    return hashes
+
+
+def update_measurement_manifest(report: dict[str, Any], report_path: Path, manifest_value: Any) -> None:
+    if not manifest_value:
+        return
+    manifest_path = Path(str(manifest_value))
+    if not manifest_path.exists():
+        return
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError:
+        return
+    leaves = manifest.get("leaves")
+    if not isinstance(leaves, dict):
+        return
+    leaves["measurement"] = measurement_leaf(report, report_path)
+    manifest["merkle_root"] = merkle_root(leaves)
+    manifest["signature"] = sign_manifest(manifest["merkle_root"])
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+
+def print_run_summary(
+    profile: str,
+    workload_reports: list[dict[str, Any]],
+    report_path: Path,
+    exports: dict[str, Path],
+) -> int:
+    executed = sum(1 for item in workload_reports if item.get("status") == "passed")
+    definition_only = sum(1 for item in workload_reports if item.get("status") == "definition_valid")
+    unsupported = sum(1 for item in workload_reports if item.get("status") == "not_implemented")
+    quality_failed = sum(1 for item in workload_reports if item.get("status") == "quality_failed")
+    console.print(
+        f"[green]{profile} run complete[/green]: "
+        f"{executed} passed, {definition_only} definition-only, {unsupported} unsupported, {quality_failed} quality-failed"
+    )
+    console.print(f"Report: {report_path}")
+    console.print(f"HTML: {exports['html']}")
+    console.print(f"CSV: {exports['csv']}")
+    for item in workload_reports:
+        artifacts = item.get("artifacts") or {}
+        if artifacts.get("report"):
+            console.print(f"Workload report: {artifacts['report']}")
+        if artifacts.get("html"):
+            console.print(f"Workload HTML: {artifacts['html']}")
+        if artifacts.get("csv"):
+            console.print(f"Workload CSV: {artifacts['csv']}")
+        if artifacts.get("provenance"):
+            console.print(f"Provenance: {artifacts['provenance']}")
+    if quality_failed:
+        return 1
+    if unsupported:
+        return 2
+    return 0
+
+
+def run_workload(workload: Workload, profile: str, output_dir: Path) -> dict[str, Any]:
+    runner = load_runner(workload, profile)
+    if runner:
+        return runner(workload, output_dir)
+
+    if profile == "pro" and load_runner(workload, "max"):
+        return run_pro_profile(workload, output_dir)
+
+    if profile == "min":
+        return smoke_workload(workload)
+
+    unsupported = smoke_workload(workload)
+    unsupported["profile"] = profile
+    unsupported["status"] = "not_implemented"
+    unsupported["note"] = f"No {profile} runner is registered for this workload."
+    return unsupported
+
+
+def run_pro_profile(workload: Workload, output_dir: Path) -> dict[str, Any]:
+    max_runner = load_runner(workload, "max")
+    if not max_runner:
+        raise ValueError(f"No max runner is registered for pro fallback: {workload.id}")
+
+    repetitions = int(os.environ.get("MLPERF_EDU_PRO_REPETITIONS", os.environ.get("MLPERF_EDU_MAX_REPETITIONS", "1")))
+    if repetitions < 1:
+        raise ValueError("MLPERF_EDU_PRO_REPETITIONS must be >= 1")
+
+    start = time.perf_counter()
+    subreports: list[dict[str, Any]] = []
+    for idx in range(repetitions):
+        rep_dir = output_dir / ".pro_evidence" / workload.id / f"rep{idx + 1}"
+        with TemporaryNanogptCheckpoint(output_dir):
+            subreport = max_runner(workload, rep_dir)
+        publish_shared_checkpoint(workload, subreport, output_dir)
+        subreports.append(subreport)
+    wall_time = time.perf_counter() - start
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = (output_dir / f"{workload.id}_pro_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_pro.provd.json").resolve()
+    status = "passed" if all(item.get("status") == "passed" for item in subreports) else "quality_failed"
+    target_met = status == "passed"
+    metrics = aggregate_pro_metrics(subreports)
+    metrics["repetitions"] = repetitions
+    metrics["wall_time_seconds"] = float(wall_time)
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "id": workload.id,
+        "workload": workload.id,
+        "suite": workload.suite,
+        "profile": "pro",
+        "status": status,
+        "backend": common_field(subreports, "backend"),
+        "data_mode": common_field(subreports, "data_mode"),
+        "pro_policy": {
+            "mode": "max-repetition",
+            "repetitions": repetitions,
+            "note": "Default pro profile repeats the verified max runner and records comparable evidence. Increase MLPERF_EDU_PRO_REPETITIONS for research sweeps.",
+        },
+        "metrics": metrics,
+        "quality": {
+            "metric": workload.quality_metric,
+            "target": workload.quality_value,
+            "quality_required": True,
+            "target_met": target_met,
+            "note": "All max sub-runs must pass for the pro aggregate to pass.",
+        },
+        "subruns": [subrun_evidence(item) for item in subreports],
+        "artifacts": {
+            "report": str(report_path),
+            "provenance": str(manifest_path),
+        },
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+
+    manifest = build_provd(
+        workload=workload.id,
+        scenario=workload.scenario or "pro",
+        division="open",
+        hardware_fingerprint=detect_hardware(),
+        report=report,
+        report_path=report_path,
+        dataset_name=workload.dataset or "pro-aggregate",
+        dataset_files=[],
+        rng_seed=None,
+        repo_root=find_project_root(),
+    )
+    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    return report
+
+
+class TemporaryNanogptCheckpoint:
+    def __init__(self, output_dir: Path) -> None:
+        self.output_dir = output_dir
+        self.previous: str | None = None
+        self.changed = False
+
+    def __enter__(self):
+        checkpoint = self.output_dir / "nanogpt-train_max_checkpoint.pt"
+        if checkpoint.exists() and "MLPERF_EDU_NANOGPT_CHECKPOINT" not in os.environ:
+            self.previous = os.environ.get("MLPERF_EDU_NANOGPT_CHECKPOINT")
+            os.environ["MLPERF_EDU_NANOGPT_CHECKPOINT"] = str(checkpoint)
+            self.changed = True
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:
+        if not self.changed:
+            return
+        if self.previous is None:
+            os.environ.pop("MLPERF_EDU_NANOGPT_CHECKPOINT", None)
+        else:
+            os.environ["MLPERF_EDU_NANOGPT_CHECKPOINT"] = self.previous
+
+
+def publish_shared_checkpoint(workload: Workload, report: dict[str, Any], output_dir: Path) -> None:
+    if workload.id != "nanogpt-train":
+        return
+    checkpoint = (report.get("artifacts") or {}).get("checkpoint")
+    if not checkpoint:
+        return
+    source = Path(checkpoint)
+    if source.exists():
+        output_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(source, output_dir / "nanogpt-train_max_checkpoint.pt")
+
+
+def aggregate_pro_metrics(subreports: list[dict[str, Any]]) -> dict[str, Any]:
+    values: dict[str, list[float]] = {}
+    for report in subreports:
+        for key, value in (report.get("metrics") or {}).items():
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                continue
+            values.setdefault(key, []).append(float(value))
+
+    metrics: dict[str, Any] = {}
+    for key, series in sorted(values.items()):
+        metrics[f"{key}_mean"] = float(sum(series) / len(series))
+        metrics[f"{key}_min"] = float(min(series))
+        metrics[f"{key}_max"] = float(max(series))
+    return metrics
+
+
+def common_field(reports: list[dict[str, Any]], field: str) -> str:
+    values = {str(report.get(field, "")) for report in reports if report.get(field)}
+    if len(values) == 1:
+        return next(iter(values))
+    if values:
+        return "mixed"
+    return ""
+
+
+def subrun_evidence(report: dict[str, Any]) -> dict[str, Any]:
+    artifacts = report.get("artifacts") or {}
+    evidence: dict[str, Any] = {
+        "workload": report.get("workload", report.get("id")),
+        "profile": report.get("profile"),
+        "status": report.get("status"),
+        "artifacts": artifacts,
+    }
+    for name, path in artifacts.items():
+        file_path = Path(path)
+        if file_path.exists() and file_path.is_file():
+            digest, n_bytes = sha256_file_for_report(file_path)
+            evidence[f"{name}_sha256"] = f"sha256:{digest}"
+            evidence[f"{name}_n_bytes"] = n_bytes
+    return evidence
+
+
+def sha256_file_for_report(path: Path, chunk: int = 1 << 20) -> tuple[str, int]:
+    h = hashlib.sha256()
+    n_bytes = 0
+    with path.open("rb") as f:
+        while True:
+            data = f.read(chunk)
+            if not data:
+                break
+            h.update(data)
+            n_bytes += len(data)
+    return h.hexdigest(), n_bytes
+
+
+def load_runner(workload: Workload, profile: str):
+    runner = (workload.raw.get("runner") or {}).get(profile)
+    if not runner:
+        return None
+    try:
+        module_name, function_name = runner.split(":", 1)
+    except ValueError as exc:
+        raise ValueError(f"invalid runner spec for {workload.id}: {runner}") from exc
+
+    module = import_module(module_name)
+    return getattr(module, function_name)
+
+
+def smoke_workload(workload: Workload) -> dict[str, Any]:
+    return {
+        "id": workload.id,
+        "suite": workload.suite,
+        "maturity": workload.maturity,
+        "model": workload.model,
+        "dataset": workload.dataset,
+        "quality_metric": workload.quality_metric,
+        "quality_value": workload.quality_value,
+        "status": "definition_valid",
+    }
+
+
+def cmd_verify(args: argparse.Namespace) -> int:
+    path = Path(args.manifest)
+    if not path.exists():
+        console.print(f"[red]Manifest not found:[/red] {path}")
+        return 1
+    result = verify_provd(path, repo_root=find_project_root())
+    print_verification_checks(result)
+
+    if result.all_ok:
+        console.print("[green]verified[/green]")
+        return 0
+    console.print("[red]verification failed[/red]")
+    return 1
+
+
+def cmd_report(args: argparse.Namespace) -> int:
+    path = resolve_report_input(Path(args.report))
+    if not path.exists():
+        console.print(f"[red]Report not found:[/red] {path}")
+        return 1
+    data = json.loads(path.read_text())
+    try:
+        enrich_report_for_display(data, load_workloads(args))
+    except (FileNotFoundError, ValueError):
+        pass
+    attach_run_fingerprints(data)
+    if args.format == "json":
+        text = json.dumps(data, indent=2, sort_keys=True) + "\n"
+        if args.output:
+            output = Path(args.output).resolve()
+            output.write_text(text)
+            console.print(f"JSON: {output}")
+        else:
+            console.print(text)
+        return 0
+    if args.format == "csv":
+        output = Path(args.output).resolve() if args.output else path.with_suffix(".csv")
+        write_csv_report(data, output)
+        console.print(f"CSV: {output}")
+        return 0
+    if args.format == "html":
+        output = Path(args.output).resolve() if args.output else path.with_suffix(".html")
+        write_html_report(data, output, source_path=path)
+        console.print(f"HTML: {output}")
+        if args.open:
+            open_report_path(output)
+        return 0
+
+    console.print(f"schema: {data.get('schema', 'unknown')}")
+    console.print(f"mlperf_suite: {data.get('mlperf_suite', DEFAULT_MLPERF_SUITE)}")
+    console.print(f"profile: {data.get('profile', 'unknown')}")
+    if data.get("power"):
+        power = data["power"]
+        console.print(f"power_average_watts: {power.get('average_watts')}")
+        console.print(f"energy_joules: {power.get('energy_joules')}")
+    if "workloads" in data:
+        console.print(f"workloads: {len(data.get('workloads', []))}")
+        status_counts: dict[str, int] = {}
+        for item in data.get("workloads", []):
+            status = str(item.get("status", "unknown"))
+            status_counts[status] = status_counts.get(status, 0) + 1
+        for status, count in sorted(status_counts.items()):
+            console.print(f"{status}: {count}")
+        return 0
+
+    console.print(f"workload: {data.get('workload', data.get('id', 'unknown'))}")
+    console.print(f"status: {data.get('status', 'unknown')}")
+    metrics = data.get("metrics") or {}
+    quality = data.get("quality") or {}
+    metric_name = quality_metric_name(quality)
+    metric_key = metric_key_for_quality(metric_name, metrics)
+    if metric_key:
+        console.print(f"{metric_key}: {metrics[metric_key]}")
+    for key in (
+        "time_to_first_token_s",
+        "inter_token_latency_s",
+        "prefill_tokens_per_sec",
+        "output_tokens_per_sec",
+        "requests_per_sec",
+        "batch_size",
+        "context_tokens",
+        "total_context_tokens",
+    ):
+        if key in metrics and key != metric_key:
+            console.print(f"{key}: {metrics[key]}")
+    if "target_met" in quality:
+        console.print(f"target_met: {quality['target_met']}")
+    if "quality_required" in quality:
+        console.print(f"quality_required: {quality['quality_required']}")
+    return 0
+
+
+def resolve_report_input(path: Path) -> Path:
+    if not path.is_dir():
+        return path
+    candidates = sorted(path.glob("mlperf_edu_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    if candidates:
+        return candidates[0]
+    validation_candidates = sorted(path.glob("mlperf_validate_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    if validation_candidates:
+        return validation_candidates[0]
+    workload_candidates = sorted(path.glob("*_report.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    if workload_candidates:
+        return workload_candidates[0]
+    return path / "mlperf_edu_<timestamp>.json"
+
+
+def write_report_exports(report: dict[str, Any], report_path: Path, *, open_report: bool = False) -> dict[str, Path]:
+    csv_path = report_path.with_suffix(".csv")
+    html_path = report_path.with_suffix(".html")
+    write_csv_report(report, csv_path)
+    write_html_report(report, html_path, source_path=report_path)
+    if open_report:
+        open_report_path(html_path)
+    return {"csv": csv_path, "html": html_path}
+
+
+def open_report_path(path: Path) -> bool:
+    try:
+        return bool(webbrowser.open(path.as_uri()))
+    except Exception as exc:
+        console.print(f"[yellow]Could not open report automatically:[/yellow] {exc}")
+        console.print(f"Open manually: {path}")
+        return False
+
+
+def write_csv_report(report: dict[str, Any], output: Path) -> None:
+    rows = report_rows(report)
+    rows.extend(aggregate_csv_rows(report))
+    output.parent.mkdir(parents=True, exist_ok=True)
+    fieldnames = [
+        "workload",
+        "canonical_workload",
+        "variant",
+        "run_selector",
+        "suite",
+        "profile",
+        "status",
+        "backend",
+        "data_mode",
+        "dataset",
+        "dataset_license_status",
+        "dataset_public_release_status",
+        "dataset_public_use",
+        "dataset_release_next_step",
+        "model_source",
+        "model_license",
+        "model_rationale",
+        "shared_checkpoint",
+        "quality_dependency",
+        "checkpoint_source_selector",
+        "checkpoint_source_quality",
+        "checkpoint_artifact_policy",
+        "metric",
+        "value",
+        "target",
+        "target_basis",
+        "reference_runs",
+        "reference_statistic",
+        "reference_protocol",
+        "direction",
+        "quality_required",
+        "target_met",
+        "functional_check",
+        "duration_seconds",
+        "throughput",
+        "power_average_watts",
+        "energy_joules",
+    ]
+    with output.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in rows:
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+
+
+def aggregate_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    power = report.get("power") or {}
+    workloads = report.get("workloads") or []
+    if not power or len(workloads) <= 1:
+        return []
+    return [
+        {
+            "workload": "__aggregate__",
+            "suite": report.get("suite") or "aggregate",
+            "profile": report.get("profile", ""),
+            "status": "aggregate",
+            "metric": "power",
+            "power_average_watts": power.get("average_watts", ""),
+            "energy_joules": power.get("energy_joules", ""),
+        }
+    ]
+
+
+def write_html_report(report: dict[str, Any], output: Path, *, source_path: Path) -> None:
+    rows = report_rows(report)
+    status_counts: dict[str, int] = {}
+    for row in rows:
+        status = str(row.get("status", "unknown"))
+        status_counts[status] = status_counts.get(status, 0) + 1
+
+    title = "MLPerf EDU Report"
+    if len(rows) == 1:
+        title = f"MLPerf EDU Report: {rows[0].get('workload', 'unknown')}"
+    elif report.get("suite"):
+        title = f"MLPerf EDU Suite Report: {report.get('suite')} / {report.get('profile')}"
+    elif (report.get("selection") or {}).get("kind") == "default":
+        title = f"MLPerf EDU Default Report: {report.get('profile')}"
+
+    generated_at = report.get("generated_at") or datetime.now(timezone.utc).isoformat()
+    status_cards = "\n".join(
+        f"<div class='card'><div class='label'>{escape(status)}</div><div class='value'>{count}</div></div>"
+        for status, count in sorted(status_counts.items())
+    )
+    power = report.get("power") or {}
+    if power:
+        status_cards += (
+            f"\n<div class='card'><div class='label'>Average Watts</div><div class='value'>{escape(format_cell(power.get('average_watts')))}</div></div>"
+            f"\n<div class='card'><div class='label'>Energy Joules</div><div class='value'>{escape(format_cell(power.get('energy_joules')))}</div></div>"
+        )
+    hardware_html = hardware_section_html(report)
+    serving_html = serving_metrics_section_html(report)
+    assets_html = assets_section_html(report)
+    body_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(str(row.get('workload', '')))}</td>"
+        f"<td>{escape(str(row.get('run_selector', '')))}</td>"
+        f"<td>{escape(str(row.get('suite', '')))}</td>"
+        f"<td>{escape(str(row.get('profile', '')))}</td>"
+        f"<td><span class='badge {status_class(str(row.get('status', '')))}'>{escape(str(row.get('status', '')))}</span></td>"
+        f"<td>{escape(str(row.get('metric', '')))}</td>"
+        f"<td>{escape(format_cell(row.get('value')))}</td>"
+        f"<td>{escape(format_cell(row.get('target')))}</td>"
+        f"<td>{escape(format_cell(row.get('target_basis')))}</td>"
+        f"<td>{escape(format_cell(row.get('reference_runs')))}</td>"
+        f"<td>{escape(format_cell(row.get('reference_statistic')))}</td>"
+        f"<td>{escape(format_cell(row.get('reference_protocol')))}</td>"
+        f"<td>{escape(format_cell(row.get('quality_required')))}</td>"
+        f"<td>{escape(format_cell(row.get('target_met')))}</td>"
+        f"<td>{escape(format_cell(row.get('functional_check')))}</td>"
+        f"<td>{escape(format_cell(row.get('duration_seconds')))}</td>"
+        f"<td>{escape(format_cell(row.get('throughput')))}</td>"
+        "</tr>"
+        for row in rows
+    )
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{escape(title)}</title>
+  <style>
+    :root {{
+      --bg: #f6f7f9;
+      --ink: #1f2937;
+      --muted: #667085;
+      --line: #d0d5dd;
+      --surface: #ffffff;
+      --pass: #067647;
+      --fail: #b42318;
+      --warn: #b54708;
+    }}
+    body {{ margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    main {{ max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }}
+    header {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 24px; }}
+    h1 {{ margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }}
+    h2 {{ margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }}
+    .meta {{ color: var(--muted); font-size: 13px; text-align: right; }}
+    .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 18px 0 24px; }}
+    .section {{ margin: 0 0 24px; }}
+    .card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }}
+    .label {{ color: var(--muted); font-size: 12px; text-transform: uppercase; }}
+    .value {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
+    table {{ width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }}
+    th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }}
+    th {{ color: var(--muted); font-size: 12px; text-transform: uppercase; background: #eef2f6; }}
+    tr:last-child td {{ border-bottom: 0; }}
+    .badge {{ display: inline-block; border-radius: 999px; padding: 2px 8px; font-size: 12px; font-weight: 600; }}
+    .pass {{ color: var(--pass); background: #dcfae6; }}
+    .fail {{ color: var(--fail); background: #fee4e2; }}
+    .warn {{ color: var(--warn); background: #fef0c7; }}
+    .note {{ color: var(--muted); margin-top: 18px; font-size: 12px; }}
+    .table-scroll {{ overflow-x: auto; }}
+    .table-scroll table {{ min-width: 980px; }}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>{escape(title)}</h1>
+      <div class="note">Schema: {escape(str(report.get('schema', 'unknown')))}</div>
+    </div>
+    <div class="meta">
+      <div>{escape(str(generated_at))}</div>
+      <div>{escape(str(source_path))}</div>
+    </div>
+  </header>
+  <section class="grid">{status_cards}</section>
+  {hardware_html}
+  {serving_html}
+  {assets_html}
+  <section>
+    <div class="table-scroll"><table>
+      <thead>
+        <tr><th>Workload</th><th>Run As</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Basis</th><th>Reference Runs</th><th>Reference Statistic</th><th>Reference Protocol</th><th>Quality Required</th><th>Met</th><th>Check</th><th>Duration</th><th>Throughput</th></tr>
+      </thead>
+      <tbody>{body_rows}</tbody>
+    </table></div>
+  </section>
+  <div class="note">Generated by mlperf report. Use the paired .provd.json manifests for integrity verification.</div>
+</main>
+</body>
+</html>
+"""
+    output.parent.mkdir(parents=True, exist_ok=True)
+    output.write_text(html)
+
+
+SERVING_METRIC_KEYS = (
+    "batch_size",
+    "configured_context_tokens",
+    "context_tokens",
+    "total_context_tokens",
+    "generated_tokens",
+    "total_generated_tokens",
+    "time_to_first_token_s",
+    "inter_token_latency_s",
+    "prefill_tokens_per_sec",
+    "output_tokens_per_sec",
+    "requests_per_sec",
+    "model_state_bytes",
+)
+
+
+def serving_metrics_section_html(report: dict[str, Any]) -> str:
+    rows = []
+    for item in report_items(report):
+        metrics = item.get("metrics") or {}
+        if not any(key in metrics for key in SERVING_METRIC_KEYS):
+            continue
+        base = report_row(
+            item,
+            default_profile=report.get("profile"),
+            default_suite=report.get("suite"),
+            default_power=None,
+        )
+        metric_cells = "".join(f"<td>{escape(format_cell(metrics.get(key)))}</td>" for key in SERVING_METRIC_KEYS)
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(base.get('workload', '')))}</td>"
+            f"<td>{escape(str(base.get('run_selector', '')))}</td>"
+            f"{metric_cells}"
+            "</tr>"
+        )
+    if not rows:
+        return ""
+
+    metric_headers = "".join(f"<th>{escape(key)}</th>" for key in SERVING_METRIC_KEYS)
+    body = "\n".join(rows)
+    return f"""
+  <section class="section">
+    <h2>Serving Metrics</h2>
+    <div class="table-scroll"><table>
+      <thead>
+        <tr><th>Workload</th><th>Run As</th>{metric_headers}</tr>
+      </thead>
+      <tbody>{body}</tbody>
+    </table></div>
+    <div class="note">Generation-style workloads report latency, context, throughput, and model-state metrics. The paired JSON contains the full metric record.</div>
+  </section>
+"""
+
+
+def hardware_section_html(report: dict[str, Any]) -> str:
+    run_fingerprint = report.get("run_fingerprint") or {}
+    hardware = report.get("hardware") or run_fingerprint.get("hardware") or {}
+    rows = report_rows(report)
+    backends = sorted({str(row.get("backend", "")) for row in rows if row.get("backend")})
+    if not hardware and not backends:
+        return ""
+
+    details: list[tuple[str, Any]] = []
+    for key in (
+        "machine_model",
+        "chip",
+        "cpu",
+        "gpu",
+        "memory_gb",
+        "os",
+        "os_version",
+        "python_version",
+        "pytorch_version",
+        "backend",
+        "fingerprint_hash",
+        "machine_class",
+        "platform",
+        "processor",
+        "python",
+        "torch",
+    ):
+        if key in hardware:
+            details.append((key, hardware.get(key)))
+    if backends:
+        details.append(("workload_backends", ", ".join(backends)))
+    software = run_fingerprint.get("software") or {}
+    for key in ("torchvision", "transformers", "mlperf_edu"):
+        if software.get(key) and key not in hardware:
+            details.append((key, software.get(key)))
+    if not details and hardware:
+        for key, value in sorted(hardware.items())[:8]:
+            details.append((key, value))
+
+    body = "\n".join(
+        f"<tr><td>{escape(str(key))}</td><td>{escape(format_hardware_value(value))}</td></tr>"
+        for key, value in details
+    )
+    return f"""
+  <section class="section">
+    <h2>Hardware and Backend</h2>
+    <table>
+      <tbody>{body}</tbody>
+    </table>
+  </section>
+"""
+
+
+def assets_section_html(report: dict[str, Any]) -> str:
+    rows = report_rows(report)
+    asset_rows = []
+    for row in rows:
+        if not any(
+            row.get(key)
+            for key in (
+                "dataset",
+                "dataset_license_status",
+                "dataset_public_release_status",
+                "model_source",
+                "model_license",
+                "model_rationale",
+                "shared_checkpoint",
+                "quality_dependency",
+                "checkpoint_source_selector",
+                "checkpoint_source_quality",
+                "checkpoint_artifact_policy",
+            )
+        ):
+            continue
+        asset_rows.append(
+            "<tr>"
+            f"<td>{escape(str(row.get('workload', '')))}</td>"
+            f"<td>{escape(format_cell(row.get('dataset')))}</td>"
+            f"<td>{escape(format_cell(row.get('dataset_license_status')))}</td>"
+            f"<td>{escape(format_cell(row.get('dataset_public_release_status')))}</td>"
+            f"<td>{escape(format_cell(row.get('dataset_public_use')))}</td>"
+            f"<td>{escape(format_cell(row.get('dataset_release_next_step')))}</td>"
+            f"<td>{escape(format_cell(row.get('model_source')))}</td>"
+            f"<td>{escape(format_cell(row.get('model_license')))}</td>"
+            f"<td>{escape(format_cell(row.get('model_rationale')))}</td>"
+            f"<td>{escape(format_cell(row.get('shared_checkpoint')))}</td>"
+            f"<td>{escape(format_cell(row.get('quality_dependency')))}</td>"
+            f"<td>{escape(format_cell(row.get('checkpoint_source_selector')))}</td>"
+            f"<td>{escape(format_cell(row.get('checkpoint_source_quality')))}</td>"
+            f"<td>{escape(format_cell(row.get('checkpoint_artifact_policy')))}</td>"
+            "</tr>"
+        )
+    if not asset_rows:
+        return ""
+    body = "\n".join(asset_rows)
+    return f"""
+  <section class="section">
+    <h2>Assets and Provenance</h2>
+    <table>
+      <thead>
+        <tr><th>Workload</th><th>Dataset</th><th>Dataset Terms</th><th>Release Status</th><th>Public Use</th><th>Next Step</th><th>Model Source</th><th>Model License</th><th>Model Rationale</th><th>Checkpoint</th><th>Quality Dependency</th><th>Checkpoint Source</th><th>Source Quality</th><th>Checkpoint Policy</th></tr>
+      </thead>
+      <tbody>{body}</tbody>
+    </table>
+  </section>
+"""
+
+
+def format_hardware_value(value: Any) -> str:
+    if isinstance(value, (dict, list, tuple)):
+        return json.dumps(value, sort_keys=True)
+    return format_cell(value)
+
+
+def report_items(report: dict[str, Any]) -> list[dict[str, Any]]:
+    if isinstance(report.get("workloads"), list):
+        return report["workloads"]
+    return [report]
+
+
+def report_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
+    if "workloads" in report:
+        workload_items = report_items(report)
+        aggregate_power = report.get("power") if len(workload_items) == 1 else None
+        return [
+            report_row(
+                item,
+                default_profile=report.get("profile"),
+                default_suite=report.get("suite"),
+                default_power=aggregate_power,
+            )
+            for item in workload_items
+        ]
+    return [report_row(report, default_profile=report.get("profile"), default_suite=report.get("suite"), default_power=report.get("power"))]
+
+
+def report_row(
+    item: dict[str, Any],
+    *,
+    default_profile: str | None,
+    default_suite: str | None,
+    default_power: dict[str, Any] | None,
+) -> dict[str, Any]:
+    metrics = item.get("metrics") or {}
+    quality = item.get("quality") or {}
+    variance_summary = quality.get("variance_summary") if isinstance(quality.get("variance_summary"), dict) else {}
+    checkpoint_provenance = item.get("checkpoint_provenance") if isinstance(item.get("checkpoint_provenance"), dict) else {}
+    dataset_asset = item.get("dataset_asset") if isinstance(item.get("dataset_asset"), dict) else {}
+    model_asset = item.get("model_asset") if isinstance(item.get("model_asset"), dict) else {}
+    metric_name = quality_metric_name(quality)
+    metric_key = metric_key_for_quality(metric_name, metrics)
+    throughput_key = metric_key_for_throughput(metrics)
+    dataset_value = dataset_name_for_row(item.get("dataset"))
+    model_source = model_asset.get("source_url") or model_source_summary(item.get("model_source"))
+    model_rationale = model_asset.get("selected_model_rationale") or model_asset.get("selection_rationale", "")
+    workload_id = str(item.get("workload", item.get("id", "")))
+    canonical = item.get("canonical_workload") or canonical_workload_for_id(workload_id) or ""
+    variant = item.get("variant") or (workload_variant_name(workload_id) if canonical else "")
+    run_selector = item.get("run_selector") or (f"{canonical} --variant {variant}" if canonical and variant else workload_id)
+    quality_required = quality_required_value(quality, "")
+    return {
+        "workload": workload_id,
+        "canonical_workload": canonical,
+        "variant": variant,
+        "run_selector": run_selector,
+        "suite": item.get("suite", default_suite or ""),
+        "profile": item.get("profile", default_profile or ""),
+        "status": item.get("status", ""),
+        "backend": item.get("backend", ""),
+        "data_mode": item.get("data_mode", ""),
+        "dataset": dataset_value,
+        "dataset_license_status": dataset_asset.get("license_status", ""),
+        "dataset_public_release_status": dataset_asset.get("public_release_status", ""),
+        "dataset_public_use": dataset_asset.get("public_result_use", ""),
+        "dataset_release_next_step": dataset_asset.get("release_next_step", ""),
+        "model_source": model_source,
+        "model_license": model_asset.get("license", ""),
+        "model_rationale": model_rationale,
+        "shared_checkpoint": item.get("shared_checkpoint", ""),
+        "quality_dependency": item.get("quality_dependency", ""),
+        "checkpoint_source_selector": checkpoint_provenance.get("source_run_selector", ""),
+        "checkpoint_source_quality": checkpoint_source_quality_summary(checkpoint_provenance),
+        "checkpoint_artifact_policy": checkpoint_provenance.get("artifact_policy", ""),
+        "metric": metric_key or metric_name or "",
+        "value": metrics.get(metric_key) if metric_key else "",
+        "target": quality.get("target", ""),
+        "target_basis": quality.get("target_basis", ""),
+        "reference_runs": quality.get("reference_runs", ""),
+        "reference_statistic": variance_summary.get("statistic", ""),
+        "reference_protocol": reference_protocol_summary(quality.get("reference_protocol")),
+        "direction": quality.get("direction", ""),
+        "quality_required": quality_required,
+        "target_met": quality.get("target_met", ""),
+        "functional_check": functional_check_summary(quality.get("functional_check")),
+        "duration_seconds": metrics.get("duration_seconds", ""),
+        "throughput": metrics.get(throughput_key) if throughput_key else "",
+        "power_average_watts": (default_power or item.get("power") or {}).get("average_watts", ""),
+        "energy_joules": (default_power or item.get("power") or {}).get("energy_joules", ""),
+    }
+
+
+def dataset_name_for_row(dataset: Any) -> str:
+    if isinstance(dataset, dict):
+        return str(dataset.get("name") or dataset.get("id") or "")
+    if dataset is None:
+        return ""
+    return str(dataset)
+
+
+def model_source_summary(model_source: Any) -> str:
+    if isinstance(model_source, dict):
+        return str(model_source.get("default_model_id") or model_source.get("source_url") or model_source.get("type") or "")
+    return ""
+
+
+def functional_check_summary(functional_check: Any) -> str:
+    if not isinstance(functional_check, dict):
+        return ""
+    metric = functional_check.get("metric", "")
+    condition = functional_check.get("condition", "")
+    if metric and condition:
+        return f"{metric}: {condition}"
+    return str(metric or condition)
+
+
+def reference_protocol_summary(protocol: Any) -> str:
+    if not isinstance(protocol, dict):
+        return ""
+    parts = []
+    for key in ("profile", "backend", "machine_class", "dataset_mode", "aggregation", "rerun_policy"):
+        value = protocol.get(key)
+        if value not in (None, ""):
+            parts.append(f"{key}={value}")
+    seeds = protocol.get("seeds")
+    if isinstance(seeds, list) and seeds:
+        parts.append("seeds=" + ",".join(str(seed) for seed in seeds))
+    return "; ".join(parts)
+
+
+def checkpoint_source_quality_summary(provenance: dict[str, Any]) -> str:
+    metric = provenance.get("source_quality_metric")
+    target = provenance.get("source_quality_target")
+    direction = provenance.get("source_quality_direction")
+    basis = provenance.get("source_target_basis")
+    if not metric:
+        return ""
+    parts = [str(metric)]
+    if direction:
+        parts.append(str(direction))
+    if target not in (None, ""):
+        parts.append(str(target))
+    if basis:
+        parts.append(f"basis={basis}")
+    return " ".join(parts)
+
+
+def quality_metric_name(quality: dict[str, Any]) -> str | None:
+    metric = quality.get("metric")
+    if metric:
+        return str(metric)
+    functional_check = quality.get("functional_check")
+    if isinstance(functional_check, dict) and functional_check.get("metric"):
+        return str(functional_check["metric"])
+    return None
+
+
+def metric_key_for_throughput(metrics: dict[str, Any]) -> str | None:
+    for key in (
+        "tokens_per_second",
+        "tokens_per_second_mean",
+        "prefill_tokens_per_sec",
+        "prefill_tokens_per_sec_mean",
+        "output_tokens_per_sec",
+        "output_tokens_per_sec_mean",
+        "samples_per_second",
+        "samples_per_second_mean",
+    ):
+        if key in metrics:
+            return key
+    return None
+
+
+def status_class(status: str) -> str:
+    if status == "passed":
+        return "pass"
+    if status in {"quality_failed", "failed"} or status.endswith("_failed"):
+        return "fail"
+    return "warn"
+
+
+def format_cell(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, float):
+        return f"{value:.6g}"
+    return str(value)
+
+
+def metric_key_for_quality(metric_name: str | None, metrics: dict[str, Any]) -> str | None:
+    if metric_name and metric_name in metrics:
+        return metric_name
+    candidates_by_metric = {
+        "accuracy": ("best_accuracy", "best_accuracy_mean", "final_accuracy", "final_accuracy_mean", "accuracy", "accuracy_mean"),
+        "top1_accuracy": ("best_accuracy", "best_accuracy_mean", "final_accuracy", "final_accuracy_mean", "accuracy", "accuracy_mean"),
+        "binary_accuracy": ("best_accuracy", "best_accuracy_mean", "final_accuracy", "final_accuracy_mean", "accuracy", "accuracy_mean"),
+        "test_accuracy": ("test_accuracy", "test_accuracy_mean", "accuracy", "accuracy_mean"),
+        "val_accuracy": ("val_accuracy", "val_accuracy_mean", "accuracy", "accuracy_mean"),
+        "mse_loss": ("mse_loss", "mse_loss_mean", "loss", "loss_mean"),
+        "val_mse": ("val_mse", "val_mse_mean", "mse_loss", "mse_loss_mean"),
+        "avg_episode_reward": ("avg_episode_reward", "avg_episode_reward_mean", "episode_reward"),
+        "reconstruction_mse": (
+            "final_reconstruction_mse",
+            "final_reconstruction_mse_mean",
+            "reconstruction_mse",
+            "reconstruction_mse_mean",
+            "final_val_reconstruction_mse",
+            "final_val_reconstruction_mse_mean",
+        ),
+        "cross_entropy_loss": (
+            "final_val_loss",
+            "final_val_loss_mean",
+            "final_train_loss",
+            "final_train_loss_mean",
+            "loss",
+            "loss_mean",
+        ),
+        "generated_tokens": ("generated_tokens", "generated_tokens_mean"),
+        "retrieval_accuracy": ("queries_per_second", "retrieve_latency_ms", "total_latency_ms"),
+        "pass_at_1": ("iterations", "tokens_per_second", "total_latency_ms"),
+        "trace_accuracy": ("steps", "total_reasoning_ms", "total_latency_ms"),
+        "relative_loss_delta": ("relative_loss_delta", "relative_loss_delta_mean"),
+    }
+    for key in candidates_by_metric.get(metric_name or "", ()):
+        if key in metrics:
+            return key
+    for fallback in (
+        "final_val_loss",
+        "final_val_loss_mean",
+        "final_accuracy",
+        "final_accuracy_mean",
+        "final_reconstruction_mse",
+        "final_reconstruction_mse_mean",
+        "prefill_latency_s",
+        "prefill_latency_s_mean",
+        "prefill_tokens_per_sec",
+        "prefill_tokens_per_sec_mean",
+        "itl_median_s",
+        "itl_median_s_mean",
+        "output_tokens_per_sec",
+        "output_tokens_per_sec_mean",
+        "generated_tokens",
+        "generated_tokens_mean",
+        "relative_loss_delta",
+        "relative_loss_delta_mean",
+        "queries_per_second",
+        "queries_per_second_mean",
+        "valid_call_rate",
+        "valid_call_rate_mean",
+        "total_latency_ms",
+        "total_latency_ms_mean",
+        "tokens_per_second",
+        "tokens_per_second_mean",
+        "loss",
+        "loss_mean",
+        "mse_loss",
+        "mse_loss_mean",
+        "val_mse",
+        "val_mse_mean",
+        "test_accuracy",
+        "test_accuracy_mean",
+        "val_accuracy",
+        "val_accuracy_mean",
+        "avg_episode_reward",
+        "avg_episode_reward_mean",
+    ):
+        if fallback in metrics:
+            return fallback
+    return None
+
+
+def print_verification_checks(result: Any) -> None:
+    table = Table(title=f"Verification: {result.workload}")
+    table.add_column("Check")
+    table.add_column("Status")
+    table.add_column("Detail")
+    for name, ok, detail in result.checks:
+        status = "[green]ok[/green]" if ok else "[red]fail[/red]"
+        table.add_row(name, status, detail)
+    console.print(table)
+
+
+def collect_package_files(manifest_path: Path, manifest: dict[str, Any]) -> list[tuple[str, Path, str]]:
+    files: list[tuple[str, Path, str]] = []
+    seen: set[Path] = set()
+
+    def add(role: str, path: Path | None, archive_name: str) -> None:
+        if not path or not path.exists() or not path.is_file():
+            return
+        resolved = path.resolve()
+        if resolved in seen:
+            return
+        seen.add(resolved)
+        files.append((role, resolved, archive_name))
+
+    add("manifest", manifest_path, f"manifest/{manifest_path.name}")
+
+    report_path = manifest_report_path(manifest)
+    if report_path:
+        add("report", report_path, f"report/{report_path.name}")
+        add("report_html", report_path.with_suffix(".html"), f"report/{report_path.with_suffix('.html').name}")
+        add("report_csv", report_path.with_suffix(".csv"), f"report/{report_path.with_suffix('.csv').name}")
+
+    leaves = manifest.get("leaves") or {}
+    weights_path = (leaves.get("weights") or {}).get("path")
+    if weights_path:
+        add("weights", Path(weights_path), f"weights/{Path(weights_path).name}")
+
+    roofline_path = (leaves.get("roofline_sidecar") or {}).get("path")
+    if roofline_path:
+        add("roofline_sidecar", Path(roofline_path), f"roofline/{Path(roofline_path).name}")
+
+    return files
+
+
+def manifest_report_path(manifest: dict[str, Any]) -> Path | None:
+    report_path = ((manifest.get("leaves") or {}).get("measurement") or {}).get("report_path")
+    return Path(report_path) if report_path else None
+
+
+def grade_manifest(manifest_path: Path) -> dict[str, Any]:
+    manifest = json.loads(manifest_path.read_text())
+    result = verify_provd(manifest_path, repo_root=find_project_root())
+
+    report_path = manifest_report_path(manifest)
+    report: dict[str, Any] = {}
+    if report_path and report_path.exists():
+        report = json.loads(report_path.read_text())
+
+    metrics = report.get("metrics") or {}
+    quality = report.get("quality") or {}
+    metric_name = quality_metric_name(quality)
+    metric_key = metric_key_for_quality(metric_name, metrics)
+    status = report.get("status") or ("missing_report" if report_path else "missing_measurement")
+    quality_required = bool(quality_required_value(quality, False))
+    target_met = quality.get("target_met", "")
+    passed = bool(result.all_ok and status == "passed" and (not quality_required or target_met is True))
+    workload_id = report.get("workload") or manifest.get("workload", "unknown")
+    canonical = report.get("canonical_workload") or canonical_workload_for_id(str(workload_id)) or ""
+    variant = report.get("variant") or (workload_variant_name(str(workload_id)) if canonical else "")
+    run_selector = report.get("run_selector") or (f"{canonical} --variant {variant}" if canonical and variant else str(workload_id))
+    return {
+        "manifest": str(manifest_path),
+        "report": str(report_path) if report_path else None,
+        "workload": workload_id,
+        "canonical_workload": canonical,
+        "variant": variant,
+        "run_selector": run_selector,
+        "profile": report.get("profile", ""),
+        "status": status,
+        "verified": result.all_ok,
+        "passed": passed,
+        "metric": metric_key or metric_name or "",
+        "value": metrics.get(metric_key) if metric_key else "",
+        "target": quality.get("target", ""),
+        "quality_required": quality_required,
+        "target_met": target_met,
+        "warning_count": 0,
+        "warnings": [],
+    }
+
+
+def cmd_package(args: argparse.Namespace) -> int:
+    manifest_path = Path(args.manifest).resolve()
+    if not manifest_path.exists():
+        console.print(f"[red]Manifest not found:[/red] {manifest_path}")
+        return 1
+
+    result = verify_provd(manifest_path, repo_root=find_project_root())
+    if not result.all_ok:
+        console.print(f"[red]Cannot package unverified manifest:[/red] {manifest_path}")
+        print_verification_checks(result)
+        return 1
+
+    manifest = json.loads(manifest_path.read_text())
+    package_path = (
+        Path(args.output).resolve()
+        if args.output
+        else manifest_path.with_name(manifest_path.name.replace(".provd.json", ".mlperf-edu.zip"))
+    )
+    package_path.parent.mkdir(parents=True, exist_ok=True)
+
+    package_files = collect_package_files(manifest_path, manifest)
+    index = {
+        "schema": "mlperf-edu-package/0.1",
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "workload": manifest.get("workload", "unknown"),
+        "source_manifest": str(manifest_path),
+        "included_files": [
+            {"role": role, "path": str(path), "archive_name": archive_name}
+            for role, path, archive_name in package_files
+        ],
+        "verification": [
+            {"check": name, "ok": ok, "detail": detail}
+            for name, ok, detail in result.checks
+        ],
+    }
+
+    with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("package_index.json", json.dumps(index, indent=2, sort_keys=True) + "\n")
+        for _, path, archive_name in package_files:
+            zf.write(path, archive_name)
+
+    console.print(f"[green]packaged[/green]: {package_path}")
+    return 0
+
+
+def cmd_grade(args: argparse.Namespace) -> int:
+    submissions_dir = Path(args.submissions_dir).resolve()
+    if not submissions_dir.exists():
+        console.print(f"[red]Submissions directory not found:[/red] {submissions_dir}")
+        return 1
+
+    manifests = sorted(
+        path
+        for path in submissions_dir.rglob("*.provd.json")
+        if ".pro_evidence" not in path.parts and ".max_evidence" not in path.parts
+    )
+    if not manifests:
+        console.print(f"[red]No .provd.json manifests found in:[/red] {submissions_dir}")
+        return 1
+
+    rows = [grade_manifest(path) for path in manifests]
+    table = Table(title=f"MLPerf EDU Grade: {submissions_dir}")
+    table.add_column("Workload", no_wrap=True)
+    table.add_column("Profile", no_wrap=True)
+    table.add_column("Result", no_wrap=True)
+    table.add_column("Verify", no_wrap=True)
+    table.add_column("Metric")
+    table.add_column("Value")
+    table.add_column("Target")
+    table.add_column("Quality Required", no_wrap=True)
+    table.add_column("Met", no_wrap=True)
+    table.add_column("Warnings", justify="right")
+    for row in rows:
+        style = "green" if row["passed"] else "red"
+        table.add_row(
+            str(row["workload"]),
+            str(row["profile"]),
+            f"[{style}]{row['status']}[/{style}]",
+            "ok" if row["verified"] else "fail",
+            str(row["metric"]),
+            format_cell(row["value"]),
+            format_cell(row["target"]),
+            format_cell(row["quality_required"]),
+            format_cell(row["target_met"]),
+            str(row.get("warning_count", 0)),
+        )
+    console.print(table)
+
+    passed = sum(1 for row in rows if row["passed"])
+    failed = len(rows) - passed
+    warning_count = sum(int(row.get("warning_count", 0)) for row in rows)
+    summary = {
+        "schema": "mlperf-edu-grade/0.1",
+        "submissions_dir": str(submissions_dir),
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "passed": passed,
+        "failed": failed,
+        "warning_count": warning_count,
+        "results": rows,
+    }
+    if args.output:
+        output = Path(args.output).resolve()
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
+        console.print(f"Grade JSON: {output}")
+
+    console.print(f"Grade summary: {passed} passed, {failed} failed, {warning_count} warning(s)")
+    return 0 if failed == 0 else 1
+
+
+def cmd_validate(args: argparse.Namespace) -> int:
+    validation_started_at = datetime.now(timezone.utc).isoformat()
+    validation_start = time.perf_counter()
+    try:
+        preset = resolve_validation_preset(args)
+    except ValueError as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 1
+    workloads = load_workloads(args)
+    items = validation_plan(preset, workloads, suite_filter=args.suite)
+    if not items:
+        console.print("[red]No validation items selected.[/red]")
+        return 1
+
+    output_root = Path(args.output_dir).resolve()
+    table = Table(title=f"MLPerf EDU Validation: {preset}")
+    table.add_column("Validation")
+    table.add_column("Selection")
+    table.add_column("Profile")
+    table.add_column("Output")
+    for selector_kind, selector_name, profile in items:
+        table.add_row(
+            validation_id(selector_kind, selector_name, profile),
+            validation_selection_label(selector_kind, selector_name),
+            profile,
+            str(validation_output_dir(output_root, selector_kind, selector_name, profile)),
+        )
+    console.print(table)
+
+    if args.dry_run:
+        console.print("[green]dry-run complete[/green]")
+        return 0
+
+    failures: list[tuple[str, str, str]] = []
+    records: list[dict[str, Any]] = []
+    preflight: dict[str, Any] = {"doctor_skipped": bool(args.skip_doctor)}
+    if not args.skip_doctor:
+        console.print("[bold]Validation preflight: doctor[/bold]")
+        doctor_start = time.perf_counter()
+        status = cmd_doctor(args)
+        preflight["doctor_exit"] = status
+        preflight["doctor_duration_seconds"] = float(time.perf_counter() - doctor_start)
+        if status != 0:
+            failures.append(("doctor", "-", f"exit {status}"))
+            if not args.keep_going:
+                return finish_validation(
+                    preset,
+                    output_root,
+                    records,
+                    failures,
+                    preflight,
+                    started_at=validation_started_at,
+                    duration_seconds=time.perf_counter() - validation_start,
+                    open_report=args.open_report,
+                )
+
+    for selector_kind, selector_name, profile in items:
+        output_dir = validation_output_dir(output_root, selector_kind, selector_name, profile)
+        item_id = validation_id(selector_kind, selector_name, profile)
+        record: dict[str, Any] = {
+            "validation": item_id,
+            "selection_kind": selector_kind,
+            "selection": validation_selection_label(selector_kind, selector_name),
+            "suite": selector_name if selector_kind == "suite" else "",
+            "profile": profile,
+            "output_dir": str(output_dir),
+            "status": "running",
+        }
+        records.append(record)
+        console.print(f"[bold]Validation run:[/bold] {validation_selection_label(selector_kind, selector_name)} / {profile}")
+        record_start = time.perf_counter()
+        run_args = argparse.Namespace(
+            registry=args.registry,
+            suite=selector_name if selector_kind == "suite" else None,
+            workload=None,
+            variant=None,
+            profile=profile,
+            output_dir=str(output_dir),
+            open_report=False,
+            model=args.model,
+            power=False,
+        )
+        if selector_kind == "collection":
+            run_args.collection = selector_name
+        else:
+            run_args.collection = None
+        run_status = cmd_run(run_args)
+        record["run_exit"] = run_status
+        record.update(latest_aggregate_exports(output_dir, profile))
+        if run_status != 0:
+            record["status"] = "run_failed"
+            record["duration_seconds"] = float(time.perf_counter() - record_start)
+            failures.append((item_id, profile, f"run exit {run_status}"))
+            if not args.keep_going:
+                return finish_validation(
+                    preset,
+                    output_root,
+                    records,
+                    failures,
+                    preflight,
+                    started_at=validation_started_at,
+                    duration_seconds=time.perf_counter() - validation_start,
+                    open_report=args.open_report,
+                )
+            continue
+
+        if args.skip_grade:
+            record["status"] = "passed"
+            record["grade_skipped"] = True
+            record["duration_seconds"] = float(time.perf_counter() - record_start)
+            continue
+        console.print(f"[bold]Validation grade:[/bold] {validation_selection_label(selector_kind, selector_name)} / {profile}")
+        grade_output = output_dir / "grade.json"
+        grade_args = argparse.Namespace(
+            registry=args.registry,
+            submissions_dir=str(output_dir),
+            output=str(grade_output),
+        )
+        grade_status = cmd_grade(grade_args)
+        record["grade_exit"] = grade_status
+        record["grade_json"] = str(grade_output)
+        if grade_output.exists():
+            grade_data = json.loads(grade_output.read_text())
+            record["passed"] = int(grade_data.get("passed", 0))
+            record["failed"] = int(grade_data.get("failed", 0))
+            record["warning_count"] = int(grade_data.get("warning_count", 0))
+        if grade_status != 0:
+            record["status"] = "grade_failed"
+            record["duration_seconds"] = float(time.perf_counter() - record_start)
+            failures.append((item_id, profile, f"grade exit {grade_status}"))
+            if not args.keep_going:
+                return finish_validation(
+                    preset,
+                    output_root,
+                    records,
+                    failures,
+                    preflight,
+                    started_at=validation_started_at,
+                    duration_seconds=time.perf_counter() - validation_start,
+                    open_report=args.open_report,
+                )
+        else:
+            record["status"] = "passed"
+            record["duration_seconds"] = float(time.perf_counter() - record_start)
+
+    return finish_validation(
+        preset,
+        output_root,
+        records,
+        failures,
+        preflight,
+        started_at=validation_started_at,
+        duration_seconds=time.perf_counter() - validation_start,
+        open_report=args.open_report,
+    )
+
+
+def resolve_validation_preset(args: argparse.Namespace) -> str:
+    candidates = []
+    if getattr(args, "preset", None):
+        candidates.append(args.preset)
+    if getattr(args, "preset_option", None):
+        candidates.append(args.preset_option)
+    if getattr(args, "legacy_level", None):
+        candidates.append(LEGACY_VALIDATE_LEVELS[args.legacy_level])
+    if not candidates:
+        return "smoke"
+    selected = candidates[0]
+    if any(candidate != selected for candidate in candidates[1:]):
+        raise ValueError(f"conflicting validation presets: {', '.join(candidates)}")
+    return selected
+
+
+def validation_plan(
+    preset: str,
+    workloads: dict[str, Workload],
+    *,
+    suite_filter: list[str] | None,
+) -> list[tuple[str, str, str]]:
+    present_suites = tuple(
+        suite for suite in PRODUCT_SUITES if any(workload.suite == suite for workload in workloads.values())
+    )
+    if suite_filter:
+        allowed = set(suite_filter)
+        selected_suites = tuple(suite for suite in present_suites if suite in allowed)
+        if preset in {"smoke", "coverage"}:
+            return [("suite", suite, "min") for suite in selected_suites]
+        if preset == "max":
+            return [("suite", suite, "max") for suite in selected_suites]
+        if preset == "release":
+            return [("suite", suite, "min") for suite in selected_suites] + [
+                ("suite", suite, "max") for suite in selected_suites
+            ]
+        raise ValueError(f"unknown validation preset: {preset}")
+
+    if preset == "smoke":
+        return [("collection", DEFAULT_WORKLOAD_COLLECTION, "min")]
+    if preset == "coverage":
+        return [("collection", "all", "min")]
+    if preset == "max":
+        return [("collection", "all", "max")]
+    if preset == "release":
+        return [("collection", "all", "min"), ("collection", "all", "max")]
+    raise ValueError(f"unknown validation preset: {preset}")
+
+
+def validation_selection_label(selector_kind: str, selector_name: str) -> str:
+    if selector_kind == "suite":
+        return f"suite:{selector_name}"
+    if selector_name == DEFAULT_WORKLOAD_COLLECTION:
+        return "default"
+    if selector_name == "all":
+        return "all workloads"
+    return f"{selector_name} workloads"
+
+
+def suite_has_profile(workloads: dict[str, Workload], *, suite: str, profile: str) -> bool:
+    selected = [workload for workload in workloads.values() if workload.suite == suite]
+    return bool(selected) and all(profile in (workload.raw.get("runner") or {}) for workload in selected)
+
+
+def validation_output_dir(output_root: Path, selector_kind: str, selector_name: str, profile: str) -> Path:
+    return output_root / validation_id(selector_kind, selector_name, profile)
+
+
+def validation_id(selector_kind: str, selector_name: str, profile: str) -> str:
+    if selector_kind == "collection":
+        if selector_name == DEFAULT_WORKLOAD_COLLECTION:
+            return f"{profile}-default"
+    return f"{profile}-{selector_name}"
+
+
+def latest_aggregate_exports(output_dir: Path, profile: str) -> dict[str, str]:
+    reports = sorted(output_dir.glob(f"mlperf_edu_{profile}_*.json"))
+    if not reports:
+        return {}
+    report = reports[-1]
+    return {
+        "report": str(report),
+        "report_html": str(report.with_suffix(".html")),
+        "report_csv": str(report.with_suffix(".csv")),
+    }
+
+
+def validation_workload_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for record in records:
+        report_path = record.get("report")
+        if not report_path:
+            continue
+        try:
+            report = json.loads(Path(str(report_path)).read_text())
+        except (OSError, json.JSONDecodeError):
+            continue
+        for row in report_rows(report):
+            enriched = {
+                "validation": record.get("validation", ""),
+            }
+            enriched.update(row)
+            rows.append(enriched)
+    return rows
+
+
+def finish_validation(
+    preset: str,
+    output_root: Path,
+    records: list[dict[str, Any]],
+    failures: list[tuple[str, str, str]],
+    preflight: dict[str, Any],
+    *,
+    started_at: str,
+    duration_seconds: float,
+    open_report: bool,
+) -> int:
+    write_validation_summary_report(
+        preset=preset,
+        output_root=output_root,
+        records=records,
+        failures=failures,
+        preflight=preflight,
+        started_at=started_at,
+        duration_seconds=duration_seconds,
+        open_report=open_report,
+    )
+    return validation_summary(failures)
+
+
+def write_validation_summary_report(
+    *,
+    preset: str,
+    output_root: Path,
+    records: list[dict[str, Any]],
+    failures: list[tuple[str, str, str]],
+    preflight: dict[str, Any],
+    started_at: str,
+    duration_seconds: float,
+    open_report: bool,
+) -> dict[str, Path]:
+    output_root.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+    status = "passed" if not failures else "failed"
+    report_path = output_root / f"mlperf_validate_{preset}_{timestamp}.json"
+    csv_path = report_path.with_suffix(".csv")
+    html_path = report_path.with_suffix(".html")
+    workload_csv_path = output_root / f"mlperf_validate_workloads_{preset}_{timestamp}.csv"
+    workloads = validation_workload_rows(records)
+    report = {
+        "schema": "mlperf-edu-validation/0.1",
+        "mlperf_suite": DEFAULT_MLPERF_SUITE,
+        "preset": preset,
+        "status": status,
+        "started_at": started_at,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "duration_seconds": float(duration_seconds),
+        "preflight": preflight,
+        "totals": {
+            "validations": len(records),
+            "passed_validations": sum(1 for record in records if record.get("status") == "passed"),
+            "failed_validations": sum(1 for record in records if str(record.get("status", "")).endswith("_failed")),
+            "passed_manifests": sum(int(record.get("passed", 0)) for record in records),
+            "failed_manifests": sum(int(record.get("failed", 0)) for record in records),
+            "warning_count": sum(int(record.get("warning_count", 0)) for record in records),
+            "failures": len(failures),
+            "workloads": len(workloads),
+            "duration_seconds": float(duration_seconds),
+        },
+        "validations": records,
+        "workloads": workloads,
+        "failures": [
+            {"suite": suite, "profile": profile, "failure": failure}
+            for suite, profile, failure in failures
+        ],
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    write_validation_csv(report, csv_path)
+    write_validation_workload_csv(report, workload_csv_path)
+    write_validation_html(report, html_path, source_path=report_path)
+    console.print(f"Validation JSON: {report_path}")
+    console.print(f"Validation HTML: {html_path}")
+    console.print(f"Validation CSV: {csv_path}")
+    console.print(f"Validation Workloads CSV: {workload_csv_path}")
+    if open_report:
+        webbrowser.open(html_path.as_uri())
+    return {"json": report_path, "csv": csv_path, "html": html_path}
+
+
+def write_validation_csv(report: dict[str, Any], output: Path) -> None:
+    fieldnames = [
+        "validation",
+        "suite",
+        "profile",
+        "status",
+        "run_exit",
+        "grade_exit",
+        "duration_seconds",
+        "passed",
+        "failed",
+        "warning_count",
+        "output_dir",
+        "report",
+        "report_html",
+        "report_csv",
+        "grade_json",
+    ]
+    with output.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for record in report.get("validations", []):
+            writer.writerow({field: record.get(field, "") for field in fieldnames})
+
+
+def write_validation_workload_csv(report: dict[str, Any], output: Path) -> None:
+    fieldnames = [
+        "validation",
+        "workload",
+        "canonical_workload",
+        "variant",
+        "run_selector",
+        "suite",
+        "profile",
+        "status",
+        "backend",
+        "data_mode",
+        "dataset",
+        "dataset_license_status",
+        "dataset_public_release_status",
+        "dataset_public_use",
+        "dataset_release_next_step",
+        "model_source",
+        "model_license",
+        "model_rationale",
+        "shared_checkpoint",
+        "quality_dependency",
+        "checkpoint_source_selector",
+        "checkpoint_source_quality",
+        "checkpoint_artifact_policy",
+        "metric",
+        "value",
+        "target",
+        "target_basis",
+        "reference_runs",
+        "reference_statistic",
+        "reference_protocol",
+        "quality_required",
+        "target_met",
+        "duration_seconds",
+        "throughput",
+    ]
+    with output.open("w", newline="") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames)
+        writer.writeheader()
+        for row in report.get("workloads", []):
+            writer.writerow({field: row.get(field, "") for field in fieldnames})
+
+
+def validation_artifact_links(record: dict[str, Any], *, base_dir: Path) -> str:
+    links = []
+    for label, key in (
+        ("HTML", "report_html"),
+        ("JSON", "report"),
+        ("CSV", "report_csv"),
+        ("Grade", "grade_json"),
+    ):
+        path = str(record.get(key, ""))
+        if not path:
+            continue
+        href = relative_href(path, base_dir=base_dir)
+        links.append(f"<a href='{escape(href)}'>{escape(label)}</a>")
+    return " · ".join(links)
+
+
+def relative_href(path: str, *, base_dir: Path) -> str:
+    file_path = Path(path)
+    try:
+        return file_path.relative_to(base_dir).as_posix()
+    except ValueError:
+        return file_path.as_uri() if file_path.is_absolute() else file_path.as_posix()
+
+
+def duration_sort_key(row: dict[str, Any]) -> float:
+    try:
+        return float(row.get("duration_seconds") or 0.0)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def write_validation_html(report: dict[str, Any], output: Path, *, source_path: Path) -> None:
+    totals = report.get("totals") or {}
+    base_dir = output.parent
+    cards = "\n".join(
+        f"<div class='card'><div class='label'>{escape(label)}</div><div class='value'>{escape(str(value))}</div></div>"
+        for label, value in (
+            ("Status", report.get("status", "unknown")),
+            ("Validation Runs", totals.get("validations", 0)),
+            ("Passed Manifests", totals.get("passed_manifests", 0)),
+            ("Failed Manifests", totals.get("failed_manifests", 0)),
+            ("Warnings", totals.get("warning_count", 0)),
+            ("Workloads", totals.get("workloads", 0)),
+            ("Duration", f"{float(report.get('duration_seconds', 0.0)):.1f}s"),
+        )
+    )
+    rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(str(record.get('validation', '')))}</td>"
+        f"<td>{escape(str(record.get('suite', '')))}</td>"
+        f"<td>{escape(str(record.get('profile', '')))}</td>"
+        f"<td><span class='badge {status_class(str(record.get('status', '')))}'>{escape(str(record.get('status', '')))}</span></td>"
+        f"<td>{escape(format_cell(record.get('passed', '')))}</td>"
+        f"<td>{escape(format_cell(record.get('failed', '')))}</td>"
+        f"<td>{escape(format_cell(record.get('warning_count', '')))}</td>"
+        f"<td>{escape(format_cell(record.get('duration_seconds', '')))}</td>"
+        f"<td>{validation_artifact_links(record, base_dir=base_dir)}</td>"
+        "</tr>"
+        for record in report.get("validations", [])
+    )
+    workload_rows = "\n".join(
+        "<tr>"
+        f"<td>{escape(str(row.get('validation', '')))}</td>"
+        f"<td>{escape(str(row.get('workload', '')))}</td>"
+        f"<td>{escape(str(row.get('suite', '')))}</td>"
+        f"<td>{escape(str(row.get('profile', '')))}</td>"
+        f"<td><span class='badge {status_class(str(row.get('status', '')))}'>{escape(str(row.get('status', '')))}</span></td>"
+        f"<td>{escape(str(row.get('metric', '')))}</td>"
+        f"<td>{escape(format_cell(row.get('value')))}</td>"
+        f"<td>{escape(format_cell(row.get('target')))}</td>"
+        f"<td>{escape(format_cell(row.get('quality_required')))}</td>"
+        f"<td>{escape(format_cell(row.get('duration_seconds')))}</td>"
+        f"<td>{escape(format_cell(row.get('throughput')))}</td>"
+        "</tr>"
+        for row in sorted(report.get("workloads", []), key=duration_sort_key, reverse=True)
+    )
+    workload_section = ""
+    if workload_rows:
+        workload_section = f"""
+  <h2>Workload Breakdown</h2>
+  <table>
+    <thead><tr><th>Validation</th><th>Workload</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Quality Required</th><th>Duration</th><th>Throughput</th></tr></thead>
+    <tbody>{workload_rows}</tbody>
+  </table>
+"""
+    html = f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>MLPerf EDU Validation: {escape(str(report.get('preset', 'unknown')))}</title>
+  <style>
+    :root {{ --bg:#f6f7f9; --ink:#1f2937; --muted:#667085; --line:#d0d5dd; --surface:#fff; --pass:#067647; --fail:#b42318; --warn:#b54708; }}
+    body {{ margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
+    main {{ max-width:1180px; margin:0 auto; padding:32px 24px 48px; }}
+    header {{ display:flex; justify-content:space-between; gap:24px; align-items:flex-start; margin-bottom:24px; }}
+    h1 {{ margin:0 0 6px; font-size:28px; letter-spacing:0; }}
+    .meta,.note {{ color:var(--muted); font-size:12px; }}
+    .meta {{ text-align:right; }}
+    .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:18px 0 24px; }}
+    .card {{ background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }}
+    .label {{ color:var(--muted); font-size:12px; text-transform:uppercase; }}
+    .value {{ font-size:24px; font-weight:700; margin-top:4px; }}
+    h2 {{ margin:28px 0 12px; font-size:18px; letter-spacing:0; }}
+    table {{ width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; }}
+    th,td {{ text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }}
+    th {{ color:var(--muted); font-size:12px; text-transform:uppercase; background:#eef2f6; }}
+    tr:last-child td {{ border-bottom:0; }}
+    .badge {{ display:inline-block; border-radius:999px; padding:2px 8px; font-size:12px; font-weight:600; }}
+    .pass {{ color:var(--pass); background:#dcfae6; }}
+    .fail {{ color:var(--fail); background:#fee4e2; }}
+    .warn {{ color:var(--warn); background:#fef0c7; }}
+    a {{ color:#175cd3; text-decoration:none; }}
+    a:hover {{ text-decoration:underline; }}
+  </style>
+</head>
+<body>
+<main>
+  <header>
+    <div>
+      <h1>MLPerf EDU Validation: {escape(str(report.get('preset', 'unknown')))}</h1>
+      <div class="note">Schema: {escape(str(report.get('schema', 'unknown')))} · Suite: {escape(str(report.get('mlperf_suite', 'unknown')))}</div>
+    </div>
+    <div class="meta">
+      <div>{escape(str(report.get('generated_at', '')))}</div>
+      <div>{escape(str(source_path))}</div>
+    </div>
+  </header>
+  <section class="grid">{cards}</section>
+  <table>
+    <thead><tr><th>Validation</th><th>Suite</th><th>Profile</th><th>Status</th><th>Passed</th><th>Failed</th><th>Warnings</th><th>Duration</th><th>Artifacts</th></tr></thead>
+    <tbody>{rows}</tbody>
+  </table>
+  {workload_section}
+  <div class="note" style="margin-top:18px">Generated by mlperf validate. Open per-suite reports for workload-level metrics.</div>
+</main>
+</body>
+</html>
+"""
+    output.write_text(html)
+
+
+def validation_summary(failures: list[tuple[str, str, str]]) -> int:
+    if not failures:
+        console.print("[green]Validation summary: all checks passed[/green]")
+        return 0
+    table = Table(title="MLPerf EDU Validation Failures")
+    table.add_column("Validation")
+    table.add_column("Profile")
+    table.add_column("Failure")
+    for suite, profile, failure in failures:
+        table.add_row(suite, profile, failure)
+    console.print(table)
+    console.print(f"[red]Validation summary: {len(failures)} failure(s)[/red]")
+    return 1
+
+
+def select_discovery_workloads(
+    workloads: dict[str, Workload],
+    *,
+    suite: str | None = None,
+    profile: str | None = None,
+    workload: str | None = None,
+    variant: str | None = None,
+    maturity: str | None = None,
+    public_status: str | None = None,
+) -> list[Workload]:
+    if variant and not workload:
+        raise ValueError("--variant requires --workload")
+
+    if workload:
+        if workload in workloads:
+            selected_ids = (resolve_cli_workload_id(workloads, workload, variant),)
+        else:
+            ids = resolve_workload_ids(workloads, workload)
+            if not ids:
+                raise ValueError(f"unknown workload or canonical workload '{workload}'")
+            if variant:
+                selected_ids = (resolve_cli_workload_id(workloads, workload, variant),)
+            else:
+                selected_ids = ids
+        selected = [workloads[workload_id] for workload_id in selected_ids if workload_id is not None]
+        if suite:
+            selected = [item for item in selected if item.suite == suite]
+        if maturity:
+            selected = [item for item in selected if item.maturity == maturity]
+        if public_status:
+            selected = [item for item in selected if item.public_status == public_status]
+        return selected
+
+    if profile and suite:
+        return select_workloads(
+            workloads,
+            suite=suite,
+            maturity=maturity,
+            public_status=public_status,
+        )
+
+    collection = profile_collection(profile) if profile else None
+    return select_workloads(
+        workloads,
+        suite=suite,
+        collection=collection,
+        maturity=maturity,
+        public_status=public_status,
+    )
+
+
+def cmd_list(args: argparse.Namespace) -> int:
+    workloads = load_workloads(args)
+    if args.subject == "suites":
+        return list_suites(workloads, args.format)
+    if args.subject == "profiles":
+        return list_profiles(workloads, args.format)
+    if args.subject == "variants":
+        return list_variants(
+            workloads,
+            args.workload,
+            args.format,
+            suite=args.suite,
+            maturity=args.maturity,
+            public_status=args.public_status,
+        )
+    if args.subject == "matrix":
+        return list_matrix(
+            workloads,
+            args.format,
+            suite=args.suite,
+            profile=args.profile,
+            workload=args.workload,
+            variant=getattr(args, "variant", None),
+            maturity=args.maturity,
+            public_status=args.public_status,
+        )
+
+    selected = select_discovery_workloads(
+        workloads,
+        suite=args.suite,
+        profile=args.profile,
+        workload=args.workload,
+        variant=args.variant,
+        maturity=args.maturity,
+        public_status=args.public_status,
+    )
+    if args.format == "json":
+        payload = {
+            "schema": "mlperf-edu-list-workloads/0.1",
+            "profile": args.profile,
+            "suite": args.suite,
+            "workload": args.workload,
+            "variant": args.variant,
+            "workloads": [workload_summary(workload) for workload in selected],
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    table = Table(title="MLPerf EDU Workloads")
+    table.add_column("Workload", no_wrap=True, min_width=44)
+    table.add_column("Internal ID", no_wrap=True, min_width=22)
+    table.add_column("Suite", no_wrap=True)
+    table.add_column("Public", no_wrap=True, min_width=20)
+    table.add_column("Quality", overflow="fold")
+    for workload in selected:
+        quality = "n/a"
+        if workload.quality_metric:
+            quality = f"{workload.quality_metric}={workload.quality_value}"
+        elif isinstance(workload.raw.get("functional_check"), dict):
+            quality = "functional: " + str(workload.raw["functional_check"].get("metric", "check"))
+        table.add_row(
+            workload_run_selector(workload),
+            workload.id,
+            workload.suite,
+            workload.public_status,
+            quality,
+        )
+    console.print(table)
+    return 0
+
+
+def list_matrix(
+    workloads: dict[str, Workload],
+    output_format: str,
+    *,
+    suite: str | None = None,
+    profile: str | None = None,
+    workload: str | None = None,
+    variant: str | None = None,
+    maturity: str | None = None,
+    public_status: str | None = None,
+) -> int:
+    selected = select_discovery_workloads(
+        workloads,
+        suite=suite,
+        profile=profile,
+        workload=workload,
+        variant=variant,
+        maturity=maturity,
+        public_status=public_status,
+    )
+
+    rows = [workload_matrix_row(workload) for workload in selected]
+    if output_format == "json":
+        payload = {
+            "schema": "mlperf-edu-workload-matrix/0.1",
+            "profile": profile,
+            "suite": suite,
+            "workload": workload,
+            "variant": variant,
+            "workloads": rows,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+        return 0
+
+    table = Table(title="MLPerf EDU Workload Matrix")
+    table.add_column("Workload", no_wrap=True, min_width=20)
+    table.add_column("Run As", overflow="fold", min_width=34)
+    table.add_column("Suite", no_wrap=True)
+    table.add_column("Profiles", no_wrap=True)
+    table.add_column("Role", no_wrap=True)
+    table.add_column("Status", no_wrap=True, min_width=12)
+    for row in rows:
+        table.add_row(
+            row["workload"],
+            row["run_selector"],
+            row["suite"],
+            row["default_profiles"],
+            row["role"],
+            row["public_status"],
+        )
+    console.print(table)
+    return 0
+
+
+def workload_matrix_row(workload: Workload) -> dict[str, str]:
+    canonical = canonical_workload_for_id(workload)
+    return {
+        "workload": workload.id,
+        "canonical_workload": canonical or "",
+        "variant": workload_variant_name(workload) if canonical else "",
+        "run_selector": workload_run_selector(workload),
+        "suite": workload.suite,
+        "default_profiles": default_profiles_for_workload(workload),
+        "role": workload_role(workload),
+        "public_status": workload.public_status,
+        "dataset": workload.dataset or "",
+        "quality": workload_quality_summary(workload),
+    }
+
+
+def default_profiles_for_workload(workload: Workload) -> str:
+    workload_id = workload.id
+    profiles = []
+    if workload_id in STARTER_WORKLOADS:
+        profiles.append("min")
+    if (workload.raw.get("runner") or {}).get("max"):
+        profiles.append("max")
+    if workload_id in RESEARCH_WORKLOADS:
+        profiles.append("pro")
+    elif (workload.raw.get("runner") or {}).get("max"):
+        profiles.append("pro")
+    return ", ".join(profiles) if profiles else "by-workload"
+
+
+def workload_role(workload: Workload) -> str:
+    workload_id = workload.id
+    if workload.suite == "agent":
+        return "agent"
+    if workload.suite == "distributed" or "distributed" in workload_id:
+        return "distributed"
+    if "spec" in workload_id:
+        return "test-time-compute"
+    if any(token in workload_id for token in ("quantized", "fp16", "fp32", "dram", "composed", "lora", "moe")):
+        return "optimization"
+    if any(token in workload_id for token in ("prefill", "decode", "inference")):
+        return "inference"
+    if "train" in workload_id or "finetune" in workload_id or workload.scenario == "training":
+        return "training"
+    if workload.scenario in {"single_stream", "offline", "server"}:
+        return "inference"
+    return workload.scenario or "systems"
+
+
+def workload_quality_summary(workload: Workload) -> str:
+    if workload.quality_metric:
+        parts = [str(workload.quality_metric)]
+        if workload.quality_direction:
+            parts.append(str(workload.quality_direction))
+        if workload.quality_value is not None:
+            parts.append(str(workload.quality_value))
+        return " ".join(parts)
+    if isinstance(workload.raw.get("functional_check"), dict):
+        return "functional: " + str(workload.raw["functional_check"].get("metric", "check"))
+    return ""
+
+
+def list_suites(workloads: dict[str, Workload], output_format: str) -> int:
+    rows = []
+    for suite in PRODUCT_SUITES:
+        suite_workloads = [workload for workload in workloads.values() if workload.suite == suite]
+        if not suite_workloads:
+            continue
+        rows.append(
+            {
+                "suite": suite,
+                "workloads": len(suite_workloads),
+                "score_bearing": sum(1 for workload in suite_workloads if workload.public_status == "score-bearing"),
+                "performance_bearing": sum(
+                    1 for workload in suite_workloads if workload.public_status == "performance-bearing"
+                ),
+                "systems_only": sum(1 for workload in suite_workloads if workload.public_status == "systems-only"),
+            }
+        )
+    if output_format == "json":
+        print(json.dumps({"schema": "mlperf-edu-list-suites/0.1", "suites": rows}, indent=2, sort_keys=True))
+        return 0
+
+    table = Table(title="MLPerf EDU Suites")
+    table.add_column("Suite", no_wrap=True)
+    table.add_column("Workloads", justify="right")
+    table.add_column("Score", justify="right")
+    table.add_column("Performance", justify="right")
+    table.add_column("Systems", justify="right")
+    for row in rows:
+        table.add_row(
+            str(row["suite"]),
+            str(row["workloads"]),
+            str(row["score_bearing"]),
+            str(row["performance_bearing"]),
+            str(row["systems_only"]),
+        )
+    console.print(table)
+    return 0
+
+
+def list_profiles(workloads: dict[str, Workload], output_format: str) -> int:
+    rows = []
+    for profile in PROFILES:
+        selected = select_workloads(workloads, collection=profile_collection(profile))
+        rows.append(
+            {
+                "profile": profile,
+                "workloads": len(selected),
+                "description": PROFILE_DESCRIPTIONS[profile],
+            }
+        )
+    if output_format == "json":
+        print(json.dumps({"schema": "mlperf-edu-list-profiles/0.1", "profiles": rows}, indent=2, sort_keys=True))
+        return 0
+
+    table = Table(title="MLPerf EDU Profiles")
+    table.add_column("Profile", no_wrap=True)
+    table.add_column("Workloads", justify="right")
+    table.add_column("Meaning")
+    for row in rows:
+        table.add_row(row["profile"], str(row["workloads"]), row["description"])
+    console.print(table)
+    return 0
+
+
+def list_variants(
+    workloads: dict[str, Workload],
+    workload_id: str | None,
+    output_format: str,
+    *,
+    suite: str | None = None,
+    maturity: str | None = None,
+    public_status: str | None = None,
+) -> int:
+    rows = variant_rows(workloads, workload_id, suite=suite, maturity=maturity, public_status=public_status)
+    if output_format == "json":
+        print(json.dumps({"schema": "mlperf-edu-list-variants/0.1", "variants": rows}, indent=2, sort_keys=True))
+        return 0
+
+    table = Table(title="MLPerf EDU Variants")
+    table.add_column("Canonical Workload", no_wrap=True)
+    table.add_column("Variant", no_wrap=True)
+    table.add_column("Registry ID", no_wrap=True)
+    table.add_column("Suite", no_wrap=True)
+    table.add_column("Model", overflow="fold")
+    table.add_column("Public", no_wrap=True)
+    for row in rows:
+        table.add_row(
+            row["canonical_workload"],
+            row["variant"],
+            row["workload"],
+            row["suite"],
+            row["model"],
+            row["public_status"],
+        )
+    console.print(table)
+    return 0
+
+
+def variant_rows(
+    workloads: dict[str, Workload],
+    workload_id: str | None = None,
+    *,
+    suite: str | None = None,
+    maturity: str | None = None,
+    public_status: str | None = None,
+) -> list[dict[str, Any]]:
+    canonical_ids: list[tuple[str, tuple[str, ...]]] = []
+    if workload_id:
+        canonical_ids = [(workload_id, resolve_workload_ids(workloads, workload_id))]
+    else:
+        canonical_ids = list(canonical_workload_groups(workloads).items())
+
+    rows: list[dict[str, Any]] = []
+    for canonical, ids in canonical_ids:
+        for current_id in ids:
+            if current_id not in workloads:
+                continue
+            workload = workloads[current_id]
+            if suite and workload.suite != suite:
+                continue
+            if maturity and workload.maturity != maturity:
+                continue
+            if public_status and workload.public_status != public_status:
+                continue
+            rows.append(
+                {
+                    "canonical_workload": canonical,
+                    "variant": workload_variant_name(workload),
+                    "workload": current_id,
+                    "suite": workload.suite,
+                    "model": workload.model,
+                    "public_status": workload.public_status,
+                }
+            )
+    if workload_id and not rows:
+        raise ValueError(f"unknown workload or canonical workload '{workload_id}'")
+    return rows
+
+
+def resolve_workload_ids(workloads: dict[str, Workload], workload_id: str) -> tuple[str, ...]:
+    if workload_id in workloads:
+        return (workload_id,)
+    groups = canonical_workload_groups(workloads)
+    if workload_id in groups:
+        return groups[workload_id]
+    return ()
+
+
+def canonical_workload_groups(workloads: dict[str, Workload]) -> dict[str, tuple[str, ...]]:
+    groups: dict[str, list[str]] = {}
+    for workload in workloads.values():
+        if workload.canonical_workload:
+            groups.setdefault(workload.canonical_workload, []).append(workload.id)
+    return {canonical: tuple(ids) for canonical, ids in groups.items()}
+
+
+def canonical_default_variant(workloads: dict[str, Workload], canonical_workload: str) -> str:
+    ids = resolve_workload_ids(workloads, canonical_workload)
+    for workload_id in ids:
+        workload = workloads[workload_id]
+        if workload.default_variant:
+            return workload_variant_name(workload)
+    for workload_id in ids:
+        workload = workloads[workload_id]
+        if workload_variant_name(workload) == "baseline":
+            return "baseline"
+    if ids:
+        return workload_variant_name(workloads[ids[0]])
+    return "baseline"
+
+
+def registry_workload_for_id(
+    workload: Workload | str,
+    workloads: dict[str, Workload] | None = None,
+) -> Workload | None:
+    if isinstance(workload, Workload):
+        return workload
+    if workloads is not None:
+        return workloads.get(workload)
+    try:
+        return load_registry().get(workload)
+    except Exception:
+        return None
+
+
+def canonical_workload_for_id(
+    workload: Workload | str,
+    workloads: dict[str, Workload] | None = None,
+) -> str | None:
+    resolved = registry_workload_for_id(workload, workloads)
+    return resolved.canonical_workload if resolved else None
+
+
+def workload_variant_name(
+    workload: Workload | str,
+    workloads: dict[str, Workload] | None = None,
+) -> str:
+    resolved = registry_workload_for_id(workload, workloads)
+    if resolved and resolved.variant:
+        return resolved.variant
+    return "baseline"
+
+
+def workload_run_selector(workload: Workload) -> str:
+    canonical = canonical_workload_for_id(workload)
+    if not canonical:
+        return workload.id
+    return f"{canonical} --variant {workload_variant_name(workload)}"
+
+
+def resolve_cli_workload_id(
+    workloads: dict[str, Workload],
+    workload_id: str | None,
+    variant: str | None,
+) -> str | None:
+    if variant and not workload_id:
+        raise ValueError("--variant requires --workload")
+    if not workload_id:
+        return None
+
+    if workload_id in workloads:
+        if variant and workload_variant_name(workloads[workload_id]) != variant:
+            available = workload_variant_name(workloads[workload_id])
+            raise ValueError(f"unknown variant '{variant}' for workload '{workload_id}'. Available: {available}")
+        return workload_id
+
+    ids = resolve_workload_ids(workloads, workload_id)
+    if not ids:
+        raise ValueError(f"unknown workload or canonical workload '{workload_id}'")
+
+    requested_variant = variant or canonical_default_variant(workloads, workload_id)
+    for current_id in ids:
+        if workload_variant_name(workloads[current_id]) == requested_variant:
+            return current_id
+
+    available = ", ".join(workload_variant_name(workloads[current_id]) for current_id in ids)
+    raise ValueError(f"unknown variant '{requested_variant}' for workload '{workload_id}'. Available: {available}")
+
+
+def workload_summary(workload: Workload) -> dict[str, Any]:
+    canonical = canonical_workload_for_id(workload)
+    summary = {
+        "workload": canonical or workload.id,
+        "id": workload.id,
+        "internal_id": workload.id,
+        "run_selector": workload_run_selector(workload),
+        "suite": workload.suite,
+        "public_status": workload.public_status,
+        "model": workload.model,
+        "dataset": workload.dataset,
+        "quality_metric": workload.quality_metric,
+        "quality_value": workload.quality_value,
+        "quality_target_basis": workload.quality_target_basis,
+        "functional_check": functional_check_summary(workload.raw.get("functional_check")),
+    }
+    if canonical:
+        summary["canonical_workload"] = canonical
+        summary["variant"] = workload_variant_name(workload)
+    return summary
+
+
+def cmd_show(args: argparse.Namespace) -> int:
+    workloads = load_workloads(args)
+    if args.variant:
+        ids = (resolve_cli_workload_id(workloads, args.workload, args.variant),)
+    else:
+        ids = resolve_workload_ids(workloads, args.workload)
+        if not ids:
+            console.print(f"[red]Unknown workload:[/red] {args.workload}")
+            return 1
+    if len(ids) > 1:
+        console.print(f"[bold]Canonical workload:[/bold] {args.workload}")
+        list_variants(workloads, args.workload, "summary")
+        return 0
+    workload = workloads[ids[0]]
+
+    table = Table(title=f"Workload: {workload.id}")
+    table.add_column("Field")
+    table.add_column("Value")
+    table.add_row("suite", workload.suite)
+    table.add_row("public_status", workload.public_status)
+    table.add_row("public_rationale", workload.public_rationale)
+    table.add_row("profiles", ", ".join(workload.supports_profiles))
+    table.add_row("model", workload.model)
+    table.add_row("dataset", workload.dataset or "")
+    canonical = canonical_workload_for_id(workload)
+    if canonical:
+        table.add_row("canonical_workload", canonical)
+        table.add_row("variant", workload_variant_name(workload))
+        table.add_row("run_as", workload_run_selector(workload))
+    table.add_row("scenario", workload.scenario or "")
+    if workload.quality_metric:
+        table.add_row("quality", f"{workload.quality_metric}={workload.quality_value}")
+    console.print(table)
+    return 0
+
+
+def cmd_info(args: argparse.Namespace) -> int:
+    workloads = load_workloads(args)
+    if args.suite:
+        return list_suites({k: v for k, v in workloads.items() if v.suite == args.suite}, "summary")
+    if args.profile:
+        console.print(f"[bold]Profile:[/bold] {args.profile}")
+        console.print(PROFILE_DESCRIPTIONS[args.profile])
+        selected = select_workloads(workloads, collection=profile_collection(args.profile))
+        print_run_selection(args.profile, selected, suite=None, workload=None, variant=None)
+        console.print(f"List details: mlperf list --profile {args.profile}")
+        return 0
+    if args.workload:
+        if args.variant:
+            return cmd_show(argparse.Namespace(registry=args.registry, workload=args.workload, variant=args.variant, model=args.model))
+        return cmd_show(argparse.Namespace(registry=args.registry, workload=args.workload, variant=None, model=args.model))
+    if args.model:
+        matches = workloads_matching_model(workloads, args.model)
+        return print_model_info(args.model, matches)
+    if args.dataset:
+        matches = [workload for workload in workloads.values() if workload.dataset == args.dataset]
+        return print_dataset_info(args.dataset, matches)
+    if args.run:
+        return cmd_report(argparse.Namespace(report=args.run, format="summary", output=None, open=False))
+    return 1
+
+
+def profile_collection(profile: str) -> str:
+    if profile == "min":
+        return "starter"
+    if profile == "max":
+        return "all"
+    return "research"
+
+
+def print_info_matches(label: str, query: str, matches: list[Workload]) -> int:
+    table = Table(title=f"{label}: {query}")
+    table.add_column("Workload", no_wrap=True)
+    table.add_column("Suite", no_wrap=True)
+    table.add_column("Model", overflow="fold")
+    table.add_column("Dataset", overflow="fold")
+    table.add_column("Public", no_wrap=True)
+    for workload in matches:
+        table.add_row(workload.id, workload.suite, workload.model, workload.dataset or "", workload.public_status)
+    console.print(table)
+    return 0 if matches else 1
+
+
+def print_dataset_info(dataset: str, matches: list[Workload]) -> int:
+    dossier = asset_dossier(dataset)
+    table = Table(title=f"Dataset: {dataset}")
+    table.add_column("Field", no_wrap=True)
+    table.add_column("Value", overflow="fold")
+    for key in (
+        "display_name",
+        "source_url",
+        "citation",
+        "license",
+        "license_status",
+        "public_release_status",
+        "public_result_use",
+        "public_release_policy",
+        "release_next_step",
+        "license_evidence_url",
+        "attribution",
+        "terms_summary",
+        "version",
+        "expected_download_bytes",
+        "expected_unpacked_bytes",
+        "hash_policy",
+    ):
+        value = dossier.get(key)
+        if value not in (None, ""):
+            table.add_row(key, str(value))
+    console.print(table)
+
+    if matches:
+        print_info_matches("Workloads using dataset", dataset, matches)
+        return 0
+    return 0 if dossier.get("license_status") != "unknown" else 1
+
+
+def workloads_matching_model(workloads: dict[str, Workload], query: str) -> list[Workload]:
+    query_lower = query.lower()
+    matches = []
+    for workload in workloads.values():
+        model_source = workload.raw.get("model_source") or {}
+        values = [workload.model, str(model_source.get("default_model_id", "")), str(model_source.get("default_alias", ""))]
+        aliases = model_source.get("aliases")
+        if isinstance(aliases, dict):
+            values.extend(str(item) for pair in aliases.items() for item in pair)
+        if any(query_lower in value.lower() for value in values):
+            matches.append(workload)
+    return matches
+
+
+def print_model_info(query: str, matches: list[Workload]) -> int:
+    dossier = model_dossier_for_query(query, matches)
+    if dossier:
+        table = Table(title=f"Model: {query}")
+        table.add_column("Field", no_wrap=True)
+        table.add_column("Value", overflow="fold")
+        for key in (
+            "display_name",
+            "id",
+            "source_url",
+            "provider",
+            "license",
+            "license_status",
+            "default_alias",
+            "selected_model_rationale",
+            "selection_rationale",
+            "size_rationale",
+            "backend_rationale",
+            "terms_summary",
+        ):
+            value = dossier.get(key)
+            if value not in (None, ""):
+                table.add_row(key, str(value))
+        aliases = dossier.get("aliases")
+        if isinstance(aliases, dict) and aliases:
+            table.add_row("aliases", ", ".join(f"{alias}->{model_id}" for alias, model_id in sorted(aliases.items())))
+        console.print(table)
+
+    if matches:
+        print_info_matches("Workloads using model", query, matches)
+        return 0
+    return 1
+
+
+def model_dossier_for_query(query: str, matches: list[Workload]) -> dict[str, Any]:
+    query_lower = query.lower()
+    for workload in matches:
+        model_source = workload.raw.get("model_source") or {}
+        if not isinstance(model_source, dict) or model_source.get("type") != "huggingface":
+            continue
+        model_id = model_source.get("default_model_id")
+        aliases = model_source.get("aliases")
+        if isinstance(aliases, dict):
+            for alias, target in aliases.items():
+                if query_lower in str(alias).lower() or query_lower in str(target).lower():
+                    model_id = target
+                    break
+        return huggingface_model_dossier(model_source, model_name=str(model_id), model_id=str(model_id))
+    return {}
+
+
+def cmd_cache(args: argparse.Namespace) -> int:
+    workloads = load_workloads(args)
+    selected = select_cli_workloads(workloads, args)
+    rows = []
+    for workload in selected:
+        rows.extend(cache_asset_rows(workload))
+
+    if args.format == "json":
+        payload = {
+            "schema": "mlperf-edu-cache/0.1",
+            "action": args.action,
+            "selection": cache_selection_summary(args, selected),
+            "assets": rows,
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        selection = cache_selection_summary(args, selected)
+        console.print(f"Selected {selection['workloads']} workload(s) for {selection['label']}.")
+        if not args.suite and not args.workload and args.profile == "min":
+            console.print("Use --profile max to inspect assets for the full suite.")
+        table = Table(title=f"MLPerf EDU Cache: {args.action}")
+        table.add_column("Workload", no_wrap=True)
+        table.add_column("Asset", no_wrap=True)
+        table.add_column("Status", no_wrap=True)
+        table.add_column("Path/Source", overflow="fold")
+        table.add_column("Terms", overflow="fold")
+        table.add_column("Digest", overflow="fold")
+        for row in rows:
+            style = "green" if row["status"] in {"present", "embedded", "external"} else "red"
+            table.add_row(
+                row["workload"],
+                row["asset"],
+                f"[{style}]{row['status']}[/{style}]",
+                row["path"],
+                cache_terms_cell(row),
+                row.get("sha256", ""),
+            )
+        console.print(table)
+
+    if args.action == "verify" and any(row["status"] == "missing" for row in rows):
+        return 1
+    return 0
+
+
+def cache_terms_cell(row: dict[str, str]) -> str:
+    license_status = row.get("license_status", "")
+    release_status = row.get("public_release_status", "")
+    if license_status and release_status:
+        return f"{license_status}; release={release_status}"
+    return license_status or release_status
+
+
+def cache_selection_summary(args: argparse.Namespace, selected: list[Workload]) -> dict[str, Any]:
+    if args.workload:
+        label = f"workload {args.workload}"
+        if args.variant:
+            label = f"{label}:{args.variant}"
+    elif args.suite:
+        label = f"suite {args.suite}"
+    else:
+        label = f"profile {args.profile}"
+    return {
+        "suite": args.suite or "",
+        "profile": "" if args.suite or args.workload else args.profile,
+        "workload": args.workload or "",
+        "variant": args.variant or "",
+        "label": label,
+        "workloads": len(selected),
+    }
+
+
+def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
+    rows: list[dict[str, str]] = []
+    model_source = workload.raw.get("model_source") or {}
+    if model_source.get("type") == "huggingface":
+        dossier = huggingface_model_dossier(model_source, model_name=workload.model)
+        rows.append(
+            {
+                "workload": workload.id,
+                "asset": "model",
+                "status": "external",
+                "path": str(model_source.get("default_model_id", "huggingface-cache")),
+                "sha256": "",
+                "source": str(dossier.get("source_url", "")),
+                "license": str(dossier.get("license", "")),
+                "license_status": str(dossier.get("license_status", "")),
+                "public_release_status": str(dossier.get("public_release_status", "")),
+                "public_result_use": str(dossier.get("public_result_use", "")),
+                "release_next_step": str(dossier.get("release_next_step", "")),
+            }
+        )
+
+    dataset = workload.dataset
+    dossier = asset_dossier(dataset, declared_source=workload.raw.get("dataset_source"))
+    if not dataset:
+        rows.append({"workload": workload.id, "asset": "dataset", "status": "embedded", "path": "none declared", "sha256": ""})
+        return rows
+    if dataset == "prompt-suite-local":
+        rows.append(cache_dataset_row(workload, dataset, status="embedded", path=dataset, sha256="", dossier=dossier))
+        return rows
+
+    known_paths: dict[str, list[Path]] = {
+        "tinyshakespeare": [
+            tinyshakespeare_paths()["full"],
+            tinyshakespeare_paths()["train"],
+            tinyshakespeare_paths()["val"],
+        ],
+        "movielens-100k": [movielens_paths()["ratings"], movielens_paths()["users"], movielens_paths()["items"]],
+        "mnist": [mnist_paths()["root"]],
+        "cifar100": [cifar100_paths()["dataset"]],
+        "fashion-mnist": [fashion_mnist_paths()["root"]],
+    }
+    paths = known_paths.get(dataset)
+    if not paths:
+        rows.append(cache_dataset_row(workload, dataset, status="external", path=dataset, sha256="", dossier=dossier))
+        return rows
+
+    existing = [path for path in paths if path.exists()]
+    status = "present" if len(existing) == len(paths) else "missing"
+    digest = ""
+    if status == "present" and len(existing) == 1 and existing[0].is_file():
+        digest = f"sha256:{sha256_file(existing[0])}"
+    rows.append(cache_dataset_row(workload, dataset, status=status, path=", ".join(str(path) for path in paths), sha256=digest, dossier=dossier))
+    return rows
+
+
+def cache_dataset_row(
+    workload: Workload,
+    dataset: str,
+    *,
+    status: str,
+    path: str,
+    sha256: str,
+    dossier: dict[str, Any],
+) -> dict[str, str]:
+    return {
+        "workload": workload.id,
+        "asset": "dataset",
+        "status": status,
+        "path": path,
+        "sha256": sha256,
+        "source": str(dossier.get("source_url", "")),
+        "license": str(dossier.get("license", "")),
+        "license_status": str(dossier.get("license_status", "")),
+        "public_release_status": str(dossier.get("public_release_status", "")),
+        "public_result_use": str(dossier.get("public_result_use", "")),
+        "release_next_step": str(dossier.get("release_next_step", "")),
+    }
+
+
+def cmd_audit(args: argparse.Namespace) -> int:
+    workloads = load_workloads(args)
+    if args.variant and not args.workload:
+        raise ValueError("--variant requires --workload")
+    if args.workload and args.suite:
+        raise ValueError("choose only one of --suite or --workload")
+    if args.workload:
+        if args.variant:
+            selected_ids = (resolve_cli_workload_id(workloads, args.workload, args.variant),)
+        else:
+            selected_ids = resolve_workload_ids(workloads, args.workload)
+            if not selected_ids:
+                raise ValueError(f"unknown workload or canonical workload '{args.workload}'")
+        selected = [workloads[workload_id] for workload_id in selected_ids if workload_id in workloads]
+        if args.public_status:
+            selected = [workload for workload in selected if workload.public_status == args.public_status]
+    else:
+        selected = select_workloads(
+            workloads,
+            suite=args.suite,
+            collection=profile_collection(args.profile) if args.profile and not args.suite else None,
+            public_status=args.public_status,
+        )
+    selected_ids = {workload.id for workload in selected}
+    issues_by_workload = {
+        workload_id: issues
+        for workload_id, issues in public_contract_report(workloads).items()
+        if workload_id in selected_ids
+    }
+    warnings_by_workload = (
+        {workload.id: public_audit_warnings(workload) for workload in selected}
+        if args.policy == "public"
+        else {workload.id: [] for workload in selected}
+    )
+    status_counts: dict[str, int] = {status: 0 for status in PUBLIC_STATUSES}
+    for workload in selected:
+        status_counts[workload.public_status] = status_counts.get(workload.public_status, 0) + 1
+    failing = {workload_id: issues for workload_id, issues in issues_by_workload.items() if issues}
+    warning_count = sum(len(warnings) for warnings in warnings_by_workload.values())
+    warning_blocked = args.policy == "public" and warning_count > 0
+    audit_passed = not failing and not warning_blocked
+    issue_rows = [
+        {
+            "workload": workload.id,
+            "run_selector": workload_run_selector(workload),
+            "issue": issue,
+        }
+        for workload in selected
+        for issue in issues_by_workload.get(workload.id, [])
+    ]
+    warning_rows = [
+        {
+            "workload": workload.id,
+            "run_selector": workload_run_selector(workload),
+            "warning": warning,
+        }
+        for workload in selected
+        for warning in warnings_by_workload.get(workload.id, [])
+    ]
+
+    if args.format == "json":
+        payload = {
+            "schema": "mlperf-edu-public-contract-audit/0.1",
+            "mlperf_suite": DEFAULT_MLPERF_SUITE,
+            "status": "passed" if audit_passed else "failed",
+            "policy": args.policy,
+            "profile": args.profile,
+            "suite": args.suite,
+            "workload": args.workload,
+            "variant": args.variant,
+            "public_status": args.public_status,
+            "counts": {status: count for status, count in status_counts.items() if count},
+            "blocker_count": len(issue_rows),
+            "warning_blocked": warning_blocked,
+            "warning_count": warning_count,
+            "issues": issue_rows,
+            "warnings": warning_rows,
+            "workloads": [
+                {
+                    "id": workload.id,
+                    "canonical_workload": canonical_workload_for_id(workload),
+                    "variant": workload_variant_name(workload) if canonical_workload_for_id(workload) else None,
+                    "run_selector": workload_run_selector(workload),
+                    "suite": workload.suite,
+                    "public_status": workload.public_status,
+                    "scenario": workload.scenario,
+                    "issues": issues_by_workload.get(workload.id, []),
+                    "warnings": warnings_by_workload.get(workload.id, []),
+                }
+                for workload in selected
+            ],
+        }
+        sys.stdout.write(json.dumps(payload, indent=2, sort_keys=True) + "\n")
+        return 0 if audit_passed else 1
+
+    table = Table(title="MLPerf EDU Public Contract Audit")
+    table.add_column("Workload", no_wrap=True)
+    table.add_column("Run As", no_wrap=True, min_width=32)
+    table.add_column("Suite", no_wrap=True)
+    table.add_column("Public", no_wrap=True)
+    table.add_column("Scenario", no_wrap=True)
+    table.add_column("Result", no_wrap=True)
+    table.add_column("Issues")
+    table.add_column("Warnings")
+    for workload in selected:
+        issues = issues_by_workload.get(workload.id, [])
+        warnings = warnings_by_workload.get(workload.id, [])
+        result = "[green]ready[/green]" if not issues else "[red]blocked[/red]"
+        table.add_row(
+            workload.id,
+            workload_run_selector(workload),
+            workload.suite,
+            workload.public_status,
+            workload.scenario or "",
+            result,
+            "; ".join(issues),
+            "; ".join(warnings),
+        )
+    console.print(table)
+    console.print(
+        "public contract audit: "
+        + (
+            "[green]passed[/green]"
+            if audit_passed
+            else f"[red]failed ({len(failing)} blocker workload(s), {warning_count if warning_blocked else 0} public warning(s))[/red]"
+        )
+    )
+    console.print(
+        "public status counts: "
+        + ", ".join(f"{status}={count}" for status, count in status_counts.items() if count)
+    )
+    console.print(f"public warnings: {warning_count}")
+    return 0 if audit_passed else 1
+
+
+def public_audit_warnings(workload: Workload) -> list[str]:
+    warnings: list[str] = []
+    if workload.public_status not in {"score-bearing", "performance-bearing"}:
+        return warnings
+
+    if workload.dataset:
+        dossier = asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source"))
+        dataset_warning = dataset_public_release_warning(dossier)
+        if dataset_warning:
+            warnings.append(dataset_warning)
+
+    model_source = workload.raw.get("model_source")
+    if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
+        dossier = huggingface_model_dossier(model_source, model_name=workload.model)
+        if dossier.get("license_status") == "requires-review":
+            warnings.append("model license status requires review before public endorsement")
+
+    return warnings
+
+
+def dataset_public_release_warning(dossier: dict[str, Any]) -> str:
+    release_status = str(dossier.get("public_release_status", "needs-release-decision"))
+    next_step = str(dossier.get("release_next_step") or dossier.get("public_release_policy") or "").strip()
+    if release_status in {"public-ok-bundled", "public-ok-with-attribution", "public-ok-fetch-only"}:
+        return ""
+    if release_status == "restricted-needs-approval":
+        detail = f": {next_step}" if next_step else ""
+        return f"dataset public release status is restricted-needs-approval{detail}"
+    if release_status == "needs-release-decision":
+        detail = f": {next_step}" if next_step else ""
+        return f"dataset public release status is needs-release-decision{detail}"
+
+    license_status = str(dossier.get("license_status", "unknown"))
+    if license_status in {"requires-review", "unknown"}:
+        return f"dataset license status is {license_status}; release policy must resolve before public endorsement"
+    if license_status == "noncommercial-research-education":
+        return "dataset terms are noncommercial/research/education; public-result policy needs explicit approval"
+    return ""
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = build_parser()
+    normalized_argv = list(sys.argv[1:] if argv is None else argv)
+    args = parser.parse_args(normalized_argv)
+    if hasattr(args, "profile"):
+        args.profile = normalize_profile(args.profile)
+    try:
+        return int(args.func(args) or 0)
+    except (FileNotFoundError, ValueError) as exc:
+        console.print(f"[red]{exc}[/red]")
+        return 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())

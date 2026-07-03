@@ -569,9 +569,36 @@
       }
     });
 
-    // Intercept navbar subscribe link
+    function isNewsletterPageLink(link) {
+      const href = link.getAttribute('href') || '';
+      try {
+        const url = new URL(href, window.location.href);
+        return url.hostname === 'mlsysbook.ai' && url.pathname.replace(/\/+$/, '') === '/newsletter';
+      } catch (err) {
+        return false;
+      }
+    }
+
+    function isNavbarSubscribeLink(link) {
+      const text = (link.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      return text === 'subscribe' && Boolean(link.closest('.navbar')) && isNewsletterPageLink(link);
+    }
+
+    function bindSubscribeLink(link) {
+      if (link.dataset.subscribeModalBound === 'true') {
+        return;
+      }
+      link.dataset.subscribeModalBound = 'true';
+      link.addEventListener('click', function(e) {
+        e.preventDefault();
+        openModal();
+      });
+    }
+
+    // Intercept modal-specific subscribe links. The navbar CTA keeps a normal
+    // /newsletter/ href for Safari/content-blocker compatibility, then this
+    // script upgrades that specific shared-navbar item into the modal trigger.
     setTimeout(() => {
-      // Look for subscribe links in navbar
       const subscribeSelectors = [
         'a[href*="buttondown.email/mlsysbook"]',
         'a[href="#subscribe"]',
@@ -583,14 +610,15 @@
       subscribeSelectors.forEach(selector => {
         try {
           const links = document.querySelectorAll(selector);
-          links.forEach(link => {
-            link.addEventListener('click', function(e) {
-              e.preventDefault();
-              openModal();
-            });
-          });
+          links.forEach(bindSubscribeLink);
         } catch (err) {
           // Selector not supported, continue
+        }
+      });
+
+      document.querySelectorAll('.navbar a.nav-link').forEach(link => {
+        if (isNavbarSubscribeLink(link)) {
+          bindSubscribeLink(link);
         }
       });
     }, 1000);

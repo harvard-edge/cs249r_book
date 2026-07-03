@@ -22,6 +22,8 @@ Conventions used here follow the book-wide notation (for example, we reserve $B$
 - **When “average looks fine” but users complain**: Use @sec-appdx-data-foundations-distributions-long-tail-901f and session-level tail probability.
 - **When accuracy drifts silently**: Use @sec-appdx-data-foundations-measuring-drift-divergence-a6dd to compare full distributions.
 
+The data landscape can feel like a zoo of formats, encodings, and edge cases, but this appendix focuses on the structural constants that constrain every ML system.
+
 ```{python}
 #| echo: false
 from mlsysim import *
@@ -325,10 +327,8 @@ Feature engineering turns raw records into the columns a model can learn from, a
 
 1.  **Selection ($\sigma$)**: Filtering rows (for example, `WHERE age > 30`).
     *   **Cost**: Cheap ($\mathcal{O}(\log N)$) if indexed; expensive ($\mathcal{O}(N)$) if full scan.
-
 2.  **Projection ($\pi$)**: Selecting columns (for example, `SELECT age`).
     *   **Cost**: Free in columnar formats (only read relevant blocks). In row formats, the entire `{python} DataAlgebra.row_size_kb_str` row must be read just to extract the `{python} DataAlgebra.int_size_bytes_value_str`-byte integer, wasting `{python} DataAlgebra.waste_pct_str` of I/O bandwidth.
-
 3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
     *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
         *   **Cost**: Massive network traffic. Joining two `{python} DataAlgebra.join_table_tb_str` tables requires moving `{python} DataAlgebra.join_network_tb_str` over the network.
@@ -581,7 +581,7 @@ print(KLDrift.psi_eq)
 #| label: psi-threshold
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: PSI threshold prose in this callout
-# │ Goal: PSI retraining alert threshold (0.2)
+# │ Goal: PSI manual-review threshold (0.2)
 # │ Show: PSI review threshold as a prose-local scalar.
 # │ How: Load the monitoring threshold from MLSysIM and guard the expected value.
 from mlsysim import Ops
@@ -596,11 +596,11 @@ class PsiThreshold:
     psi_threshold_str = fmt(psi_threshold, precision=1, commas=False)
 ```
 
-Since PSI = `{python} KLDrift.psi_str` < `{python} PsiThreshold.psi_threshold_str`, this drift is noticeable but does not yet trigger a retraining alert. However, monitoring should increase in frequency.
+Since PSI = `{python} KLDrift.psi_str` < `{python} PsiThreshold.psi_threshold_str`, this drift does not yet cross the manual-review threshold. The right response is to keep the feature on the monitoring dashboard and look for corroborating drift signals rather than retraining from this statistic alone.
 
 :::
 
-Because KL divergence is asymmetric ($\mathcal{D}_{\text{KL}}(P_0 \lVert P_t) \neq \mathcal{D}_{\text{KL}}(P_t \lVert P_0)$), practitioners often use PSI, a symmetric metric derived from KL divergence that is easier to threshold. A PSI > `{python} PsiThreshold.psi_threshold_str` typically triggers an alert for retraining.
+Because KL divergence is asymmetric ($\mathcal{D}_{\text{KL}}(P_0 \lVert P_t) \neq \mathcal{D}_{\text{KL}}(P_t \lVert P_0)$), practitioners often use PSI, a symmetric metric derived from KL divergence that is easier to threshold. A PSI above `{python} PsiThreshold.psi_threshold_str` typically triggers manual review; retraining depends on the severity of the shift and whether model-quality metrics move with it.
 
 [^fn-kl]: **KL Divergence**: Named after Solomon Kullback and Richard Leibler, who introduced it in 1951. Also called *relative entropy*, it quantifies the expected extra information needed to encode samples from one distribution using a code optimized for another; for drift monitoring in this volume, the canonical direction is $\mathcal{D}_{\text{KL}}(P_t \lVert P_0)$. With natural logarithms, as in the example above, the unit is nats; with base-2 logarithms, the unit is bits. In production ML, KL divergence is the theoretical backbone of many drift-detection metrics.
 
@@ -645,7 +645,7 @@ The problem is that if $z_i$ is large (for example, `{python} LogitOverflowExamp
 
 [^fn-logsumexp]: **Log-Sum-Exp**: Implemented as `torch.logsumexp` in PyTorch and `scipy.special.logsumexp` in SciPy. It relies on the identity $\log\left(\sum e^{x_i}\right) = a + \log\left(\sum e^{x_i - a}\right)$, where $a = \max(x_i)$. Shifted values $x_i - a$ are $\le 0$, ensuring exponentials never overflow.
 
-A small softmax calculation shows why this trick matters in practice, even for large but realistic logit values:
+A small worked example shows why this trick matters in practice, even for large but realistic logit values:
 
 ```{python}
 #| echo: false
@@ -745,9 +745,9 @@ class LogSumExp:
     )
 ```
 
-::: {#nbk-appendix-data-log-sum-exp-action .callout-notebook title="Worked example: Log-sum-exp in action"}
+::: {#exmp-appendix-data-log-sum-exp-action .callout-example title="Log-sum-exp in action"}
 
-**The setup**: A three-class classifier outputs logits $z =$ `{python} LogSumExp.z_math`.
+**Setup**: A three-class classifier outputs logits $z =$ `{python} LogSumExp.z_math`.
 
 **Without the trick (naive softmax)**:
 $$
@@ -767,7 +767,7 @@ Sum = `{python} LogSumExp.sum_str`. LogSumExp = `{python} LogSumExp.a_str` `{pyt
 
 Softmax: `{python} LogSumExp.sm_eq`
 
-The exponentiated shifted values and the resulting softmax probabilities are in $[0, 1]$—no overflow risk, even in FP16.
+**Systems insight**: The exponentiated shifted values and the resulting softmax probabilities are in $[0, 1]$—no overflow risk, even in FP16.
 
 :::
 
@@ -776,9 +776,7 @@ These worked examples now give us enough machinery to check the full chain, from
 ::: {#chk-appendix-data-check-your-understanding .callout-checkpoint title="Check your understanding"}
 
 1. A training pipeline reads 500 GB of CSV data over a 10 Gbps link. Estimate the transfer time. Now estimate how long it would take if the data were stored as Parquet and only 20 percent of columns were needed—what changes and why?
-
 2. Your model's average latency is 50 ms, but P99 is 800 ms. If a typical user session involves fifty requests, what is the probability that a user experiences at least one P99 spike? Does "average latency" adequately describe user experience?
-
 3. Explain why KL divergence is asymmetric and why this matters when choosing a drift metric for production monitoring. When would you prefer PSI over raw KL divergence?
 
 :::

@@ -506,7 +506,7 @@ export default function EcosystemBar() {
               Subscribe → Star → Support → GitHub (low-friction conversion first). */}
           <div style={{ display: 'flex', alignItems: 'center' }}>
             <a
-              href="#subscribe"
+              href="https://mlsysbook.ai/newsletter/"
               style={linkStyle('subscribe')}
               onMouseEnter={() => setHoveredLink('subscribe')}
               onMouseLeave={() => setHoveredLink(null)}
@@ -634,7 +634,7 @@ export default function EcosystemBar() {
                 Subscribe → Star → Support → GitHub → Theme (theme toggle
                 collapses into the hamburger here, same as the Quarto
                 navbar JS in shared/config/site-head.html). */}
-            <a href="#subscribe"
+            <a href="https://mlsysbook.ai/newsletter/"
               style={{ fontSize: 15, color: NAV_COLOR, textDecoration: 'none', display: 'flex', alignItems: 'center', gap: 6 }}>
               <i className="bi bi-envelope" style={{ fontSize: 14 }} /> Subscribe
             </a>

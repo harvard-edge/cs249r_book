@@ -256,9 +256,10 @@ class MovieLensRecommendationDataset(data.Dataset):
                 "-o ml-100k.zip && unzip ml-100k.zip"
             )
 
-        # Load user demographics
+        # Load user demographics. MovieLens stores occupation as a string; map it
+        # deterministically so the occupation embedding table carries signal.
         user_ages = {}
-        user_occupations = {}
+        user_occupation_names = {}
         user_genders = {}
         with open(users_path, "r") as f:
             for line in f:
@@ -266,10 +267,15 @@ class MovieLensRecommendationDataset(data.Dataset):
                 uid = int(parts[0])
                 age = float(parts[1])
                 gender = 1.0 if parts[2] == "M" else 0.0
-                occupation = int(parts[3]) if parts[3].isdigit() else 0
                 user_ages[uid] = age
-                user_occupations[uid] = occupation
+                user_occupation_names[uid] = parts[3]
                 user_genders[uid] = gender
+        occupation_vocab = {
+            name: idx for idx, name in enumerate(sorted(set(user_occupation_names.values())))
+        }
+        user_occupations = {
+            uid: occupation_vocab[name] for uid, name in user_occupation_names.items()
+        }
 
         # Load item genres (19 binary genre flags per movie)
         items_path = os.path.join(data_dir, "u.item")

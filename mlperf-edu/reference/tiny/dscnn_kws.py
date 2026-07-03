@@ -32,7 +32,11 @@ import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchaudio
+
+try:
+    import torchaudio
+except ModuleNotFoundError:
+    torchaudio = None
 
 
 # ---------------------------------------------------------------------------
@@ -156,6 +160,9 @@ class SpeechCommandsMelDataset(torch.utils.data.Dataset):
         self.label_to_idx = {kw: i for i, kw in enumerate(MLPERF_KEYWORDS)}
         self.label_to_idx["unknown"] = 10
         self.label_to_idx["silence"] = 11
+
+        if torchaudio is None:
+            raise ModuleNotFoundError("torchaudio is required to load Speech Commands data")
 
         # Mel spectrogram transform
         self.mel_transform = torchaudio.transforms.MelSpectrogram(

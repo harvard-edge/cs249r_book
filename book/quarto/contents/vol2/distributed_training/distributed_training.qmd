@@ -774,7 +774,7 @@ Gradient accumulation offers a direct remedy by keeping all communication within
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt, check, fmt_int, fmt_usd, MarkdownStr, fmt_time
+from mlsysim.fmt import fmt, check, fmt_int, fmt_usd, MarkdownStr, fmt_time, fmt_math
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GradAccumScenario:
@@ -811,7 +811,8 @@ class GradAccumScenario:
     # ┌── 4. OUTPUT ───────────────────────────────────────
     effective_batch_str = fmt(effective_batch_val, precision=0)
     comm_8gpu_ms_str = fmt_time(comm_8gpu_ms, 'millisecond', precision=1, commas=False)
-    comm_overhead_pct_str = fmt_percent(overhead_val / 100, precision=3, commas=False, style='prose')
+    # "%"-glyph math form for the worked-calc line (this value is only consumed inside that calculation).
+    comm_overhead_pct_math = fmt_math(rf"{overhead_val:.3f}\%")
     ga_training_hours_str = fmt_time(ga_training_hours_val, 'hour', precision=1, commas=False, style='word')
     baseline_cost_str = fmt_usd(baseline_cost_val, precision=0)
     ga_cost_str = fmt_usd(round(ga_cost_val))
@@ -832,7 +833,7 @@ class GradAccumScenario:
 
 1. **Effective batch size**: `{python} GradAccumScenario.n_gpus_ga_str` $\times$ batch `{python} GradAccumScenario.batch_per_gpu_str` $\times$ `{python} GradAccumScenario.accum_steps_str` accumulation steps = `{python} GradAccumScenario.effective_batch_str`.
 2. **Communication overhead**: With `{python} GradAccumScenario.accum_steps_str`-step accumulation, we AllReduce once every `{python} GradAccumScenario.accum_steps_str` steps.
-   - Overhead = `{python} GradAccumScenario.comm_8gpu_ms_str` / (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) $\approx$ `{python} GradAccumScenario.comm_overhead_pct_str`.
+   - Overhead = `{python} GradAccumScenario.comm_8gpu_ms_str` / (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) $\approx$ `{python} GradAccumScenario.comm_overhead_pct_math`.
 3. **Training duration**: Total time is `{python} GradAccumScenario.ga_training_hours_str`.
 4. **Total cost**: `{python} GradAccumScenario.ga_training_hours_str` $\times$ `{python} GradAccumScenario.hourly_rate_str` = `{python} GradAccumScenario.ga_cost_str`.
 
@@ -2255,11 +2256,11 @@ Network efficiency relies on the assumption of uniform token distribution, but n
 
 MoE systems therefore enforce a hard limit defined by the **capacity factor**\index{Capacity Factor!mixture of experts} $C$, typically set between 1.25 and 1.5. This parameter caps the maximum number of tokens an expert processes at roughly $C \cdot (B \times S)/E$ for the routing group. If the routing gate assigns more tokens than this buffer allows, the excess tokens are dropped, passing through the layer unprocessed via the residual connection. To reduce that data loss, training objectives include an **auxiliary load balancing loss**\index{Auxiliary Load Balancing Loss}, weighted at 0.01–0.1 relative to the main cross-entropy loss, that penalizes the router for favoring specific experts. Models such as Mixtral 8x7B use top-2 routing across 8 experts, achieving a favorable balance between capacity scaling and routing stability.
 
-The sparse communication pattern distinguishes recommendation and MoE workloads (Archetype B (DLRM at Scale)) from dense LLM training (Archetype A (GPT-4/Llama-3)) (@sec-vol2-introduction-archetypes), producing fundamentally different scaling behaviors.
+The sparse communication pattern distinguishes recommendation and MoE workloads (Archetype B (DLRM at Scale)) from dense LLM training (Archetype A (GPT-4/Llama-3)) (@sec-vol2-introduction-archetypes).
 
 ::: {#lhs-distributed-training-archetype-b-dlrm-at-scale-dlrm-vs-llm-scaling .callout-lighthouse title="Archetype B (DLRM at Scale): DLRM vs. LLM scaling"}
 
-Archetype B (DLRM at Scale) and Archetype A (GPT-4/Llama-3) scale differently.
+Each scales through a different mechanism, bound by a different resource:
 
 *   **LLMs (Dense)**: Scale via Tensor/Pipeline Parallelism. Constraint: compute and interconnect bandwidth (NVLink).
 *   **DLRM-style models (Sparse)**: Scale via Embedding Sharding (Parameter Servers). Constraint: memory capacity and interconnect latency (Random Access).
@@ -2614,7 +2615,7 @@ class AutoParallelism:
     hbm_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
 ```
 
-::: {#nbk-distributed-training-automated-design-space-search-tier-3-optimizer .callout-notebook title="Automated design space search (Tier 3 optimizer)"}
+::: {#exmp-distributed-training-automated-design-space-search-tier-3-optimizer .callout-example title="Automated design space search (Tier 3 optimizer)"}
 
 **Scenario**: An engineering team needs to schedule Archetype A (a `{python} AutoParallelism.params_b_str` parameter model) on a cluster of `{python} AutoParallelism.gpu_count_str` H100 GPUs. Manually searching the 3D-parallelism space (TP $\times$ PP $\times$ DP) is error-prone: a split that maximizes DP might exceed the `{python} AutoParallelism.hbm_gb_str` HBM capacity, while a split that maximizes TP might saturate the NVLink interconnect.
 
@@ -3328,6 +3329,15 @@ Beneath the cube and its three axes lies a single trade. No way of splitting a m
 ::: {.callout-chapter-connection title="From logic to traffic"}
 
 We have defined the *logical* traffic patterns of the Machine Learning Fleet, the *how* of splitting the math. These logical patterns, however, eventually hit the *physical* wires of the data center. In @sec-collective-communication, we open the black box of the collective operations (AllReduce, AllToAll) that make this consistency possible. We move from the logic of *what* to send to the mechanics of *how* to route it through rings, trees, and rails.
+
+:::
+
+::: {.callout-research-questions title="For further inquiry"}
+
+* How should an engineer choose among data, tensor, pipeline, expert, and sharded parallelism when adding accelerators begins to reduce scaling efficiency?
+* When does increasing global batch size stop improving time-to-quality, even if more hardware is available?
+* How should logical parallel groups map onto HBM, NVLink, InfiniBand, storage, and failure domains?
+* How much extra communication should a memory-sharding design accept before it stops improving time-to-train?
 
 :::
 

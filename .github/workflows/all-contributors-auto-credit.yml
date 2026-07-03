@@ -4,9 +4,9 @@ name: '🔧 Infra · 🤖 All Contributors Auto-credit on Merge'
 # 🤖 Auto-credit Contributors on PR Merge
 # =============================================================================
 #
-# When a PR is merged to dev, this workflow auto-posts an @all-contributors
-# trigger comment so the existing all-contributors-add.yml workflow processes
-# the credit. Saves the maintainer from typing the comment by hand.
+# When a PR is merged to dev, this workflow detects the contributor's project
+# and contribution type, then applies the credit directly. This avoids relying
+# on a bot-created issue comment to trigger a second workflow.
 #
 # Flow:
 #   1. SKIP_CHECK     — bots, maintainer allowlist, already-credited PRs
@@ -14,8 +14,8 @@ name: '🔧 Infra · 🤖 All Contributors Auto-credit on Merge'
 #                       (deterministic — no LLM)
 #   3. CLASSIFY_TYPE  — LLM reads PR title + body + file list, returns types
 #                       (LLM because title prefixes alone aren't reliable)
-#   4. POST_COMMENT   — structured "for <types> in <projects>" trigger, or
-#                       a "please clarify" comment if either is unknown
+#   4. APPLY_CREDIT   — update the project .all-contributorsrc and README
+#                       tables, or ask for clarification if detection fails
 #
 # Triggers:
 #   - pull_request_target: closed (and merged == true)
@@ -31,7 +31,8 @@ name: '🔧 Infra · 🤖 All Contributors Auto-credit on Merge'
 #   data — there is no shell eval of fork-controlled input.
 #
 # Related:
-#   - all-contributors-add.yml   — fires on the comment we post
+#   - all-contributors-add.yml   — manual comment entry point using the same
+#                                  contributor helper
 #   - update-contributors.yml    — regenerates root config from per-project
 #   - .github/workflows/contributors/auto_credit.py — project detection
 #
@@ -59,7 +60,8 @@ jobs:
     runs-on: ubuntu-latest
 
     permissions:
-      contents: read
+      contents: write
+      issues: write
       pull-requests: write
 
     steps:
@@ -253,9 +255,10 @@ jobs:
             No explanation, no other text.
 
       # =====================================================================
-      # STEP 4: Parse LLM output, post the appropriate comment
+      # STEP 4: Parse LLM output and decide whether credit can be applied
       # =====================================================================
-      - name: Parse types and post comment
+      - name: Parse contribution credit
+        id: parse
         if: steps.skip.outputs.skip != 'true'
         uses: actions/github-script@v9
         env:
@@ -293,25 +296,20 @@ jobs:
             const haveProject = projectConf === 'high' && projects;
             const haveTypes = types.length > 0;
 
-            // --- Both detected: post structured trigger ---
+            // --- Both detected: continue to the apply steps ---
             if (haveProject && haveTypes) {
-              const body = [
-                `Thanks @${author}! 🎉`,
-                ``,
-                `@all-contributors please add @${author} for ${typesStr} in ${projects}`
-              ].join('\n');
-
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.issue.number,
-                body
-              });
-              console.log(`Posted credit trigger: @${author} for ${typesStr} in ${projects}`);
+              const projectList = projects.split(',').map(s => s.trim()).filter(Boolean);
+              core.setOutput('success', 'true');
+              core.setOutput('username', author);
+              core.setOutput('types', JSON.stringify(types));
+              core.setOutput('types_csv', typesStr);
+              core.setOutput('projects', JSON.stringify(projectList));
+              core.setOutput('projects_csv', projectList.join(', '));
               return;
             }
 
             // --- Otherwise: ask the maintainer to specify the missing piece ---
+            core.setOutput('success', 'false');
             const projectPart = haveProject ? projects : '<project>';
             const typePart = haveTypes ? typesStr : '<type>';
             const missing = [];
@@ -338,3 +336,92 @@ jobs:
               body
             });
             console.log(`Posted clarification (missing: ${missing.join(', ')})`);
+
+      # =====================================================================
+      # STEP 5: Checkout full repo, apply credit, and push generated files
+      # =====================================================================
+      - name: Disable lingering sparse-checkout state
+        if: steps.parse.outputs.success == 'true'
+        shell: bash
+        run: |
+          git sparse-checkout disable 2>/dev/null || true
+          rm -f .git/info/sparse-checkout
+
+      - name: Checkout repository (full)
+        if: steps.parse.outputs.success == 'true'
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Apply contributor credit
+        id: apply
+        if: steps.parse.outputs.success == 'true'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          python3 .github/workflows/contributors/add_contributor.py \
+            --username '${{ steps.parse.outputs.username }}' \
+            --types '${{ steps.parse.outputs.types }}' \
+            --projects '${{ steps.parse.outputs.projects }}'
+
+      - name: Configure Git
+        if: steps.parse.outputs.success == 'true'
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Commit and push changes
+        id: commit
+        if: steps.parse.outputs.success == 'true'
+        run: |
+          set -euo pipefail
+          UPDATED_DIRS='${{ steps.apply.outputs.updated_dirs }}'
+          USERNAME="${{ steps.parse.outputs.username }}"
+          TYPES="${{ steps.parse.outputs.types_csv }}"
+          PROJECTS_LIST="${{ steps.parse.outputs.projects_csv }}"
+
+          for dir in $(echo "$UPDATED_DIRS" | python3 -c "import sys,json; print(' '.join(json.load(sys.stdin)))"); do
+            git add "${dir}/.all-contributorsrc" "${dir}/README.md" 2>/dev/null || true
+          done
+          git add README.md 2>/dev/null || true
+
+          if git diff --staged --quiet; then
+            echo "No contributor changes to commit"
+            echo "committed=false" >> "$GITHUB_OUTPUT"
+          else
+            git commit -m "docs: add @${USERNAME} as contributor for ${TYPES} (${PROJECTS_LIST})"
+            git pull --rebase origin ${{ env.TARGET_BRANCH }}
+            git push origin ${{ env.TARGET_BRANCH }}
+            echo "committed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # =====================================================================
+      # STEP 6: Post confirmation without using a workflow-trigger command
+      # =====================================================================
+      - name: Post auto-credit confirmation
+        if: steps.parse.outputs.success == 'true'
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const username = '${{ steps.parse.outputs.username }}';
+            const types = '${{ steps.parse.outputs.types_csv }}';
+            const projects = '${{ steps.parse.outputs.projects_csv }}';
+            const committed = '${{ steps.commit.outputs.committed }}' === 'true';
+
+            const body = [
+              `Thanks @${username}! 🎉`,
+              ``,
+              committed
+                ? `I added @${username} to **${projects}** for: ${types}.`
+                : `@${username} was already credited in **${projects}** for: ${types}.`,
+              ``,
+              `The contributor tables are now handled directly by this workflow; no follow-up command is needed.`
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body
+            });
