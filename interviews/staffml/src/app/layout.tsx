@@ -22,6 +22,10 @@ export const metadata: Metadata = {
   description: `Physics-grounded system design prep for ML Engineers. ${QUESTION_COUNT_DISPLAY} questions across cloud, edge, mobile, and TinyML. 100% client-side.`,
   icons: {
     icon: "/favicon.svg",
+    // Full-bleed 180x180 raster of the roofline mark (iOS ignores SVG
+    // favicons and applies its own corner radius). Base path carried
+    // explicitly, same convention as the og-image URLs below.
+    apple: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/icons/apple-touch-icon.png`,
   },
   openGraph: {
     title: "StaffML — ML Systems Interview Prep",
