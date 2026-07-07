@@ -227,14 +227,25 @@ def check_from_submission(submission_path: str) -> ComplianceResult:
     
     # Quality target from workloads.yaml
     metrics = data.get("metrics", {})
-    # Try to find the best matching metric
-    target = QUALITY_TARGETS.get(workload.replace("-12m", "").replace("-1m", ""))
+    # Normalize the same way QUALITY_TARGETS keys were built in _load_quality_targets
+    short_workload = (
+        workload.replace("-train", "").replace("-kws", "").replace("-agent", "")
+        .replace("-12m", "").replace("-1m", "")
+    )
+    target = QUALITY_TARGETS.get(short_workload)
     if target:
         metric_name = target["metric"]
-        # Try common field mappings
-        val = metrics.get(metric_name) or metrics.get("loss") or metrics.get("accuracy")
+        # Try common field mappings, but don't treat a legitimate 0.0 as missing
+        if metric_name in metrics:
+            val = metrics[metric_name]
+        elif "loss" in metrics:
+            val = metrics["loss"]
+        elif "accuracy" in metrics:
+            val = metrics["accuracy"]
+        else:
+            val = None
         if val is not None:
-            check_quality_target(result, val, workload.replace("-12m", "").replace("-1m", ""))
+            check_quality_target(result, val, short_workload)
         else:
             result.check("Quality target", False, f"metric '{metric_name}' not found in submission")
     
