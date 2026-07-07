@@ -260,12 +260,14 @@ class SubmissionHandler:
                 return SyncResult(ok=False, error="unauthorized after refresh")
             else:
                 self.console.print(f"❌ [red]Upload failed (HTTP {e.code}): {e.reason}[/red]")
+                error_body = ""
                 try: # Attempt to read error body if available
                     error_body = e.read().decode('utf-8')
                     error_json = json.loads(error_body)
                     self.console.print(f"   [dim red]Error details: {error_json.get('error', 'No message provided.')}[/dim red]")
                 except (json.JSONDecodeError, Exception):
-                    self.console.print(f"   [dim red]Error details: {error_body[:200]}...[/dim red]")
+                    if error_body:
+                        self.console.print(f"   [dim red]Error details: {error_body[:200]}...[/dim red]")
             return SyncResult(ok=False, error=f"HTTP {e.code}: {e.reason}")
         except urllib.error.URLError as e:
             self.console.print(f"❌ [red]Network error:[/red] Could not connect to the server.")
