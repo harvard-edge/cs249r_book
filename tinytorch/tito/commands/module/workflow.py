@@ -1033,6 +1033,19 @@ class ModuleWorkflowCommand(BaseCommand):
         # Parse pytest output
         tests_run = self._parse_pytest_output(result.stdout, result.stderr)
 
+        if not tests_run and result.returncode != 0:
+            # pytest itself errored (e.g. a collection-time import failure in
+            # the exported package) rather than legitimately having zero
+            # tests. Surface this as a failure instead of silently reporting
+            # "no integration tests for this module".
+            error_msg = (result.stderr or result.stdout).strip()
+            concise_error = '\n'.join(error_msg.split('\n')[:5]) if error_msg else "pytest exited with an error"
+            tests_run = [{
+                'name': 'pytest_collection',
+                'passed': False,
+                'error': concise_error,
+            }]
+
         if verbose:
             for test in tests_run:
                 icon = "✅" if test['passed'] else "❌"
