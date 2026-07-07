@@ -87,8 +87,12 @@ class GraderPipeline:
 
     def _export_leaderboard(self, grades):
         if not grades: return
-        
-        keys = grades[0].keys()
+
+        keys = []
+        for grade in grades:
+            for key in grade.keys():
+                if key not in keys:
+                    keys.append(key)
         with open(self.output_csv, 'w', newline='') as output_file:
             dict_writer = csv.DictWriter(output_file, fieldnames=keys)
             dict_writer.writeheader()
