@@ -193,6 +193,7 @@ def _training_process(model_name: str, target_loss: float):
     total_epochs = 0
     loss_history = []
     val_loss_history = []
+    model = None
 
     while nas_attempt <= MAX_NAS_ATTEMPTS:
         # (Re-)load the model
@@ -343,6 +344,10 @@ def _training_process(model_name: str, target_loss: float):
         # If we converged, break the outer NAS loop too
         if loss_history and loss_history[-1] <= target_loss:
             break
+
+    if model is None:
+        print(f"[{model_name}] ❌ Aborting: model never loaded successfully, nothing to save.")
+        return
 
     # --- Save results ---
     ckpt_dir = os.path.join(CHECKPOINT_ROOT, model_name)
