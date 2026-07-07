@@ -67,6 +67,33 @@ for (const [sym, count] of Object.entries(symCount)) {
   }
 }
 
+// known_collisions notes must actually match the primitives they describe.
+// Previously only `sym` presence was checked, so the free-text `note` field
+// (row/col call-outs) could drift from the real data with nothing to catch it.
+const byId = new Map(doc.primitives.map((e) => [e.id, e]));
+for (const c of doc.known_collisions || []) {
+  const cited = new Map();
+  const re = /#(\d+)[^)]*?row\s*(\d+)\s*col\s*(\d+)/g;
+  let m;
+  while ((m = re.exec(c.note || "")) !== null) {
+    cited.set(Number(m[1]), { layer: Number(m[2]), col: Number(m[3]) });
+  }
+  for (const id of c.ids || []) {
+    const actual = byId.get(id);
+    const claimed = cited.get(id);
+    if (!actual) {
+      issues.push(`known_collisions '${c.sym}': id ${id} does not exist`);
+    } else if (!claimed) {
+      issues.push(`known_collisions '${c.sym}': note does not cite row/col for #${id}`);
+    } else if (claimed.layer !== actual.layer || claimed.col !== actual.col) {
+      issues.push(
+        `known_collisions '${c.sym}': note claims #${id} is row ${claimed.layer} col ${claimed.col}, ` +
+        `but it is actually row ${actual.layer} col ${actual.col}`
+      );
+    }
+  }
+}
+
 // Expression resolution: every two-letter [A-Z][a-z] token in any expression must
 // resolve to a known primitive symbol.
 for (const section of doc.assemblies || []) {
