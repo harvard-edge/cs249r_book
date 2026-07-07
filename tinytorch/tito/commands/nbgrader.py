@@ -36,6 +36,7 @@ class NBGraderCommand(BaseCommand):
         self.project_root = config.project_root
         self.src_dir = self.project_root / "src"
         self.modules_dir = self.project_root / "modules"
+        self.staging_dir = self.project_root / ".nbgrader_staging"
         self.assignments_dir = self.project_root / "assignments"
         self.source_dir = self.assignments_dir / "source"
         self.release_dir = self.assignments_dir / "release"
@@ -379,24 +380,44 @@ class NBGraderCommand(BaseCommand):
         return True
 
     def _ensure_module_notebook(self, module_name: str) -> Optional[Path]:
-        """Return the generated notebook, creating it from src/ if needed."""
+        """Return a notebook reflecting the current src/ content.
+
+        notebook_file (modules/<name>/<name>.ipynb) is the same path
+        `tito module start`/`resume` open for students to edit. This method
+        must never overwrite it: if it already exists, stage a fresh
+        conversion into a private nbgrader-only cache instead, so a routine
+        `git pull` that bumps a source file's mtime can't silently clobber a
+        student's in-progress notebook when an instructor runs
+        `tito nbgrader generate`.
+        """
         notebook_file = self._notebook_for(module_name)
         source_file = self._source_file_for(module_name)
 
-        if notebook_file.exists() and (
-            not source_file.exists() or source_file.stat().st_mtime <= notebook_file.stat().st_mtime
-        ):
-            return notebook_file
-
         if not source_file.exists():
+            if notebook_file.exists():
+                return notebook_file
             self.console.print(f"[red]Source file not found: {source_file.relative_to(self.project_root)}[/red]")
             return None
 
-        notebook_file.parent.mkdir(parents=True, exist_ok=True)
-        reason = "Generated notebook missing" if not notebook_file.exists() else "Source file is newer"
+        notebook_up_to_date = (
+            notebook_file.exists() and source_file.stat().st_mtime <= notebook_file.stat().st_mtime
+        )
+        if notebook_up_to_date:
+            return notebook_file
+
+        if notebook_file.exists():
+            staged_file = self.staging_dir / module_name / f"{self._short_name(module_name)}.ipynb"
+            reason = "Student notebook exists; staging nbgrader source separately"
+            target = staged_file
+        else:
+            notebook_file.parent.mkdir(parents=True, exist_ok=True)
+            reason = "Generated notebook missing"
+            target = notebook_file
+
+        target.parent.mkdir(parents=True, exist_ok=True)
         self.console.print(
             f"{reason}; converting {source_file.relative_to(self.project_root)} "
-            f"→ {notebook_file.relative_to(self.project_root)}"
+            f"→ {target.relative_to(self.project_root)}"
         )
         result = self._run_external([
             "jupytext",
@@ -404,14 +425,14 @@ class NBGraderCommand(BaseCommand):
             "ipynb",
             str(source_file),
             "--output",
-            str(notebook_file),
+            str(target),
         ], capture_output=True)
         if result.returncode != 0:
             self.console.print("[red]Failed to generate notebook with jupytext[/red]")
             if result.stderr:
                 self.console.print(f"[red]{result.stderr.strip()}[/red]")
             return None
-        return notebook_file
+        return target
 
     def _prepare_notebook_for_nbgrader(self, notebook: Dict, *, release_tier: str = "student") -> List[str]:
         """Validate and normalize nbgrader cell metadata in a notebook."""
