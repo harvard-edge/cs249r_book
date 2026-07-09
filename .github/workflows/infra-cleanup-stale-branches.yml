@@ -1,0 +1,90 @@
+name: '🔧 Infra · 🧹 Cleanup Stale Branches'
+
+# =============================================================================
+# 🧹 Cleanup Stale Branches — Delete already-merged branches to keep the repo tidy
+# =============================================================================
+#
+# Finds branches that are fully merged into dev and whose last commit is older
+# than a configurable threshold (default 14 days), then deletes them. Deleting
+# a merged branch never loses history since every commit already lives on dev.
+#
+# Flow:
+#   1. FETCH    — Fetch all remote branches with full history
+#   2. FILTER   — Keep branches merged into dev, older than threshold, not protected
+#   3. DELETE   — Remove stale branches (or dry-run preview)
+#
+# Triggers:
+#   - schedule: Weekly (Monday 4am UTC)
+#   - workflow_dispatch: Manual with days threshold and dry_run toggle
+#
+# Secrets:    GITHUB_TOKEN (automatic)
+#
+# =============================================================================
+
+permissions:
+  contents: write
+
+concurrency:
+  group: ${{ github.workflow }}
+  cancel-in-progress: true
+
+on:
+  schedule:
+    - cron: '0 4 * * 1'  # Weekly cleanup (Monday at 4am UTC)
+  workflow_dispatch:
+    inputs:
+      days:
+        description: 'Delete branches merged and inactive for this many days'
+        required: false
+        default: '14'
+        type: string
+      dry_run:
+        description: 'Show what would be deleted without actually deleting'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  cleanup:
+    name: '🔧 Infra · 🧹 Cleanup Stale Branches'
+    runs-on: ubuntu-latest
+    if: github.repository_owner == 'harvard-edge'
+
+    steps:
+      - name: '📥 Checkout repository'
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: '🌿 Find and delete merged branches'
+        env:
+          DAYS_TO_KEEP: ${{ github.event.inputs.days || '14' }}
+          DRY_RUN: ${{ github.event.inputs.dry_run || 'false' }}
+          PROTECTED_BRANCHES: 'main dev gh-pages'
+        run: |
+          git fetch origin
+          echo "🧹 Looking for branches merged into dev, inactive for ${DAYS_TO_KEEP}+ days..."
+
+          cutoff=$(date -d "-${DAYS_TO_KEEP} days" +%s)
+
+          git for-each-ref --format='%(refname:short) %(committerdate:unix)' refs/remotes/origin | while read -r ref committed; do
+            branch="${ref#origin/}"
+            [ "$branch" = "HEAD" ] && continue
+
+            skip=false
+            for protected in $PROTECTED_BRANCHES; do
+              [ "$branch" = "$protected" ] && skip=true
+            done
+            [ "$skip" = "true" ] && continue
+
+            if git merge-base --is-ancestor "origin/$branch" origin/dev 2>/dev/null; then
+              if [ "$committed" -lt "$cutoff" ]; then
+                if [ "$DRY_RUN" = "true" ]; then
+                  echo "  🔍 Would delete: $branch (merged, last commit $(date -d @"$committed" '+%Y-%m-%d'))"
+                else
+                  echo "  🗑️  Deleting: $branch"
+                  git push origin --delete "$branch" || echo "    ❌ Failed to delete $branch"
+                fi
+              fi
+            fi
+          done
