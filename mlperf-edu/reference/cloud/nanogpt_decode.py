@@ -13,6 +13,7 @@ import statistics
 import time
 import torch
 
+from mlperf.harness import percentile
 from .nanogpt_train import NanoGPTWhiteBox
 
 
@@ -115,7 +116,7 @@ class NanoGPTDecode:
 
         kv_bytes = kv_cache_bytes(kv)
         median_itl = statistics.median(per_step) if per_step else float("nan")
-        p99_itl = sorted(per_step)[int(len(per_step) * 0.99) - 1] if per_step else float("nan")
+        p99_itl = percentile(per_step, 99) if per_step else float("nan")
         # Achieved bandwidth: each decode step re-reads the full KV cache
         # (the model also re-reads weights, but those usually live in LLC
         # after warmup). KV stream is the *additive* per-step cost.
