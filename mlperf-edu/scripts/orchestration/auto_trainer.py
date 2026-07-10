@@ -206,6 +206,9 @@ def _training_process(model_name: str, target_loss: float):
         model.train()
         optimizer = optim.AdamW(model.parameters(), lr=1e-3, weight_decay=1e-2)
         epoch = 0
+        # Reset per-attempt so plateau detection never mixes the tail of a
+        # discarded architecture's losses with a freshly reloaded model's.
+        attempt_loss_history = []
 
         print(f"[{model_name}] Starting training (NAS attempt {nas_attempt}/{MAX_NAS_ATTEMPTS})")
 
@@ -269,6 +272,7 @@ def _training_process(model_name: str, target_loss: float):
 
             train_loss = sum(epoch_losses) / len(epoch_losses)
             loss_history.append(train_loss)
+            attempt_loss_history.append(train_loss)
 
             # --- Validation pass ---
             model.eval()
@@ -319,7 +323,7 @@ def _training_process(model_name: str, target_loss: float):
                 break
 
             # Check plateau → trigger NAS
-            if _detect_plateau(loss_history) and nas_attempt < MAX_NAS_ATTEMPTS:
+            if _detect_plateau(attempt_loss_history) and nas_attempt < MAX_NAS_ATTEMPTS:
                 print(f"[{model_name}] 📉 Plateau detected at epoch {total_epochs + epoch}. "
                       f"Triggering Dual-Agent NAS (attempt {nas_attempt + 1})...")
                 total_epochs += epoch
