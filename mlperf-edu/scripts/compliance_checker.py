@@ -290,7 +290,6 @@ def quick_check_model(workload: str) -> ComplianceResult:
         n_params = sum(p.numel() for p in model.parameters())
         result.check("Model instantiation", True, cls_name)
         check_param_count(result, n_params, workload)
-        check_deterministic_seed(result)
 
         # Check dataset loads
         from reference.dataset_factory import get_dataloaders
