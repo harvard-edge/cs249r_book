@@ -68,34 +68,3 @@ class GPTBlock(nn.Module):
         x = x + attn_out
         x = x + self.mlp(self.ln_2(x))
         return x, present_kv
-
-class GPT2WhiteBox(nn.Module):
-    """Reference GPT-2 architecture (124M params at default config).
-
-    Forward returns (logits, present_key_values) for KV-cache support.
-    Training callers can ignore the second element.
-    """
-    def __init__(self, vocab_size=50257, n_embd=768, n_head=12, n_layer=12, max_seq_len=1024):
-        super().__init__()
-        self.wte = nn.Embedding(vocab_size, n_embd)
-        self.wpe = nn.Embedding(max_seq_len, n_embd)
-        self.blocks = nn.ModuleList([
-            GPTBlock(n_embd, n_head, max_seq_len=max_seq_len) for _ in range(n_layer)
-        ])
-        self.ln_f = nn.LayerNorm(n_embd)
-        self.lm_head = nn.Linear(n_embd, vocab_size, bias=False)
-        self.wte.weight = self.lm_head.weight
-
-    def forward(self, idx, use_kv_cache=False, past_key_values=None):
-        b, t = idx.size()
-        past_length = past_key_values[0][0].size(-2) if past_key_values is not None else 0
-        pos = torch.arange(past_length, past_length + t, dtype=torch.long, device=idx.device)
-        x = self.wte(idx) + self.wpe(pos)
-        present_kvs = [] if use_kv_cache else None
-        for i, block in enumerate(self.blocks):
-            past_kv = past_key_values[i] if past_key_values is not None else None
-            x, present_kv = block(x, use_kv_cache=use_kv_cache, past_key_value=past_kv)
-            if use_kv_cache:
-                present_kvs.append(present_kv)
-        x = self.ln_f(x)
-        return self.lm_head(x), present_kvs

@@ -1,3 +1,12 @@
+"""QUARANTINED — not on the nanogpt-train measured path.
+
+This legacy GPT definition is retained only because utility scripts under
+scripts/ (generate_all_curves*.py, compliance_checker.py) still import it.
+The scored nanogpt-train model is ``nanogpt_train.NanoGPTWhiteBox`` (built
+from ``gpt2_infer.GPTBlock``); nothing under ``src/mlperf`` imports this
+module. Do not extend it, and do not read it to understand the benchmark.
+"""
+
 import math
 import torch
 import torch.nn as nn

@@ -425,11 +425,13 @@ suites:
       variant: decode
     nanogpt-train:
       model: nanogpt-12m
-      params: 11.1M
+      params: 11.5M
       params_note: Char-level vocab=128 (TinyShakespeare uses 65 unique chars). Earlier
         README/paper figures of 85.9M and 124.4M reflected a vocab=50,257 BPE config
         that was never reachable from the char-level data; iteration 1 reconciled
-        the model to its actual effective size.
+        the model to its actual effective size. As built (vocab=128, n_embd=384, n_head=6,
+        n_layer=6, max_seq_len=2048, tied wte/lm_head) the base model instantiates
+        11,483,136 parameters; re-derive this figure if the base max_seq_len changes.
       dataset: tinyshakespeare
       dataset_source: Project Gutenberg eBook 100, generated MLPerf EDU tiny Shakespeare
         excerpt, character-level, 1.1MB
@@ -469,15 +471,25 @@ suites:
         reviewer_notes:
         - Baseline satisfies the target through val_loss; cleaned 11M model still
           needs fresh reference-run provenance before release.
+        - Seed mismatch pending resolution with the reference-sweep provenance decision;
+          the runner default scoring seed is 42 (MLPERF_EDU_MAX_SEED) and produced
+          the verified_baseline, while reference_protocol.seeds [0-4] describe the
+          intended five-seed sweep that has not yet been run. Each run's actual seed
+          is recorded in the report's top-level seed field.
       verified_baseline:
         train_loss: 1.958
         val_loss: 2.045
         epochs: 25
         time_seconds: 86.4
-        baseline_note: Single-seed Apple MPS default run on the Project Gutenberg
-          generated tiny excerpt; target remains provisional until the five-seed reference
-          sweep.
+        baseline_note: Single-seed Apple MPS default run (runner default seed 42)
+          on the Project Gutenberg generated tiny excerpt; target remains provisional
+          until the five-seed reference sweep.
       scenario: single_stream
+      scenario_note: single_stream is an MLPerf Inference label carried here only
+        because the harness currently requires score-bearing workloads to use single_stream,
+        offline, or server. This workload is a fixed-budget train-then-quality-gate
+        loop and its provenance manifest records scenario "train"; relabeling it (for
+        example train_to_quality) needs a harness-level scenario vocabulary change.
       public:
         status: score-bearing
         rationale: Uses a deterministic TinyShakespeare excerpt generated from Project
@@ -486,14 +498,22 @@ suites:
       runner:
         min: mlperf.runners.nanogpt:run_min
         max: mlperf.runners.nanogpt:run_max
+      min_profile_note: The min profile is a plumbing-only execution smoke; it trains
+        a ~17.9K-parameter toy (n_embd=32, n_head=4, n_layer=1) on synthetic random
+        tokens and never instantiates the ~11.5M scored architecture or the real dataset.
+        Only the max profile exercises the scored model and quality target.
       provenance: Vaswani et al. 2017 (Transformer); maps to MLPerf Training GPT-3/LLaMA
       regime:
         working_set:
           value: unmeasured
           peak_bytes_per_step: 67108864
-          note: Per-layer activation peak ~12 MB at B=16 T=64; weights ~46 MB streamed
-            once per epoch. Falls in the 6-48 MB grey band; exact classification depends
-            on batch and depends on caching behavior — measure with cache-miss counters.
+          note: Per-layer activation peak ~12 MB at B=16 T=64. Training reads all
+            ~46 MB of fp32 weights and writes gradients plus Adam moment state on
+            every optimizer step (~100 steps per epoch at the defaults), so per-epoch
+            weight traffic is roughly 100x the weight bytes plus optimizer-state traffic,
+            not a single per-epoch stream. Per-step resident set falls in the 6-48
+            MB grey band; exact classification depends on batch size and caching behavior
+            — measure with cache-miss counters.
         arithmetic_intensity:
           value: compute_bound
           flops_per_byte: 121.747
@@ -987,8 +1007,9 @@ suites:
       runner:
         min: mlperf.runners.vision:run_resnet18_min
         max: mlperf.runners.vision:run_resnet18_max
-      provenance: He et al. 2016 (ResNet); FULLY LOCAL implementation — no torchvision.models
-        dependency
+      provenance: He et al. 2016 (ResNet); local ResNet-18 implementation (no torchvision.models
+        dependency); torchvision datasets/transforms are used only to fetch and preprocess
+        Fashion-MNIST
       regime:
         working_set:
           value: unmeasured
@@ -1242,7 +1263,32 @@ suites:
       model: dscnn-kws
       params: 20K
       dataset: speech_commands_v2
-      dataset_source: Warden (2018), auto-download via torchaudio, ~2GB
+      dataset_source: Warden (2018), CC-BY-4.0, auto-download via torchaudio.datasets.SPEECHCOMMANDS(download=True),
+        2400MB
+      dataset_license:
+        license: Creative Commons Attribution 4.0 International
+        license_spdx: CC-BY-4.0
+        source: Warden 2018, arXiv:1804.03209
+        citation_url: https://arxiv.org/abs/1804.03209
+        download_url: https://download.tensorflow.org/data/speech_commands_v0.02.tar.gz
+        note: License and citation recorded as documentation-of-fact in the registry;
+          registering a structured speech_commands AssetDossier in mlperf.assets and
+          any public_release_status promotion are separate shared-code/author decisions.
+      dataset_recipe:
+        loader: torchaudio.datasets.SPEECHCOMMANDS(download=True)
+        splits_used:
+          train: training
+          validation: validation
+        test_split: not wired in the reference loader; the declared top-1 target is
+          not yet measured on the official test split
+        feature: log-mel spectrogram (natural log, 1e-9 offset)
+        sample_rate_hz: 16000
+        clip_seconds: 1.0
+        n_fft: 480
+        hop_length: 160
+        n_mels: 40
+        frames: 101
+        num_classes: 12
       quality_target:
         metric: top1_accuracy
         value: 0.9
@@ -1254,7 +1300,7 @@ suites:
         time_seconds: 51
         note: 71.2% after 10 epochs on 12-class (10 keywords + unknown + silence)
       max_model_size_kb: 100
-      scenario: offline
+      scenario: training
       public:
         status: systems-only
         rationale: Mirrors the MLPerf Tiny KWS shape, but the current verified baseline
@@ -1262,18 +1308,25 @@ suites:
       runner:
         min: mlperf.runners.tiny:run_dscnn_kws_min
         max: mlperf.runners.tiny:run_dscnn_kws_max
-      provenance: Zhang et al. 2017 (Hello Edge); maps to MLPerf Tiny KWS
+      provenance: DS-CNN after Zhang et al. 2017 (Hello Edge); pedagogically aligned
+        with, not identical to, the MLPerf Tiny KWS closed-division reference (40x101
+        log-mel front-end here vs the reference 49x10 MFCC front-end)
       regime:
         working_set:
           value: cache_resident
-          peak_bytes_per_step: 2097152
-          note: 20K params + 40x101 spectrogram inputs
+          peak_bytes_per_step: 95888
+          note: FP32 inference footprint; 19,932 params (79,728 B) plus one 40x101
+            log-mel input (16,160 B). The full training working set (activations,
+            gradients, optimizer state) is larger and unmeasured.
         arithmetic_intensity:
           value: compute_bound
           flops_per_byte: 70
           classification_rule: moderate intensity from spectrogram convs
+          note: analytical estimate from model shape; no roofline sidecar has been
+            measured for this workload
         dispatch:
           value: unmeasured
+          note: no dispatch/roofline profile recorded for this workload yet
     wake-vision-vww:
       model: wake-vision-vww
       params: 8.5K

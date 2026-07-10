@@ -3,8 +3,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
-import torchvision
-import torchvision.transforms as transforms
 from rich.console import Console
 
 console = Console()
@@ -63,6 +61,23 @@ class PedagogicalResNet(nn.Module):
         self.layer4 = self._make_layer(block, 512, num_blocks[3], stride=2)
         self.linear = nn.Linear(512 * block.expansion, num_classes)
 
+        # Explicit weight initialization (Kaiming, He et al.) so the reference
+        # run is fully specified rather than relying on framework defaults.
+        # Mirrors ResNet18Local._init_weights in resnet_core.py.
+        self._init_weights()
+
+    def _init_weights(self):
+        """Kaiming initialization for conv layers; standard BN/linear init."""
+        for m in self.modules():
+            if isinstance(m, nn.Conv2d):
+                nn.init.kaiming_normal_(m.weight, mode="fan_out", nonlinearity="relu")
+            elif isinstance(m, nn.BatchNorm2d):
+                nn.init.constant_(m.weight, 1)
+                nn.init.constant_(m.bias, 0)
+            elif isinstance(m, nn.Linear):
+                nn.init.normal_(m.weight, 0, 0.01)
+                nn.init.constant_(m.bias, 0)
+
     def _make_layer(self, block, planes, num_blocks, stride):
         strides = [stride] + [1] * (num_blocks - 1)
         layers = []
@@ -90,8 +105,14 @@ def ResNet18WhiteBox(num_classes=100):
 # =========================================================================
 
 def run_benchmark(provd_path: str, scenario: str):
+    # Legacy CIFAR-100 CLI hook (dispatched from mlperf.cli `edge resnet-train`).
+    # torchvision is imported lazily here so the registry runner path, which
+    # imports ResNet18WhiteBox from this module, does not pull it in at import time.
+    import torchvision
+    import torchvision.transforms as transforms
+
     console.print("[Edge:Train] 🎓 Initializing Pedagogical White-Box Training for ResNet-18")
-    
+
     transform_train = transforms.Compose([
         transforms.RandomCrop(32, padding=4),
         transforms.RandomHorizontalFlip(),

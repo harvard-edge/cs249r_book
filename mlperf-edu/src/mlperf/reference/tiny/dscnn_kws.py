@@ -21,11 +21,14 @@ Quality Target:
     - Top-1 accuracy >= 90% on Speech Commands v2 test set
 
 Dataset:
-    Google Speech Commands v2 (Warden 2018)
+    Google Speech Commands v2 (Warden 2018, arXiv:1804.03209, CC-BY-4.0)
     35 keyword classes → mapped to 12 MLPerf Tiny classes
     ~105K utterances, 1 second each, 16kHz mono WAV
 
-Provenance: Zhang et al. 2017, "Hello Edge: Keyword Spotting on Microcontrollers"
+Provenance: Zhang et al. 2017, "Hello Edge: Keyword Spotting on Microcontrollers".
+    Pedagogically aligned with, not identical to, the MLPerf Tiny KWS
+    closed-division reference: this module uses a 40x101 log-mel front-end,
+    while the reference uses a 49x10 MFCC front-end and a ~24.9K-param DS-CNN.
 """
 
 import os
@@ -76,14 +79,17 @@ class DSCNNBlock(nn.Module):
 
 class DSCNN(nn.Module):
     """
-    DS-CNN for keyword spotting (MLPerf Tiny reference architecture).
+    DS-CNN for keyword spotting, after Zhang et al. 2017 (Hello Edge).
+
+    Pedagogically aligned with, not identical to, the MLPerf Tiny KWS
+    closed-division reference (which uses a 49x10 MFCC front-end).
 
     Input: Mel spectrogram of shape (B, 1, n_mels, time_steps)
     Output: (B, num_classes) logits
 
-    The model is deliberately small (~60K parameters) to fit on a
-    microcontroller with <256KB SRAM. Students can quantize it to INT8
-    and measure the compression ratio.
+    The model is deliberately small (~20K parameters; 19,932 at the default
+    configuration) to fit on a microcontroller with <256KB SRAM. Students
+    can quantize it to INT8 and measure the compression ratio.
     """
 
     def __init__(self, num_classes=12, n_mels=40):
