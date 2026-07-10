@@ -32,8 +32,8 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import torch  # noqa: E402
 
-from reference.mobile.mobilenet_core import MobileNetV2Local
-from reference.mobile.mobilenet_compress import (
+from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
+from mlperf.reference.mobile.mobilenet_compress import (
     prune_unstructured, prune_2of4, fake_quantize_int8, effective_param_bytes,
 )
 from mlperf.roofline import measure_roofline

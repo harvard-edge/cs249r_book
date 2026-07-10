@@ -24,8 +24,8 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import torch  # noqa: E402
 
-from reference.cloud.nanogpt_train import NanoGPTWhiteBox, GPT2_SMALL_CONFIG
-from reference.cloud.lora import inject_lora, base_grad_norm, lora_grad_norm
+from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox, GPT2_SMALL_CONFIG
+from mlperf.reference.cloud.lora import inject_lora, base_grad_norm, lora_grad_norm
 from mlperf.roofline import measure_roofline
 
 

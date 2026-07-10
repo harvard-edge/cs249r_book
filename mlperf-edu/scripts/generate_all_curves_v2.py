@@ -27,8 +27,8 @@ else:
 # ─── Train missing workloads ────────────────────────────────────────────────
 
 def train_nanogpt():
-    from reference.cloud.nanogpt_core import GPT
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.nanogpt_core import GPT
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("nanogpt-12m", batch_size=8)
     model = GPT(vocab_size=65, n_layer=6, n_head=6, n_embd=384, max_seq_len=256).to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -56,8 +56,8 @@ def train_nanogpt():
     return t_l, v_l
 
 def train_moe():
-    from reference.cloud.nano_moe import NanoMoEWhiteBox
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.nano_moe import NanoMoEWhiteBox
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("nano-moe-12m", batch_size=8)
     model = NanoMoEWhiteBox().to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -87,8 +87,8 @@ def train_moe():
     return t_l, v_l
 
 def train_dlrm():
-    from reference.cloud.micro_dlrm import MicroDLRMWhiteBox
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("micro-dlrm-1m", batch_size=256)
     model = MicroDLRMWhiteBox().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -139,8 +139,8 @@ def train_dlrm():
     return t_l, v_l
 
 def train_gcn():
-    from reference.cloud.micro_gnn import MicroGCN
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_gnn import MicroGCN
+    from mlperf.reference.dataset_factory import get_dataloaders
     data = get_dataloaders("micro-gcn", batch_size=1)
     features = data['x'].to(device)
     labels = data['y'].to(device)
@@ -165,8 +165,8 @@ def train_gcn():
     return t_l, v_l
 
 def train_bert():
-    from reference.cloud.micro_bert import MicroBERT
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_bert import MicroBERT
+    from mlperf.reference.dataset_factory import get_dataloaders
     result = get_dataloaders("micro-bert", batch_size=32)
     if isinstance(result, dict):
         train_ld = result.get('train_loader')
@@ -199,8 +199,8 @@ def train_bert():
     return t_l, v_l
 
 def train_resnet():
-    from reference.edge.resnet_core import ResNet18Local
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.edge.resnet_core import ResNet18Local
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("resnet18", batch_size=64)
     model = ResNet18Local(num_classes=100).to(device)
     opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
@@ -225,8 +225,8 @@ def train_resnet():
     return t_l, v_l
 
 def train_mobilenet():
-    from reference.mobile.mobilenet_core import MobileNetV2Local
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("mobilenetv2", batch_size=64)
     model = MobileNetV2Local(num_classes=100).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -250,8 +250,8 @@ def train_mobilenet():
     return t_l, v_l
 
 def train_ae():
-    from reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("anomaly-ae", batch_size=64)
     model = AnomalyDetectionAE(input_dim=784).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)

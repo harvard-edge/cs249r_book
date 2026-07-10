@@ -138,17 +138,17 @@ def _input_bert(model, device, batch=16, seq_len=64):
 
 
 WORKLOAD_RUNNERS = {
-    "nanogpt-train": ("reference.cloud.nanogpt_train", "NanoGPTWhiteBox", {}, _input_lm, 50),
-    "nano-moe-train": ("reference.cloud.nano_moe", "NanoMoEWhiteBox", {}, _input_lm, 50),
-    "micro-dlrm-train": ("reference.cloud.micro_dlrm", "MicroDLRMWhiteBox", {}, _input_dlrm, 100),
-    "micro-dlrm-dram-train": ("reference.cloud.micro_dlrm_dram", "MicroDLRMDRAM", {}, _input_dlrm_dram, 50),
-    "micro-diffusion-train": ("reference.cloud.micro_diffusion", "MicroDiffusionUNet", {}, _input_image, 30),
-    "micro-bert-train": ("reference.cloud.micro_bert", "MicroBERT", {}, _input_bert, 50),
-    "micro-lstm-train": ("reference.cloud.micro_lstm", "MicroLSTM", {}, _input_lstm, 50),
-    "anomaly-ae-train": ("reference.tiny.anomaly_detection_ae", "AnomalyDetectionAE", {}, _input_anomaly_ae, 50),
-    "wake-vision-vww": ("reference.tiny.wake_vision_vww", "MicroNet", {}, lambda m, d: _input_image(m, d, batch=16, hw=64), 50),
-    "resnet18-train": ("reference.edge.resnet_train", "ResNet18WhiteBox", {"num_classes": 100}, _input_image, 30),
-    "mobilenetv2-train": ("reference.mobile.mobilenet_core", "MobileNetV2Local", {"num_classes": 100}, _input_image, 30),
+    "nanogpt-train": ("mlperf.reference.cloud.nanogpt_train", "NanoGPTWhiteBox", {}, _input_lm, 50),
+    "nano-moe-train": ("mlperf.reference.cloud.nano_moe", "NanoMoEWhiteBox", {}, _input_lm, 50),
+    "micro-dlrm-train": ("mlperf.reference.cloud.micro_dlrm", "MicroDLRMWhiteBox", {}, _input_dlrm, 100),
+    "micro-dlrm-dram-train": ("mlperf.reference.cloud.micro_dlrm_dram", "MicroDLRMDRAM", {}, _input_dlrm_dram, 50),
+    "micro-diffusion-train": ("mlperf.reference.cloud.micro_diffusion", "MicroDiffusionUNet", {}, _input_image, 30),
+    "micro-bert-train": ("mlperf.reference.cloud.micro_bert", "MicroBERT", {}, _input_bert, 50),
+    "micro-lstm-train": ("mlperf.reference.cloud.micro_lstm", "MicroLSTM", {}, _input_lstm, 50),
+    "anomaly-ae-train": ("mlperf.reference.tiny.anomaly_detection_ae", "AnomalyDetectionAE", {}, _input_anomaly_ae, 50),
+    "wake-vision-vww": ("mlperf.reference.tiny.wake_vision_vww", "MicroNet", {}, lambda m, d: _input_image(m, d, batch=16, hw=64), 50),
+    "resnet18-train": ("mlperf.reference.edge.resnet_train", "ResNet18WhiteBox", {"num_classes": 100}, _input_image, 30),
+    "mobilenetv2-train": ("mlperf.reference.mobile.mobilenet_core", "MobileNetV2Local", {"num_classes": 100}, _input_image, 30),
 }
 
 SKIPPED = {

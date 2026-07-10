@@ -42,7 +42,7 @@ def run_rag(
     seq_len: int,
 ) -> dict[str, Any]:
     ensure_reference_path()
-    from reference.cloud.nano_rag_agent import NanoRAGAgent
+    from mlperf.reference.cloud.nano_rag_agent import NanoRAGAgent
 
     seed = 42
     torch.manual_seed(seed)
@@ -96,7 +96,7 @@ def run_codegen(
     seq_len: int,
 ) -> dict[str, Any]:
     ensure_reference_path()
-    from reference.cloud.nano_codegen_agent import NanoCodeGenAgent
+    from mlperf.reference.cloud.nano_codegen_agent import NanoCodeGenAgent
 
     seed = 42
     torch.manual_seed(seed)
@@ -136,7 +136,7 @@ def run_react(
     seq_len: int,
 ) -> dict[str, Any]:
     ensure_reference_path()
-    from reference.cloud.nano_react_agent import NanoReActAgent
+    from mlperf.reference.cloud.nano_react_agent import NanoReActAgent
 
     seed = 42
     torch.manual_seed(seed)
@@ -177,7 +177,7 @@ def run_toolcall(
     seq_len: int,
 ) -> dict[str, Any]:
     ensure_reference_path()
-    from reference.cloud.nano_toolcall_agent import NanoToolCallAgent
+    from mlperf.reference.cloud.nano_toolcall_agent import NanoToolCallAgent
 
     seed = 42
     torch.manual_seed(seed)

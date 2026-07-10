@@ -22,8 +22,8 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import torch  # noqa: E402
 
-from reference.cloud.micro_dlrm import MicroDLRMWhiteBox
-from reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
+from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
+from mlperf.reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
 
 
 def bench(model, dense, sparse_idx, sparse_off, n_warmup=10, n_iter=200):

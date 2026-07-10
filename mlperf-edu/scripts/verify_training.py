@@ -26,7 +26,7 @@ import torch
 import torch.nn.functional as F
 import torch.optim as optim
 
-from reference.dataset_factory import get_dataloaders
+from mlperf.reference.dataset_factory import get_dataloaders
 
 
 # ---------------------------------------------------------------------------

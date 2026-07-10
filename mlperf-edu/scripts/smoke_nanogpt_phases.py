@@ -25,9 +25,9 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import torch  # noqa: E402
 
-from reference.cloud.nanogpt_train import NanoGPTWhiteBox
-from reference.cloud.nanogpt_prefill import NanoGPTPrefill
-from reference.cloud.nanogpt_decode import NanoGPTDecode
+from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
+from mlperf.reference.cloud.nanogpt_prefill import NanoGPTPrefill
+from mlperf.reference.cloud.nanogpt_decode import NanoGPTDecode
 
 
 def model_param_count(model):

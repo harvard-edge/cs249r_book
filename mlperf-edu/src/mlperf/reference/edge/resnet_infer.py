@@ -3,7 +3,7 @@ import torchvision
 import torchvision.transforms as transforms
 from rich.console import Console
 
-from reference.edge.resnet_train import ResNet18WhiteBox
+from mlperf.reference.edge.resnet_train import ResNet18WhiteBox
 
 console = Console()
 

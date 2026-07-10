@@ -236,7 +236,7 @@ def run_cloud(args):
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.cloud.nanogpt_infer import build_dataloader, build_model, run_benchmark
+        from mlperf.reference.cloud.nanogpt_infer import build_dataloader, build_model, run_benchmark
         if not getattr(args, 'model_signature', None):
             console.print("[bold red][CLI Error] Strict Provenance Mode: You must provide a --model-signature artifact. Generate one using `mlperf hydrate --task gpt2-infer`.[/bold red]")
             return
@@ -247,7 +247,7 @@ def run_cloud(args):
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.cloud.dlrm_infer import run_benchmark
+        from mlperf.reference.cloud.dlrm_infer import run_benchmark
         run_benchmark(args.sig, scenario=args.scenario)
     else:
         console.print(f"[yellow]Workload '{args.task}' is architected in workloads.yaml but Python logic is pending.[/yellow]")
@@ -263,13 +263,13 @@ def run_edge(args):
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.edge.resnet_train import run_benchmark
+        from mlperf.reference.edge.resnet_train import run_benchmark
         run_benchmark(None, scenario="train")
     elif args.task == 'resnet-infer':
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.edge.resnet_infer import run_benchmark
+        from mlperf.reference.edge.resnet_infer import run_benchmark
         if not getattr(args, 'model_signature', None):
             console.print("[bold red][CLI Error] Strict Provenance Mode: You must provide a --model-signature artifact for inference.[/bold red]")
             return
@@ -278,7 +278,7 @@ def run_edge(args):
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.edge.bert_infer import run_benchmark
+        from mlperf.reference.edge.bert_infer import run_benchmark
         run_benchmark(args.sig, scenario=args.scenario)
     else:
         console.print(f"[yellow]Workload '{args.task}' is architected in workloads.yaml but Python logic is pending.[/yellow]")
@@ -294,7 +294,7 @@ def run_mobile(args):
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.mobile.mobilenet_infer import run_benchmark
+        from mlperf.reference.mobile.mobilenet_infer import run_benchmark
         if not getattr(args, 'model_signature', None):
             console.print("[bold red][CLI Error] Strict Provenance Mode: You must provide a --model-signature artifact. Generate one using `mlperf hydrate --task mobilenet-infer`.[/bold red]")
             return
@@ -303,7 +303,7 @@ def run_mobile(args):
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.mobile.mobilebert_infer import run_benchmark
+        from mlperf.reference.mobile.mobilebert_infer import run_benchmark
         run_benchmark(args.sig, scenario=args.scenario)
     else:
         console.print(f"[yellow]Workload '{args.task}' is architected in workloads.yaml but Python logic is pending.[/yellow]")
@@ -320,13 +320,13 @@ def run_tiny(args):
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.tiny.dscnn_kws import run_benchmark
+        from mlperf.reference.tiny.dscnn_kws import run_benchmark
         run_benchmark(args.sig, scenario="Offline")
     elif args.task == 'ad01-infer':
         import sys
         import os
         sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-        from reference.tiny.ad01_infer import run_benchmark
+        from mlperf.reference.tiny.ad01_infer import run_benchmark
         run_benchmark(args.sig, scenario="Offline")
     else:
         console.print(f"[yellow]Workload '{args.task}' is architected in workloads.yaml but Python logic is pending.[/yellow]")
@@ -450,7 +450,7 @@ def execute_anchor(args):
     sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
     
     if args.suite == 'edge' and args.task == 'resnet-infer':
-        from reference.edge.resnet_infer import run_benchmark
+        from mlperf.reference.edge.resnet_infer import run_benchmark
         if not getattr(args, 'model_signature', None):
             console.print("[bold red][CLI Error] Strict Provenance Mode: You must provide a --model-signature artifact for baseline anchoring.[/bold red]")
             return
@@ -591,7 +591,7 @@ Instructors utilize `mlperf anchor` to mathematically prove canonical workloads,
 the absolute 99% accuracy Grading rules explicitly inside `workloads.yaml`. 
 
 [bold]Student Journey:[/bold] 
-Students clone `reference/` and rewrite Native PyTorch execution graphs directly. 
+Students read `src/mlperf/reference/` and rewrite Native PyTorch execution graphs directly. 
 When they securely execute `mlperf run --sut my_optimizations.py`, the Framework evaluates 
 their hardware latency, physical power drainage, and bounding bounds natively generating 
 a [green]Scorecard[/green]. 

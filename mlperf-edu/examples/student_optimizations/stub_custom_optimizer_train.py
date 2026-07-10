@@ -6,7 +6,7 @@ from mlperf.loadgen import LoadGenProxy
 
 # Import the Pristine Base Architecture (Students should absolutely not re-write the forward loop unless instructed!)
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
 def execute_student_training_optimization():
     """

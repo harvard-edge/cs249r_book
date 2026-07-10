@@ -1,6 +1,6 @@
 import torch
 from mlperf.sut import SUT_Interface
-from reference.edge.resnet_train import ResNet18WhiteBox
+from mlperf.reference.edge.resnet_train import ResNet18WhiteBox
 
 class ClosedResNetOptimization(SUT_Interface):
     """

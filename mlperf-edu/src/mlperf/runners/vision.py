@@ -23,7 +23,7 @@ def run_resnet18_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.edge.resnet_train import ResNet18WhiteBox
+    from mlperf.reference.edge.resnet_train import ResNet18WhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -103,7 +103,7 @@ def run_mobilenetv2_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.mobile.mobilenet_core import MobileNetV2Local
+    from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
 
     seed = 42
     torch.manual_seed(seed)
@@ -192,8 +192,8 @@ def run_mobilenet_composed(workload: Workload, output_dir: Path, *, profile: str
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.mobile.mobilenet_compress import effective_param_bytes, fake_quantize_int8, prune_2of4
-    from reference.mobile.mobilenet_core import MobileNetV2Local
+    from mlperf.reference.mobile.mobilenet_compress import effective_param_bytes, fake_quantize_int8, prune_2of4
+    from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
 
     seed = 42
     torch.manual_seed(seed)
@@ -283,7 +283,7 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.edge.resnet_train import ResNet18WhiteBox
+    from mlperf.reference.edge.resnet_train import ResNet18WhiteBox
 
     seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
     torch.manual_seed(seed)
@@ -417,7 +417,7 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.mobile.mobilenet_core import MobileNetV2Local
+    from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
 
     seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
     torch.manual_seed(seed)

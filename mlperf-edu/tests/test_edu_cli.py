@@ -2227,7 +2227,7 @@ def test_agent_max_suite_runs_all_agent_patterns(tmp_path):
 
 
 def test_movielens_text_occupations_are_encoded(tmp_path):
-    from reference.dataset_factory import MovieLensRecommendationDataset
+    from mlperf.reference.dataset_factory import MovieLensRecommendationDataset
 
     dataset_dir = tmp_path / "movielens" / "ml-100k"
     dataset_dir.mkdir(parents=True)

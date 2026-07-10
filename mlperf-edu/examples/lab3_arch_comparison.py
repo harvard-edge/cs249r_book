@@ -20,7 +20,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from reference.dataset_factory import get_dataloaders
+from mlperf.reference.dataset_factory import get_dataloaders
 
 device = (
     torch.device("mps") if torch.backends.mps.is_available()
@@ -64,8 +64,8 @@ def main():
     print("=" * 60)
 
     # ── Load models ───────────────────────────────────────────
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
-    from reference.cloud.nano_moe import NanoMoEWhiteBox
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.nano_moe import NanoMoEWhiteBox
 
     nanogpt = NanoGPTWhiteBox(
         vocab_size=65, n_embd=128, n_head=4, n_layer=4

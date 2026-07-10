@@ -441,35 +441,35 @@ def get_dataloaders(model_name: str, batch_size: int = 16) -> tuple:
     elif "dlrm" in model_name:
         return get_dlrm_dataloaders(batch_size=batch_size)
     elif "dscnn" in model_name or "kws" in model_name:
-        from reference.tiny.dscnn_kws import get_speech_commands_dataloaders
+        from mlperf.reference.tiny.dscnn_kws import get_speech_commands_dataloaders
         return get_speech_commands_dataloaders(batch_size=batch_size)
     elif "anomaly" in model_name or "autoencoder" in model_name:
-        from reference.tiny.anomaly_detection_ae import get_mnist_anomaly_dataloaders
+        from mlperf.reference.tiny.anomaly_detection_ae import get_mnist_anomaly_dataloaders
         return get_mnist_anomaly_dataloaders(batch_size=batch_size)
     elif "wake" in model_name or "vww" in model_name:
-        from reference.tiny.wake_vision_vww import get_wake_vision_dataloaders
+        from mlperf.reference.tiny.wake_vision_vww import get_wake_vision_dataloaders
         return get_wake_vision_dataloaders(batch_size=batch_size)
     elif "codegen" in model_name:
-        from reference.agent_datasets import get_mbpp_dataloaders
+        from mlperf.reference.agent_datasets import get_mbpp_dataloaders
         return get_mbpp_dataloaders(batch_size=batch_size)
     elif "react" in model_name:
-        from reference.agent_datasets import get_react_dataloaders
+        from mlperf.reference.agent_datasets import get_react_dataloaders
         return get_react_dataloaders(batch_size=batch_size)
     elif "rag" in model_name or "toolcall" in model_name:
         # RAG and ToolCall still use language data but with agent-specific framing
-        from reference.agent_datasets import get_react_dataloaders
+        from mlperf.reference.agent_datasets import get_react_dataloaders
         return get_react_dataloaders(batch_size=batch_size)
     elif "gnn" in model_name or "gcn" in model_name:
-        from reference.cloud.micro_gnn import get_gnn_dataloaders
+        from mlperf.reference.cloud.micro_gnn import get_gnn_dataloaders
         return get_gnn_dataloaders()  # Returns dict, not (train, val)
     elif "lstm" in model_name or "timeseries" in model_name:
-        from reference.cloud.micro_lstm import get_timeseries_dataloaders
+        from mlperf.reference.cloud.micro_lstm import get_timeseries_dataloaders
         return get_timeseries_dataloaders(batch_size=batch_size)
     elif "bert" in model_name or "text-cls" in model_name:
-        from reference.cloud.micro_bert import get_bert_dataloaders
+        from mlperf.reference.cloud.micro_bert import get_bert_dataloaders
         return get_bert_dataloaders(batch_size=batch_size)
     elif "rl" in model_name or "cartpole" in model_name:
-        from reference.cloud.micro_rl import get_rl_dataloaders
+        from mlperf.reference.cloud.micro_rl import get_rl_dataloaders
         return get_rl_dataloaders()  # Returns dict with env + agent_factory
     else:
         # NanoGPT, Nano-MoE use TinyShakespeare

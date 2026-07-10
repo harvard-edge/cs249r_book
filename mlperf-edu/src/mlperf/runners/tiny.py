@@ -23,7 +23,7 @@ def run_anomaly_ae_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
+    from mlperf.reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
 
     seed = 42
     torch.manual_seed(seed)
@@ -103,7 +103,7 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.dscnn_kws import DSCNN
+    from mlperf.reference.tiny.dscnn_kws import DSCNN
 
     seed = 42
     torch.manual_seed(seed)
@@ -186,7 +186,7 @@ def run_wake_vision_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.wake_vision_vww import MicroNet
+    from mlperf.reference.tiny.wake_vision_vww import MicroNet
 
     seed = 42
     torch.manual_seed(seed)
@@ -269,7 +269,7 @@ def run_dscnn_kws_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.dscnn_kws import DSCNN
+    from mlperf.reference.tiny.dscnn_kws import DSCNN
 
     seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
     torch.manual_seed(seed)
@@ -311,7 +311,7 @@ def run_wake_vision_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.wake_vision_vww import MicroNet
+    from mlperf.reference.tiny.wake_vision_vww import MicroNet
 
     seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
     torch.manual_seed(seed)
@@ -353,7 +353,7 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.anomaly_detection_ae import AnomalyDetectionAE, get_mnist_anomaly_dataloaders
+    from mlperf.reference.tiny.anomaly_detection_ae import AnomalyDetectionAE, get_mnist_anomaly_dataloaders
 
     seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
     torch.manual_seed(seed)

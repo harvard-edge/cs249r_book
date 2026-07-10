@@ -23,7 +23,7 @@ def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.micro_dlrm import MicroDLRMWhiteBox
+    from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -113,7 +113,7 @@ def run_dram_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
+    from mlperf.reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
 
     seed = 42
     torch.manual_seed(seed)
@@ -209,7 +209,7 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
+    from mlperf.reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
 
     seed = 42
     torch.manual_seed(seed)
@@ -297,8 +297,8 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
-    from reference.dataset_factory import MovieLensRecommendationDataset, _dlrm_collate_fn
+    from mlperf.reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
+    from mlperf.reference.dataset_factory import MovieLensRecommendationDataset, _dlrm_collate_fn
 
     seed = _env_int("MLPERF_EDU_MAX_SEED", 42)
     torch.manual_seed(seed)
@@ -461,7 +461,7 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
+    from mlperf.reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
 
     seed = 42
     torch.manual_seed(seed)
@@ -549,8 +549,8 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.micro_dlrm import MicroDLRMWhiteBox
-    from reference.dataset_factory import MovieLensRecommendationDataset, _dlrm_collate_fn
+    from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
+    from mlperf.reference.dataset_factory import MovieLensRecommendationDataset, _dlrm_collate_fn
 
     seed = _env_int("MLPERF_EDU_MAX_SEED", 42)
     torch.manual_seed(seed)

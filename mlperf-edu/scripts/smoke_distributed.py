@@ -25,7 +25,7 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import torch  # noqa: E402
 
-from reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
+from mlperf.reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
 
 
 def main() -> int:

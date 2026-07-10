@@ -21,7 +21,7 @@ import torch.distributed as dist
 import torch.multiprocessing as mp
 import torch.nn as nn
 
-from reference.cloud.micro_dlrm import MicroDLRMWhiteBox
+from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
 
 
 def _set_default_gloo_interface() -> None:

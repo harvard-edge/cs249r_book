@@ -22,7 +22,7 @@ def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -109,8 +109,8 @@ def run_prefill_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.nanogpt_prefill import NanoGPTPrefill
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.nanogpt_prefill import NanoGPTPrefill
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -188,7 +188,7 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.nanogpt_prefill import NanoGPTPrefill
+    from mlperf.reference.cloud.nanogpt_prefill import NanoGPTPrefill
 
     seed = _env_int("MLPERF_EDU_MAX_SEED", 42)
     torch.manual_seed(seed)
@@ -269,8 +269,8 @@ def run_decode_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.nanogpt_decode import NanoGPTDecode
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.nanogpt_decode import NanoGPTDecode
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -346,7 +346,7 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.nanogpt_decode import NanoGPTDecode
+    from mlperf.reference.cloud.nanogpt_decode import NanoGPTDecode
 
     seed = _env_int("MLPERF_EDU_MAX_SEED", 42)
     torch.manual_seed(seed)
@@ -441,7 +441,7 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     seed = _env_int("MLPERF_EDU_MAX_SEED", 42)
     torch.manual_seed(seed)
@@ -613,7 +613,7 @@ def _load_max_nanogpt_model(
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     checkpoint = Path(
         os.environ.get("MLPERF_EDU_NANOGPT_CHECKPOINT", output_dir / "nanogpt-train_max_checkpoint.pt")

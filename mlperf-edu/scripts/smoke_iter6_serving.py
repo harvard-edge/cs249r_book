@@ -35,8 +35,8 @@ os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
 import torch  # noqa: E402
 
-from reference.cloud.nanogpt_train import NanoGPTWhiteBox, GPT2_SMALL_CONFIG
-from reference.cloud.nanogpt_decode import NanoGPTDecode
+from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox, GPT2_SMALL_CONFIG
+from mlperf.reference.cloud.nanogpt_decode import NanoGPTDecode
 from mlperf.roofline import measure_roofline, latest_sidecar
 
 
@@ -178,7 +178,7 @@ def main() -> int:
     # ---- SUT 4: Speculative decode ----
     print("Running SUT 4: Speculative decode (draft 11M + target 86M, gamma=4)...", flush=True)
     try:
-        from reference.cloud.nanogpt_decode_spec import SpeculativeDecode
+        from mlperf.reference.cloud.nanogpt_decode_spec import SpeculativeDecode
         target_spec = NanoGPTWhiteBox(**GPT2_SMALL_CONFIG).to(device).half()
         draft = NanoGPTWhiteBox().to(device).half()
         spec = SpeculativeDecode(target_spec, draft, prefill_ctx=PREFILL_CTX,

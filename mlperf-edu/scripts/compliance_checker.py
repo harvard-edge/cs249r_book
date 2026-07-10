@@ -264,19 +264,19 @@ def quick_check_model(workload: str) -> ComplianceResult:
         import torch
 
         models = {
-            "nanogpt": ("reference.cloud.nanogpt_core", "GPT", {}),
-            "nano-moe": ("reference.cloud.nano_moe", "NanoMoEWhiteBox", {}),
-            "micro-dlrm": ("reference.cloud.micro_dlrm", "MicroDLRMWhiteBox", {}),
-            "micro-diffusion": ("reference.cloud.micro_diffusion", "MicroDiffusionUNet", {}),
-            "micro-gnn": ("reference.cloud.micro_gnn", "MicroGCN", {"nfeat": 50, "nclass": 7}),
-            "micro-bert": ("reference.cloud.micro_bert", "MicroBERT", {}),
-            "micro-lstm": ("reference.cloud.micro_lstm", "MicroLSTM", {}),
-            "micro-rl": ("reference.cloud.micro_rl", "REINFORCEAgent", {}),
-            "resnet18": ("reference.edge.resnet_core", "ResNet18Local", {"num_classes": 100}),
-            "mobilenetv2": ("reference.mobile.mobilenet_core", "MobileNetV2Local", {"num_classes": 100}),
-            "dscnn": ("reference.tiny.dscnn_kws", "DSCNN", {"num_classes": 12}),
-            "anomaly-ae": ("reference.tiny.anomaly_detection_ae", "AnomalyDetectionAE", {"input_dim": 784}),
-            "wake-vision": ("reference.tiny.wake_vision_vww", "MicroNet", {"num_classes": 2}),
+            "nanogpt": ("mlperf.reference.cloud.nanogpt_core", "GPT", {}),
+            "nano-moe": ("mlperf.reference.cloud.nano_moe", "NanoMoEWhiteBox", {}),
+            "micro-dlrm": ("mlperf.reference.cloud.micro_dlrm", "MicroDLRMWhiteBox", {}),
+            "micro-diffusion": ("mlperf.reference.cloud.micro_diffusion", "MicroDiffusionUNet", {}),
+            "micro-gnn": ("mlperf.reference.cloud.micro_gnn", "MicroGCN", {"nfeat": 50, "nclass": 7}),
+            "micro-bert": ("mlperf.reference.cloud.micro_bert", "MicroBERT", {}),
+            "micro-lstm": ("mlperf.reference.cloud.micro_lstm", "MicroLSTM", {}),
+            "micro-rl": ("mlperf.reference.cloud.micro_rl", "REINFORCEAgent", {}),
+            "resnet18": ("mlperf.reference.edge.resnet_core", "ResNet18Local", {"num_classes": 100}),
+            "mobilenetv2": ("mlperf.reference.mobile.mobilenet_core", "MobileNetV2Local", {"num_classes": 100}),
+            "dscnn": ("mlperf.reference.tiny.dscnn_kws", "DSCNN", {"num_classes": 12}),
+            "anomaly-ae": ("mlperf.reference.tiny.anomaly_detection_ae", "AnomalyDetectionAE", {"input_dim": 784}),
+            "wake-vision": ("mlperf.reference.tiny.wake_vision_vww", "MicroNet", {"num_classes": 2}),
         }
 
         if workload not in models:
@@ -293,7 +293,7 @@ def quick_check_model(workload: str) -> ComplianceResult:
         check_deterministic_seed(result)
 
         # Check dataset loads
-        from reference.dataset_factory import get_dataloaders
+        from mlperf.reference.dataset_factory import get_dataloaders
         name_map = {
             "nanogpt": "nanogpt-12m", "nano-moe": "nanogpt-12m",
             "micro-dlrm": "micro-dlrm-1m", "micro-diffusion": "micro-diffusion-32px",

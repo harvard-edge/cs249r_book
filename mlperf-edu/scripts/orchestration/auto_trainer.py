@@ -35,19 +35,19 @@ CHECKPOINT_ROOT = "checkpoints"
 # ---------------------------------------------------------------------------
 
 MODEL_REGISTRY = {
-    "nano-moe-12m":         ("reference.cloud.nano_moe",          "NanoMoEWhiteBox"),
-    "nanogpt-12m":          ("reference.cloud.nanogpt_train",     "NanoGPTWhiteBox"),
-    "resnet18":             ("reference.edge.resnet_train",       "ResNet18WhiteBox"),
-    "micro-dlrm-1m":       ("reference.cloud.micro_dlrm",        "MicroDLRMWhiteBox"),
-    "micro-diffusion-32px": ("reference.cloud.micro_diffusion",   "MicroDiffusionUNet"),
+    "nano-moe-12m":         ("mlperf.reference.cloud.nano_moe",          "NanoMoEWhiteBox"),
+    "nanogpt-12m":          ("mlperf.reference.cloud.nanogpt_train",     "NanoGPTWhiteBox"),
+    "resnet18":             ("mlperf.reference.edge.resnet_train",       "ResNet18WhiteBox"),
+    "micro-dlrm-1m":       ("mlperf.reference.cloud.micro_dlrm",        "MicroDLRMWhiteBox"),
+    "micro-diffusion-32px": ("mlperf.reference.cloud.micro_diffusion",   "MicroDiffusionUNet"),
     # Tiny division
-    "dscnn-kws":            ("reference.tiny.dscnn_kws",          "DSCNN"),
-    "anomaly-ae":           ("reference.tiny.anomaly_detection_ae", "AnomalyDetectionAE"),
+    "dscnn-kws":            ("mlperf.reference.tiny.dscnn_kws",          "DSCNN"),
+    "anomaly-ae":           ("mlperf.reference.tiny.anomaly_detection_ae", "AnomalyDetectionAE"),
     # Agent workloads
-    "nano-rag-agent":       ("reference.cloud.nano_rag_agent",      "NanoRAGAgent"),
-    "nano-codegen-agent":   ("reference.cloud.nano_codegen_agent",  "NanoCodeGenAgent"),
-    "nano-react-agent":     ("reference.cloud.nano_react_agent",    "NanoReActAgent"),
-    "nano-toolcall-agent":  ("reference.cloud.nano_toolcall_agent", "NanoToolCallAgent"),
+    "nano-rag-agent":       ("mlperf.reference.cloud.nano_rag_agent",      "NanoRAGAgent"),
+    "nano-codegen-agent":   ("mlperf.reference.cloud.nano_codegen_agent",  "NanoCodeGenAgent"),
+    "nano-react-agent":     ("mlperf.reference.cloud.nano_react_agent",    "NanoReActAgent"),
+    "nano-toolcall-agent":  ("mlperf.reference.cloud.nano_toolcall_agent", "NanoToolCallAgent"),
 }
 
 # Model-specific constructor kwargs
@@ -179,7 +179,7 @@ def _training_process(model_name: str, target_loss: float):
 
     # Load real data via the dataset factory
     try:
-        from reference.dataset_factory import get_dataloaders
+        from mlperf.reference.dataset_factory import get_dataloaders
         batch_size = 64 if "resnet" in model_name or "diffusion" in model_name else 16
         train_loader, val_loader = get_dataloaders(model_name, batch_size=batch_size)
         print(f"[{model_name}] ✅ Loaded real dataset: "

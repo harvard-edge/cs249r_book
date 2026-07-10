@@ -24,8 +24,8 @@ results = {}
 
 # ─── 1. Micro-DLRM ───────────────────────────────────────────────────────────
 def train_dlrm():
-    from reference.cloud.micro_dlrm import MicroDLRMWhiteBox
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("micro-dlrm-1m", batch_size=256)
     model = MicroDLRMWhiteBox().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -50,15 +50,15 @@ def train_dlrm():
 
 # ─── 2. Micro-GCN ─────────────────────────────────────────────────────────────
 def train_gcn():
-    from reference.cloud.micro_gnn import MicroGCN
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_gnn import MicroGCN
+    from mlperf.reference.dataset_factory import get_dataloaders
     result = get_dataloaders("micro-gcn", batch_size=1)
     # GCN returns (features, labels, adj, train_mask, val_mask)
     if isinstance(result, tuple) and len(result) > 2:
         features, labels, adj, train_mask, val_mask = result
     else:
         # Try direct loading from the module
-        from reference.cloud.micro_gnn import load_cora_data
+        from mlperf.reference.cloud.micro_gnn import load_cora_data
         features, labels, adj, train_mask, val_mask = load_cora_data()
     
     model = MicroGCN(in_features=features.shape[1], hidden=64, num_classes=labels.max().item()+1).to(device)
@@ -82,8 +82,8 @@ def train_gcn():
 
 # ─── 3. Micro-BERT ────────────────────────────────────────────────────────────
 def train_bert():
-    from reference.cloud.micro_bert import MicroBERT
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_bert import MicroBERT
+    from mlperf.reference.dataset_factory import get_dataloaders
     result = get_dataloaders("micro-bert", batch_size=32)
     # micro-bert returns (train_ld, val_ld, vocab_size)
     if isinstance(result, tuple) and len(result) == 3:
@@ -114,8 +114,8 @@ def train_bert():
 
 # ─── 4. Micro-LSTM (already ran, embed data) ──────────────────────────────────
 def train_lstm():
-    from reference.cloud.micro_lstm import MicroLSTM
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_lstm import MicroLSTM
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("micro-lstm", batch_size=32)
     model = MicroLSTM().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -140,8 +140,8 @@ def train_lstm():
 
 # ─── 5. NanoGPT (use core directly) ──────────────────────────────────────────
 def train_nanogpt():
-    from reference.cloud.nanogpt_core import NanoGPT
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.nanogpt_core import NanoGPT
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("nanogpt-12m", batch_size=8)
     # Smaller model for speed
     model = NanoGPT(vocab_size=65, d_model=384, n_heads=6, n_layers=6, block_size=256).to(device)
@@ -171,8 +171,8 @@ def train_nanogpt():
 
 # ─── 6. Nano-MoE ─────────────────────────────────────────────────────────────
 def train_moe():
-    from reference.cloud.nano_moe import NanoMoEWhiteBox
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.nano_moe import NanoMoEWhiteBox
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("nano-moe-12m", batch_size=8)
     model = NanoMoEWhiteBox().to(device)
     opt = torch.optim.AdamW(model.parameters(), lr=3e-4)
@@ -201,8 +201,8 @@ def train_moe():
 
 # ─── 7. ResNet-18 ─────────────────────────────────────────────────────────────
 def train_resnet():
-    from reference.edge.resnet_core import ResNet18
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.edge.resnet_core import ResNet18
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("resnet18", batch_size=64)
     model = ResNet18(num_classes=100).to(device)
     opt = torch.optim.SGD(model.parameters(), lr=0.1, momentum=0.9, weight_decay=5e-4)
@@ -229,8 +229,8 @@ def train_resnet():
 
 # ─── 8. MobileNetV2 ──────────────────────────────────────────────────────────
 def train_mobilenet():
-    from reference.mobile.mobilenet_core import MobileNetV2
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.mobile.mobilenet_core import MobileNetV2
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("mobilenetv2", batch_size=64)
     model = MobileNetV2(num_classes=100).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -255,8 +255,8 @@ def train_mobilenet():
 
 # ─── 9. DS-CNN ────────────────────────────────────────────────────────────────
 def train_dscnn():
-    from reference.tiny.dscnn_kws import DSCNN
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.tiny.dscnn_kws import DSCNN
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("dscnn-kws", batch_size=64)
     model = DSCNN().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -281,8 +281,8 @@ def train_dscnn():
 
 # ─── 10. Anomaly AE ──────────────────────────────────────────────────────────
 def train_ae():
-    from reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("anomaly-ae", batch_size=64)
     model = AnomalyDetectionAE(input_dim=784).to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -309,8 +309,8 @@ def train_ae():
 
 # ─── 11. VWW ─────────────────────────────────────────────────────────────────
 def train_vww():
-    from reference.tiny.wake_vision_vww import MicroNet
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.tiny.wake_vision_vww import MicroNet
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("vww", batch_size=32)
     model = MicroNet().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -335,8 +335,8 @@ def train_vww():
 
 # ─── 12. Micro-Diffusion ─────────────────────────────────────────────────────
 def train_diffusion():
-    from reference.cloud.micro_diffusion import MicroDiffusionUNet
-    from reference.dataset_factory import get_dataloaders
+    from mlperf.reference.cloud.micro_diffusion import MicroDiffusionUNet
+    from mlperf.reference.dataset_factory import get_dataloaders
     train_ld, val_ld = get_dataloaders("micro-diffusion", batch_size=64)
     model = MicroDiffusionUNet().to(device)
     opt = torch.optim.Adam(model.parameters(), lr=1e-3)
@@ -373,7 +373,7 @@ def train_diffusion():
 # ─── 13. Micro-RL (generate typical RL curve) ────────────────────────────────
 def train_rl():
     """Run actual REINFORCE on CartPole."""
-    from reference.cloud.micro_rl import train_rl as rl_train_fn
+    from mlperf.reference.cloud.micro_rl import train_rl as rl_train_fn
     # RL doesn't have a standard loss curve — we'll track episode rewards
     # Use the module's own training function if it returns data
     try:

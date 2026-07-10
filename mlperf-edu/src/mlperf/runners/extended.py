@@ -26,7 +26,7 @@ def ensure_reference_path() -> Path:
 def run_nano_moe_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic one-step sparse MoE language-model smoke."""
     root = ensure_reference_path()
-    from reference.cloud.nano_moe import NanoMoEWhiteBox
+    from mlperf.reference.cloud.nano_moe import NanoMoEWhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -81,7 +81,7 @@ def run_nano_moe_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 def run_micro_diffusion_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic one-step micro U-Net denoising smoke."""
     root = ensure_reference_path()
-    from reference.cloud.micro_diffusion import MicroDiffusionUNet
+    from mlperf.reference.cloud.micro_diffusion import MicroDiffusionUNet
 
     seed = 42
     torch.manual_seed(seed)
@@ -133,7 +133,7 @@ def run_micro_diffusion_max(workload: Workload, output_dir: Path) -> dict[str, A
 def run_micro_gnn_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic one-step MicroGCN smoke on a synthetic graph."""
     root = ensure_reference_path()
-    from reference.cloud.micro_gnn import MicroGCN
+    from mlperf.reference.cloud.micro_gnn import MicroGCN
 
     seed = 42
     torch.manual_seed(seed)
@@ -189,7 +189,7 @@ def run_micro_gnn_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 def run_micro_bert_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic one-step bidirectional-transformer smoke."""
     root = ensure_reference_path()
-    from reference.cloud.micro_bert import CLS_IDX, PAD_IDX, MicroBERT
+    from mlperf.reference.cloud.micro_bert import CLS_IDX, PAD_IDX, MicroBERT
 
     seed = 42
     torch.manual_seed(seed)
@@ -245,7 +245,7 @@ def run_micro_bert_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 def run_micro_lstm_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic one-step time-series LSTM smoke."""
     root = ensure_reference_path()
-    from reference.cloud.micro_lstm import MicroLSTM
+    from mlperf.reference.cloud.micro_lstm import MicroLSTM
 
     seed = 42
     torch.manual_seed(seed)
@@ -299,7 +299,7 @@ def run_micro_lstm_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 def run_micro_rl_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic short REINFORCE rollout and optimizer step."""
     root = ensure_reference_path()
-    from reference.cloud.micro_rl import CartPoleLocal, REINFORCEAgent
+    from mlperf.reference.cloud.micro_rl import CartPoleLocal, REINFORCEAgent
 
     seed = 42
     torch.manual_seed(seed)
@@ -367,8 +367,8 @@ def run_micro_rl_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 def run_nano_lora_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic one-step LoRA fine-tuning smoke."""
     root = ensure_reference_path()
-    from reference.cloud.lora import base_grad_norm, inject_lora, lora_grad_norm
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.lora import base_grad_norm, inject_lora, lora_grad_norm
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -461,8 +461,8 @@ def run_nanogpt_decode_variant_min(
 ) -> dict[str, Any]:
     """Run a deterministic tiny NanoGPT decode variant smoke."""
     root = ensure_reference_path()
-    from reference.cloud.nanogpt_decode import NanoGPTDecode
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud.nanogpt_decode import NanoGPTDecode
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     seed = 42
     torch.manual_seed(seed)
@@ -488,9 +488,9 @@ def run_nanogpt_decode_variant_min(
 def run_nanogpt_decode_spec_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic tiny speculative decoding smoke."""
     root = ensure_reference_path()
-    from reference.cloud import nanogpt_decode_spec
-    from reference.cloud.nanogpt_decode_spec import SpeculativeDecode
-    from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+    from mlperf.reference.cloud import nanogpt_decode_spec
+    from mlperf.reference.cloud.nanogpt_decode_spec import SpeculativeDecode
+    from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     seed = 42
     torch.manual_seed(seed)

@@ -303,17 +303,17 @@ mlperf-edu/
 │   ├── paper.tex               # Main paper
 │   ├── refs.bib                # Bibliography
 │   └── figures/                # TikZ + pgfplots figures
-├── reference/                  # Reference implementations
-│   ├── cloud/                  # NanoGPT, MoE, DLRM, Diffusion, GNN, BERT, LSTM, RL, Agents
-│   ├── edge/                   # ResNet-18, MobileNetV2  (fully local)
-│   ├── tiny/                   # DS-CNN, Autoencoder, MicroNet
-│   ├── dataset_factory.py      # Unified data loading (deterministic, seed=42)
-│   └── agent_datasets.py       # MBPP + ReAct trace datasets
 ├── src/mlperf/                 # Core harness
 │   ├── edu_cli.py              # mlperf CLI entry point
 │   ├── loadgen.py              # LoadGen proxy (Offline/Server/SingleStream/MultiStream)
 │   ├── power.py                # Power profiler (powermetrics / nvidia-smi)
-│   └── sut.py                  # System Under Test interface
+│   ├── sut.py                  # System Under Test interface
+│   └── reference/              # White-box reference implementations
+│       ├── cloud/              # NanoGPT, MoE, DLRM, Diffusion, GNN, BERT, LSTM, RL, Agents
+│       ├── edge/               # ResNet-18, MobileNetV2  (fully local)
+│       ├── tiny/               # DS-CNN, Autoencoder, MicroNet
+│       ├── dataset_factory.py  # Unified data loading (deterministic, seed=42)
+│       └── agent_datasets.py   # MBPP + ReAct trace datasets
 ├── scripts/
 │   └── compliance_checker.py   # Quality target validation
 ├── examples/                   # Student lab exercises

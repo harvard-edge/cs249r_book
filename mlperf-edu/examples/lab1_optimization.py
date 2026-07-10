@@ -24,7 +24,7 @@ import sys
 import os
 
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
-from reference.dataset_factory import get_dataloaders
+from mlperf.reference.dataset_factory import get_dataloaders
 
 # ── Device setup ──────────────────────────────────────────────────────────────
 device = (
@@ -35,7 +35,7 @@ device = (
 print(f"🖥️  Device: {device}")
 
 # ── Load the model ────────────────────────────────────────────────────────────
-from reference.edge.resnet_core import ResNet18Local
+from mlperf.reference.edge.resnet_core import ResNet18Local
 model = ResNet18Local(num_classes=100).to(device)
 print(f"📊 Parameters: {sum(p.numel() for p in model.parameters()):,}")
 

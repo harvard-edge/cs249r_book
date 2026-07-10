@@ -6,7 +6,7 @@ from mlperf.loadgen import LoadGenProxy
 
 # Import the Pristine Base Architecture safely algebraically
 sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
-from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
 def load_and_quantize_teacher_math(checkpoint_path: str, device: str):
     """

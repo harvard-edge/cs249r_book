@@ -41,7 +41,7 @@ class StudentNanoGPTSUT(SUT_Interface):
         super().__init__(config)
 
         # Load the pre-trained NanoGPT model
-        from reference.cloud.nanogpt_train import NanoGPTWhiteBox
+        from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
         self.device = (
             torch.device("mps") if torch.backends.mps.is_available()
