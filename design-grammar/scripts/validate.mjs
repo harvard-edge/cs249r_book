@@ -15,6 +15,7 @@ import yaml from "js-yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const YAML_PATH = path.join(__dirname, "..", "grammar.yml");
+const REWRITE_RULES_PATH = path.join(__dirname, "..", "rewrite-rules.yml");
 
 const doc = yaml.load(fs.readFileSync(YAML_PATH, "utf8"));
 const issues = [];
@@ -104,6 +105,27 @@ for (const section of doc.assemblies || []) {
     while ((m = re.exec(cleaned)) !== null) {
       if (!knownSyms.has(m[1])) {
         issues.push(`Assembly "${item.name}" references unknown symbol '${m[1]}': ${item.expression}`);
+      }
+    }
+  }
+}
+
+// ── rewrite-rules.yml ────────────────────────────────────────────────────
+// Previously never read by this validator at all, so drift here was silent
+// and permanent. Check that every rule's `relieves` entries are drawn from
+// the file's own declared constraint vocabulary.
+if (!fs.existsSync(REWRITE_RULES_PATH)) {
+  issues.push(`rewrite-rules.yml not found at ${REWRITE_RULES_PATH}`);
+} else {
+  const rewriteDoc = yaml.load(fs.readFileSync(REWRITE_RULES_PATH, "utf8"));
+  const knownConstraints = new Set(rewriteDoc.constraints || []);
+  const rules = (rewriteDoc && rewriteDoc.rules) || [];
+  for (const rule of rules) {
+    for (const constraint of rule.relieves || []) {
+      if (!knownConstraints.has(constraint)) {
+        issues.push(
+          `rewrite-rules.yml rule '${rule.key}': relieves '${constraint}' is not in the declared constraint vocabulary`
+        );
       }
     }
   }
