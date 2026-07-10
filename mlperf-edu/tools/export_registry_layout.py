@@ -101,6 +101,10 @@ def check_files(expected: dict[Path, str], output_dir: Path) -> int:
 
     if output_dir.exists():
         expected_paths = set(expected)
+        # Registry metadata that is authored, not derived from workload data:
+        # suite-level titles/summaries consumed by tools/generate_docs.py.
+        preserved = {output_dir / "suites.yaml"}
+        expected_paths.update(preserved)
         extra = sorted(path for path in output_dir.rglob("*.yaml") if path not in expected_paths)
         extra.extend(path for path in output_dir.rglob("*.md") if path not in expected_paths)
         problems.extend(f"extra {path}" for path in extra)

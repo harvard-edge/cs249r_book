@@ -78,6 +78,7 @@ the tiny workloads.
 python3 tools/export_registry_layout.py --check
 python3 tools/export_flat_registry.py --check
 python3 tools/generate_review_packets.py --check
+python3 tools/generate_docs.py --check
 uv build
 python3 -m pytest -q
 mlperf audit
@@ -88,4 +89,15 @@ Long validation remains separate:
 
 ```bash
 mlperf validate release --keep-going --skip-doctor
+```
+
+## Documentation Site
+
+The user-facing documentation site lives in `site/`. Benchmark, dataset, and
+CLI pages are generated from the registry and the CLI itself; only the guide
+pages are hand-authored.
+
+```bash
+python3 tools/generate_docs.py    # regenerate after any registry change
+cd site && quarto preview         # local preview
 ```

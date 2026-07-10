@@ -24,6 +24,8 @@ MLPerf EDU brings industry-standard ML benchmarking into teaching and research. 
 
 📦 **Install**: See [`INSTALL.md`](INSTALL.md) for the `uv sync`, `uv tool install`, and `uv build` package workflow.
 
+📚 **Documentation site**: See [`site/`](site/) — usage guides plus per-benchmark pages generated from the registry (`python3 tools/generate_docs.py`; preview with `cd site && quarto preview`).
+
 📋 **Product contract**: See [`SPEC.md`](SPEC.md) for the CLI, suite/profile vocabulary, backend policy, and validation presets that keep this tree runnable from a fresh clone.
 
 🗂️ **Workload registry**: See [`registry/`](registry/) for the native suite/workload/variant metadata layout. [`workloads.yaml`](workloads.yaml) is kept as a generated compatibility mirror.

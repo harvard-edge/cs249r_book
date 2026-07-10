@@ -1,0 +1,63 @@
+---
+title: "Optimizing: The SUT Plugin Protocol"
+---
+
+MLPerf EDU enforces a strict separation between the referee and the thing
+being measured. The harness (LoadGen, telemetry, reporting) is fixed; your
+optimization lives in an isolated **System Under Test (SUT)** plugin. Students
+never modify the framework to make a workload faster, which is exactly what
+makes their speedups comparable.
+
+## The Interface
+
+A plugin is a single Python file containing one class that inherits
+`mlperf.sut.SUT_Interface` and implements two methods:
+
+```python
+from mlperf.sut import SUT_Interface
+
+class MyOptimizedSUT(SUT_Interface):
+    def __init__(self, config):
+        # load the model, move it to the device, prepare caches
+        ...
+
+    async def process_queries(self, samples):
+        # execute a batch of LoadGen QuerySamples; return telemetry
+        ...
+```
+
+The LoadGen referee drives `process_queries` according to the scenario
+(single-stream, server, offline) and measures latency and throughput from the
+outside. Whatever you do inside the class, including KV caching, batching,
+mixed precision, quantization, or a fused kernel, is your optimization; the
+measurement never moves.
+
+## Worked Lab Examples
+
+The repository ships three lab exercises built on this protocol, under
+[`examples/`](https://github.com/harvard-edge/cs249r_book/tree/main/mlperf-edu/examples):
+
+| **Lab** | **File** | **What you optimize** |
+|:---|:---|:---|
+| Lab 1 | `lab1_optimization.py` | Training-loop systems optimization |
+| Lab 2 | `lab2_inference_sut.py` | Inference latency (KV cache, batching, precision) |
+| Lab 3 | `lab3_arch_comparison.py` | Dense vs. sparse architecture comparison |
+
+Each lab file is itself the plugin. Read the reference implementation, run the
+baseline, apply the TODO optimization, and re-run to measure your gain.
+
+::: {.callout-note}
+**Status.** The `SUT_Interface` protocol and the lab plugins ship today and are
+importable from `mlperf.sut`. First-class `mlperf run --sut <plugin.py>`
+wiring in the product CLI is part of the certification release; the labs
+currently drive plugins through their own harness entry points as documented
+in each lab file.
+:::
+
+## Rules for Comparable Submissions
+
+The public-result contract distinguishes closed submissions, which keep the
+reference model and dataset fixed and optimize only execution, from open ones,
+which may change the model. See [`PUBLIC_RULES.md`](https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu/PUBLIC_RULES.md)
+for the score-bearing and performance-bearing rules, and run `mlperf audit`
+to check a workload's contract before you optimize against it.
