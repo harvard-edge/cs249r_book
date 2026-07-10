@@ -6,6 +6,7 @@ import os
 import shutil
 import subprocess
 import tarfile
+import uuid
 import warnings
 import zipfile
 import urllib.request
@@ -652,21 +653,27 @@ def ensure_movielens_100k(*, download: bool = True, root: Path | None = None) ->
 
 
 def _download(url: str, destination: Path) -> None:
+    # Download to a process- and call-unique path first, then atomically move
+    # it into place. Two concurrent fetches of the same asset (e.g. two
+    # workload runs racing to populate a shared dataset cache) must not write
+    # through the same temp file, or a slower writer's in-progress download
+    # can be clobbered mid-write by the other process before either renames.
+    unique_tmp = destination.with_name(f"{destination.name}.{os.getpid()}.{uuid.uuid4().hex[:8]}.part")
     try:
-        urllib.request.urlretrieve(url, destination)
-        return
-    except Exception as urllib_exc:
-        if shutil.which("curl"):
-            try:
-                subprocess.run(
-                    ["curl", "--fail", "--location", "--silent", "--show-error", url, "--output", str(destination)],
-                    check=True,
-                )
-                return
-            except subprocess.CalledProcessError as curl_exc:
-                if destination.exists():
-                    destination.unlink()
-                raise RuntimeError(f"failed to download {url} with urllib and curl") from curl_exc
-        if destination.exists():
-            destination.unlink()
-        raise RuntimeError(f"failed to download {url}") from urllib_exc
+        try:
+            urllib.request.urlretrieve(url, unique_tmp)
+        except Exception as urllib_exc:
+            if shutil.which("curl"):
+                try:
+                    subprocess.run(
+                        ["curl", "--fail", "--location", "--silent", "--show-error", url, "--output", str(unique_tmp)],
+                        check=True,
+                    )
+                except subprocess.CalledProcessError as curl_exc:
+                    raise RuntimeError(f"failed to download {url} with urllib and curl") from curl_exc
+            else:
+                raise RuntimeError(f"failed to download {url}") from urllib_exc
+        unique_tmp.replace(destination)
+    finally:
+        if unique_tmp.exists():
+            unique_tmp.unlink()
