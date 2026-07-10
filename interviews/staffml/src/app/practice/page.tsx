@@ -191,6 +191,17 @@ function PracticePage() {
   const setCurrent = setCurrentSummary;
   const skipFilterCount = useRef(0);
   const questionShownAt = useRef(Date.now());
+  // Latest-callback refs for the global keyboard listener below. The
+  // listener is intentionally stable (re-armed only on showAnswer / current
+  // / pickRandom changes) so it doesn't churn on every keystroke. But
+  // handleReveal closes over `userAnswer` (and handleScore over
+  // `effectiveMaxScore` / `questionsAnswered`) which change between
+  // listener re-arms — without these refs the listener would call a stale
+  // handleReveal that still sees `userAnswer=""` after the user has typed
+  // 100+ chars, misfiring the think-guard. Refs are refreshed in the
+  // sync effect right after handleScore is defined.
+  const handleRevealRef = useRef<(force?: boolean) => void>(() => {});
+  const handleScoreRef = useRef<(score: number) => void>(() => {});
   const [showAnswer, setShowAnswer] = useState(false);
   const [userAnswer, setUserAnswer] = useState("");
   // MCQ self-check: the learner's selected option index (null = none yet).
@@ -425,19 +436,23 @@ function PracticePage() {
     setRubricItems([]);
   }, [pool, current, showAnswer]);
 
-  // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
+  // Keyboard shortcuts: Cmd/Ctrl+Enter to reveal, 1-4 for scoring, N to skip.
+  // Stable listener — re-armed only when showAnswer/current/pickRandom change.
+  // The handlers are called via refs (see handleRevealRef / handleScoreRef)
+  // so the listener always invokes the LATEST closures even though the
+  // effect itself doesn't re-run on every keystroke.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLTextAreaElement) {
         // Only Enter (without shift) to reveal when in textarea
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !showAnswer && current) {
           e.preventDefault();
-          handleReveal();
+          handleRevealRef.current();
         }
         return;
       }
       if (showAnswer && ['1', '2', '3', '4'].includes(e.key)) {
-        handleScore(parseInt(e.key) - 1);
+        handleScoreRef.current(parseInt(e.key) - 1);
       }
       if (e.key === 'n' || e.key === 'N') {
         pickRandom();
@@ -576,6 +591,16 @@ function PracticePage() {
     }
     pickNext();
   };
+
+  // Refresh the keyboard-shortcut refs after every render so the stable
+  // keydown listener above always reads the latest handleReveal /
+  // handleScore closures. Without this the listener invokes a stale
+  // handleReveal that still sees `userAnswer=""` while the user has
+  // typed in the textarea, misfiring the think-guard.
+  useEffect(() => {
+    handleRevealRef.current = handleReveal;
+    handleScoreRef.current = handleScore;
+  });
 
   // Pick next question: from SR due queue if in review mode, else random
   const pickNext = useCallback(() => {
