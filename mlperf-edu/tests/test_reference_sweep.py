@@ -582,6 +582,7 @@ def test_main_accepts_performance_metric_with_all_run_functional_gate(
     assert code == 0
     summary = json.loads(next(tmp_path.glob("*/evidence_summary.json")).read_text())
     assert summary["eligible_for_public_baseline"] is True
+    assert summary["variant"] == "baseline"
     assert summary["reference_metric_role"] == "performance"
     assert summary["primary_metric"] == {
         "name": "output_tokens_per_sec",

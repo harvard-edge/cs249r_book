@@ -1851,6 +1851,7 @@ def main(argv: list[str] | None = None) -> int:
         if len(comparison_fingerprints) == 1
         else None
     )
+    resolved_variant = getattr(workload, "variant", None)
     artifact = {
         "schema": REFERENCE_EVIDENCE_SCHEMA,
         "evidence_id": evidence_id,
@@ -1871,7 +1872,7 @@ def main(argv: list[str] | None = None) -> int:
         "workload": workload.id,
         "canonical_workload": getattr(workload, "canonical_workload", None)
         or workload.id,
-        "variant": args.variant,
+        "variant": resolved_variant,
         "profile": args.profile,
         "public_status": workload.public_status,
         "evidence_tier": evidence_tier,
