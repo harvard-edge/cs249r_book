@@ -1254,8 +1254,23 @@ def run_comparison_fingerprint_record(
     fingerprint: dict[str, Any],
 ) -> dict[str, Any]:
     """Return comparison inputs while excluding paths and result outcomes."""
+    hardware = dict(fingerprint.get("hardware") or {})
+    # The digest fields summarize the complete detected hardware record, including
+    # process environment.  Keep the explicit hardware fields below, and let the
+    # normalized software environment bind comparison-relevant runtime settings.
+    hardware.pop("fingerprint_hash", None)
+    hardware.pop("fingerprint_sha256", None)
     software = dict(fingerprint.get("software") or {})
     software.pop("python_executable", None)
+    performance_environment = software.get("performance_environment")
+    if isinstance(performance_environment, dict):
+        performance_environment = dict(performance_environment)
+        for key in ("MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SEED", "MLPERF_EDU_SLM_SEED"):
+            performance_environment.pop(key, None)
+        if performance_environment:
+            software["performance_environment"] = performance_environment
+        else:
+            software.pop("performance_environment", None)
     execution = dict(fingerprint.get("execution") or {})
     execution.pop("status", None)
     # Seeds are intentional repeated-run variables. Keep them in the complete
@@ -1264,7 +1279,7 @@ def run_comparison_fingerprint_record(
     execution.pop("seed", None)
     record = {
         "schema": fingerprint.get("schema"),
-        "hardware": fingerprint.get("hardware") or {},
+        "hardware": hardware,
         "software": software,
         "execution": execution,
         "comparison_fingerprint_hash_algorithm": fingerprint.get(

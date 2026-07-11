@@ -283,9 +283,19 @@ def test_run_fingerprint_labels_selected_backend_and_binds_run_context(monkeypat
     )
     reseeded = copy.deepcopy(run_fingerprint)
     reseeded["execution"]["seed"] = 4
+    reseeded["software"]["performance_environment"]["MLPERF_EDU_MAX_SEED"] = "4"
+    reseeded["hardware"]["fingerprint_hash"] = "fedcba9876543210"
+    reseeded["hardware"]["fingerprint_sha256"] = "f" * 64
     assert (
         edu_cli.run_comparison_fingerprint_sha256(reseeded)
         == run_fingerprint["comparison_fingerprint_sha256"]
+    )
+
+    changed_environment = copy.deepcopy(run_fingerprint)
+    changed_environment["software"]["performance_environment"]["OMP_NUM_THREADS"] = "8"
+    assert (
+        edu_cli.run_comparison_fingerprint_sha256(changed_environment)
+        != run_fingerprint["comparison_fingerprint_sha256"]
     )
 
 
