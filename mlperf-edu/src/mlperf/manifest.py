@@ -203,6 +203,77 @@ def _multi_file_weights_merkle(files: list[dict[str, Any]]) -> str:
     return "sha256:" + root_h.hexdigest()
 
 
+def dataset_merkle_root(files: list[dict[str, Any]]) -> str:
+    """Aggregate dataset files independent of host storage paths."""
+    root_h = hashlib.sha256()
+    for item in sorted(
+        files,
+        key=lambda row: (
+            str(row.get("logical_path") or row.get("path") or ""),
+            str(row.get("sha256") or ""),
+            int(row.get("n_bytes") or 0),
+        ),
+    ):
+        record = {
+            "logical_path": str(item.get("logical_path") or item.get("path") or ""),
+            "sha256": item.get("sha256"),
+            "n_bytes": item.get("n_bytes"),
+        }
+        root_h.update(_canon(record))
+        root_h.update(b"\0")
+    return "sha256:" + root_h.hexdigest()
+
+
+def _legacy_dataset_path_merkle(files: list[dict[str, Any]]) -> str:
+    """Recompute pre-1.1.1 dataset roots that included manifest paths."""
+    root_h = hashlib.sha256()
+    for item in files:
+        digest = str(item.get("sha256") or "").removeprefix("sha256:")
+        root_h.update(f"{item.get('path')}:{digest}\n".encode())
+    return "sha256:" + root_h.hexdigest()
+
+
+def _dataset_file_records(file_paths: list[str | Path]) -> list[dict[str, Any]]:
+    paths = sorted(str(p) for p in file_paths)
+    records: list[dict[str, Any]] = []
+    basename_counts: dict[str, int] = {}
+    for path in paths:
+        basename = Path(path).name or "dataset-file"
+        basename_counts[basename] = basename_counts.get(basename, 0) + 1
+        if not Path(path).exists():
+            records.append(
+                {
+                    "path": path,
+                    "sha256": None,
+                    "n_bytes": 0,
+                    "note": "missing",
+                    "_basename": basename,
+                }
+            )
+            continue
+        digest, n = _hash_file(path)
+        records.append(
+            {
+                "path": path,
+                "sha256": "sha256:" + digest,
+                "n_bytes": n,
+                "_basename": basename,
+            }
+        )
+
+    for index, record in enumerate(records):
+        basename = str(record.pop("_basename"))
+        if basename_counts[basename] == 1:
+            record["logical_path"] = basename
+            continue
+        stem = Path(basename).stem or "dataset-file"
+        suffix = Path(basename).suffix
+        digest = str(record.get("sha256") or "").removeprefix("sha256:")
+        discriminator = digest[:12] if digest else str(index)
+        record["logical_path"] = f"{stem}-{discriminator}{suffix}"
+    return records
+
+
 def multi_file_weights_leaf(
     *,
     name: str,
@@ -264,18 +335,8 @@ def multi_file_weights_leaf(
 
 def dataset_leaf(name: str, file_paths: list[str | Path]) -> dict:
     """Leaf binding the dataset by per-file hash + Merkle root."""
-    files: list[dict] = []
-    root_h = hashlib.sha256()
-    for path in sorted([str(p) for p in file_paths]):
-        if not Path(path).exists():
-            files.append(
-                {"path": path, "sha256": None, "n_bytes": 0, "note": "missing"}
-            )
-            continue
-        digest, n = _hash_file(path)
-        files.append({"path": path, "sha256": "sha256:" + digest, "n_bytes": n})
-        root_h.update(f"{path}:{digest}\n".encode())
-    return {"name": name, "files": files, "merkle_root": "sha256:" + root_h.hexdigest()}
+    files = _dataset_file_records(file_paths)
+    return {"name": name, "files": files, "merkle_root": dataset_merkle_root(files)}
 
 
 def rng_leaf(
@@ -747,8 +808,8 @@ def verify_provd(
             "dataset.merkle_root", False, "dataset files declared without a Merkle root"
         )
     if d.get("files") and d.get("merkle_root"):
-        root_h = hashlib.sha256()
         ok_files = True
+        verified_files: list[dict[str, Any]] = []
         for index, f in enumerate(d["files"]):
             dataset_path = resolve_artifact_path(manifest_path, f["path"])
             if not f.get("sha256") or not dataset_path.exists():
@@ -766,6 +827,10 @@ def verify_provd(
                 digest_ok,
                 f"claimed {f['sha256'][:18]}, recomputed sha256:{actual[:12]}",
             )
+            verified_file = dict(f)
+            verified_file["sha256"] = "sha256:" + actual
+            verified_file["n_bytes"] = n_bytes
+            verified_files.append(verified_file)
             if not digest_ok:
                 ok_files = False
             if f.get("n_bytes") is not None:
@@ -776,11 +841,12 @@ def verify_provd(
                     f"claimed {f['n_bytes']}, recomputed {n_bytes}",
                 )
                 ok_files = ok_files and size_ok
-            root_h.update(f"{f['path']}:{actual}\n".encode())
-        recomputed = "sha256:" + root_h.hexdigest()
+        recomputed = dataset_merkle_root(verified_files)
+        legacy_recomputed = _legacy_dataset_path_merkle(verified_files)
+        root_ok = ok_files and d["merkle_root"] in {recomputed, legacy_recomputed}
         res.add(
             "dataset.merkle_root",
-            ok_files and recomputed == d["merkle_root"],
+            root_ok,
             f"claimed {d['merkle_root'][:18]}, recomputed {recomputed[:18]}",
         )
 

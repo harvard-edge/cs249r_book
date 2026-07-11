@@ -163,6 +163,27 @@ def test_manifest_recomputes_seed_derived_initial_rng_state(tmp_path):
     )
 
 
+def test_dataset_merkle_root_is_independent_of_storage_path(tmp_path):
+    from mlperf.manifest import dataset_leaf
+
+    first_dir = tmp_path / "seed_0"
+    second_dir = tmp_path / "seed_1"
+    first_dir.mkdir()
+    second_dir.mkdir()
+    first = first_dir / "quality.json"
+    second = second_dir / "quality.json"
+    first.write_text('{"cases": []}\n')
+    second.write_text(first.read_text())
+
+    first_leaf = dataset_leaf("prompt-suite-local", [first])
+    second_leaf = dataset_leaf("prompt-suite-local", [second])
+
+    assert first_leaf["files"][0]["path"] != second_leaf["files"][0]["path"]
+    assert first_leaf["files"][0]["logical_path"] == "quality.json"
+    assert second_leaf["files"][0]["logical_path"] == "quality.json"
+    assert first_leaf["merkle_root"] == second_leaf["merkle_root"]
+
+
 def test_manifest_verifies_relative_artifacts_after_relocation(tmp_path):
     source = tmp_path / "source"
     source.mkdir()
@@ -219,10 +240,6 @@ def test_manifest_verifies_relative_artifacts_after_relocation(tmp_path):
     # using the package helper exercised in the CLI test below.
     from mlperf.manifest import integrity_record, merkle_root
 
-    dataset_digest = leaves["dataset"]["files"][0]["sha256"].removeprefix("sha256:")
-    root = hashlib.sha256()
-    root.update(f"{leaves['dataset']['files'][0]['path']}:{dataset_digest}\n".encode())
-    leaves["dataset"]["merkle_root"] = "sha256:" + root.hexdigest()
     manifest["merkle_root"] = merkle_root(leaves)
     manifest["integrity"] = integrity_record(manifest["merkle_root"])
     manifest_path = manifest_dir / "toy.provd.json"

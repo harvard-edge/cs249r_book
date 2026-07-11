@@ -51,6 +51,7 @@ from .fingerprint import detect_hardware
 from .contracts import aggregate_contract_issues, evaluate_report_contract
 from .manifest import (
     build_provd,
+    dataset_merkle_root,
     integrity_record,
     measurement_leaf,
     merkle_root,
@@ -3109,11 +3110,7 @@ def build_portable_package_files(
         if isinstance(item, dict):
             rewrite_leaf_path(item)
     if dataset.get("files"):
-        dataset_root = hashlib.sha256()
-        for item in dataset["files"]:
-            digest = str(item["sha256"]).removeprefix("sha256:")
-            dataset_root.update(f"{item['path']}:{digest}\n".encode())
-        dataset["merkle_root"] = "sha256:" + dataset_root.hexdigest()
+        dataset["merkle_root"] = dataset_merkle_root(dataset["files"])
 
     leaves["measurement"] = measurement_leaf(
         packaged_report,
