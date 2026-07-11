@@ -81,44 +81,45 @@ grading, or report-contract behavior. A post-freeze change to any of those
 measurement-bearing surfaces requires new sweeps rather than editing these
 records.
 
-## Historical Local Verification Snapshot
+## Current Local Verification Snapshot
 
-The promotion revision recorded by `review-ece36ac566/handoff_manifest.json`
-completed the local release matrix on July 11, 2026, on macOS 26.4 with an
-Apple M5 Max. A later ledger-only commit may record these results, but the
-promotion revision remains the exact executable source named by the retained
-validation reports and handoff manifest. This snapshot does not verify the
-current worktree; every gate below must run again on the final revision.
+The promotion revision recorded in
+`review-f917f4823a/handoff_manifest.json` completed the local release matrix on
+July 11, 2026, on macOS 26.4 with an Apple M5 Max. That revision remains the
+exact clean executable source named by the retained validation reports and
+handoff manifest; the commit that records this ledger changes documentation
+only.
 
 | **Artifact** | **Result** | **SHA-256** |
 |:---|:---|:---|
-| `validation-smoke` | 12 of 12 default `min` workloads passed | `6954a13d3cd99fb66cd0faee4793c91540e522c3b46eb70602f172b839354eb9` |
-| `validation-coverage` | 30 of 30 `min` workloads passed | `33d32ff1256ec4411c7c430579bfa9e4903ac05d1dce3694d4c5ccad58175b60` |
-| `validation-max` | 30 of 30 `max` workloads passed | `bfcd71c94d4ed7602d8dec75a8d5037a7203c7d53c66365494cb7c184967aca7` |
-| `validation-release` | 60 of 60 `min` and `max` workloads passed | `e40edcea473c1982a272d69bee558ea67e0b32963c7f8e57663b48cb4890493a` |
-| Clean Python 3.12 wheel | Installed outside the checkout, audited, and executed a verified smoke workload | `94a28beab06a8f70ae85793460ba7e74d9d3a0e31603908ae2c019c541c11bb4` |
-| Reviewer handoff manifest | 8 summaries, 40 valid attempts, 35 reverified packages, and 5 policy-blocked DLRM attempts | `0fabaaed4cf71754b9a7074729b7ff267799a450d678d6bdbb4960116c461a6a` |
-| Strict public audit | 0 blockers and 9 expected external warnings | `e80a606345c6f2e0d47abc33f789201e2961aaeffeb7ee27eb4f778e57965613` |
-| Review paper PDF | 6 visually inspected and mechanically verified pages | `22c12622281d8c31976f4b1c29dc922ae91964fd32c05f3401b36a6ef6b8a510` |
+| `validation-smoke` | 12 of 12 default `min` workloads passed | `eeeb344053c06784dca86a68a41b744b9fe05867b0e72a99240d7c44c69ca898` |
+| `validation-coverage` | 30 of 30 `min` workloads passed | `373442fcd7bcecee8cf976e77a0b68ce162cbc9ce063d5617e61269ac674c6dc` |
+| `validation-max` | 30 of 30 `max` workloads passed at reference seed 0 | `c8e9a4fe5f7d8936a49cfd9564a01d287d052a970f4dd839f97929ee5f657573` |
+| `validation-release` | 60 of 60 `min` and `max` workloads passed | `5c54d3d984141b6c8e757b319c21648127717dffb0733d484742ec8c214b4c01` |
+| Complete test suite | 382 tests passed | Recorded in the local review log for the promotion revision |
+| Clean Python 3.12 wheel | Installed outside the checkout, audited, executed a workload, and verified provenance | `24eef2fe9217df32648f7d92b60972df424c59843046010e157caf7969a4d75c` |
+| Reviewer handoff manifest | 8 summaries, 40 valid attempts, 35 reverified packages, and 5 policy-blocked DLRM attempts | `8d7674df0e3fe21088b7c6ea19a69e1121250d05693cccfe524099462ef21a2b` |
+| Strict public audit | 0 internal blockers and 9 explicit external-publication warnings | `4ed5bfa6a34d9f27f9699bda9f937246411813acfcf4b8038bd14d703e5403e0` |
+| Review paper PDF | 6 visually inspected and mechanically verified pages | `99e149460d4faa5bdbf37a1298b1242c8383d8e64a0bc250f90b152d205b00c6` |
 
 ## Repository Verification Status
 
 | **Status** | **Gate** | **Required Evidence** |
 |:---|:---|:---|
 | Verified | Evidence source stability | Source lock regenerated for `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`; every imported packet came from a clean source snapshot. |
-| Pending | Complete local tests | Run the full test suite on the final source revision. |
+| Verified | Complete local tests | All 382 tests passed on the promotion revision recorded in the handoff manifest. |
 | Verified | Five score packets | Fresh create-once seeds 0–4 packets are committed for NanoGPT, DLRM, anomaly detection, ResNet-18, and MobileNetV2. |
 | Verified | Inference chain | One NanoGPT training lineage package produced current prefill and decode packets; SmolLM2 baseline packet is committed under the current protocol. |
-| Pending | Actual validation presets | Run fresh `smoke`, `coverage`, `max`, and `release` executions with zero run, grade, provenance, or review-contract failures. |
-| Pending | Package portability | Rebuild and verify packages from replacement evidence under the current schema and policy. |
-| Pending | Clean wheel environment on macOS | Install the final wheel outside the checkout, audit it, and run installed smoke plus provenance verification. |
+| Verified | Actual validation presets | Fresh `smoke`, `coverage`, `max`, and `release` executions passed with zero run, grade, provenance, or review-contract failures. |
+| Verified | Package portability | All 35 policy-permitted packages reverified; all 5 MovieLens-derived packages failed closed as required. |
+| Verified | Clean wheel environment on macOS | The final wheel installed under Python 3.12 outside the checkout, passed its packaged audit, ran `nano-rag-agent`, and verified its provenance. |
 | Pending | Clean wheel environment on Linux | The hosted Linux wheel job must pass on the pushed review revision. |
-| Pending | Lab and tutorial regression | Rerun all three lab smokes and Tutorial 01 smoke on the final revision. |
-| Pending | Automated site review | Regenerate and rerender the site, then rerun required-output and link checks. |
-| Pending | Site visual review | Representative desktop and narrow browser views still need inspection. The in-app browser was unavailable during the local review. |
-| Pending | Paper review | Rebuild from replacement evidence, run both verifiers, and visually inspect the PDF. |
+| Verified | Lab and tutorial regression | All three lab smokes and Tutorial 01 passed; the tutorial provenance verified. |
+| Verified | Automated site review | Generated 37 benchmark pages, rendered all 43 site pages, passed internal links, and passed 86 layout checks across two viewports. |
+| Verified | Site visual review | Representative desktop and narrow pages were visually inspected after rendering. |
+| Verified | Paper review | The six-page paper rebuilt, passed both mechanical checks, and was visually inspected page by page. |
 | Pending | Hosted CI evidence | Development and full benchmark workflows are green for the same review revision and their artifacts are retained. Local evidence does not imply this hosted gate passed. |
-| Pending | Review notes | Synchronize all review documents to the final source and replacement evidence revision. |
+| Verified | Review notes | Registry mirrors, review packets, generated pages, proposal, quality review, paper snapshot, and release notes identify the promoted evidence. |
 
 ## External Decisions
 
