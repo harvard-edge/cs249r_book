@@ -88,7 +88,7 @@ def run_anomaly_ae_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "training",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -173,7 +173,7 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "training",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -635,7 +635,7 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "training",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
