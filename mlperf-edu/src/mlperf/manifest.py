@@ -6,11 +6,12 @@ hash chain that actually binds: source-tree git SHA, weights bytes,
 dataset bytes, RNG state, hardware fingerprint, and the roofline
 measurement sidecar.
 
-Per Dean's iter-5 spec: every leaf is a recomputable fact about the run.
-The Merkle root over the leaves is what the submission attests to. A
-verifier (scripts/verify_submission.py) walks every leaf and recomputes
-its hash from the artifact on disk; mismatches are reported per-leaf.
+Every leaf is a recomputable fact about the run. The Merkle root and its
+domain-separated integrity digest provide tamper detection, not producer
+authentication. A verifier walks every leaf and recomputes its hash from the
+artifact on disk; mismatches are reported per leaf.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -23,18 +24,26 @@ from pathlib import Path
 from typing import Any
 
 
-SCHEMA_VERSION = "mlperf-edu-provd/1.0"
-PORTABLE_SIGNATURE_ALGO = "sha256-merkle-root-v1"
-PORTABLE_SIGNATURE_KEY_ID = "mlperf-edu-public-v1"
-PORTABLE_SIGNATURE_DOMAIN = "mlperf-edu-provd-signature-v1"
+SCHEMA_VERSION = "mlperf-edu-provd/1.1"
+INTEGRITY_DIGEST_ALGO = "sha256-domain-separated-digest-v1"
+INTEGRITY_DIGEST_DOMAIN = "mlperf-edu-provd-integrity-v1"
+
+# Backward-compatible identifier for manifests emitted before schema 1.1. Those
+# manifests called a public checksum a "signature" even though no secret or
+# public/private key was involved. Verification accepts them, but new manifests
+# accurately describe the value as an unauthenticated integrity digest.
+LEGACY_PORTABLE_SIGNATURE_ALGO = "sha256-merkle-root-v1"
+LEGACY_PORTABLE_SIGNATURE_DOMAIN = "mlperf-edu-provd-signature-v1"
 
 
 # ---------- canonical encoders ----------
 
+
 def _canon(obj: Any) -> bytes:
     """Canonical JSON encoding for hashing (no whitespace, sorted keys)."""
-    return json.dumps(obj, sort_keys=True, separators=(",", ":"),
-                       ensure_ascii=False).encode("utf-8")
+    return json.dumps(
+        obj, sort_keys=True, separators=(",", ":"), ensure_ascii=False
+    ).encode("utf-8")
 
 
 def _sha256(data: bytes) -> str:
@@ -57,6 +66,7 @@ def _hash_file(path: str | Path, chunk: int = 1 << 20) -> tuple[str, int]:
 
 # ---------- leaf builders ----------
 
+
 def _git_leaf(repo_root: Path) -> dict:
     """Leaf binding source-tree state (sha + dirty + tree hash)."""
     try:
@@ -66,16 +76,23 @@ def _git_leaf(repo_root: Path) -> dict:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-        dirty = subprocess.run(
-            ["git", "diff-index", "--quiet", "HEAD", "--"],
-            cwd=repo_root,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.DEVNULL,
-        ).returncode != 0
+        dirty = (
+            subprocess.run(
+                ["git", "diff-index", "--quiet", "HEAD", "--"],
+                cwd=repo_root,
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            ).returncode
+            != 0
+        )
     except (subprocess.CalledProcessError, FileNotFoundError):
-        return {"git_sha": None, "git_dirty": True,
-                "tree_hash": None, "patch_hash": None,
-                "note": "no git repo or git unavailable"}
+        return {
+            "git_sha": None,
+            "git_dirty": True,
+            "tree_hash": None,
+            "patch_hash": None,
+            "note": "no git repo or git unavailable",
+        }
 
     # Hash the contents of every tracked file; not a real git tree hash
     # but a portable equivalent that doesn't need libgit2.
@@ -104,24 +121,35 @@ def _git_leaf(repo_root: Path) -> dict:
         patch_hash = _sha256(diff.encode())
 
     return {
-        "git_sha": sha, "git_dirty": dirty,
+        "git_sha": sha,
+        "git_dirty": dirty,
         "tree_hash": "sha256:" + tree_h.hexdigest(),
         "patch_hash": ("sha256:" + patch_hash) if patch_hash else None,
     }
 
 
-def weights_leaf(checkpoint_path: str | Path,
-                  n_params: int | None = None,
-                  dtype: str | None = None) -> dict:
+def weights_leaf(
+    checkpoint_path: str | Path, n_params: int | None = None, dtype: str | None = None
+) -> dict:
     """Leaf binding model weights to bytes-on-disk."""
     p = Path(checkpoint_path)
     if not p.exists():
-        return {"path": str(p), "sha256": None, "n_bytes": 0,
-                "n_params": n_params, "torch_dtype": dtype,
-                "note": "checkpoint file missing"}
+        return {
+            "path": str(p),
+            "sha256": None,
+            "n_bytes": 0,
+            "n_params": n_params,
+            "torch_dtype": dtype,
+            "note": "checkpoint file missing",
+        }
     digest, n = _hash_file(p)
-    return {"path": str(p), "sha256": "sha256:" + digest, "n_bytes": n,
-            "n_params": n_params, "torch_dtype": dtype}
+    return {
+        "path": str(p),
+        "sha256": "sha256:" + digest,
+        "n_bytes": n,
+        "n_params": n_params,
+        "torch_dtype": dtype,
+    }
 
 
 def dataset_leaf(name: str, file_paths: list[str | Path]) -> dict:
@@ -130,35 +158,38 @@ def dataset_leaf(name: str, file_paths: list[str | Path]) -> dict:
     root_h = hashlib.sha256()
     for path in sorted([str(p) for p in file_paths]):
         if not Path(path).exists():
-            files.append({"path": path, "sha256": None, "n_bytes": 0,
-                          "note": "missing"})
+            files.append(
+                {"path": path, "sha256": None, "n_bytes": 0, "note": "missing"}
+            )
             continue
         digest, n = _hash_file(path)
         files.append({"path": path, "sha256": "sha256:" + digest, "n_bytes": n})
         root_h.update(f"{path}:{digest}\n".encode())
-    return {"name": name, "files": files,
-            "merkle_root": "sha256:" + root_h.hexdigest()}
+    return {"name": name, "files": files, "merkle_root": "sha256:" + root_h.hexdigest()}
 
 
-def rng_leaf(seed: int | None,
-              torch_state_bytes: bytes | None,
-              numpy_state_bytes: bytes | None) -> dict:
+def rng_leaf(
+    seed: int | None, torch_state_bytes: bytes | None, numpy_state_bytes: bytes | None
+) -> dict:
     return {
         "seed": seed,
         "torch_initial_state_sha256": ("sha256:" + _sha256(torch_state_bytes))
-                                       if torch_state_bytes else None,
+        if torch_state_bytes
+        else None,
         "numpy_state_sha256": ("sha256:" + _sha256(numpy_state_bytes))
-                               if numpy_state_bytes else None,
+        if numpy_state_bytes
+        else None,
     }
 
 
 def hardware_leaf(fingerprint: dict) -> dict:
     fp_canon = _canon(fingerprint)
     return {
+        "fingerprint": fingerprint,
         "fingerprint_sha256": "sha256:" + _sha256(fp_canon),
         "machine_class": fingerprint.get("machine_class")
-                          or fingerprint.get("system", {}).get("machine")
-                          or "unknown",
+        or fingerprint.get("system", {}).get("machine")
+        or "unknown",
         "reference_platform": fingerprint.get("is_reference_platform", False),
     }
 
@@ -167,18 +198,38 @@ def roofline_sidecar_leaf(sidecar_path: str | Path) -> dict:
     p = Path(sidecar_path)
     if not p.exists():
         return {"path": str(p), "sha256": None, "note": "no sidecar produced"}
-    digest, _ = _hash_file(p)
-    return {"path": str(p), "sha256": "sha256:" + digest}
+    digest, n = _hash_file(p)
+    return {"path": str(p), "sha256": "sha256:" + digest, "n_bytes": n}
 
 
-def measurement_leaf(report: dict, report_path: str | Path) -> dict:
-    return {
+def measurement_leaf(
+    report: dict,
+    report_path: str | Path,
+    *,
+    report_bytes: bytes | None = None,
+) -> dict:
+    """Bind both report semantics and exact serialized bytes.
+
+    ``report_canonical_sha256`` catches semantic changes independent of JSON
+    formatting. ``report_file_sha256`` also covers the exact artifact carried in
+    a submission package. ``report_bytes`` supports archive-specific reports
+    that are assembled in memory before they are written.
+    """
+    if report_bytes is None:
+        path = Path(report_path)
+        report_bytes = path.read_bytes() if path.exists() and path.is_file() else None
+    leaf = {
         "report_canonical_sha256": "sha256:" + _sha256(_canon(report)),
         "report_path": str(report_path),
     }
+    if report_bytes is not None:
+        leaf["report_file_sha256"] = "sha256:" + _sha256(report_bytes)
+        leaf["n_bytes"] = len(report_bytes)
+    return leaf
 
 
-# ---------- Merkle root + signature ----------
+# ---------- Merkle root + integrity digest ----------
+
 
 def merkle_root(leaves: dict) -> str:
     """Order-independent root over all leaves' canonical encoding."""
@@ -202,22 +253,27 @@ def _legacy_signing_key() -> bytes:
     return key_path.read_bytes()
 
 
-def _portable_signature(merkle: str) -> str:
-    return _sha256(f"{PORTABLE_SIGNATURE_DOMAIN}:{merkle}".encode())
+def _integrity_digest(merkle: str) -> str:
+    return _sha256(f"{INTEGRITY_DIGEST_DOMAIN}:{merkle}".encode())
 
 
-def sign_manifest(merkle: str, key_id: str = PORTABLE_SIGNATURE_KEY_ID) -> dict:
-    """Return a portable, public-verifiable manifest signature.
+def integrity_record(merkle: str) -> dict:
+    """Return a portable tamper-detection record.
 
-    MLPerf EDU manifests are meant to be graded on machines that do not share a
-    student-local secret. The Merkle root binds the artifacts; this signature is
-    a domain-separated checksum over that root so third-party graders can verify
-    it without a private key.
+    This is intentionally not called a signature. Anyone can recompute the
+    digest, so it detects accidental or post-publication changes but does not
+    authenticate who produced the manifest.
     """
-    return {"algo": PORTABLE_SIGNATURE_ALGO, "key_id": key_id, "signature": _portable_signature(merkle)}
+    return {
+        "type": "unauthenticated_digest",
+        "algorithm": INTEGRITY_DIGEST_ALGO,
+        "digest": _integrity_digest(merkle),
+        "authenticated": False,
+    }
 
 
 # ---------- public API ----------
+
 
 @dataclass
 class ProvdManifest:
@@ -226,7 +282,7 @@ class ProvdManifest:
     division: str
     leaves: dict
     merkle_root: str
-    signature: dict
+    integrity: dict
     utc: str
     nonce: str
     schema: str = SCHEMA_VERSION
@@ -241,50 +297,65 @@ class ProvdManifest:
             "nonce": self.nonce,
             "leaves": self.leaves,
             "merkle_root": self.merkle_root,
-            "signature": self.signature,
+            "integrity": self.integrity,
         }
 
 
-def build_provd(*, workload: str, scenario: str, division: str,
-                 hardware_fingerprint: dict,
-                 report: dict, report_path: str | Path,
-                 weights_path: str | Path | None = None,
-                 weights_n_params: int | None = None,
-                 weights_dtype: str | None = None,
-                 dataset_name: str = "unknown",
-                 dataset_files: list[str | Path] | None = None,
-                 rng_seed: int | None = None,
-                 torch_state_bytes: bytes | None = None,
-                 numpy_state_bytes: bytes | None = None,
-                 roofline_sidecar_path: str | Path | None = None,
-                 repo_root: str | Path | None = None) -> ProvdManifest:
+def build_provd(
+    *,
+    workload: str,
+    scenario: str,
+    division: str,
+    hardware_fingerprint: dict,
+    report: dict,
+    report_path: str | Path,
+    weights_path: str | Path | None = None,
+    weights_n_params: int | None = None,
+    weights_dtype: str | None = None,
+    dataset_name: str = "unknown",
+    dataset_files: list[str | Path] | None = None,
+    rng_seed: int | None = None,
+    torch_state_bytes: bytes | None = None,
+    numpy_state_bytes: bytes | None = None,
+    roofline_sidecar_path: str | Path | None = None,
+    repo_root: str | Path | None = None,
+) -> ProvdManifest:
     """Construct a complete provenance manifest."""
     import datetime
+
     repo = Path(repo_root) if repo_root else Path(__file__).resolve().parents[2]
     leaves = {
         "source_tree": _git_leaf(repo),
-        "weights": (weights_leaf(weights_path, weights_n_params, weights_dtype)
-                    if weights_path else
-                    {"path": None, "sha256": None, "note": "no weights checkpoint"}),
+        "weights": (
+            weights_leaf(weights_path, weights_n_params, weights_dtype)
+            if weights_path
+            else {"path": None, "sha256": None, "note": "no weights checkpoint"}
+        ),
         "dataset": dataset_leaf(dataset_name, dataset_files or []),
         "rng": rng_leaf(rng_seed, torch_state_bytes, numpy_state_bytes),
         "hardware": hardware_leaf(hardware_fingerprint),
-        "roofline_sidecar": (roofline_sidecar_leaf(roofline_sidecar_path)
-                              if roofline_sidecar_path
-                              else {"path": None, "sha256": None,
-                                    "note": "no roofline sidecar"}),
+        "roofline_sidecar": (
+            roofline_sidecar_leaf(roofline_sidecar_path)
+            if roofline_sidecar_path
+            else {"path": None, "sha256": None, "note": "no roofline sidecar"}
+        ),
         "measurement": measurement_leaf(report, report_path),
     }
     root = merkle_root(leaves)
     return ProvdManifest(
-        workload=workload, scenario=scenario, division=division,
-        leaves=leaves, merkle_root=root, signature=sign_manifest(root),
+        workload=workload,
+        scenario=scenario,
+        division=division,
+        leaves=leaves,
+        merkle_root=root,
+        integrity=integrity_record(root),
         utc=datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         nonce=secrets.token_hex(8),
     )
 
 
 # ---------- verification ----------
+
 
 @dataclass
 class VerificationResult:
@@ -299,21 +370,35 @@ class VerificationResult:
         self.checks.append((name, ok, detail))
 
 
-def verify_provd(manifest_path: str | Path,
-                  repo_root: str | Path | None = None) -> VerificationResult:
+def resolve_artifact_path(manifest_path: str | Path, artifact_path: str | Path) -> Path:
+    """Resolve a manifest artifact path, including archive-relative paths."""
+    path = Path(artifact_path)
+    if path.is_absolute():
+        return path
+    return Path(manifest_path).resolve().parent / path
+
+
+def verify_provd(
+    manifest_path: str | Path, repo_root: str | Path | None = None
+) -> VerificationResult:
     """Walk every leaf and recompute its hash from the artifact on disk."""
-    manifest = json.loads(Path(manifest_path).read_text())
+    manifest_path = Path(manifest_path).resolve()
+    manifest = json.loads(manifest_path.read_text())
     res = VerificationResult(workload=manifest["workload"])
     leaves = manifest["leaves"]
 
     # Source tree.
     if leaves["source_tree"].get("git_sha"):
-        actual_git = _git_leaf(Path(repo_root) if repo_root
-                                else Path(manifest_path).resolve().parents[1])
+        actual_git = _git_leaf(
+            Path(repo_root) if repo_root else manifest_path.parents[1]
+        )
         ok = actual_git["git_sha"] == leaves["source_tree"]["git_sha"]
-        res.add("source_tree.git_sha", ok,
-                f"claimed {leaves['source_tree']['git_sha'][:12] if leaves['source_tree']['git_sha'] else 'None'}, "
-                f"current HEAD {actual_git['git_sha'][:12] if actual_git['git_sha'] else 'None'}")
+        res.add(
+            "source_tree.git_sha",
+            ok,
+            f"claimed {leaves['source_tree']['git_sha'][:12] if leaves['source_tree']['git_sha'] else 'None'}, "
+            f"current HEAD {actual_git['git_sha'][:12] if actual_git['git_sha'] else 'None'}",
+        )
         if leaves["source_tree"].get("tree_hash"):
             res.add(
                 "source_tree.tree_hash",
@@ -331,85 +416,232 @@ def verify_provd(manifest_path: str | Path,
 
         # Closed-division rejection of dirty trees (Dean's iter-5 sign-off).
         # Open division allows dirty trees with patch_hash as a courtesy.
-        if (manifest.get("division") == "closed"
-                and leaves["source_tree"].get("git_dirty")):
-            res.add("source_tree.closed_division_clean", False,
-                    "division=closed but submission was generated from a dirty tree "
-                    "(uncommitted changes). Closed-division submissions must come "
-                    "from a clean working tree.")
+        if manifest.get("division") == "closed" and leaves["source_tree"].get(
+            "git_dirty"
+        ):
+            res.add(
+                "source_tree.closed_division_clean",
+                False,
+                "division=closed but submission was generated from a dirty tree "
+                "(uncommitted changes). Closed-division submissions must come "
+                "from a clean working tree.",
+            )
 
     # Weights.
     w = leaves["weights"]
+    if w.get("path") and not w.get("sha256"):
+        res.add(
+            "weights.sha256", False, f"digest absent for declared file: {w['path']}"
+        )
+    if w.get("sha256") and not w.get("path"):
+        res.add("weights.path", False, "digest declared without an artifact path")
     if w.get("path") and w.get("sha256"):
-        if Path(w["path"]).exists():
-            actual, _ = _hash_file(w["path"])
+        weights_path = resolve_artifact_path(manifest_path, w["path"])
+        if weights_path.exists():
+            actual, n_bytes = _hash_file(weights_path)
             ok = ("sha256:" + actual) == w["sha256"]
-            res.add("weights.sha256", ok,
-                    f"claimed {w['sha256'][:18]}, recomputed sha256:{actual[:12]}")
+            res.add(
+                "weights.sha256",
+                ok,
+                f"claimed {w['sha256'][:18]}, recomputed sha256:{actual[:12]}",
+            )
+            if w.get("n_bytes") is not None:
+                res.add(
+                    "weights.n_bytes",
+                    n_bytes == w["n_bytes"],
+                    f"claimed {w['n_bytes']}, recomputed {n_bytes}",
+                )
         else:
             res.add("weights.sha256", False, f"file missing: {w['path']}")
 
     # Dataset Merkle.
     d = leaves["dataset"]
+    if d.get("files") and not d.get("merkle_root"):
+        res.add(
+            "dataset.merkle_root", False, "dataset files declared without a Merkle root"
+        )
     if d.get("files") and d.get("merkle_root"):
         root_h = hashlib.sha256()
         ok_files = True
-        for f in d["files"]:
-            if not f.get("sha256") or not Path(f["path"]).exists():
+        for index, f in enumerate(d["files"]):
+            dataset_path = resolve_artifact_path(manifest_path, f["path"])
+            if not f.get("sha256") or not dataset_path.exists():
                 ok_files = False
+                res.add(
+                    f"dataset.files[{index}].sha256",
+                    False,
+                    f"file missing or digest absent: {f.get('path')}",
+                )
                 continue
-            actual, _ = _hash_file(f["path"])
-            if ("sha256:" + actual) != f["sha256"]:
+            actual, n_bytes = _hash_file(dataset_path)
+            digest_ok = ("sha256:" + actual) == f["sha256"]
+            res.add(
+                f"dataset.files[{index}].sha256",
+                digest_ok,
+                f"claimed {f['sha256'][:18]}, recomputed sha256:{actual[:12]}",
+            )
+            if not digest_ok:
                 ok_files = False
+            if f.get("n_bytes") is not None:
+                size_ok = n_bytes == f["n_bytes"]
+                res.add(
+                    f"dataset.files[{index}].n_bytes",
+                    size_ok,
+                    f"claimed {f['n_bytes']}, recomputed {n_bytes}",
+                )
+                ok_files = ok_files and size_ok
             root_h.update(f"{f['path']}:{actual}\n".encode())
         recomputed = "sha256:" + root_h.hexdigest()
-        res.add("dataset.merkle_root", ok_files and recomputed == d["merkle_root"],
-                f"claimed {d['merkle_root'][:18]}, recomputed {recomputed[:18]}")
+        res.add(
+            "dataset.merkle_root",
+            ok_files and recomputed == d["merkle_root"],
+            f"claimed {d['merkle_root'][:18]}, recomputed {recomputed[:18]}",
+        )
 
     # Roofline sidecar.
     rs = leaves["roofline_sidecar"]
+    if rs.get("path") and not rs.get("sha256"):
+        res.add(
+            "roofline_sidecar.sha256",
+            False,
+            f"digest absent for declared file: {rs['path']}",
+        )
     if rs.get("path") and rs.get("sha256"):
-        if Path(rs["path"]).exists():
-            actual, _ = _hash_file(rs["path"])
-            res.add("roofline_sidecar.sha256",
-                    ("sha256:" + actual) == rs["sha256"],
-                    f"recomputed sha256:{actual[:12]}")
+        roofline_path = resolve_artifact_path(manifest_path, rs["path"])
+        if roofline_path.exists():
+            actual, n_bytes = _hash_file(roofline_path)
+            res.add(
+                "roofline_sidecar.sha256",
+                ("sha256:" + actual) == rs["sha256"],
+                f"recomputed sha256:{actual[:12]}",
+            )
+            if rs.get("n_bytes") is not None:
+                res.add(
+                    "roofline_sidecar.n_bytes",
+                    n_bytes == rs["n_bytes"],
+                    f"claimed {rs['n_bytes']}, recomputed {n_bytes}",
+                )
         else:
             res.add("roofline_sidecar.sha256", False, f"missing: {rs['path']}")
 
+    # Hardware metadata. This validates internal consistency and keeps the full
+    # machine description inspectable; it does not independently attest that the
+    # run occurred on the described hardware.
+    hardware = leaves["hardware"]
+    fingerprint = hardware.get("fingerprint")
+    if fingerprint is not None:
+        actual = "sha256:" + _sha256(_canon(fingerprint))
+        res.add(
+            "hardware.fingerprint_sha256",
+            actual == hardware.get("fingerprint_sha256"),
+            f"recomputed {actual[:18]}",
+        )
+    elif manifest.get("schema") == SCHEMA_VERSION:
+        res.add(
+            "hardware.fingerprint",
+            False,
+            "schema 1.1 requires inspectable hardware metadata",
+        )
+
     # Measurement.
     m = leaves["measurement"]
-    if m.get("report_path") and Path(m["report_path"]).exists():
-        report = json.loads(Path(m["report_path"]).read_text())
+    if not m.get("report_path"):
+        res.add("measurement.report_path", False, "measurement report path is absent")
+    if not m.get("report_canonical_sha256"):
+        res.add(
+            "measurement.report_canonical_sha256", False, "measurement digest is absent"
+        )
+    if manifest.get("schema") == SCHEMA_VERSION and not m.get("report_file_sha256"):
+        res.add(
+            "measurement.report_file_sha256",
+            False,
+            "schema 1.1 requires an exact report-file digest",
+        )
+    report_path = (
+        resolve_artifact_path(manifest_path, m["report_path"])
+        if m.get("report_path")
+        else None
+    )
+    if report_path and report_path.exists():
+        report_bytes = report_path.read_bytes()
+        report = json.loads(report_bytes)
         actual = "sha256:" + _sha256(_canon(report))
-        res.add("measurement.report_canonical_sha256",
-                actual == m["report_canonical_sha256"],
-                f"recomputed {actual[:18]}")
+        res.add(
+            "measurement.report_canonical_sha256",
+            actual == m["report_canonical_sha256"],
+            f"recomputed {actual[:18]}",
+        )
+        if m.get("report_file_sha256"):
+            file_digest = "sha256:" + _sha256(report_bytes)
+            res.add(
+                "measurement.report_file_sha256",
+                file_digest == m["report_file_sha256"],
+                f"recomputed {file_digest[:18]}",
+            )
+        if m.get("n_bytes") is not None:
+            res.add(
+                "measurement.n_bytes",
+                len(report_bytes) == m["n_bytes"],
+                f"claimed {m['n_bytes']}, recomputed {len(report_bytes)}",
+            )
     elif m.get("report_path"):
-        res.add("measurement.report_canonical_sha256", False,
-                f"missing: {m['report_path']}")
+        res.add(
+            "measurement.report_canonical_sha256", False, f"missing: {m['report_path']}"
+        )
 
     # Merkle root over leaves.
     recomputed_root = merkle_root(leaves)
-    res.add("merkle_root", recomputed_root == manifest["merkle_root"],
-            f"recomputed {recomputed_root[:18]} vs claimed {manifest['merkle_root'][:18]}")
+    res.add(
+        "merkle_root",
+        recomputed_root == manifest["merkle_root"],
+        f"recomputed {recomputed_root[:18]} vs claimed {manifest['merkle_root'][:18]}",
+    )
 
-    # Signature.
+    # Integrity record. Schema 1.1 accurately labels this as an unauthenticated
+    # digest. Older manifests using the misleading signature label remain
+    # verifiable for compatibility.
+    integrity = manifest.get("integrity") or {}
+    if integrity:
+        algo = integrity.get("algorithm")
+        if algo == INTEGRITY_DIGEST_ALGO:
+            expected = _integrity_digest(manifest["merkle_root"])
+            sig_ok = hmac.compare_digest(str(integrity.get("digest", "")), expected)
+            detail = (
+                "valid unauthenticated integrity digest (tamper detection only; origin not authenticated)"
+                if sig_ok
+                else "INVALID unauthenticated integrity digest"
+            )
+        else:
+            sig_ok = False
+            detail = f"unsupported integrity digest algorithm: {algo}"
+        res.add("integrity.digest", sig_ok, detail)
+        return res
+
     signature = manifest.get("signature") or {}
     algo = signature.get("algo")
-    if algo == PORTABLE_SIGNATURE_ALGO:
-        expected = _portable_signature(manifest["merkle_root"])
+    if algo == LEGACY_PORTABLE_SIGNATURE_ALGO:
+        expected = _sha256(
+            f"{LEGACY_PORTABLE_SIGNATURE_DOMAIN}:{manifest['merkle_root']}".encode()
+        )
         sig_ok = hmac.compare_digest(str(signature.get("signature", "")), expected)
-        detail = "portable signature" if sig_ok else "INVALID portable signature"
+        detail = (
+            "valid legacy unauthenticated digest" if sig_ok else "INVALID legacy digest"
+        )
     elif algo == "hmac-sha256":
         sig_ok = hmac.compare_digest(
             str(signature.get("signature", "")),
-            hmac.new(_legacy_signing_key(), manifest["merkle_root"].encode(), hashlib.sha256).hexdigest(),
+            hmac.new(
+                _legacy_signing_key(), manifest["merkle_root"].encode(), hashlib.sha256
+            ).hexdigest(),
         )
-        detail = "legacy local install signature" if sig_ok else "INVALID legacy local signature"
+        detail = (
+            "legacy local install signature"
+            if sig_ok
+            else "INVALID legacy local signature"
+        )
     else:
         sig_ok = False
         detail = f"unsupported signature algorithm: {algo}"
-    res.add("signature", sig_ok, detail)
+    res.add("legacy_signature", sig_ok, detail)
 
     return res

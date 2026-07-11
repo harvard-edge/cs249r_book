@@ -4,14 +4,15 @@ MLPerf EDU: Roofline-coordinate emitter.
 Wraps a workload's hot loop in a context manager that measures wall time,
 then divides caller-supplied analytic FLOP and byte counts to produce
 (arithmetic intensity, achieved FLOPS, achieved bandwidth, dispatch
-utilization). Writes a JSON sidecar consumed by the iter-5 provenance
-chain (manifest.py) and the iter-4 taxonomy linter (check_taxonomy.py).
+utilization). These analytic sidecars are development diagnostics only. The
+taxonomy checker does not accept them as measured classification evidence.
 
 Per Dean's iter-5 spec: emitter is the instrument that produces the
 telemetry the provenance chain hashes. Splitting them would mean the
 manifest hashes nothing real and the emitter produces numbers no one
 verifies.
 """
+
 from __future__ import annotations
 
 import json
@@ -34,7 +35,7 @@ SCHEMA_VERSION = "mlperf-edu-roofline/1.0"
 # (M1 base class) only if no cached measurement exists. The defaults
 # are intentionally low so an unmeasured run is more likely to flag
 # its workload as device_saturated than to hide a dispatch bottleneck.
-DEFAULT_PEAK_FLOPS = 2.6e12   # M1 base 8-core GPU fp32, conservative fallback
+DEFAULT_PEAK_FLOPS = 2.6e12  # M1 base 8-core GPU fp32, conservative fallback
 DEFAULT_PEAK_BW_GBPS = 68.25  # M1 base unified memory peak
 
 
@@ -42,6 +43,7 @@ def _machine_caps() -> tuple[float, float]:
     """Return (peak_FLOPS, peak_BW_GBps) from per-machine cache or defaults."""
     try:
         from pathlib import Path as _P
+
         cache_dir = _P.home() / ".mlperf-edu"
         # Find any machine_caps_*.json (caller doesn't need to know the hash).
         if cache_dir.exists():
@@ -52,11 +54,12 @@ def _machine_caps() -> tuple[float, float]:
         pass
     return DEFAULT_PEAK_FLOPS, DEFAULT_PEAK_BW_GBPS
 
+
 # Threshold rules (must match check_taxonomy.py).
-_RIDGE_LOW_MULTIPLIER = 0.5   # bandwidth_bound if intensity < 0.5*ridge
+_RIDGE_LOW_MULTIPLIER = 0.5  # bandwidth_bound if intensity < 0.5*ridge
 _RIDGE_HIGH_MULTIPLIER = 2.0  # compute_bound if intensity > 2*ridge
-_DISPATCH_BOUND_UTIL = 0.25   # dispatch_bound if utilization < 0.25
-_DEVICE_SAT_UTIL = 0.50       # device_saturated if utilization > 0.50
+_DISPATCH_BOUND_UTIL = 0.25  # dispatch_bound if utilization < 0.25
+_DEVICE_SAT_UTIL = 0.50  # device_saturated if utilization > 0.50
 
 
 @dataclass
@@ -71,13 +74,17 @@ class RooflineMeasurement:
     axis_dispatch: str
 
     def summary(self) -> str:
-        return (f"{self.workload}: intensity={self.intensity:.2f} FLOP/byte, "
-                f"util={self.dispatch_utilization:.3f}, "
-                f"AI={self.axis_arithmetic_intensity}, "
-                f"dispatch={self.axis_dispatch}")
+        return (
+            f"{self.workload}: intensity={self.intensity:.2f} FLOP/byte, "
+            f"util={self.dispatch_utilization:.3f}, "
+            f"AI={self.axis_arithmetic_intensity}, "
+            f"dispatch={self.axis_dispatch}"
+        )
 
 
-def _classify_axes(intensity: float, utilization: float, ridge: float) -> tuple[str, str]:
+def _classify_axes(
+    intensity: float, utilization: float, ridge: float
+) -> tuple[str, str]:
     if intensity > _RIDGE_HIGH_MULTIPLIER * ridge:
         ai = "compute_bound"
     elif intensity < _RIDGE_LOW_MULTIPLIER * ridge:
@@ -96,8 +103,9 @@ def _classify_axes(intensity: float, utilization: float, ridge: float) -> tuple[
 def _hardware_fingerprint_short() -> str:
     """Short hash of the platform for sidecar naming."""
     try:
-        from .hardware import profile_hardware
-        fp = profile_hardware()
+        from .fingerprint import detect_hardware
+
+        fp = detect_hardware()
     except Exception:
         fp = {"system": "unknown"}
     payload = json.dumps(fp, sort_keys=True, separators=(",", ":")).encode()
@@ -107,6 +115,7 @@ def _hardware_fingerprint_short() -> str:
 def _sync():
     try:
         import torch
+
         if torch.backends.mps.is_available():
             torch.mps.synchronize()
         elif torch.cuda.is_available():
@@ -116,15 +125,16 @@ def _sync():
 
 
 @contextmanager
-def measure_roofline(workload_name: str,
-                      analytic_flops: Callable[[], float] | float,
-                      analytic_bytes: Callable[[], float] | float,
-                      n_iter: int = 1,
-                      output_dir: str | Path = "roofline",
-                      peak_flops: float | None = None,
-                      peak_bw_gbps: float | None = None,
-                      machine_class: str = "apple-silicon",
-                      ) -> Iterator[dict]:
+def measure_roofline(
+    workload_name: str,
+    analytic_flops: Callable[[], float] | float,
+    analytic_bytes: Callable[[], float] | float,
+    n_iter: int = 1,
+    output_dir: str | Path = "roofline",
+    peak_flops: float | None = None,
+    peak_bw_gbps: float | None = None,
+    machine_class: str = "apple-silicon",
+) -> Iterator[dict]:
     """Wrap a hot loop and emit a roofline sidecar on exit.
 
     Usage:
@@ -164,10 +174,16 @@ def measure_roofline(workload_name: str,
         per_iter_flops = flops / max(n_iter, 1) if n_iter > 1 else flops
         per_iter_bytes = byts / max(n_iter, 1) if n_iter > 1 else byts
         achieved_flops = per_iter_flops / per_iter_time if per_iter_time > 0 else 0.0
-        achieved_bw = (per_iter_bytes / per_iter_time / 1e9) if per_iter_time > 0 else 0.0
-        intensity = (per_iter_flops / per_iter_bytes) if per_iter_bytes > 0 else float("inf")
-        util = max(achieved_flops / peak_flops if peak_flops > 0 else 0.0,
-                   achieved_bw / peak_bw_gbps if peak_bw_gbps > 0 else 0.0)
+        achieved_bw = (
+            (per_iter_bytes / per_iter_time / 1e9) if per_iter_time > 0 else 0.0
+        )
+        intensity = (
+            (per_iter_flops / per_iter_bytes) if per_iter_bytes > 0 else float("inf")
+        )
+        util = max(
+            achieved_flops / peak_flops if peak_flops > 0 else 0.0,
+            achieved_bw / peak_bw_gbps if peak_bw_gbps > 0 else 0.0,
+        )
         ridge = peak_flops / (peak_bw_gbps * 1e9) if peak_bw_gbps > 0 else 0.0
         axis_ai, axis_disp = _classify_axes(intensity, util, ridge)
 
@@ -198,11 +214,13 @@ def measure_roofline(workload_name: str,
             "regime_inference": {
                 "axis_arithmetic_intensity": axis_ai,
                 "axis_dispatch": axis_disp,
-                "rule": (f"intensity {intensity:.2f} vs "
-                         f"[low {_RIDGE_LOW_MULTIPLIER*ridge:.2f}, "
-                         f"high {_RIDGE_HIGH_MULTIPLIER*ridge:.2f}]; "
-                         f"util {util:.3f} vs "
-                         f"[dispatch {_DISPATCH_BOUND_UTIL}, sat {_DEVICE_SAT_UTIL}]"),
+                "rule": (
+                    f"intensity {intensity:.2f} vs "
+                    f"[low {_RIDGE_LOW_MULTIPLIER * ridge:.2f}, "
+                    f"high {_RIDGE_HIGH_MULTIPLIER * ridge:.2f}]; "
+                    f"util {util:.3f} vs "
+                    f"[dispatch {_DISPATCH_BOUND_UTIL}, sat {_DEVICE_SAT_UTIL}]"
+                ),
             },
             "extra": extra,
         }
@@ -217,6 +235,9 @@ def latest_sidecar(workload: str, output_dir: str | Path = "roofline") -> Path |
     out_dir = Path(output_dir)
     if not out_dir.exists():
         return None
-    matches = sorted(out_dir.glob(f"{workload}_*.json"),
-                      key=lambda p: p.stat().st_mtime, reverse=True)
+    matches = sorted(
+        out_dir.glob(f"{workload}_*.json"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
     return matches[0] if matches else None

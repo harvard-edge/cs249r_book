@@ -1,0 +1,121 @@
+name: 'MLPerf EDU · Full Benchmark Validation'
+
+# This workflow executes benchmark work. It is the evidence-bearing counterpart
+# to validate-dev and has a five-hour hard limit. A dry run is never reported as
+# max or release validation.
+
+on:
+  workflow_dispatch:
+    inputs:
+      preset:
+        description: 'Execute every max path, or every min and max path'
+        type: choice
+        options:
+          - release
+          - max
+        default: release
+      keep_going:
+        description: 'Continue through all workloads after an individual failure'
+        type: boolean
+        default: true
+  schedule:
+    - cron: '17 3 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: mlperf-edu-full-validation-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  MLPERF_EDU_ROOT: mlperf-edu
+
+jobs:
+  full-validation:
+    name: "Execute ${{ inputs.preset || 'release' }} Validation"
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Install the Locked Development Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Check Evidence Inputs Before Execution
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          uv run pytest
+          uv run python tools/export_flat_registry.py --check
+          uv run python tools/check_taxonomy.py
+          uv run python tools/generate_review_packets.py --check
+          uv run python tools/generate_docs.py --check
+          uv run mlperf audit
+
+      - name: Execute the Requested Validation Preset
+        id: benchmark
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        env:
+          REQUESTED_PRESET: ${{ inputs.preset }}
+          REQUESTED_KEEP_GOING: ${{ inputs.keep_going }}
+        run: |
+          set -euo pipefail
+          preset=${REQUESTED_PRESET:-release}
+          output_dir="submissions/ci-${preset}"
+          args=(validate "$preset" --output-dir "$output_dir")
+          if [ "${REQUESTED_KEEP_GOING:-true}" = "true" ]; then
+            args+=(--keep-going)
+          fi
+          echo "Executing actual ${preset} validation into ${output_dir}"
+          uv run mlperf "${args[@]}"
+
+      - name: Record the Strict Public-Release Audit
+        if: always()
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          set +e
+          uv run mlperf audit --policy public 2>&1 | tee public-audit.txt
+          status=${PIPESTATUS[0]}
+          echo "strict_public_audit_exit_code=$status" >> "$GITHUB_ENV"
+          exit 0
+
+      - name: Upload Full Validation Evidence
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mlperf-edu-${{ inputs.preset || 'release' }}-evidence-${{ github.run_id }}
+          path: |
+            ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-*/**
+            ${{ env.MLPERF_EDU_ROOT }}/public-audit.txt
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Summarize the Evidence Boundary
+        if: always()
+        env:
+          EXECUTED_PRESET: ${{ inputs.preset || 'release' }}
+          BENCHMARK_OUTCOME: ${{ steps.benchmark.outcome }}
+        run: |
+          {
+            echo '## MLPerf EDU Full Validation'
+            echo ''
+            echo "- Preset executed: \`$EXECUTED_PRESET\`"
+            echo "- Benchmark step: \`$BENCHMARK_OUTCOME\`"
+            echo "- Strict public audit exit code: \`${strict_public_audit_exit_code:-not-run}\`"
+            echo ''
+            echo 'A green benchmark step proves execution and local grading for this run.'
+            echo 'It does not imply MLCommons endorsement or close external dataset and licensing decisions.'
+          } >> "$GITHUB_STEP_SUMMARY"

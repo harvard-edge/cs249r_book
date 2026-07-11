@@ -1,63 +1,84 @@
 ---
-title: "Optimizing: The SUT Plugin Protocol"
+title: "Lab 2 SUT Interface"
 ---
 
-MLPerf EDU enforces a strict separation between the referee and the thing
-being measured. The harness (LoadGen, telemetry, reporting) is fixed; your
-optimization lives in an isolated **System Under Test (SUT)** plugin. Students
-never modify the framework to make a workload faster, which is exactly what
-makes their speedups comparable.
+MLPerf EDU includes an educational `mlperf.sut.SUT_Interface`, but its current
+integration is deliberately narrow. **Lab 2 is the only shipped lab that
+implements this interface.** It constructs the SUT directly and drives it from
+the lab script so students can compare naïve and KV-cache decoding while
+checking token-for-token output parity.
 
-## The Interface
+The supported product command, `uv run mlperf run`, dispatches workloads that
+are registered in the repository. It does not expose a generic `--sut` option
+and does not discover or load arbitrary student plugin files. A Lab 2 result is
+therefore a standalone classroom experiment, not a canonical MLPerf EDU result
+or a plugin submission accepted by the product CLI.
 
-A plugin is a single Python file containing one class that inherits
-`mlperf.sut.SUT_Interface` and implements two methods:
+## The Interface Used by Lab 2
+
+Lab 2 defines a class that inherits `mlperf.sut.SUT_Interface` and implements
+the interface's constructor and asynchronous query method:
 
 ```python
 from mlperf.sut import SUT_Interface
 
-class MyOptimizedSUT(SUT_Interface):
+class StudentNanoGPTSUT(SUT_Interface):
     def __init__(self, config):
-        # load the model, move it to the device, prepare caches
+        # load the lab model and prepare its execution device
         ...
 
     async def process_queries(self, samples):
-        # execute a batch of LoadGen QuerySamples; return telemetry
+        # run the selected decode implementation and return measurements
         ...
 ```
 
-The LoadGen referee drives `process_queries` according to the scenario
-(single-stream, server, offline) and measures latency and throughput from the
-outside. Whatever you do inside the class, including KV caching, batching,
-mixed precision, quantization, or a fused kernel, is your optimization; the
-measurement never moves.
+The lab creates deterministic `QuerySample` inputs, calls `process_queries`
+locally, and records latency, throughput, and output-parity evidence. This is a
+useful teaching seam, but it is not wired into the generated benchmark runner
+or release-validation path.
 
-## Worked Lab Examples
+## Scope of the Three Labs
 
-The repository ships three lab exercises built on this protocol, under
+The repository ships three independent exercises under
 [`examples/`](https://github.com/harvard-edge/cs249r_book/tree/main/mlperf-edu/examples):
 
-| **Lab** | **File** | **What you optimize** |
+| **Lab** | **File** | **Current execution model** |
 |:---|:---|:---|
-| Lab 1 | `lab1_optimization.py` | Training-loop systems optimization |
-| Lab 2 | `lab2_inference_sut.py` | Inference latency (KV cache, batching, precision) |
-| Lab 3 | `lab3_arch_comparison.py` | Dense vs. sparse architecture comparison |
+| Lab 1 | `lab1_optimization.py` | Standalone training-loop experiment; does not implement `SUT_Interface` |
+| Lab 2 | `lab2_inference_sut.py` | Standalone inference experiment that implements and locally drives `SUT_Interface` |
+| Lab 3 | `lab3_arch_comparison.py` | Standalone dense-versus-sparse training experiment; does not implement `SUT_Interface` |
 
-Each lab file is itself the plugin. Read the reference implementation, run the
-baseline, apply the TODO optimization, and re-run to measure your gain.
+Run their network-free smoke paths from a source checkout:
 
-::: {.callout-note}
-**Status.** The `SUT_Interface` protocol and the lab plugins ship today and are
-importable from `mlperf.sut`. First-class `mlperf run --sut <plugin.py>`
-wiring in the product CLI is part of the certification release; the labs
-currently drive plugins through their own harness entry points as documented
-in each lab file.
-:::
+```bash
+uv run python examples/lab1_optimization.py --smoke
+uv run python examples/lab2_inference_sut.py --smoke
+uv run python examples/lab3_arch_comparison.py --smoke
+```
 
-## Rules for Comparable Submissions
+Each command executes real model operations on deterministic synthetic inputs.
+A passing smoke validates that educational entry point; it is not benchmark
+quality evidence.
 
-The public-result contract distinguishes closed submissions, which keep the
-reference model and dataset fixed and optimize only execution, from open ones,
-which may change the model. See [`PUBLIC_RULES.md`](https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu/PUBLIC_RULES.md)
-for the score-bearing and performance-bearing rules, and run `mlperf audit`
-to check a workload's contract before you optimize against it.
+## Producing Canonical Artifacts
+
+Use registered workload commands when you need reports and provenance that the
+benchmark validation tools understand. For the inference path closest to Lab 2:
+
+```bash
+OUTPUT_DIR="submissions/nanogpt-inference-max"
+uv run mlperf fetch --workload nanogpt-train --profile max
+uv run mlperf run --workload nanogpt-train --profile max --output-dir "$OUTPUT_DIR"
+uv run mlperf run --workload nanogpt-inference --variant decode --profile max \
+  --output-dir "$OUTPUT_DIR"
+```
+
+The inference command requires the passing training report, provenance manifest,
+and checkpoint produced in the same output directory. Fetching assets alone does
+not create a quality-approved checkpoint.
+
+The candidate public-result contract distinguishes score-bearing,
+performance-bearing, and systems-only workloads. See
+[`PUBLIC_RULES.md`](https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu/PUBLIC_RULES.md)
+and run `uv run mlperf audit --policy public` before treating a registered result
+as a public candidate.

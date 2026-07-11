@@ -1,37 +1,47 @@
-import torch
-import sys
+"""Incomplete custom-optimizer assignment starter.
+
+This file is not a benchmark baseline or a valid submission. Instructors must
+define the exercise's data, run budget, quality threshold, and grading path
+before assigning it. See the README in this directory.
+"""
+
 import os
+import sys
 
-from mlperf.loadgen import LoadGenProxy 
+import torch
 
-# Import the Pristine Base Architecture (Students should absolutely not re-write the forward loop unless instructed!)
-sys.path.append(os.path.join(os.path.dirname(__file__), '..', '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), "..", "..", "src"))
 from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
+
 
 def execute_student_training_optimization():
     """
-    MLPerf EDU: The Open Division Training Sandbox!
-    Target: Time-To-Target-Loss (TTTL)
-    
-    This template structurally demonstrates exactly how to swap `torch.optim.AdamW`
-    with a completely custom mathematical systems engine! Your exact Backpropagation 
-    physics will explicitly be tracked securely by the local LoadGen API accurately!
+    Demonstrate where a student-defined parameter update can be inserted.
+
+    This short synthetic loop does not implement benchmark data loading,
+    provenance, quality evaluation, or grading.
     """
-    print("🚀 Booting Custom System-Under-Test (SUT) Training Wrapper...")
-    
-    device = "cuda" if torch.cuda.is_available() else "mps" if torch.backends.mps.is_available() else "cpu"
-    print(f"Hardware Trace Locked: Exploiting {device.upper()} natively!")
-    
+    print("Custom optimizer assignment starter")
+
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
+    print(f"Device: {device}")
+
     model = NanoGPTWhiteBox().to(device)
     model.train()
-    
+
     # ---------------------------------------------------------------------------------
-    # ⚠️ YOUR CUSTOM SYSTEMS LOGIC GOES HERE 
+    # ⚠️ YOUR CUSTOM SYSTEMS LOGIC GOES HERE
     # Do not use `torch.optim`. Write your own Stochastic Gradient Descent natively!
     # Tip: Evaluate memory overheads of storing custom momentums mathematically!
     # ---------------------------------------------------------------------------------
-    
-    # Example Custom Wrapper (Conceptual Placeholder)
+
+    # Minimal update for orientation. Replace it under the assignment rubric.
     def my_custom_backward_step(loss, parameters):
         loss.backward()
         with torch.no_grad():
@@ -40,22 +50,20 @@ def execute_student_training_optimization():
                     # Implement your mathematical routing natively here!
                     p.sub_(p.grad * 0.001)
                     p.grad.zero_()
-                    
+
     # ---------------------------------------------------------------------------------
 
-    # DUMMY LOOP (In reality, replace with the WikiText dataloader organically)
-    for epoch in range(10): 
-        dummy_data = torch.randint(0, 50257, (1, 16)).to(device)
-        dummy_targets = torch.randint(0, 50257, (1, 16)).to(device)
-        
+    # Synthetic orientation loop. It is not a benchmark workload.
+    for epoch in range(10):
+        dummy_data = torch.randint(0, 128, (1, 16), device=device)
+        dummy_targets = torch.randint(0, 128, (1, 16), device=device)
+
         logits, loss = model(dummy_data, targets=dummy_targets)
-        
-        # Execute your custom physics!
+
         my_custom_backward_step(loss, model.parameters())
-        
-        # The MLPerf EDU referee automatically halts your run if Loss < target bound!
-        # (This is just an integration demo, loadgen handles this internally physically)
-        print(f"Step {epoch} | Custom SUT Loss Computed: {loss.item():.4f}")
+
+        print(f"Step {epoch} | synthetic loss: {loss.item():.4f}")
+
 
 if __name__ == "__main__":
     execute_student_training_optimization()

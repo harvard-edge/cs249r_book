@@ -1,8 +1,9 @@
 """
 MLPerf EDU: Dataset Factory
 
-Provides real, deterministic data loaders for every workload in the benchmark
-suite. This replaces the random-tensor stubs in auto_trainer.py.
+Provides real, deterministic data loaders for reference workloads that have a
+real-data path. Systems-only micro-shard runners declare their separate execution
+boundary in the registry.
 
 Data sources:
     - Language models (NanoGPT, Nano-MoE): TinyShakespeare character-level encoding
@@ -23,14 +24,16 @@ import os
 import torch
 import torch.utils.data as data
 
-REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-DATASET_ROOT = os.path.join(REPO_ROOT, "datasets")
+from mlperf.assets import data_root
+
+DATASET_ROOT = str(data_root().parent)
 SPLIT_SEED = 42  # Immutable — guarantees identical splits everywhere
 
 
 # ---------------------------------------------------------------------------
 # Language Dataset (TinyShakespeare, character-level)
 # ---------------------------------------------------------------------------
+
 
 class CharTokenizer:
     """
@@ -117,13 +120,19 @@ def get_language_dataloaders(
     val_ds = TextDataset(val_tokens, seq_len=seq_len)
 
     train_loader = data.DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, drop_last=True,
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
         generator=torch.Generator().manual_seed(SPLIT_SEED),
     )
     val_loader = data.DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, drop_last=True,
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        drop_last=True,
     )
 
     return train_loader, val_loader
@@ -132,6 +141,7 @@ def get_language_dataloaders(
 # ---------------------------------------------------------------------------
 # Vision Dataset (CIFAR-100 for ResNet, CIFAR-10 for Diffusion)
 # ---------------------------------------------------------------------------
+
 
 def get_cifar100_dataloaders(
     batch_size: int = 64, data_dir: str = "./data", num_workers: int = 0
@@ -144,22 +154,26 @@ def get_cifar100_dataloaders(
     import torchvision
     import torchvision.transforms as transforms
 
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            (0.5071, 0.4867, 0.4408),
-            (0.2675, 0.2565, 0.2761),
-        ),
-    ])
-    transform_val = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize(
-            (0.5071, 0.4867, 0.4408),
-            (0.2675, 0.2565, 0.2761),
-        ),
-    ])
+    transform_train = transforms.Compose(
+        [
+            transforms.RandomCrop(32, padding=4),
+            transforms.RandomHorizontalFlip(),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                (0.5071, 0.4867, 0.4408),
+                (0.2675, 0.2565, 0.2761),
+            ),
+        ]
+    )
+    transform_val = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize(
+                (0.5071, 0.4867, 0.4408),
+                (0.2675, 0.2565, 0.2761),
+            ),
+        ]
+    )
 
     trainset = torchvision.datasets.CIFAR100(
         root=data_dir, train=True, download=True, transform=transform_train
@@ -169,12 +183,18 @@ def get_cifar100_dataloaders(
     )
 
     train_loader = data.DataLoader(
-        trainset, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, drop_last=True,
+        trainset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
     )
     val_loader = data.DataLoader(
-        valset, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, drop_last=True,
+        valset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        drop_last=True,
     )
 
     return train_loader, val_loader
@@ -191,10 +211,12 @@ def get_cifar10_dataloaders(
     import torchvision
     import torchvision.transforms as transforms
 
-    transform = transforms.Compose([
-        transforms.ToTensor(),
-        transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
-    ])
+    transform = transforms.Compose(
+        [
+            transforms.ToTensor(),
+            transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5)),
+        ]
+    )
 
     trainset = torchvision.datasets.CIFAR10(
         root=data_dir, train=True, download=True, transform=transform
@@ -204,12 +226,18 @@ def get_cifar10_dataloaders(
     )
 
     train_loader = data.DataLoader(
-        trainset, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, drop_last=True,
+        trainset,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
     )
     val_loader = data.DataLoader(
-        valset, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, drop_last=True,
+        valset,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        drop_last=True,
     )
 
     return train_loader, val_loader
@@ -219,7 +247,7 @@ def get_cifar10_dataloaders(
 # DLRM Dataset (MovieLens-100K — real user-item interactions)
 # ---------------------------------------------------------------------------
 
-MOVIELENS_DIR = os.path.join(DATASET_ROOT, "..", "data", "movielens", "ml-100k")
+MOVIELENS_DIR = os.path.join(DATASET_ROOT, "local_tensors", "movielens", "ml-100k")
 
 
 class MovieLensRecommendationDataset(data.Dataset):
@@ -271,7 +299,8 @@ class MovieLensRecommendationDataset(data.Dataset):
                 user_occupation_names[uid] = parts[3]
                 user_genders[uid] = gender
         occupation_vocab = {
-            name: idx for idx, name in enumerate(sorted(set(user_occupation_names.values())))
+            name: idx
+            for idx, name in enumerate(sorted(set(user_occupation_names.values())))
         }
         user_occupations = {
             uid: occupation_vocab[name] for uid, name in user_occupation_names.items()
@@ -301,7 +330,7 @@ class MovieLensRecommendationDataset(data.Dataset):
                 parts = line.strip().split("\t")
                 uid, rating = int(parts[0]), float(parts[2])
                 user_ratings.setdefault(uid, []).append(rating)
-        user_avg = {u: sum(rs)/len(rs) for u, rs in user_ratings.items()}
+        user_avg = {u: sum(rs) / len(rs) for u, rs in user_ratings.items()}
         user_cnt = {u: len(rs) for u, rs in user_ratings.items()}
         max_cnt = max(user_cnt.values())
 
@@ -330,11 +359,13 @@ class MovieLensRecommendationDataset(data.Dataset):
                 dense_list.append(dense)
 
                 # Sparse features: user_id, item_id, occupation
-                sparse_list.append([
-                    user_id - 1,   # 0-indexed, max 942
-                    item_id - 1,   # 0-indexed, max 1681
-                    user_occupations.get(user_id, 0),  # max ~20
-                ])
+                sparse_list.append(
+                    [
+                        user_id - 1,  # 0-indexed, max 942
+                        item_id - 1,  # 0-indexed, max 1681
+                        user_occupations.get(user_id, 0),  # max ~20
+                    ]
+                )
 
                 # Binary: rating >= 4 → positive
                 labels_list.append(1.0 if rating >= 4.0 else 0.0)
@@ -375,9 +406,7 @@ def _dlrm_collate_fn(batch):
     return dense, sparse_indices, sparse_offsets, labels
 
 
-def get_dlrm_dram_dataloaders(
-    batch_size: int = 1024, num_workers: int = 0
-) -> tuple:
+def get_dlrm_dram_dataloaders(batch_size: int = 1024, num_workers: int = 0) -> tuple:
     """
     Returns (train_loader, val_loader) for the DRAM-bound DLRM variant.
 
@@ -390,9 +419,7 @@ def get_dlrm_dram_dataloaders(
     return get_dlrm_dataloaders(batch_size=batch_size, num_workers=num_workers)
 
 
-def get_dlrm_dataloaders(
-    batch_size: int = 256, num_workers: int = 0
-) -> tuple:
+def get_dlrm_dataloaders(batch_size: int = 256, num_workers: int = 0) -> tuple:
     """
     Returns (train_loader, val_loader) for MovieLens-100K recommendation.
 
@@ -404,18 +431,25 @@ def get_dlrm_dataloaders(
     n_train = int(len(full_ds) * 0.8)
     n_val = len(full_ds) - n_train
     train_ds, val_ds = data.random_split(
-        full_ds, [n_train, n_val],
+        full_ds,
+        [n_train, n_val],
         generator=torch.Generator().manual_seed(SPLIT_SEED),
     )
 
     train_loader = data.DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, drop_last=True,
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
         collate_fn=_dlrm_collate_fn,
     )
     val_loader = data.DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, drop_last=True,
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        drop_last=True,
         collate_fn=_dlrm_collate_fn,
     )
 
@@ -426,11 +460,12 @@ def get_dlrm_dataloaders(
 # Unified Factory
 # ---------------------------------------------------------------------------
 
+
 def get_dataloaders(model_name: str, batch_size: int = 16) -> tuple:
     """
     Returns (train_loader, val_loader) for the given workload.
 
-    This is the single entry point that auto_trainer.py should use.
+    This is the shared entry point for reference modules that need these loaders.
     """
     if "resnet" in model_name or "mobilenet" in model_name:
         return get_cifar100_dataloaders(batch_size=batch_size)
@@ -442,34 +477,46 @@ def get_dataloaders(model_name: str, batch_size: int = 16) -> tuple:
         return get_dlrm_dataloaders(batch_size=batch_size)
     elif "dscnn" in model_name or "kws" in model_name:
         from mlperf.reference.tiny.dscnn_kws import get_speech_commands_dataloaders
+
         return get_speech_commands_dataloaders(batch_size=batch_size)
     elif "anomaly" in model_name or "autoencoder" in model_name:
-        from mlperf.reference.tiny.anomaly_detection_ae import get_mnist_anomaly_dataloaders
+        from mlperf.reference.tiny.anomaly_detection_ae import (
+            get_mnist_anomaly_dataloaders,
+        )
+
         return get_mnist_anomaly_dataloaders(batch_size=batch_size)
     elif "wake" in model_name or "vww" in model_name:
         from mlperf.reference.tiny.wake_vision_vww import get_wake_vision_dataloaders
+
         return get_wake_vision_dataloaders(batch_size=batch_size)
     elif "codegen" in model_name:
         from mlperf.reference.agent_datasets import get_mbpp_dataloaders
+
         return get_mbpp_dataloaders(batch_size=batch_size)
     elif "react" in model_name:
         from mlperf.reference.agent_datasets import get_react_dataloaders
+
         return get_react_dataloaders(batch_size=batch_size)
     elif "rag" in model_name or "toolcall" in model_name:
         # RAG and ToolCall still use language data but with agent-specific framing
         from mlperf.reference.agent_datasets import get_react_dataloaders
+
         return get_react_dataloaders(batch_size=batch_size)
     elif "gnn" in model_name or "gcn" in model_name:
         from mlperf.reference.cloud.micro_gnn import get_gnn_dataloaders
+
         return get_gnn_dataloaders()  # Returns dict, not (train, val)
     elif "lstm" in model_name or "timeseries" in model_name:
         from mlperf.reference.cloud.micro_lstm import get_timeseries_dataloaders
+
         return get_timeseries_dataloaders(batch_size=batch_size)
     elif "bert" in model_name or "text-cls" in model_name:
         from mlperf.reference.cloud.micro_bert import get_bert_dataloaders
+
         return get_bert_dataloaders(batch_size=batch_size)
     elif "rl" in model_name or "cartpole" in model_name:
         from mlperf.reference.cloud.micro_rl import get_rl_dataloaders
+
         return get_rl_dataloaders()  # Returns dict with env + agent_factory
     else:
         # NanoGPT, Nano-MoE use TinyShakespeare
@@ -483,7 +530,7 @@ if __name__ == "__main__":
     # Language
     train_ld, val_ld = get_language_dataloaders(batch_size=4, seq_len=64)
     x, y = next(iter(train_ld))
-    print(f"📖 Language (TinyShakespeare):")
+    print("📖 Language (TinyShakespeare):")
     print(f"   Train samples: {len(train_ld.dataset)}")
     print(f"   Val samples:   {len(val_ld.dataset)}")
     print(f"   Batch shape:   x={x.shape}, y={y.shape}")
@@ -493,7 +540,7 @@ if __name__ == "__main__":
     # DLRM
     train_ld, val_ld = get_dlrm_dataloaders(batch_size=8)
     dense, sparse_idx, sparse_off, labels = next(iter(train_ld))
-    print(f"🛒 DLRM (MovieLens-100K):")
+    print("🛒 DLRM (MovieLens-100K):")
     print(f"   Train samples: {len(train_ld.dataset)}")
     print(f"   Dense shape:   {dense.shape}")
     print(f"   Labels shape:  {labels.shape}")
@@ -501,4 +548,6 @@ if __name__ == "__main__":
     print(f"   Positive rate: {labels.mean().item():.3f}\n")
 
     print("✅ All dataset pipelines verified.")
-    print("   (CIFAR-10/100 not tested here to avoid download — they auto-download on first use)")
+    print(
+        "   (CIFAR-10/100 not tested here to avoid download — they auto-download on first use)"
+    )

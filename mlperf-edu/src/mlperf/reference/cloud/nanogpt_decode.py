@@ -9,6 +9,7 @@ serving cost in production.
 Pair with nanogpt-prefill (same checkpoint) to observe the
 prefill-vs-decode bottleneck split.
 """
+
 import statistics
 import time
 import torch
@@ -16,10 +17,10 @@ import torch
 from .nanogpt_train import NanoGPTWhiteBox
 
 
-def _sync():
-    if torch.backends.mps.is_available():
+def _sync(device: torch.device):
+    if device.type == "mps":
         torch.mps.synchronize()
-    elif torch.cuda.is_available():
+    elif device.type == "cuda":
         torch.cuda.synchronize()
 
 
@@ -39,8 +40,13 @@ class NanoGPTDecode:
     derived from streaming the cached K,V each step.
     """
 
-    def __init__(self, model: NanoGPTWhiteBox,
-                 prefill_ctx: int = 1792, decode_steps: int = 64, batch_size: int = 1):
+    def __init__(
+        self,
+        model: NanoGPTWhiteBox,
+        prefill_ctx: int = 1792,
+        decode_steps: int = 64,
+        batch_size: int = 1,
+    ):
         max_ctx = prefill_ctx + decode_steps
         if max_ctx > model.config["max_seq_len"]:
             raise ValueError(
@@ -60,37 +66,45 @@ class NanoGPTDecode:
 
     def run(self, emit_sidecar: bool = True) -> dict:
         device = next(self.model.parameters()).device
-        prompt = torch.randint(0, self.vocab, (self.batch, self.prefill_ctx), device=device)
+        prompt = torch.randint(
+            0, self.vocab, (self.batch, self.prefill_ctx), device=device
+        )
         n_params = sum(p.numel() for p in self.model.parameters())
         cfg = self.model.config
         head_dim = cfg["n_embd"] // cfg["n_head"]
         # Per-step bytes during decode: full weight reread + full KV stream.
-        kv_bytes_per_step = 2 * cfg["n_layer"] * cfg["n_head"] * head_dim * self.prefill_ctx * 4
+        kv_bytes_per_step = (
+            2 * cfg["n_layer"] * cfg["n_head"] * head_dim * self.prefill_ctx * 4
+        )
         bytes_per_step = n_params * 4 + kv_bytes_per_step
         # Per-step FLOPs: one new token through all weights + attention over ctx.
-        flops_per_step = 2 * n_params + 4 * cfg["n_layer"] * cfg["n_head"] * head_dim * self.prefill_ctx
+        flops_per_step = (
+            2 * n_params
+            + 4 * cfg["n_layer"] * cfg["n_head"] * head_dim * self.prefill_ctx
+        )
 
         with torch.no_grad():
             # Warm the cache and get the last-step logits.
-            _sync()
+            _sync(device)
             t_prefill_start = time.perf_counter()
             logits, kv = self.model(prompt, use_kv_cache=True)
-            _sync()
+            _sync(device)
             prefill_time = time.perf_counter() - t_prefill_start
 
             # First decode step (TTFT measured here; the prefill is the
             # "prompt processing" phase, not part of TTFT in serving SLOs).
-            _sync()
+            _sync(device)
             t0 = time.perf_counter()
             next_tok = self._sample(logits[:, -1, :])
             logits, kv = self.model(next_tok, use_kv_cache=True, past_key_values=kv)
-            _sync()
+            _sync(device)
             ttft = time.perf_counter() - t0
 
             per_step = []
             n_loop = self.decode_steps - 1
             if emit_sidecar and n_loop > 0:
                 from mlperf.roofline import measure_roofline
+
                 with measure_roofline(
                     "nanogpt-decode",
                     analytic_flops=lambda: flops_per_step * n_loop,
@@ -99,23 +113,36 @@ class NanoGPTDecode:
                 ):
                     for _ in range(n_loop):
                         next_tok = self._sample(logits[:, -1, :])
-                        _sync()
+                        _sync(device)
                         t = time.perf_counter()
-                        logits, kv = self.model(next_tok, use_kv_cache=True, past_key_values=kv)
-                        _sync()
+                        logits, kv = self.model(
+                            next_tok, use_kv_cache=True, past_key_values=kv
+                        )
+                        _sync(device)
                         per_step.append(time.perf_counter() - t)
             else:
                 for _ in range(n_loop):
                     next_tok = self._sample(logits[:, -1, :])
-                    _sync()
+                    _sync(device)
                     t = time.perf_counter()
-                    logits, kv = self.model(next_tok, use_kv_cache=True, past_key_values=kv)
-                    _sync()
+                    logits, kv = self.model(
+                        next_tok, use_kv_cache=True, past_key_values=kv
+                    )
+                    _sync(device)
                     per_step.append(time.perf_counter() - t)
 
         kv_bytes = kv_cache_bytes(kv)
         median_itl = statistics.median(per_step) if per_step else float("nan")
-        p99_itl = sorted(per_step)[int(len(per_step) * 0.99) - 1] if per_step else float("nan")
+        p90_itl = (
+            sorted(per_step)[max(0, int(len(per_step) * 0.90 + 0.999999) - 1)]
+            if per_step
+            else float("nan")
+        )
+        p99_itl = (
+            sorted(per_step)[int(len(per_step) * 0.99) - 1]
+            if per_step
+            else float("nan")
+        )
         # Achieved bandwidth: each decode step re-reads the full KV cache
         # (the model also re-reads weights, but those usually live in LLC
         # after warmup). KV stream is the *additive* per-step cost.
@@ -129,18 +156,29 @@ class NanoGPTDecode:
             "prefill_warm_s": prefill_time,
             "ttft_s": ttft,
             "itl_median_s": median_itl,
+            "itl_p90_s": p90_itl,
             "itl_p99_s": p99_itl,
+            "itl_samples_s": per_step,
             "kv_cache_bytes": kv_bytes,
             "achieved_bw_gbps": achieved_bw_gbps,
             "output_tokens_per_sec": 1.0 / median_itl if per_step else 0.0,
         }
 
 
-def run_benchmark(checkpoint_path: str = None, scenario: str = "Offline",
-                   prefill_ctx: int = 1792, decode_steps: int = 64,
-                   batch_size: int = 1) -> dict:
-    device = ("cuda" if torch.cuda.is_available()
-              else "mps" if torch.backends.mps.is_available() else "cpu")
+def run_benchmark(
+    checkpoint_path: str = None,
+    scenario: str = "Offline",
+    prefill_ctx: int = 1792,
+    decode_steps: int = 64,
+    batch_size: int = 1,
+) -> dict:
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     model = NanoGPTWhiteBox().to(device)
     if checkpoint_path:
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))

@@ -1,33 +1,117 @@
-# MLPerf EDU: Design Philosophy
+# MLPerf EDU Design Philosophy
 
-## The SPEC for Machine Learning Pedagogy
-Machine learning systems are notoriously difficult to profile without deep C++ and CUDA expertise. While the original **MLPerf (MLCommons)** is the enterprise gold standard for benchmarking datacenters, it is heavily bound by vendor-specific optimized submodules (e.g., cuDNN, OneDNN, TensorRT). It is not designed to be easily analyzed inside a classroom.
+MLPerf EDU explores whether disciplined benchmark methodology can fit inside a
+course laptop and remain useful for research review. The project draws
+inspiration from SPEC-style reproducibility and MLPerf-style workload, quality,
+scenario, and artifact discipline. It is an independent preview, not an
+official MLCommons benchmark.
 
-**MLPerf EDU** is built on the philosophy of the venerable **SPEC CPU Benchmarks**. Its primary purpose is not to reward the absolute fastest hardware, but to provide a canonical vessel for pedagogical analysis, architectural profiling, and academic research.
+## Inspectable Where It Teaches
 
-### Core Tenets
+Many core teaching models are compact PyTorch implementations kept in this
+repository. Students can inspect the model, data loop, checkpoint path, and
+measurement code. The SLM suite deliberately uses pinned off-the-shelf Hugging
+Face models because model download, serving, quantization, batching, and task
+quality are the systems lessons there.
 
-#### 1. White-Box Algorithms
-Every benchmark is written in sub-300 lines of pure Python/PyTorch. We explicitly forbid opaque C++ hardware bindings for core algorithmic loops during training/inference references. If a student wants to see exactly how KV-Caching is bottlenecking a transformer, they can introspect the raw Python dictionary carrying the cache matrix.
+White-box does not mean that every dependency is pure Python or that every
+runner is fewer than a fixed number of lines. PyTorch, torchvision,
+Transformers, and platform kernels remain real dependencies. Reports disclose
+the backend and software environment instead of pretending those layers do not
+exist.
 
-#### 2. Canonical Provenance
-We do not invent random ML topologies. Every workload correlates explicitly with a foundational paper:
-- **Cloud/LLM:** GPT-2 (Radford et al., 2019)
-- **Edge/Vision:** ResNet (He et al., 2015)
-- **Mobile/Detection:** MobileNetV2 (Sandler et al., 2018)
-- **TinyML/KWS:** DS-CNN (Zhang et al., 2017)
+## Quality Before Speed
 
-#### 3. Surgical Telemetry over Anti-Cheating
-Traditional MLPerf goes to extraordinary lengths (cryptographic dataset hashing, strict PRNG enforcement) to prevent hyper-scalers from "cheating" the benchmark. Because we operate in an academic/pedagogical setting, we trade draconian anti-cheating measures for **Introspection Hooking**. Our `Referee` captures Roofline Arithmetic Intensity (FLOPs/Byte), Dataloader I/O blocking percentages, and localized energy (Joules) without breaking the execution flow.
+A fast broken model is not a baseline. Score-bearing candidates must pass a
+real-data task metric. Performance-bearing candidates must complete meaningful
+work and preserve checkpoint or model quality. Synthetic and micro-sharded
+paths remain useful for setup and systems instruction, but they are labeled
+systems-only.
 
-#### 4. The Full Provenance Loop
-The benchmark integrates Training explicitly with Inference. A student trains an architecture until they hit the YAML-defined generic target accuracy. Upon success, the system emits a `.provd` (Provenance Artifact) capturing the frozen `state_dict` and its SHA-256 hash. The Inference lab enforces the ingestion of this specific `.provd` artifact, closing the pedagogical loop.
+The current quality boundary is concrete. Five training candidates use
+five-seed target protocols. NanoGPT inference inherits quality from a hashed
+training checkpoint. The SmolLM2 baseline uses a pinned revision and a bundled
+continuation-perplexity fixture. The dynamic-int8 SLM path stays systems-only
+because its current calibration fails quality parity.
 
-#### 5. Canonical Hydration
-Acknowledging that students lack datacenter compute to pre-train LLMs locally, the framework introduces the **Hydration Layer**. Using `mlperf hydrate`, the framework autonomously downloads canonical industry weights (e.g. HuggingFace GPT-2), hashes them, and packages them securely into a `.provd` artifact. This ensures students always interact with mathematically validated tensors during Inference, maintaining strict academic provenance.
+## Reports Are the Interface
 
-#### 6. The Systems Under Test (SUT) Plugin Protocol
-MLPerf EDU enforces a rigid separation between the LoadGen Referee and the SUT Implementation. Students never modify the core framework. To submit a custom CUDA optimization, optimized Dataloader, or fused C++ Attention mechanism, they inherit the `SUT_Interface` in an isolated `.py` file. The CLI dynamically intercepts and evaluates their plugin (`--sut student_hw.py`), emitting reproducible MLCommons-style JSON dumps tracking their optimization gains against the host's hardware boundaries.
+Console output is transient. Every canonical run writes structured JSON, a
+human-readable HTML view, a CSV view, and a provenance manifest. The report
+contains the workload identity, profile, data mode, seed, metrics, target
+status, hardware and software fingerprints, asset dossiers, and artifact
+paths.
 
----
-*MLPerf EDU enables researchers to run deep architectural experiments on arbitrary local hardware with zero setup, generating publication-ready telemetry out-of-the-box.*
+Students, instructors, and artifact reviewers should reason from these files.
+Tutorial 01 follows this rule by invoking the public command, reading the JSON,
+and verifying the paired manifest.
+
+## Provenance Without Overclaiming
+
+The `.provd.json` manifest binds available source, dataset, weights, seed,
+hardware, optional sidecar, and exact report evidence with SHA-256. Its
+integrity digest is unauthenticated. It detects changes but does not prove who
+produced the artifact.
+
+Portable packages use relative paths, index every included file by digest and
+byte size, and verify again after clean extraction. These checks make review
+easier. They do not replace independent execution, measurement governance, or
+rights review.
+
+## Training and Inference Stay Connected
+
+Checkpoint-backed NanoGPT prefill and decode require the training checkpoint in
+the selected output path or through an explicit environment variable. Reports
+record the checkpoint digest and quality dependency. This creates an auditable
+training-to-serving chain rather than timing random weights.
+
+External-model serving uses a different provenance shape. The registry pins a
+model revision, and the report records the model dossier, fixture digest,
+quality result, and timing protocol.
+
+## Measurement Must Be Repeatable
+
+Candidate inference rows separate warmup from measured work, synchronize the
+active device, retain a defined sample count, and report median, p90, and p99
+latencies. Score-bearing targets run through five fresh processes with explicit
+seeds and create-once evidence packets.
+
+Optional power data is coarse platform telemetry. Optional roofline evidence
+must come from an existing, digest-checked sidecar before it can support a
+claim. Missing measurements are labeled `unmeasured` rather than inferred from
+architecture names.
+
+## The Harness Is Fixed for Canonical Runs
+
+Canonical results use registered runners. The repository contains a
+`SUT_Interface` and Lab 2 uses it to compare naive and KV-cache decode with
+token parity. The product CLI does not currently accept an arbitrary `--sut`
+plugin file. A general plugin-loading protocol is roadmap work and must not be
+described as shipped.
+
+Likewise, the implemented asset command is `mlperf fetch`. There is no
+`mlperf hydrate` command. Fetching prepares datasets or pinned model assets and
+keeps network work outside the measured run where supported.
+
+## Laptop-Scale Is an Operational Constraint
+
+The core smoke paths and all lab smokes run on CPU without a network after
+dependencies are installed. Candidate `max` runs may download datasets or the
+pinned 135M-parameter SLM and can take materially longer. The release process
+therefore records measured runtimes instead of promising a universal time
+budget.
+
+Laptop-scale means no cluster is required for the standard path. It does not
+mean zero installation, zero downloads, identical runtime on every notebook,
+or calibrated energy data on unsupported hardware.
+
+## Governance Is Part of Correctness
+
+The repository separates implementation, validation evidence, and external
+approval. A green local run cannot close a dataset-rights question. A complete
+artifact cannot grant MLCommons endorsement. A registry target cannot become a
+canonical baseline without retained multi-seed evidence and review.
+
+The design succeeds when a student can understand the measured system and a
+reviewer can reproduce, challenge, and reject a result using the same visible
+contract.

@@ -1,141 +1,183 @@
-# MLPerf EDU — Getting Started Guide
+# MLPerf EDU Lab Guide
+
+The three labs in this directory are complete classroom experiments with a
+shared execution contract. Each accepts `--smoke`, runs real model code on CPU
+without network access, performs a functional validity check, and returns a
+nonzero exit status on failure.
+
+Lab output is labeled as a classroom measurement. It is not a canonical MLPerf
+EDU submission and should not be used as public baseline evidence. The
+registered `mlperf run` workflows produce the benchmark reports and provenance
+artifacts used for review.
 
 ## Setup
 
-```bash
-# Clone the repository
-git clone https://github.com/harvard-edge/mlperf-edu.git
-cd mlperf-edu
+Clone the MLSysBook repository and install MLPerf EDU from its project
+directory.
 
-# Create virtual environment and install
+```bash
+git clone https://github.com/harvard-edge/cs249r_book.git
+cd cs249r_book/mlperf-edu
 python3 -m venv .venv
 source .venv/bin/activate
-pip install -e .
+python -m pip install -e .
 ```
 
-## Quick Start: Your First Benchmark
-
-### 1. Train NanoGPT (5 minutes)
+Check the installation and inspect the registry before running a workload.
 
 ```bash
-mlperf run cloud --task nanogpt-12m
+mlperf doctor
+mlperf list workloads
+mlperf show resnet18-train
 ```
 
-This trains an 85.9M-parameter GPT-2 variant on TinyShakespeare. You'll see:
-- Training loss converging from ~4.3 to ~2.25
-- Inference latency measured at the end
-- A JSON submission file saved to `submissions/`
+## Canonical CLI Workflow
 
-### 2. Generate a Report
+The `min` profile is a quick representative execution path. It is useful for
+checking installation and artifact plumbing, but a passing `min` run does not
+automatically establish the quality of a `max` baseline.
 
 ```bash
-mlperf report --submission submissions/<your_file>.json
+mlperf run \
+  --workload micro-lstm-train \
+  --profile min \
+  --output-dir submissions/first-run
 ```
 
-Open the generated HTML report in your browser. It shows:
-- Metrics summary (loss, latency, throughput)
-- Hardware fingerprint (for auditability)
-- Convergence behavior
-- SHA-256 hashes (anti-tampering)
-
-### 3. Run All Workloads
+Inspect the generated report and verify the paired provenance manifest.
 
 ```bash
-mlperf train --all          # Train all 16 workloads
-mlperf train --division cloud   # Just the cloud suite
+mlperf report submissions/first-run/micro-lstm-train_min_report.json
+mlperf verify submissions/first-run/micro-lstm-train_min.provd.json
 ```
 
-## Lab Structure
-
-### Lab 1: Training Optimization (Closed Division)
-
-**Goal**: Reduce ResNet-18 training time by 20% without dropping below the quality target.
+Discover workload and variant identifiers from the registry instead of copying
+a static workload list from this guide.
 
 ```bash
-# Baseline run
-mlperf run edge --task resnet18
-
-# Your optimized run
-python examples/lab1_optimization.py
+mlperf list workloads
+mlperf list variants --workload nanogpt-inference
+mlperf info --workload nanogpt-inference --variant decode
 ```
 
-**What you'll learn**:
-- Batch size vs. convergence tradeoffs
-- Data loading bottlenecks (num_workers)
-- Learning rate scheduling
+## Fast Preflight
 
-### Lab 2: Inference Architecture (Open Division)
-
-**Goal**: Build a System Under Test (SUT) that handles the load generator's query stream.
+Run all three lab entry points before a class or documentation release.
 
 ```bash
-python examples/lab2_inference_sut.py
+python examples/lab1_optimization.py --smoke
+python examples/lab2_inference_sut.py --smoke
+python examples/lab3_arch_comparison.py --smoke
 ```
 
-**What you'll learn**:
-- Latency percentiles (p50/p90/p99)
-- Throughput vs. latency tradeoffs
-- Batching strategies
+The smoke paths use deterministic synthetic inputs. Their accuracy and loss
+values are functional checks, not quality targets.
 
-### Lab 3: Architecture Comparison
+## Lab 1. Training-Loop Optimization
 
-**Goal**: Compare dense (NanoGPT) vs. sparse (Nano-MoE) architectures.
+Lab 1 trains the repository's complete CIFAR-style ResNet-18 architecture on
+the registered Fashion-MNIST dataset. Images are resized to 32 by 32 and
+expanded to three channels, matching the canonical workload preprocessing. The
+batch size, worker count, augmentation, optimizer, and learning-rate schedule
+settings are wired to the executed code. A full run may download Fashion-MNIST
+on the first invocation.
+
+Start with the baseline preset and save the classroom result.
 
 ```bash
-python examples/lab3_arch_comparison.py
+python examples/lab1_optimization.py \
+  --preset baseline \
+  --epochs 1 \
+  --max-train-batches 100 \
+  --max-validation-batches 50 \
+  --output submissions/lab1-baseline.json
 ```
 
-**What you'll learn**:
-- Expert specialization in MoE
-- Routing overhead vs. quality improvement
-- Parameter efficiency
-
-## Declarative Interface (YAML)
-
-```yaml
-# experiment.yaml
-workload: nanogpt-12m      # S.Model
-dataset: tinyshakespeare    # S.Data
-target_quality: 2.3         # S.Constraints
-epochs: 25                  # S.Constraints
-```
+Run the optimized preset with the same seed and limits.
 
 ```bash
-mlperf config experiment.yaml
+python examples/lab1_optimization.py \
+  --preset optimized \
+  --epochs 1 \
+  --max-train-batches 100 \
+  --max-validation-batches 50 \
+  --output submissions/lab1-optimized.json
 ```
 
-## Available Workloads
+Compare throughput and validation accuracy together. A faster run is not an
+improvement if the model's quality falls outside the assignment's allowed
+range. Instructors may set a course-specific check with `--target-accuracy`,
+but the script deliberately does not invent a universal target for every
+laptop and run budget.
 
-| Division | Workload | Time | Key Concept |
-|----------|----------|------|-------------|
-| Cloud | NanoGPT | 89s | O(N²) attention scaling |
-| Cloud | Nano-MoE | 158s | Conditional compute |
-| Cloud | DLRM | 5s | Sparse vs. dense memory |
-| Cloud | Diffusion | 41s | Denoising step count |
-| Cloud | GCN | 2s | Message passing |
-| Cloud | BERT | 45s | Bidirectional attention |
-| Cloud | LSTM | 20s | Sequential bottleneck |
-| Cloud | RL | 1s | Policy gradient variance |
-| Edge | ResNet-18 | 64s | Skip connections + batch norm |
-| Edge | MobileNetV2 | 60s | Depthwise-sep. convolutions |
-| Tiny | DS-CNN | 51s | Spectrogram features |
-| Tiny | Anomaly AE | 6s | Reconstruction error |
-| Tiny | VWW | 10s | Sub-10K model compression |
-
-## Submission & Grading
-
-After each run, the harness produces a JSON submission:
+The canonical registered workload is separate.
 
 ```bash
-# Verify your submission
-mlperf verify --submission submissions/your_run.json
-
-# Generate a grading artifact (for TAs)
-mlperf submit
+mlperf run --workload resnet18-train --profile min
 ```
 
-## Need Help?
+## Lab 2. KV-Cache Inference
 
-- `mlperf about` — Architecture overview
-- `mlperf list` — All available workloads
-- `mlperf --help` — Full CLI reference
+Lab 2 implements `mlperf.sut.SUT_Interface` and measures two real autoregressive
+decode paths. The baseline recomputes the full sequence at every step. The
+optimized path reuses attention keys and values. The comparison passes only if
+both paths produce identical tokens for every measured query.
+
+```bash
+python examples/lab2_inference_sut.py \
+  --mode compare \
+  --queries 3 \
+  --prompt-length 32 \
+  --generated-tokens 8 \
+  --repeats 3 \
+  --output submissions/lab2-kv-cache.json
+```
+
+The default lab-scale model uses deterministic random initialization and is
+appropriate for latency and token-parity instruction. Pass a compatible
+checkpoint with `--checkpoint` when the assignment also needs trained-model
+behavior. Neither mode reports placeholder accuracy.
+
+The current product CLI runs registered SUTs. It does not accept an arbitrary
+`--sut` plugin path. Use the built-in canonical decode workload as follows.
+
+```bash
+mlperf run \
+  --workload nanogpt-inference \
+  --variant decode \
+  --profile min
+```
+
+## Lab 3. Dense and Sparse Architectures
+
+Lab 3 trains NanoGPT and Nano-MoE on the same fixed TinyShakespeare batches.
+The `--top-k` value directly changes the sparse router. The result reports total
+parameters, active parameters per token, loss, and measured token throughput.
+
+```bash
+python examples/lab3_arch_comparison.py \
+  --epochs 1 \
+  --max-batches 20 \
+  --top-k 2 \
+  --output submissions/lab3-dense-sparse.json
+```
+
+A bounded classroom run does not prove that one architecture converges better
+than the other. Use multiple seeds and a declared quality protocol before
+drawing a model-quality conclusion. The registered workload commands are:
+
+```bash
+mlperf run --workload nanogpt-train --profile min
+mlperf run --workload nano-moe-train --profile min
+```
+
+## Result Interpretation
+
+Every lab JSON includes its scope, seed, device, effective configuration,
+measured metrics, and functional check. The field `canonical_result` is always
+`false`. Canonical workload reports have a different schema and are paired with
+`.provd.json` provenance manifests.
+
+Useful CLI discovery commands include `mlperf --help`, `mlperf list workloads`,
+`mlperf list variants`, `mlperf show WORKLOAD`, and `mlperf info --workload
+WORKLOAD`.

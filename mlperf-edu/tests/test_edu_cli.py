@@ -1,14 +1,21 @@
 import csv
+import hashlib
 import json
 import os
+import shutil
 import subprocess
 import sys
 import zipfile
 from argparse import Namespace
+from pathlib import Path
 
 import torch
 
-from mlperf.edu_cli import default_collection_for, enrich_report_for_display
+from mlperf.edu_cli import (
+    default_collection_for,
+    enrich_report_for_display,
+    package_dataset_policy_issue,
+)
 from mlperf.manifest import build_provd
 from mlperf.registry import load_registry
 
@@ -93,7 +100,9 @@ def test_doctor_json_reports_selected_workloads():
     assert checks["data cache"]["status"] == "ok"
     assert checks["model cache"]["status"] == "ok"
 
-    suite_result = run_cli("doctor", "--suite", "slm", "--profile", "pro", "--format", "json")
+    suite_result = run_cli(
+        "doctor", "--suite", "slm", "--profile", "pro", "--format", "json"
+    )
     assert suite_result.returncode == 0, suite_result.stdout + suite_result.stderr
     suite_data = json.loads(suite_result.stdout)
     assert suite_data["suite"] == "slm"
@@ -104,7 +113,9 @@ def test_doctor_json_reports_selected_workloads():
         "slm-long-context-decode",
     }
 
-    family_result = run_cli("doctor", "--workload", "smollm2-chat-inference", "--format", "json")
+    family_result = run_cli(
+        "doctor", "--workload", "smollm2-chat-inference", "--format", "json"
+    )
     assert family_result.returncode == 0, family_result.stdout + family_result.stderr
     family_data = json.loads(family_result.stdout)
     assert {workload["id"] for workload in family_data["selected_workloads"]} == {
@@ -125,8 +136,13 @@ def test_doctor_json_reports_selected_workloads():
     )
     assert variant_result.returncode == 0, variant_result.stdout + variant_result.stderr
     variant_data = json.loads(variant_result.stdout)
-    assert [workload["id"] for workload in variant_data["selected_workloads"]] == ["slm-quantized-decode"]
-    assert variant_data["selected_workloads"][0]["run_selector"] == "smollm2-chat-inference --variant quantized-int8"
+    assert [workload["id"] for workload in variant_data["selected_workloads"]] == [
+        "slm-quantized-decode"
+    ]
+    assert (
+        variant_data["selected_workloads"][0]["run_selector"]
+        == "smollm2-chat-inference --variant quantized-int8"
+    )
 
 
 def test_doctor_json_marks_bad_selection_as_failure():
@@ -182,7 +198,10 @@ def test_list_discovery_subjects():
 
     profiles_json = run_cli("list", "profiles", "--format", "json")
     assert profiles_json.returncode == 0, profiles_json.stdout + profiles_json.stderr
-    profile_counts = {row["profile"]: row["workloads"] for row in json.loads(profiles_json.stdout)["profiles"]}
+    profile_counts = {
+        row["profile"]: row["workloads"]
+        for row in json.loads(profiles_json.stdout)["profiles"]
+    }
     assert profile_counts == {"min": 12, "max": 30, "pro": 12}
 
 
@@ -191,7 +210,9 @@ def test_info_profile_shows_default_selection():
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Profile: min" in result.stdout
     assert "Selected 12 workload(s) for profile min (default)." in result.stdout
-    assert "Suite coverage: agent=1, distributed=1, graph=1, language=3" in result.stdout
+    assert (
+        "Suite coverage: agent=1, distributed=1, graph=1, language=3" in result.stdout
+    )
     assert "List details: mlperf list --profile min" in result.stdout
 
 
@@ -247,7 +268,11 @@ def test_list_profile_filters_default_selection():
         "resnet18-train",
         "slm-decode",
     }
-    prefill = next(workload for workload in min_data["workloads"] if workload["id"] == "nanogpt-prefill")
+    prefill = next(
+        workload
+        for workload in min_data["workloads"]
+        if workload["id"] == "nanogpt-prefill"
+    )
     assert "prefill_tokens_per_sec" in prefill["functional_check"]
 
     max_result = run_cli("list", "--profile", "max", "--format", "json")
@@ -268,7 +293,9 @@ def test_list_profile_filters_default_selection():
 
     pro_result = run_cli("list", "--profile", "pro", "--format", "json")
     assert pro_result.returncode == 0, pro_result.stdout + pro_result.stderr
-    pro_ids = {workload["id"] for workload in json.loads(pro_result.stdout)["workloads"]}
+    pro_ids = {
+        workload["id"] for workload in json.loads(pro_result.stdout)["workloads"]
+    }
     assert "micro-bert-train" in pro_ids
     assert "slm-batched-decode" in pro_ids
     assert "slm-long-context-decode" in pro_ids
@@ -289,7 +316,9 @@ def test_list_workload_filters_canonical_variants():
         "nanogpt-decode-spec",
         "nanogpt-prefill",
     }
-    assert {workload["dataset"] for workload in data["workloads"]} == {"prompt-suite-local"}
+    assert {workload["dataset"] for workload in data["workloads"]} == {
+        "prompt-suite-local"
+    }
 
     prefill_result = run_cli(
         "list",
@@ -303,11 +332,23 @@ def test_list_workload_filters_canonical_variants():
     assert prefill_result.returncode == 0, prefill_result.stdout + prefill_result.stderr
     prefill_data = json.loads(prefill_result.stdout)
     assert prefill_data["variant"] == "prefill"
-    assert [workload["id"] for workload in prefill_data["workloads"]] == ["nanogpt-prefill"]
+    assert [workload["id"] for workload in prefill_data["workloads"]] == [
+        "nanogpt-prefill"
+    ]
 
-    min_result = run_cli("list", "--workload", "nanogpt-inference", "--profile", "min", "--format", "json")
+    min_result = run_cli(
+        "list",
+        "--workload",
+        "nanogpt-inference",
+        "--profile",
+        "min",
+        "--format",
+        "json",
+    )
     assert min_result.returncode == 0, min_result.stdout + min_result.stderr
-    min_ids = {workload["id"] for workload in json.loads(min_result.stdout)["workloads"]}
+    min_ids = {
+        workload["id"] for workload in json.loads(min_result.stdout)["workloads"]
+    }
     assert min_ids == {
         "nanogpt-decode",
         "nanogpt-decode-fp16-b16",
@@ -316,9 +357,16 @@ def test_list_workload_filters_canonical_variants():
         "nanogpt-prefill",
     }
 
-    suite_profile_result = run_cli("list", "matrix", "--suite", "language", "--profile", "min", "--format", "json")
-    assert suite_profile_result.returncode == 0, suite_profile_result.stdout + suite_profile_result.stderr
-    suite_profile_ids = {workload["workload"] for workload in json.loads(suite_profile_result.stdout)["workloads"]}
+    suite_profile_result = run_cli(
+        "list", "matrix", "--suite", "language", "--profile", "min", "--format", "json"
+    )
+    assert suite_profile_result.returncode == 0, (
+        suite_profile_result.stdout + suite_profile_result.stderr
+    )
+    suite_profile_ids = {
+        workload["workload"]
+        for workload in json.loads(suite_profile_result.stdout)["workloads"]
+    }
     assert suite_profile_ids == {
         "micro-bert-train",
         "nano-lora-finetune",
@@ -337,13 +385,19 @@ def test_list_matrix_summarizes_roles_and_profiles():
     assert max_result.returncode == 0, max_result.stdout + max_result.stderr
     max_data = json.loads(max_result.stdout)
     assert max_data["schema"] == "mlperf-edu-workload-matrix/0.1"
-    slm = next(workload for workload in max_data["workloads"] if workload["workload"] == "slm-quantized-decode")
+    slm = next(
+        workload
+        for workload in max_data["workloads"]
+        if workload["workload"] == "slm-quantized-decode"
+    )
     assert slm["run_selector"] == "smollm2-chat-inference --variant quantized-int8"
     assert slm["role"] == "optimization"
     assert slm["default_profiles"] == "max, pro"
     assert slm["quality"] == "generated_tokens 8"
 
-    slm_pro_result = run_cli("list", "matrix", "--suite", "slm", "--profile", "pro", "--format", "json")
+    slm_pro_result = run_cli(
+        "list", "matrix", "--suite", "slm", "--profile", "pro", "--format", "json"
+    )
     assert slm_pro_result.returncode == 0, slm_pro_result.stdout + slm_pro_result.stderr
     slm_pro_data = json.loads(slm_pro_result.stdout)
     assert {workload["workload"] for workload in slm_pro_data["workloads"]} == {
@@ -352,7 +406,10 @@ def test_list_matrix_summarizes_roles_and_profiles():
         "slm-batched-decode",
         "slm-long-context-decode",
     }
-    slm_profiles = {workload["workload"]: workload["default_profiles"] for workload in slm_pro_data["workloads"]}
+    slm_profiles = {
+        workload["workload"]: workload["default_profiles"]
+        for workload in slm_pro_data["workloads"]
+    }
     assert slm_profiles == {
         "slm-decode": "min, max, pro",
         "slm-quantized-decode": "max, pro",
@@ -363,13 +420,21 @@ def test_list_matrix_summarizes_roles_and_profiles():
     pro_result = run_cli("list", "matrix", "--profile", "pro", "--format", "json")
     assert pro_result.returncode == 0, pro_result.stdout + pro_result.stderr
     pro_data = json.loads(pro_result.stdout)
-    speculative = next(workload for workload in pro_data["workloads"] if workload["workload"] == "nanogpt-decode-spec")
+    speculative = next(
+        workload
+        for workload in pro_data["workloads"]
+        if workload["workload"] == "nanogpt-decode-spec"
+    )
     assert speculative["run_selector"] == "nanogpt-inference --variant speculative"
     assert speculative["role"] == "test-time-compute"
     assert speculative["default_profiles"] == "max, pro"
 
-    nanogpt_inference_result = run_cli("list", "matrix", "--workload", "nanogpt-inference", "--format", "json")
-    assert nanogpt_inference_result.returncode == 0, nanogpt_inference_result.stdout + nanogpt_inference_result.stderr
+    nanogpt_inference_result = run_cli(
+        "list", "matrix", "--workload", "nanogpt-inference", "--format", "json"
+    )
+    assert nanogpt_inference_result.returncode == 0, (
+        nanogpt_inference_result.stdout + nanogpt_inference_result.stderr
+    )
     nanogpt_inference = json.loads(nanogpt_inference_result.stdout)
     assert nanogpt_inference["workload"] == "nanogpt-inference"
     assert {workload["variant"] for workload in nanogpt_inference["workloads"]} == {
@@ -379,7 +444,9 @@ def test_list_matrix_summarizes_roles_and_profiles():
         "prefill",
         "speculative",
     }
-    assert {workload["dataset"] for workload in nanogpt_inference["workloads"]} == {"prompt-suite-local"}
+    assert {workload["dataset"] for workload in nanogpt_inference["workloads"]} == {
+        "prompt-suite-local"
+    }
 
     nanogpt_prefill_result = run_cli(
         "list",
@@ -391,15 +458,23 @@ def test_list_matrix_summarizes_roles_and_profiles():
         "--format",
         "json",
     )
-    assert nanogpt_prefill_result.returncode == 0, nanogpt_prefill_result.stdout + nanogpt_prefill_result.stderr
+    assert nanogpt_prefill_result.returncode == 0, (
+        nanogpt_prefill_result.stdout + nanogpt_prefill_result.stderr
+    )
     nanogpt_prefill = json.loads(nanogpt_prefill_result.stdout)
-    assert [workload["workload"] for workload in nanogpt_prefill["workloads"]] == ["nanogpt-prefill"]
+    assert [workload["workload"] for workload in nanogpt_prefill["workloads"]] == [
+        "nanogpt-prefill"
+    ]
     assert nanogpt_prefill["workloads"][0]["dataset"] == "prompt-suite-local"
 
     all_result = run_cli("list", "matrix", "--format", "json")
     assert all_result.returncode == 0, all_result.stdout + all_result.stderr
     all_data = json.loads(all_result.stdout)
-    assert [workload["workload"] for workload in all_data["workloads"] if not workload["quality"]] == []
+    assert [
+        workload["workload"]
+        for workload in all_data["workloads"]
+        if not workload["quality"]
+    ] == []
 
     table_result = run_cli("list", "matrix", "--suite", "slm")
     assert table_result.returncode == 0, table_result.stdout + table_result.stderr
@@ -408,11 +483,36 @@ def test_list_matrix_summarizes_roles_and_profiles():
 
 
 def test_default_collection_for_profile_defaults():
-    assert default_collection_for(Namespace(collection=None, suite=None, workload=None, profile="min")) == "starter"
-    assert default_collection_for(Namespace(collection=None, suite=None, workload=None, profile="max")) == "all"
-    assert default_collection_for(Namespace(collection=None, suite=None, workload=None, profile="pro")) == "research"
-    assert default_collection_for(Namespace(collection=None, suite="vision", workload=None, profile="max")) is None
-    assert default_collection_for(Namespace(collection="all", suite=None, workload=None, profile="min")) == "all"
+    assert (
+        default_collection_for(
+            Namespace(collection=None, suite=None, workload=None, profile="min")
+        )
+        == "starter"
+    )
+    assert (
+        default_collection_for(
+            Namespace(collection=None, suite=None, workload=None, profile="max")
+        )
+        == "all"
+    )
+    assert (
+        default_collection_for(
+            Namespace(collection=None, suite=None, workload=None, profile="pro")
+        )
+        == "research"
+    )
+    assert (
+        default_collection_for(
+            Namespace(collection=None, suite="vision", workload=None, profile="max")
+        )
+        is None
+    )
+    assert (
+        default_collection_for(
+            Namespace(collection="all", suite=None, workload=None, profile="min")
+        )
+        == "all"
+    )
 
 
 def test_report_enrichment_defaults_quality_required_from_public_contract():
@@ -425,7 +525,10 @@ def test_report_enrichment_defaults_quality_required_from_public_contract():
     assert report["quality"]["reference_protocol"]["seeds"] == [0, 1, 2, 3, 4]
     assert "gated" not in report["quality"]
 
-    explicit_not_required = {"workload": "nanogpt-train", "quality": {"quality_required": False}}
+    explicit_not_required = {
+        "workload": "nanogpt-train",
+        "quality": {"quality_required": False},
+    }
     enrich_report_for_display(explicit_not_required, workloads)
     assert explicit_not_required["quality"]["quality_required"] is False
     assert "gated" not in explicit_not_required["quality"]
@@ -450,7 +553,9 @@ def test_info_workload_alias():
 
 
 def test_info_workload_variant_shows_resolved_slice():
-    result = run_cli("info", "--workload", "smollm2-chat-inference", "--variant", "quantized-int8")
+    result = run_cli(
+        "info", "--workload", "smollm2-chat-inference", "--variant", "quantized-int8"
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Workload: slm-quantized-decode" in result.stdout
     assert "performance-bearing" in result.stdout
@@ -523,14 +628,23 @@ def test_cache_list_and_verify_known_workload(tmp_path):
 
 
 def test_cache_accepts_canonical_variant():
-    result = run_cli("cache", "list", "--workload", "smollm2-chat-inference", "--variant", "quantized-int8")
+    result = run_cli(
+        "cache",
+        "list",
+        "--workload",
+        "smollm2-chat-inference",
+        "--variant",
+        "quantized-int8",
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "slm-quantized-decode" in result.stdout
     assert "model" in result.stdout
 
 
 def test_cache_canonical_workload_lists_all_variant_assets():
-    result = run_cli("cache", "list", "--workload", "smollm2-chat-inference", "--format", "json")
+    result = run_cli(
+        "cache", "list", "--workload", "smollm2-chat-inference", "--format", "json"
+    )
     assert result.returncode == 0, result.stdout + result.stderr
     payload = json.loads(result.stdout)
     assert payload["selection"]["workload"] == "smollm2-chat-inference"
@@ -575,8 +689,8 @@ def test_audit_summary_passes():
     assert "MLPerf EDU Public Contract Audit" in result.stdout
     assert "public contract audit: passed" in result.stdout
     assert "score-bearing=5" in result.stdout
-    assert "performance-bearing=4" in result.stdout
-    assert "systems-only=21" in result.stdout
+    assert "performance-bearing=3" in result.stdout
+    assert "systems-only=22" in result.stdout
     assert "public warnings: 0" in result.stdout
 
 
@@ -589,7 +703,7 @@ def test_audit_json_passes_and_filters_by_suite():
     assert data["status"] == "passed"
     assert data["policy"] == "development"
     assert data["suite"] == "slm"
-    assert data["counts"] == {"performance-bearing": 2, "systems-only": 2}
+    assert data["counts"] == {"performance-bearing": 1, "systems-only": 3}
     assert data["blocker_count"] == 0
     assert data["warning_count"] == 0
     assert data["issues"] == []
@@ -597,7 +711,9 @@ def test_audit_json_passes_and_filters_by_suite():
     assert len(data["workloads"]) == 4
     assert all(not workload["issues"] for workload in data["workloads"])
     assert all(not workload["warnings"] for workload in data["workloads"])
-    slm = next(workload for workload in data["workloads"] if workload["id"] == "slm-decode")
+    slm = next(
+        workload for workload in data["workloads"] if workload["id"] == "slm-decode"
+    )
     assert slm["canonical_workload"] == "smollm2-chat-inference"
     assert slm["variant"] == "baseline"
     assert slm["run_selector"] == "smollm2-chat-inference --variant baseline"
@@ -634,17 +750,29 @@ def test_audit_json_suppresses_public_asset_warnings_by_default():
     assert data["policy"] == "development"
     assert data["warning_count"] == 0
     assert data["warnings"] == []
-    nanogpt = next(workload for workload in data["workloads"] if workload["id"] == "nanogpt-train")
+    nanogpt = next(
+        workload for workload in data["workloads"] if workload["id"] == "nanogpt-train"
+    )
     assert not nanogpt["issues"]
     assert nanogpt["warnings"] == []
-    dlrm = next(workload for workload in data["workloads"] if workload["id"] == "micro-dlrm-train")
+    dlrm = next(
+        workload
+        for workload in data["workloads"]
+        if workload["id"] == "micro-dlrm-train"
+    )
     assert dlrm["warnings"] == []
-    anomaly = next(workload for workload in data["workloads"] if workload["id"] == "anomaly-ae-train")
+    anomaly = next(
+        workload
+        for workload in data["workloads"]
+        if workload["id"] == "anomaly-ae-train"
+    )
     assert anomaly["warnings"] == []
 
 
 def test_audit_public_policy_fails_on_unresolved_warnings():
-    result = run_cli("audit", "--status", "score-bearing", "--policy", "public", "--format", "json")
+    result = run_cli(
+        "audit", "--status", "score-bearing", "--policy", "public", "--format", "json"
+    )
     assert result.returncode == 1, result.stdout + result.stderr
     data = json.loads(result.stdout)
     assert data["status"] == "failed"
@@ -656,11 +784,13 @@ def test_audit_public_policy_fails_on_unresolved_warnings():
 
 
 def test_audit_filters_by_canonical_workload_and_variant():
-    canonical = run_cli("audit", "--workload", "smollm2-chat-inference", "--format", "json")
+    canonical = run_cli(
+        "audit", "--workload", "smollm2-chat-inference", "--format", "json"
+    )
     assert canonical.returncode == 0, canonical.stdout + canonical.stderr
     canonical_data = json.loads(canonical.stdout)
     assert canonical_data["workload"] == "smollm2-chat-inference"
-    assert canonical_data["counts"] == {"performance-bearing": 2, "systems-only": 2}
+    assert canonical_data["counts"] == {"performance-bearing": 1, "systems-only": 3}
     assert {workload["id"] for workload in canonical_data["workloads"]} == {
         "slm-decode",
         "slm-quantized-decode",
@@ -686,12 +816,20 @@ def test_audit_filters_by_canonical_workload_and_variant():
     assert variant.returncode == 0, variant.stdout + variant.stderr
     variant_data = json.loads(variant.stdout)
     assert variant_data["variant"] == "quantized-int8"
-    assert [workload["id"] for workload in variant_data["workloads"]] == ["slm-quantized-decode"]
-    assert variant_data["workloads"][0]["run_selector"] == "smollm2-chat-inference --variant quantized-int8"
+    assert [workload["id"] for workload in variant_data["workloads"]] == [
+        "slm-quantized-decode"
+    ]
+    assert variant_data["workloads"][0]["public_status"] == "systems-only"
+    assert (
+        variant_data["workloads"][0]["run_selector"]
+        == "smollm2-chat-inference --variant quantized-int8"
+    )
 
 
 def test_fetch_workload_dry_run():
-    result = run_cli("fetch", "--workload", "nanogpt-train", "--profile", "min", "--dry-run")
+    result = run_cli(
+        "fetch", "--workload", "nanogpt-train", "--profile", "min", "--dry-run"
+    )
     assert result.returncode == 0, result.stderr
     assert "Selected 1 workload(s) for profile min (nanogpt-train)." in result.stdout
     assert "Would fetch 1 workload" in result.stdout
@@ -761,7 +899,10 @@ def test_fetch_canonical_workload_expands_variants_without_running_them():
         "--dry-run",
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Selected 4 workload(s) for profile max (smollm2-chat-inference)." in result.stdout
+    assert (
+        "Selected 4 workload(s) for profile max (smollm2-chat-inference)."
+        in result.stdout
+    )
     assert "Would fetch 4 workload" in result.stdout
     assert "slm-decode" in result.stdout
     assert "slm-quantized-decode" in result.stdout
@@ -783,8 +924,13 @@ def test_run_dry_run_previews_selection_without_artifacts(tmp_path):
         "--dry-run",
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Selected 5 workload(s) for profile min (nanogpt-inference)." in result.stdout
-    assert "nanogpt-decode-spec | run as: nanogpt-inference --variant speculative" in result.stdout
+    assert (
+        "Selected 5 workload(s) for profile min (nanogpt-inference)." in result.stdout
+    )
+    assert (
+        "nanogpt-decode-spec | run as: nanogpt-inference --variant speculative"
+        in result.stdout
+    )
     assert "dry-run complete" in result.stdout
     assert list(tmp_path.iterdir()) == []
 
@@ -957,7 +1103,9 @@ def test_validate_smoke_runs_starter_grades_and_summarizes(tmp_path):
     validation_reports = list(tmp_path.glob("mlperf_validate_smoke_*.json"))
     validation_html = list(tmp_path.glob("mlperf_validate_smoke_*.html"))
     validation_csv = list(tmp_path.glob("mlperf_validate_smoke_*.csv"))
-    validation_workload_csv = list(tmp_path.glob("mlperf_validate_workloads_smoke_*.csv"))
+    validation_workload_csv = list(
+        tmp_path.glob("mlperf_validate_workloads_smoke_*.csv")
+    )
     assert len(validation_reports) == 1
     assert len(validation_html) == 1
     assert len(validation_csv) == 1
@@ -1023,7 +1171,9 @@ def test_validate_smoke_runs_starter_grades_and_summarizes(tmp_path):
     assert validation_rows[0]["warning_count"] == "0"
 
     validation_summary = run_cli("report", str(tmp_path))
-    assert validation_summary.returncode == 0, validation_summary.stdout + validation_summary.stderr
+    assert validation_summary.returncode == 0, (
+        validation_summary.stdout + validation_summary.stderr
+    )
     assert "mlperf_suite: mlperf-edu" in validation_summary.stdout
     assert "workloads: 12" in validation_summary.stdout
 
@@ -1053,7 +1203,9 @@ def test_min_run_writes_report(tmp_path):
     )
     assert result.returncode == 0, result.stderr
     assert "Selected 12 workload(s) for profile min (default)." in result.stdout
-    assert "Suite coverage: agent=1, distributed=1, graph=1, language=3" in result.stdout
+    assert (
+        "Suite coverage: agent=1, distributed=1, graph=1, language=3" in result.stdout
+    )
     assert "min run complete" in result.stdout
     assert "HTML:" in result.stdout
     assert "CSV:" in result.stdout
@@ -1097,12 +1249,18 @@ def test_min_run_writes_report(tmp_path):
     assert "anomaly-ae-train" in html
 
     directory_summary = run_cli("report", str(tmp_path))
-    assert directory_summary.returncode == 0, directory_summary.stdout + directory_summary.stderr
+    assert directory_summary.returncode == 0, (
+        directory_summary.stdout + directory_summary.stderr
+    )
     assert "workloads: 12" in directory_summary.stdout
 
     directory_html = tmp_path / "latest.html"
-    directory_html_result = run_cli("report", str(tmp_path), "--format", "html", "--output", str(directory_html))
-    assert directory_html_result.returncode == 0, directory_html_result.stdout + directory_html_result.stderr
+    directory_html_result = run_cli(
+        "report", str(tmp_path), "--format", "html", "--output", str(directory_html)
+    )
+    assert directory_html_result.returncode == 0, (
+        directory_html_result.stdout + directory_html_result.stderr
+    )
     assert directory_html.is_file()
     assert "MLPerf EDU Default Report: min" in directory_html.read_text()
 
@@ -1200,7 +1358,9 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert report["run_fingerprint"]["software"]["python"]
     assert report["run_fingerprint"]["execution"]["workload"] == "nanogpt-train"
     assert report["run_fingerprint"]["execution"]["profile"] == "min"
-    assert report["run_fingerprint"]["execution"]["data_modes"] == ["synthetic-deterministic"]
+    assert report["run_fingerprint"]["execution"]["data_modes"] == [
+        "synthetic-deterministic"
+    ]
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
@@ -1209,13 +1369,17 @@ def test_report_command_exports_json_csv_html(tmp_path):
     csv_path = tmp_path / "manual.csv"
     html_path = tmp_path / "manual.html"
 
-    json_result = run_cli("report", str(report_path), "--format", "json", "--output", str(json_path))
+    json_result = run_cli(
+        "report", str(report_path), "--format", "json", "--output", str(json_path)
+    )
     assert json_result.returncode == 0, json_result.stdout + json_result.stderr
     manual_json = json.loads(json_path.read_text())
     assert manual_json["workload"] == "nanogpt-train"
     assert manual_json["run_fingerprint"]["execution"]["workload"] == "nanogpt-train"
 
-    csv_result = run_cli("report", str(report_path), "--format", "csv", "--output", str(csv_path))
+    csv_result = run_cli(
+        "report", str(report_path), "--format", "csv", "--output", str(csv_path)
+    )
     assert csv_result.returncode == 0, csv_result.stdout + csv_result.stderr
     with csv_path.open(newline="") as f:
         rows = list(csv.DictReader(f))
@@ -1230,7 +1394,9 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert rows[0]["dataset_license_status"] == "public-domain-us"
     assert rows[0]["dataset_public_release_status"] == "public-ok-fetch-only"
     assert rows[0]["dataset_public_use"].startswith("score-bearing")
-    assert rows[0]["dataset_release_next_step"].startswith("Keep generated-corpus recipe")
+    assert rows[0]["dataset_release_next_step"].startswith(
+        "Keep generated-corpus recipe"
+    )
     assert rows[0]["metric"] == "loss"
     assert rows[0]["target"] == "2.3"
     assert rows[0]["target_basis"] == "reference_runs"
@@ -1244,7 +1410,9 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert float(rows[0]["duration_seconds"]) >= 0
     assert float(rows[0]["throughput"]) > 0
 
-    html_result = run_cli("report", str(report_path), "--format", "html", "--output", str(html_path))
+    html_result = run_cli(
+        "report", str(report_path), "--format", "html", "--output", str(html_path)
+    )
     assert html_result.returncode == 0, html_result.stdout + html_result.stderr
     html = html_path.read_text()
     assert "MLPerf EDU Report: nanogpt-train" in html
@@ -1287,14 +1455,42 @@ def test_package_and_grade_verified_manifest(tmp_path):
     with zipfile.ZipFile(package_path) as zf:
         names = set(zf.namelist())
         index = json.loads(zf.read("package_index.json"))
+        packaged_manifest = json.loads(zf.read(f"manifest/{manifest_path.name}"))
+        packaged_report = json.loads(zf.read(f"report/{report_path.name}"))
+        packaged_html = zf.read(
+            f"report/{report_path.with_suffix('.html').name}"
+        ).decode()
+        packaged_csv = zf.read(
+            f"report/{report_path.with_suffix('.csv').name}"
+        ).decode()
+        assert names - {"package_index.json"} == {
+            item["path"] for item in index["included_files"]
+        }
+        for item in index["included_files"]:
+            payload = zf.read(item["path"])
+            assert item["sha256"] == "sha256:" + hashlib.sha256(payload).hexdigest()
+            assert item["n_bytes"] == len(payload)
     assert "package_index.json" in names
     assert f"manifest/{manifest_path.name}" in names
     assert f"report/{report_path.name}" in names
     assert f"report/{report_path.with_suffix('.html').name}" in names
     assert f"report/{report_path.with_suffix('.csv').name}" in names
-    assert index["schema"] == "mlperf-edu-package/0.1"
+    assert index["schema"] == "mlperf-edu-package/0.2"
     assert index["workload"] == "nanogpt-train"
     assert all(check["ok"] for check in index["verification"])
+    assert index["source_manifest"] == f"manifest/{manifest_path.name}"
+    assert all(not os.path.isabs(item["path"]) for item in index["included_files"])
+    assert "signature" not in packaged_manifest
+    assert packaged_manifest["integrity"]["authenticated"] is False
+    leaves = packaged_manifest["leaves"]
+    assert not os.path.isabs(leaves["measurement"]["report_path"])
+    assert not os.path.isabs(packaged_report["artifacts"]["report"])
+    assert not os.path.isabs(packaged_report["artifacts"]["provenance"])
+    packaged_report_json = json.dumps(packaged_report)
+    assert str(tmp_path) not in packaged_report_json
+    assert str(Path.cwd()) not in packaged_report_json
+    assert str(tmp_path) not in packaged_html
+    assert str(tmp_path) not in packaged_csv
 
     grade = run_cli("grade", str(tmp_path), "--output", str(grade_path))
     assert grade.returncode == 0, grade.stdout + grade.stderr
@@ -1311,6 +1507,145 @@ def test_package_and_grade_verified_manifest(tmp_path):
     assert summary["results"][0]["target_met"] == ""
     assert summary["results"][0]["warning_count"] == 0
     assert summary["results"][0]["warnings"] == []
+
+
+def test_package_policy_refuses_known_restricted_dataset_bytes():
+    manifest = {
+        "leaves": {
+            "dataset": {
+                "name": "movielens-100k",
+                "files": [{"path": "/tmp/u.data", "sha256": "sha256:placeholder"}],
+            }
+        }
+    }
+    issue = package_dataset_policy_issue(manifest)
+    assert issue is not None
+    assert "restricted-needs-approval" in issue
+    assert "do not redistribute" in issue
+
+
+def test_package_policy_allows_open_or_artifact_free_datasets():
+    fashion = {
+        "leaves": {
+            "dataset": {
+                "name": "fashion-mnist",
+                "files": [
+                    {"path": "/tmp/train-images", "sha256": "sha256:placeholder"}
+                ],
+            }
+        }
+    }
+    restricted_without_bytes = {
+        "leaves": {"dataset": {"name": "movielens-100k", "files": []}}
+    }
+    assert package_dataset_policy_issue(fashion) is None
+    assert package_dataset_policy_issue(restricted_without_bytes) is None
+
+
+def test_package_carries_all_manifest_dependencies_and_survives_source_removal(
+    tmp_path,
+):
+    source = tmp_path / "source"
+    source.mkdir()
+    report_path = source / "toy_report.json"
+    manifest_path = source / "toy.provd.json"
+    checkpoint_path = source / "toy.pt"
+    dataset_root = source / "data"
+    dataset_root.mkdir()
+    dataset_path = dataset_root / "dataset.bin"
+    roofline_path = source / "roofline.json"
+    metadata_path = source / "metadata.json"
+    checkpoint_path.write_bytes(b"checkpoint")
+    dataset_path.write_bytes(b"dataset")
+    roofline_path.write_text('{"flops": 1}\n')
+    metadata_path.write_text('{"model": "toy"}\n')
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "workload": "toy-workload",
+        "profile": "max",
+        "status": "passed",
+        "seed": 7,
+        "data_mode": "real",
+        "metrics": {"accuracy": 1.0},
+        "quality": {
+            "metric": "accuracy",
+            "target": 0.9,
+            "direction": "higher",
+            "quality_required": True,
+            "target_met": True,
+        },
+        "dataset_asset": {
+            "root": str(dataset_root),
+            "hashes": {"files": [{"path": str(dataset_path), "sha256": "fixture"}]},
+        },
+        "run_fingerprint": {
+            "software": {
+                "python_executable": str(tmp_path / "venv" / "bin" / "python")
+            },
+        },
+        "artifacts": {
+            "report": str(report_path),
+            "provenance": str(manifest_path),
+            "checkpoint": str(checkpoint_path),
+            "model_metadata": str(metadata_path),
+        },
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    manifest = build_provd(
+        workload="toy-workload",
+        scenario="train",
+        division="open",
+        hardware_fingerprint={"platform": "test"},
+        report=report,
+        report_path=report_path,
+        weights_path=checkpoint_path,
+        dataset_name="toy-data",
+        dataset_files=[dataset_path],
+        rng_seed=7,
+        roofline_sidecar_path=roofline_path,
+        repo_root=source,
+    )
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
+    package_path = tmp_path / "toy.zip"
+
+    package = run_cli("package", str(manifest_path), "--output", str(package_path))
+    assert package.returncode == 0, package.stdout + package.stderr
+    extraction = tmp_path / "extraction"
+    with zipfile.ZipFile(package_path) as zf:
+        index = json.loads(zf.read("package_index.json"))
+        roles = {item["role"] for item in index["included_files"]}
+        assert {"manifest", "report", "weights", "dataset", "roofline_sidecar"} <= roles
+        assert "report_artifact:model_metadata" in roles
+        zf.extractall(extraction)
+
+    shutil.rmtree(source)
+    extracted_manifest = extraction / index["manifest"]
+    packaged_manifest = json.loads(extracted_manifest.read_text())
+    packaged_report_path = (
+        extracted_manifest.parent
+        / packaged_manifest["leaves"]["measurement"]["report_path"]
+    )
+    packaged_report = json.loads(packaged_report_path.read_text())
+    assert packaged_report["dataset_asset"]["root"] == "../dataset"
+    assert packaged_report["dataset_asset"]["hashes"]["files"][0]["path"].startswith(
+        "../dataset/"
+    )
+    assert (
+        packaged_report["run_fingerprint"]["software"]["python_executable"]
+        == "local-environment:python"
+    )
+    assert str(tmp_path) not in json.dumps(packaged_report)
+    verify = run_cli("verify", str(extracted_manifest))
+    assert verify.returncode == 0, verify.stdout + verify.stderr
+
+    dataset_relative = packaged_manifest["leaves"]["dataset"]["files"][0]["path"]
+    packaged_dataset = extracted_manifest.parent / dataset_relative
+    packaged_dataset.write_bytes(b"tampered")
+    tampered = run_cli("verify", str(extracted_manifest))
+    assert tampered.returncode == 1
+    assert "dataset.files[0].sha256" in tampered.stdout
 
 
 def test_grade_uses_quality_required_not_legacy_gated(tmp_path):
@@ -1340,7 +1675,9 @@ def test_grade_uses_quality_required_not_legacy_gated(tmp_path):
         repo_root=tmp_path,
     )
     manifest_path = tmp_path / "toy.provd.json"
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
 
     grade = run_cli("grade", str(tmp_path), "--output", str(tmp_path / "grade.json"))
     assert grade.returncode == 1, grade.stdout + grade.stderr
@@ -1369,7 +1706,10 @@ def test_slm_min_run_writes_verifiable_artifacts(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Selected 1 workload(s) for profile min (slm-decode)." in result.stdout
-    assert "slm-decode | run as: smollm2-chat-inference --variant baseline | suite: slm" in result.stdout
+    assert (
+        "slm-decode | run as: smollm2-chat-inference --variant baseline | suite: slm"
+        in result.stdout
+    )
 
     report_path = tmp_path / "slm-decode_min_report.json"
     manifest_path = tmp_path / "slm-decode_min.provd.json"
@@ -1388,8 +1728,13 @@ def test_slm_min_run_writes_verifiable_artifacts(tmp_path):
     assert report["status"] == "passed"
     assert report["backend"] == "transformers-cpu"
     assert report["model"]["id"] == "transformers:gpt2-tiny-random-local"
-    assert report["model_asset"]["selected_model_rationale"].startswith("Default local SLM")
-    assert "SmolLM2-135M-Instruct is the default" in report["model_asset"]["selection_rationale"]
+    assert report["model_asset"]["selected_model_rationale"].startswith(
+        "Default local SLM"
+    )
+    assert (
+        "SmolLM2-135M-Instruct is the default"
+        in report["model_asset"]["selection_rationale"]
+    )
     assert "135M parameters" in report["model_asset"]["size_rationale"]
     assert "Transformers/PyTorch" in report["model_asset"]["backend_rationale"]
     assert report["metrics"]["generated_tokens"] == 4
@@ -1398,7 +1743,7 @@ def test_slm_min_run_writes_verifiable_artifacts(tmp_path):
     assert report["quality"]["target"] == 4
     assert report["quality"]["direction"] == "higher"
     assert report["quality"]["override"] is True
-    assert "Functional serving check" in report["quality"]["note"]
+    assert "bounded continuation perplexity" in report["quality"]["note"]
     assert report["metrics"]["output_tokens_per_sec"] > 0
     assert report["metrics"]["time_to_first_token_s"] > 0
     assert report["metrics"]["inter_token_latency_s"] > 0
@@ -1449,6 +1794,13 @@ def test_slm_max_default_decode_budget_has_functional_margin(tmp_path):
     assert report["quality"]["target"] == 8
     assert report["quality"]["direction"] == "higher"
     assert report["quality"]["override"] is False
+    assert report["review_contract"]["status"] == "failed"
+    assert report["review_contract"]["issues"] == [
+        "data_mode 'synthetic-tokenized' is not eligible for performance-bearing review"
+    ]
+    assert report["review_contract"]["metric"] == "output_tokens_per_sec"
+    assert report["review_contract"]["metric_value"] > 0
+    assert report["review_contract"]["functional_metric"] == "generated_tokens"
 
 
 def test_canonical_variant_run_resolves_to_current_registry_slice(tmp_path):
@@ -1469,14 +1821,23 @@ def test_canonical_variant_run_resolves_to_current_registry_slice(tmp_path):
         },
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Selected 1 workload(s) for profile min (smollm2-chat-inference:quantized-int8)." in result.stdout
-    assert "slm-quantized-decode | run as: smollm2-chat-inference --variant quantized-int8 | suite: slm" in result.stdout
+    assert (
+        "Selected 1 workload(s) for profile min (smollm2-chat-inference:quantized-int8)."
+        in result.stdout
+    )
+    assert (
+        "slm-quantized-decode | run as: smollm2-chat-inference --variant quantized-int8 | suite: slm"
+        in result.stdout
+    )
 
     aggregate = next(tmp_path.glob("mlperf_edu_min_*.json"))
     data = json.loads(aggregate.read_text())
     assert data["workload"] == "smollm2-chat-inference"
     assert data["variant"] == "quantized-int8"
-    assert data["selection"] == {"kind": "workload", "name": "smollm2-chat-inference:quantized-int8"}
+    assert data["selection"] == {
+        "kind": "workload",
+        "name": "smollm2-chat-inference:quantized-int8",
+    }
     assert [item["workload"] for item in data["workloads"]] == ["slm-quantized-decode"]
     assert (tmp_path / "slm-quantized-decode_min_report.html").is_file()
     assert (tmp_path / "slm-quantized-decode_min_report.csv").is_file()
@@ -1486,7 +1847,10 @@ def test_canonical_variant_run_resolves_to_current_registry_slice(tmp_path):
     grade_data = json.loads((tmp_path / "grade.json").read_text())
     assert grade_data["results"][0]["canonical_workload"] == "smollm2-chat-inference"
     assert grade_data["results"][0]["variant"] == "quantized-int8"
-    assert grade_data["results"][0]["run_selector"] == "smollm2-chat-inference --variant quantized-int8"
+    assert (
+        grade_data["results"][0]["run_selector"]
+        == "smollm2-chat-inference --variant quantized-int8"
+    )
 
 
 def test_canonical_workload_runs_all_variants_by_default(tmp_path):
@@ -1500,7 +1864,9 @@ def test_canonical_workload_runs_all_variants_by_default(tmp_path):
         str(tmp_path),
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Selected 5 workload(s) for profile min (nanogpt-inference)." in result.stdout
+    assert (
+        "Selected 5 workload(s) for profile min (nanogpt-inference)." in result.stdout
+    )
 
     aggregate = next(tmp_path.glob("mlperf_edu_min_*.json"))
     data = json.loads(aggregate.read_text())
@@ -1557,16 +1923,26 @@ def test_slm_max_tiny_mode_and_suite_reports(tmp_path):
         assert metrics["inter_token_latency_s"] > 0
         assert metrics["prefill_tokens_per_sec"] > 0
         assert metrics["total_context_tokens"] >= metrics["context_tokens"]
-    batched = next(item for item in data["workloads"] if item["workload"] == "slm-batched-decode")
+    batched = next(
+        item for item in data["workloads"] if item["workload"] == "slm-batched-decode"
+    )
     assert batched["metrics"]["batch_size"] == 4
     assert batched["metrics"]["total_generated_tokens"] == 16
     assert batched["run_selector"] == "smollm2-chat-inference --variant batched-b4"
-    long_context = next(item for item in data["workloads"] if item["workload"] == "slm-long-context-decode")
+    long_context = next(
+        item
+        for item in data["workloads"]
+        if item["workload"] == "slm-long-context-decode"
+    )
     assert long_context["metrics"]["configured_context_tokens"] == 96
     assert long_context["metrics"]["context_tokens"] == 96
     assert long_context["data_mode"] == "synthetic-tokenized-long-context"
-    assert long_context["run_selector"] == "smollm2-chat-inference --variant long-context"
-    quantized = next(item for item in data["workloads"] if item["workload"] == "slm-quantized-decode")
+    assert (
+        long_context["run_selector"] == "smollm2-chat-inference --variant long-context"
+    )
+    quantized = next(
+        item for item in data["workloads"] if item["workload"] == "slm-quantized-decode"
+    )
     assert quantized["backend"] == "transformers-cpu-dynamic-int8"
     assert quantized["metrics"]["model_state_bytes"] > 0
 
@@ -1576,8 +1952,12 @@ def test_slm_max_tiny_mode_and_suite_reports(tmp_path):
 
     verify = run_cli("verify", str(tmp_path / "slm-decode_max.provd.json"))
     assert verify.returncode == 0, verify.stdout + verify.stderr
-    quantized_verify = run_cli("verify", str(tmp_path / "slm-quantized-decode_max.provd.json"))
-    assert quantized_verify.returncode == 0, quantized_verify.stdout + quantized_verify.stderr
+    quantized_verify = run_cli(
+        "verify", str(tmp_path / "slm-quantized-decode_max.provd.json")
+    )
+    assert quantized_verify.returncode == 0, (
+        quantized_verify.stdout + quantized_verify.stderr
+    )
 
 
 def test_vision_min_suite_runs_domain_workloads(tmp_path):
@@ -1603,10 +1983,14 @@ def test_vision_min_suite_runs_domain_workloads(tmp_path):
     ]
     assert {item["status"] for item in data["workloads"]} == {"passed"}
 
-    mobilenet_report = json.loads((tmp_path / "mobilenetv2-train_min_report.json").read_text())
+    mobilenet_report = json.loads(
+        (tmp_path / "mobilenetv2-train_min_report.json").read_text()
+    )
     assert mobilenet_report["metrics"]["logits_shape"] == [2, 100]
 
-    composed_report = json.loads((tmp_path / "mobilenet-cifar100-composed-fp16_min_report.json").read_text())
+    composed_report = json.loads(
+        (tmp_path / "mobilenet-cifar100-composed-fp16_min_report.json").read_text()
+    )
     assert composed_report["metrics"]["effective_compression_ratio"] > 1.0
     assert composed_report["metrics"]["sparsity_actual"] > 0.0
 
@@ -1614,7 +1998,10 @@ def test_vision_min_suite_runs_domain_workloads(tmp_path):
     assert grade.returncode == 0, grade.stdout + grade.stderr
     grade_data = json.loads((tmp_path / "grade.json").read_text())
     grade_metrics = {row["workload"]: row["metric"] for row in grade_data["results"]}
-    assert grade_metrics["mobilenet-cifar100-composed-fp16"] == "effective_compression_ratio"
+    assert (
+        grade_metrics["mobilenet-cifar100-composed-fp16"]
+        == "effective_compression_ratio"
+    )
 
     for manifest in (
         tmp_path / "resnet18-train_min.provd.json",
@@ -1712,14 +2099,22 @@ def test_research_workloads_run_by_workload_min(tmp_path):
         assert result.returncode == 0, result.stdout + result.stderr
 
     bert = json.loads((tmp_path / "micro-bert-train_min_report.json").read_text())
-    diffusion = json.loads((tmp_path / "micro-diffusion-train_min_report.json").read_text())
+    diffusion = json.loads(
+        (tmp_path / "micro-diffusion-train_min_report.json").read_text()
+    )
     gnn = json.loads((tmp_path / "micro-gnn-train_min_report.json").read_text())
     lstm = json.loads((tmp_path / "micro-lstm-train_min_report.json").read_text())
     rl = json.loads((tmp_path / "micro-rl-train_min_report.json").read_text())
     lora = json.loads((tmp_path / "nano-lora-finetune_min_report.json").read_text())
-    decode_fp32 = json.loads((tmp_path / "nanogpt-decode-fp32-b16_min_report.json").read_text())
-    decode_fp16 = json.loads((tmp_path / "nanogpt-decode-fp16-b16_min_report.json").read_text())
-    decode_spec = json.loads((tmp_path / "nanogpt-decode-spec_min_report.json").read_text())
+    decode_fp32 = json.loads(
+        (tmp_path / "nanogpt-decode-fp32-b16_min_report.json").read_text()
+    )
+    decode_fp16 = json.loads(
+        (tmp_path / "nanogpt-decode-fp16-b16_min_report.json").read_text()
+    )
+    decode_spec = json.loads(
+        (tmp_path / "nanogpt-decode-spec_min_report.json").read_text()
+    )
     assert bert["metrics"]["logits_shape"] == [4, 2]
     assert diffusion["metrics"]["output_shape"] == [2, 3, 32, 32]
     assert gnn["metrics"]["logits_shape"] == [16, 3]
@@ -1792,7 +2187,9 @@ def test_research_workloads_run_by_workload_max_and_grade(tmp_path):
 def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    (data_dir / "tinyshakespeare.txt").write_text("First Citizen:\nBefore we proceed any further.\n" * 512)
+    (data_dir / "tinyshakespeare.txt").write_text(
+        "First Citizen:\nBefore we proceed any further.\n" * 512
+    )
     output_dir = tmp_path / "out"
 
     env = {
@@ -1847,7 +2244,7 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
         **env,
         "MLPERF_EDU_PREFILL_MAX_CONTEXT": "16",
         "MLPERF_EDU_PREFILL_MAX_WARMUP": "1",
-        "MLPERF_EDU_PREFILL_MAX_ITER": "2",
+        "MLPERF_EDU_PREFILL_MAX_ITER": "3",
     }
     prefill = run_cli(
         "run",
@@ -1860,11 +2257,21 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
         env_extra=prefill_env,
     )
     assert prefill.returncode == 0, prefill.stdout + prefill.stderr
-    prefill_report = json.loads((output_dir / "nanogpt-prefill_max_report.json").read_text())
+    prefill_report = json.loads(
+        (output_dir / "nanogpt-prefill_max_report.json").read_text()
+    )
     assert prefill_report["status"] == "passed"
     assert prefill_report["metrics"]["context_length"] == 16
     assert prefill_report["metrics"]["prefill_tokens_per_sec"] > 0
-    prefill_verify = run_cli("verify", str(output_dir / "nanogpt-prefill_max.provd.json"))
+    assert prefill_report["measurement_protocol"]["measured_runs"] == 3
+    assert prefill_report["checkpoint_provenance"]["source_manifest_verified"] is True
+    assert prefill_report["checkpoint_provenance"]["source_quality_target_met"] is True
+    assert prefill_report["review_contract"]["status"] == "passed"
+    assert prefill_report["review_contract"]["metric"] == "prefill_tokens_per_sec"
+    assert prefill_report["review_contract"]["metric_value"] > 0
+    prefill_verify = run_cli(
+        "verify", str(output_dir / "nanogpt-prefill_max.provd.json")
+    )
     assert prefill_verify.returncode == 0, prefill_verify.stdout + prefill_verify.stderr
 
     decode_env = {
@@ -1883,19 +2290,110 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
         env_extra=decode_env,
     )
     assert decode.returncode == 0, decode.stdout + decode.stderr
-    decode_report = json.loads((output_dir / "nanogpt-decode_max_report.json").read_text())
+    decode_report = json.loads(
+        (output_dir / "nanogpt-decode_max_report.json").read_text()
+    )
     assert decode_report["status"] == "passed"
     assert decode_report["metrics"]["prefill_ctx"] == 8
     assert decode_report["metrics"]["decode_steps"] == 4
     assert decode_report["metrics"]["output_tokens_per_sec"] > 0
+    assert decode_report["measurement_protocol"]["warmup_runs"] == 1
+    assert decode_report["measurement_protocol"]["measured_runs"] == 5
+    assert len(decode_report["metrics"]["request_ttft_samples_s"]) == 5
+    assert decode_report["checkpoint_provenance"]["source_manifest_verified"] is True
+    assert decode_report["review_contract"]["status"] == "passed"
+    assert decode_report["review_contract"]["metric"] == "output_tokens_per_sec"
+    assert decode_report["review_contract"]["metric_value"] > 0
+    assert decode_report["review_contract"]["functional_metric"] == "decode_steps"
     decode_verify = run_cli("verify", str(output_dir / "nanogpt-decode_max.provd.json"))
     assert decode_verify.returncode == 0, decode_verify.stdout + decode_verify.stderr
+
+    source = json.loads(report_path.read_text())
+    source["quality"]["target_met"] = False
+    report_path.write_text(json.dumps(source, indent=2, sort_keys=True) + "\n")
+    tampered = run_cli(
+        "run",
+        "--workload",
+        "nanogpt-prefill",
+        "--profile",
+        "max",
+        "--output-dir",
+        str(tmp_path / "tampered-lineage"),
+        env_extra={
+            **prefill_env,
+            "MLPERF_EDU_NANOGPT_CHECKPOINT": str(checkpoint_path),
+            "MLPERF_EDU_NANOGPT_TRAIN_REPORT": str(report_path),
+            "MLPERF_EDU_NANOGPT_TRAIN_MANIFEST": str(manifest_path),
+        },
+    )
+    assert tampered.returncode != 0
+    assert "source training provenance failed verification" in (
+        tampered.stdout + tampered.stderr
+    )
+
+
+def test_language_max_aggregate_preserves_nanogpt_checkpoint_lineage(tmp_path):
+    data_dir = tmp_path / "data"
+    data_dir.mkdir()
+    (data_dir / "tinyshakespeare.txt").write_text(
+        "First Citizen:\nBefore we proceed any further.\n" * 512
+    )
+    output_dir = tmp_path / "out"
+    env = {
+        "MLPERF_EDU_DATA_DIR": str(data_dir),
+        "MLPERF_EDU_DEVICE": "cpu",
+        "MLPERF_EDU_MAX_MODEL_SIZE": "tiny",
+        "MLPERF_EDU_MAX_BATCH_SIZE": "2",
+        "MLPERF_EDU_MAX_SEQ_LEN": "16",
+        "MLPERF_EDU_MAX_EPOCHS": "1",
+        "MLPERF_EDU_MAX_BATCHES_PER_EPOCH": "2",
+        "MLPERF_EDU_MAX_VAL_BATCHES": "1",
+        "MLPERF_EDU_MAX_QUALITY_TARGET": "10.0",
+        "MLPERF_EDU_PREFILL_MAX_CONTEXT": "16",
+        "MLPERF_EDU_PREFILL_MAX_WARMUP": "1",
+        "MLPERF_EDU_PREFILL_MAX_ITER": "3",
+        "MLPERF_EDU_DECODE_MAX_PREFILL_CTX": "8",
+        "MLPERF_EDU_DECODE_MAX_STEPS": "4",
+    }
+
+    result = run_cli(
+        "run",
+        "--suite",
+        "language",
+        "--profile",
+        "max",
+        "--output-dir",
+        str(output_dir),
+        env_extra=env,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    source_report = output_dir / "nanogpt-train_max_report.json"
+    source_manifest = output_dir / "nanogpt-train_max.provd.json"
+    expected_report_sha = (
+        "sha256:" + hashlib.sha256(source_report.read_bytes()).hexdigest()
+    )
+    expected_manifest_sha = (
+        "sha256:" + hashlib.sha256(source_manifest.read_bytes()).hexdigest()
+    )
+
+    for workload in ("nanogpt-prefill", "nanogpt-decode"):
+        report = json.loads((output_dir / f"{workload}_max_report.json").read_text())
+        lineage = report["checkpoint_provenance"]
+        assert lineage["source_report_sha256"] == expected_report_sha
+        assert lineage["source_manifest_sha256"] == expected_manifest_sha
+        assert report["review_contract"]["status"] == "passed"
+
+        verify = run_cli("verify", str(output_dir / f"{workload}_max.provd.json"))
+        assert verify.returncode == 0, verify.stdout + verify.stderr
 
 
 def test_nanogpt_pro_profile_aggregates_max_runner(tmp_path):
     data_dir = tmp_path / "data"
     data_dir.mkdir()
-    (data_dir / "tinyshakespeare.txt").write_text("First Citizen:\nBefore we proceed any further.\n" * 512)
+    (data_dir / "tinyshakespeare.txt").write_text(
+        "First Citizen:\nBefore we proceed any further.\n" * 512
+    )
     output_dir = tmp_path / "out"
 
     env = {
@@ -1944,7 +2442,9 @@ def test_nanogpt_pro_profile_aggregates_max_runner(tmp_path):
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
 
-    grade = run_cli("grade", str(output_dir), "--output", str(output_dir / "grade.json"))
+    grade = run_cli(
+        "grade", str(output_dir), "--output", str(output_dir / "grade.json")
+    )
     assert grade.returncode == 0, grade.stdout + grade.stderr
     summary = json.loads((output_dir / "grade.json").read_text())
     assert summary["passed"] == 1
@@ -1978,7 +2478,9 @@ def test_nanogpt_prefill_min_run_writes_verifiable_artifacts(tmp_path):
     assert report["quality_dependency"] == "nanogpt-train"
     assert report["checkpoint_provenance"]["source_workload"] == "nanogpt-train"
     assert report["checkpoint_provenance"]["source_run_selector"] == "nanogpt-train"
-    assert report["checkpoint_provenance"]["source_quality_metric"] == "cross_entropy_loss"
+    assert (
+        report["checkpoint_provenance"]["source_quality_metric"] == "cross_entropy_loss"
+    )
     assert report["checkpoint_provenance"]["source_quality_target"] == 2.3
     assert report["checkpoint_provenance"]["source_reference_runs"] == 5
     assert report["status"] == "passed"
@@ -1992,8 +2494,13 @@ def test_nanogpt_prefill_min_run_writes_verifiable_artifacts(tmp_path):
     assert rows[0]["shared_checkpoint"] == "nanogpt-train"
     assert rows[0]["quality_dependency"] == "nanogpt-train"
     assert rows[0]["checkpoint_source_selector"] == "nanogpt-train"
-    assert rows[0]["checkpoint_source_quality"] == "cross_entropy_loss lower 2.3 basis=reference_runs"
-    assert rows[0]["checkpoint_artifact_policy"].startswith("Preserve the source training report")
+    assert (
+        rows[0]["checkpoint_source_quality"]
+        == "cross_entropy_loss lower 2.3 basis=reference_runs"
+    )
+    assert rows[0]["checkpoint_artifact_policy"].startswith(
+        "Preserve the source training report"
+    )
     html = report_path.with_suffix(".html").read_text()
     assert "nanogpt-train" in html
     assert "Quality Dependency" in html
@@ -2029,7 +2536,9 @@ def test_nanogpt_decode_min_run_writes_verifiable_artifacts(tmp_path):
     assert report["shared_checkpoint"] == "nanogpt-train"
     assert report["quality_dependency"] == "nanogpt-train"
     assert report["checkpoint_provenance"]["source_workload"] == "nanogpt-train"
-    assert report["checkpoint_provenance"]["source_quality_metric"] == "cross_entropy_loss"
+    assert (
+        report["checkpoint_provenance"]["source_quality_metric"] == "cross_entropy_loss"
+    )
     assert report["status"] == "passed"
     assert report["metrics"]["phase"] == "decode"
     assert report["metrics"]["prefill_ctx"] == 16
@@ -2161,7 +2670,9 @@ def test_agent_min_suite_runs_all_agent_patterns(tmp_path):
     codegen = json.loads((tmp_path / "nano-codegen-agent_min_report.json").read_text())
     rag = json.loads((tmp_path / "nano-rag-agent_min_report.json").read_text())
     react = json.loads((tmp_path / "nano-react-agent_min_report.json").read_text())
-    toolcall = json.loads((tmp_path / "nano-toolcall-agent_min_report.json").read_text())
+    toolcall = json.loads(
+        (tmp_path / "nano-toolcall-agent_min_report.json").read_text()
+    )
     assert codegen["metrics"]["iterations"] == 2
     assert rag["metrics"]["retrieve_latency_ms"] >= 0
     assert react["metrics"]["steps"] == 2
@@ -2210,7 +2721,9 @@ def test_agent_max_suite_runs_all_agent_patterns(tmp_path):
     codegen = json.loads((tmp_path / "nano-codegen-agent_max_report.json").read_text())
     rag = json.loads((tmp_path / "nano-rag-agent_max_report.json").read_text())
     react = json.loads((tmp_path / "nano-react-agent_max_report.json").read_text())
-    toolcall = json.loads((tmp_path / "nano-toolcall-agent_max_report.json").read_text())
+    toolcall = json.loads(
+        (tmp_path / "nano-toolcall-agent_max_report.json").read_text()
+    )
     assert codegen["metrics"]["iterations"] == 3
     assert rag["metrics"]["n_passages"] == 64
     assert react["metrics"]["steps"] == 3
@@ -2231,10 +2744,7 @@ def test_movielens_text_occupations_are_encoded(tmp_path):
 
     dataset_dir = tmp_path / "movielens" / "ml-100k"
     dataset_dir.mkdir(parents=True)
-    (dataset_dir / "u.user").write_text(
-        "1|21|M|student|00000\n"
-        "2|39|F|engineer|00000\n"
-    )
+    (dataset_dir / "u.user").write_text("1|21|M|student|00000\n2|39|F|engineer|00000\n")
     with (dataset_dir / "u.item").open("w", encoding="latin-1") as f:
         for item_id in range(1, 3):
             genres = ["1" if idx == item_id % 19 else "0" for idx in range(19)]
@@ -2247,10 +2757,7 @@ def test_movielens_text_occupations_are_encoded(tmp_path):
                 *genres,
             ]
             f.write("|".join(fields) + "\n")
-    (dataset_dir / "u.data").write_text(
-        "1\t1\t5\t0\n"
-        "2\t2\t2\t1\n"
-    )
+    (dataset_dir / "u.data").write_text("1\t1\t5\t0\n2\t2\t2\t1\n")
 
     dataset = MovieLensRecommendationDataset(data_dir=str(dataset_dir))
 
@@ -2300,7 +2807,9 @@ def test_micro_dlrm_max_run_writes_verifiable_artifacts(tmp_path):
     assert report["metrics"]["samples"] == 8
     assert report["metrics"]["best_epoch"] == 1
     assert report["metrics"]["best_accuracy"] == report["metrics"]["final_accuracy"]
-    assert report["metrics"]["last_epoch_accuracy"] == report["metrics"]["final_accuracy"]
+    assert (
+        report["metrics"]["last_epoch_accuracy"] == report["metrics"]["final_accuracy"]
+    )
     assert 0.0 <= report["metrics"]["final_accuracy"] <= 1.0
 
     verify = run_cli("verify", str(manifest_path))
@@ -2641,7 +3150,8 @@ def test_tiny_max_suite_runs_kws_and_wake_vision(tmp_path):
     dscnn = json.loads((tmp_path / "dscnn-kws-train_max_report.json").read_text())
     wake = json.loads((tmp_path / "wake-vision-vww_max_report.json").read_text())
     assert anomaly["data_mode"] == "local-tensor-shard"
-    assert anomaly["quality"]["target_met"] is True
+    assert anomaly["quality"]["quality_required"] is False
+    assert anomaly["quality"]["target_met"] is None
     assert dscnn["data_mode"] == "synthetic-microshard"
     assert dscnn["metrics"]["samples"] == 2
     assert dscnn["quality"]["quality_required"] is False
@@ -2702,9 +3212,10 @@ def test_anomaly_ae_max_run_writes_verifiable_artifacts(tmp_path):
     assert report["profile"] == "max"
     assert report["status"] == "passed"
     assert report["data_mode"] == "local-tensor-shard"
-    assert report["quality"]["quality_required"] is True
+    assert report["quality"]["quality_required"] is False
+    assert report["quality"]["target_met"] is None
     assert "gated" not in report["quality"]
-    assert report["quality"]["override"] is True
+    assert report["quality"]["override"] is False
     assert report["metrics"]["samples"] == 8
 
     verify = run_cli("verify", str(manifest_path))

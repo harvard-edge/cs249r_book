@@ -9,11 +9,12 @@ Architecture:
     → Decoder (upsample + skip connections) → Reconstructed image
 
 For training, the model learns to reconstruct clean images from
-noisy inputs (denoising autoencoder objective). The time embedding
-is a placeholder for the diffusion timestep conditioning that would
-be used in a full DDPM pipeline.
+noisy inputs (denoising autoencoder objective). A reserved time-projection
+module documents the intended extension point, but the current systems-only
+runner does not claim full DDPM timestep conditioning.
 
-Quality Target: MSE < 0.001 on CIFAR-10 reconstruction
+The candidate CIFAR-10 target lives in the registry and is not enforced by the
+current synthetic-micro-shard max runner.
 
 Provenance: Ho et al. 2020, "Denoising Diffusion Probabilistic Models"
 """
@@ -47,7 +48,9 @@ class UpConv(nn.Module):
 
     def __init__(self, in_channels, out_channels):
         super().__init__()
-        self.up = nn.ConvTranspose2d(in_channels, in_channels // 2, kernel_size=2, stride=2)
+        self.up = nn.ConvTranspose2d(
+            in_channels, in_channels // 2, kernel_size=2, stride=2
+        )
         self.conv = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
             nn.BatchNorm2d(out_channels),
@@ -81,7 +84,8 @@ class MicroDiffusionUNet(nn.Module):
     def __init__(self, n_channels=3, n_classes=3):
         super().__init__()
 
-        # Time embedding (placeholder for full diffusion)
+        # Reserved for a future fully time-conditioned DDPM path; intentionally
+        # unused by the current denoising-autoencoder systems workload.
         self.time_embed = nn.Sequential(
             nn.Linear(128, 256),
             nn.ReLU(),

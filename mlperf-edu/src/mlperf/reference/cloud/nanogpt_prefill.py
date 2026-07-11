@@ -9,16 +9,18 @@ of the roofline.
 Pair with nanogpt-decode (same checkpoint) to observe the prefill-vs-decode
 bottleneck split that defines modern LLM serving economics.
 """
+
+import statistics
 import time
 import torch
 
 from .nanogpt_train import NanoGPTWhiteBox
 
 
-def _sync():
-    if torch.backends.mps.is_available():
+def _sync(device: torch.device):
+    if device.type == "mps":
         torch.mps.synchronize()
-    elif torch.cuda.is_available():
+    elif device.type == "cuda":
         torch.cuda.synchronize()
 
 
@@ -48,7 +50,9 @@ class NanoGPTPrefill:
     regime that production serving systems run once per request.
     """
 
-    def __init__(self, model: NanoGPTWhiteBox, context_len: int = 1792, batch_size: int = 1):
+    def __init__(
+        self, model: NanoGPTWhiteBox, context_len: int = 1792, batch_size: int = 1
+    ):
         if context_len > model.config["max_seq_len"]:
             raise ValueError(
                 f"context_len={context_len} exceeds model max_seq_len="
@@ -59,65 +63,58 @@ class NanoGPTPrefill:
         self.batch = batch_size
         self.vocab = model.config["vocab_size"]
 
-    def run(self, n_warmup: int = 3, n_iter: int = 10,
-             emit_sidecar: bool = True) -> dict:
+    def run(
+        self, n_warmup: int = 3, n_iter: int = 10, emit_sidecar: bool = True
+    ) -> dict:
         device = next(self.model.parameters()).device
         ids = torch.randint(0, self.vocab, (self.batch, self.ctx_len), device=device)
-        n_params = sum(p.numel() for p in self.model.parameters())
         act_bytes = estimate_activation_bytes(self.model, self.ctx_len, self.batch)
 
         with torch.no_grad():
             for _ in range(n_warmup):
                 self.model(ids)
-            _sync()
+            _sync(device)
 
-            # Emit a roofline sidecar so the iter-4 taxonomy linter can
-            # verify the YAML's regime claims against measured intensity
-            # and dispatch utilization (iter-5.5 integration).
-            if emit_sidecar:
-                from mlperf.roofline import measure_roofline
-                with measure_roofline(
-                    "nanogpt-prefill",
-                    analytic_flops=lambda: 2 * n_params * self.ctx_len * n_iter,
-                    analytic_bytes=lambda: (n_params * 4 + act_bytes) * n_iter,
-                    n_iter=n_iter,
-                ):
-                    for _ in range(n_iter):
-                        self.model(ids)
-                # measure_roofline already timed; reuse its wall_time below
-                t0 = 0.0
-                total = float(__import__("os").environ.get("_MLPERF_LAST_WALL", "0") or 0.0)
-            else:
+            latencies = []
+            for _ in range(n_iter):
+                _sync(device)
                 t0 = time.perf_counter()
-                for _ in range(n_iter):
-                    self.model(ids)
-                _sync()
-                total = time.perf_counter() - t0
+                self.model(ids)
+                _sync(device)
+                latencies.append(time.perf_counter() - t0)
 
-            # If we used measure_roofline, recompute wall-time from a quick re-run.
-            if total <= 0.0:
-                t0 = time.perf_counter()
-                for _ in range(n_iter):
-                    self.model(ids)
-                _sync()
-                total = time.perf_counter() - t0
-
-        latency = total / n_iter
+        ordered = sorted(latencies)
+        latency = statistics.median(ordered)
+        p90 = ordered[max(0, int(len(ordered) * 0.90 + 0.999999) - 1)]
+        p99 = ordered[max(0, int(len(ordered) * 0.99 + 0.999999) - 1)]
         return {
             "phase": "prefill",
             "context_length": self.ctx_len,
             "batch_size": self.batch,
             "prefill_latency_s": latency,
+            "prefill_latency_median_s": latency,
+            "prefill_latency_p90_s": p90,
+            "prefill_latency_p99_s": p99,
+            "prefill_latency_samples_s": latencies,
             "prefill_tokens_per_sec": self.ctx_len * self.batch / latency,
             "peak_activation_bytes": act_bytes,
         }
 
 
-def run_benchmark(checkpoint_path: str = None, scenario: str = "Offline",
-                   context_len: int = 1792, batch_size: int = 1) -> dict:
+def run_benchmark(
+    checkpoint_path: str = None,
+    scenario: str = "Offline",
+    context_len: int = 1792,
+    batch_size: int = 1,
+) -> dict:
     """Entry point used by the CLI / smoke test."""
-    device = ("cuda" if torch.cuda.is_available()
-              else "mps" if torch.backends.mps.is_available() else "cpu")
+    device = (
+        "cuda"
+        if torch.cuda.is_available()
+        else "mps"
+        if torch.backends.mps.is_available()
+        else "cpu"
+    )
     model = NanoGPTWhiteBox().to(device)
     if checkpoint_path:
         model.load_state_dict(torch.load(checkpoint_path, map_location=device))

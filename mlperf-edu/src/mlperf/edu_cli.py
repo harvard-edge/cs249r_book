@@ -6,8 +6,10 @@ import hashlib
 import json
 import os
 import platform
+import posixpath
 import shutil
 import sys
+import tempfile
 import time
 import webbrowser
 import zipfile
@@ -37,13 +39,22 @@ from .assets import (
     ensure_tinyshakespeare,
     fashion_mnist_paths,
     huggingface_model_dossier,
+    has_asset_dossier,
     mnist_paths,
     movielens_paths,
     sha256_file,
     tinyshakespeare_paths,
 )
 from .fingerprint import detect_hardware
-from .manifest import build_provd, measurement_leaf, merkle_root, sign_manifest, verify_provd
+from .contracts import aggregate_contract_issues, evaluate_report_contract
+from .manifest import (
+    build_provd,
+    integrity_record,
+    measurement_leaf,
+    merkle_root,
+    resolve_artifact_path,
+    verify_provd,
+)
 from .power import PowerMeter
 from .registry import (
     DEFAULT_WORKLOAD_COLLECTION,
@@ -51,7 +62,6 @@ from .registry import (
     PROFILES,
     PUBLIC_STATUSES,
     RESEARCH_WORKLOADS,
-    STANDARD_WORKLOADS,
     STARTER_WORKLOADS,
     Workload,
     default_registry_path,
@@ -81,7 +91,9 @@ LEGACY_QUALITY_REQUIRED_FIELD = "gated"
 
 
 def quality_required_value(quality: dict[str, Any], default: Any = False) -> Any:
-    return quality.get("quality_required", quality.get(LEGACY_QUALITY_REQUIRED_FIELD, default))
+    return quality.get(
+        "quality_required", quality.get(LEGACY_QUALITY_REQUIRED_FIELD, default)
+    )
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -119,22 +131,46 @@ def build_parser() -> argparse.ArgumentParser:
 
     subparsers = parser.add_subparsers(dest="command", required=True)
 
-    doctor = subparsers.add_parser("doctor", help="Check local environment and registry")
+    doctor = subparsers.add_parser(
+        "doctor", help="Check local environment and registry"
+    )
     doctor_selection = doctor.add_mutually_exclusive_group()
-    doctor_selection.add_argument("--suite", choices=PRODUCT_SUITES, help="Check one workload domain, such as slm or vision")
-    doctor_selection.add_argument("--workload", default=None, help="Check one workload id or canonical workload family")
+    doctor_selection.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        help="Check one workload domain, such as slm or vision",
+    )
+    doctor_selection.add_argument(
+        "--workload",
+        default=None,
+        help="Check one workload id or canonical workload family",
+    )
     add_profile(doctor)
-    doctor.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    doctor.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
     doctor.add_argument("--format", choices=("summary", "json"), default="summary")
     doctor.set_defaults(func=cmd_doctor)
 
     init = subparsers.add_parser("init", help="Prepare local caches for a profile")
     add_profile(init)
     init_selection = init.add_mutually_exclusive_group()
-    init_selection.add_argument("--suite", choices=PRODUCT_SUITES, help="Prepare one workload domain, such as slm or vision")
-    init_selection.add_argument("--workload", default=None, help="Prepare one workload id or canonical workload family")
-    init.add_argument("--variant", default=None, help="Variant under a canonical workload")
-    init.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    init_selection.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        help="Prepare one workload domain, such as slm or vision",
+    )
+    init_selection.add_argument(
+        "--workload",
+        default=None,
+        help="Prepare one workload id or canonical workload family",
+    )
+    init.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
+    init.add_argument(
+        "--model", default=None, help="Model id or alias for model-backed workloads"
+    )
     init.add_argument("--no-smoke", action="store_true")
     init.add_argument(
         "--output-dir",
@@ -146,15 +182,23 @@ def build_parser() -> argparse.ArgumentParser:
     fetch = subparsers.add_parser("fetch", help="Fetch or verify assets for workloads")
     add_selection(fetch)
     add_profile(fetch)
-    fetch.add_argument("--variant", default=None, help="Variant under a canonical workload")
-    fetch.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    fetch.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
+    fetch.add_argument(
+        "--model", default=None, help="Model id or alias for model-backed workloads"
+    )
     fetch.add_argument("--dry-run", action="store_true")
     fetch.set_defaults(func=cmd_fetch)
 
-    run = subparsers.add_parser("run", help="Run workloads by profile, suite, or workload id")
+    run = subparsers.add_parser(
+        "run", help="Run workloads by profile, suite, or workload id"
+    )
     add_selection(run)
     add_profile(run)
-    run.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    run.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
     run.add_argument(
         "--output-dir",
         default="submissions",
@@ -165,9 +209,19 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Open the generated HTML report in the default browser.",
     )
-    run.add_argument("--dry-run", action="store_true", help="Print selected workloads without running them")
-    run.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
-    run.add_argument("--power", action="store_true", help="Add estimated aggregate power and energy telemetry to the run report")
+    run.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print selected workloads without running them",
+    )
+    run.add_argument(
+        "--model", default=None, help="Model id or alias for model-backed workloads"
+    )
+    run.add_argument(
+        "--power",
+        action="store_true",
+        help="Add estimated aggregate power and energy telemetry to the run report",
+    )
     run.set_defaults(func=cmd_run)
 
     verify = subparsers.add_parser("verify", help="Verify a provenance manifest")
@@ -175,20 +229,34 @@ def build_parser() -> argparse.ArgumentParser:
     verify.set_defaults(func=cmd_verify)
 
     report = subparsers.add_parser("report", help="Print a compact report summary")
-    report.add_argument("report", type=str, help="Path to a workload/aggregate report JSON, or a run directory")
-    report.add_argument("--format", choices=("summary", "json", "csv", "html"), default="summary")
-    report.add_argument("--output", type=str, default=None, help="Output path for json/csv/html formats")
-    report.add_argument("--open", action="store_true", help="Open generated HTML in the default browser")
+    report.add_argument(
+        "report",
+        type=str,
+        help="Path to a workload/aggregate report JSON, or a run directory",
+    )
+    report.add_argument(
+        "--format", choices=("summary", "json", "csv", "html"), default="summary"
+    )
+    report.add_argument(
+        "--output", type=str, default=None, help="Output path for json/csv/html formats"
+    )
+    report.add_argument(
+        "--open", action="store_true", help="Open generated HTML in the default browser"
+    )
     report.set_defaults(func=cmd_report)
 
     package = subparsers.add_parser("package", help="Package a verified submission")
     package.add_argument("manifest", type=str)
-    package.add_argument("--output", "-o", type=str, default=None, help="Output .zip path")
+    package.add_argument(
+        "--output", "-o", type=str, default=None, help="Output .zip path"
+    )
     package.set_defaults(func=cmd_package)
 
     grade = subparsers.add_parser("grade", help="Grade a directory of submissions")
     grade.add_argument("submissions_dir", nargs="?", default="submissions")
-    grade.add_argument("--output", type=str, default=None, help="Write grading summary JSON")
+    grade.add_argument(
+        "--output", type=str, default=None, help="Write grading summary JSON"
+    )
     grade.set_defaults(func=cmd_grade)
 
     validate = subparsers.add_parser(
@@ -204,10 +272,20 @@ def build_parser() -> argparse.ArgumentParser:
         help="Audit the public result contract",
         description="Maintainer command: audit registry metadata and public-result labels. This does not run benchmarks.",
     )
-    audit.add_argument("--suite", choices=PRODUCT_SUITES, help="Audit one workload domain, such as slm or vision")
-    audit.add_argument("--workload", default=None, help="Audit one workload id or canonical workload family")
+    audit.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        help="Audit one workload domain, such as slm or vision",
+    )
+    audit.add_argument(
+        "--workload",
+        default=None,
+        help="Audit one workload id or canonical workload family",
+    )
     audit.add_argument("--profile", choices=PROFILE_CHOICES, default=None)
-    audit.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    audit.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
     audit.add_argument("--status", dest="public_status", choices=PUBLIC_STATUSES)
     audit.add_argument(
         "--policy",
@@ -226,39 +304,75 @@ def build_parser() -> argparse.ArgumentParser:
         default="workloads",
         help="Discovery subject to list.",
     )
-    list_parser.add_argument("--suite", choices=PRODUCT_SUITES, help="Filter by workload domain, such as slm or vision")
+    list_parser.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        help="Filter by workload domain, such as slm or vision",
+    )
     list_parser.add_argument("--profile", choices=PROFILE_CHOICES, default=None)
-    list_parser.add_argument("--workload", default=None, help="Filter by workload id or canonical workload")
-    list_parser.add_argument("--variant", default=None, help="Variant under a canonical workload")
-    list_parser.add_argument("--maturity", choices=("base", "research", "experimental"), help=argparse.SUPPRESS)
+    list_parser.add_argument(
+        "--workload", default=None, help="Filter by workload id or canonical workload"
+    )
+    list_parser.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
+    list_parser.add_argument(
+        "--maturity",
+        choices=("base", "research", "experimental"),
+        help=argparse.SUPPRESS,
+    )
     list_parser.add_argument("--public-status", choices=PUBLIC_STATUSES)
     list_parser.add_argument("--format", choices=("summary", "json"), default="summary")
     list_parser.set_defaults(func=cmd_list)
 
     show = subparsers.add_parser("show", help="Show one workload")
     show.add_argument("workload", type=str)
-    show.add_argument("--variant", default=None, help="Variant under a canonical workload")
-    show.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
+    show.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
+    show.add_argument(
+        "--model", default=None, help="Model id or alias for model-backed workloads"
+    )
     show.set_defaults(func=cmd_show)
 
-    info = subparsers.add_parser("info", help="Show suite, profile, workload, model, dataset, or run details")
+    info = subparsers.add_parser(
+        "info", help="Show suite, profile, workload, model, dataset, or run details"
+    )
     info_group = info.add_mutually_exclusive_group(required=True)
-    info_group.add_argument("--suite", choices=PRODUCT_SUITES, help="Show one workload domain, such as slm or vision")
+    info_group.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        help="Show one workload domain, such as slm or vision",
+    )
     info_group.add_argument("--profile", choices=PROFILE_CHOICES)
-    info_group.add_argument("--workload", default=None, help="Show one workload id or canonical workload family")
+    info_group.add_argument(
+        "--workload",
+        default=None,
+        help="Show one workload id or canonical workload family",
+    )
     info_group.add_argument("--model", default=None)
     info_group.add_argument("--dataset", default=None)
     info_group.add_argument("--run", default=None)
     info.add_argument("--variant", default=None)
     info.set_defaults(func=cmd_info)
 
-    cache = subparsers.add_parser("cache", help="Inspect and verify local MLPerf EDU assets")
+    cache = subparsers.add_parser(
+        "cache", help="Inspect and verify local MLPerf EDU assets"
+    )
     cache.add_argument("action", nargs="?", choices=("list", "verify"), default="list")
     cache_selection = cache.add_mutually_exclusive_group()
-    cache_selection.add_argument("--suite", choices=PRODUCT_SUITES, help="Inspect assets for one workload domain")
-    cache_selection.add_argument("--workload", default=None, help="Inspect assets for one workload id or canonical workload family")
+    cache_selection.add_argument(
+        "--suite", choices=PRODUCT_SUITES, help="Inspect assets for one workload domain"
+    )
+    cache_selection.add_argument(
+        "--workload",
+        default=None,
+        help="Inspect assets for one workload id or canonical workload family",
+    )
     add_profile(cache)
-    cache.add_argument("--variant", default=None, help="Variant under a canonical workload")
+    cache.add_argument(
+        "--variant", default=None, help="Variant under a canonical workload"
+    )
     cache.add_argument("--format", choices=("summary", "json"), default="summary")
     cache.set_defaults(func=cmd_cache)
 
@@ -300,12 +414,30 @@ def add_validate_arguments(parser: argparse.ArgumentParser) -> None:
         default="submissions/validation",
         help="Root directory for validation artifacts.",
     )
-    parser.add_argument("--model", default=None, help="Model id or alias for model-backed workloads")
-    parser.add_argument("--skip-doctor", action="store_true", help="Skip the doctor preflight")
-    parser.add_argument("--skip-grade", action="store_true", help="Skip manifest grading after each run")
-    parser.add_argument("--keep-going", action="store_true", help="Continue after a failed validation item")
-    parser.add_argument("--dry-run", action="store_true", help="Print planned validation items without running them")
-    parser.add_argument("--open-report", action="store_true", help="Open the generated validation HTML summary")
+    parser.add_argument(
+        "--model", default=None, help="Model id or alias for model-backed workloads"
+    )
+    parser.add_argument(
+        "--skip-doctor", action="store_true", help="Skip the doctor preflight"
+    )
+    parser.add_argument(
+        "--skip-grade", action="store_true", help="Skip manifest grading after each run"
+    )
+    parser.add_argument(
+        "--keep-going",
+        action="store_true",
+        help="Continue after a failed validation item",
+    )
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print planned validation items without running them",
+    )
+    parser.add_argument(
+        "--open-report",
+        action="store_true",
+        help="Open the generated validation HTML summary",
+    )
 
 
 def add_profile(parser: argparse.ArgumentParser) -> None:
@@ -326,8 +458,17 @@ def normalize_profile(profile: str) -> str:
 
 def add_selection(parser: argparse.ArgumentParser) -> None:
     group = parser.add_mutually_exclusive_group()
-    group.add_argument("--suite", choices=PRODUCT_SUITES, default=None, help="Run one workload domain, such as slm or vision")
-    group.add_argument("--workload", default=None, help="Run one workload id or canonical workload family")
+    group.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        default=None,
+        help="Run one workload domain, such as slm or vision",
+    )
+    group.add_argument(
+        "--workload",
+        default=None,
+        help="Run one workload id or canonical workload family",
+    )
 
 
 def load_workloads(args: argparse.Namespace) -> dict[str, Workload]:
@@ -342,7 +483,9 @@ def default_collection_for(args: argparse.Namespace) -> str | None:
     return profile_collection(getattr(args, "profile", "min"))
 
 
-def select_cli_workloads(workloads: dict[str, Workload], args: argparse.Namespace) -> list[Workload]:
+def select_cli_workloads(
+    workloads: dict[str, Workload], args: argparse.Namespace
+) -> list[Workload]:
     workload = getattr(args, "workload", None)
     variant = getattr(args, "variant", None)
     if workload and not variant and workload not in workloads:
@@ -435,10 +578,17 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     if workloads:
         try:
             selected = select_cli_workloads(workloads, args)
-            selector = selection_label(suite=getattr(args, "suite", None), workload=getattr(args, "workload", None))
+            selector = selection_label(
+                suite=getattr(args, "suite", None),
+                workload=getattr(args, "workload", None),
+            )
             if getattr(args, "variant", None):
                 selector = f"{selector}:{args.variant}"
-            add_check("selection", f"{len(selected)} workload(s) for profile {profile} ({selector})", "ok")
+            add_check(
+                "selection",
+                f"{len(selected)} workload(s) for profile {profile} ({selector})",
+                "ok",
+            )
         except Exception as exc:
             add_check("selection", str(exc), "fail")
 
@@ -470,7 +620,13 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         name = check["name"]
         detail = check["detail"]
         status = check["status"]
-        style = "green" if status == "ok" else "yellow" if status in {"optional", "warn"} else "red"
+        style = (
+            "green"
+            if status == "ok"
+            else "yellow"
+            if status in {"optional", "warn"}
+            else "red"
+        )
         table.add_row(name, detail, f"[{style}]{status}[/{style}]")
     console.print(table)
 
@@ -492,7 +648,13 @@ def cmd_init(args: argparse.Namespace) -> int:
             label = f"{label}:{args.variant}"
         console.print(f"[bold]Initialized profile[/bold] {args.profile} for {label}")
         console.print(f"Validated {len(selected)} workload definitions.")
-        print_run_selection(args.profile, selected, suite=args.suite, workload=args.workload, variant=args.variant)
+        print_run_selection(
+            args.profile,
+            selected,
+            suite=args.suite,
+            workload=args.workload,
+            variant=args.variant,
+        )
         output_dir = Path(args.output_dir).resolve()
         print_init_locations(output_dir)
 
@@ -501,14 +663,18 @@ def cmd_init(args: argparse.Namespace) -> int:
             for workload in selected:
                 console.print(fetch_workload_asset(workload, dry_run=False))
         else:
-            console.print("No profile assets required beyond min-profile runner-local data.")
+            console.print(
+                "No profile assets required beyond min-profile runner-local data."
+            )
 
         if args.no_smoke:
             print_next_commands(args)
             return 0
 
         console.print("Running min-profile smoke validation.")
-        workload_reports = [run_workload(workload, "min", output_dir) for workload in selected]
+        workload_reports = [
+            run_workload(workload, "min", output_dir) for workload in selected
+        ]
         enrich_reports_for_display(workload_reports, workloads)
         export_workload_reports(workload_reports, workloads)
         _, report_path, exports = write_aggregate_report(
@@ -553,7 +719,9 @@ def print_next_commands(args: argparse.Namespace) -> None:
     suffix = f" {selector_text}" if selector_text else ""
     console.print("[bold]Next commands[/bold]")
     print(f"  mlperf fetch --profile {args.profile}{suffix} --dry-run")
-    print(f"  mlperf run --profile {args.profile}{suffix} --output-dir {Path(args.output_dir).resolve()}")
+    print(
+        f"  mlperf run --profile {args.profile}{suffix} --output-dir {Path(args.output_dir).resolve()}"
+    )
     print(f"  mlperf report {Path(args.output_dir).resolve()} --format html --open")
 
 
@@ -562,8 +730,16 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         workloads = load_workloads(args)
         selected = select_cli_workloads(workloads, args)
         action = "Would fetch" if args.dry_run else "Fetched/validated"
-        print_run_selection(args.profile, selected, suite=args.suite, workload=args.workload, variant=args.variant)
-        console.print(f"{action} {len(selected)} workload(s) for profile {args.profile}.")
+        print_run_selection(
+            args.profile,
+            selected,
+            suite=args.suite,
+            workload=args.workload,
+            variant=args.variant,
+        )
+        console.print(
+            f"{action} {len(selected)} workload(s) for profile {args.profile}."
+        )
         for workload in selected:
             console.print(fetch_workload_asset(workload, dry_run=args.dry_run))
     return 0
@@ -572,11 +748,21 @@ def cmd_fetch(args: argparse.Namespace) -> int:
 def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
     model_source = workload.raw.get("model_source") or {}
     if model_source.get("type") == "huggingface":
-        from mlperf.runners.slm import DEFAULT_MODEL_ID, resolve_model_id, snapshot_model
+        from mlperf.runners.slm import (
+            DEFAULT_MODEL_ID,
+            resolve_model_id,
+            snapshot_model,
+        )
 
-        requested_model = os.environ.get("MLPERF_EDU_SLM_MODEL_ID") or model_source.get("default_model_id") or DEFAULT_MODEL_ID
+        requested_model = (
+            os.environ.get("MLPERF_EDU_SLM_MODEL_ID")
+            or model_source.get("default_model_id")
+            or DEFAULT_MODEL_ID
+        )
         model_id = resolve_model_id(str(requested_model))
-        dossier = huggingface_model_dossier(model_source, model_name=workload.model, model_id=model_id)
+        dossier = huggingface_model_dossier(
+            model_source, model_name=workload.model, model_id=model_id
+        )
         terms = asset_terms_summary(dossier)
         if dry_run:
             return f"- {workload.id}: huggingface model -> {model_id}; {terms}"
@@ -589,8 +775,14 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
         dependency = workload.raw.get("quality_dependency") or shared_checkpoint
         prompt_asset = ""
         if workload.dataset:
-            dossier = asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source"))
-            terms = asset_terms_summary(dossier) if dossier else "no structured asset dossier"
+            dossier = asset_dossier(
+                workload.dataset, declared_source=workload.raw.get("dataset_source")
+            )
+            terms = (
+                asset_terms_summary(dossier)
+                if dossier
+                else "no structured asset dossier"
+            )
             prompt_asset = f"; prompt_fixture={workload.dataset}; {terms}"
         return (
             f"- {workload.id}: shared checkpoint -> {shared_checkpoint}; "
@@ -599,7 +791,9 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
         )
 
     dataset = workload.dataset or "no dataset declared"
-    dossier = asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source"))
+    dossier = asset_dossier(
+        workload.dataset, declared_source=workload.raw.get("dataset_source")
+    )
     terms = asset_terms_summary(dossier) if dossier else "no structured asset dossier"
     if dataset == "tinyshakespeare":
         if dry_run:
@@ -639,7 +833,9 @@ def asset_terms_summary(dossier: dict[str, Any]) -> str:
     status = dossier.get("license_status", "unknown")
     use = dossier.get("public_result_use", "requires review")
     release = dossier.get("public_release_status", "needs-release-decision")
-    return f"license={license_value}; terms={status}; release={release}; public_use={use}"
+    return (
+        f"license={license_value}; terms={status}; release={release}; public_use={use}"
+    )
 
 
 def cmd_run(args: argparse.Namespace) -> int:
@@ -650,7 +846,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             console.print("[red]No workloads selected.[/red]")
             return 1
 
-        print_run_selection(args.profile, selected, suite=args.suite, workload=args.workload, variant=args.variant)
+        print_run_selection(
+            args.profile,
+            selected,
+            suite=args.suite,
+            workload=args.workload,
+            variant=args.variant,
+        )
         if getattr(args, "dry_run", False):
             console.print("[green]dry-run complete[/green]")
             return 0
@@ -659,9 +861,20 @@ def cmd_run(args: argparse.Namespace) -> int:
         power_meter = PowerMeter()
         if args.power:
             power_meter.start()
-        workload_reports = [run_workload(workload, args.profile, output_dir) for workload in selected]
-        enrich_reports_for_display(workload_reports, workloads)
-        export_workload_reports(workload_reports, workloads)
+        workload_reports: list[dict[str, Any]] = []
+        for workload in selected:
+            report = run_workload(workload, args.profile, output_dir)
+
+            # Finalize each report and its provenance before starting the next
+            # workload.  A dependent workload can bind the exact report and
+            # manifest bytes produced by an earlier workload (NanoGPT training
+            # -> prefill/decode is the current example).  Deferring all exports
+            # until the end would mutate the source report after inference had
+            # recorded its lineage digests.
+            enrich_report_for_display(report, workloads)
+            export_workload_reports([report], workloads)
+            workload_reports.append(report)
+
         power_report = power_meter.stop_report() if args.power else None
         _, report_path, exports = write_aggregate_report(
             profile=args.profile,
@@ -687,19 +900,25 @@ def print_run_selection(
     selector = selection_label(suite=suite, workload=workload)
     if variant:
         selector = f"{selector}:{variant}"
-    console.print(f"Selected {len(selected)} workload(s) for profile {profile} ({selector}).")
+    console.print(
+        f"Selected {len(selected)} workload(s) for profile {profile} ({selector})."
+    )
     if not selected:
         return
 
     if len(selected) <= 10:
         for item in selected:
-            console.print(f"  - {item.id} | run as: {workload_run_selector(item)} | suite: {item.suite}")
+            console.print(
+                f"  - {item.id} | run as: {workload_run_selector(item)} | suite: {item.suite}"
+            )
         return
 
     counts: dict[str, int] = {}
     for item in selected:
         counts[item.suite] = counts.get(item.suite, 0) + 1
-    summary = ", ".join(f"{suite_name}={count}" for suite_name, count in sorted(counts.items()))
+    summary = ", ".join(
+        f"{suite_name}={count}" for suite_name, count in sorted(counts.items())
+    )
     console.print(f"  Suite coverage: {summary}")
 
 
@@ -727,7 +946,9 @@ def write_aggregate_report(
         "variant": variant,
         "selection": {
             "kind": "workload" if workload else "suite" if suite else "default",
-            "name": f"{workload}:{variant}" if workload and variant else workload or suite or "default",
+            "name": f"{workload}:{variant}"
+            if workload and variant
+            else workload or suite or "default",
         },
         "hardware": hardware,
         "workloads": workload_reports,
@@ -741,7 +962,9 @@ def write_aggregate_report(
     return report, report_path, exports
 
 
-def export_workload_reports(workload_reports: list[dict[str, Any]], workloads: dict[str, Workload] | None = None) -> None:
+def export_workload_reports(
+    workload_reports: list[dict[str, Any]], workloads: dict[str, Workload] | None = None
+) -> None:
     """Create HTML/CSV siblings for per-workload JSON reports.
 
     Runners write the measurement JSON before building provenance manifests, so
@@ -753,43 +976,59 @@ def export_workload_reports(workload_reports: list[dict[str, Any]], workloads: d
         artifacts = item.get("artifacts")
         if not isinstance(artifacts, dict):
             if item.get("status") in {"passed", "quality_failed"}:
-                console.print(f"[yellow]No workload artifacts declared for:[/yellow] {item.get('workload', item.get('id', 'unknown'))}")
+                console.print(
+                    f"[yellow]No workload artifacts declared for:[/yellow] {item.get('workload', item.get('id', 'unknown'))}"
+                )
             continue
         report_value = artifacts.get("report")
         if not report_value:
             if item.get("status") in {"passed", "quality_failed"}:
-                console.print(f"[yellow]No workload report path declared for:[/yellow] {item.get('workload', item.get('id', 'unknown'))}")
+                console.print(
+                    f"[yellow]No workload report path declared for:[/yellow] {item.get('workload', item.get('id', 'unknown'))}"
+                )
             continue
         report_path = Path(str(report_value))
         if not report_path.exists() or not report_path.is_file():
-            console.print(f"[yellow]Workload report missing; skipped HTML/CSV export:[/yellow] {report_path}")
+            console.print(
+                f"[yellow]Workload report missing; skipped HTML/CSV export:[/yellow] {report_path}"
+            )
             continue
         try:
             # Re-read the on-disk JSON so derived views match the exact report
             # bytes that the provenance manifest binds.
             report = json.loads(report_path.read_text())
         except json.JSONDecodeError as exc:
-            console.print(f"[yellow]Workload report is not valid JSON; skipped HTML/CSV export:[/yellow] {report_path} ({exc})")
+            console.print(
+                f"[yellow]Workload report is not valid JSON; skipped HTML/CSV export:[/yellow] {report_path} ({exc})"
+            )
             continue
         try:
             enrich_report_for_display(report, workloads or {})
             attach_run_fingerprints(report)
             report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-            update_measurement_manifest(report, report_path, artifacts.get("provenance"))
+            update_measurement_manifest(
+                report, report_path, artifacts.get("provenance")
+            )
             exports = write_report_exports(report, report_path, open_report=False)
         except Exception as exc:
-            console.print(f"[yellow]Could not export workload HTML/CSV:[/yellow] {report_path} ({exc})")
+            console.print(
+                f"[yellow]Could not export workload HTML/CSV:[/yellow] {report_path} ({exc})"
+            )
             continue
         artifacts["html"] = str(exports["html"])
         artifacts["csv"] = str(exports["csv"])
 
 
-def enrich_reports_for_display(reports: list[dict[str, Any]], workloads: dict[str, Workload]) -> None:
+def enrich_reports_for_display(
+    reports: list[dict[str, Any]], workloads: dict[str, Workload]
+) -> None:
     for report in reports:
         enrich_report_for_display(report, workloads)
 
 
-def enrich_report_for_display(report: dict[str, Any], workloads: dict[str, Workload]) -> None:
+def enrich_report_for_display(
+    report: dict[str, Any], workloads: dict[str, Workload]
+) -> None:
     if "workloads" in report:
         for item in report.get("workloads", []):
             if isinstance(item, dict):
@@ -803,9 +1042,17 @@ def enrich_report_for_display(report: dict[str, Any], workloads: dict[str, Workl
 
     quality = report.setdefault("quality", {})
     if isinstance(quality, dict):
-        raw_quality = workload.raw.get("quality") or workload.raw.get("quality_target") or {}
-        legacy_required = bool(raw_quality.get(LEGACY_QUALITY_REQUIRED_FIELD, workload.public_status == "score-bearing"))
-        quality["quality_required"] = bool(quality_required_value(quality, legacy_required))
+        raw_quality = (
+            workload.raw.get("quality") or workload.raw.get("quality_target") or {}
+        )
+        legacy_required = bool(
+            raw_quality.get(
+                LEGACY_QUALITY_REQUIRED_FIELD, workload.public_status == "score-bearing"
+            )
+        )
+        quality["quality_required"] = bool(
+            quality_required_value(quality, legacy_required)
+        )
         quality.pop(LEGACY_QUALITY_REQUIRED_FIELD, None)
         if workload.quality_direction:
             quality.setdefault("direction", workload.quality_direction)
@@ -818,7 +1065,9 @@ def enrich_report_for_display(report: dict[str, Any], workloads: dict[str, Workl
         if workload.quality_variance_summary:
             quality.setdefault("variance_summary", workload.quality_variance_summary)
         if workload.quality_reference_protocol:
-            quality.setdefault("reference_protocol", workload.quality_reference_protocol)
+            quality.setdefault(
+                "reference_protocol", workload.quality_reference_protocol
+            )
         if workload.quality_reviewer_notes:
             quality.setdefault("reviewer_notes", list(workload.quality_reviewer_notes))
         functional_check = workload.raw.get("functional_check")
@@ -836,7 +1085,9 @@ def enrich_report_for_display(report: dict[str, Any], workloads: dict[str, Workl
         report.setdefault("dataset", workload.dataset)
         report.setdefault(
             "dataset_asset",
-            asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source")),
+            asset_dossier(
+                workload.dataset, declared_source=workload.raw.get("dataset_source")
+            ),
         )
     if workload.raw.get("dataset_source"):
         report.setdefault("dataset_source", workload.raw.get("dataset_source"))
@@ -844,23 +1095,35 @@ def enrich_report_for_display(report: dict[str, Any], workloads: dict[str, Workl
         report.setdefault("model_source", workload.raw.get("model_source"))
         model_source = workload.raw.get("model_source") or {}
         if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
-            report.setdefault(
-                "model_asset",
-                huggingface_model_dossier(model_source, model_name=workload.model),
-            )
+            model_asset = report.setdefault("model_asset", {})
+            if isinstance(model_asset, dict):
+                for key, value in huggingface_model_dossier(
+                    model_source, model_name=workload.model
+                ).items():
+                    model_asset.setdefault(key, value)
+                model_info = report.get("model")
+                if isinstance(model_info, dict) and model_info.get("revision"):
+                    model_asset.setdefault("revision", model_info["revision"])
     if workload.raw.get("quality_dependency"):
         report.setdefault("quality_dependency", workload.raw.get("quality_dependency"))
     if workload.raw.get("shared_checkpoint"):
         report.setdefault("shared_checkpoint", workload.raw.get("shared_checkpoint"))
-        report.setdefault("checkpoint_provenance", checkpoint_provenance_for(workload, workloads))
+        checkpoint = report.setdefault("checkpoint_provenance", {})
+        if isinstance(checkpoint, dict):
+            for key, value in checkpoint_provenance_for(workload, workloads).items():
+                checkpoint.setdefault(key, value)
     canonical = canonical_workload_for_id(workload)
     if canonical:
         report.setdefault("canonical_workload", canonical)
         report.setdefault("variant", workload_variant_name(workload))
         report.setdefault("run_selector", workload_run_selector(workload))
 
+    report["review_contract"] = evaluate_report_contract(workload, report)
 
-def checkpoint_provenance_for(workload: Workload, workloads: dict[str, Workload]) -> dict[str, Any]:
+
+def checkpoint_provenance_for(
+    workload: Workload, workloads: dict[str, Workload]
+) -> dict[str, Any]:
     shared_checkpoint = workload.raw.get("shared_checkpoint")
     if not shared_checkpoint:
         return {}
@@ -870,7 +1133,9 @@ def checkpoint_provenance_for(workload: Workload, workloads: dict[str, Workload]
         "artifact_role": "trained-checkpoint",
         "source_workload": str(shared_checkpoint),
         "quality_dependency": str(quality_dependency),
-        "source_run_selector": workload_run_selector(source) if source else str(shared_checkpoint),
+        "source_run_selector": workload_run_selector(source)
+        if source
+        else str(shared_checkpoint),
         "artifact_policy": "Preserve the source training report and .provd.json alongside checkpoint-backed inference results for public review.",
     }
     if source:
@@ -888,20 +1153,26 @@ def checkpoint_provenance_for(workload: Workload, workloads: dict[str, Workload]
     return {key: value for key, value in provenance.items() if value not in (None, "")}
 
 
-def attach_run_fingerprints(report: dict[str, Any], *, hardware: dict[str, Any] | None = None) -> None:
+def attach_run_fingerprints(
+    report: dict[str, Any], *, hardware: dict[str, Any] | None = None
+) -> None:
     """Attach stable machine-readable execution fingerprints to reports."""
     if "workloads" in report:
         aggregate_hardware = hardware or report.get("hardware") or detect_hardware()
         for item in report.get("workloads", []):
             if isinstance(item, dict):
                 attach_run_fingerprints(item, hardware=aggregate_hardware)
-        report["run_fingerprint"] = build_run_fingerprint(report, hardware=aggregate_hardware)
+        report["run_fingerprint"] = build_run_fingerprint(
+            report, hardware=aggregate_hardware
+        )
         return
 
     report["run_fingerprint"] = build_run_fingerprint(report, hardware=hardware)
 
 
-def build_run_fingerprint(report: dict[str, Any], *, hardware: dict[str, Any] | None = None) -> dict[str, Any]:
+def build_run_fingerprint(
+    report: dict[str, Any], *, hardware: dict[str, Any] | None = None
+) -> dict[str, Any]:
     hw = hardware or report.get("hardware") or detect_hardware()
     manifest = load_report_manifest(report)
     fingerprint = {
@@ -955,10 +1226,24 @@ def package_version(package: str) -> str | None:
 
 
 def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
-    workloads = report.get("workloads") if isinstance(report.get("workloads"), list) else None
+    workloads = (
+        report.get("workloads") if isinstance(report.get("workloads"), list) else None
+    )
     if workloads:
-        backends = sorted({str(item.get("backend")) for item in workloads if isinstance(item, dict) and item.get("backend")})
-        data_modes = sorted({str(item.get("data_mode")) for item in workloads if isinstance(item, dict) and item.get("data_mode")})
+        backends = sorted(
+            {
+                str(item.get("backend"))
+                for item in workloads
+                if isinstance(item, dict) and item.get("backend")
+            }
+        )
+        data_modes = sorted(
+            {
+                str(item.get("data_mode"))
+                for item in workloads
+                if isinstance(item, dict) and item.get("data_mode")
+            }
+        )
     else:
         backends = [str(report.get("backend"))] if report.get("backend") else []
         data_modes = [str(report.get("data_mode"))] if report.get("data_mode") else []
@@ -1029,7 +1314,9 @@ def asset_hashes_from_manifest(manifest: dict[str, Any] | None) -> dict[str, Any
     return hashes
 
 
-def update_measurement_manifest(report: dict[str, Any], report_path: Path, manifest_value: Any) -> None:
+def update_measurement_manifest(
+    report: dict[str, Any], report_path: Path, manifest_value: Any
+) -> None:
     if not manifest_value:
         return
     manifest_path = Path(str(manifest_value))
@@ -1044,7 +1331,8 @@ def update_measurement_manifest(report: dict[str, Any], report_path: Path, manif
         return
     leaves["measurement"] = measurement_leaf(report, report_path)
     manifest["merkle_root"] = merkle_root(leaves)
-    manifest["signature"] = sign_manifest(manifest["merkle_root"])
+    manifest["integrity"] = integrity_record(manifest["merkle_root"])
+    manifest.pop("signature", None)
     manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
 
 
@@ -1055,9 +1343,15 @@ def print_run_summary(
     exports: dict[str, Path],
 ) -> int:
     executed = sum(1 for item in workload_reports if item.get("status") == "passed")
-    definition_only = sum(1 for item in workload_reports if item.get("status") == "definition_valid")
-    unsupported = sum(1 for item in workload_reports if item.get("status") == "not_implemented")
-    quality_failed = sum(1 for item in workload_reports if item.get("status") == "quality_failed")
+    definition_only = sum(
+        1 for item in workload_reports if item.get("status") == "definition_valid"
+    )
+    unsupported = sum(
+        1 for item in workload_reports if item.get("status") == "not_implemented"
+    )
+    quality_failed = sum(
+        1 for item in workload_reports if item.get("status") == "quality_failed"
+    )
     console.print(
         f"[green]{profile} run complete[/green]: "
         f"{executed} passed, {definition_only} definition-only, {unsupported} unsupported, {quality_failed} quality-failed"
@@ -1105,7 +1399,12 @@ def run_pro_profile(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if not max_runner:
         raise ValueError(f"No max runner is registered for pro fallback: {workload.id}")
 
-    repetitions = int(os.environ.get("MLPERF_EDU_PRO_REPETITIONS", os.environ.get("MLPERF_EDU_MAX_REPETITIONS", "1")))
+    repetitions = int(
+        os.environ.get(
+            "MLPERF_EDU_PRO_REPETITIONS",
+            os.environ.get("MLPERF_EDU_MAX_REPETITIONS", "1"),
+        )
+    )
     if repetitions < 1:
         raise ValueError("MLPERF_EDU_PRO_REPETITIONS must be >= 1")
 
@@ -1122,7 +1421,11 @@ def run_pro_profile(workload: Workload, output_dir: Path) -> dict[str, Any]:
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = (output_dir / f"{workload.id}_pro_report.json").resolve()
     manifest_path = (output_dir / f"{workload.id}_pro.provd.json").resolve()
-    status = "passed" if all(item.get("status") == "passed" for item in subreports) else "quality_failed"
+    status = (
+        "passed"
+        if all(item.get("status") == "passed" for item in subreports)
+        else "quality_failed"
+    )
     target_met = status == "passed"
     metrics = aggregate_pro_metrics(subreports)
     metrics["repetitions"] = repetitions
@@ -1169,7 +1472,9 @@ def run_pro_profile(workload: Workload, output_dir: Path) -> dict[str, Any]:
         rng_seed=None,
         repo_root=find_project_root(),
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -1196,7 +1501,9 @@ class TemporaryNanogptCheckpoint:
             os.environ["MLPERF_EDU_NANOGPT_CHECKPOINT"] = self.previous
 
 
-def publish_shared_checkpoint(workload: Workload, report: dict[str, Any], output_dir: Path) -> None:
+def publish_shared_checkpoint(
+    workload: Workload, report: dict[str, Any], output_dir: Path
+) -> None:
     if workload.id != "nanogpt-train":
         return
     checkpoint = (report.get("artifacts") or {}).get("checkpoint")
@@ -1325,12 +1632,16 @@ def cmd_report(args: argparse.Namespace) -> int:
             console.print(text)
         return 0
     if args.format == "csv":
-        output = Path(args.output).resolve() if args.output else path.with_suffix(".csv")
+        output = (
+            Path(args.output).resolve() if args.output else path.with_suffix(".csv")
+        )
         write_csv_report(data, output)
         console.print(f"CSV: {output}")
         return 0
     if args.format == "html":
-        output = Path(args.output).resolve() if args.output else path.with_suffix(".html")
+        output = (
+            Path(args.output).resolve() if args.output else path.with_suffix(".html")
+        )
         write_html_report(data, output, source_path=path)
         console.print(f"HTML: {output}")
         if args.open:
@@ -1384,19 +1695,31 @@ def cmd_report(args: argparse.Namespace) -> int:
 def resolve_report_input(path: Path) -> Path:
     if not path.is_dir():
         return path
-    candidates = sorted(path.glob("mlperf_edu_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    candidates = sorted(
+        path.glob("mlperf_edu_*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
     if candidates:
         return candidates[0]
-    validation_candidates = sorted(path.glob("mlperf_validate_*.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    validation_candidates = sorted(
+        path.glob("mlperf_validate_*.json"),
+        key=lambda item: item.stat().st_mtime,
+        reverse=True,
+    )
     if validation_candidates:
         return validation_candidates[0]
-    workload_candidates = sorted(path.glob("*_report.json"), key=lambda item: item.stat().st_mtime, reverse=True)
+    workload_candidates = sorted(
+        path.glob("*_report.json"), key=lambda item: item.stat().st_mtime, reverse=True
+    )
     if workload_candidates:
         return workload_candidates[0]
     return path / "mlperf_edu_<timestamp>.json"
 
 
-def write_report_exports(report: dict[str, Any], report_path: Path, *, open_report: bool = False) -> dict[str, Path]:
+def write_report_exports(
+    report: dict[str, Any], report_path: Path, *, open_report: bool = False
+) -> dict[str, Path]:
     csv_path = report_path.with_suffix(".csv")
     html_path = report_path.with_suffix(".html")
     write_csv_report(report, csv_path)
@@ -1483,7 +1806,9 @@ def aggregate_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
-def write_html_report(report: dict[str, Any], output: Path, *, source_path: Path) -> None:
+def write_html_report(
+    report: dict[str, Any], output: Path, *, source_path: Path
+) -> None:
     rows = report_rows(report)
     status_counts: dict[str, int] = {}
     for row in rows:
@@ -1494,7 +1819,9 @@ def write_html_report(report: dict[str, Any], output: Path, *, source_path: Path
     if len(rows) == 1:
         title = f"MLPerf EDU Report: {rows[0].get('workload', 'unknown')}"
     elif report.get("suite"):
-        title = f"MLPerf EDU Suite Report: {report.get('suite')} / {report.get('profile')}"
+        title = (
+            f"MLPerf EDU Suite Report: {report.get('suite')} / {report.get('profile')}"
+        )
     elif (report.get("selection") or {}).get("kind") == "default":
         title = f"MLPerf EDU Default Report: {report.get('profile')}"
 
@@ -1580,7 +1907,7 @@ def write_html_report(report: dict[str, Any], output: Path, *, source_path: Path
   <header>
     <div>
       <h1>{escape(title)}</h1>
-      <div class="note">Schema: {escape(str(report.get('schema', 'unknown')))}</div>
+      <div class="note">Schema: {escape(str(report.get("schema", "unknown")))}</div>
     </div>
     <div class="meta">
       <div>{escape(str(generated_at))}</div>
@@ -1636,7 +1963,10 @@ def serving_metrics_section_html(report: dict[str, Any]) -> str:
             default_suite=report.get("suite"),
             default_power=None,
         )
-        metric_cells = "".join(f"<td>{escape(format_cell(metrics.get(key)))}</td>" for key in SERVING_METRIC_KEYS)
+        metric_cells = "".join(
+            f"<td>{escape(format_cell(metrics.get(key)))}</td>"
+            for key in SERVING_METRIC_KEYS
+        )
         rows.append(
             "<tr>"
             f"<td>{escape(str(base.get('workload', '')))}</td>"
@@ -1667,7 +1997,9 @@ def hardware_section_html(report: dict[str, Any]) -> str:
     run_fingerprint = report.get("run_fingerprint") or {}
     hardware = report.get("hardware") or run_fingerprint.get("hardware") or {}
     rows = report_rows(report)
-    backends = sorted({str(row.get("backend", "")) for row in rows if row.get("backend")})
+    backends = sorted(
+        {str(row.get("backend", "")) for row in rows if row.get("backend")}
+    )
     if not hardware and not backends:
         return ""
 
@@ -1796,7 +2128,14 @@ def report_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
             )
             for item in workload_items
         ]
-    return [report_row(report, default_profile=report.get("profile"), default_suite=report.get("suite"), default_power=report.get("power"))]
+    return [
+        report_row(
+            report,
+            default_profile=report.get("profile"),
+            default_suite=report.get("suite"),
+            default_power=report.get("power"),
+        )
+    ]
 
 
 def report_row(
@@ -1808,20 +2147,42 @@ def report_row(
 ) -> dict[str, Any]:
     metrics = item.get("metrics") or {}
     quality = item.get("quality") or {}
-    variance_summary = quality.get("variance_summary") if isinstance(quality.get("variance_summary"), dict) else {}
-    checkpoint_provenance = item.get("checkpoint_provenance") if isinstance(item.get("checkpoint_provenance"), dict) else {}
-    dataset_asset = item.get("dataset_asset") if isinstance(item.get("dataset_asset"), dict) else {}
-    model_asset = item.get("model_asset") if isinstance(item.get("model_asset"), dict) else {}
+    variance_summary = (
+        quality.get("variance_summary")
+        if isinstance(quality.get("variance_summary"), dict)
+        else {}
+    )
+    checkpoint_provenance = (
+        item.get("checkpoint_provenance")
+        if isinstance(item.get("checkpoint_provenance"), dict)
+        else {}
+    )
+    dataset_asset = (
+        item.get("dataset_asset") if isinstance(item.get("dataset_asset"), dict) else {}
+    )
+    model_asset = (
+        item.get("model_asset") if isinstance(item.get("model_asset"), dict) else {}
+    )
     metric_name = quality_metric_name(quality)
     metric_key = metric_key_for_quality(metric_name, metrics)
     throughput_key = metric_key_for_throughput(metrics)
     dataset_value = dataset_name_for_row(item.get("dataset"))
-    model_source = model_asset.get("source_url") or model_source_summary(item.get("model_source"))
-    model_rationale = model_asset.get("selected_model_rationale") or model_asset.get("selection_rationale", "")
+    model_source = model_asset.get("source_url") or model_source_summary(
+        item.get("model_source")
+    )
+    model_rationale = model_asset.get("selected_model_rationale") or model_asset.get(
+        "selection_rationale", ""
+    )
     workload_id = str(item.get("workload", item.get("id", "")))
-    canonical = item.get("canonical_workload") or canonical_workload_for_id(workload_id) or ""
-    variant = item.get("variant") or (workload_variant_name(workload_id) if canonical else "")
-    run_selector = item.get("run_selector") or (f"{canonical} --variant {variant}" if canonical and variant else workload_id)
+    canonical = (
+        item.get("canonical_workload") or canonical_workload_for_id(workload_id) or ""
+    )
+    variant = item.get("variant") or (
+        workload_variant_name(workload_id) if canonical else ""
+    )
+    run_selector = item.get("run_selector") or (
+        f"{canonical} --variant {variant}" if canonical and variant else workload_id
+    )
     quality_required = quality_required_value(quality, "")
     return {
         "workload": workload_id,
@@ -1843,8 +2204,12 @@ def report_row(
         "model_rationale": model_rationale,
         "shared_checkpoint": item.get("shared_checkpoint", ""),
         "quality_dependency": item.get("quality_dependency", ""),
-        "checkpoint_source_selector": checkpoint_provenance.get("source_run_selector", ""),
-        "checkpoint_source_quality": checkpoint_source_quality_summary(checkpoint_provenance),
+        "checkpoint_source_selector": checkpoint_provenance.get(
+            "source_run_selector", ""
+        ),
+        "checkpoint_source_quality": checkpoint_source_quality_summary(
+            checkpoint_provenance
+        ),
         "checkpoint_artifact_policy": checkpoint_provenance.get("artifact_policy", ""),
         "metric": metric_key or metric_name or "",
         "value": metrics.get(metric_key) if metric_key else "",
@@ -1852,15 +2217,21 @@ def report_row(
         "target_basis": quality.get("target_basis", ""),
         "reference_runs": quality.get("reference_runs", ""),
         "reference_statistic": variance_summary.get("statistic", ""),
-        "reference_protocol": reference_protocol_summary(quality.get("reference_protocol")),
+        "reference_protocol": reference_protocol_summary(
+            quality.get("reference_protocol")
+        ),
         "direction": quality.get("direction", ""),
         "quality_required": quality_required,
         "target_met": quality.get("target_met", ""),
         "functional_check": functional_check_summary(quality.get("functional_check")),
         "duration_seconds": metrics.get("duration_seconds", ""),
         "throughput": metrics.get(throughput_key) if throughput_key else "",
-        "power_average_watts": (default_power or item.get("power") or {}).get("average_watts", ""),
-        "energy_joules": (default_power or item.get("power") or {}).get("energy_joules", ""),
+        "power_average_watts": (default_power or item.get("power") or {}).get(
+            "average_watts", ""
+        ),
+        "energy_joules": (default_power or item.get("power") or {}).get(
+            "energy_joules", ""
+        ),
     }
 
 
@@ -1874,7 +2245,12 @@ def dataset_name_for_row(dataset: Any) -> str:
 
 def model_source_summary(model_source: Any) -> str:
     if isinstance(model_source, dict):
-        return str(model_source.get("default_model_id") or model_source.get("source_url") or model_source.get("type") or "")
+        return str(
+            model_source.get("default_model_id")
+            or model_source.get("source_url")
+            or model_source.get("type")
+            or ""
+        )
     return ""
 
 
@@ -1892,7 +2268,14 @@ def reference_protocol_summary(protocol: Any) -> str:
     if not isinstance(protocol, dict):
         return ""
     parts = []
-    for key in ("profile", "backend", "machine_class", "dataset_mode", "aggregation", "rerun_policy"):
+    for key in (
+        "profile",
+        "backend",
+        "machine_class",
+        "dataset_mode",
+        "aggregation",
+        "rerun_policy",
+    ):
         value = protocol.get(key)
         if value not in (None, ""):
             parts.append(f"{key}={value}")
@@ -1961,18 +2344,55 @@ def format_cell(value: Any) -> str:
     return str(value)
 
 
-def metric_key_for_quality(metric_name: str | None, metrics: dict[str, Any]) -> str | None:
+def metric_key_for_quality(
+    metric_name: str | None, metrics: dict[str, Any]
+) -> str | None:
     if metric_name and metric_name in metrics:
         return metric_name
     candidates_by_metric = {
-        "accuracy": ("best_accuracy", "best_accuracy_mean", "final_accuracy", "final_accuracy_mean", "accuracy", "accuracy_mean"),
-        "top1_accuracy": ("best_accuracy", "best_accuracy_mean", "final_accuracy", "final_accuracy_mean", "accuracy", "accuracy_mean"),
-        "binary_accuracy": ("best_accuracy", "best_accuracy_mean", "final_accuracy", "final_accuracy_mean", "accuracy", "accuracy_mean"),
-        "test_accuracy": ("test_accuracy", "test_accuracy_mean", "accuracy", "accuracy_mean"),
-        "val_accuracy": ("val_accuracy", "val_accuracy_mean", "accuracy", "accuracy_mean"),
+        "accuracy": (
+            "best_accuracy",
+            "best_accuracy_mean",
+            "final_accuracy",
+            "final_accuracy_mean",
+            "accuracy",
+            "accuracy_mean",
+        ),
+        "top1_accuracy": (
+            "best_accuracy",
+            "best_accuracy_mean",
+            "final_accuracy",
+            "final_accuracy_mean",
+            "accuracy",
+            "accuracy_mean",
+        ),
+        "binary_accuracy": (
+            "best_accuracy",
+            "best_accuracy_mean",
+            "final_accuracy",
+            "final_accuracy_mean",
+            "accuracy",
+            "accuracy_mean",
+        ),
+        "test_accuracy": (
+            "test_accuracy",
+            "test_accuracy_mean",
+            "accuracy",
+            "accuracy_mean",
+        ),
+        "val_accuracy": (
+            "val_accuracy",
+            "val_accuracy_mean",
+            "accuracy",
+            "accuracy_mean",
+        ),
         "mse_loss": ("mse_loss", "mse_loss_mean", "loss", "loss_mean"),
         "val_mse": ("val_mse", "val_mse_mean", "mse_loss", "mse_loss_mean"),
-        "avg_episode_reward": ("avg_episode_reward", "avg_episode_reward_mean", "episode_reward"),
+        "avg_episode_reward": (
+            "avg_episode_reward",
+            "avg_episode_reward_mean",
+            "episode_reward",
+        ),
         "reconstruction_mse": (
             "final_reconstruction_mse",
             "final_reconstruction_mse_mean",
@@ -1990,7 +2410,11 @@ def metric_key_for_quality(metric_name: str | None, metrics: dict[str, Any]) -> 
             "loss_mean",
         ),
         "generated_tokens": ("generated_tokens", "generated_tokens_mean"),
-        "retrieval_accuracy": ("queries_per_second", "retrieve_latency_ms", "total_latency_ms"),
+        "retrieval_accuracy": (
+            "queries_per_second",
+            "retrieve_latency_ms",
+            "total_latency_ms",
+        ),
         "pass_at_1": ("iterations", "tokens_per_second", "total_latency_ms"),
         "trace_accuracy": ("steps", "total_reasoning_ms", "total_latency_ms"),
         "relative_loss_delta": ("relative_loss_delta", "relative_loss_delta_mean"),
@@ -2054,9 +2478,13 @@ def print_verification_checks(result: Any) -> None:
     console.print(table)
 
 
-def collect_package_files(manifest_path: Path, manifest: dict[str, Any]) -> list[tuple[str, Path, str]]:
+def collect_package_files(
+    manifest_path: Path, manifest: dict[str, Any]
+) -> list[tuple[str, Path, str]]:
+    """Collect every file needed to inspect and verify a submission archive."""
     files: list[tuple[str, Path, str]] = []
     seen: set[Path] = set()
+    archive_names: set[str] = set()
 
     def add(role: str, path: Path | None, archive_name: str) -> None:
         if not path or not path.exists() or not path.is_file():
@@ -2064,39 +2492,93 @@ def collect_package_files(manifest_path: Path, manifest: dict[str, Any]) -> list
         resolved = path.resolve()
         if resolved in seen:
             return
+        if archive_name in archive_names:
+            raise ValueError(f"duplicate package archive path: {archive_name}")
         seen.add(resolved)
+        archive_names.add(archive_name)
         files.append((role, resolved, archive_name))
 
     add("manifest", manifest_path, f"manifest/{manifest_path.name}")
 
-    report_path = manifest_report_path(manifest)
+    report_path = manifest_report_path(manifest, manifest_path)
     if report_path:
         add("report", report_path, f"report/{report_path.name}")
-        add("report_html", report_path.with_suffix(".html"), f"report/{report_path.with_suffix('.html').name}")
-        add("report_csv", report_path.with_suffix(".csv"), f"report/{report_path.with_suffix('.csv').name}")
+        add(
+            "report_html",
+            report_path.with_suffix(".html"),
+            f"report/{report_path.with_suffix('.html').name}",
+        )
+        add(
+            "report_csv",
+            report_path.with_suffix(".csv"),
+            f"report/{report_path.with_suffix('.csv').name}",
+        )
 
     leaves = manifest.get("leaves") or {}
     weights_path = (leaves.get("weights") or {}).get("path")
     if weights_path:
-        add("weights", Path(weights_path), f"weights/{Path(weights_path).name}")
+        resolved = resolve_artifact_path(manifest_path, weights_path)
+        add("weights", resolved, f"weights/{resolved.name}")
 
     roofline_path = (leaves.get("roofline_sidecar") or {}).get("path")
     if roofline_path:
-        add("roofline_sidecar", Path(roofline_path), f"roofline/{Path(roofline_path).name}")
+        resolved = resolve_artifact_path(manifest_path, roofline_path)
+        add("roofline_sidecar", resolved, f"roofline/{resolved.name}")
+
+    dataset_files = (leaves.get("dataset") or {}).get("files") or []
+    for index, item in enumerate(dataset_files):
+        if not isinstance(item, dict) or not item.get("path"):
+            continue
+        resolved = resolve_artifact_path(manifest_path, item["path"])
+        add("dataset", resolved, f"dataset/{index:03d}-{resolved.name}")
+
+    # Reports can carry additional evidence that is not a first-class manifest
+    # leaf, such as model metadata. Include it and cover it in package_index.json.
+    if report_path and report_path.is_file():
+        try:
+            report = json.loads(report_path.read_text())
+        except json.JSONDecodeError:
+            report = {}
+        artifacts = report.get("artifacts") or {}
+        if isinstance(artifacts, dict):
+            for key, value in sorted(artifacts.items()):
+                if not isinstance(value, str) or not value:
+                    continue
+                source = Path(value)
+                if not source.is_absolute():
+                    source = report_path.parent / source
+                safe_key = "".join(
+                    char if char.isalnum() or char in "-_" else "_" for char in str(key)
+                )
+                add(
+                    f"report_artifact:{key}",
+                    source,
+                    f"artifacts/{safe_key}/{source.name}",
+                )
 
     return files
 
 
-def manifest_report_path(manifest: dict[str, Any]) -> Path | None:
-    report_path = ((manifest.get("leaves") or {}).get("measurement") or {}).get("report_path")
-    return Path(report_path) if report_path else None
+def manifest_report_path(
+    manifest: dict[str, Any], manifest_path: Path | None = None
+) -> Path | None:
+    report_path = ((manifest.get("leaves") or {}).get("measurement") or {}).get(
+        "report_path"
+    )
+    if not report_path:
+        return None
+    return (
+        resolve_artifact_path(manifest_path, report_path)
+        if manifest_path
+        else Path(report_path)
+    )
 
 
 def grade_manifest(manifest_path: Path) -> dict[str, Any]:
     manifest = json.loads(manifest_path.read_text())
     result = verify_provd(manifest_path, repo_root=find_project_root())
 
-    report_path = manifest_report_path(manifest)
+    report_path = manifest_report_path(manifest, manifest_path)
     report: dict[str, Any] = {}
     if report_path and report_path.exists():
         report = json.loads(report_path.read_text())
@@ -2105,14 +2587,30 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
     quality = report.get("quality") or {}
     metric_name = quality_metric_name(quality)
     metric_key = metric_key_for_quality(metric_name, metrics)
-    status = report.get("status") or ("missing_report" if report_path else "missing_measurement")
+    status = report.get("status") or (
+        "missing_report" if report_path else "missing_measurement"
+    )
     quality_required = bool(quality_required_value(quality, False))
     target_met = quality.get("target_met", "")
-    passed = bool(result.all_ok and status == "passed" and (not quality_required or target_met is True))
+    passed = bool(
+        result.all_ok
+        and status == "passed"
+        and (not quality_required or target_met is True)
+    )
     workload_id = report.get("workload") or manifest.get("workload", "unknown")
-    canonical = report.get("canonical_workload") or canonical_workload_for_id(str(workload_id)) or ""
-    variant = report.get("variant") or (workload_variant_name(str(workload_id)) if canonical else "")
-    run_selector = report.get("run_selector") or (f"{canonical} --variant {variant}" if canonical and variant else str(workload_id))
+    canonical = (
+        report.get("canonical_workload")
+        or canonical_workload_for_id(str(workload_id))
+        or ""
+    )
+    variant = report.get("variant") or (
+        workload_variant_name(str(workload_id)) if canonical else ""
+    )
+    run_selector = report.get("run_selector") or (
+        f"{canonical} --variant {variant}"
+        if canonical and variant
+        else str(workload_id)
+    )
     return {
         "manifest": str(manifest_path),
         "report": str(report_path) if report_path else None,
@@ -2134,6 +2632,325 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
     }
 
 
+def _json_bytes(value: dict[str, Any]) -> bytes:
+    return (json.dumps(value, indent=2, sort_keys=True) + "\n").encode("utf-8")
+
+
+def _archive_relative(target: str, owner: str) -> str:
+    return posixpath.relpath(target, start=posixpath.dirname(owner))
+
+
+def _portable_report_paths(
+    value: Any,
+    *,
+    source_to_archive: dict[Path, str],
+    owner_archive: str,
+) -> Any:
+    """Replace machine-local absolute paths in a packaged report."""
+    if isinstance(value, dict):
+        return {
+            key: _portable_report_paths(
+                item,
+                source_to_archive=source_to_archive,
+                owner_archive=owner_archive,
+            )
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [
+            _portable_report_paths(
+                item,
+                source_to_archive=source_to_archive,
+                owner_archive=owner_archive,
+            )
+            for item in value
+        ]
+    if not isinstance(value, str) or not Path(value).is_absolute():
+        return value
+
+    source = Path(value).resolve()
+    archive_name = source_to_archive.get(source)
+    if archive_name:
+        return _archive_relative(archive_name, owner_archive)
+
+    descendant_archives: list[str] = []
+    for candidate, candidate_archive in source_to_archive.items():
+        try:
+            candidate.relative_to(source)
+        except ValueError:
+            continue
+        descendant_archives.append(candidate_archive)
+    if descendant_archives:
+        common_archive = posixpath.commonpath(descendant_archives)
+        if common_archive not in {"", "."}:
+            if posixpath.splitext(common_archive)[1]:
+                common_archive = posixpath.dirname(common_archive)
+            return _archive_relative(common_archive, owner_archive)
+
+    # Interpreter/cache locations describe the source environment but are not
+    # submission artifacts. Keep a recognizable label without leaking or
+    # pretending that the original absolute path is portable.
+    return f"local-environment:{source.name or 'root'}"
+
+
+def _absolute_path_values(value: Any, prefix: str = "report") -> list[str]:
+    found: list[str] = []
+    if isinstance(value, dict):
+        for key, item in value.items():
+            found.extend(_absolute_path_values(item, f"{prefix}.{key}"))
+    elif isinstance(value, list):
+        for index, item in enumerate(value):
+            found.extend(_absolute_path_values(item, f"{prefix}[{index}]"))
+    elif isinstance(value, str) and Path(value).is_absolute():
+        found.append(prefix)
+    return found
+
+
+def _portable_report_exports(
+    report: dict[str, Any],
+    *,
+    report_archive: str,
+    package_files: list[tuple[str, Path, str]],
+    source_to_archive: dict[Path, str],
+) -> dict[str, bytes]:
+    """Regenerate HTML/CSV views from the archive-specific JSON report."""
+    role_to_archive = {role: archive for role, _, archive in package_files}
+    overrides: dict[str, bytes] = {}
+    with tempfile.TemporaryDirectory(prefix="mlperf-edu-package-report-") as tmp:
+        temp_report = Path(tmp) / Path(report_archive).name
+        temp_report.write_bytes(_json_bytes(report))
+        exports = write_report_exports(report, temp_report, open_report=False)
+        for role, export_key in (("report_html", "html"), ("report_csv", "csv")):
+            archive_name = role_to_archive.get(role)
+            if not archive_name:
+                continue
+            payload = exports[export_key].read_bytes()
+            payload = payload.replace(
+                str(temp_report).encode(),
+                _archive_relative(report_archive, archive_name).encode(),
+            )
+            for source, target_archive in source_to_archive.items():
+                payload = payload.replace(
+                    str(source).encode(),
+                    _archive_relative(target_archive, archive_name).encode(),
+                )
+            overrides[archive_name] = payload
+    return overrides
+
+
+def build_portable_package_files(
+    manifest_path: Path,
+    manifest: dict[str, Any],
+    package_files: list[tuple[str, Path, str]],
+) -> tuple[dict[str, bytes], str]:
+    """Build archive-specific report and manifest bytes with relative paths."""
+    source_to_archive = {
+        source.resolve(): archive for _, source, archive in package_files
+    }
+    manifest_archive = source_to_archive[manifest_path.resolve()]
+    report_path = manifest_report_path(manifest, manifest_path)
+    if not report_path or not report_path.is_file():
+        raise ValueError("manifest report is missing")
+    report_archive = source_to_archive.get(report_path.resolve())
+    if not report_archive:
+        raise ValueError("manifest report was not collected for packaging")
+
+    packaged_report = _portable_report_paths(
+        json.loads(report_path.read_text()),
+        source_to_archive=source_to_archive,
+        owner_archive=report_archive,
+    )
+
+    report_bytes = _json_bytes(packaged_report)
+    packaged_manifest = json.loads(json.dumps(manifest))
+    leaves = packaged_manifest["leaves"]
+
+    def rewrite_leaf_path(leaf: dict[str, Any]) -> None:
+        raw_path = leaf.get("path")
+        if not raw_path:
+            return
+        source = resolve_artifact_path(manifest_path, raw_path).resolve()
+        archive_name = source_to_archive.get(source)
+        if not archive_name:
+            raise ValueError(f"manifest artifact was not collected: {raw_path}")
+        leaf["path"] = _archive_relative(archive_name, manifest_archive)
+
+    rewrite_leaf_path(leaves.get("weights") or {})
+    rewrite_leaf_path(leaves.get("roofline_sidecar") or {})
+    dataset = leaves.get("dataset") or {}
+    for item in dataset.get("files") or []:
+        if isinstance(item, dict):
+            rewrite_leaf_path(item)
+    if dataset.get("files"):
+        dataset_root = hashlib.sha256()
+        for item in dataset["files"]:
+            digest = str(item["sha256"]).removeprefix("sha256:")
+            dataset_root.update(f"{item['path']}:{digest}\n".encode())
+        dataset["merkle_root"] = "sha256:" + dataset_root.hexdigest()
+
+    leaves["measurement"] = measurement_leaf(
+        packaged_report,
+        _archive_relative(report_archive, manifest_archive),
+        report_bytes=report_bytes,
+    )
+    packaged_manifest["merkle_root"] = merkle_root(leaves)
+    packaged_manifest["integrity"] = integrity_record(packaged_manifest["merkle_root"])
+    packaged_manifest.pop("signature", None)
+    manifest_bytes = _json_bytes(packaged_manifest)
+    archive_bytes = {
+        report_archive: report_bytes,
+        manifest_archive: manifest_bytes,
+    }
+    archive_bytes.update(
+        _portable_report_exports(
+            packaged_report,
+            report_archive=report_archive,
+            package_files=package_files,
+            source_to_archive=source_to_archive,
+        )
+    )
+    return archive_bytes, manifest_archive
+
+
+def verify_package_archive(
+    package_path: Path,
+    *,
+    repo_root: Path,
+) -> list[tuple[str, bool, str]]:
+    """Verify index coverage and provenance after extraction to a clean directory."""
+    checks: list[tuple[str, bool, str]] = []
+    with tempfile.TemporaryDirectory(prefix="mlperf-edu-package-verify-") as tmp:
+        extraction_root = Path(tmp)
+        with zipfile.ZipFile(package_path) as zf:
+            names = set(zf.namelist())
+            if "package_index.json" not in names:
+                return [("package_index", False, "package_index.json is missing")]
+            index = json.loads(zf.read("package_index.json"))
+            included = index.get("included_files") or []
+            indexed_names = [str(item.get("path", "")) for item in included]
+            checks.append(
+                (
+                    "index.unique_paths",
+                    len(indexed_names) == len(set(indexed_names)),
+                    "every archive path must appear exactly once in the index",
+                )
+            )
+            unindexed = sorted(names - {"package_index.json"} - set(indexed_names))
+            checks.append(
+                (
+                    "index.complete_coverage",
+                    not unindexed,
+                    f"unindexed archive members: {unindexed}",
+                )
+            )
+            for item in included:
+                archive_name = str(item.get("path", ""))
+                archive_path = Path(archive_name)
+                safe = (
+                    bool(archive_name)
+                    and not archive_path.is_absolute()
+                    and ".." not in archive_path.parts
+                )
+                checks.append(
+                    (
+                        f"index.path:{archive_name}",
+                        safe,
+                        "archive-relative path required",
+                    )
+                )
+                if not safe or archive_name not in names:
+                    checks.append(
+                        (f"index.file:{archive_name}", False, "indexed file is missing")
+                    )
+                    continue
+                payload = zf.read(archive_name)
+                actual_digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+                checks.append(
+                    (
+                        f"index.sha256:{archive_name}",
+                        actual_digest == item.get("sha256"),
+                        f"claimed {item.get('sha256')}, recomputed {actual_digest}",
+                    )
+                )
+                checks.append(
+                    (
+                        f"index.n_bytes:{archive_name}",
+                        len(payload) == item.get("n_bytes"),
+                        f"claimed {item.get('n_bytes')}, recomputed {len(payload)}",
+                    )
+                )
+            zf.extractall(extraction_root)
+
+        manifest_name = str(index.get("manifest") or index.get("source_manifest") or "")
+        manifest_path = extraction_root / manifest_name
+        if not manifest_name or not manifest_path.is_file():
+            checks.append(
+                ("clean_extraction.manifest", False, "packaged manifest is missing")
+            )
+            return checks
+
+        packaged_manifest = json.loads(manifest_path.read_text())
+        leaves = packaged_manifest.get("leaves") or {}
+        path_values = [
+            ((leaves.get("measurement") or {}).get("report_path")),
+            ((leaves.get("weights") or {}).get("path")),
+            ((leaves.get("roofline_sidecar") or {}).get("path")),
+            *[
+                item.get("path")
+                for item in ((leaves.get("dataset") or {}).get("files") or [])
+                if isinstance(item, dict)
+            ],
+        ]
+        relative_paths = all(
+            not Path(value).is_absolute() for value in path_values if value
+        )
+        checks.append(
+            (
+                "clean_extraction.manifest_paths",
+                relative_paths,
+                "all packaged manifest artifact paths must be relative",
+            )
+        )
+        measurement = leaves.get("measurement") or {}
+        report_path = resolve_artifact_path(
+            manifest_path, measurement.get("report_path", "")
+        )
+        packaged_report = (
+            json.loads(report_path.read_text()) if report_path.is_file() else {}
+        )
+        absolute_report_paths = _absolute_path_values(packaged_report)
+        checks.append(
+            (
+                "clean_extraction.report_paths",
+                not absolute_report_paths,
+                f"absolute path values remain at: {absolute_report_paths}",
+            )
+        )
+        report_artifacts = packaged_report.get("artifacts") or {}
+        report_paths_relative = (
+            all(
+                not Path(value).is_absolute()
+                for value in report_artifacts.values()
+                if isinstance(value, str) and value
+            )
+            if isinstance(report_artifacts, dict)
+            else False
+        )
+        checks.append(
+            (
+                "clean_extraction.report_artifact_paths",
+                report_paths_relative,
+                "all packaged report artifact paths must be relative",
+            )
+        )
+        provenance = verify_provd(manifest_path, repo_root=repo_root)
+        checks.extend(
+            (f"clean_extraction.{name}", ok, detail)
+            for name, ok, detail in provenance.checks
+        )
+    return checks
+
+
 def cmd_package(args: argparse.Namespace) -> int:
     manifest_path = Path(args.manifest).resolve()
     if not manifest_path.exists():
@@ -2147,36 +2964,114 @@ def cmd_package(args: argparse.Namespace) -> int:
         return 1
 
     manifest = json.loads(manifest_path.read_text())
+    dataset_policy_issue = package_dataset_policy_issue(manifest)
+    if dataset_policy_issue:
+        console.print(
+            f"[red]Cannot package restricted dataset bytes:[/red] {dataset_policy_issue}"
+        )
+        return 1
     package_path = (
         Path(args.output).resolve()
         if args.output
-        else manifest_path.with_name(manifest_path.name.replace(".provd.json", ".mlperf-edu.zip"))
+        else manifest_path.with_name(
+            manifest_path.name.replace(".provd.json", ".mlperf-edu.zip")
+        )
     )
     package_path.parent.mkdir(parents=True, exist_ok=True)
 
     package_files = collect_package_files(manifest_path, manifest)
+    try:
+        archive_bytes, packaged_manifest_name = build_portable_package_files(
+            manifest_path,
+            manifest,
+            package_files,
+        )
+    except (OSError, ValueError, KeyError, json.JSONDecodeError) as exc:
+        console.print(f"[red]Cannot build portable package:[/red] {exc}")
+        return 1
+
+    included_files = []
+    for role, source_path, archive_name in package_files:
+        payload = archive_bytes.get(archive_name)
+        if payload is None:
+            digest = "sha256:" + sha256_file(source_path)
+            n_bytes = source_path.stat().st_size
+        else:
+            digest = "sha256:" + hashlib.sha256(payload).hexdigest()
+            n_bytes = len(payload)
+        included_files.append(
+            {
+                "role": role,
+                "path": archive_name,
+                "sha256": digest,
+                "n_bytes": n_bytes,
+            }
+        )
     index = {
-        "schema": "mlperf-edu-package/0.1",
+        "schema": "mlperf-edu-package/0.2",
         "created_at": datetime.now(timezone.utc).isoformat(),
         "workload": manifest.get("workload", "unknown"),
-        "source_manifest": str(manifest_path),
-        "included_files": [
-            {"role": role, "path": str(path), "archive_name": archive_name}
-            for role, path, archive_name in package_files
-        ],
-        "verification": [
-            {"check": name, "ok": ok, "detail": detail}
-            for name, ok, detail in result.checks
-        ],
+        "manifest": packaged_manifest_name,
+        "source_manifest": packaged_manifest_name,
+        "path_policy": (
+            "Package-index paths are relative to the archive root. Manifest and report artifact pointers "
+            "are relative to their owning file. Other machine-local source locations are replaced with "
+            "local-environment:<name> labels."
+        ),
+        "digest_policy": "SHA-256 digests provide unauthenticated integrity checking, not producer authentication.",
+        "included_files": included_files,
+        "source_verification": {
+            "passed": True,
+            "checks": [{"check": name, "ok": ok} for name, ok, _ in result.checks],
+        },
+        "verification": [{"check": name, "ok": ok} for name, ok, _ in result.checks],
+        "clean_extraction_verification": {
+            "required": True,
+            "status": "passed",
+        },
     }
 
     with zipfile.ZipFile(package_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("package_index.json", json.dumps(index, indent=2, sort_keys=True) + "\n")
-        for _, path, archive_name in package_files:
-            zf.write(path, archive_name)
+        zf.writestr(
+            "package_index.json", json.dumps(index, indent=2, sort_keys=True) + "\n"
+        )
+        for _, source_path, archive_name in package_files:
+            payload = archive_bytes.get(archive_name)
+            if payload is None:
+                zf.write(source_path, archive_name)
+            else:
+                zf.writestr(archive_name, payload)
+
+    portable_checks = verify_package_archive(
+        package_path, repo_root=find_project_root()
+    )
+    if not all(ok for _, ok, _ in portable_checks):
+        package_path.unlink(missing_ok=True)
+        console.print("[red]Clean-extraction package verification failed.[/red]")
+        for name, ok, detail in portable_checks:
+            if not ok:
+                console.print(f"  [red]{name}[/red]: {detail}")
+        return 1
 
     console.print(f"[green]packaged[/green]: {package_path}")
     return 0
+
+
+def package_dataset_policy_issue(manifest: dict[str, Any]) -> str | None:
+    """Return a fail-closed redistribution issue for known dataset bytes."""
+    dataset = (manifest.get("leaves") or {}).get("dataset") or {}
+    dataset_name = str(dataset.get("name") or "")
+    files = [item for item in dataset.get("files") or [] if isinstance(item, dict)]
+    if not dataset_name or not files or not has_asset_dossier(dataset_name):
+        return None
+    dossier = asset_dossier(dataset_name)
+    release_status = str(dossier.get("public_release_status") or "")
+    if release_status not in {"restricted-needs-approval", "needs-release-decision"}:
+        return None
+    policy = str(
+        dossier.get("public_release_policy") or "Resolve the dataset release policy."
+    )
+    return f"{dataset_name} has release status {release_status}. {policy}"
 
 
 def cmd_grade(args: argparse.Namespace) -> int:
@@ -2191,7 +3086,9 @@ def cmd_grade(args: argparse.Namespace) -> int:
         if ".pro_evidence" not in path.parts and ".max_evidence" not in path.parts
     )
     if not manifests:
-        console.print(f"[red]No .provd.json manifests found in:[/red] {submissions_dir}")
+        console.print(
+            f"[red]No .provd.json manifests found in:[/red] {submissions_dir}"
+        )
         return 1
 
     rows = [grade_manifest(path) for path in manifests]
@@ -2240,7 +3137,9 @@ def cmd_grade(args: argparse.Namespace) -> int:
         output.write_text(json.dumps(summary, indent=2, sort_keys=True) + "\n")
         console.print(f"Grade JSON: {output}")
 
-    console.print(f"Grade summary: {passed} passed, {failed} failed, {warning_count} warning(s)")
+    console.print(
+        f"Grade summary: {passed} passed, {failed} failed, {warning_count} warning(s)"
+    )
     return 0 if failed == 0 else 1
 
 
@@ -2269,7 +3168,11 @@ def cmd_validate(args: argparse.Namespace) -> int:
             validation_id(selector_kind, selector_name, profile),
             validation_selection_label(selector_kind, selector_name),
             profile,
-            str(validation_output_dir(output_root, selector_kind, selector_name, profile)),
+            str(
+                validation_output_dir(
+                    output_root, selector_kind, selector_name, profile
+                )
+            ),
         )
     console.print(table)
 
@@ -2301,7 +3204,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
                 )
 
     for selector_kind, selector_name, profile in items:
-        output_dir = validation_output_dir(output_root, selector_kind, selector_name, profile)
+        output_dir = validation_output_dir(
+            output_root, selector_kind, selector_name, profile
+        )
         item_id = validation_id(selector_kind, selector_name, profile)
         record: dict[str, Any] = {
             "validation": item_id,
@@ -2313,7 +3218,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
             "status": "running",
         }
         records.append(record)
-        console.print(f"[bold]Validation run:[/bold] {validation_selection_label(selector_kind, selector_name)} / {profile}")
+        console.print(
+            f"[bold]Validation run:[/bold] {validation_selection_label(selector_kind, selector_name)} / {profile}"
+        )
         record_start = time.perf_counter()
         run_args = argparse.Namespace(
             registry=args.registry,
@@ -2333,6 +3240,9 @@ def cmd_validate(args: argparse.Namespace) -> int:
         run_status = cmd_run(run_args)
         record["run_exit"] = run_status
         record.update(latest_aggregate_exports(output_dir, profile))
+        contract_failures = validation_contract_failures(record.get("report"))
+        record["review_contract_failures"] = contract_failures
+        record["review_contract_failure_count"] = len(contract_failures)
         if run_status != 0:
             record["status"] = "run_failed"
             record["duration_seconds"] = float(time.perf_counter() - record_start)
@@ -2351,11 +3261,23 @@ def cmd_validate(args: argparse.Namespace) -> int:
             continue
 
         if args.skip_grade:
-            record["status"] = "passed"
+            if contract_failures:
+                record["status"] = "contract_failed"
+                failures.append(
+                    (
+                        item_id,
+                        profile,
+                        f"{len(contract_failures)} public review contract failure(s)",
+                    )
+                )
+            else:
+                record["status"] = "passed"
             record["grade_skipped"] = True
             record["duration_seconds"] = float(time.perf_counter() - record_start)
             continue
-        console.print(f"[bold]Validation grade:[/bold] {validation_selection_label(selector_kind, selector_name)} / {profile}")
+        console.print(
+            f"[bold]Validation grade:[/bold] {validation_selection_label(selector_kind, selector_name)} / {profile}"
+        )
         grade_output = output_dir / "grade.json"
         grade_args = argparse.Namespace(
             registry=args.registry,
@@ -2385,6 +3307,16 @@ def cmd_validate(args: argparse.Namespace) -> int:
                     duration_seconds=time.perf_counter() - validation_start,
                     open_report=args.open_report,
                 )
+        elif contract_failures:
+            record["status"] = "contract_failed"
+            record["duration_seconds"] = float(time.perf_counter() - record_start)
+            failures.append(
+                (
+                    item_id,
+                    profile,
+                    f"{len(contract_failures)} public review contract failure(s)",
+                )
+            )
         else:
             record["status"] = "passed"
             record["duration_seconds"] = float(time.perf_counter() - record_start)
@@ -2424,7 +3356,9 @@ def validation_plan(
     suite_filter: list[str] | None,
 ) -> list[tuple[str, str, str]]:
     present_suites = tuple(
-        suite for suite in PRODUCT_SUITES if any(workload.suite == suite for workload in workloads.values())
+        suite
+        for suite in PRODUCT_SUITES
+        if any(workload.suite == suite for workload in workloads.values())
     )
     if suite_filter:
         allowed = set(suite_filter)
@@ -2460,12 +3394,18 @@ def validation_selection_label(selector_kind: str, selector_name: str) -> str:
     return f"{selector_name} workloads"
 
 
-def suite_has_profile(workloads: dict[str, Workload], *, suite: str, profile: str) -> bool:
+def suite_has_profile(
+    workloads: dict[str, Workload], *, suite: str, profile: str
+) -> bool:
     selected = [workload for workload in workloads.values() if workload.suite == suite]
-    return bool(selected) and all(profile in (workload.raw.get("runner") or {}) for workload in selected)
+    return bool(selected) and all(
+        profile in (workload.raw.get("runner") or {}) for workload in selected
+    )
 
 
-def validation_output_dir(output_root: Path, selector_kind: str, selector_name: str, profile: str) -> Path:
+def validation_output_dir(
+    output_root: Path, selector_kind: str, selector_name: str, profile: str
+) -> Path:
     return output_root / validation_id(selector_kind, selector_name, profile)
 
 
@@ -2486,6 +3426,18 @@ def latest_aggregate_exports(output_dir: Path, profile: str) -> dict[str, str]:
         "report_html": str(report.with_suffix(".html")),
         "report_csv": str(report.with_suffix(".csv")),
     }
+
+
+def validation_contract_failures(report_value: Any) -> list[dict[str, Any]]:
+    if not report_value:
+        return []
+    try:
+        report = json.loads(Path(str(report_value)).read_text())
+    except (OSError, json.JSONDecodeError):
+        return [
+            {"workload": "aggregate", "issues": ["aggregate report could not be read"]}
+        ]
+    return aggregate_contract_issues(report)
 
 
 def validation_workload_rows(records: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -2548,7 +3500,9 @@ def write_validation_summary_report(
     report_path = output_root / f"mlperf_validate_{preset}_{timestamp}.json"
     csv_path = report_path.with_suffix(".csv")
     html_path = report_path.with_suffix(".html")
-    workload_csv_path = output_root / f"mlperf_validate_workloads_{preset}_{timestamp}.csv"
+    workload_csv_path = (
+        output_root / f"mlperf_validate_workloads_{preset}_{timestamp}.csv"
+    )
     workloads = validation_workload_rows(records)
     report = {
         "schema": "mlperf-edu-validation/0.1",
@@ -2561,11 +3515,23 @@ def write_validation_summary_report(
         "preflight": preflight,
         "totals": {
             "validations": len(records),
-            "passed_validations": sum(1 for record in records if record.get("status") == "passed"),
-            "failed_validations": sum(1 for record in records if str(record.get("status", "")).endswith("_failed")),
+            "passed_validations": sum(
+                1 for record in records if record.get("status") == "passed"
+            ),
+            "failed_validations": sum(
+                1
+                for record in records
+                if str(record.get("status", "")).endswith("_failed")
+            ),
             "passed_manifests": sum(int(record.get("passed", 0)) for record in records),
             "failed_manifests": sum(int(record.get("failed", 0)) for record in records),
-            "warning_count": sum(int(record.get("warning_count", 0)) for record in records),
+            "warning_count": sum(
+                int(record.get("warning_count", 0)) for record in records
+            ),
+            "review_contract_failures": sum(
+                int(record.get("review_contract_failure_count", 0))
+                for record in records
+            ),
             "failures": len(failures),
             "workloads": len(workloads),
             "duration_seconds": float(duration_seconds),
@@ -2690,7 +3656,9 @@ def duration_sort_key(row: dict[str, Any]) -> float:
         return 0.0
 
 
-def write_validation_html(report: dict[str, Any], output: Path, *, source_path: Path) -> None:
+def write_validation_html(
+    report: dict[str, Any], output: Path, *, source_path: Path
+) -> None:
     totals = report.get("totals") or {}
     base_dir = output.parent
     cards = "\n".join(
@@ -2733,7 +3701,9 @@ def write_validation_html(report: dict[str, Any], output: Path, *, source_path: 
         f"<td>{escape(format_cell(row.get('duration_seconds')))}</td>"
         f"<td>{escape(format_cell(row.get('throughput')))}</td>"
         "</tr>"
-        for row in sorted(report.get("workloads", []), key=duration_sort_key, reverse=True)
+        for row in sorted(
+            report.get("workloads", []), key=duration_sort_key, reverse=True
+        )
     )
     workload_section = ""
     if workload_rows:
@@ -2749,7 +3719,7 @@ def write_validation_html(report: dict[str, Any], output: Path, *, source_path: 
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MLPerf EDU Validation: {escape(str(report.get('preset', 'unknown')))}</title>
+  <title>MLPerf EDU Validation: {escape(str(report.get("preset", "unknown")))}</title>
   <style>
     :root {{ --bg:#f6f7f9; --ink:#1f2937; --muted:#667085; --line:#d0d5dd; --surface:#fff; --pass:#067647; --fail:#b42318; --warn:#b54708; }}
     body {{ margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
@@ -2779,11 +3749,11 @@ def write_validation_html(report: dict[str, Any], output: Path, *, source_path: 
 <main>
   <header>
     <div>
-      <h1>MLPerf EDU Validation: {escape(str(report.get('preset', 'unknown')))}</h1>
-      <div class="note">Schema: {escape(str(report.get('schema', 'unknown')))} · Suite: {escape(str(report.get('mlperf_suite', 'unknown')))}</div>
+      <h1>MLPerf EDU Validation: {escape(str(report.get("preset", "unknown")))}</h1>
+      <div class="note">Schema: {escape(str(report.get("schema", "unknown")))} · Suite: {escape(str(report.get("mlperf_suite", "unknown")))}</div>
     </div>
     <div class="meta">
-      <div>{escape(str(report.get('generated_at', '')))}</div>
+      <div>{escape(str(report.get("generated_at", "")))}</div>
       <div>{escape(str(source_path))}</div>
     </div>
   </header>
@@ -2840,13 +3810,19 @@ def select_discovery_workloads(
                 selected_ids = (resolve_cli_workload_id(workloads, workload, variant),)
             else:
                 selected_ids = ids
-        selected = [workloads[workload_id] for workload_id in selected_ids if workload_id is not None]
+        selected = [
+            workloads[workload_id]
+            for workload_id in selected_ids
+            if workload_id is not None
+        ]
         if suite:
             selected = [item for item in selected if item.suite == suite]
         if maturity:
             selected = [item for item in selected if item.maturity == maturity]
         if public_status:
-            selected = [item for item in selected if item.public_status == public_status]
+            selected = [
+                item for item in selected if item.public_status == public_status
+            ]
         return selected
 
     if profile and suite:
@@ -2926,7 +3902,9 @@ def cmd_list(args: argparse.Namespace) -> int:
         if workload.quality_metric:
             quality = f"{workload.quality_metric}={workload.quality_value}"
         elif isinstance(workload.raw.get("functional_check"), dict):
-            quality = "functional: " + str(workload.raw["functional_check"].get("metric", "check"))
+            quality = "functional: " + str(
+                workload.raw["functional_check"].get("metric", "check")
+            )
         table.add_row(
             workload_run_selector(workload),
             workload.id,
@@ -3030,11 +4008,18 @@ def workload_role(workload: Workload) -> str:
         return "distributed"
     if "spec" in workload_id:
         return "test-time-compute"
-    if any(token in workload_id for token in ("quantized", "fp16", "fp32", "dram", "composed", "lora", "moe")):
+    if any(
+        token in workload_id
+        for token in ("quantized", "fp16", "fp32", "dram", "composed", "lora", "moe")
+    ):
         return "optimization"
     if any(token in workload_id for token in ("prefill", "decode", "inference")):
         return "inference"
-    if "train" in workload_id or "finetune" in workload_id or workload.scenario == "training":
+    if (
+        "train" in workload_id
+        or "finetune" in workload_id
+        or workload.scenario == "training"
+    ):
         return "training"
     if workload.scenario in {"single_stream", "offline", "server"}:
         return "inference"
@@ -3050,29 +4035,49 @@ def workload_quality_summary(workload: Workload) -> str:
             parts.append(str(workload.quality_value))
         return " ".join(parts)
     if isinstance(workload.raw.get("functional_check"), dict):
-        return "functional: " + str(workload.raw["functional_check"].get("metric", "check"))
+        return "functional: " + str(
+            workload.raw["functional_check"].get("metric", "check")
+        )
     return ""
 
 
 def list_suites(workloads: dict[str, Workload], output_format: str) -> int:
     rows = []
     for suite in PRODUCT_SUITES:
-        suite_workloads = [workload for workload in workloads.values() if workload.suite == suite]
+        suite_workloads = [
+            workload for workload in workloads.values() if workload.suite == suite
+        ]
         if not suite_workloads:
             continue
         rows.append(
             {
                 "suite": suite,
                 "workloads": len(suite_workloads),
-                "score_bearing": sum(1 for workload in suite_workloads if workload.public_status == "score-bearing"),
-                "performance_bearing": sum(
-                    1 for workload in suite_workloads if workload.public_status == "performance-bearing"
+                "score_bearing": sum(
+                    1
+                    for workload in suite_workloads
+                    if workload.public_status == "score-bearing"
                 ),
-                "systems_only": sum(1 for workload in suite_workloads if workload.public_status == "systems-only"),
+                "performance_bearing": sum(
+                    1
+                    for workload in suite_workloads
+                    if workload.public_status == "performance-bearing"
+                ),
+                "systems_only": sum(
+                    1
+                    for workload in suite_workloads
+                    if workload.public_status == "systems-only"
+                ),
             }
         )
     if output_format == "json":
-        print(json.dumps({"schema": "mlperf-edu-list-suites/0.1", "suites": rows}, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                {"schema": "mlperf-edu-list-suites/0.1", "suites": rows},
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
 
     table = Table(title="MLPerf EDU Suites")
@@ -3105,7 +4110,13 @@ def list_profiles(workloads: dict[str, Workload], output_format: str) -> int:
             }
         )
     if output_format == "json":
-        print(json.dumps({"schema": "mlperf-edu-list-profiles/0.1", "profiles": rows}, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                {"schema": "mlperf-edu-list-profiles/0.1", "profiles": rows},
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
 
     table = Table(title="MLPerf EDU Profiles")
@@ -3127,9 +4138,21 @@ def list_variants(
     maturity: str | None = None,
     public_status: str | None = None,
 ) -> int:
-    rows = variant_rows(workloads, workload_id, suite=suite, maturity=maturity, public_status=public_status)
+    rows = variant_rows(
+        workloads,
+        workload_id,
+        suite=suite,
+        maturity=maturity,
+        public_status=public_status,
+    )
     if output_format == "json":
-        print(json.dumps({"schema": "mlperf-edu-list-variants/0.1", "variants": rows}, indent=2, sort_keys=True))
+        print(
+            json.dumps(
+                {"schema": "mlperf-edu-list-variants/0.1", "variants": rows},
+                indent=2,
+                sort_keys=True,
+            )
+        )
         return 0
 
     table = Table(title="MLPerf EDU Variants")
@@ -3193,7 +4216,9 @@ def variant_rows(
     return rows
 
 
-def resolve_workload_ids(workloads: dict[str, Workload], workload_id: str) -> tuple[str, ...]:
+def resolve_workload_ids(
+    workloads: dict[str, Workload], workload_id: str
+) -> tuple[str, ...]:
     if workload_id in workloads:
         return (workload_id,)
     groups = canonical_workload_groups(workloads)
@@ -3202,7 +4227,9 @@ def resolve_workload_ids(workloads: dict[str, Workload], workload_id: str) -> tu
     return ()
 
 
-def canonical_workload_groups(workloads: dict[str, Workload]) -> dict[str, tuple[str, ...]]:
+def canonical_workload_groups(
+    workloads: dict[str, Workload],
+) -> dict[str, tuple[str, ...]]:
     groups: dict[str, list[str]] = {}
     for workload in workloads.values():
         if workload.canonical_workload:
@@ -3210,7 +4237,9 @@ def canonical_workload_groups(workloads: dict[str, Workload]) -> dict[str, tuple
     return {canonical: tuple(ids) for canonical, ids in groups.items()}
 
 
-def canonical_default_variant(workloads: dict[str, Workload], canonical_workload: str) -> str:
+def canonical_default_variant(
+    workloads: dict[str, Workload], canonical_workload: str
+) -> str:
     ids = resolve_workload_ids(workloads, canonical_workload)
     for workload_id in ids:
         workload = workloads[workload_id]
@@ -3277,7 +4306,9 @@ def resolve_cli_workload_id(
     if workload_id in workloads:
         if variant and workload_variant_name(workloads[workload_id]) != variant:
             available = workload_variant_name(workloads[workload_id])
-            raise ValueError(f"unknown variant '{variant}' for workload '{workload_id}'. Available: {available}")
+            raise ValueError(
+                f"unknown variant '{variant}' for workload '{workload_id}'. Available: {available}"
+            )
         return workload_id
 
     ids = resolve_workload_ids(workloads, workload_id)
@@ -3289,8 +4320,12 @@ def resolve_cli_workload_id(
         if workload_variant_name(workloads[current_id]) == requested_variant:
             return current_id
 
-    available = ", ".join(workload_variant_name(workloads[current_id]) for current_id in ids)
-    raise ValueError(f"unknown variant '{requested_variant}' for workload '{workload_id}'. Available: {available}")
+    available = ", ".join(
+        workload_variant_name(workloads[current_id]) for current_id in ids
+    )
+    raise ValueError(
+        f"unknown variant '{requested_variant}' for workload '{workload_id}'. Available: {available}"
+    )
 
 
 def workload_summary(workload: Workload) -> dict[str, Any]:
@@ -3307,7 +4342,9 @@ def workload_summary(workload: Workload) -> dict[str, Any]:
         "quality_metric": workload.quality_metric,
         "quality_value": workload.quality_value,
         "quality_target_basis": workload.quality_target_basis,
-        "functional_check": functional_check_summary(workload.raw.get("functional_check")),
+        "functional_check": functional_check_summary(
+            workload.raw.get("functional_check")
+        ),
     }
     if canonical:
         summary["canonical_workload"] = canonical
@@ -3354,26 +4391,54 @@ def cmd_show(args: argparse.Namespace) -> int:
 def cmd_info(args: argparse.Namespace) -> int:
     workloads = load_workloads(args)
     if args.suite:
-        return list_suites({k: v for k, v in workloads.items() if v.suite == args.suite}, "summary")
+        return list_suites(
+            {k: v for k, v in workloads.items() if v.suite == args.suite}, "summary"
+        )
     if args.profile:
         console.print(f"[bold]Profile:[/bold] {args.profile}")
         console.print(PROFILE_DESCRIPTIONS[args.profile])
-        selected = select_workloads(workloads, collection=profile_collection(args.profile))
-        print_run_selection(args.profile, selected, suite=None, workload=None, variant=None)
+        selected = select_workloads(
+            workloads, collection=profile_collection(args.profile)
+        )
+        print_run_selection(
+            args.profile, selected, suite=None, workload=None, variant=None
+        )
         console.print(f"List details: mlperf list --profile {args.profile}")
         return 0
     if args.workload:
         if args.variant:
-            return cmd_show(argparse.Namespace(registry=args.registry, workload=args.workload, variant=args.variant, model=args.model))
-        return cmd_show(argparse.Namespace(registry=args.registry, workload=args.workload, variant=None, model=args.model))
+            return cmd_show(
+                argparse.Namespace(
+                    registry=args.registry,
+                    workload=args.workload,
+                    variant=args.variant,
+                    model=args.model,
+                )
+            )
+        return cmd_show(
+            argparse.Namespace(
+                registry=args.registry,
+                workload=args.workload,
+                variant=None,
+                model=args.model,
+            )
+        )
     if args.model:
         matches = workloads_matching_model(workloads, args.model)
         return print_model_info(args.model, matches)
     if args.dataset:
-        matches = [workload for workload in workloads.values() if workload.dataset == args.dataset]
+        matches = [
+            workload
+            for workload in workloads.values()
+            if workload.dataset == args.dataset
+        ]
         return print_dataset_info(args.dataset, matches)
     if args.run:
-        return cmd_report(argparse.Namespace(report=args.run, format="summary", output=None, open=False))
+        return cmd_report(
+            argparse.Namespace(
+                report=args.run, format="summary", output=None, open=False
+            )
+        )
     return 1
 
 
@@ -3393,7 +4458,13 @@ def print_info_matches(label: str, query: str, matches: list[Workload]) -> int:
     table.add_column("Dataset", overflow="fold")
     table.add_column("Public", no_wrap=True)
     for workload in matches:
-        table.add_row(workload.id, workload.suite, workload.model, workload.dataset or "", workload.public_status)
+        table.add_row(
+            workload.id,
+            workload.suite,
+            workload.model,
+            workload.dataset or "",
+            workload.public_status,
+        )
     console.print(table)
     return 0 if matches else 1
 
@@ -3432,12 +4503,18 @@ def print_dataset_info(dataset: str, matches: list[Workload]) -> int:
     return 0 if dossier.get("license_status") != "unknown" else 1
 
 
-def workloads_matching_model(workloads: dict[str, Workload], query: str) -> list[Workload]:
+def workloads_matching_model(
+    workloads: dict[str, Workload], query: str
+) -> list[Workload]:
     query_lower = query.lower()
     matches = []
     for workload in workloads.values():
         model_source = workload.raw.get("model_source") or {}
-        values = [workload.model, str(model_source.get("default_model_id", "")), str(model_source.get("default_alias", ""))]
+        values = [
+            workload.model,
+            str(model_source.get("default_model_id", "")),
+            str(model_source.get("default_alias", "")),
+        ]
         aliases = model_source.get("aliases")
         if isinstance(aliases, dict):
             values.extend(str(item) for pair in aliases.items() for item in pair)
@@ -3471,7 +4548,13 @@ def print_model_info(query: str, matches: list[Workload]) -> int:
                 table.add_row(key, str(value))
         aliases = dossier.get("aliases")
         if isinstance(aliases, dict) and aliases:
-            table.add_row("aliases", ", ".join(f"{alias}->{model_id}" for alias, model_id in sorted(aliases.items())))
+            table.add_row(
+                "aliases",
+                ", ".join(
+                    f"{alias}->{model_id}"
+                    for alias, model_id in sorted(aliases.items())
+                ),
+            )
         console.print(table)
 
     if matches:
@@ -3484,16 +4567,24 @@ def model_dossier_for_query(query: str, matches: list[Workload]) -> dict[str, An
     query_lower = query.lower()
     for workload in matches:
         model_source = workload.raw.get("model_source") or {}
-        if not isinstance(model_source, dict) or model_source.get("type") != "huggingface":
+        if (
+            not isinstance(model_source, dict)
+            or model_source.get("type") != "huggingface"
+        ):
             continue
         model_id = model_source.get("default_model_id")
         aliases = model_source.get("aliases")
         if isinstance(aliases, dict):
             for alias, target in aliases.items():
-                if query_lower in str(alias).lower() or query_lower in str(target).lower():
+                if (
+                    query_lower in str(alias).lower()
+                    or query_lower in str(target).lower()
+                ):
                     model_id = target
                     break
-        return huggingface_model_dossier(model_source, model_name=str(model_id), model_id=str(model_id))
+        return huggingface_model_dossier(
+            model_source, model_name=str(model_id), model_id=str(model_id)
+        )
     return {}
 
 
@@ -3514,7 +4605,9 @@ def cmd_cache(args: argparse.Namespace) -> int:
         print(json.dumps(payload, indent=2, sort_keys=True))
     else:
         selection = cache_selection_summary(args, selected)
-        console.print(f"Selected {selection['workloads']} workload(s) for {selection['label']}.")
+        console.print(
+            f"Selected {selection['workloads']} workload(s) for {selection['label']}."
+        )
         if not args.suite and not args.workload and args.profile == "min":
             console.print("Use --profile max to inspect assets for the full suite.")
         table = Table(title=f"MLPerf EDU Cache: {args.action}")
@@ -3525,7 +4618,11 @@ def cmd_cache(args: argparse.Namespace) -> int:
         table.add_column("Terms", overflow="fold")
         table.add_column("Digest", overflow="fold")
         for row in rows:
-            style = "green" if row["status"] in {"present", "embedded", "external"} else "red"
+            style = (
+                "green"
+                if row["status"] in {"present", "embedded", "external"}
+                else "red"
+            )
             table.add_row(
                 row["workload"],
                 row["asset"],
@@ -3549,7 +4646,9 @@ def cache_terms_cell(row: dict[str, str]) -> str:
     return license_status or release_status
 
 
-def cache_selection_summary(args: argparse.Namespace, selected: list[Workload]) -> dict[str, Any]:
+def cache_selection_summary(
+    args: argparse.Namespace, selected: list[Workload]
+) -> dict[str, Any]:
     if args.workload:
         label = f"workload {args.workload}"
         if args.variant:
@@ -3592,10 +4691,27 @@ def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
     dataset = workload.dataset
     dossier = asset_dossier(dataset, declared_source=workload.raw.get("dataset_source"))
     if not dataset:
-        rows.append({"workload": workload.id, "asset": "dataset", "status": "embedded", "path": "none declared", "sha256": ""})
+        rows.append(
+            {
+                "workload": workload.id,
+                "asset": "dataset",
+                "status": "embedded",
+                "path": "none declared",
+                "sha256": "",
+            }
+        )
         return rows
     if dataset == "prompt-suite-local":
-        rows.append(cache_dataset_row(workload, dataset, status="embedded", path=dataset, sha256="", dossier=dossier))
+        rows.append(
+            cache_dataset_row(
+                workload,
+                dataset,
+                status="embedded",
+                path=dataset,
+                sha256="",
+                dossier=dossier,
+            )
+        )
         return rows
 
     known_paths: dict[str, list[Path]] = {
@@ -3604,14 +4720,27 @@ def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
             tinyshakespeare_paths()["train"],
             tinyshakespeare_paths()["val"],
         ],
-        "movielens-100k": [movielens_paths()["ratings"], movielens_paths()["users"], movielens_paths()["items"]],
+        "movielens-100k": [
+            movielens_paths()["ratings"],
+            movielens_paths()["users"],
+            movielens_paths()["items"],
+        ],
         "mnist": [mnist_paths()["root"]],
         "cifar100": [cifar100_paths()["dataset"]],
         "fashion-mnist": [fashion_mnist_paths()["root"]],
     }
     paths = known_paths.get(dataset)
     if not paths:
-        rows.append(cache_dataset_row(workload, dataset, status="external", path=dataset, sha256="", dossier=dossier))
+        rows.append(
+            cache_dataset_row(
+                workload,
+                dataset,
+                status="external",
+                path=dataset,
+                sha256="",
+                dossier=dossier,
+            )
+        )
         return rows
 
     existing = [path for path in paths if path.exists()]
@@ -3619,7 +4748,16 @@ def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
     digest = ""
     if status == "present" and len(existing) == 1 and existing[0].is_file():
         digest = f"sha256:{sha256_file(existing[0])}"
-    rows.append(cache_dataset_row(workload, dataset, status=status, path=", ".join(str(path) for path in paths), sha256=digest, dossier=dossier))
+    rows.append(
+        cache_dataset_row(
+            workload,
+            dataset,
+            status=status,
+            path=", ".join(str(path) for path in paths),
+            sha256=digest,
+            dossier=dossier,
+        )
+    )
     return rows
 
 
@@ -3655,19 +4793,33 @@ def cmd_audit(args: argparse.Namespace) -> int:
         raise ValueError("choose only one of --suite or --workload")
     if args.workload:
         if args.variant:
-            selected_ids = (resolve_cli_workload_id(workloads, args.workload, args.variant),)
+            selected_ids = (
+                resolve_cli_workload_id(workloads, args.workload, args.variant),
+            )
         else:
             selected_ids = resolve_workload_ids(workloads, args.workload)
             if not selected_ids:
-                raise ValueError(f"unknown workload or canonical workload '{args.workload}'")
-        selected = [workloads[workload_id] for workload_id in selected_ids if workload_id in workloads]
+                raise ValueError(
+                    f"unknown workload or canonical workload '{args.workload}'"
+                )
+        selected = [
+            workloads[workload_id]
+            for workload_id in selected_ids
+            if workload_id in workloads
+        ]
         if args.public_status:
-            selected = [workload for workload in selected if workload.public_status == args.public_status]
+            selected = [
+                workload
+                for workload in selected
+                if workload.public_status == args.public_status
+            ]
     else:
         selected = select_workloads(
             workloads,
             suite=args.suite,
-            collection=profile_collection(args.profile) if args.profile and not args.suite else None,
+            collection=profile_collection(args.profile)
+            if args.profile and not args.suite
+            else None,
             public_status=args.public_status,
         )
     selected_ids = {workload.id for workload in selected}
@@ -3683,8 +4835,14 @@ def cmd_audit(args: argparse.Namespace) -> int:
     )
     status_counts: dict[str, int] = {status: 0 for status in PUBLIC_STATUSES}
     for workload in selected:
-        status_counts[workload.public_status] = status_counts.get(workload.public_status, 0) + 1
-    failing = {workload_id: issues for workload_id, issues in issues_by_workload.items() if issues}
+        status_counts[workload.public_status] = (
+            status_counts.get(workload.public_status, 0) + 1
+        )
+    failing = {
+        workload_id: issues
+        for workload_id, issues in issues_by_workload.items()
+        if issues
+    }
     warning_count = sum(len(warnings) for warnings in warnings_by_workload.values())
     warning_blocked = args.policy == "public" and warning_count > 0
     audit_passed = not failing and not warning_blocked
@@ -3718,7 +4876,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
             "workload": args.workload,
             "variant": args.variant,
             "public_status": args.public_status,
-            "counts": {status: count for status, count in status_counts.items() if count},
+            "counts": {
+                status: count for status, count in status_counts.items() if count
+            },
             "blocker_count": len(issue_rows),
             "warning_blocked": warning_blocked,
             "warning_count": warning_count,
@@ -3728,7 +4888,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
                 {
                     "id": workload.id,
                     "canonical_workload": canonical_workload_for_id(workload),
-                    "variant": workload_variant_name(workload) if canonical_workload_for_id(workload) else None,
+                    "variant": workload_variant_name(workload)
+                    if canonical_workload_for_id(workload)
+                    else None,
                     "run_selector": workload_run_selector(workload),
                     "suite": workload.suite,
                     "public_status": workload.public_status,
@@ -3776,7 +4938,9 @@ def cmd_audit(args: argparse.Namespace) -> int:
     )
     console.print(
         "public status counts: "
-        + ", ".join(f"{status}={count}" for status, count in status_counts.items() if count)
+        + ", ".join(
+            f"{status}={count}" for status, count in status_counts.items() if count
+        )
     )
     console.print(f"public warnings: {warning_count}")
     return 0 if audit_passed else 1
@@ -3788,7 +4952,9 @@ def public_audit_warnings(workload: Workload) -> list[str]:
         return warnings
 
     if workload.dataset:
-        dossier = asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source"))
+        dossier = asset_dossier(
+            workload.dataset, declared_source=workload.raw.get("dataset_source")
+        )
         dataset_warning = dataset_public_release_warning(dossier)
         if dataset_warning:
             warnings.append(dataset_warning)
@@ -3797,15 +4963,23 @@ def public_audit_warnings(workload: Workload) -> list[str]:
     if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
         dossier = huggingface_model_dossier(model_source, model_name=workload.model)
         if dossier.get("license_status") == "requires-review":
-            warnings.append("model license status requires review before public endorsement")
+            warnings.append(
+                "model license status requires review before public endorsement"
+            )
 
     return warnings
 
 
 def dataset_public_release_warning(dossier: dict[str, Any]) -> str:
     release_status = str(dossier.get("public_release_status", "needs-release-decision"))
-    next_step = str(dossier.get("release_next_step") or dossier.get("public_release_policy") or "").strip()
-    if release_status in {"public-ok-bundled", "public-ok-with-attribution", "public-ok-fetch-only"}:
+    next_step = str(
+        dossier.get("release_next_step") or dossier.get("public_release_policy") or ""
+    ).strip()
+    if release_status in {
+        "public-ok-bundled",
+        "public-ok-with-attribution",
+        "public-ok-fetch-only",
+    }:
         return ""
     if release_status == "restricted-needs-approval":
         detail = f": {next_step}" if next_step else ""

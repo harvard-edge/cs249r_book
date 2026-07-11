@@ -119,6 +119,7 @@ class AnomalyDetectionAE(nn.Module):
 # MNIST Anomaly Detection Dataset
 # ---------------------------------------------------------------------------
 
+
 class MNISTAnomalyDataset(data.Dataset):
     """
     MNIST-based anomaly detection dataset.
@@ -136,9 +137,11 @@ class MNISTAnomalyDataset(data.Dataset):
         import torchvision
         import torchvision.transforms as transforms
 
-        transform = transforms.Compose([
-            transforms.ToTensor(),
-        ])
+        transform = transforms.Compose(
+            [
+                transforms.ToTensor(),
+            ]
+        )
 
         full_dataset = torchvision.datasets.MNIST(
             root=root, train=train, download=True, transform=transform
@@ -146,13 +149,19 @@ class MNISTAnomalyDataset(data.Dataset):
 
         if train:
             # Training: only normal class
-            indices = [i for i, (_, label) in enumerate(full_dataset) if label == normal_class]
+            indices = [
+                i for i, (_, label) in enumerate(full_dataset) if label == normal_class
+            ]
             self.data = torch.stack([full_dataset[i][0] for i in indices])
             self.labels = torch.zeros(len(indices), dtype=torch.long)  # all normal
         else:
             # Validation: all classes, with labels (0=normal, 1=anomaly)
-            self.data = torch.stack([full_dataset[i][0] for i in range(len(full_dataset))])
-            original_labels = torch.tensor([full_dataset[i][1] for i in range(len(full_dataset))])
+            self.data = torch.stack(
+                [full_dataset[i][0] for i in range(len(full_dataset))]
+            )
+            original_labels = torch.tensor(
+                [full_dataset[i][1] for i in range(len(full_dataset))]
+            )
             self.labels = (original_labels != normal_class).long()
 
     def __len__(self):
@@ -164,7 +173,9 @@ class MNISTAnomalyDataset(data.Dataset):
         return x, label
 
 
-def get_mnist_anomaly_dataloaders(batch_size=64, data_dir="./data", normal_class=0, num_workers=0):
+def get_mnist_anomaly_dataloaders(
+    batch_size=64, data_dir="./data", normal_class=0, num_workers=0
+):
     """
     Returns (train_loader, val_loader) for MNIST anomaly detection.
 
@@ -175,12 +186,18 @@ def get_mnist_anomaly_dataloaders(batch_size=64, data_dir="./data", normal_class
     val_ds = MNISTAnomalyDataset(root=data_dir, train=False, normal_class=normal_class)
 
     train_loader = data.DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, drop_last=True,
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
     )
     val_loader = data.DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, drop_last=True,
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        drop_last=False,
     )
 
     return train_loader, val_loader
@@ -192,9 +209,9 @@ if __name__ == "__main__":
     # MNIST version (input_dim = 784 = 28*28)
     model = AnomalyDetectionAE(input_dim=784, bottleneck_dim=8)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"📊 Parameters: {total_params:,} ({total_params/1e3:.1f}K)")
+    print(f"📊 Parameters: {total_params:,} ({total_params / 1e3:.1f}K)")
     print(f"💾 Model size: {total_params * 4 / 1024:.1f} KB (FP32)")
-    print(f"🔬 Compression ratio: 784 / 8 = {784/8:.0f}x")
+    print(f"🔬 Compression ratio: 784 / 8 = {784 / 8:.0f}x")
 
     # Dummy forward
     dummy = torch.randn(4, 784)

@@ -1,7 +1,8 @@
 # MLPerf EDU Review Packets
 
-These packets are generated from `workloads.yaml` and structured asset dossiers.
+These packets are generated from the native registry and structured asset dossiers.
 They are intended for MLCommons, instructor, and artifact-review feedback.
+A committed evidence summary can pass repository CI while the packet continues to flag a raw-package publication blocker.
 
 | Workload | Internal ID | Suite | Public status | Packet |
 |---|---|---|---|---|
@@ -13,4 +14,3 @@ They are intended for MLCommons, instructor, and artifact-review feedback.
 | `nanogpt-inference --variant prefill` | `nanogpt-prefill` | `language` | `performance-bearing` | [nanogpt-inference__prefill.md](nanogpt-inference__prefill.md) |
 | `nanogpt-inference --variant decode` | `nanogpt-decode` | `language` | `performance-bearing` | [nanogpt-inference__decode.md](nanogpt-inference__decode.md) |
 | `smollm2-chat-inference --variant baseline` | `slm-decode` | `slm` | `performance-bearing` | [smollm2-chat-inference__baseline.md](smollm2-chat-inference__baseline.md) |
-| `smollm2-chat-inference --variant quantized-int8` | `slm-quantized-decode` | `slm` | `performance-bearing` | [smollm2-chat-inference__quantized-int8.md](smollm2-chat-inference__quantized-int8.md) |

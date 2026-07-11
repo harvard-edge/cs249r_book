@@ -113,12 +113,14 @@ public-result subset is:
 | `single_stream` | One sample, request, token path, or step; latency and step-level behavior |
 | `offline` | Throughput-oriented batch or dataset processing |
 | `server` | Serving, queueing, decode, retrieval, and latency-throughput tradeoffs |
+| `training` | Fixed-budget training followed by a real-data quality gate |
 
-`score-bearing` and `performance-bearing` workloads should use only those
-three scenarios. `training` and `inference` are allowed for `systems-only`
-workloads while they are controlled teaching scaffolds. A workload should not
-be promoted to a public score until its scenario and measurement semantics are
-precise enough for comparison.
+Current score-bearing rows use `training`; performance-bearing inference rows
+use `single_stream`, `offline`, or `server`. `inference` remains available only
+for systems-only teaching scaffolds. These are MLPerf EDU scenario semantics,
+not a claim that `training` is an official MLPerf Inference scenario. A workload
+should not be promoted until MLCommons reviewers accept its scenario and
+measurement semantics.
 
 ## CLI Contract
 

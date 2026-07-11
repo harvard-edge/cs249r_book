@@ -15,6 +15,7 @@ from mlperf.assets import DatasetAsset, ensure_mnist, sha256_file
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
+from mlperf.runners.common import configured_seed
 
 
 def run_anomaly_ae_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -25,7 +26,7 @@ def run_anomaly_ae_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 4
@@ -93,7 +94,9 @@ def run_anomaly_ae_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -105,7 +108,7 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.tiny.dscnn_kws import DSCNN
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 4
@@ -176,7 +179,9 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -188,7 +193,7 @@ def run_wake_vision_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.tiny.wake_vision_vww import MicroNet
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 4
@@ -259,7 +264,9 @@ def run_wake_vision_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -271,7 +278,7 @@ def run_dscnn_kws_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.tiny.dscnn_kws import DSCNN
 
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
     batch_size = int(os.environ.get("MLPERF_EDU_DSCNN_MAX_BATCH_SIZE", "8"))
@@ -313,7 +320,7 @@ def run_wake_vision_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.tiny.wake_vision_vww import MicroNet
 
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
     batch_size = int(os.environ.get("MLPERF_EDU_WAKE_MAX_BATCH_SIZE", "8"))
@@ -353,20 +360,27 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from mlperf.reference.tiny.anomaly_detection_ae import AnomalyDetectionAE, get_mnist_anomaly_dataloaders
+    from mlperf.reference.tiny.anomaly_detection_ae import (
+        AnomalyDetectionAE,
+        get_mnist_anomaly_dataloaders,
+    )
 
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
     batch_size = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_BATCH_SIZE", 64))
     epochs = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_EPOCHS", 20))
-    batches_per_epoch = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_BATCHES_PER_EPOCH", 50))
-    val_batches = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_VAL_BATCHES", 50))
+    batches_per_epoch = int(
+        os.environ.get("MLPERF_EDU_ANOMALY_MAX_BATCHES_PER_EPOCH", 50)
+    )
+    requested_val_batches = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_VAL_BATCHES", 0))
     lr = float(os.environ.get("MLPERF_EDU_ANOMALY_MAX_LR", 1e-3))
 
     shard_path = os.environ.get("MLPERF_EDU_ANOMALY_MAX_TENSOR_PATH")
     if shard_path:
-        asset, train_loader, val_loader = _load_tensor_shard(Path(shard_path), batch_size)
+        asset, train_loader, val_loader = _load_tensor_shard(
+            Path(shard_path), batch_size
+        )
     else:
         asset = ensure_mnist(download=True)
         train_loader, val_loader = get_mnist_anomaly_dataloaders(
@@ -375,11 +389,15 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             num_workers=0,
         )
 
+    val_batches = requested_val_batches or len(val_loader)
+
     model = AnomalyDetectionAE(input_dim=784, bottleneck_dim=8).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
 
     train_losses: list[float] = []
     val_losses: list[float] = []
+    val_aurocs: list[float] = []
+    val_auprcs: list[float] = []
     epoch_times: list[float] = []
     samples_seen = 0
     start = time.perf_counter()
@@ -392,16 +410,27 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss = _validate(model, val_loader, device, max_batches=val_batches)
+        val_loss, val_auroc, val_auprc, evaluated_samples = _evaluate_anomaly(
+            model, val_loader, device, max_batches=val_batches
+        )
         samples_seen += train_samples
         train_losses.append(train_loss)
         val_losses.append(val_loss)
+        val_aurocs.append(val_auroc)
+        val_auprcs.append(val_auprc)
         epoch_times.append(time.perf_counter() - t0)
     duration = time.perf_counter() - start
 
-    target = float(os.environ.get("MLPERF_EDU_ANOMALY_MAX_MSE_TARGET", workload.quality_value or 0.04))
+    target = float(
+        os.environ.get(
+            "MLPERF_EDU_ANOMALY_MAX_AUROC_TARGET", workload.quality_value or 0.85
+        )
+    )
     final_reconstruction_mse = train_losses[-1]
-    target_met = final_reconstruction_mse <= target
+    final_auroc = val_aurocs[-1]
+    labels_available = final_auroc == final_auroc
+    target_met = labels_available and final_auroc >= target
+    quality_required = not shard_path or labels_available
     n_params = sum(p.numel() for p in model.parameters())
 
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -416,7 +445,9 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "max",
-        "status": "passed" if target_met else "quality_failed",
+        "status": "passed"
+        if (target_met or not quality_required)
+        else "quality_failed",
         "backend": f"pytorch-{device.type}",
         "data_mode": "real" if not shard_path else "local-tensor-shard",
         "dataset": {
@@ -437,21 +468,39 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "metrics": {
             "final_reconstruction_mse": float(final_reconstruction_mse),
             "final_val_reconstruction_mse": float(val_losses[-1]),
+            "anomaly_auroc": float(final_auroc) if labels_available else None,
+            "anomaly_auprc": float(val_auprcs[-1]) if labels_available else None,
+            "evaluation_samples": int(evaluated_samples),
             "duration_seconds": float(duration),
             "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
+            "samples_per_second": float(samples_seen / duration)
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
             "epoch_times": epoch_times,
             "train_losses": train_losses,
             "val_losses": val_losses,
+            "val_aurocs": [
+                float(value) if value == value else None for value in val_aurocs
+            ],
+            "val_auprcs": [
+                float(value) if value == value else None for value in val_auprcs
+            ],
         },
         "quality": {
             "metric": workload.quality_metric,
+            "metric_key": "anomaly_auroc",
             "target": target,
-            "direction": "lower",
-            "target_met": target_met,
-            "quality_required": True,
-            "override": "MLPERF_EDU_ANOMALY_MAX_MSE_TARGET" in os.environ,
+            "direction": "higher",
+            "target_met": target_met if quality_required else None,
+            "quality_required": quality_required,
+            "override": "MLPERF_EDU_ANOMALY_MAX_AUROC_TARGET" in os.environ,
+            "note": (
+                "AUROC is computed from per-sample reconstruction error on the full "
+                "MNIST normal/anomaly evaluation split."
+                if quality_required
+                else "The local tensor shard has no anomaly labels, so it validates execution only."
+            ),
         },
         "artifacts": {
             "report": str(report_path),
@@ -476,7 +525,9 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -494,8 +545,18 @@ def _synthetic_classifier_loaders(
     train_y = torch.arange(train_shape[0], dtype=torch.long) % n_classes
     val_y = torch.arange(val_shape[0], dtype=torch.long) % n_classes
     return (
-        DataLoader(TensorDataset(train_x, train_y), batch_size=batch_size, shuffle=True, drop_last=True),
-        DataLoader(TensorDataset(val_x, val_y), batch_size=batch_size, shuffle=False, drop_last=True),
+        DataLoader(
+            TensorDataset(train_x, train_y),
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+        ),
+        DataLoader(
+            TensorDataset(val_x, val_y),
+            batch_size=batch_size,
+            shuffle=False,
+            drop_last=True,
+        ),
     )
 
 
@@ -525,7 +586,9 @@ def _run_tiny_classifier_max(
         device,
         max_batches=max_train_batches,
     )
-    val_loss, val_accuracy = _validate_classifier(model, val_loader, device, max_batches=max_val_batches)
+    val_loss, val_accuracy = _validate_classifier(
+        model, val_loader, device, max_batches=max_val_batches
+    )
     duration = time.perf_counter() - start
     n_params = sum(p.numel() for p in model.parameters())
 
@@ -558,7 +621,9 @@ def _run_tiny_classifier_max(
             "train_accuracy": float(train_accuracy),
             "duration_seconds": float(duration),
             "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
+            "samples_per_second": float(samples_seen / duration)
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
             "model_size_bytes_fp32": int(n_params * 4),
             "model_size_bytes_int8": int(n_params),
@@ -592,7 +657,9 @@ def _run_tiny_classifier_max(
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -662,12 +729,22 @@ def _validate_classifier(
     return avg_loss, accuracy
 
 
-def _load_tensor_shard(path: Path, batch_size: int) -> tuple[DatasetAsset, DataLoader, DataLoader]:
+def _load_tensor_shard(
+    path: Path, batch_size: int
+) -> tuple[DatasetAsset, DataLoader, DataLoader]:
     data = torch.load(path, map_location="cpu")
     train_x = data["train"].float()
     val_x = data["val"].float()
-    train_loader = DataLoader(TensorDataset(train_x), batch_size=batch_size, shuffle=True, drop_last=True)
-    val_loader = DataLoader(TensorDataset(val_x), batch_size=batch_size, shuffle=False, drop_last=True)
+    train_loader = DataLoader(
+        TensorDataset(train_x), batch_size=batch_size, shuffle=True, drop_last=True
+    )
+    if "val_labels" in data:
+        val_ds = TensorDataset(val_x, data["val_labels"].long())
+    else:
+        val_ds = TensorDataset(val_x)
+    val_loader = DataLoader(
+        val_ds, batch_size=batch_size, shuffle=False, drop_last=False
+    )
     asset = DatasetAsset(
         name="mnist-local-tensor-shard",
         root=path.parent.resolve(),
@@ -726,3 +803,79 @@ def _validate(
         reconstruction, _ = model(x)
         losses.append(float(F.mse_loss(reconstruction, x).item()))
     return sum(losses) / len(losses) if losses else float("inf")
+
+
+@torch.no_grad()
+def _evaluate_anomaly(
+    model: torch.nn.Module,
+    loader: DataLoader,
+    device: torch.device,
+    *,
+    max_batches: int,
+) -> tuple[float, float, float, int]:
+    """Return reconstruction MSE, AUROC, AUPRC, and evaluated sample count."""
+    model.eval()
+    losses: list[float] = []
+    scores: list[float] = []
+    labels: list[int] = []
+    evaluated = 0
+    for batch_idx, batch in enumerate(loader):
+        if batch_idx >= max_batches:
+            break
+        x = _batch_inputs(batch, device)
+        reconstruction, _ = model(x)
+        per_sample = ((reconstruction - x) ** 2).mean(dim=1)
+        losses.append(float(per_sample.mean().item()))
+        evaluated += int(x.size(0))
+        if isinstance(batch, (tuple, list)) and len(batch) > 1:
+            scores.extend(float(value) for value in per_sample.detach().cpu().tolist())
+            labels.extend(int(value) for value in batch[1].detach().cpu().tolist())
+
+    mse = sum(losses) / len(losses) if losses else float("inf")
+    if not labels or len(set(labels)) < 2:
+        return mse, float("nan"), float("nan"), evaluated
+    return (
+        mse,
+        _binary_auroc(scores, labels),
+        _binary_average_precision(scores, labels),
+        evaluated,
+    )
+
+
+def _binary_auroc(scores: list[float], labels: list[int]) -> float:
+    """Compute binary AUROC using average ranks for tied scores."""
+    pairs = sorted(zip(scores, labels), key=lambda item: item[0])
+    rank_sum_positive = 0.0
+    index = 0
+    while index < len(pairs):
+        end = index + 1
+        while end < len(pairs) and pairs[end][0] == pairs[index][0]:
+            end += 1
+        average_rank = ((index + 1) + end) / 2.0
+        rank_sum_positive += average_rank * sum(
+            label == 1 for _, label in pairs[index:end]
+        )
+        index = end
+    positives = sum(label == 1 for label in labels)
+    negatives = len(labels) - positives
+    if positives == 0 or negatives == 0:
+        return float("nan")
+    return float(
+        (rank_sum_positive - positives * (positives + 1) / 2.0)
+        / (positives * negatives)
+    )
+
+
+def _binary_average_precision(scores: list[float], labels: list[int]) -> float:
+    """Compute average precision from scores sorted from most to least anomalous."""
+    ranked = sorted(zip(scores, labels), key=lambda item: item[0], reverse=True)
+    positives = sum(label == 1 for label in labels)
+    if positives == 0:
+        return float("nan")
+    true_positives = 0
+    precision_sum = 0.0
+    for rank, (_, label) in enumerate(ranked, start=1):
+        if label == 1:
+            true_positives += 1
+            precision_sum += true_positives / rank
+    return float(precision_sum / positives)

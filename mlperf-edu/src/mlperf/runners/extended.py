@@ -14,6 +14,7 @@ import torch.nn.functional as F
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
+from mlperf.runners.common import configured_seed
 
 
 def ensure_reference_path() -> Path:
@@ -28,15 +29,19 @@ def run_nano_moe_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     root = ensure_reference_path()
     from mlperf.reference.cloud.nano_moe import NanoMoEWhiteBox
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 2
     seq_len = 16
 
-    model = NanoMoEWhiteBox(vocab_size=128, d_model=32, n_heads=4, n_layers=1).to(device)
+    model = NanoMoEWhiteBox(vocab_size=128, d_model=32, n_heads=4, n_layers=1).to(
+        device
+    )
     model.train()
-    inputs = torch.randint(0, 96, (batch_size, seq_len), dtype=torch.long, device=device)
+    inputs = torch.randint(
+        0, 96, (batch_size, seq_len), dtype=torch.long, device=device
+    )
     targets = torch.roll(inputs, shifts=-1, dims=1)
 
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
@@ -51,7 +56,9 @@ def run_nano_moe_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "loss": float(loss.item()),
         "duration_seconds": float(duration),
         "tokens": int(batch_size * seq_len),
-        "tokens_per_second": float((batch_size * seq_len) / duration) if duration > 0 else 0.0,
+        "tokens_per_second": float((batch_size * seq_len) / duration)
+        if duration > 0
+        else 0.0,
         "n_params": count_params(model),
         "num_experts": 8,
         "top_k": 2,
@@ -83,7 +90,7 @@ def run_micro_diffusion_min(workload: Workload, output_dir: Path) -> dict[str, A
     root = ensure_reference_path()
     from mlperf.reference.cloud.micro_diffusion import MicroDiffusionUNet
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 2
@@ -135,14 +142,16 @@ def run_micro_gnn_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     root = ensure_reference_path()
     from mlperf.reference.cloud.micro_gnn import MicroGCN
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     n_nodes = 16
     n_features = 8
     n_classes = 3
 
-    model = MicroGCN(nfeat=n_features, nhid=16, nclass=n_classes, dropout=0.0).to(device)
+    model = MicroGCN(nfeat=n_features, nhid=16, nclass=n_classes, dropout=0.0).to(
+        device
+    )
     model.train()
     features = torch.randn(n_nodes, n_features, device=device)
     labels = torch.arange(n_nodes, device=device) % n_classes
@@ -191,15 +200,19 @@ def run_micro_bert_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     root = ensure_reference_path()
     from mlperf.reference.cloud.micro_bert import CLS_IDX, PAD_IDX, MicroBERT
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 4
     seq_len = 16
 
-    model = MicroBERT(vocab_size=128, d_model=32, nhead=4, num_layers=1, max_len=seq_len, dropout=0.0).to(device)
+    model = MicroBERT(
+        vocab_size=128, d_model=32, nhead=4, num_layers=1, max_len=seq_len, dropout=0.0
+    ).to(device)
     model.train()
-    input_ids = torch.randint(4, 128, (batch_size, seq_len), dtype=torch.long, device=device)
+    input_ids = torch.randint(
+        4, 128, (batch_size, seq_len), dtype=torch.long, device=device
+    )
     input_ids[:, 0] = CLS_IDX
     input_ids[:, -1] = PAD_IDX
     labels = torch.tensor([0, 1, 0, 1], dtype=torch.long, device=device)
@@ -247,14 +260,16 @@ def run_micro_lstm_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     root = ensure_reference_path()
     from mlperf.reference.cloud.micro_lstm import MicroLSTM
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 2
     seq_len = 12
     pred_len = 4
 
-    model = MicroLSTM(input_dim=7, hidden_dim=16, num_layers=1, pred_len=pred_len).to(device)
+    model = MicroLSTM(input_dim=7, hidden_dim=16, num_layers=1, pred_len=pred_len).to(
+        device
+    )
     model.train()
     inputs = torch.randn(batch_size, seq_len, 7, device=device)
     targets = torch.randn(batch_size, pred_len, device=device)
@@ -301,7 +316,7 @@ def run_micro_rl_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     root = ensure_reference_path()
     from mlperf.reference.cloud.micro_rl import CartPoleLocal, REINFORCEAgent
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     env = CartPoleLocal()
     agent = REINFORCEAgent(state_dim=env.state_dim, n_actions=env.n_actions)
@@ -370,20 +385,28 @@ def run_nano_lora_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     from mlperf.reference.cloud.lora import base_grad_norm, inject_lora, lora_grad_norm
     from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 2
     seq_len = 16
 
-    model = NanoGPTWhiteBox(vocab_size=128, n_embd=32, n_head=4, n_layer=1, max_seq_len=32).to(device)
+    model = NanoGPTWhiteBox(
+        vocab_size=128, n_embd=32, n_head=4, n_layer=1, max_seq_len=32
+    ).to(device)
     total_params = count_params(model)
-    n_adapters, trainable_lora_params = inject_lora(model, rank=4, alpha=8, target="c_attn")
+    n_adapters, trainable_lora_params = inject_lora(
+        model, rank=4, alpha=8, target="c_attn"
+    )
     model.train()
-    inputs = torch.randint(0, 96, (batch_size, seq_len), dtype=torch.long, device=device)
+    inputs = torch.randint(
+        0, 96, (batch_size, seq_len), dtype=torch.long, device=device
+    )
     targets = torch.roll(inputs, shifts=-1, dims=1)
 
-    optimizer = torch.optim.AdamW((p for p in model.parameters() if p.requires_grad), lr=1e-3)
+    optimizer = torch.optim.AdamW(
+        (p for p in model.parameters() if p.requires_grad), lr=1e-3
+    )
     start = time.perf_counter()
     logits, loss = model(inputs, targets=targets)
     assert loss is not None
@@ -397,7 +420,9 @@ def run_nano_lora_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "loss": float(loss.item()),
         "duration_seconds": float(duration),
         "tokens": int(batch_size * seq_len),
-        "tokens_per_second": float((batch_size * seq_len) / duration) if duration > 0 else 0.0,
+        "tokens_per_second": float((batch_size * seq_len) / duration)
+        if duration > 0
+        else 0.0,
         "n_params_total": int(total_params),
         "n_lora_adapters": int(n_adapters),
         "n_lora_trainable_params": int(trainable_lora_params),
@@ -427,7 +452,9 @@ def run_nano_lora_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
 
 def run_nanogpt_decode_fp32_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    return run_nanogpt_decode_variant_min(workload, output_dir, dtype=torch.float32, dtype_label="fp32")
+    return run_nanogpt_decode_variant_min(
+        workload, output_dir, dtype=torch.float32, dtype_label="fp32"
+    )
 
 
 def run_nanogpt_decode_fp32_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -440,7 +467,9 @@ def run_nanogpt_decode_fp32_max(workload: Workload, output_dir: Path) -> dict[st
 
 
 def run_nanogpt_decode_fp16_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    return run_nanogpt_decode_variant_min(workload, output_dir, dtype=torch.float16, dtype_label="fp16")
+    return run_nanogpt_decode_variant_min(
+        workload, output_dir, dtype=torch.float16, dtype_label="fp16"
+    )
 
 
 def run_nanogpt_decode_fp16_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -464,12 +493,19 @@ def run_nanogpt_decode_variant_min(
     from mlperf.reference.cloud.nanogpt_decode import NanoGPTDecode
     from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
-    model = NanoGPTWhiteBox(vocab_size=128, n_embd=32, n_head=4, n_layer=1, max_seq_len=64).to(dtype=dtype)
-    result = NanoGPTDecode(model, prefill_ctx=8, decode_steps=4, batch_size=2).run(emit_sidecar=False)
+    model = NanoGPTWhiteBox(
+        vocab_size=128, n_embd=32, n_head=4, n_layer=1, max_seq_len=64
+    ).to(dtype=dtype)
+    result = NanoGPTDecode(model, prefill_ctx=8, decode_steps=4, batch_size=2).run(
+        emit_sidecar=False
+    )
     metrics = {
-        **{key: float(value) if isinstance(value, float) else value for key, value in result.items()},
+        **{
+            key: float(value) if isinstance(value, float) else value
+            for key, value in result.items()
+        },
         "n_params": count_params(model),
         "dtype": dtype_label,
     }
@@ -492,10 +528,14 @@ def run_nanogpt_decode_spec_min(workload: Workload, output_dir: Path) -> dict[st
     from mlperf.reference.cloud.nanogpt_decode_spec import SpeculativeDecode
     from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
-    target = NanoGPTWhiteBox(vocab_size=128, n_embd=32, n_head=4, n_layer=1, max_seq_len=64)
-    draft = NanoGPTWhiteBox(vocab_size=128, n_embd=16, n_head=4, n_layer=1, max_seq_len=64)
+    target = NanoGPTWhiteBox(
+        vocab_size=128, n_embd=32, n_head=4, n_layer=1, max_seq_len=64
+    )
+    draft = NanoGPTWhiteBox(
+        vocab_size=128, n_embd=16, n_head=4, n_layer=1, max_seq_len=64
+    )
     original_measure = nanogpt_decode_spec.measure_roofline
     nanogpt_decode_spec.measure_roofline = null_roofline
     try:
@@ -511,7 +551,10 @@ def run_nanogpt_decode_spec_min(workload: Workload, output_dir: Path) -> dict[st
         nanogpt_decode_spec.measure_roofline = original_measure
 
     metrics = {
-        **{key: float(value) if isinstance(value, float) else value for key, value in result.items()},
+        **{
+            key: float(value) if isinstance(value, float) else value
+            for key, value in result.items()
+        },
         "n_params_total": count_params(target) + count_params(draft),
     }
     return write_min_report(
@@ -584,7 +627,9 @@ def write_min_report(
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -640,7 +685,9 @@ def run_extended_max_from_min(
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 

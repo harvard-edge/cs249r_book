@@ -11,10 +11,16 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader, TensorDataset
 
-from mlperf.assets import DatasetAsset, ensure_fashion_mnist, load_fashion_mnist_dataset, sha256_file
+from mlperf.assets import (
+    DatasetAsset,
+    ensure_fashion_mnist,
+    load_fashion_mnist_dataset,
+    sha256_file,
+)
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
+from mlperf.runners.common import configured_seed
 
 
 def run_resnet18_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -25,7 +31,7 @@ def run_resnet18_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.edge.resnet_train import ResNet18WhiteBox
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 2
@@ -93,7 +99,9 @@ def run_resnet18_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -105,7 +113,7 @@ def run_mobilenetv2_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 2
@@ -173,7 +181,9 @@ def run_mobilenetv2_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -183,19 +193,27 @@ def run_mobilenet_composed_min(workload: Workload, output_dir: Path) -> dict[str
 
 def run_mobilenet_composed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     repetitions = int(os.environ.get("MLPERF_EDU_MOBILENET_COMP_REPETITIONS", "5"))
-    return run_mobilenet_composed(workload, output_dir, profile="max", repetitions=repetitions)
+    return run_mobilenet_composed(
+        workload, output_dir, profile="max", repetitions=repetitions
+    )
 
 
-def run_mobilenet_composed(workload: Workload, output_dir: Path, *, profile: str, repetitions: int) -> dict[str, Any]:
+def run_mobilenet_composed(
+    workload: Workload, output_dir: Path, *, profile: str, repetitions: int
+) -> dict[str, Any]:
     """Run MobileNetV2 with composed pruning and fake quantization primitives."""
     root = find_project_root()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from mlperf.reference.mobile.mobilenet_compress import effective_param_bytes, fake_quantize_int8, prune_2of4
+    from mlperf.reference.mobile.mobilenet_compress import (
+        effective_param_bytes,
+        fake_quantize_int8,
+        prune_2of4,
+    )
     from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = int(os.environ.get("MLPERF_EDU_MOBILENET_COMP_BATCH_SIZE", "2"))
@@ -238,11 +256,15 @@ def run_mobilenet_composed(workload: Workload, output_dir: Path, *, profile: str
         "metrics": {
             "duration_seconds": float(duration),
             "samples": int(batch_size * repetitions),
-            "samples_per_second": float((batch_size * repetitions) / duration) if duration > 0 else 0.0,
+            "samples_per_second": float((batch_size * repetitions) / duration)
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
             "baseline_param_bytes": int(baseline_param_bytes),
             "effective_param_bytes": int(effective_bytes),
-            "effective_compression_ratio": float(baseline_param_bytes / effective_bytes) if effective_bytes else 0.0,
+            "effective_compression_ratio": float(baseline_param_bytes / effective_bytes)
+            if effective_bytes
+            else 0.0,
             "sparsity_actual": float(sparsity["sparsity_actual"]),
             "n_quantized_params": int(quant["n_quantized_params"]),
             "logits_shape": list(logits.shape),
@@ -273,7 +295,9 @@ def run_mobilenet_composed(workload: Workload, output_dir: Path, *, profile: str
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -285,22 +309,30 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.edge.resnet_train import ResNet18WhiteBox
 
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = _select_device()
     batch_size = int(os.environ.get("MLPERF_EDU_RESNET_MAX_BATCH_SIZE", 64))
-    epochs = int(os.environ.get("MLPERF_EDU_RESNET_MAX_EPOCHS", 3))
-    batches_per_epoch = int(os.environ.get("MLPERF_EDU_RESNET_MAX_BATCHES_PER_EPOCH", 20))
-    val_batches = int(os.environ.get("MLPERF_EDU_RESNET_MAX_VAL_BATCHES", 20))
+    epochs = int(os.environ.get("MLPERF_EDU_RESNET_MAX_EPOCHS", 5))
+    batches_per_epoch = int(
+        os.environ.get("MLPERF_EDU_RESNET_MAX_BATCHES_PER_EPOCH", 100)
+    )
+    requested_val_batches = int(os.environ.get("MLPERF_EDU_RESNET_MAX_VAL_BATCHES", 0))
     lr = float(os.environ.get("MLPERF_EDU_RESNET_MAX_LR", 1e-3))
 
     shard_path = os.environ.get("MLPERF_EDU_RESNET_MAX_TENSOR_PATH")
     if shard_path:
-        asset, train_loader, val_loader = _load_tensor_shard(Path(shard_path), batch_size)
+        asset, train_loader, val_loader = _load_tensor_shard(
+            Path(shard_path), batch_size
+        )
         num_classes = 100
     else:
-        asset, train_loader, val_loader = _fashion_mnist_loaders(batch_size=batch_size)
+        asset, train_loader, val_loader = _fashion_mnist_loaders(
+            batch_size=batch_size, seed=seed
+        )
         num_classes = 10
+
+    val_batches = requested_val_batches or len(val_loader)
 
     model = ResNet18WhiteBox(num_classes=num_classes).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
@@ -320,7 +352,9 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss, val_acc = _validate(model, val_loader, device, max_batches=val_batches)
+        val_loss, val_acc, evaluated_samples = _validate(
+            model, val_loader, device, max_batches=val_batches
+        )
         samples_seen += train_samples
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -329,7 +363,11 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     duration = time.perf_counter() - start
 
     final_accuracy = val_accuracies[-1]
-    target = float(os.environ.get("MLPERF_EDU_RESNET_MAX_ACCURACY_TARGET", workload.quality_value or 0.36))
+    target = float(
+        os.environ.get(
+            "MLPERF_EDU_RESNET_MAX_ACCURACY_TARGET", workload.quality_value or 0.36
+        )
+    )
     target_met = final_accuracy >= target
     n_params = sum(p.numel() for p in model.parameters())
 
@@ -367,9 +405,13 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "final_train_loss": float(train_losses[-1]),
             "final_val_loss": float(val_losses[-1]),
             "final_accuracy": float(final_accuracy),
+            "top1_accuracy": float(final_accuracy),
+            "evaluation_samples": int(evaluated_samples),
             "duration_seconds": float(duration),
             "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
+            "samples_per_second": float(samples_seen / duration)
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
             "epoch_times": epoch_times,
             "train_losses": train_losses,
@@ -378,6 +420,7 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         },
         "quality": {
             "metric": workload.quality_metric,
+            "metric_key": "top1_accuracy",
             "target": target,
             "direction": "higher",
             "target_met": target_met,
@@ -407,7 +450,9 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -419,22 +464,32 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.mobile.mobilenet_core import MobileNetV2Local
 
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = _select_device()
     batch_size = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_BATCH_SIZE", 64))
-    epochs = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_EPOCHS", 5))
-    batches_per_epoch = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_BATCHES_PER_EPOCH", 50))
-    val_batches = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_VAL_BATCHES", 50))
+    epochs = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_EPOCHS", 8))
+    batches_per_epoch = int(
+        os.environ.get("MLPERF_EDU_MOBILENET_MAX_BATCHES_PER_EPOCH", 100)
+    )
+    requested_val_batches = int(
+        os.environ.get("MLPERF_EDU_MOBILENET_MAX_VAL_BATCHES", 0)
+    )
     lr = float(os.environ.get("MLPERF_EDU_MOBILENET_MAX_LR", 1e-4))
 
     shard_path = os.environ.get("MLPERF_EDU_MOBILENET_MAX_TENSOR_PATH")
     if shard_path:
-        asset, train_loader, val_loader = _load_tensor_shard(Path(shard_path), batch_size)
+        asset, train_loader, val_loader = _load_tensor_shard(
+            Path(shard_path), batch_size
+        )
         num_classes = 100
     else:
-        asset, train_loader, val_loader = _fashion_mnist_loaders(batch_size=batch_size)
+        asset, train_loader, val_loader = _fashion_mnist_loaders(
+            batch_size=batch_size, seed=seed
+        )
         num_classes = 10
+
+    val_batches = requested_val_batches or len(val_loader)
 
     model = MobileNetV2Local(num_classes=num_classes).to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
@@ -454,7 +509,9 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss, val_acc = _validate(model, val_loader, device, max_batches=val_batches)
+        val_loss, val_acc, evaluated_samples = _validate(
+            model, val_loader, device, max_batches=val_batches
+        )
         samples_seen += train_samples
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -463,7 +520,11 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     duration = time.perf_counter() - start
 
     final_accuracy = val_accuracies[-1]
-    target = float(os.environ.get("MLPERF_EDU_MOBILENET_MAX_ACCURACY_TARGET", workload.quality_value or 0.4))
+    target = float(
+        os.environ.get(
+            "MLPERF_EDU_MOBILENET_MAX_ACCURACY_TARGET", workload.quality_value or 0.4
+        )
+    )
     target_met = final_accuracy >= target
     n_params = sum(p.numel() for p in model.parameters())
 
@@ -501,9 +562,13 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "final_train_loss": float(train_losses[-1]),
             "final_val_loss": float(val_losses[-1]),
             "final_accuracy": float(final_accuracy),
+            "top1_accuracy": float(final_accuracy),
+            "evaluation_samples": int(evaluated_samples),
             "duration_seconds": float(duration),
             "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
+            "samples_per_second": float(samples_seen / duration)
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
             "epoch_times": epoch_times,
             "train_losses": train_losses,
@@ -512,6 +577,7 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         },
         "quality": {
             "metric": workload.quality_metric,
+            "metric_key": "top1_accuracy",
             "target": target,
             "direction": "higher",
             "target_met": target_met,
@@ -541,7 +607,9 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -556,7 +624,9 @@ def _select_device() -> torch.device:
     return torch.device("cpu")
 
 
-def _fashion_mnist_loaders(batch_size: int) -> tuple[DatasetAsset, DataLoader, DataLoader]:
+def _fashion_mnist_loaders(
+    batch_size: int, *, seed: int
+) -> tuple[DatasetAsset, DataLoader, DataLoader]:
     asset = ensure_fashion_mnist(download=True)
     import torchvision.transforms as transforms
 
@@ -576,16 +646,31 @@ def _fashion_mnist_loaders(batch_size: int) -> tuple[DatasetAsset, DataLoader, D
             transforms.Normalize((0.2860, 0.2860, 0.2860), (0.3530, 0.3530, 0.3530)),
         ]
     )
-    train_ds = load_fashion_mnist_dataset(root=asset.root, train=True, download=False, transform=train_transform)
-    val_ds = load_fashion_mnist_dataset(root=asset.root, train=False, download=False, transform=val_transform)
+    train_ds = load_fashion_mnist_dataset(
+        root=asset.root, train=True, download=False, transform=train_transform
+    )
+    val_ds = load_fashion_mnist_dataset(
+        root=asset.root, train=False, download=False, transform=val_transform
+    )
     return (
         asset,
-        DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=0),
-        DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=True, num_workers=0),
+        DataLoader(
+            train_ds,
+            batch_size=batch_size,
+            shuffle=True,
+            drop_last=True,
+            num_workers=0,
+            generator=torch.Generator().manual_seed(seed),
+        ),
+        DataLoader(
+            val_ds, batch_size=batch_size, shuffle=False, drop_last=False, num_workers=0
+        ),
     )
 
 
-def _load_tensor_shard(path: Path, batch_size: int) -> tuple[DatasetAsset, DataLoader, DataLoader]:
+def _load_tensor_shard(
+    path: Path, batch_size: int
+) -> tuple[DatasetAsset, DataLoader, DataLoader]:
     data = torch.load(path, map_location="cpu")
     train_ds = TensorDataset(data["train_images"].float(), data["train_labels"].long())
     val_ds = TensorDataset(data["val_images"].float(), data["val_labels"].long())
@@ -637,7 +722,7 @@ def _validate(
     device: torch.device,
     *,
     max_batches: int,
-) -> tuple[float, float]:
+) -> tuple[float, float, int]:
     model.eval()
     losses: list[float] = []
     correct = 0
@@ -654,4 +739,4 @@ def _validate(
         total += int(labels.numel())
     avg_loss = sum(losses) / len(losses) if losses else float("inf")
     accuracy = correct / total if total else 0.0
-    return avg_loss, accuracy
+    return avg_loss, accuracy, total

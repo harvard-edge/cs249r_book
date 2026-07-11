@@ -3,12 +3,13 @@
 
 Single source of truth
 ----------------------
-Every fact on the generated pages comes from exactly one of:
+Generated benchmark and reference facts come from these project contracts:
 
-  * ``registry/suites/**``      — per-workload / per-variant benchmark metadata
-  * ``registry/suites.yaml``    — suite-level titles and summaries
-  * ``datasets.yaml``           — dataset catalog
-  * the live ``mlperf`` CLI     — ``--help`` text for the command reference
+  * ``registry/suites/**``      - per-workload / per-variant benchmark metadata
+  * ``registry/suites.yaml``    - suite-level titles and summaries
+  * ``datasets.yaml``           - dataset catalog
+  * ``src/mlperf/assets.py``    - structured public-asset dossiers
+  * the live ``mlperf`` CLI     - ``--help`` text for the command reference
 
 Nothing on these pages is hand-written. To change a page, change the
 registry (or the CLI help text) and regenerate:
@@ -39,14 +40,25 @@ sys.path.insert(0, str(ROOT / "src"))
 
 import yaml  # noqa: E402
 
+from mlperf.assets import asset_dossier, has_asset_dossier  # noqa: E402
 from mlperf.registry import Workload, load_registry  # noqa: E402
 
 GITHUB_BLOB = "https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu"
+GITHUB_TREE = "https://github.com/harvard-edge/cs249r_book/tree/main/mlperf-edu"
+CHECKOUT_COMMAND = "uv run mlperf"
 
 GENERATED_NOTE = (
-    "<!-- GENERATED FILE — do not edit by hand.\n"
-    "     Source of truth: registry/ + datasets.yaml + the mlperf CLI.\n"
+    "<!-- GENERATED FILE - do not edit by hand.\n"
+    "     Sources: registry/ + datasets.yaml + asset dossiers + the mlperf CLI.\n"
     "     Regenerate with: python3 tools/generate_docs.py -->\n"
+)
+
+PREVIEW_CALLOUT = (
+    "::: {.callout-warning}\n"
+    "**Independent preview.** MLPerf EDU is not an official MLCommons benchmark "
+    "and is not endorsed by MLCommons. Registry result labels are candidate "
+    "classifications for review, not accepted MLPerf result categories.\n"
+    ":::\n"
 )
 
 CLI_COMMANDS = [
@@ -70,6 +82,7 @@ CLI_COMMANDS = [
 # ---------------------------------------------------------------------------
 # Small rendering helpers
 # ---------------------------------------------------------------------------
+
 
 def esc(value: Any) -> str:
     """Escape a scalar for use inside a markdown pipe table cell."""
@@ -101,6 +114,18 @@ def bullet_block(title: str, items: list[Any]) -> str:
     return "\n".join(lines) + "\n"
 
 
+def mapping_table(mapping: Any) -> str:
+    """Render a registry mapping as a readable two-column table."""
+    if not isinstance(mapping, dict) or not mapping:
+        return ""
+    rows: list[tuple[str, Any]] = []
+    for key, value in mapping.items():
+        if isinstance(value, list):
+            value = ", ".join(str(item) for item in value)
+        rows.append((key.replace("_", " ").capitalize(), value))
+    return kv_table(rows)
+
+
 def workload_href(suite: str, family: str, depth: int) -> str:
     prefix = "../" * depth
     return f"{prefix}benchmarks/{suite}/{family}.qmd"
@@ -109,6 +134,7 @@ def workload_href(suite: str, family: str, depth: int) -> str:
 # ---------------------------------------------------------------------------
 # Registry access
 # ---------------------------------------------------------------------------
+
 
 def load_suite_meta() -> dict[str, dict[str, str]]:
     path = ROOT / "registry" / "suites.yaml"
@@ -132,21 +158,27 @@ def index_source_paths() -> dict[str, str]:
                 paths[workload_id] = str(item.relative_to(ROOT))
             elif item.is_dir():
                 base_path = item / "workload.yaml"
-                base = yaml.safe_load(base_path.read_text()) if base_path.is_file() else {}
+                base = (
+                    yaml.safe_load(base_path.read_text()) if base_path.is_file() else {}
+                )
                 canonical = str((base or {}).get("id") or item.name)
                 variants_dir = item / "variants"
                 if variants_dir.is_dir():
                     for variant_path in sorted(variants_dir.glob("*.y*ml")):
                         raw = yaml.safe_load(variant_path.read_text()) or {}
                         variant_name = str(raw.get("variant") or variant_path.stem)
-                        workload_id = str(raw.get("id") or f"{canonical}-{variant_name}")
+                        workload_id = str(
+                            raw.get("id") or f"{canonical}-{variant_name}"
+                        )
                         paths[workload_id] = str(variant_path.relative_to(ROOT))
                 else:
                     paths[canonical] = str(base_path.relative_to(ROOT))
     return paths
 
 
-def group_families(workloads: dict[str, Workload]) -> "OrderedDict[str, list[Workload]]":
+def group_families(
+    workloads: dict[str, Workload],
+) -> "OrderedDict[str, list[Workload]]":
     """Group workloads into families keyed by canonical workload id."""
     families: OrderedDict[str, list[Workload]] = OrderedDict()
     for workload in workloads.values():
@@ -159,6 +191,7 @@ def group_families(workloads: dict[str, Workload]) -> "OrderedDict[str, list[Wor
 # Page sections
 # ---------------------------------------------------------------------------
 
+
 def section_at_a_glance(w: Workload) -> str:
     raw = w.raw
     rows = [
@@ -169,14 +202,46 @@ def section_at_a_glance(w: Workload) -> str:
         ("Dataset source", raw.get("dataset_source")),
         ("Scenario", w.scenario),
         ("Maturity", w.maturity),
-        ("Public status", w.public_status),
+        ("Candidate result status", w.public_status),
         ("Provenance", raw.get("provenance")),
     ]
     body = kv_table(rows)
     note = raw.get("params_note")
     if note:
         body += f"\n> **Parameter count note:** {esc(note)}\n"
+    if w.scenario == "training":
+        body += (
+            "\n> **Scenario note:** `training` is a proposed MLPerf EDU label "
+            "for train-then-quality workloads. It is not an official MLPerf "
+            "Inference scenario.\n"
+        )
     return f"## At a Glance\n\n{body}"
+
+
+def section_execution_boundary(w: Workload) -> str:
+    execution = w.raw.get("max_execution")
+    if not isinstance(execution, dict) or not execution:
+        return ""
+
+    quality = "yes" if execution.get("quality_target_enforced") is True else "no"
+    fetched = "yes" if execution.get("fetched_assets_used") is True else "no"
+    declared = "yes" if execution.get("declared_dataset_used") is True else "no"
+    return "\n".join(
+        [
+            "::: {.callout-caution}",
+            "**Current `max` execution boundary.** " + esc(execution.get("note", "")),
+            "",
+            f"- Reported data mode: `{esc(execution.get('data_mode'))}`",
+            f"- Candidate quality target enforced: **{quality}**",
+            f"- Fetched assets used by this runner: **{fetched}**",
+            f"- Declared dataset used by this runner: **{declared}**",
+            "",
+            "This path is systems-only. Its measurements are not a public score or "
+            "performance baseline unless the workload is promoted through a reviewed "
+            "result contract.",
+            ":::",
+        ]
+    )
 
 
 def section_how_to_run(w: Workload) -> str:
@@ -190,17 +255,48 @@ def section_how_to_run(w: Workload) -> str:
     model_flag = ""
     if isinstance(model_source, dict) and model_source.get("default_alias"):
         model_flag = f" --model {model_source['default_alias']}"
-    lines.append("# one-time asset preparation")
-    lines.append(f"mlperf fetch {target} --profile max")
-    lines.append("")
-    lines.append("# benchmark run (writes JSON/HTML/CSV reports + .provd provenance)")
-    lines.append(f"mlperf run {target} --profile max{model_flag} --open-report")
+    shared_checkpoint = w.raw.get("shared_checkpoint")
+    max_execution = w.raw.get("max_execution") or {}
+    if shared_checkpoint:
+        lines.append("# prepare and quality-check the shared training checkpoint")
+        lines.append('OUTPUT_DIR="submissions/nanogpt-inference-max"')
+        lines.append(
+            f"{CHECKOUT_COMMAND} fetch --workload {shared_checkpoint} --profile max"
+        )
+        lines.append(
+            f'{CHECKOUT_COMMAND} run --workload {shared_checkpoint} --profile max --output-dir "$OUTPUT_DIR"'
+        )
+        lines.append("")
+        lines.append(
+            "# checkpoint-backed benchmark run (reuses the same output directory)"
+        )
+        lines.append(
+            f'{CHECKOUT_COMMAND} run {target} --profile max{model_flag} --output-dir "$OUTPUT_DIR" --open-report'
+        )
+    else:
+        if max_execution.get("fetched_assets_used") is False:
+            lines.append(
+                "# no asset fetch is required; current max uses its declared systems-only micro-shard"
+            )
+        else:
+            lines.append("# one-time asset preparation")
+            lines.append(f"{CHECKOUT_COMMAND} fetch {target} --profile max")
+        lines.append("")
+        lines.append(
+            "# benchmark run (writes JSON/HTML/CSV reports + .provd provenance)"
+        )
+        lines.append(
+            f"{CHECKOUT_COMMAND} run {target} --profile max{model_flag} --open-report"
+        )
     lines.append("")
     lines.append("# quick smoke pass")
-    lines.append(f"mlperf run {target} --profile min{model_flag}")
+    lines.append(f"{CHECKOUT_COMMAND} run {target} --profile min{model_flag}")
     lines.append("")
     lines.append("# research envelope")
-    lines.append(f"mlperf run {target} --profile pro{model_flag}")
+    pro_output = ' --output-dir "$OUTPUT_DIR"' if shared_checkpoint else ""
+    lines.append(
+        f"{CHECKOUT_COMMAND} run {target} --profile pro{model_flag}{pro_output}"
+    )
     lines.append("```")
     lines.append("")
     lines.append(
@@ -222,6 +318,12 @@ def section_quality_target(w: Workload) -> str:
         ("Reference runs", w.quality_reference_runs),
     ]
     body = kv_table(rows)
+    max_execution = w.raw.get("max_execution") or {}
+    if max_execution.get("quality_target_enforced") is False:
+        body += (
+            "\n> **Not enforced by the current `max` runner.** This target is "
+            "research context for future promotion; the current path remains systems-only.\n"
+        )
 
     variance = w.quality_variance_summary
     if isinstance(variance, dict) and variance:
@@ -240,7 +342,49 @@ def section_quality_target(w: Workload) -> str:
 
     if w.quality_reviewer_notes:
         body += "\n" + bullet_block("Reviewer notes", list(w.quality_reviewer_notes))
-    return f"## Quality Target\n\n{body}"
+    return f"## Candidate Quality Target\n\n{body}"
+
+
+def section_performance_contract(w: Workload) -> str:
+    raw = w.raw
+    functional = raw.get("functional_check")
+    reference = raw.get("performance_reference_protocol")
+    measurement = raw.get("measurement_protocol")
+    checkpoint = raw.get("checkpoint_contract")
+    quality = raw.get("quality_evaluation")
+    if not any(
+        isinstance(item, dict) and item
+        for item in (functional, reference, measurement, checkpoint, quality)
+    ):
+        return ""
+
+    title = (
+        "Candidate Performance Contract"
+        if w.public_status == "performance-bearing"
+        else "Systems Experiment Execution Contract"
+    )
+    parts = [f"## {title}", ""]
+    if isinstance(functional, dict) and functional:
+        notes = functional.get("reviewer_notes")
+        visible = {
+            key: value for key, value in functional.items() if key != "reviewer_notes"
+        }
+        parts += ["**Functional acceptance:**", "", mapping_table(visible)]
+        if isinstance(notes, list) and notes:
+            parts += [bullet_block("Reviewer notes", notes)]
+    if isinstance(reference, dict) and reference:
+        parts += ["**Five-seed reference protocol:**", "", mapping_table(reference)]
+    if isinstance(measurement, dict) and measurement:
+        parts += [
+            "**Within-run measurement protocol:**",
+            "",
+            mapping_table(measurement),
+        ]
+    if isinstance(checkpoint, dict) and checkpoint:
+        parts += ["**Checkpoint contract:**", "", mapping_table(checkpoint)]
+    if isinstance(quality, dict) and quality:
+        parts += ["**Task-quality evaluation:**", "", mapping_table(quality)]
+    return "\n".join(parts).rstrip() + "\n"
 
 
 def section_verified_baseline(w: Workload) -> str:
@@ -248,15 +392,36 @@ def section_verified_baseline(w: Workload) -> str:
     if not isinstance(baseline, dict) or not baseline:
         return ""
     note = baseline.get("baseline_note")
-    rows = [
-        (k.replace("_", " ").capitalize(), v)
-        for k, v in baseline.items()
-        if k != "baseline_note"
-    ]
-    body = kv_table(rows)
+    visible = {key: value for key, value in baseline.items() if key != "baseline_note"}
+    body = mapping_table(visible)
     if note:
         body += f"\n> {esc(note)}\n"
-    return f"## Verified Baseline\n\n{body}"
+    review_eligible = baseline.get("review_eligible") is True
+    if review_eligible:
+        title = "Recorded Project Reference Baseline"
+        disclosure = (
+            "This is a project reference baseline, not an MLCommons-verified result."
+        )
+    else:
+        title = "Development Calibration (Not Review Eligible)"
+        disclosure = (
+            "This is a project development calibration, not an MLCommons-verified "
+            "result or a review-eligible reference package."
+        )
+    body += f"\n> {disclosure}\n"
+    return f"## {title}\n\n{body}"
+
+
+def section_calibration_observation(w: Workload) -> str:
+    calibration = w.raw.get("calibration_observation")
+    if not isinstance(calibration, dict) or not calibration:
+        return ""
+    body = mapping_table(calibration)
+    body += (
+        "\n> This observation is local development context. It is not a "
+        "review-eligible reference result.\n"
+    )
+    return f"## Local Calibration Observation\n\n{body}"
 
 
 def section_regime(w: Workload) -> str:
@@ -288,6 +453,7 @@ def section_model_source(w: Workload) -> str:
     rows = [
         ("Type", source.get("type")),
         ("Default model", source.get("default_model_id")),
+        ("Pinned revision", source.get("revision")),
         ("Default alias", source.get("default_alias")),
         ("License", source.get("license")),
     ]
@@ -322,12 +488,17 @@ def section_runner(w: Workload, source_paths: dict[str, str]) -> str:
     return "\n".join(parts)
 
 
-def render_workload_body(w: Workload, source_paths: dict[str, str], heading_shift: bool) -> str:
+def render_workload_body(
+    w: Workload, source_paths: dict[str, str], heading_shift: bool
+) -> str:
     sections = [
         section_at_a_glance(w),
+        section_execution_boundary(w),
         section_how_to_run(w),
         section_quality_target(w),
+        section_performance_contract(w),
         section_verified_baseline(w),
+        section_calibration_observation(w),
         section_regime(w),
         section_model_source(w),
         section_runner(w, source_paths),
@@ -339,10 +510,16 @@ def render_workload_body(w: Workload, source_paths: dict[str, str], heading_shif
 
 
 def public_line(w: Workload) -> str:
-    return f"{badge(w.public_status)}\n\n> {esc(w.public_rationale)}\n" if w.public_rationale else badge(w.public_status) + "\n"
+    return (
+        f"{badge(w.public_status)}\n\n> {esc(w.public_rationale)}\n"
+        if w.public_rationale
+        else badge(w.public_status) + "\n"
+    )
 
 
-def family_page(family: str, members: list[Workload], source_paths: dict[str, str]) -> str:
+def family_page(
+    family: str, members: list[Workload], source_paths: dict[str, str]
+) -> str:
     lead = members[0]
     suite = lead.suite
     lines = [
@@ -352,6 +529,7 @@ def family_page(family: str, members: list[Workload], source_paths: dict[str, st
         "---",
         "",
         GENERATED_NOTE,
+        PREVIEW_CALLOUT,
     ]
     if len(members) == 1:
         w = members[0]
@@ -365,7 +543,9 @@ def family_page(family: str, members: list[Workload], source_paths: dict[str, st
         "contract; each row below is independently runnable and reported."
     )
     lines.append("")
-    lines.append("| **Variant** | **Workload ID** | **Scenario** | **Public status** |")
+    lines.append(
+        "| **Variant** | **Workload ID** | **Scenario** | **Candidate result status** |"
+    )
     lines.append("|:---|:---|:---|:---|")
     for member in members:
         anchor = f"#variant-{member.variant}"
@@ -387,6 +567,7 @@ def family_page(family: str, members: list[Workload], source_paths: dict[str, st
 # Index pages
 # ---------------------------------------------------------------------------
 
+
 def family_row(family: str, members: list[Workload], depth: int) -> str:
     lead = members[0]
     variants = f"{len(members)}" if len(members) > 1 else "—"
@@ -401,7 +582,7 @@ def family_row(family: str, members: list[Workload], depth: int) -> str:
 
 FAMILY_TABLE_HEADER = (
     "| **Workload** | **Suite** | **Model** | **Params** | **Dataset** "
-    "| **Variants** | **Public status** |\n"
+    "| **Variants** | **Candidate result status** |\n"
     "|:---|:---|:---|:---|:---|:---|:---|"
 )
 
@@ -424,10 +605,11 @@ def benchmarks_index(
         "---",
         "",
         GENERATED_NOTE,
+        PREVIEW_CALLOUT,
         f"MLPerf EDU currently registers **{len(workloads)} workloads** in "
         f"**{len(families)} families** across **{sum(1 for s in by_suite.values() if s)} suites**. "
         "Every page in this section is generated from the "
-        f"[workload registry]({GITHUB_BLOB}/registry); the registry YAML is the "
+        f"[workload registry]({GITHUB_TREE}/registry); the registry YAML is the "
         "single source of truth for models, datasets, quality targets, and "
         "public-result status.",
         "",
@@ -461,6 +643,7 @@ def suite_index(
         "---",
         "",
         GENERATED_NOTE,
+        PREVIEW_CALLOUT,
     ]
     if meta.get("summary"):
         lines += [esc(meta["summary"]), ""]
@@ -472,8 +655,8 @@ def suite_index(
     lines.append("")
     lines.append("```bash")
     lines.append(f"# run every {suite} workload in the max profile")
-    lines.append(f"mlperf fetch --suite {suite} --profile max")
-    lines.append(f"mlperf run --suite {suite} --profile max")
+    lines.append(f"{CHECKOUT_COMMAND} fetch --suite {suite} --profile max")
+    lines.append(f"{CHECKOUT_COMMAND} run --suite {suite} --profile max")
     lines.append("```")
     return "\n".join(lines) + "\n"
 
@@ -482,14 +665,83 @@ def suite_index(
 # Datasets and CLI reference
 # ---------------------------------------------------------------------------
 
-def datasets_page(workloads: dict[str, Workload]) -> str:
+
+def load_dataset_catalog() -> dict[str, dict[str, Any]]:
     with (ROOT / "datasets.yaml").open("r") as handle:
         catalog = (yaml.safe_load(handle) or {}).get("datasets", {})
+    if not isinstance(catalog, dict):
+        raise ValueError("datasets.yaml must define a 'datasets' mapping")
+    for name, entry in catalog.items():
+        if not isinstance(entry, dict):
+            raise ValueError(f"dataset '{name}' must be a mapping")
+    return catalog
 
+
+def dataset_usage(workloads: dict[str, Workload]) -> dict[str, list[Workload]]:
     usage: dict[str, list[Workload]] = {}
-    for w in workloads.values():
-        if w.dataset:
-            usage.setdefault(w.dataset, []).append(w)
+    for workload in workloads.values():
+        if workload.dataset:
+            usage.setdefault(workload.dataset, []).append(workload)
+    return usage
+
+
+def validate_dataset_catalog(
+    catalog: dict[str, dict[str, Any]],
+    usage: dict[str, list[Workload]],
+) -> None:
+    missing = sorted(set(usage) - set(catalog))
+    stale = sorted(set(catalog) - set(usage))
+    problems: list[str] = []
+    if missing:
+        problems.append(f"registry datasets missing from datasets.yaml: {missing}")
+    if stale:
+        problems.append(f"datasets.yaml entries unused by the registry: {stale}")
+
+    required = {
+        "description",
+        "uri",
+        "estimated_size_mb",
+        "split",
+        "license",
+        "license_status",
+        "public_release_status",
+    }
+    for name, entry in sorted(catalog.items()):
+        absent = sorted(key for key in required if entry.get(key) in (None, ""))
+        if absent:
+            problems.append(f"dataset '{name}' is missing fields: {absent}")
+        if has_asset_dossier(name):
+            dossier = asset_dossier(name)
+            for field in ("license_status", "public_release_status"):
+                if entry.get(field) != dossier.get(field):
+                    problems.append(
+                        f"dataset '{name}' field '{field}' disagrees with its "
+                        f"asset dossier: {entry.get(field)!r} != {dossier.get(field)!r}"
+                    )
+
+    tiny_uri = str(catalog.get("tinyshakespeare", {}).get("uri", ""))
+    if "gutenberg.org" not in tiny_uri:
+        problems.append("tinyshakespeare must use the Project Gutenberg source")
+    if "karpathy" in tiny_uri.lower():
+        problems.append("tinyshakespeare still references the retired Karpathy mirror")
+
+    if problems:
+        raise ValueError(
+            "dataset catalog is inconsistent:\n  - " + "\n  - ".join(problems)
+        )
+
+
+def dataset_source_cell(source: Any) -> str:
+    text = str(source or "")
+    if text.startswith(("https://", "http://")):
+        return f"[upstream]({text})"
+    return f"`{esc(text)}`" if text else ""
+
+
+def datasets_page(workloads: dict[str, Workload]) -> str:
+    catalog = load_dataset_catalog()
+    usage = dataset_usage(workloads)
+    validate_dataset_catalog(catalog, usage)
 
     lines = [
         "---",
@@ -497,33 +749,59 @@ def datasets_page(workloads: dict[str, Workload]) -> str:
         "---",
         "",
         GENERATED_NOTE,
-        "Datasets are deliberately small: deterministic excerpts, synthetic "
-        "generators, and torchvision downloads sized for laptops. The catalog "
-        f"below is generated from [`datasets.yaml`]({GITHUB_BLOB}/datasets.yaml).",
+        PREVIEW_CALLOUT,
+        "The catalog is generated from the workload registry, "
+        f"[`datasets.yaml`]({GITHUB_BLOB}/datasets.yaml), and the structured "
+        "public-asset dossiers used by the harness. Every registry dataset is "
+        "listed. Entries that remain systems-only or need release review are "
+        "marked explicitly.",
         "",
-        "| **Dataset** | **Description** | **Size (MB)** | **Source** | **Used by** |",
-        "|:---|:---|:---|:---|:---|",
+        "::: {.callout-note}",
+        "**Release boundary.** Dataset status covers the named asset only. The "
+        "MLPerf EDU component license, package-index publication, and MLCommons "
+        "review remain separate release gates. MovieLens 100K is fetch-only and "
+        "requires an explicit policy decision before public score-bearing use.",
+        ":::",
+        "",
+        "| **Dataset** | **Purpose** | **Size (MB)** | **Source** | **License status** | **Release status** | **Used by** |",
+        "|:---|:---|---:|:---|:---|:---|:---|",
     ]
-    for name in sorted(set(catalog) | set(usage)):
-        entry = catalog.get(name, {})
+    for name in sorted(usage):
+        entry = catalog[name]
         users = usage.get(name, [])
+        dossier = (
+            asset_dossier(
+                name,
+                declared_source=users[0].raw.get("dataset_source") if users else None,
+            )
+            if has_asset_dossier(name)
+            else {}
+        )
         links = ", ".join(
             f"[`{w.id}`](../benchmarks/{w.suite}/{w.canonical_workload or w.id}.qmd)"
             for w in sorted(users, key=lambda item: item.id)
         )
+        source = dossier.get("source_url") or entry.get("uri", "")
+        license_status = dossier.get("license_status") or entry.get(
+            "license_status", ""
+        )
+        release_status = dossier.get("public_release_status") or entry.get(
+            "public_release_status", ""
+        )
         lines.append(
             f"| `{esc(name)}` | {esc(entry.get('description', ''))} "
             f"| {esc(entry.get('estimated_size_mb', ''))} "
-            f"| {esc(entry.get('uri', ''))} | {links or '—'} |"
+            f"| {dataset_source_cell(source)} | `{esc(license_status)}` "
+            f"| `{esc(release_status)}` | {links or '—'} |"
         )
     lines += [
         "",
-        "Fetch and inspect assets with:",
+        "Fetch and inspect assets from a source checkout:",
         "",
         "```bash",
-        "mlperf fetch --profile max --dry-run   # show what would be downloaded",
-        "mlperf info --dataset tinyshakespeare  # one dataset's dossier",
-        "mlperf cache list                      # inspect the local cache",
+        f"{CHECKOUT_COMMAND} fetch --profile max --dry-run   # show what would be downloaded",
+        f"{CHECKOUT_COMMAND} info --dataset tinyshakespeare  # one dataset's dossier",
+        f"{CHECKOUT_COMMAND} cache list                      # inspect the local cache",
         "```",
     ]
     return "\n".join(lines) + "\n"
@@ -607,6 +885,7 @@ def stats_partial(
 # Emission
 # ---------------------------------------------------------------------------
 
+
 def normalize(content: str) -> str:
     """Match the repo pre-commit contract: no trailing whitespace on any
     line, exactly one trailing newline. The generator must emit hook-clean
@@ -624,9 +903,7 @@ def build_outputs() -> dict[Path, str]:
 
     unknown = {m[0].suite for m in families.values()} - set(suite_meta)
     if unknown:
-        raise ValueError(
-            f"suites missing from registry/suites.yaml: {sorted(unknown)}"
-        )
+        raise ValueError(f"suites missing from registry/suites.yaml: {sorted(unknown)}")
 
     site = ROOT / "site"
     outputs: dict[Path, str] = {}
@@ -646,9 +923,7 @@ def build_outputs() -> dict[Path, str]:
             )
     outputs[site / "reference" / "datasets.qmd"] = datasets_page(workloads)
     outputs[site / "reference" / "cli.qmd"] = cli_page()
-    outputs[site / "_stats.qmd"] = stats_partial(
-        workloads, families, suite_meta
-    )
+    outputs[site / "_stats.qmd"] = stats_partial(workloads, families, suite_meta)
     return {path: normalize(content) for path, content in outputs.items()}
 
 

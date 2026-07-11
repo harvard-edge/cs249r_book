@@ -1,62 +1,81 @@
 # MLPerf EDU Tutorials
 
-Hands-on tutorial materials for teaching ML systems benchmarking, designed to
-run as a half-day conference tutorial (ISCA, MICRO, ASPLOS, HPCA) or as a
-course module. Every exercise runs on an attendee laptop; no cluster, no GPU
-required.
+This directory contains runnable teaching material for ML systems benchmarking.
+Tutorial 01 is implemented and tested. Later sessions remain a roadmap and are
+not included in the current release.
 
-## Format
+## Setup
 
-Notebooks are [marimo](https://marimo.io) files: plain Python, reactive,
-version-controllable, and runnable either as interactive notebooks or as
-scripts. Install the tutorial extra and launch:
+Install the tutorial dependency and launch the marimo notebook from the
+`mlperf-edu` directory.
 
 ```bash
 uv sync --extra tutorial
 uv run marimo edit tutorials/01_first_benchmark.py
 ```
 
-Notebooks consume the run report JSON that every `mlperf run` produces. They
-never import harness internals, so they keep working as the harness evolves.
+The notebook invokes the public `mlperf` command surface through a subprocess
+and reads its report artifacts. It does not import runner internals.
 
-## The Half-Day Program (3.5 hours)
+## Implemented Material
 
-| # | Session | Time | Notebook |
-|:--|:---|:---|:---|
-| 0 | **Setup and doctor** — install, `mlperf doctor`, offline fallback kit | 0:15 | — |
-| 1 | **Anatomy of a benchmark run** — profiles, scenarios, reports, provenance | 0:45 | `01_first_benchmark.py` |
-| 2 | **The systems lens** — compute-, memory-, and dispatch-bound regimes across three workloads; roofline telemetry from real runs | 1:00 | `02_regimes_roofline.py` (planned) |
-| 3 | **Optimize like MLPerf** — SUT plugin lab: baseline decode, add KV cache and quantization, measure honestly | 1:00 | `03_optimize_sut.py` (planned) |
-| 4 | **The research envelope** — `pro` profile variant sweeps (int8, batching, long context); citing results in a paper | 0:30 | `04_research_envelope.py` (planned) |
+| **Session** | **Status** | **Duration** | **Entry Point** |
+|:---|:---|:---|:---|
+| Anatomy of a benchmark run | Implemented and smoke-tested | 30–45 minutes | `01_first_benchmark.py` |
 
-Session 0 exists because conference Wi-Fi fails. The offline kit is a wheel
-plus pre-fetched dataset cache produced ahead of time:
+Tutorial 01 runs the `micro-lstm-train` `min` profile. That profile is a
+deterministic functional systems run over a synthetic micro-shard. It is not a
+quality baseline. Students inspect the metrics, run fingerprint, report views,
+and provenance manifest, then verify the manifest with the CLI.
+
+The complete noninteractive path is suitable for local preflight and CI.
 
 ```bash
-uv build
-mlperf fetch --profile min          # populate datasets/local_tensors
-tar czf mlperf-edu-offline-kit.tgz dist/ datasets/local_tensors/
+python tutorials/smoke_first_benchmark.py
 ```
 
-Attendees who cannot reach PyPI install from the kit and still finish every
-exercise.
+The command exits successfully only when the workload passes, the JSON, HTML,
+CSV, and provenance files exist, the report includes metrics and a run
+fingerprint, and `mlperf verify` accepts the fresh manifest.
 
-## Design Rules for Tutorial Material
+## Roadmap
 
-1. **Laptop budget.** Every cell completes in under two minutes on a
-   several-year-old laptop CPU; full sessions never depend on an accelerator.
-2. **Reports are the interface.** Exercises read `*_report.json` artifacts,
-   teaching students that benchmark output is data to analyze, not console
-   text to glance at.
-3. **Measurement discipline is the lesson.** Each session ends by asking what
-   would make the number untrustworthy (warmup, seeds, thermal state,
-   fingerprint disclosure) and shows how the harness addresses it.
-4. **One benchmark fact source.** Notebooks link to the generated benchmark
-   pages on the documentation site rather than restating registry facts.
+The following sessions describe intended future material. No notebook files or
+runnable exercises are claimed for them in this release.
+
+| **Proposed Session** | **Intended Lesson** | **Status** |
+|:---|:---|:---|
+| Systems regimes | Compare compute, memory, and dispatch behavior using measured telemetry | Roadmap |
+| Optimize a SUT | Measure baseline and KV-cache decode while preserving token parity | Roadmap; the complete command-line exercise is available as `examples/lab2_inference_sut.py` |
+| Research variants | Run controlled variant sweeps and cite result artifacts | Roadmap |
+
+These sessions should not be advertised as a half-day conference program until
+their notebooks, instructor notes, timing checks, and smoke tests are committed.
+
+## Offline Behavior
+
+Tutorial 01 uses a synthetic deterministic micro-shard and needs no dataset
+download. After Python dependencies are installed, its benchmark and
+verification steps run without network access. A distributable wheel can be
+built ahead of a class with `uv build`, but a complete offline teaching bundle
+is not yet part of this repository.
+
+## Teaching Rules
+
+1. **Laptop budget.** The implemented smoke must complete quickly on a laptop
+   CPU and must not require an accelerator.
+2. **Reports are the interface.** Exercises read generated report artifacts
+   instead of scraping console text for benchmark data.
+3. **Measurement scope stays explicit.** Functional smoke results must not be
+   described as quality baselines or public benchmark scores.
+4. **Provenance is checked.** An exercise that creates a manifest must verify it
+   before reporting success.
+5. **Roadmap material stays labeled.** A session becomes implemented only after
+   its entry point and smoke test are present.
 
 ## Course Use
 
-Sessions 1 through 3 map directly onto a problem-set arc: run the baseline,
-diagnose the bottleneck from the report, optimize through a SUT plugin, and
-submit a packaged result that `mlperf grade` can score. The lab files under
-`examples/` are the graded counterparts of these tutorial notebooks.
+Tutorial 01 can be used as a standalone introductory module. The three complete
+command-line labs under `examples/` provide longer exercises for training-loop
+optimization, KV-cache inference, and dense-versus-sparse comparison. Their
+outputs are classroom measurements, not canonical MLPerf EDU submissions.

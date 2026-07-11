@@ -31,7 +31,6 @@ Provenance: Zhang et al. 2017, "Hello Edge: Keyword Spotting on Microcontrollers
     while the reference uses a 49x10 MFCC front-end and a ~24.9K-param DS-CNN.
 """
 
-import os
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -45,6 +44,7 @@ except ModuleNotFoundError:
 # ---------------------------------------------------------------------------
 # DS-CNN Architecture
 # ---------------------------------------------------------------------------
+
 
 class DSCNNBlock(nn.Module):
     """Depthwise-Separable Convolution Block.
@@ -60,15 +60,16 @@ class DSCNNBlock(nn.Module):
     def __init__(self, in_channels, out_channels, stride=1):
         super().__init__()
         self.depthwise = nn.Conv2d(
-            in_channels, in_channels,
-            kernel_size=3, stride=stride, padding=1,
-            groups=in_channels, bias=False
+            in_channels,
+            in_channels,
+            kernel_size=3,
+            stride=stride,
+            padding=1,
+            groups=in_channels,
+            bias=False,
         )
         self.bn1 = nn.BatchNorm2d(in_channels)
-        self.pointwise = nn.Conv2d(
-            in_channels, out_channels,
-            kernel_size=1, bias=False
-        )
+        self.pointwise = nn.Conv2d(in_channels, out_channels, kernel_size=1, bias=False)
         self.bn2 = nn.BatchNorm2d(out_channels)
 
     def forward(self, x):
@@ -97,7 +98,9 @@ class DSCNN(nn.Module):
 
         # Initial convolution: maps 1-channel spectrogram to 64 filters
         self.conv_init = nn.Sequential(
-            nn.Conv2d(1, 64, kernel_size=(10, 4), stride=(2, 2), padding=(4, 1), bias=False),
+            nn.Conv2d(
+                1, 64, kernel_size=(10, 4), stride=(2, 2), padding=(4, 1), bias=False
+            ),
             nn.BatchNorm2d(64),
             nn.ReLU(),
         )
@@ -115,7 +118,7 @@ class DSCNN(nn.Module):
 
     def forward(self, x, targets=None):
         """
-        Forward pass compatible with the auto_trainer interface.
+        Forward pass compatible with the reference training helpers.
 
         Args:
             x: (B, 1, n_mels, time_steps) mel spectrogram
@@ -143,8 +146,16 @@ class DSCNN(nn.Module):
 
 # The 12 MLPerf Tiny keyword classes
 MLPERF_KEYWORDS = [
-    "yes", "no", "up", "down", "left", "right",
-    "on", "off", "stop", "go",
+    "yes",
+    "no",
+    "up",
+    "down",
+    "left",
+    "right",
+    "on",
+    "off",
+    "stop",
+    "go",
 ]
 # All other words map to "unknown", silence maps to "silence"
 
@@ -168,7 +179,9 @@ class SpeechCommandsMelDataset(torch.utils.data.Dataset):
         self.label_to_idx["silence"] = 11
 
         if torchaudio is None:
-            raise ModuleNotFoundError("torchaudio is required to load Speech Commands data")
+            raise ModuleNotFoundError(
+                "torchaudio is required to load Speech Commands data"
+            )
 
         # Mel spectrogram transform
         self.mel_transform = torchaudio.transforms.MelSpectrogram(
@@ -199,7 +212,7 @@ class SpeechCommandsMelDataset(torch.utils.data.Dataset):
             pad = self.target_length - waveform.size(1)
             waveform = F.pad(waveform, (0, pad))
         else:
-            waveform = waveform[:, :self.target_length]
+            waveform = waveform[:, : self.target_length]
 
         # Convert to mel spectrogram
         mel = self.mel_transform(waveform)  # (1, n_mels, time_steps)
@@ -226,12 +239,18 @@ def get_speech_commands_dataloaders(batch_size=64, data_dir="./data", num_worker
     val_ds = SpeechCommandsMelDataset(root=data_dir, subset="validation")
 
     train_loader = torch.utils.data.DataLoader(
-        train_ds, batch_size=batch_size, shuffle=True,
-        num_workers=num_workers, drop_last=True,
+        train_ds,
+        batch_size=batch_size,
+        shuffle=True,
+        num_workers=num_workers,
+        drop_last=True,
     )
     val_loader = torch.utils.data.DataLoader(
-        val_ds, batch_size=batch_size, shuffle=False,
-        num_workers=num_workers, drop_last=True,
+        val_ds,
+        batch_size=batch_size,
+        shuffle=False,
+        num_workers=num_workers,
+        drop_last=True,
     )
 
     return train_loader, val_loader
@@ -242,12 +261,12 @@ if __name__ == "__main__":
 
     model = DSCNN(num_classes=12)
     total_params = sum(p.numel() for p in model.parameters())
-    print(f"📊 Parameters: {total_params:,} ({total_params/1e3:.1f}K)")
+    print(f"📊 Parameters: {total_params:,} ({total_params / 1e3:.1f}K)")
 
     # Model size in bytes (FP32)
     model_size_bytes = total_params * 4
-    print(f"💾 Model size: {model_size_bytes/1024:.1f} KB (FP32)")
-    print(f"💾 Model size: {total_params/1024:.1f} KB (INT8, after quantization)")
+    print(f"💾 Model size: {model_size_bytes / 1024:.1f} KB (FP32)")
+    print(f"💾 Model size: {total_params / 1024:.1f} KB (INT8, after quantization)")
 
     # Dummy forward pass
     dummy_mel = torch.randn(4, 1, 40, 101)  # (B, 1, n_mels, time_steps)

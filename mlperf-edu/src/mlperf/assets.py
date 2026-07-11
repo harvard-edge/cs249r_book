@@ -17,12 +17,16 @@ from typing import Any
 TINY_SHAKESPEARE_URL = "https://www.gutenberg.org/files/100/100-0.txt"
 TINY_SHAKESPEARE_VERSION = "project-gutenberg-100-0-tiny-excerpt"
 TINY_SHAKESPEARE_TARGET_CHARS = 1_115_394
-KARPATHY_TINY_SHAKESPEARE_SHA256 = "86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed"
+KARPATHY_TINY_SHAKESPEARE_SHA256 = (
+    "86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed"
+)
 MOVIELENS_100K_URL = "https://files.grouplens.org/datasets/movielens/ml-100k.zip"
 MNIST_SOURCE = "torchvision://MNIST"
 FASHION_MNIST_SOURCE = "torchvision://FashionMNIST"
 CIFAR100_URL = "https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
-CIFAR100_PICKLE_WARNING = r"dtype\(\): align should be passed as Python or NumPy boolean"
+CIFAR100_PICKLE_WARNING = (
+    r"dtype\(\): align should be passed as Python or NumPy boolean"
+)
 
 
 @dataclass(frozen=True)
@@ -201,7 +205,9 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
 }
 
 
-def asset_dossier(asset_id: str | None, *, declared_source: str | None = None) -> dict[str, Any]:
+def asset_dossier(
+    asset_id: str | None, *, declared_source: str | None = None
+) -> dict[str, Any]:
     if not asset_id:
         return {}
     dossier = ASSET_DOSSIERS.get(asset_id)
@@ -231,13 +237,36 @@ def has_asset_dossier(asset_id: str | None) -> bool:
     return bool(asset_id) and asset_id in ASSET_DOSSIERS
 
 
-def huggingface_model_dossier(model_source: dict[str, Any], *, model_name: str | None = None, model_id: str | None = None) -> dict[str, Any]:
-    resolved_model_id = model_id or model_source.get("default_model_id") or model_name or "huggingface-model"
-    source_url = f"https://huggingface.co/{resolved_model_id}" if "/" in str(resolved_model_id) else str(resolved_model_id)
-    aliases = model_source.get("aliases") if isinstance(model_source.get("aliases"), dict) else {}
+def huggingface_model_dossier(
+    model_source: dict[str, Any],
+    *,
+    model_name: str | None = None,
+    model_id: str | None = None,
+) -> dict[str, Any]:
+    resolved_model_id = (
+        model_id
+        or model_source.get("default_model_id")
+        or model_name
+        or "huggingface-model"
+    )
+    source_url = (
+        f"https://huggingface.co/{resolved_model_id}"
+        if "/" in str(resolved_model_id)
+        else str(resolved_model_id)
+    )
+    aliases = (
+        model_source.get("aliases")
+        if isinstance(model_source.get("aliases"), dict)
+        else {}
+    )
     license_value = str(model_source.get("license", "unknown"))
     normalized_license = license_value.lower()
-    permissive = normalized_license in {"apache-2.0", "mit", "bsd-2-clause", "bsd-3-clause"}
+    permissive = normalized_license in {
+        "apache-2.0",
+        "mit",
+        "bsd-2-clause",
+        "bsd-3-clause",
+    }
     data = {
         "id": str(resolved_model_id),
         "type": "model",
@@ -246,12 +275,17 @@ def huggingface_model_dossier(model_source: dict[str, Any], *, model_name: str |
         "provider": "Hugging Face",
         "license": license_value,
         "license_spdx": license_value if permissive else None,
-        "license_status": "declared-by-upstream" if model_source.get("license") else "requires-review",
+        "license_status": "declared-by-upstream"
+        if model_source.get("license")
+        else "requires-review",
         "default_alias": model_source.get("default_alias"),
         "aliases": aliases,
+        "revision": model_source.get("revision"),
         "terms_summary": "Model is fetched from its upstream Hugging Face repository; preserve upstream license and model card attribution.",
         "public_result_use": "performance-bearing candidate when the selected model license is compatible",
-        "public_release_status": "public-ok-with-attribution" if permissive else "needs-release-decision",
+        "public_release_status": "public-ok-with-attribution"
+        if permissive
+        else "needs-release-decision",
         "public_release_policy": (
             "Fetch model weights from the upstream Hugging Face repository and preserve "
             "the model card, license, provider, and revision metadata in public artifacts."
@@ -277,7 +311,9 @@ def huggingface_model_dossier(model_source: dict[str, Any], *, model_name: str |
     return data
 
 
-def model_rationale_for(model_id: str, aliases: dict[str, Any], alias_rationales: dict[str, Any]) -> str | None:
+def model_rationale_for(
+    model_id: str, aliases: dict[str, Any], alias_rationales: dict[str, Any]
+) -> str | None:
     candidates = [str(model_id)]
     for alias, target in aliases.items():
         if str(target) == str(model_id):
@@ -314,13 +350,19 @@ def load_cifar100_dataset(*, root: Path, train: bool, download: bool, transform=
             message=CIFAR100_PICKLE_WARNING,
             category=Warning,
         )
-        return CIFAR100(root=str(root), train=train, download=download, transform=transform)
+        return CIFAR100(
+            root=str(root), train=train, download=download, transform=transform
+        )
 
 
-def load_fashion_mnist_dataset(*, root: Path, train: bool, download: bool, transform=None):
+def load_fashion_mnist_dataset(
+    *, root: Path, train: bool, download: bool, transform=None
+):
     from torchvision.datasets import FashionMNIST
 
-    return FashionMNIST(root=str(root), train=train, download=download, transform=transform)
+    return FashionMNIST(
+        root=str(root), train=train, download=download, transform=transform
+    )
 
 
 def tinyshakespeare_paths(root: Path | None = None) -> dict[str, Path]:
@@ -342,7 +384,11 @@ def movielens_paths(root: Path | None = None) -> dict[str, Path]:
         override = os.environ.get("MLPERF_EDU_DATA_DIR")
         from .registry import find_project_root
 
-        base = (Path(override).expanduser().resolve() / "movielens") if override else find_project_root() / "data" / "movielens"
+        base = (
+            (Path(override).expanduser().resolve() / "movielens")
+            if override
+            else find_project_root() / "data" / "movielens"
+        )
     dataset = base / "ml-100k"
     return {
         "root": base,
@@ -361,7 +407,11 @@ def mnist_paths(root: Path | None = None) -> dict[str, Path]:
         override = os.environ.get("MLPERF_EDU_DATA_DIR")
         from .registry import find_project_root
 
-        base = (Path(override).expanduser().resolve() / "mnist") if override else find_project_root() / "data" / "mnist"
+        base = (
+            (Path(override).expanduser().resolve() / "mnist")
+            if override
+            else find_project_root() / "data" / "mnist"
+        )
     return {
         "root": base,
         "raw": base / "MNIST" / "raw",
@@ -376,7 +426,11 @@ def cifar100_paths(root: Path | None = None) -> dict[str, Path]:
         override = os.environ.get("MLPERF_EDU_DATA_DIR")
         from .registry import find_project_root
 
-        base = (Path(override).expanduser().resolve() / "cifar100") if override else find_project_root() / "data" / "cifar100"
+        base = (
+            (Path(override).expanduser().resolve() / "cifar100")
+            if override
+            else find_project_root() / "data" / "cifar100"
+        )
     return {
         "root": base,
         "dataset": base / "cifar-100-python",
@@ -391,7 +445,11 @@ def fashion_mnist_paths(root: Path | None = None) -> dict[str, Path]:
         override = os.environ.get("MLPERF_EDU_DATA_DIR")
         from .registry import find_project_root
 
-        base = (Path(override).expanduser().resolve() / "fashion-mnist") if override else find_project_root() / "data" / "fashion-mnist"
+        base = (
+            (Path(override).expanduser().resolve() / "fashion-mnist")
+            if override
+            else find_project_root() / "data" / "fashion-mnist"
+        )
     return {
         "root": base,
         "raw": base / "FashionMNIST" / "raw",
@@ -399,7 +457,9 @@ def fashion_mnist_paths(root: Path | None = None) -> dict[str, Path]:
     }
 
 
-def ensure_tinyshakespeare(*, download: bool = True, root: Path | None = None) -> DatasetAsset:
+def ensure_tinyshakespeare(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
     paths = tinyshakespeare_paths(root)
     base = paths["root"]
     raw = paths["raw"]
@@ -416,8 +476,12 @@ def ensure_tinyshakespeare(*, download: bool = True, root: Path | None = None) -
         "truncate to target_chars\n"
     )
 
-    known_old_cache = full.exists() and sha256_file(full) == KARPATHY_TINY_SHAKESPEARE_SHA256
-    recipe_mismatch = recipe.exists() and recipe.read_text(encoding="utf-8") != recipe_text
+    known_old_cache = (
+        full.exists() and sha256_file(full) == KARPATHY_TINY_SHAKESPEARE_SHA256
+    )
+    recipe_mismatch = (
+        recipe.exists() and recipe.read_text(encoding="utf-8") != recipe_text
+    )
     needs_generated_source = not full.exists() or known_old_cache or recipe_mismatch
     if needs_generated_source:
         if not download:
@@ -428,7 +492,9 @@ def ensure_tinyshakespeare(*, download: bool = True, root: Path | None = None) -
         tmp = raw.with_suffix(".download")
         _download(TINY_SHAKESPEARE_URL, tmp)
         tmp.replace(raw)
-        generated = _generate_tinyshakespeare_from_gutenberg(raw.read_text(encoding="utf-8-sig"))
+        generated = _generate_tinyshakespeare_from_gutenberg(
+            raw.read_text(encoding="utf-8-sig")
+        )
         full.write_text(generated, encoding="utf-8")
         recipe.write_text(recipe_text, encoding="utf-8")
 
@@ -465,7 +531,11 @@ def _generate_tinyshakespeare_from_gutenberg(text: str) -> str:
     start = normalized.find(start_marker)
     if start != -1:
         line_end = normalized.find("\n", start)
-        normalized = normalized[line_end + 1 :] if line_end != -1 else normalized[start + len(start_marker) :]
+        normalized = (
+            normalized[line_end + 1 :]
+            if line_end != -1
+            else normalized[start + len(start_marker) :]
+        )
     end = normalized.find(end_marker)
     if end != -1:
         normalized = normalized[:end]
@@ -517,7 +587,9 @@ def ensure_cifar100(*, download: bool = True, root: Path | None = None) -> Datas
     )
 
 
-def ensure_fashion_mnist(*, download: bool = True, root: Path | None = None) -> DatasetAsset:
+def ensure_fashion_mnist(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
     paths = fashion_mnist_paths(root)
     base = paths["root"]
     base.mkdir(parents=True, exist_ok=True)
@@ -533,7 +605,9 @@ def ensure_fashion_mnist(*, download: bool = True, root: Path | None = None) -> 
             ) from exc
         raise
 
-    files = tuple(sorted(path for path in (base / "FashionMNIST").rglob("*") if path.is_file()))
+    files = tuple(
+        sorted(path for path in (base / "FashionMNIST").rglob("*") if path.is_file())
+    )
     if not files:
         raise FileNotFoundError(f"Fashion-MNIST produced no files under {base}")
     n_bytes = sum(path.stat().st_size for path in files)
@@ -571,7 +645,9 @@ def ensure_mnist(*, download: bool = True, root: Path | None = None) -> DatasetA
         MNIST(root=str(base), train=True, download=False)
         MNIST(root=str(base), train=False, download=False)
 
-    files = tuple(sorted(path for path in (base / "MNIST").rglob("*") if path.is_file()))
+    files = tuple(
+        sorted(path for path in (base / "MNIST").rglob("*") if path.is_file())
+    )
     if not files:
         raise FileNotFoundError(f"MNIST produced no files under {base}")
 
@@ -609,7 +685,9 @@ def _download_mnist_with_curl_fallback(base: Path) -> None:
             shutil.copyfileobj(src, dst)
 
 
-def ensure_movielens_100k(*, download: bool = True, root: Path | None = None) -> DatasetAsset:
+def ensure_movielens_100k(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
     paths = movielens_paths(root)
     base = paths["root"]
     dataset = paths["dataset"]
@@ -659,14 +737,25 @@ def _download(url: str, destination: Path) -> None:
         if shutil.which("curl"):
             try:
                 subprocess.run(
-                    ["curl", "--fail", "--location", "--silent", "--show-error", url, "--output", str(destination)],
+                    [
+                        "curl",
+                        "--fail",
+                        "--location",
+                        "--silent",
+                        "--show-error",
+                        url,
+                        "--output",
+                        str(destination),
+                    ],
                     check=True,
                 )
                 return
             except subprocess.CalledProcessError as curl_exc:
                 if destination.exists():
                     destination.unlink()
-                raise RuntimeError(f"failed to download {url} with urllib and curl") from curl_exc
+                raise RuntimeError(
+                    f"failed to download {url} with urllib and curl"
+                ) from curl_exc
         if destination.exists():
             destination.unlink()
         raise RuntimeError(f"failed to download {url}") from urllib_exc

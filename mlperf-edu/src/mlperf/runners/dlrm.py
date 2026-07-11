@@ -15,6 +15,7 @@ from mlperf.assets import ensure_movielens_100k
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
+from mlperf.runners.common import configured_seed
 
 
 def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -25,7 +26,7 @@ def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 8
@@ -39,8 +40,7 @@ def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         for n in table_sizes
     ]
     sparse_offsets = [
-        torch.arange(batch_size, dtype=torch.long, device=device)
-        for _ in table_sizes
+        torch.arange(batch_size, dtype=torch.long, device=device) for _ in table_sizes
     ]
     labels = torch.randint(0, 2, (batch_size, 1), dtype=torch.float32, device=device)
 
@@ -103,7 +103,9 @@ def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -115,13 +117,15 @@ def run_dram_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 8
     table_sizes = [943, 1682, 21]
 
-    model = MicroDLRMDRAM(m_spa=32, virtual_table_size=16_384, sparse_grad=True).to(device)
+    model = MicroDLRMDRAM(m_spa=32, virtual_table_size=16_384, sparse_grad=True).to(
+        device
+    )
     model.train()
     dense = torch.randn(batch_size, 16, device=device)
     sparse_indices = [
@@ -129,8 +133,7 @@ def run_dram_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         for n in table_sizes
     ]
     sparse_offsets = [
-        torch.arange(batch_size, dtype=torch.long, device=device)
-        for _ in table_sizes
+        torch.arange(batch_size, dtype=torch.long, device=device) for _ in table_sizes
     ]
     labels = torch.randint(0, 2, (batch_size, 1), dtype=torch.float32, device=device)
 
@@ -199,7 +202,9 @@ def run_dram_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -211,7 +216,7 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     world_size = _env_int("MLPERF_EDU_DDP_WORLD_SIZE", 2)
     n_steps = _env_int("MLPERF_EDU_DDP_STEPS", 2)
@@ -219,7 +224,9 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     start = time.perf_counter()
     ddp = run_ddp(n_steps=n_steps, micro_batch=micro_batch, world_size=world_size)
-    baseline = run_gradacc_baseline(n_steps=n_steps, micro_batch=micro_batch, world_size=world_size)
+    baseline = run_gradacc_baseline(
+        n_steps=n_steps, micro_batch=micro_batch, world_size=world_size
+    )
     duration = time.perf_counter() - start
 
     error = ddp.get("error")
@@ -230,7 +237,11 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         denom = max(abs(float(baseline["final_loss"])), 1e-12)
         relative_loss_delta = loss_delta / denom
     target = float(os.environ.get("MLPERF_EDU_DDP_REL_LOSS_TARGET", "1.0"))
-    target_met = (error is None) and (relative_loss_delta is not None) and relative_loss_delta <= target
+    target_met = (
+        (error is None)
+        and (relative_loss_delta is not None)
+        and relative_loss_delta <= target
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = (output_dir / "micro-dlrm-distributed_min_report.json").resolve()
@@ -255,8 +266,14 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "ddp_final_loss": float(ddp.get("final_loss", 0.0)) if not error else None,
             "gradacc_final_loss": float(baseline["final_loss"]),
             "loss_delta": float(loss_delta) if loss_delta is not None else None,
-            "relative_loss_delta": float(relative_loss_delta) if relative_loss_delta is not None else None,
-            "allreduce_time_per_step_ms": float(ddp.get("allreduce_time_per_step_ms", 0.0)) if not error else None,
+            "relative_loss_delta": float(relative_loss_delta)
+            if relative_loss_delta is not None
+            else None,
+            "allreduce_time_per_step_ms": float(
+                ddp.get("allreduce_time_per_step_ms", 0.0)
+            )
+            if not error
+            else None,
         },
         "quality": {
             "metric": "relative_loss_delta",
@@ -287,7 +304,9 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -298,9 +317,12 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         sys.path.insert(0, str(root))
 
     from mlperf.reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
-    from mlperf.reference.dataset_factory import MovieLensRecommendationDataset, _dlrm_collate_fn
+    from mlperf.reference.dataset_factory import (
+        MovieLensRecommendationDataset,
+        _dlrm_collate_fn,
+    )
 
-    seed = _env_int("MLPERF_EDU_MAX_SEED", 42)
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
     asset = ensure_movielens_100k(download=True)
@@ -337,7 +359,9 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         collate_fn=_dlrm_collate_fn,
     )
 
-    model = MicroDLRMDRAM(m_spa=m_spa, virtual_table_size=virtual_table_size, sparse_grad=True).to(device)
+    model = MicroDLRMDRAM(
+        m_spa=m_spa, virtual_table_size=virtual_table_size, sparse_grad=True
+    ).to(device)
     sparse_optimizer = torch.optim.SparseAdam([model.virtual_emb.weight], lr=lr)
     dense_optimizer = torch.optim.AdamW(
         [p for name, p in model.named_parameters() if name != "virtual_emb.weight"],
@@ -361,7 +385,9 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss, val_acc = _validate(model, val_loader, device, max_batches=val_batches)
+        val_loss, val_acc = _validate(
+            model, val_loader, device, max_batches=val_batches
+        )
         samples_seen += train_samples
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -370,7 +396,10 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     duration = time.perf_counter() - start
 
     final_accuracy = val_accuracies[-1]
-    target = _env_float("MLPERF_EDU_DLRM_DRAM_MAX_ACCURACY_TARGET", float(workload.quality_value or 0.65))
+    target = _env_float(
+        "MLPERF_EDU_DLRM_DRAM_MAX_ACCURACY_TARGET",
+        float(workload.quality_value or 0.65),
+    )
     target_met = final_accuracy >= target
     n_params = sum(p.numel() for p in model.parameters())
 
@@ -412,7 +441,9 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "final_accuracy": float(final_accuracy),
             "duration_seconds": float(duration),
             "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
+            "samples_per_second": float(samples_seen / duration)
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
             "working_set_bytes": int(model.working_set_bytes()),
             "epoch_times": epoch_times,
@@ -451,7 +482,9 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -463,15 +496,19 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
-    world_size = _env_int("MLPERF_EDU_DDP_MAX_WORLD_SIZE", _env_int("MLPERF_EDU_DDP_WORLD_SIZE", 2))
+    world_size = _env_int(
+        "MLPERF_EDU_DDP_MAX_WORLD_SIZE", _env_int("MLPERF_EDU_DDP_WORLD_SIZE", 2)
+    )
     n_steps = _env_int("MLPERF_EDU_DDP_MAX_STEPS", 4)
     micro_batch = _env_int("MLPERF_EDU_DDP_MAX_MICRO_BATCH", 8)
 
     start = time.perf_counter()
     ddp = run_ddp(n_steps=n_steps, micro_batch=micro_batch, world_size=world_size)
-    baseline = run_gradacc_baseline(n_steps=n_steps, micro_batch=micro_batch, world_size=world_size)
+    baseline = run_gradacc_baseline(
+        n_steps=n_steps, micro_batch=micro_batch, world_size=world_size
+    )
     duration = time.perf_counter() - start
 
     error = ddp.get("error")
@@ -482,7 +519,11 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         denom = max(abs(float(baseline["final_loss"])), 1e-12)
         relative_loss_delta = loss_delta / denom
     target = _env_float("MLPERF_EDU_DDP_MAX_REL_LOSS_TARGET", 0.05)
-    target_met = (error is None) and (relative_loss_delta is not None) and relative_loss_delta <= target
+    target_met = (
+        (error is None)
+        and (relative_loss_delta is not None)
+        and relative_loss_delta <= target
+    )
 
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = (output_dir / "micro-dlrm-distributed_max_report.json").resolve()
@@ -507,8 +548,14 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "ddp_final_loss": float(ddp.get("final_loss", 0.0)) if not error else None,
             "gradacc_final_loss": float(baseline["final_loss"]),
             "loss_delta": float(loss_delta) if loss_delta is not None else None,
-            "relative_loss_delta": float(relative_loss_delta) if relative_loss_delta is not None else None,
-            "allreduce_time_per_step_ms": float(ddp.get("allreduce_time_per_step_ms", 0.0)) if not error else None,
+            "relative_loss_delta": float(relative_loss_delta)
+            if relative_loss_delta is not None
+            else None,
+            "allreduce_time_per_step_ms": float(
+                ddp.get("allreduce_time_per_step_ms", 0.0)
+            )
+            if not error
+            else None,
         },
         "quality": {
             "metric": "relative_loss_delta",
@@ -539,7 +586,9 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
@@ -550,9 +599,12 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         sys.path.insert(0, str(root))
 
     from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
-    from mlperf.reference.dataset_factory import MovieLensRecommendationDataset, _dlrm_collate_fn
+    from mlperf.reference.dataset_factory import (
+        MovieLensRecommendationDataset,
+        _dlrm_collate_fn,
+    )
 
-    seed = _env_int("MLPERF_EDU_MAX_SEED", 42)
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
     asset = ensure_movielens_100k(download=True)
@@ -610,7 +662,9 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss, val_acc = _validate(model, val_loader, device, max_batches=val_batches)
+        val_loss, val_acc = _validate(
+            model, val_loader, device, max_batches=val_batches
+        )
         samples_seen += train_samples
         train_losses.append(train_loss)
         val_losses.append(val_loss)
@@ -628,7 +682,9 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     duration = time.perf_counter() - start
 
     final_accuracy = val_accuracies[-1]
-    target = _env_float("MLPERF_EDU_DLRM_MAX_ACCURACY_TARGET", float(workload.quality_value or 0.7))
+    target = _env_float(
+        "MLPERF_EDU_DLRM_MAX_ACCURACY_TARGET", float(workload.quality_value or 0.7)
+    )
     target_met = best_accuracy >= target
     n_params = sum(p.numel() for p in model.parameters())
 
@@ -671,10 +727,13 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "best_train_loss": float(best_train_loss),
             "best_val_loss": float(best_val_loss),
             "best_accuracy": float(best_accuracy),
+            "accuracy": float(best_accuracy),
             "best_epoch": int(best_epoch),
             "duration_seconds": float(duration),
             "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
+            "samples_per_second": float(samples_seen / duration)
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
             "epoch_times": epoch_times,
             "train_losses": train_losses,
@@ -714,7 +773,9 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 

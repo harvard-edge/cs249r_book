@@ -11,6 +11,7 @@ import torch
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
+from mlperf.runners.common import configured_seed
 
 
 def ensure_reference_path() -> Path:
@@ -21,12 +22,32 @@ def ensure_reference_path() -> Path:
 
 
 def run_rag_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    return run_rag(workload, output_dir, profile="min", d_model=32, n_layers=1, n_passages=32, top_k=2, batch_size=1, seq_len=16)
+    return run_rag(
+        workload,
+        output_dir,
+        profile="min",
+        d_model=32,
+        n_layers=1,
+        n_passages=32,
+        top_k=2,
+        batch_size=1,
+        seq_len=16,
+    )
 
 
 def run_rag_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     n_passages = int(os.environ.get("MLPERF_EDU_RAG_MAX_PASSAGES", "128"))
-    return run_rag(workload, output_dir, profile="max", d_model=48, n_layers=2, n_passages=n_passages, top_k=4, batch_size=2, seq_len=32)
+    return run_rag(
+        workload,
+        output_dir,
+        profile="max",
+        d_model=48,
+        n_layers=2,
+        n_passages=n_passages,
+        top_k=4,
+        batch_size=2,
+        seq_len=32,
+    )
 
 
 def run_rag(
@@ -44,7 +65,7 @@ def run_rag(
     ensure_reference_path()
     from mlperf.reference.cloud.nano_rag_agent import NanoRAGAgent
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     model = NanoRAGAgent(
         vocab_size=512,
@@ -65,23 +86,50 @@ def run_rag(
         "retrieve_latency_ms": float(timings["retrieve_ms"]),
         "generate_latency_ms": float(timings["generate_ms"]),
         "total_latency_ms": float(timings["total_ms"]),
-        "queries_per_second": float(batch_size * 1000.0 / timings["total_ms"]) if timings["total_ms"] else 0.0,
+        "queries_per_second": float(batch_size * 1000.0 / timings["total_ms"])
+        if timings["total_ms"]
+        else 0.0,
         "n_params": count_params(model),
         "n_passages": n_passages,
         "top_k": top_k,
         "logits_shape": list(logits.shape),
     }
-    return write_agent_report(workload, output_dir, profile=profile, seed=seed, metrics=metrics, output_shape=list(logits.shape))
+    return write_agent_report(
+        workload,
+        output_dir,
+        profile=profile,
+        seed=seed,
+        metrics=metrics,
+        output_shape=list(logits.shape),
+    )
 
 
 def run_codegen_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     retries = int(os.environ.get("MLPERF_EDU_CODEGEN_MIN_RETRIES", "2"))
-    return run_codegen(workload, output_dir, profile="min", retries=retries, d_model=32, n_layers=1, batch_size=1, seq_len=24)
+    return run_codegen(
+        workload,
+        output_dir,
+        profile="min",
+        retries=retries,
+        d_model=32,
+        n_layers=1,
+        batch_size=1,
+        seq_len=24,
+    )
 
 
 def run_codegen_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     retries = int(os.environ.get("MLPERF_EDU_CODEGEN_MAX_RETRIES", "4"))
-    return run_codegen(workload, output_dir, profile="max", retries=retries, d_model=48, n_layers=2, batch_size=2, seq_len=32)
+    return run_codegen(
+        workload,
+        output_dir,
+        profile="max",
+        retries=retries,
+        d_model=48,
+        n_layers=2,
+        batch_size=2,
+        seq_len=32,
+    )
 
 
 def run_codegen(
@@ -98,30 +146,64 @@ def run_codegen(
     ensure_reference_path()
     from mlperf.reference.cloud.nano_codegen_agent import NanoCodeGenAgent
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
-    model = NanoCodeGenAgent(vocab_size=512, d_model=d_model, n_heads=4, n_layers=n_layers, max_seq_len=192)
+    model = NanoCodeGenAgent(
+        vocab_size=512, d_model=d_model, n_heads=4, n_layers=n_layers, max_seq_len=192
+    )
     input_ids = torch.randint(0, 512, (batch_size, seq_len))
     results = model.forward_with_timing(input_ids, max_retries=retries)
     metrics = {
         "iterations": len(results["iterations"]),
         "total_tokens_generated": int(results["total_tokens_generated"]),
         "total_latency_ms": float(results["total_ms"]),
-        "tokens_per_second": float(results["total_tokens_generated"] * 1000.0 / results["total_ms"]) if results["total_ms"] else 0.0,
-        "context_growth_factor": float(results["iterations"][-1]["context_length"] / results["iterations"][0]["context_length"]),
+        "tokens_per_second": float(
+            results["total_tokens_generated"] * 1000.0 / results["total_ms"]
+        )
+        if results["total_ms"]
+        else 0.0,
+        "context_growth_factor": float(
+            results["iterations"][-1]["context_length"]
+            / results["iterations"][0]["context_length"]
+        ),
         "n_params": count_params(model),
     }
-    return write_agent_report(workload, output_dir, profile=profile, seed=seed, metrics=metrics, details={"iterations": results["iterations"]})
+    return write_agent_report(
+        workload,
+        output_dir,
+        profile=profile,
+        seed=seed,
+        metrics=metrics,
+        details={"iterations": results["iterations"]},
+    )
 
 
 def run_react_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     steps = int(os.environ.get("MLPERF_EDU_REACT_MIN_STEPS", "2"))
-    return run_react(workload, output_dir, profile="min", steps=steps, d_model=32, n_layers=1, batch_size=1, seq_len=24)
+    return run_react(
+        workload,
+        output_dir,
+        profile="min",
+        steps=steps,
+        d_model=32,
+        n_layers=1,
+        batch_size=1,
+        seq_len=24,
+    )
 
 
 def run_react_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     steps = int(os.environ.get("MLPERF_EDU_REACT_MAX_STEPS", "4"))
-    return run_react(workload, output_dir, profile="max", steps=steps, d_model=48, n_layers=2, batch_size=2, seq_len=32)
+    return run_react(
+        workload,
+        output_dir,
+        profile="max",
+        steps=steps,
+        d_model=48,
+        n_layers=2,
+        batch_size=2,
+        seq_len=32,
+    )
 
 
 def run_react(
@@ -138,9 +220,16 @@ def run_react(
     ensure_reference_path()
     from mlperf.reference.cloud.nano_react_agent import NanoReActAgent
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
-    model = NanoReActAgent(vocab_size=512, d_model=d_model, n_heads=4, n_layers=n_layers, max_seq_len=192, n_tools=4)
+    model = NanoReActAgent(
+        vocab_size=512,
+        d_model=d_model,
+        n_heads=4,
+        n_layers=n_layers,
+        max_seq_len=192,
+        n_tools=4,
+    )
     input_ids = torch.randint(0, 512, (batch_size, seq_len))
     results = model.forward_with_timing(input_ids, max_steps=steps)
     metrics = {
@@ -152,17 +241,42 @@ def run_react(
         "final_memory_bytes": int(results["final_memory_bytes"]),
         "n_params": count_params(model),
     }
-    return write_agent_report(workload, output_dir, profile=profile, seed=seed, metrics=metrics, details={"steps": results["steps"]})
+    return write_agent_report(
+        workload,
+        output_dir,
+        profile=profile,
+        seed=seed,
+        metrics=metrics,
+        details={"steps": results["steps"]},
+    )
 
 
 def run_toolcall_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     n_queries = int(os.environ.get("MLPERF_EDU_TOOLCALL_MIN_QUERIES", "2"))
-    return run_toolcall(workload, output_dir, profile="min", n_queries=n_queries, d_model=32, n_layers=1, batch_size=1, seq_len=24)
+    return run_toolcall(
+        workload,
+        output_dir,
+        profile="min",
+        n_queries=n_queries,
+        d_model=32,
+        n_layers=1,
+        batch_size=1,
+        seq_len=24,
+    )
 
 
 def run_toolcall_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     n_queries = int(os.environ.get("MLPERF_EDU_TOOLCALL_MAX_QUERIES", "8"))
-    return run_toolcall(workload, output_dir, profile="max", n_queries=n_queries, d_model=48, n_layers=2, batch_size=2, seq_len=32)
+    return run_toolcall(
+        workload,
+        output_dir,
+        profile="max",
+        n_queries=n_queries,
+        d_model=48,
+        n_layers=2,
+        batch_size=2,
+        seq_len=32,
+    )
 
 
 def run_toolcall(
@@ -179,22 +293,38 @@ def run_toolcall(
     ensure_reference_path()
     from mlperf.reference.cloud.nano_toolcall_agent import NanoToolCallAgent
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
-    model = NanoToolCallAgent(vocab_size=512, d_model=d_model, n_heads=4, n_layers=n_layers, max_seq_len=128, n_functions=10)
+    model = NanoToolCallAgent(
+        vocab_size=512,
+        d_model=d_model,
+        n_heads=4,
+        n_layers=n_layers,
+        max_seq_len=128,
+        n_functions=10,
+    )
     input_ids = torch.randint(0, 512, (batch_size, seq_len))
     results = model.forward_with_timing(input_ids, n_queries=n_queries)
     metrics = {
         "total_queries": int(results["total_queries"]),
         "valid_calls": int(results["valid_calls"]),
-        "valid_call_rate": float(results["valid_calls"] / max(results["total_queries"], 1)),
+        "valid_call_rate": float(
+            results["valid_calls"] / max(results["total_queries"], 1)
+        ),
         "total_generation_ms": float(results["total_generation_ms"]),
         "total_classification_ms": float(results["total_classification_ms"]),
         "total_dispatch_ms": float(results["total_dispatch_ms"]),
         "total_latency_ms": float(results["total_ms"]),
         "n_params": count_params(model),
     }
-    return write_agent_report(workload, output_dir, profile=profile, seed=seed, metrics=metrics, details={"queries": results["queries"]})
+    return write_agent_report(
+        workload,
+        output_dir,
+        profile=profile,
+        seed=seed,
+        metrics=metrics,
+        details={"queries": results["queries"]},
+    )
 
 
 def write_agent_report(
@@ -251,7 +381,9 @@ def write_agent_report(
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
