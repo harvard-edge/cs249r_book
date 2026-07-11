@@ -178,6 +178,20 @@ def load_summary(path: Path) -> tuple[dict[str, Any], bytes]:
     return payload, data
 
 
+def rejected_attempt_reason(payload: dict[str, Any]) -> str | None:
+    """Describe a sweep-rejected attempt that is safe to exclude from promotion."""
+    reasons = payload.get("invalid_reasons")
+    if (
+        payload.get("status") == "invalid"
+        and payload.get("eligible_for_public_baseline") is False
+        and isinstance(reasons, list)
+        and reasons
+        and all(isinstance(reason, str) and reason for reason in reasons)
+    ):
+        return "; ".join(reasons)
+    return None
+
+
 def valid_sha256_hex(value: object) -> bool:
     return (
         isinstance(value, str)
@@ -1151,6 +1165,7 @@ def discover_summaries(
     source_git_sha: str,
     sweep_tool_sha256: str,
     source_project_root: Path,
+    rejected_attempts: list[tuple[Path, str]] | None = None,
 ) -> dict[str, tuple[Path, dict[str, Any], bytes]]:
     """Discover exactly one valid summary for every public candidate."""
     expected = expected_public_candidates()
@@ -1173,6 +1188,11 @@ def discover_summaries(
                 raise ValueError(
                     f"{path}: eligible summary names unexpected workload {workload!r}"
                 )
+            continue
+        rejection = rejected_attempt_reason(payload)
+        if rejection is not None:
+            if rejected_attempts is not None:
+                rejected_attempts.append((resolved_path, rejection))
             continue
         validate_summary(
             resolved_path,
@@ -1348,12 +1368,14 @@ def main() -> int:
             args.source_git_sha, project_root=ROOT
         )
         source_lock_bytes = reference_source_lock.canonical_json_bytes(source_lock)
+        rejected_attempts: list[tuple[Path, str]] = []
         with source_project_checkout(args.source_git_sha) as source_project_root:
             selected = discover_summaries(
                 evidence_root,
                 source_git_sha=args.source_git_sha,
                 sweep_tool_sha256=sweep_tool_sha256,
                 source_project_root=source_project_root,
+                rejected_attempts=rejected_attempts,
             )
     except (OSError, ValueError, zipfile.BadZipFile) as exc:
         print(f"FAIL: {exc}", file=sys.stderr)
@@ -1416,6 +1438,11 @@ def main() -> int:
         f"PASS: {action} {len(selected)} clean public-candidate summaries "
         f"from {args.source_git_sha}."
     )
+    if rejected_attempts:
+        print(
+            f"INFO: excluded {len(rejected_attempts)} explicitly rejected "
+            "create-once attempt(s)."
+        )
     for workload, (_, payload, data) in sorted(selected.items()):
         print(f"  {workload}: {payload['evidence_id']} sha256:{sha256_bytes(data)}")
     return 0

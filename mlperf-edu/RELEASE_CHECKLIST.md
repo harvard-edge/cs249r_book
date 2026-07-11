@@ -6,7 +6,7 @@ fresh evidence and external decisions. A feature is not release-verified merely
 because its code or workflow exists.
 
 The current reference evidence contains eight retained result summaries from
-clean source commit `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. Complete local
+clean source commit `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. Complete local
 validation, hosted CI, independent reproduction, and external decisions remain
 separate gates.
 
@@ -34,15 +34,15 @@ final gate sequence below.
 | Implemented | Native registry and package mirrors | `registry/`, `workloads.yaml`, and `src/mlperf_edu/workloads.yaml`. | Both registry export checks. |
 | Implemented | Complete registry execution surface | 30 rows declare `min` and `max` runners. | Actual `coverage`, `max`, and `release` validation. |
 | Implemented | Candidate result classification | Five score-bearing, three performance-bearing, 22 systems-only. | Registry audit and generated-page drift checks. |
-| Verified | Strong score gates | NanoGPT loss `<= 2.30`; DLRM fixed-final-epoch ROC AUC `>= 0.76`; anomaly macro AUROC `>= 0.93`, worst-class AUROC `>= 0.90`, and learned-control margin `>= 0.20`; ResNet top-1 `>= 0.85`; MobileNetV2 top-1 `>= 0.78`. | Five clean public-candidate packets from source `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. |
+| Verified | Strong score gates | NanoGPT loss `<= 2.30`; DLRM fixed-final-epoch ROC AUC `>= 0.76`; anomaly macro AUROC `>= 0.93`, worst-class AUROC `>= 0.90`, and learned-control margin `>= 0.20`; ResNet top-1 `>= 0.85`; MobileNetV2 top-1 `>= 0.78`. | Five clean public-candidate packets from source `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. |
 | Implemented | Report-level public review contract | `src/mlperf/contracts.py` checks data mode, seed, quality, timing, checkpoint or model lineage, and artifacts. | Actual `max` and `release` validation with zero contract failures. |
-| Verified | Repeatable inference timing | NanoGPT prefill and decode plus pinned SmolLM2 baseline record warmups, measured runs, median, p90, p99, and cross-execution CV. | Three committed five-execution summaries from clean source `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`; CVs are `0.92%`, `0.47%`, and `2.95%`, below the `5%` limit. |
+| Verified | Repeatable inference timing | NanoGPT prefill and decode plus pinned SmolLM2 baseline record warmups, measured runs, median, p90, p99, and cross-execution CV. | Three committed five-execution summaries from clean source `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`; CVs are `0.19%`, `0.75%`, and `1.11%`, below the `5%` limit. |
 | Verified | Training-to-inference lineage | NanoGPT inference requires the training checkpoint and records its SHA-256 digest and quality dependency. | Verified with median-quality training seed 2 and both inference packets. |
 | Verified | SLM task-quality fixture | Pinned SmolLM2 revision, attributed 28-case v2 suite, token-weighted NLL, and overall plus weakest-category gates. | Current clean five-execution packet passes the v2 fixture and timing contract. |
 | Implemented; replacement calibration pending | Honest quantized boundary | Dynamic-int8 SLM row remains systems-only after failing the former quality-parity calibration. | Rerun the quantized path on v2 and require overall, weakest-category, and NLL-parity gates before promotion. |
 | Implemented | Exact report provenance | Manifest binds canonical report content and exact report bytes with SHA-256 and size evidence. | Manifest and package portability tests. |
 | Implemented | Portable package schema 0.2 | Relative paths, complete artifact index, digest and byte-size checks, and clean-extraction verification. | NanoGPT lineage package SHA-256 `0b0173d78e2c3315c4687b6319beb8a2826c98bce7f52710542f4b496edadd20` passed all 56 archive checks; 35 policy-permitted run packages were also created and verified. |
-| Verified | Five-seed sweep tool | Fresh-process seeds, seed/report/manifest agreement, separate performance and quality fields, grading, immutable attempts, artifact index, digest sidecar, cooldowns, and portable NanoGPT training-lineage staging. | Eight fresh public-candidate summaries from source `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. |
+| Verified | Five-seed sweep tool | Fresh-process seeds, seed/report/manifest agreement, separate performance and quality fields, grading, immutable attempts, artifact index, digest sidecar, cooldowns, and portable NanoGPT training-lineage staging. | Eight fresh public-candidate summaries from source `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. |
 | Implemented | Systems-only execution boundaries | Every systems-only row declares the exact max data mode, whether fetched or declared assets are used, and whether a quality target is enforced. | Registry validation and generated-page truth tests. |
 | Implemented | Classroom entry points | Three labs accept literal `--smoke`; Tutorial 01 has a noninteractive provenance smoke. | Four commands pass on CPU without network. |
 | Implemented | Generated review site | Registry, dataset, benchmark, and CLI pages are generated; Quarto and link gates exist. | Regenerate, render, link-check, and visually inspect. |
@@ -53,20 +53,20 @@ final gate sequence below.
 ## Current Committed Reference Evidence
 
 The retained evidence set was collected on July 11, 2026, from clean source
-commit `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. Its embedded validity fields
+commit `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. Its embedded validity fields
 describe the current contracts. `reference_results/index.json` retains the
 exact IDs and digests.
 
 | **Workload** | **Evidence ID** | **Primary Metric Median** | **Minimum** | **Maximum** | **CV** |
 |:---|:---|---:|---:|---:|---:|
-| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T185950.479514Z` | `3.1185` | `3.0778` | `3.2159` | n/a |
-| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T185902.723780Z` | `1.8956` | `1.8684` | `1.9025` | n/a |
-| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T190411.719846Z` | `57.7264` | `57.5393` | `58.1860` | n/a |
-| `nanogpt-decode` | `nanogpt-decode_max_20260711T191026.069877Z` | `124.6054` | `123.4936` | `125.0866` | `0.47%` |
-| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T190945.837856Z` | `122609.21` | `120209.46` | `122699.81` | `0.92%` |
-| `nanogpt-train` | `nanogpt-train_max_20260711T185153.818986Z` | `73.0170` | `70.8778` | `73.5426` | n/a |
-| `resnet18-train` | `resnet18-train_max_20260711T190054.049258Z` | `31.1051` | `30.3761` | `31.9132` | n/a |
-| `slm-decode` | `slm-decode_max_20260711T191209.721134Z` | `102.7963` | `97.3773` | `104.7385` | `2.95%` |
+| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T204007.498158Z` | `4.3060` | `4.2488` | `4.5012` | n/a |
+| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T205839.712863Z` | `2.0394` | `1.9475` | `2.0924` | n/a |
+| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T204653.574587Z` | `103.6699` | `103.4276` | `104.7116` | n/a |
+| `nanogpt-decode` | `nanogpt-decode_max_20260711T210118.136527Z` | `316.7836` | `313.2178` | `319.4718` | `0.75%` |
+| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T205947.060179Z` | `3859.7758` | `3849.9537` | `3868.4721` | `0.19%` |
+| `nanogpt-train` | `nanogpt-train_max_20260711T202223.716219Z` | `117.5981` | `117.0730` | `118.2963` | n/a |
+| `resnet18-train` | `resnet18-train_max_20260711T204117.913822Z` | `58.4192` | `57.3181` | `59.5123` | n/a |
+| `slm-decode` | `slm-decode_max_20260711T210317.517476Z` | `61.5742` | `60.4083` | `61.9703` | `1.11%` |
 
 Complete create-once attempt directories remain outside the checkout under the
 local reference root and are available by local handoff. Thirty-five
@@ -105,7 +105,7 @@ current worktree; every gate below must run again on the final revision.
 
 | **Status** | **Gate** | **Required Evidence** |
 |:---|:---|:---|
-| Verified | Evidence source stability | Source lock regenerated for `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`; every imported packet came from a clean source snapshot. |
+| Verified | Evidence source stability | Source lock regenerated for `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`; every imported packet came from a clean source snapshot. |
 | Pending | Complete local tests | Run the full test suite on the final source revision. |
 | Verified | Five score packets | Fresh create-once seeds 0–4 packets are committed for NanoGPT, DLRM, anomaly detection, ResNet-18, and MobileNetV2. |
 | Verified | Inference chain | One NanoGPT training lineage package produced current prefill and decode packets; SmolLM2 baseline packet is committed under the current protocol. |
@@ -201,7 +201,7 @@ zero.
 Run these commands only after the source-cleanliness guard passes. The tool's
 default output root is `~/.mlperf-edu/reference_runs`. These are reproduction
 commands for the current committed summaries; retain a new create-once attempt
-rather than overwriting the evidence from `b4366b76`.
+rather than overwriting the evidence from `86738e46`.
 
 ```bash
 uv run python tools/run_reference_sweep.py \

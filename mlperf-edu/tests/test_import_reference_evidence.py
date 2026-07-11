@@ -13,7 +13,7 @@ from tools import import_reference_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "reference_results" / "index.json"
-SOURCE_SHA = "b4366b7614f0bb8ba0a1d6224832d4caea64e68a"
+SOURCE_SHA = "86738e4654d8f77ef1cec4698b30e0ebd20dd2b3"
 
 
 def _bind_comparison_fingerprint(
@@ -99,6 +99,25 @@ def test_importer_rejects_a_dirty_or_wrong_source_summary(tmp_path):
                 SOURCE_SHA
             ),
         )
+
+
+def test_importer_classifies_only_explicitly_rejected_attempts():
+    payload = {
+        "status": "invalid",
+        "eligible_for_public_baseline": False,
+        "invalid_reasons": ["timing CV exceeds limit"],
+    }
+
+    assert import_reference_evidence.rejected_attempt_reason(payload) == (
+        "timing CV exceeds limit"
+    )
+
+    payload["invalid_reasons"] = []
+    assert import_reference_evidence.rejected_attempt_reason(payload) is None
+
+    payload["invalid_reasons"] = ["timing CV exceeds limit"]
+    payload["eligible_for_public_baseline"] = True
+    assert import_reference_evidence.rejected_attempt_reason(payload) is None
 
 
 def test_importer_rejects_source_destination_overlap():

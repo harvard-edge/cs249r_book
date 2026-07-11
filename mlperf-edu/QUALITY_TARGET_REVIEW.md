@@ -6,7 +6,7 @@ MLPerf EDU project classifications. They are not approved MLCommons result
 categories.
 
 The eight retained summaries were produced from clean source commit
-`b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. They are current local-handoff
+`86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. They are current local-handoff
 evidence for the present contracts.
 
 ## Evidence Vocabulary
@@ -16,7 +16,7 @@ evidence for the present contracts.
 | Implemented | The runner, report fields, gate, and registry protocol exist. |
 | Calibrated | One or more local measurements informed the current threshold. Calibration values can expose an implausible target, but they are not release evidence. |
 | Validated | A fresh artifact passed its runner gate, provenance verification, grading, and report-level review contract. |
-| Committed-summary | A clean source revision produced a complete create-once reference attempt, and the repository retains its exact summary and SHA-256 digest. The eight retained packets from `b4366b7614f0bb8ba0a1d6224832d4caea64e68a` are current local-handoff evidence. |
+| Committed-summary | A clean source revision produced a complete create-once reference attempt, and the repository retains its exact summary and SHA-256 digest. The eight retained packets from `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3` are current local-handoff evidence. |
 | Release-evidenced | A reviewer has received and verified the committed summary and complete raw packet at an agreed handoff or publication location. The current raw packets are available for local handoff but have not yet been transferred or assigned public URLs. |
 | Externally approved | Dataset policy, target rationale, naming, and result wording have the required reviewer decisions. This state cannot be granted by repository tests. |
 
@@ -47,20 +47,20 @@ does not contaminate that source snapshot.
 ## Current Reference Snapshot
 
 `reference_results/index.json` records eight summaries from clean source commit
-`b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. The public-candidate
+`86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. The public-candidate
 repeatability limit is `5%` coefficient of variation for timed performance
 references.
 
 | **Workload** | **Evidence ID** | **Summary SHA-256** | **Primary Metric Median** | **Minimum** | **Maximum** | **CV** |
 |:---|:---|:---|---:|---:|---:|---:|
-| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T185950.479514Z` | `036fb7f1f6cbef38f5c229cb08f16555a8086cd9af61b944925032b9aa6f22c7` | `3.1185` | `3.0778` | `3.2159` | n/a |
-| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T185902.723780Z` | `b5419752fd507afbef073063323c253d9afd2508cca35228e2353f4e78cd4dc5` | `1.8956` | `1.8684` | `1.9025` | n/a |
-| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T190411.719846Z` | `89ab833b133570f89144bb88644ed235e6f33e8d24875739789575f09fee6fb8` | `57.7264` | `57.5393` | `58.1860` | n/a |
-| `nanogpt-decode` | `nanogpt-decode_max_20260711T191026.069877Z` | `0179a12d1e45afc11a9584f31cffc80e2104cbd638533fd82ab12a2a30b5b391` | `124.6054` | `123.4936` | `125.0866` | `0.47%` |
-| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T190945.837856Z` | `38118741360d53028e1e6977eba95eff33c7830aa382e45ee4744618e7938d83` | `122609.21` | `120209.46` | `122699.81` | `0.92%` |
-| `nanogpt-train` | `nanogpt-train_max_20260711T185153.818986Z` | `9dee70ef74c70bae260679d1920395cd504c32ed2bfe33cdbe392d5bf772c13d` | `73.0170` | `70.8778` | `73.5426` | n/a |
-| `resnet18-train` | `resnet18-train_max_20260711T190054.049258Z` | `b4318ae7f41e645a7260c0948e6861629d8e5e56b2f6346e5a89ddc75c7db30c` | `31.1051` | `30.3761` | `31.9132` | n/a |
-| `slm-decode` | `slm-decode_max_20260711T191209.721134Z` | `74bd019ccf8f8551174ec95df3ba60af8849b523ec20d9c34263c72467496dc8` | `102.7963` | `97.3773` | `104.7385` | `2.95%` |
+| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T204007.498158Z` | `3aef7b883d55a3f1df8a954762c5ba8d5b8ca013543a2e70bd3a37510d48798e` | `4.3060` | `4.2488` | `4.5012` | n/a |
+| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T205839.712863Z` | `946bc787b41515fbd1779e2ba75d68c0e755a15fee37bea7d4d681a529d53ab5` | `2.0394` | `1.9475` | `2.0924` | n/a |
+| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T204653.574587Z` | `8d5834986074e7d9d7d36a7b04d857d6e0e8325032de103f880a1e38c96f9cff` | `103.6699` | `103.4276` | `104.7116` | n/a |
+| `nanogpt-decode` | `nanogpt-decode_max_20260711T210118.136527Z` | `ebbfc6f421d1900cebea5142ab8256fa62aa3054a18b32a6a7929a9d09532b57` | `316.7836` | `313.2178` | `319.4718` | `0.75%` |
+| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T205947.060179Z` | `8ef84b454bbec8d5b0f0191a257b70eb494b2bfaf39979c6003e07f7b0afd032` | `3859.7758` | `3849.9537` | `3868.4721` | `0.19%` |
+| `nanogpt-train` | `nanogpt-train_max_20260711T202223.716219Z` | `8fd52fd7b03cf42c5b6b93185a7a2d0f12503e4434b057cf19fdf1f3ec2daf8e` | `117.5981` | `117.0730` | `118.2963` | n/a |
+| `resnet18-train` | `resnet18-train_max_20260711T204117.913822Z` | `ad18347f04f4b2557e16428e0c5cbc741c0ae84d9c1259163aee4dec76d05f7d` | `58.4192` | `57.3181` | `59.5123` | n/a |
+| `slm-decode` | `slm-decode_max_20260711T210317.517476Z` | `5c939ce65d2d35b680460d6e46c071063803797ca1cc3d29c11754c46bdc1524` | `61.5742` | `60.4083` | `61.9703` | `1.11%` |
 
 ## Score-Bearing Candidates
 
@@ -88,9 +88,9 @@ performance values to be no greater than `0.05`.
 
 | **Workload** | **Functional and Quality Gate** | **Default Measurement** | **Provenance Requirement** | **Release State** |
 |:---|:---|:---|:---|:---|
-| `nanogpt-inference --variant prefill` | Positive prefill throughput from a quality-approved NanoGPT checkpoint | Fixed content-addressed prompt, fresh KV cache, three discarded warmups, and 20 synchronized forward passes; median, p90, p99 | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Current five-run packet committed; CV `0.92%`. |
-| `nanogpt-inference --variant decode` | Completes 64 decode steps with positive throughput from the same checkpoint lineage | Three discarded warmups and 20 single-stream requests; causal TTFT, first-decode latency, and subsequent ITL statistics | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Current five-run packet committed; CV `0.47%`. |
-| `smollm2-chat-inference --variant baseline` | At least eight generated tokens, token-weighted continuation perplexity `<= 7`, and worst-category perplexity `<= 24` on 28 attributed cases | Three warmups and 20 measured requests; separate prefill and generation median, p90, p99 | Pinned model revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, model metadata, v2 fixture version and digest, case count, categories, and aggregation | Current five-run packet committed; CV `2.95%`. |
+| `nanogpt-inference --variant prefill` | Positive prefill throughput from a quality-approved NanoGPT checkpoint | Fixed content-addressed prompt, fresh KV cache, three discarded warmups, and 20 synchronized forward passes; median, p90, p99 | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Current five-run packet committed; CV `0.19%`. |
+| `nanogpt-inference --variant decode` | Completes 64 decode steps with positive throughput from the same checkpoint lineage | Three discarded warmups and 20 single-stream requests; causal TTFT, first-decode latency, and subsequent ITL statistics | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Current five-run packet committed; CV `0.75%`. |
+| `smollm2-chat-inference --variant baseline` | At least eight generated tokens, token-weighted continuation perplexity `<= 7`, and worst-category perplexity `<= 24` on 28 attributed cases | Three warmups and 20 measured requests; separate prefill and generation median, p90, p99 | Pinned model revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, model metadata, v2 fixture version and digest, case count, categories, and aggregation | Current five-run packet committed; CV `1.11%`. |
 
 The NanoGPT timing rows inherit task quality from the training checkpoint. A
 random or unidentified checkpoint cannot carry public-candidate performance.

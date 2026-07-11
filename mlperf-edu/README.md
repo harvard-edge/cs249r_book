@@ -26,7 +26,7 @@ MLCommons-approved result categories.
 |:---|:---|
 | Implemented | The CLI, native registry, `min` and `max` runners, reports, provenance verification, portable packaging, labs, tutorial smoke, generated site, and validation workflows exist in this tree. |
 | Historical validation snapshot | The promotion revision recorded in `review-ece36ac566/handoff_manifest.json` passed 241 tests, the four validation presets, a clean wheel install, package extraction, generated-file checks, site render, link checks, and the paper build. Subsequent protocol changes require the complete matrix to run again on the final revision. |
-| Current reference evidence committed | Eight content-addressed summaries from source commit `b4366b7614f0bb8ba0a1d6224832d4caea64e68a` are committed and review-eligible for local handoff under the current contracts. |
+| Current reference evidence committed | Eight content-addressed summaries from source commit `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3` are committed and review-eligible for local handoff under the current contracts. |
 | Verification limits | The committed summaries do not substitute for hosted CI on a pushed revision, independent reproduction, or representative desktop and narrow browser inspection. Those gates remain recorded in the release ledger. |
 | External decision | The component license, MovieLens-100K policy, public result wording, project name, and any MLCommons relationship require decisions outside this repository. |
 
@@ -35,7 +35,7 @@ The target-by-target evidence review is
 [QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md).
 
 The current committed reference evidence uses source commit
-`b4366b7614f0bb8ba0a1d6224832d4caea64e68a`; its raw create-once attempts are
+`86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`; its raw create-once attempts are
 available for local handoff.
 
 ## Install From a Checkout
@@ -154,20 +154,20 @@ suite.
 
 ## Current Reference Evidence
 
-Source revision: `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. The public
+Source revision: `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. The public
 candidate repeatability limit is `5%` coefficient of variation for timed
 performance references.
 
 | **Workload** | **Evidence ID** | **Primary Metric Median** | **Minimum** | **Maximum** | **CV** |
 |:---|:---|---:|---:|---:|---:|
-| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T185950.479514Z` | `3.1185` | `3.0778` | `3.2159` | n/a |
-| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T185902.723780Z` | `1.8956` | `1.8684` | `1.9025` | n/a |
-| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T190411.719846Z` | `57.7264` | `57.5393` | `58.1860` | n/a |
-| `nanogpt-decode` | `nanogpt-decode_max_20260711T191026.069877Z` | `124.6054` | `123.4936` | `125.0866` | `0.47%` |
-| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T190945.837856Z` | `122609.21` | `120209.46` | `122699.81` | `0.92%` |
-| `nanogpt-train` | `nanogpt-train_max_20260711T185153.818986Z` | `73.0170` | `70.8778` | `73.5426` | n/a |
-| `resnet18-train` | `resnet18-train_max_20260711T190054.049258Z` | `31.1051` | `30.3761` | `31.9132` | n/a |
-| `slm-decode` | `slm-decode_max_20260711T191209.721134Z` | `102.7963` | `97.3773` | `104.7385` | `2.95%` |
+| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T204007.498158Z` | `4.3060` | `4.2488` | `4.5012` | n/a |
+| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T205839.712863Z` | `2.0394` | `1.9475` | `2.0924` | n/a |
+| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T204653.574587Z` | `103.6699` | `103.4276` | `104.7116` | n/a |
+| `nanogpt-decode` | `nanogpt-decode_max_20260711T210118.136527Z` | `316.7836` | `313.2178` | `319.4718` | `0.75%` |
+| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T205947.060179Z` | `3859.7758` | `3849.9537` | `3868.4721` | `0.19%` |
+| `nanogpt-train` | `nanogpt-train_max_20260711T202223.716219Z` | `117.5981` | `117.0730` | `118.2963` | n/a |
+| `resnet18-train` | `resnet18-train_max_20260711T204117.913822Z` | `58.4192` | `57.3181` | `59.5123` | n/a |
+| `slm-decode` | `slm-decode_max_20260711T210317.517476Z` | `61.5742` | `60.4083` | `61.9703` | `1.11%` |
 
 The dynamic-int8 SLM variant is systems-only. Its historical v1 calibration
 completed generation but failed quality parity, and its exact values are now

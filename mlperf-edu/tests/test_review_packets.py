@@ -42,8 +42,8 @@ def test_generate_review_packets(tmp_path):
     assert "cross_entropy_loss lower 2.3 basis=reference_runs" in prefill
     assert "primary_metric=prefill_tokens_per_sec" in prefill
     assert "reference_results/nanogpt-prefill/" in prefill
-    assert "nanogpt-prefill_max_20260711T190945.837856Z" in prefill
-    assert "38118741360d53028e1e6977eba95eff33c7830aa382e45ee4744618e7938d83" in prefill
+    assert "nanogpt-prefill_max_20260711T205947.060179Z" in prefill
+    assert "8ef84b454bbec8d5b0f0191a257b70eb494b2bfaf39979c6003e07f7b0afd032" in prefill
     assert "metric_values_by_seed=" in prefill
     assert "not an MLCommons-verified result" in prefill
     assert "raw reference package for shared checkpoint source nanogpt-train" in prefill
@@ -68,7 +68,7 @@ def test_generate_review_packets(tmp_path):
     assert "token-weighted-continuation-nll" in slm
     assert "primary_metric=output_tokens_per_sec" in slm
     assert "reference_results/slm-decode/" in slm
-    assert "74bd019ccf8f8551174ec95df3ba60af8849b523ec20d9c34263c72467496dc8" in slm
+    assert "5c939ce65d2d35b680460d6e46c071063803797ca1cc3d29c11754c46bdc1524" in slm
     assert "metric_values_by_seed=" in slm
     assert "not an MLCommons-verified result" in slm
     assert "external-publication blocker" in slm

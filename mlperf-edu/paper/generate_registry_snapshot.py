@@ -32,8 +32,8 @@ SNAPSHOT = HERE / "evidence_snapshot.json"
 OUTPUT = HERE / "generated_registry.tex"
 
 INDEX_SCHEMA = "mlperf-edu-reference-index/0.2"
-SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.3"
-SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.2"
+SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.4"
+SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.3"
 EXPECTED_SEEDS = [0, 1, 2, 3, 4]
 SHA256_RE = re.compile(r"[0-9a-f]{64}")
 GIT_SHA_RE = re.compile(r"[0-9a-f]{40}")
@@ -169,8 +169,13 @@ def validate_summary(
         payload.get("variant") == expected_variant,
         f"{label}: summary variant {payload.get('variant')!r} != {expected_variant!r}",
     )
-    metric = payload.get("quality_metric")
+    primary_metric = (payload.get("primary_metric") or {}).get("name")
+    require(
+        isinstance(primary_metric, str) and primary_metric,
+        f"{label}: primary metric is missing",
+    )
     if workload.public_status == "score-bearing":
+        metric = payload.get("quality_metric")
         require(metric == workload.quality_metric, f"{label}: quality metric drift")
         acceptance = payload.get("acceptance") or {}
         close(
@@ -184,10 +189,15 @@ def validate_summary(
             f"{label}: acceptance operator drift",
         )
     else:
+        metric = primary_metric
         expected_metric = (workload.raw.get("measurement_protocol") or {}).get(
             "primary_metric"
         )
         require(metric == expected_metric, f"{label}: performance metric drift")
+        require(
+            payload.get("quality_metric") is None,
+            f"{label}: performance summary must not declare a score quality metric",
+        )
         acceptance = payload.get("acceptance") or {}
         require(
             acceptance.get("statistic") == "all_runs"
@@ -237,7 +247,12 @@ def validate_summary(
             {"report", "provenance"}.issubset(roles),
             f"{label}: seed {seed} lacks report or provenance evidence",
         )
-        value = float(run["quality_value"])
+        value_key = (
+            "quality_value"
+            if workload.public_status == "score-bearing"
+            else "primary_metric_value"
+        )
+        value = float(run[value_key])
         wall_value = float(run["wall_seconds"])
         require(
             math.isfinite(value) and math.isfinite(wall_value),
@@ -249,7 +264,10 @@ def validate_summary(
         chips.add(str(run.get("chip") or "unknown"))
         data_modes.add(str(run.get("data_mode") or "unknown"))
 
-    aggregate = (payload.get("aggregate") or {}).get("quality") or {}
+    aggregate_key = (
+        "quality" if workload.public_status == "score-bearing" else "primary_metric"
+    )
+    aggregate = (payload.get("aggregate") or {}).get(aggregate_key) or {}
     require(aggregate.get("count") == 5, f"{label}: aggregate count is not five")
     expected_stats = {
         "min": min(values),
@@ -289,7 +307,11 @@ def validate_summary(
         f"{label}: index status drift",
     )
     require(entry.get("seeds") == EXPECTED_SEEDS, f"{label}: index seed drift")
-    require(entry.get("metric") == metric, f"{label}: index metric drift")
+    require(entry.get("metric") == primary_metric, f"{label}: index metric drift")
+    require(
+        entry.get("quality_metric") == payload.get("quality_metric"),
+        f"{label}: index quality metric drift",
+    )
     require(entry.get("profile") == "max", f"{label}: index profile drift")
     require(entry.get("variant") == expected_variant, f"{label}: index variant drift")
     require(
