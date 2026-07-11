@@ -11,6 +11,7 @@ Per Han's iter-8 negative-result discipline: none of these accelerate
 inference on PyTorch+MPS. They are *algorithmic* primitives that
 compose; the runtime gap to a fused-kernel stack IS the lesson.
 """
+
 from __future__ import annotations
 
 import torch
@@ -40,7 +41,11 @@ def prune_unstructured(model: nn.Module, sparsity: float = 0.5) -> dict:
             m.register_buffer("_prune_mask", mask)
             n_pruned += int((mask == 0).sum().item())
             n_total += w.numel()
-    return {"sparsity_actual": n_pruned / max(n_total, 1), "n_pruned": n_pruned, "n_total": n_total}
+    return {
+        "sparsity_actual": n_pruned / max(n_total, 1),
+        "n_pruned": n_pruned,
+        "n_total": n_total,
+    }
 
 
 @torch.no_grad()
@@ -66,9 +71,13 @@ def prune_2of4(model: nn.Module) -> dict:
             full_mask = torch.ones_like(w)
             full_mask.flatten()[:n] = mask.flatten()
             m.register_buffer("_2of4_mask", full_mask)
-            n_pruned += int(((full_mask == 0)).sum().item())
+            n_pruned += int((full_mask == 0).sum().item())
             n_total += w.numel()
-    return {"sparsity_actual": n_pruned / max(n_total, 1), "n_pruned": n_pruned, "n_total": n_total}
+    return {
+        "sparsity_actual": n_pruned / max(n_total, 1),
+        "n_pruned": n_pruned,
+        "n_total": n_total,
+    }
 
 
 @torch.no_grad()
@@ -106,16 +115,17 @@ def effective_param_bytes(model: nn.Module) -> int:
                 mask = m._prune_mask
             elif hasattr(m, "_2of4_mask"):
                 mask = m._2of4_mask
-            bits_per_param = 8 if quant else 32
+            bits_per_param = 8 if quant else w.element_size() * 8
             n_kept = int((mask != 0).sum().item()) if mask is not None else n
             total += n_kept * (bits_per_param // 8)
             if mask is not None:
                 # Bookkeeping: 1 bit per param for the mask layout.
                 total += (n + 7) // 8
-            # Bias is usually small; count as fp32 always.
+            # Bias is usually small; count its actual execution dtype.
             if hasattr(m, "bias") and m.bias is not None:
-                total += m.bias.numel() * 4
-    # Add non-Conv/Linear params (BN, embeddings) in fp32.
+                total += m.bias.numel() * m.bias.element_size()
+    # Add non-Conv/Linear parameters (for example batch normalization) in
+    # their actual execution dtype.
     for name, p in model.named_parameters():
         owner = name.rsplit(".", 1)[0]
         try:
@@ -123,5 +133,5 @@ def effective_param_bytes(model: nn.Module) -> int:
         except KeyError:
             mod = None
         if not isinstance(mod, (nn.Conv2d, nn.Linear)):
-            total += p.numel() * 4
+            total += p.numel() * p.element_size()
     return total

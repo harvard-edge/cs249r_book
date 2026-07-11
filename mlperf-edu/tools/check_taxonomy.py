@@ -66,7 +66,12 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PREFIXED_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 EVIDENCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x1f\x7f]")
-REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.3"
+REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.4"
+LEGACY_REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.3"
+SUPPORTED_REFERENCE_EVIDENCE_SCHEMAS = {
+    LEGACY_REFERENCE_EVIDENCE_SCHEMA,
+    REFERENCE_EVIDENCE_SCHEMA,
+}
 REFERENCE_INDEX_SCHEMA = "mlperf-edu-reference-index/0.2"
 EMPTY_SHA256 = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 SWEEP_TOOL_SHA256 = (
@@ -398,6 +403,26 @@ def check_workload_evidence(name: str, body: dict) -> list[str]:
                 f"{name}: development summary digest requires local-handoff or published availability"
             )
     if baseline.get("evidence_status") == "committed-reference-summary":
+        lifecycle = (
+            baseline.get("protocol_compatibility"),
+            baseline.get("review_eligible"),
+            baseline.get("replacement_required"),
+        )
+        superseded_lifecycle = ("superseded", False, True)
+        lifecycle_declared = any(
+            field in baseline
+            for field in (
+                "protocol_compatibility",
+                "replacement_required",
+            )
+        )
+        protocol_superseded = lifecycle == superseded_lifecycle
+        if lifecycle_declared and not protocol_superseded:
+            errors.append(
+                f"{name}: historical evidence lifecycle must be exactly "
+                "protocol_compatibility=superseded, review_eligible=false, "
+                "replacement_required=true"
+            )
         file_errors = check_declared_file(
             name,
             label="verified_baseline.evidence_file",
@@ -405,7 +430,7 @@ def check_workload_evidence(name: str, body: dict) -> list[str]:
             digest=baseline.get("evidence_sha256"),
         )
         errors.extend(file_errors)
-        if baseline.get("review_eligible") is not True:
+        if not protocol_superseded and baseline.get("review_eligible") is not True:
             errors.append(
                 f"{name}: committed-reference-summary must set verified_baseline.review_eligible to true"
             )
@@ -437,7 +462,10 @@ def check_workload_evidence(name: str, body: dict) -> list[str]:
                     f"{name}: verified_baseline.evidence_file is not valid JSON: {exc}"
                 )
             else:
-                errors.extend(check_reference_summary(name, body, payload))
+                if protocol_superseded:
+                    errors.extend(check_historical_reference_summary(name, payload))
+                else:
+                    errors.extend(check_reference_summary(name, body, payload))
     elif baseline.get("review_eligible") is True:
         errors.append(
             f"{name}: verified_baseline.review_eligible may be true only for a committed-reference-summary"
@@ -516,10 +544,27 @@ def check_summary_aggregate_integrity(
     if not isinstance(aggregate, dict):
         return [f"{name}: reference summary aggregate is missing or not an object"]
 
-    for series_name, run_field in (
-        ("quality", "quality_value"),
-        ("wall_seconds", "wall_seconds"),
-    ):
+    dual_metrics = payload.get("schema") == REFERENCE_EVIDENCE_SCHEMA
+    series = (
+        (
+            ("primary_metric", "primary_metric_value"),
+            ("quality", "quality_value"),
+            ("wall_seconds", "wall_seconds"),
+        )
+        if dual_metrics
+        else (
+            ("quality", "quality_value"),
+            ("wall_seconds", "wall_seconds"),
+        )
+    )
+    for series_name, run_field in series:
+        declared = aggregate.get(series_name)
+        if dual_metrics and series_name == "quality" and declared is None:
+            if payload.get("public_status") != "performance-bearing":
+                errors.append(
+                    f"{name}: score-bearing reference summary aggregate.quality is missing"
+                )
+            continue
         values: list[float] = []
         for index, run in enumerate(runs):
             value = run.get(run_field)
@@ -535,7 +580,6 @@ def check_summary_aggregate_integrity(
                 values.append(float(value))
         if len(values) != len(runs):
             continue
-        declared = aggregate.get(series_name)
         if not isinstance(declared, dict):
             errors.append(
                 f"{name}: reference summary aggregate.{series_name} is missing or not an object"
@@ -555,6 +599,8 @@ def check_summary_acceptance(
     name: str, body: dict, payload: dict, runs: list[dict]
 ) -> list[str]:
     """Bind the summary's acceptance claim to the registry and raw run values."""
+    if payload.get("schema") == REFERENCE_EVIDENCE_SCHEMA:
+        return check_dual_metric_summary_acceptance(name, body, payload, runs)
     errors: list[str] = []
     acceptance = payload.get("acceptance") or {}
     values = [run.get("quality_value") for run in runs]
@@ -710,6 +756,259 @@ def check_summary_acceptance(
     return errors
 
 
+def check_dual_metric_summary_acceptance(
+    name: str, body: dict, payload: dict, runs: list[dict]
+) -> list[str]:
+    """Validate schema 0.4 performance-primary and separate gate semantics."""
+    errors: list[str] = []
+    acceptance = payload.get("acceptance") or {}
+    public_status = (body.get("public") or {}).get("status")
+    primary_name = (body.get("measurement_protocol") or {}).get("primary_metric")
+    if payload.get("reference_metric_role") != "performance":
+        errors.append(f"{name}: schema 0.4 reference_metric_role must be performance")
+    if payload.get("primary_metric") != {
+        "name": primary_name,
+        "role": "performance",
+    }:
+        errors.append(
+            f"{name}: schema 0.4 primary metric does not match measurement protocol"
+        )
+
+    primary_values = [run.get("primary_metric_value") for run in runs]
+    for index, value in enumerate(primary_values):
+        run = runs[index]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0
+        ):
+            errors.append(
+                f"{name}: reference summary run {index} has invalid primary performance value"
+            )
+        if run.get("primary_metric_declared") != primary_name:
+            errors.append(
+                f"{name}: reference summary run {index} primary metric declaration mismatches registry"
+            )
+
+    if public_status == "score-bearing":
+        target = body.get("quality_target") or {}
+        quality_metric = target.get("metric")
+        direction = target.get("direction")
+        target_value = target.get("value")
+        tolerance = float(target.get("tolerance") or 0.0)
+        values = [run.get("quality_value") for run in runs]
+        numeric_values: list[float] = []
+        for index, value in enumerate(values):
+            run = runs[index]
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                errors.append(
+                    f"{name}: reference summary run {index} has invalid quality value"
+                )
+                continue
+            numeric = float(value)
+            numeric_values.append(numeric)
+            passed = (
+                numeric - tolerance <= float(target_value)
+                if direction == "lower" and isinstance(target_value, (int, float))
+                else numeric + tolerance >= float(target_value)
+                if direction == "higher" and isinstance(target_value, (int, float))
+                else False
+            )
+            if not passed or run.get("quality_target_met") is not True:
+                errors.append(
+                    f"{name}: reference summary run {index} does not satisfy the registry quality target"
+                )
+            if run.get("quality_metric_declared") != quality_metric:
+                errors.append(
+                    f"{name}: reference summary run {index} quality metric declaration mismatches registry"
+                )
+            if any(
+                run.get(field) is not None
+                for field in (
+                    "functional_metric_declared",
+                    "functional_metric_key",
+                    "functional_metric_value",
+                )
+            ):
+                errors.append(
+                    f"{name}: score-bearing run {index} must not declare a functional gate metric"
+                )
+        median = statistics.median(numeric_values) if numeric_values else None
+        expected_operator = "<=" if direction == "lower" else ">="
+        expected = {
+            "passed": True,
+            "statistic": "median",
+            "operator": expected_operator,
+            "target": target_value,
+            "value": median,
+            "all_runs_passed": True,
+            "passed_runs": len(runs),
+            "run_count": len(runs),
+            "tolerance": tolerance,
+        }
+        expected_quality_gate = {
+            "metric": quality_metric,
+            "target": target_value,
+            "direction": direction,
+            "tolerance": target.get("tolerance"),
+            "all_runs_must_pass": True,
+        }
+        if payload.get("quality_metric") != quality_metric:
+            errors.append(
+                f"{name}: score summary quality_metric does not match registry"
+            )
+        if payload.get("quality_gate") != expected_quality_gate:
+            errors.append(f"{name}: score summary quality_gate does not match registry")
+        if (payload.get("basis") or {}).get("quality_target") != expected_quality_gate:
+            errors.append(
+                f"{name}: score summary basis.quality_target does not match registry"
+            )
+        if payload.get("quality_target") != target_value:
+            errors.append(
+                f"{name}: score summary quality_target does not match registry"
+            )
+        if payload.get("quality_direction") != direction:
+            errors.append(
+                f"{name}: score summary quality_direction does not match registry"
+            )
+        if payload.get("functional_gate") is not None:
+            errors.append(f"{name}: score summary functional_gate must be null")
+        if payload.get("repeatability") is not None:
+            errors.append(f"{name}: score summary repeatability must be null")
+        for index, run in enumerate(runs):
+            grade = run.get("grade") or {}
+            expected_grade = {
+                "passed": True,
+                "target_met": True,
+                "metric": quality_metric,
+                "value": run.get("quality_value"),
+                "target": target_value,
+            }
+            for field, expected_value in expected_grade.items():
+                if not numbers_match(grade.get(field), expected_value):
+                    errors.append(
+                        f"{name}: score run {index} grade.{field} is not bound to quality"
+                    )
+    elif public_status == "performance-bearing":
+        functional = body.get("functional_check") or {}
+        values = [run.get("functional_metric_value") for run in runs]
+        if payload.get("quality_metric") is not None:
+            errors.append(f"{name}: performance summary quality_metric must be null")
+        if payload.get("quality_gate") is not None:
+            errors.append(f"{name}: performance summary quality_gate must be null")
+        if (payload.get("aggregate") or {}).get("quality") is not None:
+            errors.append(f"{name}: performance summary aggregate.quality must be null")
+        if payload.get("functional_gate") != (payload.get("basis") or {}).get(
+            "functional_check"
+        ):
+            errors.append(
+                f"{name}: performance summary functional gate differs from its basis"
+            )
+        if (payload.get("basis") or {}).get("quality_target") is not None:
+            errors.append(
+                f"{name}: performance summary basis.quality_target must be null"
+            )
+        if (payload.get("functional_gate") or {}).get("metric") != functional.get(
+            "metric"
+        ):
+            errors.append(
+                f"{name}: performance summary functional metric does not match registry"
+            )
+        for index, value in enumerate(values):
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+                or runs[index].get("quality_target_met") is not True
+            ):
+                errors.append(
+                    f"{name}: performance summary run {index} has an invalid or failed functional gate"
+                )
+            if runs[index].get("functional_metric_declared") != functional.get(
+                "metric"
+            ):
+                errors.append(
+                    f"{name}: performance summary run {index} functional metric declaration mismatches registry"
+                )
+            if any(
+                runs[index].get(field) is not None
+                for field in (
+                    "quality_metric_declared",
+                    "quality_metric_key",
+                    "quality_value",
+                )
+            ):
+                errors.append(
+                    f"{name}: performance run {index} must not declare score-bearing quality fields"
+                )
+            grade = runs[index].get("grade") or {}
+            expected_grade = {
+                "passed": True,
+                "target_met": True,
+                "metric": functional.get("metric"),
+                "value": value,
+                "target": (payload.get("functional_gate") or {}).get("target"),
+            }
+            for field, expected_value in expected_grade.items():
+                if not numbers_match(grade.get(field), expected_value):
+                    errors.append(
+                        f"{name}: performance run {index} grade.{field} is not bound to functional gate"
+                    )
+        expected = {
+            "passed": True,
+            "statistic": "all_runs",
+            "operator": "==",
+            "target": len(runs),
+            "value": len(runs),
+            "condition": functional.get("condition"),
+        }
+        repeatability = payload.get("repeatability") or {}
+        aggregate = (payload.get("aggregate") or {}).get("primary_metric") or {}
+        mean = aggregate.get("mean")
+        stdev = aggregate.get("stdev")
+        limit = (body.get("performance_reference_protocol") or {}).get(
+            "repeatability_limit"
+        )
+        computed = (
+            float(stdev) / float(mean)
+            if isinstance(mean, (int, float))
+            and not isinstance(mean, bool)
+            and float(mean) > 0
+            and isinstance(stdev, (int, float))
+            and not isinstance(stdev, bool)
+            else None
+        )
+        expected_repeatability = {
+            "metric": (body.get("performance_reference_protocol") or {}).get(
+                "repeatability_metric"
+            ),
+            "coefficient_of_variation": computed,
+            "limit": limit,
+            "passed": computed is not None
+            and isinstance(limit, (int, float))
+            and computed <= float(limit),
+        }
+        if repeatability != expected_repeatability:
+            errors.append(
+                f"{name}: performance summary repeatability does not match recomputed values"
+            )
+    else:
+        return [f"{name}: unsupported public status {public_status!r}"]
+
+    for field, expected_value in expected.items():
+        if not numbers_match(acceptance.get(field), expected_value):
+            errors.append(
+                f"{name}: reference summary acceptance.{field} is "
+                f"{acceptance.get(field)!r}, expected {expected_value!r}"
+            )
+    return errors
+
+
 def check_nanogpt_lineage(name: str, baseline: dict, payload: dict) -> list[str]:
     """Verify the portable training-to-inference lineage recorded by NanoGPT."""
     errors: list[str] = []
@@ -810,8 +1109,21 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
     errors: list[str] = []
     baseline = body.get("verified_baseline") or {}
     runs = payload.get("runs") or []
-    quality_values = [run.get("quality_value") for run in runs]
+    dual_metrics = payload.get("schema") == REFERENCE_EVIDENCE_SCHEMA
+    primary_metric_name = (
+        (payload.get("primary_metric") or {}).get("name")
+        if dual_metrics
+        else payload.get("quality_metric")
+    )
+    primary_values = [
+        run.get("primary_metric_value") if dual_metrics else run.get("quality_value")
+        for run in runs
+    ]
+    primary_aggregate = (payload.get("aggregate") or {}).get("primary_metric") or {}
     quality_aggregate = (payload.get("aggregate") or {}).get("quality") or {}
+    baseline_primary_aggregate = (
+        primary_aggregate if dual_metrics else quality_aggregate
+    )
     wall_aggregate = (payload.get("aggregate") or {}).get("wall_seconds") or {}
     source = payload.get("source") or {}
 
@@ -821,7 +1133,7 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
         "source_git_sha": source.get("git_sha"),
         "profile": payload.get("profile"),
         "device_requested": payload.get("device_requested"),
-        "primary_metric": payload.get("quality_metric"),
+        "primary_metric": primary_metric_name,
         "accepted_runs": len(runs),
     }
     for field, expected in expected_fields.items():
@@ -833,7 +1145,7 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
 
     expected_lists = {
         "seeds": payload.get("seeds_requested"),
-        "metric_values_by_seed": quality_values,
+        "metric_values_by_seed": primary_values,
     }
     for field, expected in expected_lists.items():
         if not list_values_match(baseline.get(field), expected):
@@ -865,20 +1177,22 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
                     f"{baseline.get(baseline_field)!r}, reference summary value is {expected!r}"
                 )
 
-    metric = payload.get("quality_metric")
+    metric = primary_metric_name
     if not isinstance(metric, str) or not metric:
         errors.append(f"{name}: reference summary quality_metric is missing")
-    elif not numbers_match(baseline.get(metric), quality_aggregate.get("median")):
+    elif not numbers_match(
+        baseline.get(metric), baseline_primary_aggregate.get("median")
+    ):
         errors.append(
             f"{name}: verified_baseline.{metric} does not match the committed median"
         )
 
     aggregate_fields = {
-        "median": quality_aggregate.get("median"),
-        "min": quality_aggregate.get("min"),
-        "max": quality_aggregate.get("max"),
-        "mean": quality_aggregate.get("mean"),
-        "sample_stdev": quality_aggregate.get("stdev"),
+        "median": baseline_primary_aggregate.get("median"),
+        "min": baseline_primary_aggregate.get("min"),
+        "max": baseline_primary_aggregate.get("max"),
+        "mean": baseline_primary_aggregate.get("mean"),
+        "sample_stdev": baseline_primary_aggregate.get("stdev"),
         "wall_seconds_median": wall_aggregate.get("median"),
         "wall_seconds_min": wall_aggregate.get("min"),
         "wall_seconds_max": wall_aggregate.get("max"),
@@ -893,9 +1207,10 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
 
     public_status = (body.get("public") or {}).get("status")
     if public_status == "score-bearing":
-        if payload.get("reference_metric_role") != "quality":
+        expected_role = "performance" if dual_metrics else "quality"
+        if payload.get("reference_metric_role") != expected_role:
             errors.append(
-                f"{name}: score-bearing reference summary metric role must be quality"
+                f"{name}: score-bearing reference summary metric role must be {expected_role}"
             )
         quality_target = body.get("quality_target") or {}
         if payload.get("quality_metric") != quality_target.get("metric"):
@@ -911,6 +1226,13 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
         if payload.get("quality_direction") != quality_target.get("direction"):
             errors.append(
                 f"{name}: reference summary direction does not match quality_target.direction"
+            )
+        quality_metric = quality_target.get("metric")
+        if dual_metrics and not numbers_match(
+            baseline.get(quality_metric), quality_aggregate.get("median")
+        ):
+            errors.append(
+                f"{name}: verified_baseline.{quality_metric} does not match committed quality median"
             )
         variance = quality_target.get("variance_summary") or {}
         variance_fields = {
@@ -940,8 +1262,8 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
             errors.append(
                 f"{name}: verified_baseline.functional_passes must equal the accepted run count"
             )
-        mean = quality_aggregate.get("mean")
-        stdev = quality_aggregate.get("stdev")
+        mean = primary_aggregate.get("mean")
+        stdev = primary_aggregate.get("stdev")
         repeatability_limit = (body.get("performance_reference_protocol") or {}).get(
             "repeatability_limit"
         )
@@ -983,7 +1305,6 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
     ) or quality_target.get("reference_runs")
 
     expected_values = {
-        "schema": REFERENCE_EVIDENCE_SCHEMA,
         "workload": workload_id,
         "profile": reference_protocol.get("profile"),
         "status": "valid",
@@ -996,21 +1317,34 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
             errors.append(
                 f"{name}: reference summary {field} is {payload.get(field)!r}, expected {expected!r}"
             )
-    expected_metric_role = (
-        "performance"
-        if (body.get("public") or {}).get("status") == "performance-bearing"
-        else "quality"
-    )
-    expected_primary_metric = {
-        "name": payload.get("quality_metric"),
-        "role": expected_metric_role,
-    }
+    schema = payload.get("schema")
+    if schema not in SUPPORTED_REFERENCE_EVIDENCE_SCHEMAS:
+        errors.append(
+            f"{name}: reference summary schema is {schema!r}, expected one of "
+            f"{sorted(SUPPORTED_REFERENCE_EVIDENCE_SCHEMAS)!r}"
+        )
+    dual_metrics = schema == REFERENCE_EVIDENCE_SCHEMA
+    if dual_metrics:
+        expected_primary_metric = {
+            "name": (body.get("measurement_protocol") or {}).get("primary_metric"),
+            "role": "performance",
+        }
+    else:
+        expected_metric_role = (
+            "performance"
+            if (body.get("public") or {}).get("status") == "performance-bearing"
+            else "quality"
+        )
+        expected_primary_metric = {
+            "name": payload.get("quality_metric"),
+            "role": expected_metric_role,
+        }
     if payload.get("primary_metric") != expected_primary_metric:
         errors.append(
             f"{name}: reference summary primary_metric does not match its metric role"
         )
     aggregate = payload.get("aggregate") or {}
-    if aggregate.get("primary_metric") != aggregate.get("quality"):
+    if not dual_metrics and aggregate.get("primary_metric") != aggregate.get("quality"):
         errors.append(
             f"{name}: reference summary aggregate.primary_metric does not match the legacy aggregate.quality mirror"
         )
@@ -1028,10 +1362,13 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
             errors.append(
                 f"{name}: reference summary source.{field} does not prove an empty clean-source record"
             )
-    if source.get("tool_sha256") != SWEEP_TOOL_SHA256:
-        errors.append(
-            f"{name}: reference summary source.tool_sha256 does not match the sweep tool"
-        )
+    if dual_metrics:
+        if source.get("tool_sha256") != SWEEP_TOOL_SHA256:
+            errors.append(
+                f"{name}: reference summary source.tool_sha256 does not match the sweep tool"
+            )
+    elif not PREFIXED_SHA256_RE.fullmatch(str(source.get("tool_sha256") or "")):
+        errors.append(f"{name}: legacy reference summary source.tool_sha256 is invalid")
     if not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_sha") or "")):
         errors.append(f"{name}: reference summary source.git_sha is missing or invalid")
     evidence_id = payload.get("evidence_id")
@@ -1138,6 +1475,73 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
         dict_runs
     ) == len(runs):
         errors.extend(check_registry_summary_alignment(name, body, payload))
+    return errors
+
+
+def check_historical_reference_summary(name: str, payload: dict) -> list[str]:
+    """Check pinned historical bytes internally without applying the new protocol."""
+    errors: list[str] = []
+    if payload.get("schema") not in SUPPORTED_REFERENCE_EVIDENCE_SCHEMAS:
+        errors.append(f"{name}: historical reference summary schema is unsupported")
+    if payload.get("status") != "valid":
+        errors.append(f"{name}: historical reference summary status is not valid")
+    if payload.get("workload") != name.split("/", 1)[-1]:
+        errors.append(f"{name}: historical reference summary workload mismatches")
+    if (payload.get("acceptance") or {}).get("passed") is not True:
+        errors.append(f"{name}: historical reference summary acceptance did not pass")
+    if payload.get("invalid_reasons"):
+        errors.append(f"{name}: historical reference summary contains invalid reasons")
+    runs = payload.get("runs")
+    if not isinstance(runs, list) or not runs:
+        return [*errors, f"{name}: historical reference summary has no runs"]
+    dict_runs: list[dict] = []
+    for index, run in enumerate(runs):
+        label = f"{name}: historical run {index}"
+        if not isinstance(run, dict):
+            errors.append(f"{label} is not an object")
+            continue
+        dict_runs.append(run)
+        for field in (
+            "execution_ok",
+            "evidence_valid",
+            "seed_match",
+            "manifest_verified",
+        ):
+            if run.get(field) is not True:
+                errors.append(f"{label} does not set {field}=true")
+        if run.get("invalid_reasons"):
+            errors.append(f"{label} contains invalid reasons")
+        artifacts = run.get("artifacts")
+        if not isinstance(artifacts, list) or not artifacts:
+            errors.append(f"{label} has no artifact index")
+            continue
+        roles: set[str] = set()
+        paths: set[str] = set()
+        for artifact_index, artifact in enumerate(artifacts):
+            artifact_label = f"{label} artifact {artifact_index}"
+            if not isinstance(artifact, dict):
+                errors.append(f"{artifact_label} is not an object")
+                continue
+            role = artifact.get("role")
+            path = artifact.get("path")
+            if not isinstance(role, str) or not role or role in roles:
+                errors.append(f"{artifact_label} has a missing or duplicate role")
+            if not is_safe_posix_relative_path(path) or path in paths:
+                errors.append(f"{artifact_label} has an unsafe or duplicate path")
+            if not PREFIXED_SHA256_RE.fullmatch(str(artifact.get("sha256") or "")):
+                errors.append(f"{artifact_label} has an invalid SHA-256")
+            if not isinstance(artifact.get("n_bytes"), int) or artifact["n_bytes"] <= 0:
+                errors.append(f"{artifact_label} has an invalid byte count")
+            roles.add(str(role))
+            paths.add(str(path))
+        if not {"report", "provenance"}.issubset(roles):
+            errors.append(f"{label} lacks report or provenance artifacts")
+        if run.get("report_path") not in paths:
+            errors.append(f"{label} report path is absent from its artifact index")
+        if run.get("manifest_path") not in paths:
+            errors.append(f"{label} manifest path is absent from its artifact index")
+    if len(dict_runs) == len(runs):
+        errors.extend(check_summary_aggregate_integrity(name, payload, dict_runs))
     return errors
 
 
@@ -1278,6 +1682,21 @@ def check_reference_index(workloads: dict[str, dict]) -> list[str]:
         errors.append("reference index source_git_sha is missing or invalid")
 
     source_lock = index.get("source_lock") or {}
+    public_bodies = [
+        body
+        for body in workloads.values()
+        if (body.get("public") or {}).get("status")
+        in {"score-bearing", "performance-bearing"}
+    ]
+    historical_index = bool(public_bodies) and all(
+        (
+            (body.get("verified_baseline") or {}).get("protocol_compatibility"),
+            (body.get("verified_baseline") or {}).get("review_eligible"),
+            (body.get("verified_baseline") or {}).get("replacement_required"),
+        )
+        == ("superseded", False, True)
+        for body in public_bodies
+    )
     lock_relative = source_lock.get("path")
     if not is_safe_posix_relative_path(lock_relative):
         errors.append("reference index source_lock.path is not portable")
@@ -1297,6 +1716,7 @@ def check_reference_index(workloads: dict[str, dict]) -> list[str]:
                     lock_path,
                     project_root=REPO_ROOT,
                     expected_source_git_sha=str(source_git_sha),
+                    verify_current=not historical_index,
                 )
             except reference_source_lock.SourceLockError as exc:
                 errors.append(f"reference source lock is invalid: {exc}")

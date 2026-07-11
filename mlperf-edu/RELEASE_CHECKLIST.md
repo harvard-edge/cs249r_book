@@ -5,6 +5,11 @@ ready to show MLCommons reviewers. It separates implemented machinery from
 fresh evidence and external decisions. A feature is not release-verified merely
 because its code or workflow exists.
 
+The label `protocol-superseded historical reference` applies to all eight
+retained result summaries from source commit `0ec4d3e1`. They cannot satisfy a
+current release gate. Fresh evidence and a complete validation rerun on the
+final clean revision remain mandatory.
+
 Do not change a row to `Verified` without recording the source revision,
 command, exit status, date, platform, and retained artifact path in the review
 notes or release packet.
@@ -29,15 +34,15 @@ final gate sequence below.
 | Implemented | Native registry and package mirrors | `registry/`, `workloads.yaml`, and `src/mlperf_edu/workloads.yaml`. | Both registry export checks. |
 | Implemented | Complete registry execution surface | 30 rows declare `min` and `max` runners. | Actual `coverage`, `max`, and `release` validation. |
 | Implemented | Candidate result classification | Five score-bearing, three performance-bearing, 22 systems-only. | Registry audit and generated-page drift checks. |
-| Implemented | Strong score gates | NanoGPT `<=2.30`, DLRM `>=0.70`, anomaly AUROC `>=0.95`, ResNet `>=0.85`, MobileNetV2 `>=0.78`. | Verified by five committed summaries from clean source `0ec4d3e1`. |
+| Implemented; replacement evidence pending | Strong score gates | NanoGPT loss `<= 2.30`; DLRM fixed-final-epoch ROC AUC `>= 0.76`; anomaly macro AUROC `>= 0.93`, worst-class AUROC `>= 0.90`, and learned-control margin `>= 0.20`; ResNet top-1 `>= 0.85`; MobileNetV2 top-1 `>= 0.78`. | Fresh five-seed packets from the final clean revision. |
 | Implemented | Report-level public review contract | `src/mlperf/contracts.py` checks data mode, seed, quality, timing, checkpoint or model lineage, and artifacts. | Actual `max` and `release` validation with zero contract failures. |
 | Implemented | Repeatable inference timing | NanoGPT prefill and decode plus pinned SmolLM2 baseline record warmups, measured runs, median, p90, p99, and cross-execution CV. | Verified by three committed five-execution summaries from clean source `0ec4d3e1`; all three CVs are at or below `5%`. |
 | Implemented | Training-to-inference lineage | NanoGPT inference requires the training checkpoint and records its SHA-256 digest and quality dependency. | Verified with median-quality training seed 4, checkpoint SHA-256 `a0d2f31a747355d47d11c6aa77eb09faf2232f84cb519accb286a78159fb2d8a`, and both inference packets. |
-| Implemented | SLM task-quality fixture | Pinned SmolLM2 revision and bundled four-case continuation suite with perplexity gate. | Verified in five executions. Every execution passed the token and perplexity gates with the pinned revision and fixture digest retained. |
-| Implemented | Honest quantized boundary | Dynamic-int8 SLM row is systems-only after failing the current quality-parity calibration. | Registry, docs, and packet regeneration. |
+| Implemented; replacement evidence pending | SLM task-quality fixture | Pinned SmolLM2 revision, attributed 28-case v2 suite, token-weighted NLL, and overall plus weakest-category gates. | One bounded pinned-model calibration passed at `5.2272` overall perplexity and `18.9403` worst-category perplexity. The former four-case packet is protocol-superseded; run a clean five-execution replacement before review. |
+| Implemented; replacement calibration pending | Honest quantized boundary | Dynamic-int8 SLM row remains systems-only after failing the former quality-parity calibration. | Rerun the quantized path on v2 and require overall, weakest-category, and NLL-parity gates before promotion. |
 | Implemented | Exact report provenance | Manifest binds canonical report content and exact report bytes with SHA-256 and size evidence. | Manifest and package portability tests. |
 | Implemented | Portable package schema 0.2 | Relative paths, complete artifact index, digest and byte-size checks, and clean-extraction verification. | NanoGPT lineage package SHA-256 `0b0173d78e2c3315c4687b6319beb8a2826c98bce7f52710542f4b496edadd20` passed all 56 archive checks; 35 policy-permitted run packages were also created and verified. |
-| Implemented | Five-seed sweep tool | Fresh-process seeds, seed/report/manifest agreement, grading, immutable attempts, artifact index, digest sidecar, and portable NanoGPT training-lineage staging. | Eight clean public-candidate summaries are committed for the five score and three performance candidates. |
+| Implemented; replacement evidence pending | Five-seed sweep tool | Fresh-process seeds, seed/report/manifest agreement, separate performance and quality fields, grading, immutable attempts, artifact index, digest sidecar, cooldowns, and portable NanoGPT training-lineage staging. | Eight fresh public-candidate summaries from the final clean revision. |
 | Implemented | Systems-only execution boundaries | Every systems-only row declares the exact max data mode, whether fetched or declared assets are used, and whether a quality target is enforced. | Registry validation and generated-page truth tests. |
 | Implemented | Classroom entry points | Three labs accept literal `--smoke`; Tutorial 01 has a noninteractive provenance smoke. | Four commands pass on CPU without network. |
 | Implemented | Generated review site | Registry, dataset, benchmark, and CLI pages are generated; Quarto and link gates exist. | Regenerate, render, link-check, and visually inspect. |
@@ -45,15 +50,14 @@ final gate sequence below.
 | Implemented | Guarded site publication | Live preview requires recent development and full benchmark validation plus manual `PUBLISH` confirmation. | Confirm deployment only after the guarded workflow succeeds. |
 | Implemented | Evidence-synchronized paper build | Paper Makefile generates a registry snapshot and verifies the PDF. | Clean build, verification, and visual inspection. |
 
-## Committed Reference Evidence
+## Historical Committed Reference Evidence
 
-The current evidence set was collected on July 11, 2026, from clean source
-commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. The reference sweep commands
-below exited zero for every candidate, and all eight summaries report
-`status: valid` and `eligible_for_public_baseline: true`. The recorded platform
-is an Apple M5 Max laptop with CPU or MPS selected by the declared protocol.
-`reference_results/index.json` retains the exact evidence IDs, summary digests,
-aggregates, and source revision.
+The retained evidence set was collected on July 11, 2026, from clean source
+commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. Its embedded validity fields
+describe the protocols active at collection time. The current registry marks
+all eight summaries as superseded, not review eligible, and replacement
+required. `reference_results/index.json` retains their exact IDs and digests
+only for historical traceability.
 
 Complete create-once attempt directories remain outside the checkout under the
 local reference root and are available by local handoff. Thirty-five
@@ -68,13 +72,14 @@ grading, or report-contract behavior. A post-freeze change to any of those
 measurement-bearing surfaces requires new sweeps rather than editing these
 records.
 
-## Local Verification Snapshot
+## Historical Local Verification Snapshot
 
 The promotion revision recorded by `review-ece36ac566/handoff_manifest.json`
 completed the local release matrix on July 11, 2026, on macOS 26.4 with an
 Apple M5 Max. A later ledger-only commit may record these results, but the
 promotion revision remains the exact executable source named by the retained
-validation reports and handoff manifest.
+validation reports and handoff manifest. This snapshot does not verify the
+current worktree; every gate below must run again on the final revision.
 
 | **Artifact** | **Result** | **SHA-256** |
 |:---|:---|:---|
@@ -91,21 +96,21 @@ validation reports and handoff manifest.
 
 | **Status** | **Gate** | **Required Evidence** |
 |:---|:---|:---|
-| Verified | Evidence source stability | Reference collection began from clean commit `0ec4d3e1c415944227d0754d170edb0addc1d925`; every summary records empty source-status and source-patch digests, and source lock SHA-256 `42cf76614351260bf946633ab9b23341d6053a491d0632258d49b53d36a66e20` binds 28 files and eight candidate contracts. |
-| Verified | Complete local tests | The promotion revision recorded by the handoff manifest passed all 241 tests. |
-| Verified | Generated-file consistency | Native layout, flat mirrors, verified baselines, taxonomy, claims, review packets, and generated docs passed together. |
-| Verified | Five score packets | Five committed summaries cover valid create-once seeds 0–4 attempts for NanoGPT, DLRM, anomaly detection, ResNet-18, and MobileNetV2. All individual runs and medians passed. |
-| Verified | Inference chain | The committed NanoGPT training, prefill, and decode summaries share the verified seed-4 checkpoint lineage; prefill CV is `4.60%`, decode CV is `2.09%`, and the committed SLM summary records five passing outer executions with CV `0.86%`. |
-| Verified | Actual validation presets | Fresh `smoke`, `coverage`, `max`, and `release` executions passed 12, 30, 30, and 60 workload-profile checks with zero run, grade, provenance, or review-contract failures. |
-| Verified | Package portability | The retained NanoGPT lineage archive uses package schema 0.2 and passed 56 index, hash, size, path, extraction, and source-verification checks. Thirty-five policy-permitted run packages verified; five DLRM packages were correctly policy-blocked. |
-| Verified | Clean wheel environment on macOS | The wheel installed in a clean Python 3.12.13 environment outside the checkout; dependency checks, packaged evidence checks, installed audit, installed smoke, and provenance verification passed. |
+| Pending | Evidence source stability | Commit the final measurement-bearing source, regenerate the source lock, and require empty source-status and source-patch digests for every new packet. |
+| Pending | Complete local tests | Run the full test suite on the final source revision. |
+| Pending | Generated-file consistency | Synchronize native and flat mirrors, baselines, taxonomy, claims, review packets, and generated docs after replacement evidence is imported. |
+| Pending | Five score packets | Generate fresh create-once seeds 0–4 packets for NanoGPT, DLRM, anomaly detection, ResNet-18, and MobileNetV2. |
+| Pending | Inference chain | Generate one replacement NanoGPT training lineage and fresh prefill, decode, and SmolLM2 packets under the current protocols. |
+| Pending | Actual validation presets | Run fresh `smoke`, `coverage`, `max`, and `release` executions with zero run, grade, provenance, or review-contract failures. |
+| Pending | Package portability | Rebuild and verify packages from replacement evidence under the current schema and policy. |
+| Pending | Clean wheel environment on macOS | Install the final wheel outside the checkout, audit it, and run installed smoke plus provenance verification. |
 | Pending | Clean wheel environment on Linux | The hosted Linux wheel job must pass on the pushed review revision. |
-| Verified | Lab and tutorial regression | All three lab smokes and Tutorial 01 smoke passed on CPU without network access. |
-| Verified | Automated site review | All 43 pages rendered; required outputs, internal links, and 47 supported external HTTP links passed with zero errors. |
+| Pending | Lab and tutorial regression | Rerun all three lab smokes and Tutorial 01 smoke on the final revision. |
+| Pending | Automated site review | Regenerate and rerender the site, then rerun required-output and link checks. |
 | Pending | Site visual review | Representative desktop and narrow browser views still need inspection. The in-app browser was unavailable during the local review. |
-| Verified | Paper review | The PDF built from synchronized evidence; both verifier passes and visual inspection of all six pages succeeded. |
+| Pending | Paper review | Rebuild from replacement evidence, run both verifiers, and visually inspect the PDF. |
 | Pending | Hosted CI evidence | Development and full benchmark workflows are green for the same review revision and their artifacts are retained. Local evidence does not imply this hosted gate passed. |
-| Verified | Review notes | `README.md`, `PROPOSAL.md`, `PUBLIC_RULES.md`, and this ledger state the independent-preview status, supported install, evidence revision, known limitations, and non-endorsement. |
+| Pending | Review notes | Synchronize all review documents to the final source and replacement evidence revision. |
 
 ## External Decisions
 

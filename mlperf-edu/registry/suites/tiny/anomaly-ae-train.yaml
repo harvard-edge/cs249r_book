@@ -5,48 +5,139 @@ dataset: mnist
 dataset_source: LeCun et al. 1998, auto-download via torchvision, 12MB
 quality_target:
   metric: anomaly_auroc
-  value: 0.95
+  value: 0.93
   direction: higher
   target_basis: reference_runs
   tolerance: 0.0
   reference_runs: 5
+  methodology:
+    protocol_id: mnist-hard-curve-v1
+    normal_class: 5
+    anomaly_classes:
+    - 3
+    - 8
+    - 9
+    score_definition: Macro average of three classwise AUROCs. Each AUROC compares held-out
+      normal digit 5 with one anomaly digit using per-sample reconstruction error.
+    no_training_controls:
+    - zero reconstructor
+    - full normal-training-set centroid
+    - seeded random-initialization autoencoder
+  auxiliary_gates:
+    worst_class_auroc:
+      value: 0.90
+      direction: higher
+      acceptance_rule: The minimum AUROC across anomaly digits 3, 8, and 9 must be at least
+        0.90 in every reference run.
+    learned_control_margin:
+      value: 0.20
+      direction: higher
+      acceptance_rule: For every anomaly digit, learned AUROC minus the strongest AUROC
+        from the three no-training controls must be at least 0.20.
   variance_summary:
     runs: 5
     statistic: median
-    acceptance_rule: median anomaly AUROC must be >= target
+    acceptance_rule: Every run must pass the macro-AUROC target, worst-class gate, and
+      learned-control gate. The reported five-seed median must also be >= target.
     metric: anomaly_auroc
-    median: 0.9665642110502738
-    min: 0.9645168333408751
-    max: 0.9701133535454093
-    mean: 0.9667495135526494
-    sample_stdev: 0.0020662715355119
-    spread_note: The clean five-seed public-candidate sweep computes AUROC from per-sample
-      reconstruction error on the complete 10,000-example MNIST test split, with digit zero
-      treated as normal and all other digits treated as anomalies. Every seed passed the 0.95
-      target.
+    median: 0.9388614489261358
+    min: 0.936979004999433
+    max: 0.9422428382049717
+    mean: 0.9391071962241943
+    sample_stdev: 0.0021998504807542404
+    calibration_status: bounded-local-methodology-experiment
+    spread_note: A bounded seed 0-4 methodology experiment on cached MNIST produced macro
+      AUROC 0.9370-0.9422, worst-class AUROC 0.9132-0.9212, and minimum learned-control
+      margin 0.2491-0.2570. These values set the proposed gates but do not replace a clean
+      committed reference packet.
   reference_protocol:
     profile: max
     backend: pytorch-cpu reference path unless the report declares a different backend
     machine_class: laptop-class CPU or laptop-class accelerator with full hardware fingerprint
-    dataset_mode: fetched MNIST with fixed normal/anomaly digit split, preprocessing, and
-      seed; no synthetic fallback
+    dataset_mode: fetched MNIST hard-curve-v1 with digit 5 as normal, digits 3/8/9 as the
+      fixed anomaly set, original test labels preserved for classwise scoring, and no synthetic
+      fallback
     seeds:
     - 0
     - 1
     - 2
     - 3
     - 4
-    aggregation: median anomaly AUROC across five independent reference runs
+    aggregation: Median macro anomaly AUROC across five independent reference runs. Every
+      run must pass the macro target, worst-class AUROC, and learned-control-margin gates.
+    repeatability_metric: sample coefficient of variation of train_and_eval_seconds across
+      the five reference runs
+    repeatability_limit: 0.05
+    repeatability_action: withhold the performance reference and rerun the complete protocol
+      when the coefficient of variation exceeds 5%
     artifact_policy: preserve JSON, HTML, CSV, .provd.json, run fingerprint, dataset asset
       metadata, and raw metric values for each run
     rerun_policy: rerun all five references when model code, dataset preprocessing, optimizer
       schedule, PyTorch major version, or target hardware class changes
   reviewer_notes:
-  - The public quality gate measures anomaly discrimination, not autoencoder training loss.
-    Reconstruction MSE remains a diagnostic metric.
+  - The primary score is a macro average, and the independent worst-class gate prevents an
+    easy anomaly digit from hiding a weak one. Reconstruction MSE remains diagnostic only.
+  - The learned-control gate proves that optimization added discrimination beyond a zero
+    reconstructor, a normal-data centroid, and the seeded untrained architecture.
+measurement_protocol:
+  primary_metric: train_and_eval_seconds
+  scenario: training
+  timing_scope: fixed canonical training loop plus scheduled validation
+  included_phases:
+  - optimizer steps
+  - scheduled validation
+  - learning-rate scheduler steps when configured
+  excluded_phases:
+  - dataset or asset fetching
+  - model construction
+  - checkpoint serialization
+  - report and provenance serialization
+  device_synchronization: synchronize immediately before and after the measured train-and-evaluation
+    region
+  outer_reference_runs: 5
+canonical_max_contract:
+  model_id: anomaly-ae
+  dataset: mnist
+  dataset_sha256: sha256:3069a3d6940f6416dc56f3d75769e7ccdf3df3ced1c39032d196ae7638daade7
+  data_mode: real
+  config:
+    batch_size: 64
+    epochs: 20
+    batches_per_epoch: 50
+    val_batches: 61
+    lr: 0.001
+    protocol: mnist-hard-curve-v1
+    normal_class: 5
+    anomaly_classes:
+    - 3
+    - 8
+    - 9
+  quality:
+    metric: anomaly_auroc
+    metric_key: anomaly_auroc
+    target: 0.93
+    direction: higher
+    protocol: mnist-hard-curve-v1
+  quality_gates:
+    macro_auroc:
+      metric_key: anomaly_auroc
+      target: 0.93
+      direction: higher
+    worst_class_auroc:
+      metric_key: anomaly_worst_class_auroc
+      target: 0.90
+      direction: higher
+    control_margin:
+      metric_key: anomaly_min_control_margin
+      target: 0.20
+      direction: higher
 verified_baseline:
   evidence_status: committed-reference-summary
-  review_eligible: true
+  review_eligible: false
+  protocol_compatibility: superseded
+  replacement_required: true
+  superseded_reason: The current mnist-hard-curve-v1 contract adds classwise gates and
+    no-training controls; this packet used the former zero-versus-all-digits protocol.
   evidence_tier: public-candidate
   evidence_id: anomaly-ae-train_max_20260711T085421.359195Z
   evidence_file: reference_results/anomaly-ae-train/anomaly-ae-train_max_20260711T085421.359195Z.json
@@ -84,18 +175,17 @@ verified_baseline:
   wall_seconds_mean: 6.642767050047405
   wall_seconds_sample_stdev: 0.04565513013724323
   accepted_runs: 5
-  baseline_note: Clean five-run project reference from exact source commit 0ec4d3e1. Evidence
-    semantics were recomputed from the raw reports and manifests during promotion. Every seed
-    passed the declared quality gate. Content-addressed portable run packages are retained
-    for local review, but no public package URL is recorded. This is not an MLCommons-verified
-    result.
+  baseline_note: This packet documents the superseded zero-versus-all-digits protocol and
+    is retained only for historical traceability. It is not eligible evidence for
+    mnist-hard-curve-v1. A clean five-seed replacement packet is required before promotion.
 max_model_size_kb: 1200
 scenario: training
 public:
   status: score-bearing
-  rationale: Uses MNIST with an explicit anomaly-AUROC target and a compact local autoencoder,
-    matching the train-on-normal and score-by-reconstruction-error shape of the MLPerf Tiny
-    anomaly-detection workload.
+  rationale: Uses a versioned hard MNIST split, classwise anomaly AUROC, and explicit
+    no-training controls with a compact local autoencoder. This preserves the train-on-normal
+    and score-by-reconstruction-error shape of the MLPerf Tiny anomaly-detection workload
+    while requiring a measurable benefit from training.
 runner:
   min: mlperf.runners.tiny:run_anomaly_ae_min
   max: mlperf.runners.tiny:run_anomaly_ae_max

@@ -45,7 +45,7 @@ def run_rag_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         n_layers=2,
         n_passages=n_passages,
         top_k=4,
-        batch_size=2,
+        batch_size=1,
         seq_len=32,
     )
 
@@ -94,12 +94,24 @@ def run_rag(
         "top_k": top_k,
         "logits_shape": list(logits.shape),
     }
+    config = {
+        "vocab_size": 512,
+        "d_model": d_model,
+        "n_heads": 4,
+        "n_layers": n_layers,
+        "max_seq_len": 128,
+        "n_passages": n_passages,
+        "top_k": top_k,
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+    }
     return write_agent_report(
         workload,
         output_dir,
         profile=profile,
         seed=seed,
         metrics=metrics,
+        config=config,
         output_shape=list(logits.shape),
     )
 
@@ -127,7 +139,7 @@ def run_codegen_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         retries=retries,
         d_model=48,
         n_layers=2,
-        batch_size=2,
+        batch_size=1,
         seq_len=32,
     )
 
@@ -168,12 +180,23 @@ def run_codegen(
         ),
         "n_params": count_params(model),
     }
+    config = {
+        "vocab_size": 512,
+        "d_model": d_model,
+        "n_heads": 4,
+        "n_layers": n_layers,
+        "max_seq_len": 192,
+        "retries": retries,
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+    }
     return write_agent_report(
         workload,
         output_dir,
         profile=profile,
         seed=seed,
         metrics=metrics,
+        config=config,
         details={"iterations": results["iterations"]},
     )
 
@@ -201,7 +224,7 @@ def run_react_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         steps=steps,
         d_model=48,
         n_layers=2,
-        batch_size=2,
+        batch_size=1,
         seq_len=32,
     )
 
@@ -241,12 +264,24 @@ def run_react(
         "final_memory_bytes": int(results["final_memory_bytes"]),
         "n_params": count_params(model),
     }
+    config = {
+        "vocab_size": 512,
+        "d_model": d_model,
+        "n_heads": 4,
+        "n_layers": n_layers,
+        "max_seq_len": 192,
+        "n_tools": 4,
+        "steps": steps,
+        "batch_size": batch_size,
+        "seq_len": seq_len,
+    }
     return write_agent_report(
         workload,
         output_dir,
         profile=profile,
         seed=seed,
         metrics=metrics,
+        config=config,
         details={"steps": results["steps"]},
     )
 
@@ -274,7 +309,7 @@ def run_toolcall_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         n_queries=n_queries,
         d_model=48,
         n_layers=2,
-        batch_size=2,
+        batch_size=1,
         seq_len=32,
     )
 
@@ -305,17 +340,51 @@ def run_toolcall(
     )
     input_ids = torch.randint(0, 512, (batch_size, seq_len))
     results = model.forward_with_timing(input_ids, n_queries=n_queries)
+    queries = results.get("queries")
+    total_queries = int(results.get("total_queries", 0))
+    valid_calls = int(results.get("valid_calls", 0))
+    queries_per_second = float(results.get("queries_per_second", 0.0))
+    completed_requested_queries = (
+        n_queries > 0
+        and total_queries == n_queries
+        and isinstance(queries, list)
+        and len(queries) == n_queries
+    )
+    every_call_valid = bool(
+        completed_requested_queries
+        and valid_calls == n_queries
+        and all(
+            isinstance(query, dict) and query.get("call_valid") is True
+            for query in queries
+        )
+    )
+    functional_check_passed = bool(
+        completed_requested_queries and every_call_valid and queries_per_second > 0.0
+    )
+    functional_contract = workload.raw.get("functional_check") or {}
     metrics = {
-        "total_queries": int(results["total_queries"]),
-        "valid_calls": int(results["valid_calls"]),
-        "valid_call_rate": float(
-            results["valid_calls"] / max(results["total_queries"], 1)
-        ),
+        "requested_queries": n_queries,
+        "total_queries": total_queries,
+        "valid_calls": valid_calls,
+        "valid_call_rate": float(valid_calls / max(total_queries, 1)),
+        "queries_per_second": queries_per_second,
         "total_generation_ms": float(results["total_generation_ms"]),
         "total_classification_ms": float(results["total_classification_ms"]),
         "total_dispatch_ms": float(results["total_dispatch_ms"]),
         "total_latency_ms": float(results["total_ms"]),
         "n_params": count_params(model),
+        "functional_check_passed": functional_check_passed,
+    }
+    config = {
+        "vocab_size": 512,
+        "d_model": d_model,
+        "n_heads": 4,
+        "n_layers": n_layers,
+        "max_seq_len": 128,
+        "n_functions": 10,
+        "n_queries": n_queries,
+        "batch_size": batch_size,
+        "seq_len": seq_len,
     }
     return write_agent_report(
         workload,
@@ -323,7 +392,19 @@ def run_toolcall(
         profile=profile,
         seed=seed,
         metrics=metrics,
-        details={"queries": results["queries"]},
+        config=config,
+        status="passed" if functional_check_passed else "functional_failed",
+        functional_check={
+            "metric": functional_contract.get("metric", "valid_call_rate"),
+            "condition": functional_contract.get("condition", ""),
+            "target": functional_contract.get("target", 1.0),
+            "direction": functional_contract.get("direction", "higher"),
+            "passed": functional_check_passed,
+            "completed_requested_queries": completed_requested_queries,
+            "every_call_valid": every_call_valid,
+            "positive_query_throughput": queries_per_second > 0.0,
+        },
+        details={"queries": queries if isinstance(queries, list) else []},
     )
 
 
@@ -334,6 +415,9 @@ def write_agent_report(
     profile: str = "min",
     seed: int,
     metrics: dict[str, Any],
+    config: dict[str, Any],
+    status: str = "passed",
+    functional_check: dict[str, Any] | None = None,
     output_shape: list[int] | None = None,
     details: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
@@ -347,10 +431,13 @@ def write_agent_report(
         "workload": workload.id,
         "suite": workload.suite,
         "profile": profile,
-        "status": "passed",
+        "scenario": workload.scenario,
+        "status": status,
         "backend": "pytorch-cpu",
         "data_mode": "synthetic-deterministic",
+        "dataset": workload.dataset,
         "seed": seed,
+        "config": config,
         "metrics": metrics,
         "quality": {
             "metric": workload.quality_metric,
@@ -363,6 +450,8 @@ def write_agent_report(
             "provenance": str(manifest_path),
         },
     }
+    if functional_check is not None:
+        report["quality"]["functional_check"] = functional_check
     if output_shape is not None:
         report["output_shape"] = output_shape
     if details:
@@ -370,12 +459,12 @@ def write_agent_report(
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario=workload.scenario or "agent",
+        scenario=workload.scenario,
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        dataset_name="synthetic-deterministic-agent-prompts",
+        dataset_name=workload.dataset or "synthetic-deterministic-agent-prompts",
         dataset_files=[],
         rng_seed=seed,
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),

@@ -17,14 +17,14 @@ This workload family exposes **4 measured variants** of `smollm2-chat-inference`
 |:---|:---|:---|:---|:---|:---|:---|
 | [baseline](#variant-baseline) | `slm-decode` | SmolLM2-135M-Instruct | 135M | prompt-suite-local | single_stream | performance-bearing |
 | [quantized-int8](#variant-quantized-int8) | `slm-quantized-decode` | SmolLM2-135M-Instruct dynamic-int8 | 135M | prompt-suite-local | single_stream | systems-only |
-| [batched-b4](#variant-batched-b4) | `slm-batched-decode` | SmolLM2-135M-Instruct batched | 135M | prompt-suite-local | server | systems-only |
-| [long-context](#variant-long-context) | `slm-long-context-decode` | SmolLM2-135M-Instruct long-context | 135M | prompt-suite-local | server | systems-only |
+| [batched-b4](#variant-batched-b4) | `slm-batched-decode` | SmolLM2-135M-Instruct batched | 135M | prompt-suite-local | offline | systems-only |
+| [long-context](#variant-long-context) | `slm-long-context-decode` | SmolLM2-135M-Instruct long-context | 135M | prompt-suite-local | single_stream | systems-only |
 
 ## Variant: baseline {#variant-baseline}
 
 <span class="badge status-performance-bearing">performance-bearing</span>
 
-> Uses an off-the-shelf permissive SLM with a deterministic prompt set; reports comparable serving performance with a functional generation check rather than task accuracy.
+> Uses an off-the-shelf permissive SLM with a versioned, attributed continuation suite; serving performance is comparable only after the overall and weakest-category task-quality gates pass.
 
 ### At a Glance
 
@@ -34,7 +34,7 @@ This workload family exposes **4 measured variants** of `smollm2-chat-inference`
 | **Model** | SmolLM2-135M-Instruct |
 | **Parameters** | 135M |
 | **Dataset** | prompt-suite-local |
-| **Dataset source** | Deterministic local prompts embedded in the runner; no external evaluation dataset required. |
+| **Dataset source** | Project-authored, CC0-1.0 continuation cases bundled with the runner; no external evaluation dataset is copied or fetched. |
 | **Scenario** | single_stream |
 | **Maturity** | base |
 | **Candidate result status** | performance-bearing |
@@ -72,7 +72,7 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 | **Field** | **Value** |
 |:---|:---|
 | **Metric** | generated_tokens |
-| **Condition** | default max run requests 16 decode tokens; generated_tokens must be >= 8 and continuation perplexity must be <= 10 on the bundled deterministic quality suite |
+| **Condition** | default max run requests 16 decode tokens; generated_tokens must be >= 8 and token-weighted continuation perplexity must be <= 7 overall and <= 24 in the weakest category on the bundled deterministic quality suite |
 
 **Reviewer notes:**
 
@@ -92,7 +92,7 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 | **Repeatability metric** | sample coefficient of variation of output_tokens_per_sec across the five reference runs |
 | **Repeatability limit** | 0.05 |
 | **Repeatability action** | withhold the performance reference and rerun the complete protocol when the coefficient of variation exceeds 5% |
-| **Functional acceptance** | every run must generate at least eight tokens and pass continuation perplexity at or below 10 |
+| **Functional acceptance** | every run must generate at least eight tokens, pass token-weighted continuation perplexity at or below 7, and keep every category at or below 24 perplexity |
 | **Artifact policy** | create a new immutable attempt directory and SHA-256 index every report, provenance manifest, model metadata file, export, and runner-declared artifact |
 | **Rerun policy** | if any run fails or times out, create a new attempt and rerun all five seeds; never replace one seed in an existing attempt |
 
@@ -105,26 +105,38 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 | **Measured runs** | 20 |
 | **Latency statistics** | median, p90, p99 |
 | **Timed phases** | prefill, greedy generation |
-| **Timing scope** | synchronized timings over one fixed prompt and 16 requested decode tokens |
+| **Raw sample metrics** | prefill_latency_samples_s, request_ttft_samples_s, itl_samples_s, request_end_to_end_samples_s |
+| **Timing scope** | one cache-reusing greedy request path per fixed prompt batch; TTFT spans prompt prefill through the first output token, ITL samples time only subsequent cached-token steps, and end-to-end latency spans the complete request |
 
 **Task-quality evaluation:**
 
 | **Field** | **Value** |
 |:---|:---|
-| **Suite** | mlperf-edu-slm-quality/0.1 |
+| **Suite** | mlperf-edu-slm-quality/0.2 |
+| **Fixture version** | 2.0.0 |
 | **Asset** | src/mlperf_edu/slm_quality_prompts.json |
-| **Asset sha256** | 5fa25872d0b7dc986b12137256b16fd6329267d1640f03e4e04f1dc4e8c8ed5f |
-| **Cases** | 4 |
-| **Method** | mean continuation-only negative log likelihood over the deterministic suite |
+| **Asset sha256** | 3d6d06b99dd92f1cf86fcde10f77b4db060397003bf654cc52c3148087ede556 |
+| **Attribution** | MLPerf EDU contributors; project-authored fixture released as CC0-1.0 |
+| **Cases** | 28 |
+| **Categories** | 7 |
+| **Aggregation** | token-weighted-continuation-nll |
+| **Category guard** | maximum-category-perplexity |
+| **Method** | teacher-forced continuation-only negative log likelihood; prompt and continuation tokens are encoded separately, prompt prefill creates one KV cache, every subsequent continuation token reuses that cache, and token losses are weighted by continuation-token count globally and within each category; every case ID, category, and continuation-token count is bound by the versioned fixture |
 | **Metric** | continuation_perplexity |
-| **Maximum** | 10.0 |
+| **Maximum** | 7.0 |
+| **Worst category maximum** | 24.0 |
+| **Calibration** | {'model_id': 'HuggingFaceTB/SmolLM2-135M-Instruct', 'model_revision': '12fd25f77366fa6b3b4b768ec3050bf629380bac', 'device': 'mps', 'observed_perplexity': 5.227185511982561, 'observed_worst_category': 'benchmarking', 'observed_worst_category_perplexity': 18.94030982965928, 'observed_continuation_tokens': 75, 'evaluation_seconds': 2.3826990419765934, 'threshold_rationale': 'The overall and weakest-category ceilings leave 34% and 27% perplexity headroom, respectively, for backend numeric variation while remaining tight enough to reject material degradation. This bounded run calibrates the protocol but is not a promoted reference packet.'} |
 
-### Recorded Project Reference Baseline
+### Historical Project Reference (Protocol Superseded)
 
 | **Field** | **Value** |
 |:---|:---|
 | **Evidence status** | committed-reference-summary |
-| **Review eligible** | True |
+| **Review eligible** | False |
+| **Protocol compatibility** | superseded |
+| **Replacement required** | True |
+| **Superseded reason** | The current contract uses cache-reusing timing semantics and the attributed 28-case v2 quality fixture; this packet used the former timing path and four-case unweighted fixture. |
+| **Superseded by quality suite** | mlperf-edu-slm-quality/0.2 |
 | **Evidence tier** | public-candidate |
 | **Evidence id** | slm-decode_max_20260711T085533.624561Z |
 | **Evidence file** | reference_results/slm-decode/slm-decode_max_20260711T085533.624561Z.json |
@@ -155,9 +167,9 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 | **Functional passes** | 5 |
 | **Coefficient of variation** | 0.00861551108693729 |
 
-> Clean five-run project reference from exact source commit 0ec4d3e1. Evidence semantics were recomputed from the raw reports and manifests during promotion. Every run passed its functional gate. The primary performance metric has 0.86% sample coefficient of variation across the five runs, within the 5% promotion limit. The speed is a machine observation, not a portable target. Content-addressed portable run packages are retained for local review, but no public package URL is recorded. This is not an MLCommons-verified result.
+> This five-run packet used the superseded four-case, unweighted quality protocol and is retained only for historical traceability. Its speed values are not review eligible under the 28-case v2 fixture. A clean five-run replacement packet is required before promotion. This is not an MLCommons-verified result.
 
-> This is a project reference baseline, not an MLCommons-verified result.
+> This content-addressed packet is retained for historical traceability. It does not validate the current benchmark contract, is not review eligible, and must be replaced by a clean reference sweep before promotion. It is not an MLCommons-verified result.
 
 ### Measured Systems Regime
 
@@ -220,7 +232,7 @@ Registry source: [`registry/suites/slm/smollm2-chat-inference/variants/baseline.
 
 <span class="badge status-systems-only">systems-only</span>
 
-> Standardized dynamic-int8 serving path for quantization studies. The current PyTorch dynamic-int8 path materially changes continuation NLL on the bundled quality suite, so it is not performance-bearing until parity is restored.
+> Standardized dynamic-int8 path for quantization studies with explicit v2 systems limits calibrated to the default CPU backend. It remains non-performance-bearing until a reviewed comparison contract and clean multi-seed reference package exist.
 
 ### At a Glance
 
@@ -237,7 +249,7 @@ Registry source: [`registry/suites/slm/smollm2-chat-inference/variants/baseline.
 | **Provenance** | Dynamic int8 SLM decode path for quantization, memory-footprint, and CPU serving comparison studies. |
 
 ::: {.callout-caution}
-**Current `max` execution boundary.** The current max runner uses the pinned SLM and bundled prompt suite and enforces output length, but the dynamic-int8 continuation-quality evaluation fails the current perplexity and NLL-delta bounds. The variant is systems-only.
+**Current `max` execution boundary.** The current max runner reads this variant's declared v2 ceilings and fails closed on output length, overall perplexity, weakest-category perplexity, and quantized NLL parity. The default CPU path passes the bounded calibration but remains systems-only pending a clean multi-seed reference package and reviewed comparison contract.
 
 - Reported data mode: `local-prompt`
 - Candidate quality target enforced: **yes**
@@ -278,22 +290,53 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 | **Field** | **Value** |
 |:---|:---|
 | **Metric** | generated_tokens |
-| **Condition** | default max run requests 16 decode tokens; generated_tokens must be >= 8 on the deterministic prompt set after dynamic int8 conversion |
+| **Condition** | default max run requests 16 decode tokens; generated_tokens must be >= 8, token-weighted continuation perplexity must be <= 7 overall and <= 25 in the weakest category, and mean NLL degradation from the unquantized model must be <= 0.25 after dynamic int8 conversion |
 | **Reference runs** | 5 |
 
 **Reviewer notes:**
 
-- Quantized path must preserve the functional generation check before latency, throughput, memory, or energy comparisons are interpreted.
+- The real-model max path must pass output length, both declared v2 continuation-quality gates, and the quantized NLL-parity gate before latency, throughput, memory, or energy comparisons are interpreted. These quantized systems limits do not alter the baseline workload's 7, 24, and 0.1 limits.
+
+**Task-quality evaluation:**
+
+| **Field** | **Value** |
+|:---|:---|
+| **Suite** | mlperf-edu-slm-quality/0.2 |
+| **Fixture version** | 2.0.0 |
+| **Aggregation** | token-weighted-continuation-nll |
+| **Category guard** | maximum-category-perplexity |
+| **Metric** | continuation_perplexity |
+| **Maximum** | 7.0 |
+| **Worst category maximum** | 25.0 |
+| **Max quantized nll delta** | 0.25 |
+| **Threshold rationale** | The overall ceiling remains 7. The weakest-category ceiling of 25 leaves 4.2% headroom above the observed 24.0029, and the 0.25 NLL-delta ceiling leaves 14.4% headroom above the larger observed delta of 0.2185. A 0.25 NLL delta bounds the permitted perplexity ratio to exp(0.25), or about 1.284, which rejects gross dynamic-int8 degradation while accommodating measured CPU backend variation. These are systems-only quantization limits and do not claim baseline equivalence. |
 
 ### Local Calibration Observation
 
 | **Field** | **Value** |
 |:---|:---|
 | **Evidence status** | historical-unverified-no-committed-artifact |
+| **Calibration scope** | bounded-local-current-v2 |
+| **Protocol compatibility** | current-v2 |
+| **Review eligible** | False |
+| **Artifact status** | uncommitted-local-run |
+| **Observed utc** | 2026-07-11T13:57:13Z |
+| **Model id** | HuggingFaceTB/SmolLM2-135M-Instruct |
+| **Model revision** | 12fd25f77366fa6b3b4b768ec3050bf629380bac |
+| **Reference backend** | transformers-mps |
+| **Execution backend** | transformers-cpu-dynamic-int8 |
+| **Quantized engine** | qnnpack |
 | **Generated tokens** | 16 |
-| **Quality perplexity** | 19.8108 |
-| **Quality nll delta** | 0.958 |
-| **Baseline note** | Dynamic-int8 calibration completes generation but fails the current quality-parity gate; the row remains systems-only. |
+| **Continuation tokens** | 75 |
+| **Reference perplexity** | 5.227185511982561 |
+| **Reference worst category perplexity** | 18.94030982965928 |
+| **Quantized perplexity** | 6.503655991585001 |
+| **Quantized worst category** | benchmarking |
+| **Quantized worst category perplexity** | 24.00291125471191 |
+| **Quantized nll delta** | 0.21849148882242542 |
+| **Cpu reference nll delta** | 0.21700134003806548 |
+| **Baseline note** | A bounded v2 default run used the Apple M5 Max MPS reference path followed by PyTorch 2.13.0 qnnpack execution on CPU. It passed output length and overall perplexity. Its weakest category and NLL delta sit just above the baseline limits, motivating the explicit quantized systems limits. A clean multi-seed reference package is still required before any promotion review. |
+| **Superseded observation** | {'fixture': 'former four-case unweighted suite', 'quality_perplexity': 19.8108, 'quality_nll_delta': 0.958, 'note': 'Retained only for historical traceability and not used to set the v2 contract.'} |
 
 > This observation is local development context. It is not a review-eligible reference result.
 
@@ -358,7 +401,7 @@ Registry source: [`registry/suites/slm/smollm2-chat-inference/variants/quantized
 
 <span class="badge status-systems-only">systems-only</span>
 
-> Exposes batching effects for local SLM serving studies without introducing a separate model or dataset identity.
+> Exposes synchronous fixed-batch throughput effects without introducing a separate model or dataset identity. It is an offline throughput microbenchmark, not a queued server-load test.
 
 ### At a Glance
 
@@ -369,13 +412,13 @@ Registry source: [`registry/suites/slm/smollm2-chat-inference/variants/quantized
 | **Parameters** | 135M |
 | **Dataset** | prompt-suite-local |
 | **Dataset source** | Deterministic local prompts embedded in the runner; no external evaluation dataset required. |
-| **Scenario** | server |
+| **Scenario** | offline |
 | **Maturity** | research |
 | **Candidate result status** | systems-only |
-| **Provenance** | Batched SLM decode path for throughput, queueing, memory-footprint, and energy studies under the SmolLM2 chat inference workload. |
+| **Provenance** | Synchronous fixed-batch SLM decode path for throughput, memory-footprint, and energy studies under the SmolLM2 chat inference workload; no request arrivals or queueing are modeled. |
 
 ::: {.callout-caution}
-**Current `max` execution boundary.** The current max runner uses the pinned SLM and bundled prompt/quality suite, enforces its functional and continuation-quality gates, and reports batched serving metrics. The variant remains systems-only pending a reviewed comparison contract.
+**Current `max` execution boundary.** The current max runner uses the pinned SLM and bundled prompt/quality suite, fails closed on output length and both v2 continuation-quality gates, and reports synchronous fixed-batch throughput metrics. The variant remains systems-only pending a reviewed comparison contract.
 
 - Reported data mode: `local-prompt-batch`
 - Candidate quality target enforced: **yes**
@@ -416,12 +459,12 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 | **Field** | **Value** |
 |:---|:---|
 | **Metric** | generated_tokens |
-| **Condition** | default max run requests 16 decode tokens per request; each request in the deterministic prompt batch must generate at least 8 tokens |
+| **Condition** | default max run requests 16 decode tokens per request; each request in the deterministic fixed batch must generate at least 8 tokens, and token-weighted continuation perplexity must be <= 7 overall and <= 24 in the weakest category |
 | **Reference runs** | 5 |
 
 **Reviewer notes:**
 
-- Batched serving reports per-request functional generation plus aggregate requests/sec and output tokens/sec.
+- This variant synchronously executes one fixed prompt batch and reports aggregate requests/sec and output tokens/sec; it does not model arrivals, a request queue, or a serving scheduler.
 
 ### Local Calibration Observation
 
@@ -429,7 +472,7 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 |:---|:---|
 | **Evidence status** | historical-unverified-no-committed-artifact |
 | **Generated tokens** | 16 |
-| **Baseline note** | Functional batched serving check with an 8-token per-request minimum; public comparisons use throughput, latency, memory footprint, and energy. |
+| **Baseline note** | Historical batched generation smoke only; it predates the v2 overall and weakest-category quality gates and is not review-eligible evidence. |
 
 > This observation is local development context. It is not a review-eligible reference result.
 
@@ -494,7 +537,7 @@ Registry source: [`registry/suites/slm/smollm2-chat-inference/variants/batched-b
 
 <span class="badge status-systems-only">systems-only</span>
 
-> Exposes prompt-length and prefill/KV-cache scaling for local SLM serving studies without introducing a separate model or dataset identity.
+> Exposes prompt-length and prefill/KV-cache scaling for sequential single-request local SLM inference without introducing a separate model or dataset identity.
 
 ### At a Glance
 
@@ -505,13 +548,13 @@ Registry source: [`registry/suites/slm/smollm2-chat-inference/variants/batched-b
 | **Parameters** | 135M |
 | **Dataset** | prompt-suite-local |
 | **Dataset source** | Deterministic expanded local prompts embedded in the runner; no external evaluation dataset required. |
-| **Scenario** | server |
+| **Scenario** | single_stream |
 | **Maturity** | research |
 | **Candidate result status** | systems-only |
-| **Provenance** | Long-context SLM decode path for prefill, KV-cache, memory-footprint, and latency scaling studies under the SmolLM2 chat inference workload. |
+| **Provenance** | Sequential single-request long-context SLM decode path for prefill, KV-cache, memory-footprint, and latency scaling studies under the SmolLM2 chat inference workload. |
 
 ::: {.callout-caution}
-**Current `max` execution boundary.** The current max runner uses the pinned SLM and expanded bundled prompt, enforces its functional and continuation-quality gates, and reports long-context serving metrics. The variant remains systems-only pending a reviewed comparison contract.
+**Current `max` execution boundary.** The current max runner uses the pinned SLM and expanded bundled prompt, fails closed on output length and both v2 continuation-quality gates, and reports sequential single-request long-context metrics. The variant remains systems-only pending a reviewed comparison contract.
 
 - Reported data mode: `local-prompt-long-context`
 - Candidate quality target enforced: **yes**
@@ -552,12 +595,12 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 | **Field** | **Value** |
 |:---|:---|
 | **Metric** | generated_tokens |
-| **Condition** | default max run requests 16 decode tokens; long-context prompt must generate at least 8 continuation tokens |
+| **Condition** | default max run requests 16 decode tokens; the expanded long-context prompt must generate at least 8 continuation tokens, and token-weighted continuation perplexity must be <= 7 overall and <= 24 in the weakest category |
 | **Reference runs** | 5 |
 
 **Reviewer notes:**
 
-- Long-context serving reports configured context length, measured context tokens, prefill latency, decode throughput, and prompt size.
+- This variant measures sequential single-request execution with an expanded deterministic prompt and reports configured context length, measured context tokens, prefill latency, decode throughput, and prompt size.
 
 ### Local Calibration Observation
 
@@ -565,7 +608,7 @@ See the [running guide](../../guide/running.qmd) for profile semantics, report h
 |:---|:---|
 | **Evidence status** | historical-unverified-no-committed-artifact |
 | **Generated tokens** | 16 |
-| **Baseline note** | Functional long-context serving check with an 8-token minimum; public comparisons use context-length scaling, prefill latency, memory footprint, and energy. |
+| **Baseline note** | Historical long-context generation smoke only; it predates the v2 overall and weakest-category quality gates and is not review-eligible evidence. |
 
 > This observation is local development context. It is not a review-eligible reference result.
 

@@ -29,15 +29,16 @@ model_source:
     qwen3-0.6b: Newer compact Qwen-family option for optional model-family comparisons; its
       larger download keeps it out of the default laptop setup.
 dataset: prompt-suite-local
-dataset_source: Deterministic local prompts embedded in the runner; no external evaluation
-  dataset required.
+dataset_source: Project-authored, CC0-1.0 continuation cases bundled with the runner; no
+  external evaluation dataset is copied or fetched.
 quality_target:
   metric: generated_tokens
   value: 8
 functional_check:
   metric: generated_tokens
   condition: default max run requests 16 decode tokens; generated_tokens must be >= 8 and
-    continuation perplexity must be <= 10 on the bundled deterministic quality suite
+    token-weighted continuation perplexity must be <= 7 overall and <= 24 in the weakest
+    category on the bundled deterministic quality suite
   reviewer_notes:
   - The pinned model must pass both output-length and continuation-perplexity gates before
     latency, throughput, memory, or energy results are eligible for review.
@@ -61,20 +62,43 @@ performance_reference_protocol:
   repeatability_limit: 0.05
   repeatability_action: withhold the performance reference and rerun the complete protocol
     when the coefficient of variation exceeds 5%
-  functional_acceptance: every run must generate at least eight tokens and pass continuation
-    perplexity at or below 10
+  functional_acceptance: every run must generate at least eight tokens, pass token-weighted
+    continuation perplexity at or below 7, and keep every category at or below 24 perplexity
   artifact_policy: create a new immutable attempt directory and SHA-256 index every report,
     provenance manifest, model metadata file, export, and runner-declared artifact
   rerun_policy: if any run fails or times out, create a new attempt and rerun all five seeds;
     never replace one seed in an existing attempt
 quality_evaluation:
-  suite: mlperf-edu-slm-quality/0.1
+  suite: mlperf-edu-slm-quality/0.2
+  fixture_version: 2.0.0
   asset: src/mlperf_edu/slm_quality_prompts.json
-  asset_sha256: 5fa25872d0b7dc986b12137256b16fd6329267d1640f03e4e04f1dc4e8c8ed5f
-  cases: 4
-  method: mean continuation-only negative log likelihood over the deterministic suite
+  asset_sha256: 3d6d06b99dd92f1cf86fcde10f77b4db060397003bf654cc52c3148087ede556
+  attribution: MLPerf EDU contributors; project-authored fixture released as CC0-1.0
+  cases: 28
+  categories: 7
+  aggregation: token-weighted-continuation-nll
+  category_guard: maximum-category-perplexity
+  method: teacher-forced continuation-only negative log likelihood; prompt and continuation
+    tokens are encoded separately, prompt prefill creates one KV cache, every subsequent
+    continuation token reuses that cache, and token losses are weighted by continuation-token
+    count globally and within each category; every case ID, category, and continuation-token
+    count is bound by the versioned fixture
   metric: continuation_perplexity
-  maximum: 10.0
+  maximum: 7.0
+  worst_category_maximum: 24.0
+  calibration:
+    model_id: HuggingFaceTB/SmolLM2-135M-Instruct
+    model_revision: 12fd25f77366fa6b3b4b768ec3050bf629380bac
+    device: mps
+    observed_perplexity: 5.227185511982561
+    observed_worst_category: benchmarking
+    observed_worst_category_perplexity: 18.94030982965928
+    observed_continuation_tokens: 75
+    evaluation_seconds: 2.3826990419765934
+    threshold_rationale: The overall and weakest-category ceilings leave 34% and 27% perplexity
+      headroom, respectively, for backend numeric variation while remaining tight enough to
+      reject material degradation. This bounded run calibrates the protocol but is not a
+      promoted reference packet.
 measurement_protocol:
   primary_metric: output_tokens_per_sec
   warmup_runs: 3
@@ -86,10 +110,66 @@ measurement_protocol:
   timed_phases:
   - prefill
   - greedy generation
-  timing_scope: synchronized timings over one fixed prompt and 16 requested decode tokens
+  raw_sample_metrics:
+  - prefill_latency_samples_s
+  - request_ttft_samples_s
+  - itl_samples_s
+  - request_end_to_end_samples_s
+  timing_scope: one cache-reusing greedy request path per fixed prompt batch; TTFT spans prompt
+    prefill through the first output token, ITL samples time only subsequent cached-token steps,
+    and end-to-end latency spans the complete request
+canonical_max_contract:
+  model_id: HuggingFaceTB/SmolLM2-135M-Instruct
+  model_revision: 12fd25f77366fa6b3b4b768ec3050bf629380bac
+  model_n_params: 134515008
+  dataset: prompt-suite-local
+  data_mode: local-prompt
+  config:
+    requested_decode_tokens: 16
+    target_generated_tokens: 8
+    max_context_tokens: 64
+    prompt_mode: single
+    prompt_sha256: a311e5d2df67ef404950dd76a31424f32e685f475f95da502224ea9933c79125
+    batch_size: 1
+    quantization: null
+    tiny_local: false
+  quality:
+    metric: generated_tokens
+    metric_key: generated_tokens
+    target: 8
+    direction: higher
+  quality_evaluation:
+    suite: mlperf-edu-slm-quality/0.2
+    fixture_version: 2.0.0
+    suite_sha256: sha256:3d6d06b99dd92f1cf86fcde10f77b4db060397003bf654cc52c3148087ede556
+    cases: 28
+    categories: 7
+    aggregation: token-weighted-continuation-nll
+    category_guard: maximum-category-perplexity
+    gates:
+      overall_perplexity:
+        metric_key: perplexity
+        target: 7.0
+        direction: lower
+      worst_category_perplexity:
+        metric_key: worst_category_perplexity
+        target: 24.0
+        direction: lower
+    max_quantized_nll_delta: 0.1
+  timing_sample_counts:
+    prefill_latency_samples_s: 20
+    request_ttft_samples_s: 20
+    itl_samples_s: 300
+    request_end_to_end_samples_s: 20
 verified_baseline:
   evidence_status: committed-reference-summary
-  review_eligible: true
+  review_eligible: false
+  protocol_compatibility: superseded
+  replacement_required: true
+  superseded_reason: The current contract uses cache-reusing timing semantics and the
+    attributed 28-case v2 quality fixture; this packet used the former timing path and
+    four-case unweighted fixture.
+  superseded_by_quality_suite: mlperf-edu-slm-quality/0.2
   evidence_tier: public-candidate
   evidence_id: slm-decode_max_20260711T085533.624561Z
   evidence_file: reference_results/slm-decode/slm-decode_max_20260711T085533.624561Z.json
@@ -129,18 +209,16 @@ verified_baseline:
   accepted_runs: 5
   functional_passes: 5
   coefficient_of_variation: 0.00861551108693729
-  baseline_note: Clean five-run project reference from exact source commit 0ec4d3e1. Evidence
-    semantics were recomputed from the raw reports and manifests during promotion. Every run
-    passed its functional gate. The primary performance metric has 0.86% sample coefficient
-    of variation across the five runs, within the 5% promotion limit. The speed is a machine
-    observation, not a portable target. Content-addressed portable run packages are retained
-    for local review, but no public package URL is recorded. This is not an MLCommons-verified
-    result.
+  baseline_note: This five-run packet used the superseded four-case, unweighted quality protocol
+    and is retained only for historical traceability. Its speed values are not review eligible
+    under the 28-case v2 fixture. A clean five-run replacement packet is required before
+    promotion. This is not an MLCommons-verified result.
 scenario: single_stream
 public:
   status: performance-bearing
-  rationale: Uses an off-the-shelf permissive SLM with a deterministic prompt set; reports
-    comparable serving performance with a functional generation check rather than task accuracy.
+  rationale: Uses an off-the-shelf permissive SLM with a versioned, attributed continuation
+    suite; serving performance is comparable only after the overall and weakest-category
+    task-quality gates pass.
 runner:
   min: mlperf.runners.slm:run_decode_min
   max: mlperf.runners.slm:run_decode_max

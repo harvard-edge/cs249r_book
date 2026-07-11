@@ -20,11 +20,13 @@ Systems Focus:
     - Students measure reconstruction quality vs. bottleneck size
 
 Quality Target:
-    - AUC >= 0.85 on held-out anomaly detection
+    - Macro AUROC >= 0.93 on the versioned MNIST hard-curve protocol
+    - Worst-class AUROC >= 0.90
+    - Per-class AUROC improvement over no-training controls >= 0.20
 
 Dataset:
     Primary: ToyADMOS (Koizumi et al. 2019) / DCASE 2020 Task 2
-    Fallback: MNIST (train on one digit class, detect others as anomalies)
+    Fallback: MNIST hard-curve-v1 (train on digit 5; detect 3, 8, and 9)
 
 Provenance: MLPerf Tiny Benchmark Suite, Banbury et al. 2021
 """
@@ -33,6 +35,11 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.utils.data as data
+
+
+MNIST_HARD_ANOMALY_PROTOCOL = "mnist-hard-curve-v1"
+MNIST_HARD_NORMAL_CLASS = 5
+MNIST_HARD_ANOMALY_CLASSES = (3, 8, 9)
 
 
 class AnomalyDetectionAE(nn.Module):
@@ -124,16 +131,23 @@ class MNISTAnomalyDataset(data.Dataset):
     """
     MNIST-based anomaly detection dataset.
 
-    Training: only "normal" digits (e.g., digit 0)
-    Validation: mix of normal + anomalous digits
-    The model learns to reconstruct digit 0; other digits have higher error.
+    Training contains only digit 5. Evaluation pairs held-out fives with the
+    visually related curved digits 3, 8, and 9. Returning the original digit
+    labels allows the runner to report a separate AUROC for every anomaly
+    class instead of allowing easy classes to hide a weak one.
 
     This is a pedagogical stand-in for ToyADMOS audio data, using the
     same autoencoder architecture. The principle is identical:
     train on normal → detect anomaly via reconstruction error.
     """
 
-    def __init__(self, root="./data", train=True, normal_class=0):
+    def __init__(
+        self,
+        root="./data",
+        train=True,
+        normal_class=MNIST_HARD_NORMAL_CLASS,
+        anomaly_classes=MNIST_HARD_ANOMALY_CLASSES,
+    ):
         import torchvision
         import torchvision.transforms as transforms
 
@@ -147,22 +161,35 @@ class MNISTAnomalyDataset(data.Dataset):
             root=root, train=train, download=True, transform=transform
         )
 
+        anomaly_classes = tuple(int(value) for value in anomaly_classes)
+        if normal_class in anomaly_classes:
+            raise ValueError("normal_class cannot also be an anomaly class")
+        if not anomaly_classes:
+            raise ValueError("at least one anomaly class is required")
+
         if train:
             # Training: only normal class
             indices = [
                 i for i, (_, label) in enumerate(full_dataset) if label == normal_class
             ]
             self.data = torch.stack([full_dataset[i][0] for i in indices])
-            self.labels = torch.zeros(len(indices), dtype=torch.long)  # all normal
+            self.labels = torch.full(
+                (len(indices),), int(normal_class), dtype=torch.long
+            )
         else:
-            # Validation: all classes, with labels (0=normal, 1=anomaly)
-            self.data = torch.stack(
-                [full_dataset[i][0] for i in range(len(full_dataset))]
+            # Evaluation: normal class plus the versioned hard anomaly set.
+            selected = {int(normal_class), *anomaly_classes}
+            indices = [
+                i for i, (_, label) in enumerate(full_dataset) if label in selected
+            ]
+            self.data = torch.stack([full_dataset[i][0] for i in indices])
+            self.labels = torch.tensor(
+                [full_dataset[i][1] for i in indices], dtype=torch.long
             )
-            original_labels = torch.tensor(
-                [full_dataset[i][1] for i in range(len(full_dataset))]
-            )
-            self.labels = (original_labels != normal_class).long()
+
+        self.normal_class = int(normal_class)
+        self.anomaly_classes = anomaly_classes
+        self.protocol = MNIST_HARD_ANOMALY_PROTOCOL
 
     def __len__(self):
         return len(self.data)
@@ -174,16 +201,33 @@ class MNISTAnomalyDataset(data.Dataset):
 
 
 def get_mnist_anomaly_dataloaders(
-    batch_size=64, data_dir="./data", normal_class=0, num_workers=0
+    batch_size=64,
+    data_dir="./data",
+    normal_class=MNIST_HARD_NORMAL_CLASS,
+    anomaly_classes=MNIST_HARD_ANOMALY_CLASSES,
+    num_workers=0,
+    seed=0,
 ):
     """
     Returns (train_loader, val_loader) for MNIST anomaly detection.
 
-    Training set: only normal_class digits
-    Validation set: all digits (normal_class → label 0, others → label 1)
+    Training contains only ``normal_class``. Evaluation contains the normal
+    class and every class in ``anomaly_classes`` while preserving original
+    digit labels for classwise scoring.
     """
-    train_ds = MNISTAnomalyDataset(root=data_dir, train=True, normal_class=normal_class)
-    val_ds = MNISTAnomalyDataset(root=data_dir, train=False, normal_class=normal_class)
+    train_ds = MNISTAnomalyDataset(
+        root=data_dir,
+        train=True,
+        normal_class=normal_class,
+        anomaly_classes=anomaly_classes,
+    )
+    val_ds = MNISTAnomalyDataset(
+        root=data_dir,
+        train=False,
+        normal_class=normal_class,
+        anomaly_classes=anomaly_classes,
+    )
+    generator = torch.Generator().manual_seed(int(seed))
 
     train_loader = data.DataLoader(
         train_ds,
@@ -191,6 +235,7 @@ def get_mnist_anomaly_dataloaders(
         shuffle=True,
         num_workers=num_workers,
         drop_last=True,
+        generator=generator,
     )
     val_loader = data.DataLoader(
         val_ds,

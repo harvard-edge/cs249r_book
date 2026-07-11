@@ -1,13 +1,66 @@
 import hashlib
 import json
+import subprocess
 
 from mlperf.manifest import (
     INTEGRITY_DIGEST_ALGO,
     LEGACY_PORTABLE_SIGNATURE_ALGO,
     LEGACY_PORTABLE_SIGNATURE_DOMAIN,
+    _git_leaf,
     build_provd,
+    rng_leaf,
     verify_provd,
 )
+
+
+def test_rng_leaf_distinguishes_initial_and_manifest_capture_states():
+    first = rng_leaf(7, b"state-after-work", None)
+    second = rng_leaf(7, b"different-state-after-work", None)
+
+    assert first["torch_initial_state_sha256"] == second["torch_initial_state_sha256"]
+    assert first["torch_initial_state_derivation"].startswith("torch.Generator")
+    assert first["torch_captured_state_sha256"] != second["torch_captured_state_sha256"]
+    assert first["torch_captured_state_point"] == "manifest-construction"
+    assert "numpy_state_sha256" not in first
+
+
+def test_git_leaf_binds_staged_unstaged_and_untracked_content(tmp_path):
+    subprocess.run(["git", "init", "-q"], cwd=tmp_path, check=True)
+    subprocess.run(
+        ["git", "config", "user.email", "benchmark@example.invalid"],
+        cwd=tmp_path,
+        check=True,
+    )
+    subprocess.run(
+        ["git", "config", "user.name", "Benchmark Test"],
+        cwd=tmp_path,
+        check=True,
+    )
+    tracked = tmp_path / "tracked.txt"
+    tracked.write_text("committed\n")
+    subprocess.run(["git", "add", "tracked.txt"], cwd=tmp_path, check=True)
+    subprocess.run(["git", "commit", "-qm", "fixture"], cwd=tmp_path, check=True)
+
+    assert _git_leaf(tmp_path)["git_dirty"] is False
+
+    untracked = tmp_path / "untracked.txt"
+    untracked.write_text("first\n")
+    first = _git_leaf(tmp_path)
+    assert first["git_dirty"] is True
+    assert first["patch_hash"].startswith("sha256:")
+
+    untracked.write_text("second\n")
+    second = _git_leaf(tmp_path)
+    assert second["patch_hash"] != first["patch_hash"]
+
+    subprocess.run(["git", "add", "untracked.txt"], cwd=tmp_path, check=True)
+    staged = _git_leaf(tmp_path)
+    assert staged["git_dirty"] is True
+    assert staged["patch_hash"] != second["patch_hash"]
+
+    tracked.write_text("unstaged\n")
+    unstaged = _git_leaf(tmp_path)
+    assert unstaged["patch_hash"] != staged["patch_hash"]
 
 
 def test_build_provd_outside_git_repo_is_quiet(tmp_path, capfd):
@@ -75,6 +128,38 @@ def test_manifest_integrity_digest_is_portable_and_not_mislabeled_as_signature(
     assert result.all_ok, result.checks
     assert any(
         name == "hardware.fingerprint_sha256" and ok for name, ok, _ in result.checks
+    )
+
+
+def test_manifest_recomputes_seed_derived_initial_rng_state(tmp_path):
+    from mlperf.manifest import integrity_record, merkle_root
+
+    report_path = tmp_path / "report.json"
+    report = {"workload": "toy", "status": "passed", "metrics": {"loss": 1.0}}
+    report_path.write_text(json.dumps(report) + "\n")
+    manifest = build_provd(
+        workload="toy",
+        scenario="train",
+        division="open",
+        hardware_fingerprint={"platform": "test"},
+        report=report,
+        report_path=report_path,
+        rng_seed=7,
+        torch_state_bytes=b"captured-after-work",
+        repo_root=tmp_path,
+    ).to_dict()
+    manifest["leaves"]["rng"]["torch_initial_state_sha256"] = "sha256:" + "0" * 64
+    manifest["merkle_root"] = merkle_root(manifest["leaves"])
+    manifest["integrity"] = integrity_record(manifest["merkle_root"])
+    manifest_path = tmp_path / "toy.provd.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n")
+
+    result = verify_provd(manifest_path, repo_root=tmp_path)
+
+    assert not result.all_ok
+    assert any(
+        name == "rng.torch_initial_state_sha256" and not ok
+        for name, ok, _ in result.checks
     )
 
 

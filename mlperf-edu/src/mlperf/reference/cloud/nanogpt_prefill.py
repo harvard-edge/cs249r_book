@@ -1,7 +1,7 @@
 """
 MLPerf EDU: NanoGPT-Prefill workload (Cloud Division)
 
-Single forward pass over a long context with KV-cache disabled. Exercises
+Single forward pass over a long context while materializing the KV cache. Exercises
 the compute-bound regime: every weight matrix is reused across `ctx_len`
 tokens, giving high arithmetic intensity. Should sit on the compute side
 of the roofline.
@@ -10,11 +10,36 @@ Pair with nanogpt-decode (same checkpoint) to observe the prefill-vs-decode
 bottleneck split that defines modern LLM serving economics.
 """
 
+import hashlib
+import json
 import statistics
 import time
 import torch
 
 from .nanogpt_train import NanoGPTWhiteBox
+
+
+FIXED_PROMPT_SEED = 314159
+
+
+def fixed_token_prompt(
+    *, batch_size: int, context_len: int, vocab_size: int, device: torch.device
+) -> tuple[torch.Tensor, str]:
+    """Create the canonical inference prompt independently of the run seed."""
+    generator = torch.Generator(device="cpu").manual_seed(FIXED_PROMPT_SEED)
+    prompt = torch.randint(
+        0,
+        vocab_size,
+        (batch_size, context_len),
+        dtype=torch.long,
+        generator=generator,
+    )
+    canonical = json.dumps(
+        {"shape": list(prompt.shape), "token_ids": prompt.reshape(-1).tolist()},
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+    return prompt.to(device), hashlib.sha256(canonical).hexdigest()
 
 
 def _sync(device: torch.device):
@@ -45,9 +70,9 @@ def estimate_activation_bytes(model: NanoGPTWhiteBox, ctx_len: int, batch: int) 
 class NanoGPTPrefill:
     """Times one forward pass over `ctx_len` tokens.
 
-    Reports prefill latency, throughput, and a static peak-activation
-    estimate. The KV cache is *not* warmed; this is the cold prefill
-    regime that production serving systems run once per request.
+    Reports prefill latency, throughput, KV-cache bytes, and a static
+    peak-activation estimate. Each timed forward materializes a fresh cache,
+    matching the prompt-processing phase that precedes cached decode.
     """
 
     def __init__(
@@ -67,21 +92,34 @@ class NanoGPTPrefill:
         self, n_warmup: int = 3, n_iter: int = 10, emit_sidecar: bool = True
     ) -> dict:
         device = next(self.model.parameters()).device
-        ids = torch.randint(0, self.vocab, (self.batch, self.ctx_len), device=device)
+        ids, prompt_sha256 = fixed_token_prompt(
+            batch_size=self.batch,
+            context_len=self.ctx_len,
+            vocab_size=self.vocab,
+            device=device,
+        )
         act_bytes = estimate_activation_bytes(self.model, self.ctx_len, self.batch)
 
         with torch.no_grad():
             for _ in range(n_warmup):
-                self.model(ids)
+                _, warmup_cache = self.model(ids, use_kv_cache=True)
+                _validate_kv_cache(warmup_cache, expected_context=self.ctx_len)
+                del warmup_cache
             _sync(device)
 
             latencies = []
+            kv_cache = None
             for _ in range(n_iter):
+                kv_cache = None
                 _sync(device)
                 t0 = time.perf_counter()
-                self.model(ids)
+                _, kv_cache = self.model(ids, use_kv_cache=True)
                 _sync(device)
                 latencies.append(time.perf_counter() - t0)
+                _validate_kv_cache(kv_cache, expected_context=self.ctx_len)
+
+        if kv_cache is None:
+            raise ValueError("prefill measurement requires at least one measured run")
 
         ordered = sorted(latencies)
         latency = statistics.median(ordered)
@@ -91,6 +129,10 @@ class NanoGPTPrefill:
             "phase": "prefill",
             "context_length": self.ctx_len,
             "batch_size": self.batch,
+            "prompt_seed": FIXED_PROMPT_SEED,
+            "prompt_sha256": prompt_sha256,
+            "kv_cache_materialized": True,
+            "kv_cache_bytes": _kv_cache_bytes(kv_cache),
             "prefill_latency_s": latency,
             "prefill_latency_median_s": latency,
             "prefill_latency_p90_s": p90,
@@ -99,6 +141,33 @@ class NanoGPTPrefill:
             "prefill_tokens_per_sec": self.ctx_len * self.batch / latency,
             "peak_activation_bytes": act_bytes,
         }
+
+
+def _validate_kv_cache(kv_cache: object, *, expected_context: int) -> None:
+    if not isinstance(kv_cache, (list, tuple)) or not kv_cache:
+        raise ValueError("prefill model did not return a KV cache")
+    for layer in kv_cache:
+        if not isinstance(layer, (list, tuple)) or len(layer) != 2:
+            raise ValueError("prefill model returned an invalid KV-cache layer")
+        key, value = layer
+        if not torch.is_tensor(key) or not torch.is_tensor(value):
+            raise ValueError("prefill KV-cache entries must be tensors")
+        if key.shape[-2] != expected_context or value.shape[-2] != expected_context:
+            raise ValueError("prefill KV cache does not cover the complete prompt")
+
+
+def _kv_cache_bytes(kv_cache: object) -> int:
+    if not isinstance(kv_cache, (list, tuple)) or not kv_cache:
+        raise ValueError("prefill model did not return a KV cache")
+    total = 0
+    for layer in kv_cache:
+        if not isinstance(layer, (list, tuple)) or len(layer) != 2:
+            raise ValueError("prefill model returned an invalid KV-cache layer")
+        for tensor in layer:
+            if not torch.is_tensor(tensor):
+                raise ValueError("prefill KV-cache entries must be tensors")
+            total += tensor.numel() * tensor.element_size()
+    return int(total)
 
 
 def run_benchmark(

@@ -25,14 +25,13 @@ request to publish competitive results. The most useful first review would
 address the project name, sponsoring group, candidate workload set, quality
 targets, inference scenarios, asset policy, report schema, and result wording.
 
-The current reference snapshot contains eight committed, content-addressed
-summaries produced from clean source commit
-`0ec4d3e1c415944227d0754d170edb0addc1d925`. All five score-bearing and three
-performance-bearing candidates passed their declared five-execution contracts.
-The complete raw attempts are retained for local handoff, but no public
-artifact URL is claimed. This closes the in-repository reference-generation
-step without implying MLCommons approval, hosted CI success, independent
-reproduction, or publication readiness.
+The repository retains eight committed, content-addressed summaries produced
+from clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`.
+The label `protocol-superseded historical reference` applies to every one of
+them because the benchmark contracts have since changed. They remain useful for
+traceability, but they are not current review evidence. All five score-bearing
+and three performance-bearing candidates require fresh five-execution packets
+from the final clean revision before this proposal is ready to send.
 
 ## Problem the Project Addresses
 
@@ -70,18 +69,19 @@ report contract. The five-run median must also pass.
 
 | **Candidate** | **Data or Model** | **Gate** | **Current Evidence Boundary** |
 |:---|:---|:---|:---|
-| NanoGPT training | Deterministic excerpt generated from Project Gutenberg eBook 100 | cross-entropy loss `<= 2.30` | Committed summary from `0ec4d3e1`; five runs at `1.9744`-`2.1648`, median `2.0789`; passed. |
-| Micro-DLRM training | MovieLens-100K | best validation accuracy `>= 0.70` | Committed summary from `0ec4d3e1`; five runs at `0.7019`-`0.7094`, median `0.7041`; passed. Raw evidence remains local while dataset policy is unresolved. |
-| MNIST anomaly autoencoder | MNIST, zero treated as normal | anomaly AUROC `>= 0.95` | Committed summary from `0ec4d3e1`; five runs at `0.9645`-`0.9701`, median `0.9666`; passed. |
-| ResNet-18 training | Fashion-MNIST | top-1 accuracy `>= 0.85` | Committed summary from `0ec4d3e1`; five runs at `0.8630`-`0.8781`, median `0.8750`; passed. |
-| MobileNetV2 training | Fashion-MNIST | top-1 accuracy `>= 0.78` | Committed summary from `0ec4d3e1`; five runs at `0.7970`-`0.8238`, median `0.8089`; passed. |
-| NanoGPT prefill | Quality-approved NanoGPT checkpoint | positive checkpoint-backed prefill throughput | Committed summary from `0ec4d3e1`; five executions, median `124578.18` tokens/s and 4.60% CV; shared packaged training lineage verified. |
-| NanoGPT decode | Same quality-approved checkpoint | 64 decode steps and positive throughput | Committed summary from `0ec4d3e1`; five executions completed 64 steps, median `131.8344` tokens/s and 2.09% CV; shared lineage verified. |
-| SmolLM2 baseline | Pinned 135M model revision and four bundled continuation cases | at least eight tokens and perplexity `<= 10` | Committed summary from `0ec4d3e1`; all five executions passed the token and perplexity gates, with median `101.3853` tokens/s and 0.86% CV. |
+| NanoGPT training | Deterministic excerpt generated from Project Gutenberg eBook 100 | cross-entropy loss `<= 2.30` | Replacement five-run packet pending. |
+| Micro-DLRM training | MovieLens-100K official split, without rating-derived aggregate features | fixed-final-epoch ROC AUC `>= 0.76` | Replacement five-run packet pending; the historical accuracy packet is ineligible. |
+| MNIST anomaly autoencoder | Digit 5 normal; digits 3, 8, and 9 anomalous | macro AUROC `>= 0.93`, worst-class AUROC `>= 0.90`, and learned-control margin `>= 0.20` | Replacement five-run packet pending. |
+| ResNet-18 training | Fashion-MNIST | top-1 accuracy `>= 0.85` | Replacement five-run packet pending. |
+| MobileNetV2 training | Fashion-MNIST | top-1 accuracy `>= 0.78` | Replacement five-run packet pending. |
+| NanoGPT prefill | Quality-approved NanoGPT checkpoint | positive checkpoint-backed prefill throughput with fresh cache materialization | Replacement five-run packet pending under the corrected twenty-sample protocol. |
+| NanoGPT decode | Same quality-approved checkpoint | 64 decode steps and positive throughput | Replacement five-run packet pending under corrected causal TTFT and ITL boundaries. |
+| SmolLM2 baseline | Pinned 135M model revision and 28 attributed continuation cases across seven categories | at least eight tokens, token-weighted perplexity `<= 7`, and worst-category perplexity `<= 24` | Bounded v2 calibration passed at `5.2272` overall and `18.9403` worst-category perplexity. The old four-case packet is protocol-superseded; a replacement five-run packet is required. |
 
-The dynamic-int8 SLM variant remains systems-only because its current
-calibration completes generation but fails the quality-parity limit. This is an
-intentional example of quality taking precedence over a performance label.
+The dynamic-int8 SLM variant remains systems-only because its historical v1
+calibration failed quality parity and a v2 calibration is still required. This
+is an intentional example of quality taking precedence over a performance
+label.
 
 ## Measurement and Evidence Model
 
@@ -138,8 +138,9 @@ The requested review topics follow.
   for course-scale training targets.
 - Whether NanoGPT prefill and decode scenarios, warmups, repetitions, and
   latency statistics are appropriate.
-- Whether the pinned SmolLM2 model, four-case continuation fixture, perplexity
-  limit, and token floor are adequate for a first serving candidate.
+- Whether the pinned SmolLM2 model, attributed 28-case continuation fixture,
+  token-weighted aggregation, overall and weakest-category perplexity limits,
+  and token floor are adequate for a first serving candidate.
 - Which report fields and schema-stability guarantees reviewers require.
 - Which wording cleanly separates independent educational candidate results
   from official competitive MLPerf results.
@@ -157,7 +158,8 @@ must include all of the following, with measurements anchored to source commit
   unassigned for the bounded review.
 - The verified NanoGPT training package, checkpoint digest, prefill packet, and
   decode packet.
-- The pinned SmolLM2 packet with task-quality evidence and fixture digest.
+- A replacement pinned SmolLM2 packet with v2 task-quality evidence, exact
+  fixture digest, and overall plus weakest-category gate results.
 - Provenance verification, grading, and portable package examples.
 - Clean wheel installs on Linux and the primary macOS laptop environment.
 - Generated review packets, rendered website, link checks, and representative

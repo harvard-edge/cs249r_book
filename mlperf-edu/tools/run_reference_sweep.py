@@ -36,12 +36,16 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TOOL_NAME = "run_reference_sweep.py"
-TOOL_VERSION = "2.3.0"
+TOOL_VERSION = "3.0.0"
 TOOL_ID = f"tools/{TOOL_NAME} v{TOOL_VERSION}"
 SCORE_PUBLIC_DATA_MODES = frozenset({"real"})
 PERFORMANCE_PUBLIC_DATA_MODES = frozenset({"real", "checkpoint-backed", "local-prompt"})
 PUBLIC_STATUSES = frozenset({"score-bearing", "performance-bearing"})
+REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.4"
 DEFAULT_TIMEOUT_SECONDS = 7200.0
+DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS = 5.0
+MAX_INTER_EXECUTION_COOLDOWN_SECONDS = 300.0
+PUBLIC_PRIMARY_METRIC_CV_LIMIT = 0.05
 DEFAULT_OUTPUT_DIR = Path.home() / ".mlperf-edu" / "reference_runs"
 MAX_LINEAGE_PACKAGE_MEMBERS = 256
 MAX_LINEAGE_PACKAGE_BYTES = 2 * 1024**3
@@ -137,6 +141,7 @@ def main():
             enrich_report_for_display,
             grade_manifest,
             metric_key_for_quality,
+            run_comparison_fingerprint_sha256,
             run_workload,
             update_measurement_manifest,
             write_report_exports,
@@ -171,26 +176,46 @@ def main():
         grade = grade_manifest(manifest_path)
         quality = report.get("quality") or {}
         metrics = report.get("metrics") or {}
-        functional_metric = quality.get("metric") or getattr(workload, "quality_metric", None)
         measurement_protocol = workload.raw.get("measurement_protocol") or {}
-        performance_metric = (
-            measurement_protocol.get("primary_metric")
+        primary_metric = measurement_protocol.get("primary_metric")
+        quality_metric = (
+            getattr(workload, "quality_metric", None)
+            if workload.public_status == "score-bearing"
+            else None
+        )
+        functional_metric = (
+            quality.get("metric") or getattr(workload, "quality_metric", None)
             if workload.public_status == "performance-bearing"
             else None
         )
-        declared_metric = performance_metric or functional_metric
-        metric_key = metric_key_for_quality(declared_metric, metrics)
-        metric_value = metrics.get(metric_key) if metric_key else None
-        if isinstance(metric_value, bool) or not isinstance(metric_value, (int, float)):
-            metric_value = None
-        elif not math.isfinite(float(metric_value)):
-            metric_value = None
-        else:
-            metric_value = float(metric_value)
+
+        def finite_metric(metric_name, *, preferred_key=None):
+            key = None
+            if preferred_key and preferred_key in metrics:
+                key = str(preferred_key)
+            elif metric_name:
+                key = metric_key_for_quality(metric_name, metrics)
+            value = metrics.get(key) if key else None
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                return key, None
+            return key, float(value)
+
+        primary_metric_key, primary_metric_value = finite_metric(primary_metric)
+        gate_metric = quality_metric or functional_metric
+        gate_metric_key, gate_metric_value = finite_metric(
+            gate_metric, preferred_key=quality.get("metric_key")
+        )
 
         report_seed = report.get("seed")
         manifest_seed = ((manifest.get("leaves") or {}).get("rng") or {}).get("seed")
         data_mode = report.get("data_mode")
+        report_scenario = report.get("scenario")
+        manifest_scenario = manifest.get("scenario")
+        registry_scenario = getattr(workload, "scenario", None)
         execution_backend = str(report.get("backend") or "")
         requested_device = args.get("device")
         invalid_reasons = []
@@ -204,10 +229,35 @@ def main():
             invalid_reasons.append(f"report recorded seed {report_seed!r}, requested {seed}")
         if manifest_seed != seed:
             invalid_reasons.append(f"manifest recorded seed {manifest_seed!r}, requested {seed}")
-        if metric_value is None:
-            invalid_reasons.append(f"declared reference metric {declared_metric!r} has no finite numeric report value")
-        if workload.public_status == "performance-bearing" and quality.get("target_met") is not True:
-            invalid_reasons.append("performance-bearing functional check did not pass")
+        if args["evidence_tier"] == "public-candidate":
+            if not registry_scenario:
+                invalid_reasons.append("registry scenario is missing")
+            if report_scenario != registry_scenario:
+                invalid_reasons.append(
+                    f"report scenario {report_scenario!r} does not match registry "
+                    f"scenario {registry_scenario!r}"
+                )
+            if manifest_scenario != registry_scenario:
+                invalid_reasons.append(
+                    f"manifest scenario {manifest_scenario!r} does not match registry "
+                    f"scenario {registry_scenario!r}"
+                )
+        if primary_metric_value is None:
+            invalid_reasons.append(
+                f"declared primary metric {primary_metric!r} has no finite numeric report value"
+            )
+        if workload.public_status == "score-bearing" and gate_metric_value is None:
+            invalid_reasons.append(
+                f"declared quality metric {quality_metric!r} has no finite numeric report value"
+            )
+        if workload.public_status == "performance-bearing" and gate_metric_value is None:
+            invalid_reasons.append(
+                f"declared functional metric {functional_metric!r} has no finite numeric report value"
+            )
+        if quality.get("target_met") is not True:
+            invalid_reasons.append(
+                f"{workload.public_status} quality or functional gate did not pass"
+            )
         if requested_device and requested_device.lower() not in execution_backend.lower():
             invalid_reasons.append(
                 f"report execution backend {execution_backend!r} does not match requested device {requested_device!r}"
@@ -219,8 +269,60 @@ def main():
         review_contract = report.get("review_contract") or {}
         if args["evidence_tier"] == "public-candidate" and review_contract.get("status") != "passed":
             invalid_reasons.append("report review contract did not pass")
+        if args["evidence_tier"] == "public-candidate":
+            expected_review = {
+                "metric": primary_metric,
+                "metric_key": primary_metric_key,
+                "metric_value": primary_metric_value,
+                "functional_metric": gate_metric,
+                "functional_metric_key": gate_metric_key,
+                "functional_metric_value": gate_metric_value,
+            }
+            for field, expected in expected_review.items():
+                if review_contract.get(field) != expected:
+                    invalid_reasons.append(
+                        f"review contract {field}={review_contract.get(field)!r} "
+                        f"does not match raw report metric {expected!r}"
+                    )
+            expected_grade = {
+                "passed": True,
+                "target_met": True,
+                "metric": gate_metric,
+                "value": gate_metric_value,
+                "target": quality.get("target"),
+            }
+            for field, expected in expected_grade.items():
+                if grade.get(field) != expected:
+                    invalid_reasons.append(
+                        f"grade {field}={grade.get(field)!r} does not match "
+                        f"quality or functional gate {expected!r}"
+                    )
 
         fingerprint = report.get("run_fingerprint") or {}
+        comparison_fingerprint_sha256 = fingerprint.get(
+            "comparison_fingerprint_sha256"
+        )
+        recomputed_comparison_fingerprint_sha256 = (
+            run_comparison_fingerprint_sha256(fingerprint)
+            if isinstance(fingerprint, dict)
+            else None
+        )
+        if (
+            not isinstance(comparison_fingerprint_sha256, str)
+            or len(comparison_fingerprint_sha256) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in comparison_fingerprint_sha256
+            )
+        ):
+            invalid_reasons.append(
+                "report comparison_fingerprint_sha256 is missing or malformed"
+            )
+        elif comparison_fingerprint_sha256 != recomputed_comparison_fingerprint_sha256:
+            invalid_reasons.append(
+                "report comparison_fingerprint_sha256 does not match its canonical "
+                "comparison record"
+            )
         hardware = fingerprint.get("hardware") or {}
         execution = fingerprint.get("execution") or {}
         result.update({
@@ -230,12 +332,21 @@ def main():
             "status": report.get("status"),
             "report_recorded_seed": report_seed,
             "manifest_recorded_seed": manifest_seed,
-            "quality_metric_declared": declared_metric,
+            "primary_metric_declared": primary_metric,
+            "primary_metric_key": primary_metric_key,
+            "primary_metric_value": primary_metric_value,
+            "quality_metric_declared": quality_metric,
+            "quality_metric_key": gate_metric_key if quality_metric else None,
+            "quality_value": gate_metric_value if quality_metric else None,
             "functional_metric_declared": functional_metric,
-            "reference_metric_role": "performance" if performance_metric else "quality",
-            "quality_metric_key": metric_key,
-            "quality_value": metric_value,
+            "functional_metric_key": gate_metric_key if functional_metric else None,
+            "functional_metric_value": gate_metric_value if functional_metric else None,
+            "reference_metric_role": "performance",
             "quality_target_met": quality.get("target_met"),
+            "comparison_fingerprint_sha256": comparison_fingerprint_sha256,
+            "scenario": report_scenario,
+            "manifest_scenario": manifest_scenario,
+            "registry_scenario": registry_scenario,
             "wall_seconds": wall_seconds,
             "backend": execution_backend or None,
             "hardware_backend": hardware.get("backend"),
@@ -658,8 +769,18 @@ def run_one_seed(
     evidence_tier: str,
     allowed_data_modes: frozenset[str],
     environment_overrides: dict[str, str] | None = None,
+    cooldown_before_seconds: float = 0.0,
 ) -> dict[str, Any]:
     """Run one seed in a fresh process and return its validation record."""
+    if (
+        not math.isfinite(cooldown_before_seconds)
+        or cooldown_before_seconds < 0
+        or cooldown_before_seconds > MAX_INTER_EXECUTION_COOLDOWN_SECONDS
+    ):
+        raise ValueError(
+            "cooldown_before_seconds must be finite, nonnegative, and no greater "
+            f"than {MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g}"
+        )
     seed_dir = attempt_dir / f"seed_{seed}"
     with tempfile.TemporaryDirectory(prefix=f"mlperf-edu-seed-{seed}-") as tmp:
         args_path = Path(tmp) / "args.json"
@@ -683,6 +804,8 @@ def run_one_seed(
             str(args_path),
             str(result_path),
         ]
+        if cooldown_before_seconds > 0:
+            time.sleep(cooldown_before_seconds)
         started = time.perf_counter()
         try:
             process = subprocess.run(
@@ -780,18 +903,90 @@ def sweep_environment(
     device: str | None,
     overrides: dict[str, str] | None = None,
 ) -> dict[str, str]:
-    """Return an isolated seed environment with no higher-priority override."""
-    env = dict(os.environ)
-    env.pop("MLPERF_EDU_SEED", None)
-    env.pop("MLPERF_EDU_SLM_SEED", None)
+    """Return an isolated environment containing only explicit sweep controls."""
+    env = {
+        name: value
+        for name, value in os.environ.items()
+        if not name.startswith("MLPERF_EDU_")
+    }
     env["MLPERF_EDU_MAX_SEED"] = str(seed)
     if device:
         env["MLPERF_EDU_DEVICE"] = device
     else:
         env.pop("MLPERF_EDU_DEVICE", None)
     if overrides:
+        unexpected = sorted(set(overrides) - set(NANOGPT_LINEAGE_ENV.values()))
+        if unexpected:
+            raise ValueError(
+                f"unsupported reference sweep environment overrides: {unexpected}"
+            )
         env.update(overrides)
     return env
+
+
+def build_outer_execution_policy(
+    *,
+    public_status: str,
+    evidence_tier: str,
+    seeds: list[int],
+    configured_cooldown_seconds: float,
+) -> dict[str, Any]:
+    """Describe the fixed delay between fresh timed public-candidate processes."""
+    applies = public_status in PUBLIC_STATUSES and evidence_tier == "public-candidate"
+    executions = [
+        {
+            "execution_index": index,
+            "seed": seed,
+            "fresh_process": True,
+            "cooldown_before_seconds": (
+                configured_cooldown_seconds if applies and index > 1 else 0.0
+            ),
+        }
+        for index, seed in enumerate(seeds, start=1)
+    ]
+    return {
+        "scope": "outer-process-executions",
+        "applies": applies,
+        "applicability": (
+            "all public-candidate score-bearing and performance-bearing workloads"
+        ),
+        "mode": "fixed-delay-between-fresh-processes" if applies else "not-applied",
+        "execution_unit": "one fresh Python subprocess per requested seed",
+        "process_execution_count": len(executions),
+        "configured_cooldown_seconds": configured_cooldown_seconds,
+        "default_cooldown_seconds": DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS,
+        "maximum_cooldown_seconds": MAX_INTER_EXECUTION_COOLDOWN_SECONDS,
+        "first_execution_has_no_cooldown": True,
+        "timing_scope": (
+            "The cooldown occurs before subprocess launch and is excluded from "
+            "both subprocess wall time and within-run timing samples."
+        ),
+        "executions": executions,
+    }
+
+
+def record_outer_execution(
+    result: dict[str, Any],
+    execution: dict[str, Any],
+    policy: dict[str, Any],
+) -> None:
+    """Bind process order and stabilization controls to one run record."""
+    execution_record = dict(execution)
+    result["outer_process_execution"] = execution_record
+    reproduce = dict(result.get("reproduce") or {})
+    reproduce["reference_sweep"] = {
+        "outer_process_execution": execution_record,
+        "inter_execution_cooldown": {
+            "cli_option": "--inter-execution-cooldown-seconds",
+            "configured_seconds": policy["configured_cooldown_seconds"],
+            "applied_before_this_execution_seconds": execution_record[
+                "cooldown_before_seconds"
+            ],
+            "applies": policy["applies"],
+        },
+        "timing_scope": policy["timing_scope"],
+    }
+    result["reproduce"] = reproduce
 
 
 def build_row(result: dict[str, Any]) -> dict[str, Any]:
@@ -805,12 +1000,21 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
         "manifest_recorded_seed": manifest_seed,
         "seed_match": seed_match,
         "status": result.get("status"),
+        "primary_metric_declared": result.get("primary_metric_declared"),
+        "primary_metric_key": result.get("primary_metric_key"),
+        "primary_metric_value": result.get("primary_metric_value"),
         "quality_metric_declared": result.get("quality_metric_declared"),
-        "functional_metric_declared": result.get("functional_metric_declared"),
-        "reference_metric_role": result.get("reference_metric_role"),
         "quality_metric_key": result.get("quality_metric_key"),
         "quality_value": result.get("quality_value"),
+        "functional_metric_declared": result.get("functional_metric_declared"),
+        "functional_metric_key": result.get("functional_metric_key"),
+        "functional_metric_value": result.get("functional_metric_value"),
+        "reference_metric_role": result.get("reference_metric_role"),
         "quality_target_met": result.get("quality_target_met"),
+        "comparison_fingerprint_sha256": result.get("comparison_fingerprint_sha256"),
+        "scenario": result.get("scenario"),
+        "manifest_scenario": result.get("manifest_scenario"),
+        "registry_scenario": result.get("registry_scenario"),
         "wall_seconds": result.get("wall_seconds"),
         "subprocess_wall_seconds": result.get("subprocess_wall_seconds"),
         "backend": result.get("backend"),
@@ -827,19 +1031,27 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
         "evidence_valid": bool(result.get("evidence_valid")) and seed_match,
         "timed_out": bool(result.get("timed_out")),
         "invalid_reasons": list(result.get("invalid_reasons") or []),
+        "outer_process_execution": result.get("outer_process_execution"),
         "reproduce": result.get("reproduce"),
         "stderr_tail": result.get("stderr_tail"),
     }
 
 
-def seed_sensitivity(rows: list[dict[str, Any]]) -> dict[str, Any]:
+def seed_sensitivity(
+    rows: list[dict[str, Any]],
+    *,
+    value_field: str = "quality_value",
+    metric: str | None = None,
+    role: str = "quality",
+) -> dict[str, Any]:
     valid = [
         row
         for row in rows
         if row.get("evidence_valid")
-        and isinstance(row.get("quality_value"), (int, float))
+        and not isinstance(row.get(value_field), bool)
+        and isinstance(row.get(value_field), (int, float))
     ]
-    distinct = {round(float(row["quality_value"]), 12) for row in valid}
+    distinct = {round(float(row[value_field]), 12) for row in valid}
     if len(valid) < 2:
         verdict = "inconclusive"
         note = "Fewer than two valid runs; a seed-sensitivity claim cannot be made."
@@ -850,6 +1062,8 @@ def seed_sensitivity(rows: list[dict[str, Any]]) -> dict[str, Any]:
         verdict = "sensitive"
         note = f"Observed {len(distinct)} distinct quality values across {len(valid)} valid runs."
     return {
+        "metric": metric,
+        "role": role,
         "verdict": verdict,
         "distinct_quality_values": len(distinct),
         "valid_runs": len(valid),
@@ -882,6 +1096,56 @@ def aggregate_acceptance(
         "operator": operator,
         "target": target,
     }
+
+
+def score_acceptance(
+    rows: list[dict[str, Any]],
+    aggregate_value: Any,
+    target: Any,
+    direction: str | None,
+    *,
+    tolerance: float = 0.0,
+) -> dict[str, Any]:
+    """Require both median quality and every score-bearing run to pass."""
+    result = aggregate_acceptance(aggregate_value, target, direction)
+    per_run_passes: list[bool] = []
+    if isinstance(target, bool) or not isinstance(target, (int, float)):
+        result.update(
+            {
+                "passed": False,
+                "all_runs_passed": False,
+                "passed_runs": 0,
+                "run_count": len(rows),
+            }
+        )
+        return result
+    for row in rows:
+        value = row.get("quality_value")
+        numeric = (
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(float(value))
+        )
+        if direction == "lower" and numeric:
+            numeric_passed = float(value) - tolerance <= float(target)
+        elif direction == "higher" and numeric:
+            numeric_passed = float(value) + tolerance >= float(target)
+        else:
+            numeric_passed = False
+        per_run_passes.append(
+            bool(numeric_passed and row.get("quality_target_met") is True)
+        )
+    all_runs_passed = bool(rows) and all(per_run_passes)
+    result.update(
+        {
+            "passed": result.get("passed") is True and all_runs_passed,
+            "all_runs_passed": all_runs_passed,
+            "passed_runs": sum(per_run_passes),
+            "run_count": len(rows),
+            "tolerance": tolerance,
+        }
+    )
+    return result
 
 
 def performance_acceptance(
@@ -953,8 +1217,10 @@ def build_basis(
     workload: Any,
     profile: str,
     rows: list[dict[str, Any]],
-    quality: dict[str, Any],
-    metric_name: str | None,
+    primary_aggregate: dict[str, Any],
+    primary_metric_name: str | None,
+    quality_aggregate: dict[str, Any] | None,
+    quality_metric_name: str | None,
     dataset_mode: Any,
     eligible: bool,
 ) -> dict[str, Any]:
@@ -970,13 +1236,20 @@ def build_basis(
         functional_target = json.loads(next(iter(functional_targets)))
     if performance:
         functional["target"] = functional_target
+    variance_aggregate = primary_aggregate if performance else quality_aggregate or {}
+    variance_metric = primary_metric_name if performance else quality_metric_name
     return {
         "eligible_for_public_baseline": eligible,
+        "primary_metric": {
+            "name": primary_metric_name,
+            "role": "performance",
+            "aggregate": primary_aggregate,
+        },
         "variance_summary": {
             "runs": len([row for row in rows if row.get("evidence_valid")]),
             "statistic": "median",
-            "metric": metric_name,
-            **quality,
+            "metric": variance_metric,
+            **variance_aggregate,
         },
         "reference_protocol": {
             "profile": profile,
@@ -994,9 +1267,11 @@ def build_basis(
             None
             if performance
             else {
-                "metric": metric_name,
+                "metric": quality_metric_name,
                 "target": getattr(workload, "quality_value", None),
                 "direction": getattr(workload, "quality_direction", None),
+                "tolerance": getattr(workload, "quality_tolerance", None),
+                "all_runs_must_pass": True,
             }
         ),
         "functional_check": functional,
@@ -1009,6 +1284,49 @@ def _declared_protocol(workload: Any) -> dict[str, Any]:
         return protocol if isinstance(protocol, dict) else {}
     protocol = getattr(workload, "quality_reference_protocol", None)
     return protocol if isinstance(protocol, dict) else {}
+
+
+def _valid_sha256_hex(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def primary_metric_repeatability(
+    primary_aggregate: dict[str, Any], protocol: dict[str, Any]
+) -> dict[str, Any]:
+    """Recompute timing repeatability from the five-run primary metric."""
+    mean = primary_aggregate.get("mean")
+    stdev = primary_aggregate.get("stdev")
+    raw_limit = protocol.get("repeatability_limit")
+    limit = (
+        float(raw_limit)
+        if not isinstance(raw_limit, bool)
+        and isinstance(raw_limit, (int, float))
+        and math.isfinite(float(raw_limit))
+        else None
+    )
+    coefficient_of_variation = (
+        float(stdev) / float(mean)
+        if not isinstance(mean, bool)
+        and isinstance(mean, (int, float))
+        and math.isfinite(float(mean))
+        and float(mean) > 0
+        and not isinstance(stdev, bool)
+        and isinstance(stdev, (int, float))
+        and math.isfinite(float(stdev))
+        else None
+    )
+    return {
+        "metric": protocol.get("repeatability_metric"),
+        "coefficient_of_variation": coefficient_of_variation,
+        "limit": limit,
+        "passed": coefficient_of_variation is not None
+        and limit is not None
+        and coefficient_of_variation <= limit,
+    }
 
 
 def validate_sweep(
@@ -1027,18 +1345,90 @@ def validate_sweep(
                 row.get("invalid_reasons") or ["unknown validation failure"]
             )
             reasons.append(f"seed {row.get('requested_seed')}: {details}")
+        expected_primary = (workload.raw.get("measurement_protocol") or {}).get(
+            "primary_metric"
+        )
+        if row.get("primary_metric_declared") != expected_primary:
+            reasons.append(
+                f"seed {row.get('requested_seed')}: primary metric declaration "
+                f"{row.get('primary_metric_declared')!r} does not match "
+                f"{expected_primary!r}"
+            )
+        if row.get("reference_metric_role") != "performance":
+            reasons.append(
+                f"seed {row.get('requested_seed')}: primary metric role must be performance"
+            )
+        primary_value = row.get("primary_metric_value")
+        if (
+            isinstance(primary_value, bool)
+            or not isinstance(primary_value, (int, float))
+            or not math.isfinite(float(primary_value))
+            or float(primary_value) <= 0
+        ):
+            reasons.append(
+                f"seed {row.get('requested_seed')}: primary metric value is not "
+                "finite and positive"
+            )
+        if workload.public_status == "score-bearing":
+            if row.get("quality_metric_declared") != getattr(
+                workload, "quality_metric", None
+            ):
+                reasons.append(
+                    f"seed {row.get('requested_seed')}: quality metric declaration "
+                    "does not match the registry"
+                )
+            quality_value = row.get("quality_value")
+            if (
+                isinstance(quality_value, bool)
+                or not isinstance(quality_value, (int, float))
+                or not math.isfinite(float(quality_value))
+            ):
+                reasons.append(
+                    f"seed {row.get('requested_seed')}: quality metric value is not finite"
+                )
+        elif workload.public_status == "performance-bearing":
+            expected_functional = (workload.raw.get("functional_check") or {}).get(
+                "metric"
+            )
+            if row.get("functional_metric_declared") != expected_functional:
+                reasons.append(
+                    f"seed {row.get('requested_seed')}: functional metric declaration "
+                    "does not match the registry"
+                )
+            functional_value = row.get("functional_metric_value")
+            if (
+                isinstance(functional_value, bool)
+                or not isinstance(functional_value, (int, float))
+                or not math.isfinite(float(functional_value))
+            ):
+                reasons.append(
+                    f"seed {row.get('requested_seed')}: functional metric value is not finite"
+                )
     if sensitivity["verdict"] != "sensitive":
         reasons.append(f"seed sensitivity is {sensitivity['verdict']}, not sensitive")
-    metric_keys = {
-        row.get("quality_metric_key") for row in rows if row.get("quality_metric_key")
+    primary_metric_keys = {
+        row.get("primary_metric_key") for row in rows if row.get("primary_metric_key")
     }
-    if len(metric_keys) != 1:
+    if len(primary_metric_keys) != 1:
         reasons.append(
-            f"runs did not resolve to exactly one metric key: {sorted(metric_keys)}"
+            "runs did not resolve to exactly one primary metric key: "
+            f"{sorted(primary_metric_keys)}"
+        )
+    gate_field = (
+        "quality_metric_key"
+        if workload.public_status == "score-bearing"
+        else "functional_metric_key"
+    )
+    gate_metric_keys = {row.get(gate_field) for row in rows if row.get(gate_field)}
+    if len(gate_metric_keys) != 1:
+        reasons.append(
+            f"runs did not resolve to exactly one {gate_field}: "
+            f"{sorted(gate_metric_keys)}"
         )
     if not acceptance.get("passed"):
         reasons.append(
-            f"median quality acceptance failed: {acceptance.get('reason') or acceptance}"
+            "quality or functional acceptance failed: "
+            f"{acceptance.get('reason') or acceptance}"
         )
 
     if evidence_tier == "public-candidate":
@@ -1069,6 +1459,20 @@ def validate_sweep(
             reasons.append(
                 f"public candidates allow {sorted(allowed_modes)} for {workload.public_status}, observed {invalid_modes}"
             )
+        comparison_fingerprints = [
+            row.get("comparison_fingerprint_sha256") for row in rows
+        ]
+        malformed_fingerprints = [
+            value for value in comparison_fingerprints if not _valid_sha256_hex(value)
+        ]
+        distinct_fingerprints = {
+            str(value) for value in comparison_fingerprints if _valid_sha256_hex(value)
+        }
+        if malformed_fingerprints or len(distinct_fingerprints) != 1:
+            reasons.append(
+                "public-candidate runs must have exactly one identical, valid "
+                "comparison_fingerprint_sha256"
+            )
     return reasons
 
 
@@ -1087,14 +1491,14 @@ def write_evidence_summary(
 
 
 def print_summary(rows: list[dict[str, Any]], artifact_path: Path, valid: bool) -> None:
-    print("seed  valid  metric                 value       data_mode")
+    print("seed  valid  primary metric         value       data_mode")
     print("----  -----  ---------------------  ----------  -----------------")
     for row in rows:
         print(
             f"{str(row.get('requested_seed')):>4}  "
             f"{str(bool(row.get('evidence_valid'))):<5}  "
-            f"{str(row.get('quality_metric_key') or '-'):21.21}  "
-            f"{str(row.get('quality_value')):10.10}  "
+            f"{str(row.get('primary_metric_key') or '-'):21.21}  "
+            f"{str(row.get('primary_metric_value')):10.10}  "
             f"{str(row.get('data_mode') or '-')}"
         )
     print(f"evidence status: {'VALID' if valid else 'INVALID'}")
@@ -1129,6 +1533,17 @@ def main(argv: list[str] | None = None) -> int:
         help=f"per-seed timeout (default: {DEFAULT_TIMEOUT_SECONDS:g})",
     )
     parser.add_argument(
+        "--inter-execution-cooldown-seconds",
+        type=float,
+        default=DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS,
+        help=(
+            "fixed cooldown between fresh processes for all timed public-candidate "
+            "workloads; never applied before the first execution "
+            f"(default: {DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS:g}, maximum: "
+            f"{MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g})"
+        ),
+    )
+    parser.add_argument(
         "--evidence-tier",
         choices=("auto", "public-candidate", "development"),
         default="auto",
@@ -1143,6 +1558,15 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not math.isfinite(args.timeout_seconds) or args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be a finite positive number")
+    if (
+        not math.isfinite(args.inter_execution_cooldown_seconds)
+        or args.inter_execution_cooldown_seconds < 0
+        or args.inter_execution_cooldown_seconds > MAX_INTER_EXECUTION_COOLDOWN_SECONDS
+    ):
+        parser.error(
+            "--inter-execution-cooldown-seconds must be finite, nonnegative, "
+            f"and no greater than {MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g}"
+        )
 
     try:
         from mlperf.edu_cli import load_runner
@@ -1179,6 +1603,12 @@ def main(argv: list[str] | None = None) -> int:
             if workload.public_status in PUBLIC_STATUSES
             else "development"
         )
+    outer_execution_policy = build_outer_execution_policy(
+        public_status=workload.public_status,
+        evidence_tier=evidence_tier,
+        seeds=args.seeds,
+        configured_cooldown_seconds=args.inter_execution_cooldown_seconds,
+    )
     uses_nanogpt_lineage = _uses_nanogpt_training_lineage(workload)
     lineage_required = evidence_tier == "public-candidate" and uses_nanogpt_lineage
     if args.nanogpt_lineage_package and not uses_nanogpt_lineage:
@@ -1237,13 +1667,17 @@ def main(argv: list[str] | None = None) -> int:
 
     print(
         f"{TOOL_ID}: workload={workload.id} profile={args.profile} seeds={args.seeds} "
-        f"tier={evidence_tier} timeout={args.timeout_seconds:g}s"
+        f"tier={evidence_tier} timeout={args.timeout_seconds:g}s "
+        "inter-execution-cooldown="
+        f"{args.inter_execution_cooldown_seconds:g}s "
+        f"applies={outer_execution_policy['applies']}"
     )
     rows: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="mlperf-edu-sweep-bootstrap-") as tmp:
         bootstrap_path = Path(tmp) / "child.py"
         bootstrap_path.write_text(_CHILD_BOOTSTRAP)
-        for seed in args.seeds:
+        for execution in outer_execution_policy["executions"]:
+            seed = execution["seed"]
             print(f"running seed {seed} ...", flush=True)
             result = run_one_seed(
                 bootstrap_path,
@@ -1259,21 +1693,43 @@ def main(argv: list[str] | None = None) -> int:
                 environment_overrides=(
                     lineage_stage["environment"] if lineage_stage else None
                 ),
+                cooldown_before_seconds=execution["cooldown_before_seconds"],
             )
+            record_outer_execution(result, execution, outer_execution_policy)
             rows.append(build_row(result))
 
-    metric_name = next(
+    primary_metric_name = next(
         (
-            row.get("quality_metric_declared")
+            row.get("primary_metric_declared")
             for row in rows
-            if row.get("quality_metric_declared")
+            if row.get("primary_metric_declared")
         ),
-        getattr(workload, "quality_metric", None),
+        (workload.raw.get("measurement_protocol") or {}).get("primary_metric"),
     )
+    quality_metric_name = (
+        next(
+            (
+                row.get("quality_metric_declared")
+                for row in rows
+                if row.get("quality_metric_declared")
+            ),
+            getattr(workload, "quality_metric", None),
+        )
+        if workload.public_status == "score-bearing"
+        else None
+    )
+    primary_values = [
+        float(row["primary_metric_value"])
+        for row in rows
+        if row.get("evidence_valid")
+        and not isinstance(row.get("primary_metric_value"), bool)
+        and isinstance(row.get("primary_metric_value"), (int, float))
+    ]
     quality_values = [
         float(row["quality_value"])
         for row in rows
         if row.get("evidence_valid")
+        and not isinstance(row.get("quality_value"), bool)
         and isinstance(row.get("quality_value"), (int, float))
     ]
     wall_values = [
@@ -1281,17 +1737,36 @@ def main(argv: list[str] | None = None) -> int:
         for row in rows
         if row.get("execution_ok") and isinstance(row.get("wall_seconds"), (int, float))
     ]
-    quality_aggregate = aggregate(quality_values)
+    primary_aggregate = aggregate(primary_values)
+    quality_aggregate = (
+        aggregate(quality_values) if workload.public_status == "score-bearing" else None
+    )
     wall_aggregate = aggregate(wall_values)
-    sensitivity = seed_sensitivity(rows)
+    sensitivity = (
+        seed_sensitivity(
+            rows,
+            value_field="primary_metric_value",
+            metric=primary_metric_name,
+            role="performance",
+        )
+        if workload.public_status == "performance-bearing"
+        else seed_sensitivity(
+            rows,
+            value_field="quality_value",
+            metric=quality_metric_name,
+            role="quality",
+        )
+    )
     if workload.public_status == "performance-bearing":
         functional = workload.raw.get("functional_check") or {}
         acceptance = performance_acceptance(rows, functional.get("condition"))
     else:
-        acceptance = aggregate_acceptance(
-            quality_aggregate.get("median"),
+        acceptance = score_acceptance(
+            rows,
+            (quality_aggregate or {}).get("median"),
             getattr(workload, "quality_value", None),
             getattr(workload, "quality_direction", None),
+            tolerance=float(getattr(workload, "quality_tolerance", None) or 0.0),
         )
     protocol = _declared_protocol(workload)
     invalid_reasons = validate_sweep(
@@ -1302,29 +1777,22 @@ def main(argv: list[str] | None = None) -> int:
         acceptance=acceptance,
         evidence_tier=evidence_tier,
     )
-    repeatability = None
-    if workload.public_status == "performance-bearing":
-        repeatability_limit = float(protocol.get("repeatability_limit"))
-        mean = quality_aggregate.get("mean")
-        stdev = quality_aggregate.get("stdev")
-        coefficient_of_variation = (
-            float(stdev) / float(mean)
-            if isinstance(mean, (int, float))
-            and float(mean) > 0
-            and isinstance(stdev, (int, float))
-            else None
-        )
-        repeatability = {
-            "metric": protocol.get("repeatability_metric"),
-            "coefficient_of_variation": coefficient_of_variation,
-            "limit": repeatability_limit,
-            "passed": coefficient_of_variation is not None
-            and coefficient_of_variation <= repeatability_limit,
-        }
-        if repeatability["passed"] is not True:
+    primary_repeatability = primary_metric_repeatability(primary_aggregate, protocol)
+    if evidence_tier == "public-candidate":
+        repeatability_limit = primary_repeatability.get("limit")
+        if repeatability_limit != PUBLIC_PRIMARY_METRIC_CV_LIMIT:
             invalid_reasons.append(
-                "performance reference repeatability exceeds the declared "
-                f"coefficient-of-variation limit {repeatability_limit:g}"
+                "public protocol must declare a primary performance coefficient-of-"
+                f"variation limit of {PUBLIC_PRIMARY_METRIC_CV_LIMIT:g}"
+            )
+        if not primary_repeatability.get("metric"):
+            invalid_reasons.append(
+                "public protocol must name its primary performance repeatability metric"
+            )
+        if primary_repeatability["passed"] is not True:
+            invalid_reasons.append(
+                "primary performance repeatability exceeds the declared "
+                f"coefficient-of-variation limit {repeatability_limit!r}"
             )
     if evidence_tier == "public-candidate" and source.get("git_dirty") is not False:
         invalid_reasons.append(
@@ -1366,13 +1834,25 @@ def main(argv: list[str] | None = None) -> int:
         workload=workload,
         profile=args.profile,
         rows=rows,
-        quality=quality_aggregate,
-        metric_name=metric_name,
+        primary_aggregate=primary_aggregate,
+        primary_metric_name=primary_metric_name,
+        quality_aggregate=quality_aggregate,
+        quality_metric_name=quality_metric_name,
         dataset_mode=dataset_mode,
         eligible=eligible,
     )
+    comparison_fingerprints = {
+        str(row.get("comparison_fingerprint_sha256"))
+        for row in rows
+        if _valid_sha256_hex(row.get("comparison_fingerprint_sha256"))
+    }
+    comparison_fingerprint_sha256 = (
+        next(iter(comparison_fingerprints))
+        if len(comparison_fingerprints) == 1
+        else None
+    )
     artifact = {
-        "schema": "mlperf-edu-reference-evidence/0.3",
+        "schema": REFERENCE_EVIDENCE_SCHEMA,
         "evidence_id": evidence_id,
         "status": "valid" if eligible else "invalid",
         "eligible_for_public_baseline": eligible
@@ -1397,41 +1877,47 @@ def main(argv: list[str] | None = None) -> int:
         "evidence_tier": evidence_tier,
         "device_requested": args.device,
         "timeout_seconds_per_seed": args.timeout_seconds,
+        "inter_execution_stabilization": outer_execution_policy,
         "seeds_requested": args.seeds,
         "dataset_mode_declared": dataset_mode,
         "allowed_public_data_modes": sorted(allowed_data_modes),
-        "reference_metric_role": (
-            "performance"
-            if workload.public_status == "performance-bearing"
-            else "quality"
-        ),
+        "reference_metric_role": "performance",
         "primary_metric": {
-            "name": metric_name,
-            "role": (
-                "performance"
-                if workload.public_status == "performance-bearing"
-                else "quality"
-            ),
+            "name": primary_metric_name,
+            "role": "performance",
         },
-        "quality_metric": metric_name,
+        "quality_metric": quality_metric_name,
         "quality_target": (
             None
             if workload.public_status == "performance-bearing"
             else getattr(workload, "quality_value", None)
         ),
         "quality_direction": getattr(workload, "quality_direction", None),
+        "quality_gate": (
+            basis["quality_target"]
+            if workload.public_status == "score-bearing"
+            else None
+        ),
         "functional_gate": (
             basis["functional_check"]
             if workload.public_status == "performance-bearing"
             else None
         ),
+        "comparison_fingerprint_sha256": comparison_fingerprint_sha256,
         "runs": rows,
         "aggregate": {
-            "primary_metric": quality_aggregate,
+            "primary_metric": primary_aggregate,
             "quality": quality_aggregate,
             "wall_seconds": wall_aggregate,
         },
-        "repeatability": repeatability,
+        "primary_metric_repeatability": primary_repeatability,
+        # Retain the established performance-only field while schema 0.4 exposes
+        # primary timing repeatability for score-bearing training as well.
+        "repeatability": (
+            primary_repeatability
+            if workload.public_status == "performance-bearing"
+            else None
+        ),
         "seed_sensitivity": sensitivity,
         "acceptance": acceptance,
         "basis": basis,

@@ -21,6 +21,8 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import math
+import statistics
 import subprocess
 import sys
 import tempfile
@@ -33,16 +35,23 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 sys.path.insert(0, str(ROOT / "src"))
 
-from mlperf.registry import load_registry  # noqa: E402
-from mlperf.edu_cli import verify_package_archive  # noqa: E402
+from mlperf.contracts import evaluate_report_contract  # noqa: E402
+from mlperf.edu_cli import (  # noqa: E402
+    run_comparison_fingerprint_sha256,
+    verify_package_archive,
+)
 from mlperf.manifest import verify_provd  # noqa: E402
+from mlperf.registry import load_registry  # noqa: E402
 from tools import check_taxonomy  # noqa: E402
 from tools import reference_source_lock  # noqa: E402
 from tools import run_reference_sweep  # noqa: E402
 
-SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.3"
+SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.4"
+LEGACY_SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.3"
+SUPPORTED_SUMMARY_SCHEMAS = {LEGACY_SUMMARY_SCHEMA, SUMMARY_SCHEMA}
 INDEX_SCHEMA = "mlperf-edu-reference-index/0.2"
 PUBLIC_CANDIDATE_STATUSES = {"score-bearing", "performance-bearing"}
+PUBLIC_PRIMARY_METRIC_CV_LIMIT = 0.05
 EMPTY_SHA256 = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 OUTPUT_ROOTS = (
     ROOT / "reference_results",
@@ -169,6 +178,105 @@ def load_summary(path: Path) -> tuple[dict[str, Any], bytes]:
     return payload, data
 
 
+def valid_sha256_hex(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(character in "0123456789abcdef" for character in value)
+    )
+
+
+def declared_repeatability_protocol(workload_contract: Any) -> dict[str, Any]:
+    raw = workload_contract.raw
+    if workload_contract.public_status == "performance-bearing":
+        protocol = raw.get("performance_reference_protocol")
+    else:
+        protocol = (raw.get("quality_target") or {}).get("reference_protocol")
+    return protocol if isinstance(protocol, dict) else {}
+
+
+def validate_primary_metric_repeatability(
+    path: Path, payload: dict[str, Any], workload_contract: Any
+) -> None:
+    """Independently recompute the public packet's primary timing CV."""
+    protocol = declared_repeatability_protocol(workload_contract)
+    limit = protocol.get("repeatability_limit")
+    if not check_taxonomy.numbers_match(limit, PUBLIC_PRIMARY_METRIC_CV_LIMIT):
+        raise ValueError(
+            f"{path}: registry public protocol must declare repeatability_limit="
+            f"{PUBLIC_PRIMARY_METRIC_CV_LIMIT:g}"
+        )
+    metric = protocol.get("repeatability_metric")
+    if not isinstance(metric, str) or not metric:
+        raise ValueError(f"{path}: registry public protocol lacks repeatability_metric")
+    values = [run.get("primary_metric_value") for run in payload.get("runs") or []]
+    if not values or any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        or float(value) <= 0
+        for value in values
+    ):
+        raise ValueError(
+            f"{path}: primary performance repeatability values are invalid"
+        )
+    mean = statistics.fmean(float(value) for value in values)
+    stdev = (
+        statistics.stdev(float(value) for value in values) if len(values) > 1 else 0.0
+    )
+    coefficient_of_variation = stdev / mean
+    expected = {
+        "metric": metric,
+        "coefficient_of_variation": coefficient_of_variation,
+        "limit": float(limit),
+        "passed": coefficient_of_variation <= float(limit),
+    }
+    actual = payload.get("primary_metric_repeatability")
+    if not check_taxonomy.numbers_match(actual, expected):
+        raise ValueError(
+            f"{path}: primary_metric_repeatability does not match independently "
+            "recomputed values"
+        )
+    if expected["passed"] is not True:
+        raise ValueError(
+            f"{path}: primary performance coefficient of variation "
+            f"{coefficient_of_variation:.6f} exceeds limit {float(limit):.6f}"
+        )
+    if (
+        workload_contract.public_status == "performance-bearing"
+        and not check_taxonomy.numbers_match(payload.get("repeatability"), expected)
+    ):
+        raise ValueError(
+            f"{path}: performance repeatability compatibility field does not match "
+            "primary_metric_repeatability"
+        )
+
+
+def validate_summary_comparison_fingerprint(
+    path: Path, payload: dict[str, Any]
+) -> None:
+    """Require one comparison context across every row in a new public packet."""
+    digests = [
+        run.get("comparison_fingerprint_sha256")
+        for run in payload.get("runs") or []
+        if isinstance(run, dict)
+    ]
+    if not digests or any(not valid_sha256_hex(digest) for digest in digests):
+        raise ValueError(
+            f"{path}: one or more runs lack a valid comparison_fingerprint_sha256"
+        )
+    distinct = set(digests)
+    if len(distinct) != 1:
+        raise ValueError(
+            f"{path}: public-candidate runs have multiple comparison fingerprints"
+        )
+    only_digest = next(iter(distinct))
+    if payload.get("comparison_fingerprint_sha256") != only_digest:
+        raise ValueError(
+            f"{path}: summary comparison_fingerprint_sha256 does not match its runs"
+        )
+
+
 def validate_summary(
     path: Path,
     payload: dict[str, Any],
@@ -181,7 +289,6 @@ def validate_summary(
     evidence_id = payload.get("evidence_id")
     failures: list[str] = []
     expected = {
-        "schema": SUMMARY_SCHEMA,
         "status": "valid",
         "evidence_tier": "public-candidate",
         "eligible_for_public_baseline": True,
@@ -190,6 +297,11 @@ def validate_summary(
     for field, value in expected.items():
         if payload.get(field) != value:
             failures.append(f"{field}={payload.get(field)!r}, expected {value!r}")
+    if payload.get("schema") not in SUPPORTED_SUMMARY_SCHEMAS:
+        failures.append(
+            f"schema={payload.get('schema')!r}, expected one of "
+            f"{sorted(SUPPORTED_SUMMARY_SCHEMAS)!r}"
+        )
     if not isinstance(workload, str) or not workload:
         failures.append("workload is missing")
     if not isinstance(evidence_id, str) or not check_taxonomy.EVIDENCE_ID_RE.fullmatch(
@@ -222,6 +334,10 @@ def validate_summary(
         failures.append("one or more runs are not evidence-valid")
     if failures:
         raise ValueError(f"{path}: " + "; ".join(failures))
+
+    if payload.get("schema") == SUMMARY_SCHEMA:
+        validate_summary_comparison_fingerprint(path, payload)
+        validate_primary_metric_repeatability(path, payload, workload_contract)
 
     contract_body = dict(workload_contract.raw)
     contract_body.pop("verified_baseline", None)
@@ -359,6 +475,32 @@ def verify_run_semantics(
     )
     report = load_json_object(report_path, label=f"{label} report")
     manifest = load_json_object(manifest_path, label=f"{label} manifest")
+    dual_metrics = payload.get("schema") == SUMMARY_SCHEMA
+    if dual_metrics:
+        expected_scenario = getattr(workload_contract, "scenario", None) or (
+            workload_contract.raw.get("scenario")
+        )
+        if not isinstance(expected_scenario, str) or not expected_scenario:
+            raise ValueError(f"{label}: registry scenario is missing")
+        require_semantic_match(
+            f"{label} report.scenario", report.get("scenario"), expected_scenario
+        )
+        require_semantic_match(
+            f"{label} manifest.scenario", manifest.get("scenario"), expected_scenario
+        )
+        require_semantic_match(
+            f"{label} summary scenario", run.get("scenario"), expected_scenario
+        )
+        require_semantic_match(
+            f"{label} summary manifest scenario",
+            run.get("manifest_scenario"),
+            expected_scenario,
+        )
+        require_semantic_match(
+            f"{label} summary registry scenario",
+            run.get("registry_scenario"),
+            expected_scenario,
+        )
 
     for field, expected in (
         ("workload", payload.get("workload")),
@@ -374,27 +516,124 @@ def verify_run_semantics(
         raise ValueError(f"{label}: raw report did not pass")
 
     metrics = report.get("metrics") or {}
-    metric_key = run.get("quality_metric_key")
-    require_semantic_match(
-        f"{label} metric value", metrics.get(metric_key), run.get("quality_value")
-    )
-    require_semantic_match(
-        f"{label} declared metric",
-        run.get("quality_metric_declared"),
-        payload.get("quality_metric"),
-    )
+    if dual_metrics:
+        primary = payload.get("primary_metric") or {}
+        primary_name = primary.get("name")
+        primary_key = run.get("primary_metric_key")
+        primary_value = run.get("primary_metric_value")
+        require_semantic_match(
+            f"{label} declared primary metric",
+            run.get("primary_metric_declared"),
+            primary_name,
+        )
+        require_semantic_match(
+            f"{label} primary metric value",
+            metrics.get(primary_key),
+            primary_value,
+        )
+        public_status = payload.get("public_status")
+        if public_status == "score-bearing":
+            gate_name = payload.get("quality_metric")
+            gate_key = run.get("quality_metric_key")
+            gate_value = run.get("quality_value")
+            require_semantic_match(
+                f"{label} declared quality metric",
+                run.get("quality_metric_declared"),
+                gate_name,
+            )
+            if run.get("functional_metric_declared") is not None:
+                raise ValueError(
+                    f"{label}: score-bearing run must not declare a functional metric"
+                )
+        elif public_status == "performance-bearing":
+            gate_name = (payload.get("functional_gate") or {}).get("metric")
+            gate_key = run.get("functional_metric_key")
+            gate_value = run.get("functional_metric_value")
+            require_semantic_match(
+                f"{label} declared functional metric",
+                run.get("functional_metric_declared"),
+                gate_name,
+            )
+            if any(
+                run.get(field) is not None
+                for field in (
+                    "quality_metric_declared",
+                    "quality_metric_key",
+                    "quality_value",
+                )
+            ):
+                raise ValueError(
+                    f"{label}: performance-bearing run must use its functional gate, "
+                    "not score-bearing quality fields"
+                )
+        else:
+            raise ValueError(f"{label}: unsupported public status {public_status!r}")
+        require_semantic_match(
+            f"{label} gate metric value", metrics.get(gate_key), gate_value
+        )
+    else:
+        primary_name = payload.get("quality_metric")
+        primary_key = run.get("quality_metric_key")
+        primary_value = run.get("quality_value")
+        gate_name = run.get("functional_metric_declared")
+        gate_value = None
+        require_semantic_match(
+            f"{label} metric value", metrics.get(primary_key), primary_value
+        )
+        require_semantic_match(
+            f"{label} declared metric",
+            run.get("quality_metric_declared"),
+            payload.get("quality_metric"),
+        )
 
     review = report.get("review_contract") or {}
+    recomputed_review = evaluate_report_contract(workload_contract, report)
+    if recomputed_review.get("status") != "passed":
+        raise ValueError(
+            f"{label}: independently recomputed review contract failed: "
+            f"{recomputed_review.get('issues') or []}"
+        )
+    for field in (
+        "status",
+        "review_eligible",
+        "public_status",
+        "profile",
+        "data_mode",
+        "metric",
+        "metric_key",
+        "metric_value",
+        "functional_metric",
+        "functional_metric_key",
+        "functional_metric_value",
+    ):
+        require_semantic_match(
+            f"{label} independently recomputed review_contract.{field}",
+            review.get(field),
+            recomputed_review.get(field),
+        )
+    require_semantic_match(
+        f"{label} independently recomputed review_contract.issues",
+        review.get("issues"),
+        recomputed_review.get("issues"),
+    )
     expected_review = {
         "status": "passed",
         "review_eligible": True,
         "public_status": payload.get("public_status"),
         "profile": payload.get("profile"),
         "data_mode": run.get("data_mode"),
-        "metric": payload.get("quality_metric"),
-        "metric_value": run.get("quality_value"),
-        "functional_metric": run.get("functional_metric_declared"),
+        "metric": primary_name,
+        "metric_key": primary_key,
+        "metric_value": primary_value,
+        "functional_metric": gate_name,
     }
+    if dual_metrics:
+        expected_review.update(
+            {
+                "functional_metric_key": gate_key,
+                "functional_metric_value": gate_value,
+            }
+        )
     for field, expected in expected_review.items():
         require_semantic_match(
             f"{label} review_contract.{field}", review.get(field), expected
@@ -407,7 +646,7 @@ def verify_run_semantics(
     require_semantic_match(
         f"{label} review metric bytes",
         metrics.get(review_metric_key),
-        run.get("quality_value"),
+        primary_value,
     )
 
     quality = report.get("quality") or {}
@@ -416,8 +655,8 @@ def verify_run_semantics(
         "status": "passed",
         "passed": True,
         "target_met": True,
-        "metric": review.get("functional_metric"),
-        "value": review.get("functional_metric_value"),
+        "metric": gate_name,
+        "value": gate_value if dual_metrics else review.get("functional_metric_value"),
         "target": quality.get("target"),
     }
     for field, expected in expected_grade.items():
@@ -429,6 +668,29 @@ def verify_run_semantics(
     )
 
     fingerprint = report.get("run_fingerprint") or {}
+    if dual_metrics:
+        reported_comparison_fingerprint = fingerprint.get(
+            "comparison_fingerprint_sha256"
+        )
+        if not valid_sha256_hex(reported_comparison_fingerprint):
+            raise ValueError(
+                f"{label}: raw report comparison_fingerprint_sha256 is malformed"
+            )
+        require_semantic_match(
+            f"{label} raw report comparison fingerprint",
+            reported_comparison_fingerprint,
+            run_comparison_fingerprint_sha256(fingerprint),
+        )
+        require_semantic_match(
+            f"{label} summary-row comparison fingerprint",
+            run.get("comparison_fingerprint_sha256"),
+            reported_comparison_fingerprint,
+        )
+        require_semantic_match(
+            f"{label} summary comparison fingerprint",
+            payload.get("comparison_fingerprint_sha256"),
+            reported_comparison_fingerprint,
+        )
     execution = fingerprint.get("execution") or {}
     hardware = fingerprint.get("hardware") or {}
     for field, expected in (
@@ -442,6 +704,33 @@ def verify_run_semantics(
             execution.get(field),
             expected,
         )
+    registry_scenario = getattr(workload_contract, "scenario", None)
+    row_registry_scenario = run.get("registry_scenario")
+    scenario_expected = registry_scenario or row_registry_scenario
+    scenario_values = {
+        "report": report.get("scenario"),
+        "manifest": manifest.get("scenario"),
+        "summary-row": run.get("scenario"),
+        "summary-row manifest": run.get("manifest_scenario"),
+        "summary-row registry": row_registry_scenario,
+        "fingerprint execution": execution.get("scenario"),
+    }
+    if scenario_expected is not None or any(
+        value is not None for value in scenario_values.values()
+    ):
+        scenario_expected = scenario_expected or report.get("scenario")
+        for scenario_label, value in scenario_values.items():
+            require_semantic_match(
+                f"{label} {scenario_label} scenario",
+                value,
+                scenario_expected,
+            )
+        if execution.get("scenarios") is not None:
+            require_semantic_match(
+                f"{label} fingerprint execution.scenarios",
+                execution.get("scenarios"),
+                [scenario_expected],
+            )
     require_semantic_match(
         f"{label} fingerprint backends",
         execution.get("backends"),
@@ -514,7 +803,27 @@ def verify_run_semantics(
             f"{label} SLM quality suite", evaluation.get("suite"), contract.get("suite")
         )
         require_semantic_match(
+            f"{label} SLM fixture version",
+            result.get("fixture_version"),
+            contract.get("fixture_version"),
+        )
+        require_semantic_match(
             f"{label} SLM case count", result.get("cases"), contract.get("cases")
+        )
+        require_semantic_match(
+            f"{label} SLM category count",
+            result.get("categories"),
+            contract.get("categories"),
+        )
+        require_semantic_match(
+            f"{label} SLM aggregation",
+            result.get("aggregation"),
+            contract.get("aggregation"),
+        )
+        require_semantic_match(
+            f"{label} SLM category guard",
+            result.get("category_guard"),
+            contract.get("category_guard"),
         )
         require_semantic_match(
             f"{label} SLM quality asset",
@@ -533,6 +842,47 @@ def verify_run_semantics(
             metrics.get("quality_perplexity"),
             perplexity,
         )
+        worst_category_perplexity = result.get("worst_category_perplexity")
+        if (
+            isinstance(worst_category_perplexity, bool)
+            or not isinstance(worst_category_perplexity, (int, float))
+            or float(worst_category_perplexity)
+            > float(contract.get("worst_category_maximum"))
+        ):
+            raise ValueError(
+                f"{label}: SLM worst-category continuation perplexity exceeds its gate"
+            )
+        require_semantic_match(
+            f"{label} SLM worst-category perplexity metric",
+            metrics.get("quality_worst_category_perplexity"),
+            worst_category_perplexity,
+        )
+        require_semantic_match(
+            f"{label} SLM continuation token count",
+            metrics.get("quality_total_continuation_tokens"),
+            result.get("total_continuation_tokens"),
+        )
+        gates = evaluation.get("gates") or {}
+        if gates.get("passed") is not True:
+            raise ValueError(f"{label}: SLM quality gate conjunction did not pass")
+        for gate_name, target in (
+            ("overall_perplexity", contract.get("maximum")),
+            (
+                "worst_category_perplexity",
+                contract.get("worst_category_maximum"),
+            ),
+        ):
+            gate = gates.get(gate_name) or {}
+            require_semantic_match(
+                f"{label} SLM {gate_name} target", gate.get("target"), target
+            )
+            require_semantic_match(
+                f"{label} SLM {gate_name} direction",
+                gate.get("direction"),
+                "lower",
+            )
+            if gate.get("met") is not True:
+                raise ValueError(f"{label}: SLM {gate_name} gate did not pass")
         require_semantic_match(
             f"{label} SLM NLL metric",
             metrics.get("quality_mean_nll"),
@@ -875,12 +1225,18 @@ def build_index(
     for workload, (_, payload, data) in sorted(selected.items()):
         evidence_id = str(payload["evidence_id"])
         relative_path = Path("reference_results") / workload / f"{evidence_id}.json"
+        dual_metrics = payload.get("schema") == SUMMARY_SCHEMA
+        primary_metric = (
+            (payload.get("primary_metric") or {}).get("name")
+            if dual_metrics
+            else payload.get("quality_metric")
+        )
         entry = {
             "acceptance": payload.get("acceptance"),
             "aggregate": payload.get("aggregate"),
             "evidence_id": evidence_id,
             "evidence_sha256": sha256_bytes(data),
-            "metric": payload.get("quality_metric"),
+            "metric": primary_metric,
             "path": relative_path.as_posix(),
             "profile": payload.get("profile"),
             "public_status": payload.get("public_status"),
@@ -889,20 +1245,24 @@ def build_index(
             "variant": payload.get("variant"),
             "workload": workload,
         }
+        if dual_metrics:
+            entry["quality_metric"] = payload.get("quality_metric")
+            entry["quality_gate"] = payload.get("quality_gate")
         if payload.get("public_status") == "performance-bearing":
             entry["functional_gate"] = (payload.get("basis") or {}).get(
                 "functional_check"
             )
-            entry["legacy_summary_semantics"] = {
-                "aggregate.quality": (
-                    "primary performance metric samples; the field name is retained "
-                    "from evidence schema 0.2"
-                ),
-                "quality_target": (
-                    "not a speed threshold; acceptance is the all-runs functional "
-                    "gate recorded above"
-                ),
-            }
+            if not dual_metrics:
+                entry["legacy_summary_semantics"] = {
+                    "aggregate.quality": (
+                        "primary performance metric samples; the field name is retained "
+                        "from evidence schema 0.2"
+                    ),
+                    "quality_target": (
+                        "not a speed threshold; acceptance is the all-runs functional "
+                        "gate recorded above"
+                    ),
+                }
         entries.append(entry)
     return {
         "schema": INDEX_SCHEMA,

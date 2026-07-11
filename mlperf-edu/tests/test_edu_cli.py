@@ -33,6 +33,11 @@ def run_cli(*args, cwd=None, env_extra=None):
     )
 
 
+def replacement_pending(workload_id):
+    baseline = load_registry()[workload_id].raw.get("verified_baseline") or {}
+    return baseline.get("replacement_required") is True
+
+
 def write_tiny_movielens(root, *, n_users=12, n_items=16, n_ratings=96):
     dataset = root / "movielens" / "ml-100k"
     dataset.mkdir(parents=True)
@@ -54,12 +59,17 @@ def write_tiny_movielens(root, *, n_users=12, n_items=16, n_ratings=96):
             ]
             f.write("|".join(fields) + "\n")
 
-    with (dataset / "u.data").open("w") as f:
-        for idx in range(n_ratings):
-            user_id = (idx % n_users) + 1
-            item_id = ((idx * 3) % n_items) + 1
-            rating = 5 if (user_id + item_id) % 2 == 0 else 2
-            f.write(f"{user_id}\t{item_id}\t{rating}\t{idx}\n")
+    ratings = []
+    for idx in range(n_ratings):
+        user_id = (idx % n_users) + 1
+        item_id = ((idx * 3) % n_items) + 1
+        rating = 5 if idx % 3 == 0 else 2
+        ratings.append(f"{user_id}\t{item_id}\t{rating}\t{idx}\n")
+
+    n_train = int(n_ratings * 0.8)
+    (dataset / "u.data").write_text("".join(ratings))
+    (dataset / "u1.base").write_text("".join(ratings[:n_train]))
+    (dataset / "u1.test").write_text("".join(ratings[n_train:]))
 
 
 def test_cli_help():
@@ -534,6 +544,90 @@ def test_report_enrichment_defaults_quality_required_from_public_contract():
     assert "gated" not in explicit_not_required["quality"]
 
 
+def test_nanogpt_training_enrichment_excludes_prior_promoted_results():
+    workloads = load_registry()
+    workload = workloads["nanogpt-train"]
+    report = {
+        "workload": workload.id,
+        "profile": "max",
+        "metrics": {"cross_entropy_loss": 2.1},
+        "quality": {
+            "metric": "cross_entropy_loss",
+            "target": 2.3,
+            "target_met": True,
+            "variance_summary": {
+                "median": 1.9,
+                "evidence_id": "prior-training-evidence",
+                "source_git_sha": "1" * 40,
+            },
+        },
+        "verified_baseline": {
+            "evidence_id": "prior-training-evidence",
+            "source_git_sha": "1" * 40,
+        },
+    }
+
+    enrich_report_for_display(report, workloads)
+
+    assert report["metrics"]["cross_entropy_loss"] == 2.1
+    assert report["quality"]["target_met"] is True
+    assert report["quality"]["reference_protocol"]["profile"] == "max"
+    assert report["quality"]["reference_protocol"]["seeds"] == [0, 1, 2, 3, 4]
+    serialized = json.dumps(report, sort_keys=True)
+    assert "variance_summary" not in serialized
+    assert "verified_baseline" not in serialized
+    assert "prior-training-evidence" not in serialized
+    assert "source_git_sha" not in serialized
+
+    workload.quality_reference_protocol["seeds"].append(99)
+    assert report["quality"]["reference_protocol"]["seeds"] == [0, 1, 2, 3, 4]
+
+
+def test_nanogpt_inference_lineage_excludes_source_promoted_results():
+    workloads = load_registry()
+    workload = workloads["nanogpt-prefill"]
+    report = {
+        "workload": workload.id,
+        "profile": "max",
+        "metrics": {"prefill_tokens_per_sec": 123.0},
+        "quality": {
+            "metric": "prefill_tokens_per_sec",
+            "target": 0.0,
+            "target_met": True,
+        },
+        "checkpoint_provenance": {
+            "checkpoint_sha256": f"sha256:{'2' * 64}",
+            "source_report_sha256": f"sha256:{'3' * 64}",
+            "source_manifest_sha256": f"sha256:{'4' * 64}",
+            "source_quality_value": 2.1,
+            "source_quality_target_met": True,
+            "source_verified_baseline": {
+                "evidence_id": "prior-source-evidence",
+                "evidence_sha256": "5" * 64,
+                "source_git_sha": "6" * 40,
+                "median": 1.9,
+            },
+        },
+    }
+
+    enrich_report_for_display(report, workloads)
+
+    lineage = report["checkpoint_provenance"]
+    assert lineage["source_report_sha256"] == f"sha256:{'3' * 64}"
+    assert lineage["source_manifest_sha256"] == f"sha256:{'4' * 64}"
+    assert lineage["source_quality_value"] == 2.1
+    assert "source_verified_baseline" not in lineage
+    assert report["performance_reference_protocol"]["profile"] == "max"
+    assert report["performance_reference_protocol"]["seeds"] == [0, 1, 2, 3, 4]
+    serialized = json.dumps(report, sort_keys=True)
+    assert "prior-source-evidence" not in serialized
+    assert "evidence_sha256" not in serialized
+    assert "source_git_sha" not in serialized
+
+    workload.raw["performance_reference_protocol"]["seeds"].append(99)
+    assert report["performance_reference_protocol"]["seeds"] == [0, 1, 2, 3, 4]
+
+
 def test_show_workload():
     result = run_cli("show", "nanogpt-train")
     assert result.returncode == 0
@@ -683,33 +777,54 @@ def test_cache_defaults_to_min_profile_and_accepts_max_profile():
     assert "slm-long-context-decode" in max_workloads
 
 
-def test_audit_summary_passes():
+def test_audit_summary_fails_closed_when_replacement_evidence_is_pending():
     result = run_cli("audit")
-    assert result.returncode == 0, result.stdout + result.stderr
+    blocker_count = sum(
+        replacement_pending(workload_id)
+        for workload_id in (
+            "nanogpt-train",
+            "micro-dlrm-train",
+            "anomaly-ae-train",
+            "resnet18-train",
+            "mobilenetv2-train",
+            "nanogpt-prefill",
+            "nanogpt-decode",
+            "slm-decode",
+        )
+    )
+    assert result.returncode == (1 if blocker_count else 0), (
+        result.stdout + result.stderr
+    )
     assert "MLPerf EDU Public Contract Audit" in result.stdout
-    assert "public contract audit: passed" in result.stdout
+    if blocker_count:
+        assert f"failed ({blocker_count} blocker workload(s)" in result.stdout
+    else:
+        assert "public contract audit: passed" in result.stdout
     assert "score-bearing=5" in result.stdout
     assert "performance-bearing=3" in result.stdout
     assert "systems-only=22" in result.stdout
     assert "public warnings: 0" in result.stdout
 
 
-def test_audit_json_passes_and_filters_by_suite():
+def test_audit_json_filters_by_suite_and_reports_replacement_blocker():
     result = run_cli("audit", "--suite", "slm", "--format", "json")
-    assert result.returncode == 0, result.stdout + result.stderr
+    pending = replacement_pending("slm-decode")
+    assert result.returncode == (1 if pending else 0), result.stdout + result.stderr
     data = json.loads(result.stdout)
 
     assert data["schema"] == "mlperf-edu-public-contract-audit/0.1"
-    assert data["status"] == "passed"
+    assert data["status"] == ("failed" if pending else "passed")
     assert data["policy"] == "development"
     assert data["suite"] == "slm"
     assert data["counts"] == {"performance-bearing": 1, "systems-only": 3}
-    assert data["blocker_count"] == 0
+    assert data["blocker_count"] == int(pending)
     assert data["warning_count"] == 0
-    assert data["issues"] == []
+    assert len(data["issues"]) == int(pending)
     assert data["warnings"] == []
     assert len(data["workloads"]) == 4
-    assert all(not workload["issues"] for workload in data["workloads"])
+    assert sum(bool(workload["issues"]) for workload in data["workloads"]) == int(
+        pending
+    )
     assert all(not workload["warnings"] for workload in data["workloads"])
     slm = next(
         workload for workload in data["workloads"] if workload["id"] == "slm-decode"
@@ -717,11 +832,15 @@ def test_audit_json_passes_and_filters_by_suite():
     assert slm["canonical_workload"] == "smollm2-chat-inference"
     assert slm["variant"] == "baseline"
     assert slm["run_selector"] == "smollm2-chat-inference --variant baseline"
+    if pending:
+        assert slm["issues"] == [
+            "performance-bearing verified_baseline uses a superseded protocol and "
+            "requires a replacement reference sweep"
+        ]
 
 
 def test_audit_profile_filters_default_selection():
     result = run_cli("audit", "--profile", "min", "--format", "json")
-    assert result.returncode == 0, result.stdout + result.stderr
     data = json.loads(result.stdout)
     assert data["profile"] == "min"
     assert len(data["workloads"]) == 12
@@ -739,21 +858,37 @@ def test_audit_profile_filters_default_selection():
         "resnet18-train",
         "slm-decode",
     }
+    assert result.returncode == (1 if data["blocker_count"] else 0), (
+        result.stdout + result.stderr
+    )
 
 
-def test_audit_json_suppresses_public_asset_warnings_by_default():
+def test_audit_json_suppresses_public_asset_warnings_but_not_evidence_blockers():
     result = run_cli("audit", "--status", "score-bearing", "--format", "json")
-    assert result.returncode == 0, result.stdout + result.stderr
     data = json.loads(result.stdout)
 
-    assert data["status"] == "passed"
+    expected_blockers = sum(
+        replacement_pending(workload_id)
+        for workload_id in (
+            "nanogpt-train",
+            "micro-dlrm-train",
+            "anomaly-ae-train",
+            "resnet18-train",
+            "mobilenetv2-train",
+        )
+    )
+    assert result.returncode == (1 if expected_blockers else 0), (
+        result.stdout + result.stderr
+    )
+    assert data["status"] == ("failed" if expected_blockers else "passed")
+    assert data["blocker_count"] == expected_blockers
     assert data["policy"] == "development"
     assert data["warning_count"] == 0
     assert data["warnings"] == []
     nanogpt = next(
         workload for workload in data["workloads"] if workload["id"] == "nanogpt-train"
     )
-    assert not nanogpt["issues"]
+    assert bool(nanogpt["issues"]) is replacement_pending("nanogpt-train")
     assert nanogpt["warnings"] == []
     dlrm = next(
         workload
@@ -777,7 +912,16 @@ def test_audit_public_policy_fails_on_unresolved_warnings():
     data = json.loads(result.stdout)
     assert data["status"] == "failed"
     assert data["policy"] == "public"
-    assert data["blocker_count"] == 0
+    assert data["blocker_count"] == sum(
+        replacement_pending(workload_id)
+        for workload_id in (
+            "nanogpt-train",
+            "micro-dlrm-train",
+            "anomaly-ae-train",
+            "resnet18-train",
+            "mobilenetv2-train",
+        )
+    )
     assert data["warning_blocked"] is True
     assert data["warning_count"] >= 5
     assert len(data["warnings"]) == data["warning_count"]
@@ -792,7 +936,9 @@ def test_audit_filters_by_canonical_workload_and_variant():
     canonical = run_cli(
         "audit", "--workload", "smollm2-chat-inference", "--format", "json"
     )
-    assert canonical.returncode == 0, canonical.stdout + canonical.stderr
+    assert canonical.returncode == (1 if replacement_pending("slm-decode") else 0), (
+        canonical.stdout + canonical.stderr
+    )
     canonical_data = json.loads(canonical.stdout)
     assert canonical_data["workload"] == "smollm2-chat-inference"
     assert canonical_data["counts"] == {"performance-bearing": 1, "systems-only": 3}
@@ -1800,9 +1946,13 @@ def test_slm_max_default_decode_budget_has_functional_margin(tmp_path):
     assert report["quality"]["direction"] == "higher"
     assert report["quality"]["override"] is False
     assert report["review_contract"]["status"] == "failed"
-    assert report["review_contract"]["issues"] == [
+    assert (
         "data_mode 'synthetic-tokenized' is not eligible for performance-bearing review"
-    ]
+        in report["review_contract"]["issues"]
+    )
+    assert any(
+        "model identity" in issue for issue in report["review_contract"]["issues"]
+    )
     assert report["review_contract"]["metric"] == "output_tokens_per_sec"
     assert report["review_contract"]["metric_value"] > 0
     assert report["review_contract"]["functional_metric"] == "generated_tokens"
@@ -2235,6 +2385,18 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
     assert "gated" not in report["quality"]
     assert report["quality"]["override"] is True
     assert report["metrics"]["tokens"] == 64
+    assert report["metrics"]["quality_eval_coverage"] > 0.99
+    assert report["metrics"]["quality_eval_tokens"] > 0
+    assert report["metrics"]["train_and_eval_seconds"] > 0
+    assert (
+        report["measurement_protocol"]
+        == load_registry()["nanogpt-train"].raw["measurement_protocol"]
+    )
+    assert report["review_contract"]["status"] == "failed"
+    assert any(
+        "does not match canonical" in issue
+        for issue in report["review_contract"]["issues"]
+    )
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
@@ -2271,7 +2433,7 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
     assert prefill_report["measurement_protocol"]["measured_runs"] == 3
     assert prefill_report["checkpoint_provenance"]["source_manifest_verified"] is True
     assert prefill_report["checkpoint_provenance"]["source_quality_target_met"] is True
-    assert prefill_report["review_contract"]["status"] == "passed"
+    assert prefill_report["review_contract"]["status"] == "failed"
     assert prefill_report["review_contract"]["metric"] == "prefill_tokens_per_sec"
     assert prefill_report["review_contract"]["metric_value"] > 0
     prefill_verify = run_cli(
@@ -2309,7 +2471,7 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
         == (decode_report["measurement_protocol"]["measured_runs"])
     )
     assert decode_report["checkpoint_provenance"]["source_manifest_verified"] is True
-    assert decode_report["review_contract"]["status"] == "passed"
+    assert decode_report["review_contract"]["status"] == "failed"
     assert decode_report["review_contract"]["metric"] == "output_tokens_per_sec"
     assert decode_report["review_contract"]["metric_value"] > 0
     assert decode_report["review_contract"]["functional_metric"] == "decode_steps"
@@ -2390,7 +2552,7 @@ def test_language_max_aggregate_preserves_nanogpt_checkpoint_lineage(tmp_path):
         lineage = report["checkpoint_provenance"]
         assert lineage["source_report_sha256"] == expected_report_sha
         assert lineage["source_manifest_sha256"] == expected_manifest_sha
-        assert report["review_contract"]["status"] == "passed"
+        assert report["review_contract"]["status"] == "failed"
 
         verify = run_cli("verify", str(output_dir / f"{workload}_max.provd.json"))
         assert verify.returncode == 0, verify.stdout + verify.stderr
@@ -2772,6 +2934,49 @@ def test_movielens_text_occupations_are_encoded(tmp_path):
     assert set(dataset.sparse_features[2].tolist()) == {0, 1}
 
 
+def test_movielens_dense_features_do_not_depend_on_rating_labels(tmp_path):
+    from mlperf.reference.dataset_factory import MovieLensRecommendationDataset
+
+    data_dir = tmp_path / "data"
+    write_tiny_movielens(data_dir)
+    dataset_dir = data_dir / "movielens" / "ml-100k"
+    original = MovieLensRecommendationDataset(data_dir=str(dataset_dir))
+
+    flipped = []
+    for line in (dataset_dir / "u.data").read_text().splitlines():
+        user_id, item_id, rating, timestamp = line.split("\t")
+        flipped_rating = "2" if rating == "5" else "5"
+        flipped.append(f"{user_id}\t{item_id}\t{flipped_rating}\t{timestamp}\n")
+    (dataset_dir / "flipped.data").write_text("".join(flipped))
+    changed = MovieLensRecommendationDataset(
+        data_dir=str(dataset_dir), ratings_file="flipped.data"
+    )
+
+    assert torch.equal(original.dense_features, changed.dense_features)
+    assert all(
+        torch.equal(original_sparse, changed_sparse)
+        for original_sparse, changed_sparse in zip(
+            original.sparse_features, changed.sparse_features, strict=True
+        )
+    )
+    assert not torch.equal(original.labels, changed.labels)
+
+
+def test_movielens_fixed_split_uses_official_files(tmp_path):
+    from mlperf.reference.dataset_factory import load_movielens_fixed_split
+
+    data_dir = tmp_path / "data"
+    write_tiny_movielens(data_dir, n_ratings=100)
+    dataset_dir = data_dir / "movielens" / "ml-100k"
+
+    train, validation = load_movielens_fixed_split(str(dataset_dir))
+
+    assert len(train) == 80
+    assert len(validation) == 20
+    assert train.ratings_file == "u1.base"
+    assert validation.ratings_file == "u1.test"
+
+
 def test_micro_dlrm_max_run_writes_verifiable_artifacts(tmp_path):
     data_dir = tmp_path / "data"
     write_tiny_movielens(data_dir)
@@ -2782,8 +2987,8 @@ def test_micro_dlrm_max_run_writes_verifiable_artifacts(tmp_path):
         "MLPERF_EDU_DLRM_MAX_BATCH_SIZE": "4",
         "MLPERF_EDU_DLRM_MAX_EPOCHS": "1",
         "MLPERF_EDU_DLRM_MAX_BATCHES_PER_EPOCH": "2",
-        "MLPERF_EDU_DLRM_MAX_VAL_BATCHES": "1",
-        "MLPERF_EDU_DLRM_MAX_ACCURACY_TARGET": "0.0",
+        "MLPERF_EDU_DLRM_MAX_EVALUATION_BATCHES": "5",
+        "MLPERF_EDU_DLRM_MAX_AUROC_TARGET": "0.0",
     }
     result = run_cli(
         "run",
@@ -2811,14 +3016,21 @@ def test_micro_dlrm_max_run_writes_verifiable_artifacts(tmp_path):
     assert report["quality"]["quality_required"] is True
     assert "gated" not in report["quality"]
     assert report["quality"]["override"] is True
-    assert report["quality"]["metric_key"] == "best_accuracy"
+    assert report["quality"]["metric_key"] == "roc_auc"
     assert report["metrics"]["samples"] == 8
-    assert report["metrics"]["best_epoch"] == 1
-    assert report["metrics"]["best_accuracy"] == report["metrics"]["final_accuracy"]
+    assert 0.0 <= report["metrics"]["evaluation_accuracy"] <= 1.0
+    assert 0.0 <= report["metrics"]["evaluation_roc_auc"] <= 1.0
+    assert report["metrics"]["train_and_eval_seconds"] > 0
     assert (
-        report["metrics"]["last_epoch_accuracy"] == report["metrics"]["final_accuracy"]
+        report["measurement_protocol"]
+        == load_registry()["micro-dlrm-train"].raw["measurement_protocol"]
     )
-    assert 0.0 <= report["metrics"]["final_accuracy"] <= 1.0
+    assert report["config"]["split"] == {
+        "train": "u1.base",
+        "evaluation": "u1.test",
+        "training_seed_affects_split": False,
+    }
+    assert report["config"]["feature_recipe"].endswith("no-rating-aggregates")
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr

@@ -4,7 +4,7 @@
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import hashlib
 import json
 import math
@@ -57,6 +57,7 @@ CLAIM_ROW_ALIASES = {
 EVIDENCE_ID_RE = re.compile(r"\b[a-z0-9][a-z0-9-]*_max_\d{8}T\d{6}\.\d{6}Z\b")
 MARKDOWN_REVISION_RE = re.compile(r"`([0-9a-f]{8,40})`")
 SHA40_RE = re.compile(r"[0-9a-f]{40}")
+HISTORICAL_DISCLOSURE = "protocol-superseded historical reference"
 
 
 class ClaimDataError(ValueError):
@@ -74,8 +75,21 @@ class ReferenceClaim:
     median: float
     minimum: float
     maximum: float
+    quality_metric: str | None
+    quality_median: float | None
+    quality_minimum: float | None
+    quality_maximum: float | None
     coefficient_of_variation: float | None
     repeatability_limit: float | None
+    evidence_role: str = "current-review-evidence"
+
+    @property
+    def is_current(self) -> bool:
+        return self.evidence_role == "current-review-evidence"
+
+    @property
+    def is_historical(self) -> bool:
+        return self.evidence_role == "historical-protocol-superseded"
 
     @property
     def display_decimals(self) -> int:
@@ -110,6 +124,22 @@ class ReferenceClaims:
     source_git_sha: str
     records: Mapping[str, ReferenceClaim]
     allowed_non_source_revisions: frozenset[str]
+
+    @property
+    def current_records(self) -> Mapping[str, ReferenceClaim]:
+        return {
+            workload: claim
+            for workload, claim in self.records.items()
+            if claim.is_current
+        }
+
+    @property
+    def historical_records(self) -> Mapping[str, ReferenceClaim]:
+        return {
+            workload: claim
+            for workload, claim in self.records.items()
+            if claim.is_historical
+        }
 
 
 def _load_json(path: Path) -> dict[str, Any]:
@@ -178,6 +208,27 @@ def validate_registry_record(
     if not isinstance(baseline, dict):
         return [f"{path}: missing verified_baseline mapping"]
 
+    if baseline.get("protocol_compatibility") == "superseded":
+        if baseline.get("review_eligible") is not False:
+            errors.append(
+                f"{path}: protocol-superseded evidence must not be review eligible"
+            )
+        if baseline.get("replacement_required") is not True:
+            errors.append(
+                f"{path}: protocol-superseded evidence must require replacement"
+            )
+        if not str(baseline.get("superseded_reason") or "").strip():
+            errors.append(
+                f"{path}: protocol-superseded evidence must explain superseded_reason"
+            )
+    else:
+        if baseline.get("review_eligible") is not True:
+            errors.append(f"{path}: current evidence must be review eligible")
+        if baseline.get("replacement_required") is True:
+            errors.append(
+                f"{path}: current evidence must not require a replacement sweep"
+            )
+
     expected_scalars = {
         "evidence_id": claim.evidence_id,
         "evidence_sha256": claim.evidence_sha256,
@@ -201,6 +252,25 @@ def validate_registry_record(
                 f"{path}: verified_baseline.{key} is {baseline.get(key)!r}; "
                 f"expected {expected!r}"
             )
+
+    if claim.quality_metric is not None:
+        if baseline.get("quality_metric") != claim.quality_metric:
+            errors.append(
+                f"{path}: verified_baseline.quality_metric is "
+                f"{baseline.get('quality_metric')!r}; expected {claim.quality_metric!r}"
+            )
+        expected_quality = {
+            claim.quality_metric: claim.quality_median,
+            "quality_median": claim.quality_median,
+            "quality_min": claim.quality_minimum,
+            "quality_max": claim.quality_maximum,
+        }
+        for key, expected in expected_quality.items():
+            if expected is None or not _equal_number(baseline.get(key), expected):
+                errors.append(
+                    f"{path}: verified_baseline.{key} is {baseline.get(key)!r}; "
+                    f"expected {expected!r}"
+                )
 
     if claim.coefficient_of_variation is None:
         if "coefficient_of_variation" in baseline:
@@ -286,8 +356,36 @@ def _claim_from_entry(
             f"{workload}: unsupported reference status {public_status!r}"
         )
     metric = entry.get("metric")
-    if not isinstance(metric, str) or payload.get("quality_metric") != metric:
-        raise ClaimDataError(f"{workload}: index and summary metric differ")
+    if not isinstance(metric, str):
+        raise ClaimDataError(f"{workload}: index primary metric is missing")
+    dual_metrics = payload.get("schema") == "mlperf-edu-reference-evidence/0.4"
+    payload_primary_name = (
+        (payload.get("primary_metric") or {}).get("name")
+        if dual_metrics
+        else payload.get("quality_metric")
+    )
+    if payload_primary_name != metric:
+        raise ClaimDataError(f"{workload}: index and summary primary metric differ")
+
+    quality_metric: str | None = None
+    quality_aggregate: Mapping[str, Any] | None = None
+    if dual_metrics:
+        payload_quality_metric = payload.get("quality_metric")
+        entry_quality_metric = entry.get("quality_metric")
+        if payload_quality_metric != entry_quality_metric:
+            raise ClaimDataError(f"{workload}: index and summary quality metric differ")
+        if entry.get("quality_gate") != payload.get("quality_gate"):
+            raise ClaimDataError(f"{workload}: index and summary quality gate differ")
+        if payload_quality_metric is not None:
+            if not isinstance(payload_quality_metric, str):
+                raise ClaimDataError(f"{workload}: quality metric must be a string")
+            candidate = payload_aggregate.get("quality")
+            if not isinstance(candidate, dict):
+                raise ClaimDataError(
+                    f"{workload}: score summary lacks quality aggregate"
+                )
+            quality_metric = payload_quality_metric
+            quality_aggregate = candidate
 
     cv: float | None = None
     repeatability_limit: float | None = None
@@ -319,6 +417,22 @@ def _claim_from_entry(
         median=_number(entry_primary, "median", workload),
         minimum=_number(entry_primary, "min", workload),
         maximum=_number(entry_primary, "max", workload),
+        quality_metric=quality_metric,
+        quality_median=(
+            _number(quality_aggregate, "median", workload)
+            if quality_aggregate is not None
+            else None
+        ),
+        quality_minimum=(
+            _number(quality_aggregate, "min", workload)
+            if quality_aggregate is not None
+            else None
+        ),
+        quality_maximum=(
+            _number(quality_aggregate, "max", workload)
+            if quality_aggregate is not None
+            else None
+        ),
         coefficient_of_variation=cv,
         repeatability_limit=repeatability_limit,
     )
@@ -382,7 +496,13 @@ def load_reference_claims(root: Path = ROOT) -> ReferenceClaims:
     final_records: dict[str, ReferenceClaim] = {}
     for workload, claim in records.items():
         path, contract = registry_by_workload[workload]
-        final_records[workload] = claim
+        baseline = contract.get("verified_baseline") or {}
+        evidence_role = (
+            "historical-protocol-superseded"
+            if baseline.get("protocol_compatibility") == "superseded"
+            else "current-review-evidence"
+        )
+        final_records[workload] = replace(claim, evidence_role=evidence_role)
         registry_errors.extend(
             validate_registry_record(claim, contract, path=str(path))
         )
@@ -414,7 +534,7 @@ def _missing_token(name: str, label: str, token: str) -> str:
 def _performance_records(claims: ReferenceClaims) -> Iterable[ReferenceClaim]:
     return (
         claim
-        for claim in claims.records.values()
+        for claim in claims.current_records.values()
         if claim.public_status == "performance-bearing"
     )
 
@@ -437,7 +557,7 @@ def check_documents(
     """Return drift errors for the hand-written public review documents."""
 
     errors: list[str] = []
-    current_ids = {claim.evidence_id for claim in claims.records.values()}
+    known_ids = {claim.evidence_id for claim in claims.records.values()}
     for name, policy in DOCUMENT_POLICIES.items():
         text = documents.get(name)
         if text is None:
@@ -446,6 +566,11 @@ def check_documents(
         if claims.source_git_sha not in text:
             errors.append(
                 _missing_token(name, "full source revision", claims.source_git_sha)
+            )
+        if claims.historical_records and HISTORICAL_DISCLOSURE not in text.lower():
+            errors.append(
+                f"{name}: missing fail-closed disclosure `{HISTORICAL_DISCLOSURE}`; "
+                "superseded packets must not be presented as current evidence"
             )
         markdown_rows = [
             line for line in text.splitlines() if line.lstrip().startswith("|")
@@ -462,7 +587,7 @@ def check_documents(
             )
 
         for evidence_id in EVIDENCE_ID_RE.findall(text):
-            if evidence_id not in current_ids:
+            if evidence_id not in known_ids:
                 errors.append(f"{name}: stale or unbound evidence ID `{evidence_id}`")
 
         if "evidence-ids" in policy:
@@ -483,7 +608,7 @@ def check_documents(
                     )
 
         if "medians" in policy:
-            for claim in claims.records.values():
+            for claim in claims.current_records.values():
                 token = f"`{claim.display_median}`"
                 if token not in text:
                     errors.append(
@@ -494,11 +619,11 @@ def check_documents(
 
         range_claims: Iterable[ReferenceClaim] = ()
         if "ranges" in policy:
-            range_claims = claims.records.values()
+            range_claims = claims.current_records.values()
         elif "score-ranges" in policy:
             range_claims = (
                 claim
-                for claim in claims.records.values()
+                for claim in claims.current_records.values()
                 if claim.public_status == "score-bearing"
             )
         for claim in range_claims:
@@ -521,7 +646,9 @@ def check_documents(
             limits = {
                 claim.repeatability_limit for claim in _performance_records(claims)
             }
-            if None in limits or len(limits) != 1:
+            if not limits:
+                pass
+            elif None in limits or len(limits) != 1:
                 errors.append(
                     f"{name}: performance references do not define one common repeatability limit"
                 )
@@ -535,11 +662,11 @@ def check_documents(
 
         row_claims: Iterable[ReferenceClaim] = ()
         if "row-bindings" in policy:
-            row_claims = claims.records.values()
+            row_claims = claims.current_records.values()
         elif "score-row-bindings" in policy:
             row_claims = (
                 claim
-                for claim in claims.records.values()
+                for claim in claims.current_records.values()
                 if claim.public_status == "score-bearing"
             )
         for claim in row_claims:
@@ -589,7 +716,8 @@ def main() -> int:
         return 1
     print(
         f"reference claims are current ({len(DOCUMENT_POLICIES)} documents, "
-        f"{len(claims.records)} references)"
+        f"{len(claims.current_records)} current and "
+        f"{len(claims.historical_records)} historical references)"
     )
     return 0
 

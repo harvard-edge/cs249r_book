@@ -31,6 +31,8 @@ def test_generate_review_packets(tmp_path):
     assert "## Taxonomy Evidence" in nanogpt
     assert "value=unmeasured; evidence=none; sha256=none" in nanogpt
     assert "committed-reference-summary" in nanogpt
+    assert "historical-protocol-superseded" in nanogpt
+    assert "replacement blocker" in nanogpt
     assert "reference_results/nanogpt-train/" in nanogpt
     assert "external-publication blocker" in nanogpt
     assert "baseline is not backed by a committed reference summary" not in nanogpt
@@ -46,6 +48,9 @@ def test_generate_review_packets(tmp_path):
     assert "metric_values_by_seed=" in prefill
     assert "not an MLCommons-verified result" in prefill
     assert "raw reference package for shared checkpoint source nanogpt-train" in prefill
+    assert (
+        "shared checkpoint source nanogpt-train has only protocol-superseded" in prefill
+    )
     assert "no published package URL is recorded" in prefill
     train_command = "mlperf run --workload nanogpt-train --profile max"
     inference_command = (
@@ -63,13 +68,16 @@ def test_generate_review_packets(tmp_path):
     assert "## Functional Contract" in slm
     assert "Model license" in slm
     assert "Apache-2.0" in slm
-    assert "mlperf-edu-slm-quality/0.1" in slm
+    assert "mlperf-edu-slm-quality/0.2" in slm
+    assert "token-weighted-continuation-nll" in slm
     assert "primary_metric=output_tokens_per_sec" in slm
     assert "reference_results/slm-decode/" in slm
     assert "c13f7b7afb626cd4f3cdcb9620693a95ce8d46881d1e8c6f18ba0234442f1185" in slm
     assert "metric_values_by_seed=" in slm
     assert "not an MLCommons-verified result" in slm
     assert "external-publication blocker" in slm
+    assert "historical-protocol-superseded" in slm
+    assert "replacement blocker" in slm
     assert "calibration values are informational" not in slm
 
     for packet in tmp_path.glob("*.md"):

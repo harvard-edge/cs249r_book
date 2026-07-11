@@ -93,8 +93,58 @@ jobs:
           set +e
           uv run mlperf audit --policy public 2>&1 | tee public-audit.txt
           status=${PIPESTATUS[0]}
+          printf '%s\n' "$status" > public-audit-exit-code.txt
           echo "strict_public_audit_exit_code=$status" >> "$GITHUB_ENV"
           exit 0
+
+      - name: Verify the Full Validation Evidence Boundary
+        if: always()
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        env:
+          EXECUTED_PRESET: ${{ inputs.preset || 'release' }}
+          BENCHMARK_OUTCOME: ${{ steps.benchmark.outcome }}
+        run: |
+          set -euo pipefail
+          test -s public-audit.txt
+          test -s public-audit-exit-code.txt
+          grep -Eq '^[0-9]+$' public-audit-exit-code.txt
+          if [ "$BENCHMARK_OUTCOME" != "success" ]; then
+            echo "Benchmark execution outcome was '$BENCHMARK_OUTCOME'."
+            exit 1
+          fi
+
+          output_dir="submissions/ci-${EXECUTED_PRESET}"
+          registry_count=$(uv run python -c \
+            'from mlperf.registry import load_registry; print(len(load_registry()))')
+          summary=$(find "$output_dir" -maxdepth 1 \
+            -name "mlperf_validate_${EXECUTED_PRESET}_*.json" \
+            -type f -print -quit)
+          test -n "$summary"
+          python3 - "$summary" "$EXECUTED_PRESET" "$registry_count" <<'PY'
+          import json
+          import pathlib
+          import sys
+
+          report = json.loads(pathlib.Path(sys.argv[1]).read_text())
+          expected_preset = sys.argv[2]
+          registry_count = int(sys.argv[3])
+          profile_count = 2 if expected_preset == "release" else 1
+          if report.get("preset") != expected_preset:
+              raise SystemExit(f"unexpected preset: {report.get('preset')!r}")
+          if report.get("status") != "passed":
+              raise SystemExit(f"validation did not pass: {report.get('status')!r}")
+          totals = report.get("totals") or {}
+          expected_workloads = registry_count * profile_count
+          if int(totals.get("validations", -1)) != profile_count:
+              raise SystemExit(f"incomplete validation profiles: {totals}")
+          if int(totals.get("workloads", -1)) != expected_workloads:
+              raise SystemExit(f"incomplete workload coverage: {totals}")
+          if int(totals.get("failures", -1)) != 0:
+              raise SystemExit(f"validation recorded failures: {totals}")
+          if int(totals.get("review_contract_failures", -1)) != 0:
+              raise SystemExit(f"review contracts did not pass: {totals}")
+          PY
 
       - name: Upload Full Validation Evidence
         uses: actions/upload-artifact@v7
@@ -103,8 +153,8 @@ jobs:
           name: mlperf-edu-${{ inputs.preset || 'release' }}-evidence-${{ github.run_id }}
           path: |
             ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-*/**
-            ${{ env.MLPERF_EDU_ROOT }}/public-audit.txt
-          if-no-files-found: warn
+            ${{ env.MLPERF_EDU_ROOT }}/public-audit*.txt
+          if-no-files-found: error
           retention-days: 30
 
       - name: Summarize the Evidence Boundary

@@ -6,40 +6,228 @@ Every benchmark run stamps this into the JSON artifact.
 No manual hardware claims — all evidence is measured.
 """
 
+import hashlib
+import json
+import os
 import platform
 import subprocess
-import sys
-import os
-import hashlib
-from typing import Dict, Any, Optional
+from typing import Any
 
 
-def detect_hardware() -> Dict[str, Any]:
-    """Detect actual system hardware. Returns a dict stamped into every run artifact.
-    
+FINGERPRINT_RECORD_SCHEMA = "mlperf-edu-comparison-fingerprint/0.2"
+PERFORMANCE_ENVIRONMENT_ALLOWLIST = (
+    "CUBLAS_WORKSPACE_CONFIG",
+    "CUDA_DEVICE_MAX_CONNECTIONS",
+    "CUDA_DEVICE_ORDER",
+    "CUDA_LAUNCH_BLOCKING",
+    "CUDA_MODULE_LOADING",
+    "CUDA_VISIBLE_DEVICES",
+    "GLOO_SOCKET_IFNAME",
+    "GOMP_CPU_AFFINITY",
+    "HIP_VISIBLE_DEVICES",
+    "KMP_AFFINITY",
+    "KMP_BLOCKTIME",
+    "MKL_DYNAMIC",
+    "MKL_NUM_THREADS",
+    "MLPERF_EDU_ANOMALY_MAX_BATCHES_PER_EPOCH",
+    "MLPERF_EDU_ANOMALY_MAX_BATCH_SIZE",
+    "MLPERF_EDU_ANOMALY_MAX_EPOCHS",
+    "MLPERF_EDU_ANOMALY_MAX_LR",
+    "MLPERF_EDU_ANOMALY_MAX_VAL_BATCHES",
+    "MLPERF_EDU_CODEGEN_MAX_RETRIES",
+    "MLPERF_EDU_CODEGEN_MIN_RETRIES",
+    "MLPERF_EDU_DDP_MAX_MICRO_BATCH",
+    "MLPERF_EDU_DDP_MAX_STEPS",
+    "MLPERF_EDU_DDP_MICRO_BATCH",
+    "MLPERF_EDU_DDP_STEPS",
+    "MLPERF_EDU_DDP_WORLD_SIZE",
+    "MLPERF_EDU_DECODE_MAX_BATCH",
+    "MLPERF_EDU_DECODE_MAX_PREFILL_CTX",
+    "MLPERF_EDU_DECODE_MAX_REPETITIONS",
+    "MLPERF_EDU_DECODE_MAX_STEPS",
+    "MLPERF_EDU_DECODE_MAX_WARMUPS",
+    "MLPERF_EDU_DECODE_MIN_BATCH",
+    "MLPERF_EDU_DECODE_MIN_PREFILL_CTX",
+    "MLPERF_EDU_DECODE_MIN_STEPS",
+    "MLPERF_EDU_DEVICE",
+    "MLPERF_EDU_DLRM_DRAM_MAX_BATCHES_PER_EPOCH",
+    "MLPERF_EDU_DLRM_DRAM_MAX_BATCH_SIZE",
+    "MLPERF_EDU_DLRM_DRAM_MAX_EPOCHS",
+    "MLPERF_EDU_DLRM_DRAM_MAX_LR",
+    "MLPERF_EDU_DLRM_DRAM_MAX_M_SPA",
+    "MLPERF_EDU_DLRM_DRAM_MAX_VAL_BATCHES",
+    "MLPERF_EDU_DLRM_DRAM_MAX_VIRTUAL_TABLE_SIZE",
+    "MLPERF_EDU_DLRM_MAX_BATCHES_PER_EPOCH",
+    "MLPERF_EDU_DLRM_MAX_BATCH_SIZE",
+    "MLPERF_EDU_DLRM_MAX_EPOCHS",
+    "MLPERF_EDU_DLRM_MAX_EVALUATION_BATCHES",
+    "MLPERF_EDU_DLRM_MAX_LR",
+    "MLPERF_EDU_DSCNN_MAX_BATCHES",
+    "MLPERF_EDU_DSCNN_MAX_BATCH_SIZE",
+    "MLPERF_EDU_DSCNN_MAX_LR",
+    "MLPERF_EDU_DSCNN_MAX_VAL_BATCHES",
+    "MLPERF_EDU_MAX_MODEL_SIZE",
+    "MLPERF_EDU_MAX_REPETITIONS",
+    "MLPERF_EDU_MAX_BATCHES_PER_EPOCH",
+    "MLPERF_EDU_MAX_BATCH_SIZE",
+    "MLPERF_EDU_MAX_EPOCHS",
+    "MLPERF_EDU_MAX_LR",
+    "MLPERF_EDU_MAX_SEED",
+    "MLPERF_EDU_MAX_SEQ_LEN",
+    "MLPERF_EDU_MAX_VAL_BATCHES",
+    "MLPERF_EDU_MOBILENET_COMP_BATCH_SIZE",
+    "MLPERF_EDU_MOBILENET_COMP_REPETITIONS",
+    "MLPERF_EDU_MOBILENET_MAX_BATCHES_PER_EPOCH",
+    "MLPERF_EDU_MOBILENET_MAX_BATCH_SIZE",
+    "MLPERF_EDU_MOBILENET_MAX_EPOCHS",
+    "MLPERF_EDU_MOBILENET_MAX_LR",
+    "MLPERF_EDU_MOBILENET_MAX_VAL_BATCHES",
+    "MLPERF_EDU_PREFILL_MAX_BATCH",
+    "MLPERF_EDU_PREFILL_MAX_CONTEXT",
+    "MLPERF_EDU_PREFILL_MAX_ITER",
+    "MLPERF_EDU_PREFILL_MAX_WARMUP",
+    "MLPERF_EDU_PREFILL_MIN_BATCH",
+    "MLPERF_EDU_PREFILL_MIN_CONTEXT",
+    "MLPERF_EDU_PREFILL_MIN_ITER",
+    "MLPERF_EDU_PREFILL_MIN_WARMUP",
+    "MLPERF_EDU_RAG_MAX_PASSAGES",
+    "MLPERF_EDU_REACT_MAX_STEPS",
+    "MLPERF_EDU_REACT_MIN_STEPS",
+    "MLPERF_EDU_RESNET_MAX_BATCHES_PER_EPOCH",
+    "MLPERF_EDU_RESNET_MAX_BATCH_SIZE",
+    "MLPERF_EDU_RESNET_MAX_EPOCHS",
+    "MLPERF_EDU_RESNET_MAX_LR",
+    "MLPERF_EDU_RESNET_MAX_VAL_BATCHES",
+    "MLPERF_EDU_SLM_BATCH_SIZE",
+    "MLPERF_EDU_SLM_CONTEXT_TOKENS",
+    "MLPERF_EDU_SLM_DECODE_TOKENS",
+    "MLPERF_EDU_SLM_LOCAL_ONLY",
+    "MLPERF_EDU_SLM_LONG_CONTEXT_TOKENS",
+    "MLPERF_EDU_SLM_MEASURED_RUNS",
+    "MLPERF_EDU_SLM_SEED",
+    "MLPERF_EDU_SLM_TINY",
+    "MLPERF_EDU_SLM_WARMUP_RUNS",
+    "MLPERF_EDU_SEED",
+    "MLPERF_EDU_TOOLCALL_MAX_QUERIES",
+    "MLPERF_EDU_TOOLCALL_MIN_QUERIES",
+    "MLPERF_EDU_WAKE_MAX_BATCHES",
+    "MLPERF_EDU_WAKE_MAX_BATCH_SIZE",
+    "MLPERF_EDU_WAKE_MAX_LR",
+    "MLPERF_EDU_WAKE_MAX_VAL_BATCHES",
+    "NCCL_ALGO",
+    "NCCL_IB_DISABLE",
+    "NCCL_P2P_DISABLE",
+    "NCCL_PROTO",
+    "NCCL_SOCKET_IFNAME",
+    "NUMEXPR_NUM_THREADS",
+    "NVIDIA_TF32_OVERRIDE",
+    "OMP_DYNAMIC",
+    "OMP_NUM_THREADS",
+    "OMP_PLACES",
+    "OMP_PROC_BIND",
+    "OMP_SCHEDULE",
+    "OPENBLAS_NUM_THREADS",
+    "PYTORCH_ALLOC_CONF",
+    "PYTORCH_CUDA_ALLOC_CONF",
+    "PYTORCH_ENABLE_MPS_FALLBACK",
+    "PYTORCH_MPS_FAST_MATH",
+    "PYTORCH_MPS_HIGH_WATERMARK_RATIO",
+    "PYTORCH_MPS_LOW_WATERMARK_RATIO",
+    "PYTORCH_MPS_PREFER_METAL",
+    "ROCR_VISIBLE_DEVICES",
+    "TOKENIZERS_PARALLELISM",
+    "TORCHINDUCTOR_COMPILE_THREADS",
+    "TORCH_NUM_THREADS",
+    "VECLIB_MAXIMUM_THREADS",
+)
+
+_HARDWARE_COMPARISON_KEYS = (
+    "machine_model",
+    "chip",
+    "cpu",
+    "cpu_topology",
+    "gpu",
+    "accelerator",
+    "memory_gb",
+    "cache_sizes",
+    "backend",
+    "availability_detected_backend",
+    "available_backends",
+)
+_SOFTWARE_COMPARISON_KEYS = (
+    "os",
+    "os_version",
+    "python_version",
+    "pytorch_version",
+    "torch_runtime",
+    "performance_environment",
+    "audio_backend",
+)
+
+
+def detect_hardware() -> dict[str, Any]:
+    """Detect the system and runtime configuration stamped into run artifacts.
+
     This is the single source of truth for hardware claims.
     The paper must not state hardware that this function did not detect.
     """
+    available_backends = _detect_available_backends()
+    availability_detected_backend = _preferred_available_backend(available_backends)
     info = {
         "machine_model": _detect_machine_model(),
         "chip": _detect_chip(),
         "cpu": _detect_cpu(),
+        "cpu_topology": _detect_cpu_topology(),
         "gpu": _detect_gpu(),
+        "accelerator": _detect_accelerator(),
         "memory_gb": _detect_memory_gb(),
         "os": f"{platform.system()} {platform.release()}",
         "os_version": platform.version(),
         "python_version": platform.python_version(),
         "pytorch_version": _detect_pytorch_version(),
-        "backend": _detect_backend(),
+        # ``backend`` is retained for report compatibility. It has always meant
+        # the best backend found during availability detection, not necessarily
+        # the backend selected by a workload.
+        "backend": availability_detected_backend,
+        "availability_detected_backend": availability_detected_backend,
+        "available_backends": available_backends,
+        "torch_runtime": _detect_torch_runtime(),
+        "performance_environment": _detect_performance_environment(),
         "cache_sizes": _detect_cache_sizes(),
         "audio_backend": _detect_audio_backend(),
     }
-    
-    # Compute a deterministic fingerprint hash for cross-run comparison
-    fingerprint_str = f"{info['chip']}|{info['memory_gb']}|{info['os']}|{info['pytorch_version']}"
-    info["fingerprint_hash"] = hashlib.sha256(fingerprint_str.encode()).hexdigest()[:16]
-    
+
+    digest = comparison_fingerprint_sha256(info)
+    info["fingerprint_schema"] = FINGERPRINT_RECORD_SCHEMA
+    info["fingerprint_hash_algorithm"] = "sha256"
+    info["fingerprint_hash_scope"] = "canonical-comparison-record"
+    # Keep the historical short key while also retaining the collision-resistant
+    # full digest used for evidence comparison.
+    info["fingerprint_hash"] = digest[:16]
+    info["fingerprint_sha256"] = digest
+
     return info
+
+
+def comparison_fingerprint_record(info: dict[str, Any]) -> dict[str, Any]:
+    """Return the canonical comparison-relevant record bound by the digest."""
+    return {
+        "schema": FINGERPRINT_RECORD_SCHEMA,
+        "hardware": {key: info.get(key) for key in _HARDWARE_COMPARISON_KEYS},
+        "software_runtime": {key: info.get(key) for key in _SOFTWARE_COMPARISON_KEYS},
+    }
+
+
+def comparison_fingerprint_sha256(info: dict[str, Any]) -> str:
+    """Hash the complete canonical comparison-relevant fingerprint record."""
+    payload = json.dumps(
+        comparison_fingerprint_record(info),
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 def _detect_machine_model() -> str:
@@ -47,14 +235,15 @@ def _detect_machine_model() -> str:
     if platform.system() == "Darwin":
         try:
             result = subprocess.run(
-                ["sysctl", "-n", "hw.model"],
-                capture_output=True, text=True, timeout=5
+                ["sysctl", "-n", "hw.model"], capture_output=True, text=True, timeout=5
             )
             model_id = result.stdout.strip()
             # Also try system_profiler for human-readable name
             result2 = subprocess.run(
                 ["system_profiler", "SPHardwareDataType"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True,
+                text=True,
+                timeout=10,
             )
             for line in result2.stdout.split("\n"):
                 if "Model Name" in line:
@@ -62,7 +251,21 @@ def _detect_machine_model() -> str:
             return model_id
         except Exception:
             pass
-    return platform.node()
+    if platform.system() == "Linux":
+        for path in (
+            "/sys/devices/virtual/dmi/id/product_name",
+            "/sys/class/dmi/id/product_name",
+        ):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    value = handle.read().strip()
+            except OSError:
+                continue
+            if value:
+                return value
+    # Do not fall back to platform.node(): it is commonly a private hostname,
+    # not a hardware model, and should not leak into public evidence.
+    return platform.machine() or "Unknown"
 
 
 def _detect_chip() -> str:
@@ -71,7 +274,9 @@ def _detect_chip() -> str:
         try:
             result = subprocess.run(
                 ["sysctl", "-n", "machdep.cpu.brand_string"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             return result.stdout.strip()
         except Exception:
@@ -92,17 +297,181 @@ def _detect_cpu() -> str:
     return platform.machine()
 
 
-def _detect_gpu() -> Optional[str]:
+def _detect_cpu_topology() -> dict[str, int | None]:
+    """Detect logical cores, physical cores, and sockets without guessing."""
+    logical_cores = os.cpu_count()
+    physical_cores: int | None = None
+    sockets: int | None = None
+
+    if platform.system() == "Darwin":
+        physical_cores = _sysctl_int("hw.physicalcpu")
+        logical_cores = _sysctl_int("hw.logicalcpu") or logical_cores
+        sockets = _sysctl_int("hw.packages")
+    elif platform.system() == "Linux":
+        physical_cores, sockets = _detect_linux_physical_topology()
+
+    return {
+        "logical_cores": logical_cores,
+        "physical_cores": physical_cores,
+        "sockets": sockets,
+    }
+
+
+def _sysctl_int(name: str) -> int | None:
+    try:
+        result = subprocess.run(
+            ["sysctl", "-n", name],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+        value = int(result.stdout.strip())
+        return value if value > 0 else None
+    except (OSError, ValueError, subprocess.SubprocessError):
+        return None
+
+
+def _detect_linux_physical_topology() -> tuple[int | None, int | None]:
+    try:
+        with open("/proc/cpuinfo", encoding="utf-8") as cpuinfo:
+            blocks = cpuinfo.read().split("\n\n")
+    except OSError:
+        return None, None
+
+    core_ids: set[tuple[str, str]] = set()
+    socket_ids: set[str] = set()
+    cores_per_socket: dict[str, int] = {}
+    for block in blocks:
+        fields = {}
+        for line in block.splitlines():
+            if ":" not in line:
+                continue
+            key, value = line.split(":", 1)
+            fields[key.strip()] = value.strip()
+        socket = fields.get("physical id")
+        core = fields.get("core id")
+        if socket is not None:
+            socket_ids.add(socket)
+            try:
+                cores_per_socket[socket] = int(fields.get("cpu cores", ""))
+            except ValueError:
+                pass
+        if socket is not None and core is not None:
+            core_ids.add((socket, core))
+
+    physical_cores = len(core_ids) or None
+    if (
+        physical_cores is None
+        and socket_ids
+        and len(cores_per_socket) == len(socket_ids)
+    ):
+        physical_cores = sum(cores_per_socket.values()) or None
+    return physical_cores, len(socket_ids) or None
+
+
+def _detect_gpu() -> str | None:
     """Detect GPU if available."""
     try:
         import torch
+
         if torch.cuda.is_available():
             return torch.cuda.get_device_name(0)
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
             return "Apple MPS (Metal Performance Shaders)"
-    except ImportError:
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            return torch.xpu.get_device_name(0)
+    except (AttributeError, ImportError, RuntimeError):
         pass
     return None
+
+
+def _detect_accelerator() -> dict[str, Any] | None:
+    """Detect accelerator identity plus runtime and driver metadata."""
+    try:
+        import torch
+    except (ImportError, RuntimeError):
+        return None
+
+    try:
+        if torch.cuda.is_available():
+            hip_version = getattr(torch.version, "hip", None)
+            runtime = "ROCm" if hip_version else "CUDA"
+            runtime_version = hip_version or getattr(torch.version, "cuda", None)
+            device_index = _safe_call(torch.cuda.current_device, default=0)
+            properties = _safe_call(
+                torch.cuda.get_device_properties, int(device_index), default=None
+            )
+            capability = _safe_call(
+                torch.cuda.get_device_capability, int(device_index), default=None
+            )
+            if isinstance(capability, tuple):
+                capability = ".".join(str(part) for part in capability)
+            return {
+                "availability_backend": "CUDA",
+                "runtime": runtime,
+                "runtime_version": runtime_version,
+                "driver_version": _detect_accelerator_driver(runtime),
+                "device_count": _safe_call(torch.cuda.device_count, default=None),
+                "inspection_device_index": device_index,
+                "device_name": _safe_call(
+                    torch.cuda.get_device_name, int(device_index), default=None
+                ),
+                "total_memory_bytes": getattr(properties, "total_memory", None),
+                "compute_capability": capability,
+            }
+
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            macos_version = platform.mac_ver()[0] or None
+            return {
+                "availability_backend": "MPS",
+                "runtime": "Metal Performance Shaders",
+                "runtime_version": macos_version,
+                "driver_version": macos_version,
+                "driver_source": "integrated-with-macos",
+                "device_count": 1,
+                "device_name": "Apple MPS (Metal Performance Shaders)",
+            }
+
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            device_index = _safe_call(torch.xpu.current_device, default=0)
+            return {
+                "availability_backend": "XPU",
+                "runtime": "Intel XPU",
+                "runtime_version": getattr(torch.version, "xpu", None),
+                "driver_version": None,
+                "device_count": _safe_call(torch.xpu.device_count, default=None),
+                "inspection_device_index": device_index,
+                "device_name": _safe_call(
+                    torch.xpu.get_device_name, int(device_index), default=None
+                ),
+            }
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return None
+    return None
+
+
+def _detect_accelerator_driver(runtime: str) -> str | None:
+    if runtime != "CUDA":
+        return None
+    try:
+        result = subprocess.run(
+            [
+                "nvidia-smi",
+                "--query-gpu=driver_version",
+                "--format=csv,noheader,nounits",
+            ],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    versions = sorted(
+        {line.strip() for line in result.stdout.splitlines() if line.strip()}
+    )
+    return ",".join(versions) or None
 
 
 def _detect_memory_gb() -> float:
@@ -111,7 +480,9 @@ def _detect_memory_gb() -> float:
         try:
             result = subprocess.run(
                 ["sysctl", "-n", "hw.memsize"],
-                capture_output=True, text=True, timeout=5
+                capture_output=True,
+                text=True,
+                timeout=5,
             )
             return round(int(result.stdout.strip()) / (1024**3), 1)
         except Exception:
@@ -132,29 +503,120 @@ def _detect_pytorch_version() -> str:
     """Detect PyTorch version."""
     try:
         import torch
+
         return torch.__version__
-    except ImportError:
+    except (ImportError, RuntimeError):
         return "not installed"
 
 
 def _detect_backend() -> str:
-    """Detect the active compute backend."""
+    """Return the preferred availability-detected backend."""
+    return _preferred_available_backend(_detect_available_backends())
+
+
+def _detect_available_backends() -> list[str]:
+    """Return the compute backends visible to PyTorch on this host."""
+    backends = ["CPU"]
     try:
         import torch
+
         if torch.cuda.is_available():
-            return "CUDA"
-        elif hasattr(torch.backends, 'mps') and torch.backends.mps.is_available():
-            return "MPS"
-        else:
-            return "CPU"
-    except ImportError:
-        return "CPU"
+            backends.append("CUDA")
+        if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+            backends.append("MPS")
+        if hasattr(torch, "xpu") and torch.xpu.is_available():
+            backends.append("XPU")
+    except (AttributeError, ImportError, RuntimeError):
+        pass
+    return backends
 
 
-def _detect_cache_sizes() -> Dict[str, Optional[int]]:
+def _preferred_available_backend(backends: list[str]) -> str:
+    for backend in ("CUDA", "MPS", "XPU", "CPU"):
+        if backend in backends:
+            return backend
+    return "CPU"
+
+
+def _detect_torch_runtime() -> dict[str, Any]:
+    """Capture performance-relevant PyTorch process configuration."""
+    try:
+        import torch
+    except (ImportError, RuntimeError):
+        return {"available": False}
+
+    cuda_backend = getattr(getattr(torch, "backends", None), "cuda", None)
+    cuda_matmul = getattr(cuda_backend, "matmul", None)
+    cudnn = getattr(getattr(torch, "backends", None), "cudnn", None)
+    quantized = getattr(getattr(torch, "backends", None), "quantized", None)
+    quantized_supported_engines = getattr(quantized, "supported_engines", None) or []
+    default_device = None
+    if hasattr(torch, "get_default_device"):
+        default_device = _safe_call(torch.get_default_device, default=None)
+
+    return {
+        "available": True,
+        "intra_op_threads": _safe_call(
+            getattr(torch, "get_num_threads", None), default=None
+        ),
+        "inter_op_threads": _safe_call(
+            getattr(torch, "get_num_interop_threads", None), default=None
+        ),
+        "default_dtype": _torch_value_name(
+            _safe_call(getattr(torch, "get_default_dtype", None), default=None)
+        ),
+        "default_device": _torch_value_name(default_device),
+        "float32_matmul_precision": _safe_call(
+            getattr(torch, "get_float32_matmul_precision", None), default=None
+        ),
+        "cuda_matmul_allow_tf32": getattr(cuda_matmul, "allow_tf32", None),
+        "cudnn_allow_tf32": getattr(cudnn, "allow_tf32", None),
+        "cudnn_version": _safe_call(getattr(cudnn, "version", None), default=None),
+        "quantized_engine": getattr(quantized, "engine", None),
+        "quantized_supported_engines": list(quantized_supported_engines),
+        "deterministic_algorithms_enabled": _safe_call(
+            getattr(torch, "are_deterministic_algorithms_enabled", None),
+            default=None,
+        ),
+        "deterministic_debug_mode": _safe_call(
+            getattr(torch, "get_deterministic_debug_mode", None), default=None
+        ),
+        "cudnn_deterministic": getattr(cudnn, "deterministic", None),
+        "cudnn_benchmark": getattr(cudnn, "benchmark", None),
+    }
+
+
+def _safe_call(function: Any, *args: Any, default: Any) -> Any:
+    if not callable(function):
+        return default
+    try:
+        return function(*args)
+    except (AttributeError, RuntimeError, TypeError, ValueError):
+        return default
+
+
+def _torch_value_name(value: Any) -> str | None:
+    if value is None:
+        return None
+    return str(value).removeprefix("torch.")
+
+
+def _detect_performance_environment() -> dict[str, str]:
+    """Record only explicitly allowlisted performance environment settings.
+
+    Credential variables, user text, and machine-local asset paths are excluded.
+    """
+    return {
+        name: os.environ[name]
+        for name in PERFORMANCE_ENVIRONMENT_ALLOWLIST
+        if name in os.environ
+    }
+
+
+def _detect_cache_sizes() -> dict[str, int | None]:
     """Detect CPU cache sizes in bytes. Returns what is measurable, nothing more."""
     caches = {"l1d": None, "l1i": None, "l2": None, "l3": None}
-    
+
     if platform.system() == "Darwin":
         mapping = {
             "hw.l1dcachesize": "l1d",
@@ -166,7 +628,9 @@ def _detect_cache_sizes() -> Dict[str, Optional[int]]:
             try:
                 result = subprocess.run(
                     ["sysctl", "-n", sysctl_key],
-                    capture_output=True, text=True, timeout=5
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
                 )
                 val = result.stdout.strip()
                 if val:
@@ -193,7 +657,7 @@ def _detect_cache_sizes() -> Dict[str, Optional[int]]:
                             size_bytes = int(size_str[:-1]) * 1024 * 1024
                         else:
                             size_bytes = int(size_str)
-                    
+
                     if level == 1 and ctype == "Data":
                         caches["l1d"] = size_bytes
                     elif level == 1 and ctype == "Instruction":
@@ -204,20 +668,21 @@ def _detect_cache_sizes() -> Dict[str, Optional[int]]:
                         caches["l3"] = size_bytes
                 except Exception:
                     pass
-    
+
     return caches
 
 
-def _detect_audio_backend() -> Optional[str]:
+def _detect_audio_backend() -> str | None:
     """Detect torchaudio backend availability."""
     try:
         import torchaudio
+
         return f"torchaudio {torchaudio.__version__}"
-    except ImportError:
+    except (ImportError, OSError, RuntimeError):
         return None
 
 
-def format_fingerprint(hw: Dict[str, Any]) -> str:
+def format_fingerprint(hw: dict[str, Any]) -> str:
     """Format hardware fingerprint as a human-readable string."""
     lines = [
         f"Machine:  {hw['machine_model']}",
@@ -227,9 +692,10 @@ def format_fingerprint(hw: Dict[str, Any]) -> str:
         f"OS:       {hw['os']}",
         f"Python:   {hw['python_version']}",
         f"PyTorch:  {hw['pytorch_version']}",
-        f"Backend:  {hw['backend']}",
+        f"Available: {', '.join(hw.get('available_backends', [hw['backend']]))}",
+        f"Detected:  {hw.get('availability_detected_backend', hw['backend'])}",
     ]
-    
+
     caches = hw.get("cache_sizes", {})
     if any(v is not None for v in caches.values()):
         cache_parts = []
@@ -237,29 +703,29 @@ def format_fingerprint(hw: Dict[str, Any]) -> str:
             val = caches.get(level)
             if val:
                 if val >= 1024 * 1024:
-                    cache_parts.append(f"{level.upper()}={val // (1024*1024)}MB")
+                    cache_parts.append(f"{level.upper()}={val // (1024 * 1024)}MB")
                 else:
                     cache_parts.append(f"{level.upper()}={val // 1024}KB")
         lines.append(f"Caches:   {', '.join(cache_parts)}")
-    
+
     lines.append(f"ID:       {hw['fingerprint_hash']}")
     return "\n".join(lines)
 
 
-def tensor_cache_analysis(tensor_bytes: int, hw: Dict[str, Any]) -> str:
+def tensor_cache_analysis(tensor_bytes: int, hw: dict[str, Any]) -> str:
     """Determine which cache level a tensor fits in, based on measured cache sizes.
-    
+
     Returns a factual statement about tensor size vs cache capacity.
     Does NOT guess — only reports what was detected.
     """
     caches = hw.get("cache_sizes", {})
-    
+
     fits_in = []
     for level_name, level_key in [("L1d", "l1d"), ("L2", "l2"), ("L3", "l3")]:
         size = caches.get(level_key)
         if size is not None and tensor_bytes <= size:
             fits_in.append(f"{level_name} ({size // 1024}KB)")
-    
+
     tensor_kb = tensor_bytes / 1024
     if fits_in:
         return f"{tensor_kb:.0f}KB fits in {fits_in[0]}"
@@ -274,7 +740,7 @@ if __name__ == "__main__":
     print("=== MLPerf EDU Hardware Fingerprint ===")
     print(format_fingerprint(hw))
     print()
-    
+
     # DLRM embedding table analysis
     dlrm_bytes = (943 * 32 + 1682 * 32) * 4  # float32
     print(f"DLRM embedding tables: {tensor_cache_analysis(dlrm_bytes, hw)}")

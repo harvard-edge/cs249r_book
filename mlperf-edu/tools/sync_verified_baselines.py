@@ -18,6 +18,18 @@ from tools import reference_source_lock  # noqa: E402
 
 
 INDEX_PATH = ROOT / "reference_results" / "index.json"
+HISTORICAL_MARKERS = {
+    "review_eligible": False,
+    "protocol_compatibility": "superseded",
+    "replacement_required": True,
+}
+INDEX_IDENTITY_FIELDS = (
+    "evidence_id",
+    "evidence_file",
+    "evidence_sha256",
+    "source_git_sha",
+)
+DUAL_METRIC_SCHEMA = "mlperf-edu-reference-evidence/0.4"
 
 
 def load_index() -> tuple[dict[str, Any], dict[str, tuple[dict, dict]]]:
@@ -90,7 +102,7 @@ def baseline_note(workload_id: str, payload: dict, aggregate: dict) -> str:
 
 
 def selected_training_lineage(source_payload: dict) -> tuple[int, str]:
-    median = source_payload["aggregate"]["primary_metric"]["median"]
+    median = source_payload["aggregate"]["quality"]["median"]
     selected = [
         run for run in source_payload["runs"] if run.get("quality_value") == median
     ]
@@ -117,7 +129,19 @@ def build_baseline(
     runs = payload["runs"]
     aggregate = payload["aggregate"]["primary_metric"]
     wall = payload["aggregate"]["wall_seconds"]
-    metric = str(payload["quality_metric"])
+    dual_metrics = payload.get("schema") == DUAL_METRIC_SCHEMA
+    metric_value = (
+        (payload.get("primary_metric") or {}).get("name")
+        if dual_metrics
+        else payload["quality_metric"]
+    )
+    if not isinstance(metric_value, str) or not metric_value:
+        raise ValueError(f"{workload_id}: reference evidence has no primary metric")
+    metric = metric_value
+    primary_values = [
+        run["primary_metric_value"] if dual_metrics else run["quality_value"]
+        for run in runs
+    ]
     baseline: dict[str, Any] = {
         "evidence_status": "committed-reference-summary",
         "review_eligible": True,
@@ -153,7 +177,7 @@ def build_baseline(
         {
             "seeds": payload["seeds_requested"],
             "primary_metric": metric,
-            "metric_values_by_seed": [run["quality_value"] for run in runs],
+            "metric_values_by_seed": primary_values,
             metric: aggregate["median"],
             "median": aggregate["median"],
             "min": aggregate["min"],
@@ -168,6 +192,25 @@ def build_baseline(
             "accepted_runs": len(runs),
         }
     )
+    quality_metric = payload.get("quality_metric")
+    quality_aggregate = payload["aggregate"].get("quality")
+    if (
+        dual_metrics
+        and isinstance(quality_metric, str)
+        and isinstance(quality_aggregate, dict)
+    ):
+        baseline.update(
+            {
+                "quality_metric": quality_metric,
+                "quality_values_by_seed": [run["quality_value"] for run in runs],
+                quality_metric: quality_aggregate["median"],
+                "quality_median": quality_aggregate["median"],
+                "quality_min": quality_aggregate["min"],
+                "quality_max": quality_aggregate["max"],
+                "quality_mean": quality_aggregate["mean"],
+                "quality_sample_stdev": quality_aggregate["stdev"],
+            }
+        )
     if payload.get("public_status") == "performance-bearing":
         baseline["functional_passes"] = int(payload["acceptance"]["value"])
         baseline["coefficient_of_variation"] = payload["repeatability"][
@@ -175,6 +218,47 @@ def build_baseline(
         ]
     baseline["baseline_note"] = baseline_note(workload_id, payload, aggregate)
     return baseline
+
+
+def historical_baseline_errors(
+    workload_id: str,
+    contract: dict[str, Any],
+    entry: dict,
+    payload: dict,
+    records: dict[str, tuple[dict, dict]],
+) -> list[str]:
+    """Bind a superseded record to its immutable historical summary."""
+    baseline = contract.get("verified_baseline")
+    if not isinstance(baseline, dict):
+        return ["verified_baseline is missing"]
+    errors: list[str] = []
+    for field, expected in HISTORICAL_MARKERS.items():
+        if baseline.get(field) != expected:
+            errors.append(f"{field} must be {expected!r}")
+    if not str(baseline.get("superseded_reason") or "").strip():
+        errors.append("superseded_reason is required")
+
+    indexed = build_baseline(workload_id, entry, payload, records)
+    for field, expected in indexed.items():
+        if field in {"review_eligible", "baseline_note"}:
+            continue
+        if baseline.get(field) != expected:
+            errors.append(f"{field} does not match the historical reference index")
+    return errors
+
+
+def historical_index_identity_matches(
+    baseline: dict[str, Any], entry: dict, payload: dict
+) -> bool:
+    expected = {
+        "evidence_id": payload.get("evidence_id"),
+        "evidence_file": entry.get("path"),
+        "evidence_sha256": entry.get("evidence_sha256"),
+        "source_git_sha": (payload.get("source") or {}).get("git_sha"),
+    }
+    return all(
+        baseline.get(field) == expected[field] for field in INDEX_IDENTITY_FIELDS
+    )
 
 
 def synchronized_contract(
@@ -188,7 +272,11 @@ def synchronized_contract(
     contract["verified_baseline"] = build_baseline(workload_id, entry, payload, records)
     if payload.get("public_status") == "score-bearing":
         variance = contract["quality_target"].setdefault("variance_summary", {})
-        aggregate = payload["aggregate"]["primary_metric"]
+        aggregate = (
+            payload["aggregate"]["quality"]
+            if payload.get("schema") == DUAL_METRIC_SCHEMA
+            else payload["aggregate"]["primary_metric"]
+        )
         variance.update(
             {
                 "runs": len(payload["runs"]),
@@ -220,10 +308,28 @@ def main() -> int:
     args = parser.parse_args()
     _index, records = load_index()
     stale: list[Path] = []
+    historical_blockers: list[Path] = []
+    historical_verified = 0
+    writes: list[tuple[Path, bytes]] = []
     for workload_id, relative_path in sorted(
         reference_source_lock.PROMOTED_CONTRACT_PATHS.items()
     ):
         path = ROOT / relative_path
+        contract = yaml.safe_load(path.read_text(encoding="utf-8"))
+        baseline = contract.get("verified_baseline") or {}
+        historical = baseline.get("protocol_compatibility") == "superseded"
+        entry, payload = records[workload_id]
+        if historical and historical_index_identity_matches(baseline, entry, payload):
+            errors = historical_baseline_errors(
+                workload_id, contract, entry, payload, records
+            )
+            if errors and args.check:
+                stale.append(path)
+            elif args.check:
+                historical_verified += 1
+            elif not args.check:
+                historical_blockers.append(path)
+            continue
         expected = synchronized_contract(
             workload_id, path, *records[workload_id], records
         )
@@ -232,14 +338,30 @@ def main() -> int:
         if args.check:
             stale.append(path)
         else:
-            path.write_bytes(expected)
+            writes.append((path, expected))
     if stale:
         print("verified baselines are out of date:")
         for path in stale:
             print(f"- {path.relative_to(ROOT)}")
         return 1
-    action = "verified" if args.check else "synchronized"
-    print(f"{action} {len(records)} verified baselines")
+    if historical_blockers:
+        print(
+            "refusing to promote protocol-superseded evidence; import a clean "
+            "replacement reference index first:"
+        )
+        for path in historical_blockers:
+            print(f"- {path.relative_to(ROOT)}")
+        return 1
+    for path, expected in writes:
+        path.write_bytes(expected)
+    if args.check:
+        current_verified = len(records) - historical_verified
+        print(
+            f"verified {current_verified} current baseline(s) and "
+            f"{historical_verified} protocol-superseded historical record(s)"
+        )
+    else:
+        print(f"synchronized {len(records)} verified baselines")
     return 0
 
 

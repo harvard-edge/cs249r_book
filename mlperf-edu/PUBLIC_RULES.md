@@ -22,6 +22,11 @@ A registry label alone is not evidence. The final `max` report, release
 validation, retained reference packet, asset policy, and reviewer decisions
 must all agree.
 
+The label `protocol-superseded historical reference` applies to all eight
+retained summaries from source commit `0ec4d3e1`. None is eligible under the
+current contracts. Current result claims require fresh five-execution packets
+from the final clean benchmark revision.
+
 ## Profile Semantics
 
 | **Profile** | **Role** | **Evidence Boundary** |
@@ -86,10 +91,9 @@ attempt is create-once and receives an evidence summary plus an unauthenticated
 SHA-256 digest sidecar.
 
 The current thresholds are listed in
-[QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). The five score rows now
-have committed reference summaries from clean source commit `0ec4d3e1`; older
-development calibration fields are historical rationale rather than the
-authoritative reference result.
+[QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). The five score rows retain
+protocol-superseded packets from clean source commit `0ec4d3e1`. Their current
+registry calibration fields are rationale, not replacement release evidence.
 
 ## Performance-Bearing Rule
 
@@ -110,37 +114,46 @@ Checkpoint-backed NanoGPT inference must retain all of the following evidence.
 - Synchronized repeated timing with raw or aggregate latency samples.
 - Positive throughput and completed functional work.
 
-The prefill default uses three discarded warmups and ten measurements. The
-decode default uses three discarded warmups and twenty measured requests. Prefill
-reports median, p90, and p99 latency. Decode reports TTFT and inter-token
-median, p90, and p99 latency across the measured requests.
+The prefill default uses one content-addressed token prompt, materializes a fresh
+KV cache, and records three discarded warmups plus twenty measurements. The
+decode default is a single-stream sequential microbenchmark with three discarded
+warmups and twenty measured requests. Its request TTFT spans prompt prefill
+through selection of the first output token. Every inter-token sample measures a
+subsequent cache-reusing step, and the first such sample is also retained as
+first-decode latency.
+This is not a server-load or arrival-process measurement.
 
 The SmolLM2 baseline must retain its pinned revision, model metadata, bundled
-four-case fixture digest, continuation-only NLL and perplexity, generation
-length, and repeated timing. Its default gate requires at least eight generated
-tokens and perplexity at most 10. Its default protocol uses three warmups and twenty
-measured requests with separate prefill and generation median, p90, and p99
-latencies.
+28-case v2 fixture digest, fixture version, seven category labels, continuation-only
+NLL and perplexity, generation length, and repeated timing. Continuation losses
+are weighted by token count globally and within each category. The default gate
+requires at least eight generated tokens, overall perplexity at most 7, and
+worst-category perplexity at most 24. Its default protocol uses three warmups and
+twenty measured cache-reusing greedy requests. Request TTFT spans prompt prefill
+through the first output token. Subsequent token calls reuse the same KV cache,
+and the report retains raw ITL samples and end-to-end request latency separately.
+The quality pass tokenizes each expected continuation independently from its
+prompt and scores those exact tokens through the same prefill-then-cache-reuse
+path. The former four-case, case-mean packet is protocol-superseded and cannot
+support a v2 performance claim.
 
-The dynamic-int8 SLM path is systems-only because its current calibration fails
-the task-quality parity limits. Completing generation is not enough to promote
-it.
+The dynamic-int8 SLM path is systems-only. Its historical v1 calibration failed
+the task-quality parity limits, and the fixture change supersedes those exact
+numbers. Completing generation is not enough to promote it; v2 overall,
+weakest-category, and NLL-parity gates must all pass.
 
-## Current Committed Reference Set
+## Historical Committed Reference Set
 
 `reference_results/index.json` contains eight content-addressed summaries from
-clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. All eight
-record `status: valid`, `eligible_for_public_baseline: true`, seeds 0 through 4,
-passing individual contracts, and passing aggregate acceptance.
+clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. Their embedded
+validity fields describe the protocols that existed when they were collected.
+The current registry explicitly marks every packet as superseded,
+`review_eligible: false`, and `replacement_required: true`.
 
-The score medians are `2.0789` NanoGPT cross-entropy loss, `0.7041` DLRM
-accuracy, `0.9666` anomaly AUROC, `0.8750` ResNet-18 top-1 accuracy, and
-`0.8089` MobileNetV2 top-1 accuracy. The performance medians are `124578.18`
-NanoGPT prefill tokens/s, `131.8344` NanoGPT decode tokens/s, and `101.3853`
-SmolLM2 output tokens/s. These are project candidate observations on the
-recorded Apple M5 Max system, not official MLPerf results or cross-system
-performance claims. Each performance reference stays within the declared 5%
-cross-seed coefficient-of-variation limit.
+The old score and performance values are preserved only to make protocol
+evolution auditable. They must not be copied into a current results table or
+used to support a benchmark claim. Replacement packets must use the current
+dual-metric evidence schema, contracts, and final clean source revision.
 
 The repository commits compact summaries and digests, not every raw artifact.
 Complete create-once attempts are retained for local handoff, and

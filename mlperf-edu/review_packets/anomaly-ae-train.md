@@ -27,20 +27,23 @@ mlperf grade "$OUTPUT_DIR" --output "$OUTPUT_DIR/grade.json"
 | Field | Value |
 |---|---|
 | Metric | anomaly_auroc |
-| Target | 0.95 |
+| Target | 0.93 |
 | Direction | higher |
 | Target basis | reference_runs |
 | Reference runs | 5 |
-| Acceptance rule | median anomaly AUROC must be >= target |
-| Reference protocol | profile=max; backend=pytorch-cpu reference path unless the report declares a different backend; machine_class=laptop-class CPU or laptop-class accelerator with full hardware fingerprint; dataset_mode=fetched MNIST with fixed normal/anomaly digit split, preprocessing, and seed; no synthetic fallback; seeds=0, 1, 2, 3, 4; aggregation=median anomaly AUROC across five independent reference runs; artifact_policy=preserve JSON, HTML, CSV, .provd.json, run fingerprint, dataset asset metadata, and raw metric values for each run; rerun_policy=rerun all five references when model code, dataset preprocessing, optimizer schedule, PyTorch major version, or target hardware class changes |
+| Acceptance rule | Every run must pass the macro-AUROC target, worst-class gate, and learned-control gate. The reported five-seed median must also be >= target. |
+| Reference protocol | profile=max; backend=pytorch-cpu reference path unless the report declares a different backend; machine_class=laptop-class CPU or laptop-class accelerator with full hardware fingerprint; dataset_mode=fetched MNIST hard-curve-v1 with digit 5 as normal, digits 3/8/9 as the fixed anomaly set, original test labels preserved for classwise scoring, and no synthetic fallback; seeds=0, 1, 2, 3, 4; aggregation=Median macro anomaly AUROC across five independent reference runs. Every run must pass the macro target, worst-class AUROC, and learned-control-margin gates.; repeatability_metric=sample coefficient of variation of train_and_eval_seconds across the five reference runs; repeatability_limit=0.05; repeatability_action=withhold the performance reference and rerun the complete protocol when the coefficient of variation exceeds 5%; artifact_policy=preserve JSON, HTML, CSV, .provd.json, run fingerprint, dataset asset metadata, and raw metric values for each run; rerun_policy=rerun all five references when model code, dataset preprocessing, optimizer schedule, PyTorch major version, or target hardware class changes |
 
 ## Measurement and Evidence Contract
 
 | Field | Value |
 |---|---|
-| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=anomaly-ae-train_max_20260711T085421.359195Z; evidence_file=reference_results/anomaly-ae-train/anomaly-ae-train_max_20260711T085421.359195Z.json; evidence_sha256=a3393e127285bbb9dcba5af692a7cbd0105df1f6a25577c1b51fd9d491c27803; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=0ec4d3e1c415944227d0754d170edb0addc1d925; profile=max; device_requested=cpu; data_mode=real; execution_backend=pytorch-cpu; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=anomaly_auroc; metric_values_by_seed=0.9666612742658038, 0.9701133535454093, 0.9665642110502738, 0.9645168333408751, 0.9658918955608851; anomaly_auroc=0.9665642110502738; median=0.9665642110502738; min=0.9645168333408751; max=0.9701133535454093; mean=0.9667495135526494; sample_stdev=0.0020662715355119; wall_seconds_median=6.636674875044264; wall_seconds_min=6.580142458085902; wall_seconds_max=6.698525084066205; wall_seconds_mean=6.642767050047405; wall_seconds_sample_stdev=0.04565513013724323; accepted_runs=5; baseline_note=Clean five-run project reference from exact source commit 0ec4d3e1. Evidence semantics were recomputed from the raw reports and manifests during promotion. Every seed passed the declared quality gate. Content-addressed portable run packages are retained for local review, but no public package URL is recorded. This is not an MLCommons-verified result. |
+| Measurement protocol | primary_metric=train_and_eval_seconds; scenario=training; timing_scope=fixed canonical training loop plus scheduled validation; included_phases=optimizer steps, scheduled validation, learning-rate scheduler steps when configured; excluded_phases=dataset or asset fetching, model construction, checkpoint serialization, report and provenance serialization; device_synchronization=synchronize immediately before and after the measured train-and-evaluation region; outer_reference_runs=5 |
+| Baseline record | evidence_status=committed-reference-summary; review_eligible=False; protocol_compatibility=superseded; replacement_required=True; superseded_reason=The current mnist-hard-curve-v1 contract adds classwise gates and no-training controls; this packet used the former zero-versus-all-digits protocol.; evidence_tier=public-candidate; evidence_id=anomaly-ae-train_max_20260711T085421.359195Z; evidence_file=reference_results/anomaly-ae-train/anomaly-ae-train_max_20260711T085421.359195Z.json; evidence_sha256=a3393e127285bbb9dcba5af692a7cbd0105df1f6a25577c1b51fd9d491c27803; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=0ec4d3e1c415944227d0754d170edb0addc1d925; profile=max; device_requested=cpu; data_mode=real; execution_backend=pytorch-cpu; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=anomaly_auroc; metric_values_by_seed=0.9666612742658038, 0.9701133535454093, 0.9665642110502738, 0.9645168333408751, 0.9658918955608851; anomaly_auroc=0.9665642110502738; median=0.9665642110502738; min=0.9645168333408751; max=0.9701133535454093; mean=0.9667495135526494; sample_stdev=0.0020662715355119; wall_seconds_median=6.636674875044264; wall_seconds_min=6.580142458085902; wall_seconds_max=6.698525084066205; wall_seconds_mean=6.642767050047405; wall_seconds_sample_stdev=0.04565513013724323; accepted_runs=5; baseline_note=This packet documents the superseded zero-versus-all-digits protocol and is retained only for historical traceability. It is not eligible evidence for mnist-hard-curve-v1. A clean five-seed replacement packet is required before promotion. |
+| Baseline record role | historical-protocol-superseded |
+| Baseline disclosure | Retained for historical traceability only; it does not validate the current contract and is not an MLCommons-verified result. |
 | Baseline evidence status | committed-reference-summary |
-| Baseline review eligible | True |
+| Baseline review eligible | False |
 | Baseline evidence file | reference_results/anomaly-ae-train/anomaly-ae-train_max_20260711T085421.359195Z.json |
 | Reference package availability | local-handoff |
 | External publication status | pending |
@@ -72,6 +75,7 @@ mlperf grade "$OUTPUT_DIR" --output "$OUTPUT_DIR/grade.json"
 ## Public Review Notes
 
 - external-publication blocker: registry declares local-handoff reference evidence, but no published package URL is recorded
+- replacement blocker: the committed packet is historical and uses a protocol superseded by the current benchmark contract; a clean reference sweep is required before promotion. Reason: The current mnist-hard-curve-v1 contract adds classwise gates and no-training controls; this packet used the former zero-versus-all-digits protocol.
 
 ## Source Provenance
 

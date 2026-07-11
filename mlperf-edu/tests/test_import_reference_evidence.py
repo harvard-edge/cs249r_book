@@ -16,6 +16,17 @@ INDEX_PATH = ROOT / "reference_results" / "index.json"
 SOURCE_SHA = "0ec4d3e1c415944227d0754d170edb0addc1d925"
 
 
+def _bind_comparison_fingerprint(
+    payload: dict[str, object], run: dict[str, object], report: dict[str, object]
+) -> None:
+    fingerprint = report["run_fingerprint"]
+    assert isinstance(fingerprint, dict)
+    digest = import_reference_evidence.run_comparison_fingerprint_sha256(fingerprint)
+    fingerprint["comparison_fingerprint_sha256"] = digest
+    run["comparison_fingerprint_sha256"] = digest
+    payload["comparison_fingerprint_sha256"] = digest
+
+
 def test_reference_index_binds_all_exact_imported_summary_bytes():
     index = json.loads(INDEX_PATH.read_text())
 
@@ -28,9 +39,10 @@ def test_reference_index_binds_all_exact_imported_summary_bytes():
     )
     assert slm_entry["reference_metric_role"] == "performance"
     assert slm_entry["functional_gate"]["metric"] == "generated_tokens"
-    assert "not a speed threshold" in slm_entry["legacy_summary_semantics"][
-        "quality_target"
-    ]
+    assert (
+        "not a speed threshold"
+        in slm_entry["legacy_summary_semantics"]["quality_target"]
+    )
 
     selected = {}
     for entry in index["summaries"]:
@@ -170,7 +182,7 @@ def test_importer_hashes_sidecar_and_every_retained_artifact(tmp_path):
         )
 
 
-def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
+def test_importer_binds_dual_score_metrics_to_raw_report(tmp_path, monkeypatch):
     report_path = tmp_path / "seed_0" / "example_max_report.json"
     manifest_path = tmp_path / "seed_0" / "example_max.provd.json"
     report_path.parent.mkdir()
@@ -180,10 +192,18 @@ def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
         "backend": "pytorch-cpu",
         "chip": "Test Chip",
         "data_mode": "real",
+        "scenario": "training",
+        "manifest_scenario": "training",
+        "registry_scenario": "training",
+        "primary_metric_declared": "train_and_eval_seconds",
+        "primary_metric_key": "train_and_eval_seconds",
+        "primary_metric_value": 12.5,
         "quality_value": 0.75,
         "quality_metric_key": "accuracy",
         "quality_metric_declared": "accuracy",
-        "functional_metric_declared": "accuracy",
+        "functional_metric_declared": None,
+        "functional_metric_key": None,
+        "functional_metric_value": None,
         "quality_target_met": True,
         "report_recorded_seed": 0,
         "manifest_recorded_seed": 0,
@@ -211,8 +231,9 @@ def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
         "seed": 0,
         "backend": "pytorch-cpu",
         "data_mode": "real",
+        "scenario": "training",
         "variant": None,
-        "metrics": {"accuracy": 0.75},
+        "metrics": {"accuracy": 0.75, "train_and_eval_seconds": 12.5},
         "quality": {"metric": "accuracy", "target": 0.7, "target_met": True},
         "review_contract": {
             "status": "passed",
@@ -221,10 +242,11 @@ def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
             "public_status": "score-bearing",
             "profile": "max",
             "data_mode": "real",
-            "metric": "accuracy",
-            "metric_key": "accuracy",
-            "metric_value": 0.75,
+            "metric": "train_and_eval_seconds",
+            "metric_key": "train_and_eval_seconds",
+            "metric_value": 12.5,
             "functional_metric": "accuracy",
+            "functional_metric_key": "accuracy",
             "functional_metric_value": 0.75,
         },
         "run_fingerprint": {
@@ -233,15 +255,31 @@ def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
                 "profile": "max",
                 "seed": 0,
                 "status": "passed",
+                "scenario": "training",
+                "scenarios": ["training"],
                 "backends": ["pytorch-cpu"],
                 "data_modes": ["real"],
             },
             "hardware": {"chip": "Test Chip", "backend": "CPU"},
         },
     }
+    payload = {
+        "schema": "mlperf-edu-reference-evidence/0.4",
+        "workload": "example",
+        "profile": "max",
+        "variant": None,
+        "public_status": "score-bearing",
+        "primary_metric": {
+            "name": "train_and_eval_seconds",
+            "role": "performance",
+        },
+        "quality_metric": "accuracy",
+    }
+    _bind_comparison_fingerprint(payload, run, report)
     report_path.write_text(json.dumps(report, sort_keys=True) + "\n")
     manifest = {
         "workload": "example",
+        "scenario": "training",
         "leaves": {
             "rng": {"seed": 0},
             "measurement": {
@@ -254,19 +292,17 @@ def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
         },
     }
     manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n")
-    payload = {
-        "workload": "example",
-        "profile": "max",
-        "variant": None,
-        "public_status": "score-bearing",
-        "quality_metric": "accuracy",
-    }
     monkeypatch.setattr(
         import_reference_evidence,
         "verify_manifest_against_source",
         lambda *args, **kwargs: None,
     )
-    contract = SimpleNamespace(raw={})
+    monkeypatch.setattr(
+        import_reference_evidence,
+        "evaluate_report_contract",
+        lambda _contract, raw_report: raw_report["review_contract"],
+    )
+    contract = SimpleNamespace(raw={}, scenario="training")
 
     import_reference_evidence.verify_run_semantics(
         tmp_path,
@@ -278,8 +314,9 @@ def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
         manifest_cache={},
     )
 
-    run["quality_value"] = 0.8
-    with pytest.raises(ValueError, match="metric value"):
+    manifest["scenario"] = "offline"
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n")
+    with pytest.raises(ValueError, match="manifest.scenario"):
         import_reference_evidence.verify_run_semantics(
             tmp_path,
             payload,
@@ -289,6 +326,247 @@ def test_importer_binds_summary_metric_to_raw_report(tmp_path, monkeypatch):
             source_project_root=tmp_path,
             manifest_cache={},
         )
+    manifest["scenario"] = "training"
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n")
+
+    run["quality_value"] = 0.8
+    with pytest.raises(ValueError, match="gate metric value"):
+        import_reference_evidence.verify_run_semantics(
+            tmp_path,
+            payload,
+            run,
+            run_index=0,
+            workload_contract=contract,
+            source_project_root=tmp_path,
+            manifest_cache={},
+        )
+
+    run["quality_value"] = 0.75
+    run["primary_metric_value"] = 99.0
+    with pytest.raises(ValueError, match="primary metric value"):
+        import_reference_evidence.verify_run_semantics(
+            tmp_path,
+            payload,
+            run,
+            run_index=0,
+            workload_contract=contract,
+            source_project_root=tmp_path,
+            manifest_cache={},
+        )
+
+    run["primary_metric_value"] = 12.5
+    monkeypatch.setattr(
+        import_reference_evidence,
+        "evaluate_report_contract",
+        lambda _contract, _report: {
+            "status": "failed",
+            "issues": ["independent contract failure"],
+        },
+    )
+    with pytest.raises(ValueError, match="independently recomputed review contract"):
+        import_reference_evidence.verify_run_semantics(
+            tmp_path,
+            payload,
+            run,
+            run_index=0,
+            workload_contract=contract,
+            source_project_root=tmp_path,
+            manifest_cache={},
+        )
+
+
+def test_importer_binds_performance_primary_and_functional_gate(tmp_path, monkeypatch):
+    report_path = tmp_path / "seed_0" / "slm_max_report.json"
+    manifest_path = tmp_path / "seed_0" / "slm_max.provd.json"
+    report_path.parent.mkdir()
+    run = {
+        "requested_seed": 0,
+        "status": "passed",
+        "backend": "transformers-cpu",
+        "chip": "Test Chip",
+        "data_mode": "local-prompt",
+        "scenario": "single_stream",
+        "manifest_scenario": "single_stream",
+        "registry_scenario": "single_stream",
+        "primary_metric_declared": "output_tokens_per_sec",
+        "primary_metric_key": "output_tokens_per_sec",
+        "primary_metric_value": 100.0,
+        "quality_metric_declared": None,
+        "quality_metric_key": None,
+        "quality_value": None,
+        "functional_metric_declared": "generated_tokens",
+        "functional_metric_key": "generated_tokens",
+        "functional_metric_value": 16.0,
+        "quality_target_met": True,
+        "report_recorded_seed": 0,
+        "manifest_recorded_seed": 0,
+        "fingerprint_backends": ["transformers-cpu"],
+        "hardware_backend": "CPU",
+        "report_path": "seed_0/slm_max_report.json",
+        "manifest_path": "seed_0/slm_max.provd.json",
+        "grade": {
+            "status": "passed",
+            "passed": True,
+            "target_met": True,
+            "metric": "generated_tokens",
+            "value": 16.0,
+            "target": 8,
+        },
+        "artifacts": [
+            {"role": "report", "path": "seed_0/slm_max_report.json"},
+            {"role": "provenance", "path": "seed_0/slm_max.provd.json"},
+        ],
+    }
+    report = {
+        "workload": "example",
+        "profile": "max",
+        "status": "passed",
+        "seed": 0,
+        "backend": "transformers-cpu",
+        "data_mode": "local-prompt",
+        "scenario": "single_stream",
+        "variant": None,
+        "metrics": {"output_tokens_per_sec": 100.0, "generated_tokens": 16.0},
+        "quality": {
+            "metric": "generated_tokens",
+            "target": 8,
+            "target_met": True,
+        },
+        "review_contract": {
+            "status": "passed",
+            "review_eligible": True,
+            "issues": [],
+            "public_status": "performance-bearing",
+            "profile": "max",
+            "data_mode": "local-prompt",
+            "metric": "output_tokens_per_sec",
+            "metric_key": "output_tokens_per_sec",
+            "metric_value": 100.0,
+            "functional_metric": "generated_tokens",
+            "functional_metric_key": "generated_tokens",
+            "functional_metric_value": 16.0,
+        },
+        "run_fingerprint": {
+            "execution": {
+                "workload": "example",
+                "profile": "max",
+                "seed": 0,
+                "status": "passed",
+                "scenario": "single_stream",
+                "scenarios": ["single_stream"],
+                "backends": ["transformers-cpu"],
+                "data_modes": ["local-prompt"],
+            },
+            "hardware": {"chip": "Test Chip", "backend": "CPU"},
+        },
+    }
+    payload = {
+        "schema": "mlperf-edu-reference-evidence/0.4",
+        "workload": "example",
+        "profile": "max",
+        "variant": None,
+        "public_status": "performance-bearing",
+        "primary_metric": {
+            "name": "output_tokens_per_sec",
+            "role": "performance",
+        },
+        "quality_metric": None,
+        "functional_gate": {"metric": "generated_tokens"},
+    }
+    _bind_comparison_fingerprint(payload, run, report)
+    report_path.write_text(json.dumps(report, sort_keys=True) + "\n")
+    manifest = {
+        "workload": "example",
+        "scenario": "single_stream",
+        "leaves": {
+            "rng": {"seed": 0},
+            "measurement": {
+                "report_path": str(report_path.resolve()),
+                "report_file_sha256": import_reference_evidence.sha256_file(
+                    report_path
+                ),
+                "n_bytes": report_path.stat().st_size,
+            },
+        },
+    }
+    manifest_path.write_text(json.dumps(manifest, sort_keys=True) + "\n")
+    monkeypatch.setattr(
+        import_reference_evidence,
+        "verify_manifest_against_source",
+        lambda *args, **kwargs: None,
+    )
+    monkeypatch.setattr(
+        import_reference_evidence,
+        "evaluate_report_contract",
+        lambda _contract, raw_report: raw_report["review_contract"],
+    )
+
+    import_reference_evidence.verify_run_semantics(
+        tmp_path,
+        payload,
+        run,
+        run_index=0,
+        workload_contract=SimpleNamespace(raw={}, scenario="single_stream"),
+        source_project_root=tmp_path,
+        manifest_cache={},
+    )
+
+    run["functional_metric_value"] = 8.0
+    with pytest.raises(ValueError, match="gate metric value"):
+        import_reference_evidence.verify_run_semantics(
+            tmp_path,
+            payload,
+            run,
+            run_index=0,
+            workload_contract=SimpleNamespace(raw={}, scenario="single_stream"),
+            source_project_root=tmp_path,
+            manifest_cache={},
+        )
+
+
+def test_schema_04_index_records_primary_and_quality_fields(tmp_path):
+    payload = {
+        "schema": "mlperf-edu-reference-evidence/0.4",
+        "evidence_id": "example-train_max_20260711T120000.000000Z",
+        "workload": "example-train",
+        "profile": "max",
+        "public_status": "score-bearing",
+        "variant": None,
+        "seeds_requested": [0],
+        "acceptance": {"passed": True},
+        "primary_metric": {
+            "name": "train_and_eval_seconds",
+            "role": "performance",
+        },
+        "quality_metric": "accuracy",
+        "quality_gate": {
+            "metric": "accuracy",
+            "target": 0.7,
+            "direction": "higher",
+        },
+        "reference_metric_role": "performance",
+        "aggregate": {
+            "primary_metric": {"median": 12.0},
+            "quality": {"median": 0.8},
+        },
+    }
+    data = (json.dumps(payload, sort_keys=True) + "\n").encode()
+    summary = tmp_path / "evidence_summary.json"
+    summary.write_bytes(data)
+    lock = {"schema": "lock/0.1", "file_count": 1, "contract_count": 1}
+    lock_bytes = (json.dumps(lock, sort_keys=True) + "\n").encode()
+
+    index = import_reference_evidence.build_index(
+        {"example-train": (summary, payload, data)},
+        source_git_sha="a" * 40,
+        source_lock=lock,
+        source_lock_bytes=lock_bytes,
+    )
+
+    entry = index["summaries"][0]
+    assert entry["metric"] == "train_and_eval_seconds"
+    assert entry["quality_metric"] == "accuracy"
+    assert entry["quality_gate"] == payload["quality_gate"]
 
 
 def test_source_tool_digest_is_bound_to_exact_git_object(monkeypatch):
@@ -309,7 +587,12 @@ def test_source_tool_digest_is_bound_to_exact_git_object(monkeypatch):
     assert calls[1][2].startswith(f"{SOURCE_SHA}:")
 
 
-def test_committed_summaries_bind_the_current_sweep_tool_bytes():
-    assert import_reference_evidence.check_taxonomy.SWEEP_TOOL_SHA256 == (
-        "sha256:b5409e20385add7cd7b7f6814bf902affa71fe4b43532477d2f82b1d05fd2bfd"
-    )
+def test_committed_summaries_bind_their_historical_sweep_tool_bytes():
+    expected = import_reference_evidence.source_sweep_tool_sha256(SOURCE_SHA)
+    index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
+
+    for entry in index["summaries"]:
+        payload = json.loads((ROOT / entry["path"]).read_text(encoding="utf-8"))
+        assert payload["source"]["tool_sha256"] == expected
+
+    assert import_reference_evidence.check_taxonomy.SWEEP_TOOL_SHA256 != expected

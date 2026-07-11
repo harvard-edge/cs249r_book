@@ -41,7 +41,12 @@ sys.path.insert(0, str(ROOT / "src"))
 import yaml  # noqa: E402
 
 from mlperf.assets import asset_dossier, has_asset_dossier  # noqa: E402
-from mlperf.registry import Workload, load_registry  # noqa: E402
+from mlperf.registry import (  # noqa: E402
+    Workload,
+    baseline_is_current_review_evidence,
+    baseline_is_protocol_superseded,
+    load_registry,
+)
 
 GITHUB_BLOB = "https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu"
 GITHUB_TREE = "https://github.com/harvard-edge/cs249r_book/tree/main/mlperf-edu"
@@ -442,8 +447,15 @@ def section_verified_baseline(w: Workload) -> str:
     body = mapping_table(visible)
     if note:
         body += f"\n> {esc(note)}\n"
-    review_eligible = baseline.get("review_eligible") is True
-    if review_eligible:
+    if baseline_is_protocol_superseded(baseline):
+        title = "Historical Project Reference (Protocol Superseded)"
+        disclosure = (
+            "This content-addressed packet is retained for historical traceability. "
+            "It does not validate the current benchmark contract, is not review "
+            "eligible, and must be replaced by a clean reference sweep before promotion. "
+            "It is not an MLCommons-verified result."
+        )
+    elif baseline_is_current_review_evidence(baseline):
         title = "Recorded Project Reference Baseline"
         disclosure = (
             "This is a project reference baseline, not an MLCommons-verified result."

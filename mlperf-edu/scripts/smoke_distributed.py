@@ -12,6 +12,7 @@ This catches the three most common DDP bugs in one number:
 
 Run: python3 scripts/smoke_distributed.py
 """
+
 from __future__ import annotations
 
 import os
@@ -23,9 +24,10 @@ sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(REPO_ROOT / "src"))
 os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
 
-import torch  # noqa: E402
-
-from mlperf.reference.distributed.ddp_runner import run_ddp, run_gradacc_baseline
+from mlperf.reference.distributed.ddp_runner import (  # noqa: E402
+    run_ddp,
+    run_gradacc_baseline,
+)
 
 
 def main() -> int:
@@ -49,7 +51,14 @@ def main() -> int:
         print(f"  DDP failed: {ddp['error']}")
         return 1
     print(f"  DDP rank-0 final_loss: {ddp['final_loss']:.6f}")
-    print(f"  DDP avg AllReduce time per step: {ddp['allreduce_time_per_step_ms']:.3f} ms")
+    print(
+        "  DDP avg backward-with-AllReduce time per step: "
+        f"{ddp['backward_with_allreduce_time_per_step_ms']:.3f} ms"
+    )
+    print(
+        f"  Gradient payload: {ddp['gradient_payload_bytes_fp32']:,} bytes "
+        f"for {ddp['n_params']:,} fp32 parameters"
+    )
     print()
 
     if base["final_loss"] == 0:
@@ -60,10 +69,12 @@ def main() -> int:
 
     if delta < 0.02:
         print("ITER-10 SMOKE: PASS")
-        print(f'  Headline: "DDP and gradient accumulation are mathematically equivalent. '
-              f'Two ranks of micro-batch=64 produce the same loss as one process accumulating '
-              f'2x64=128. The {ddp["allreduce_time_per_step_ms"]:.1f} ms/step AllReduce overhead '
-              f'is what you pay for the parallelism."')
+        print(
+            '  Headline: "DDP and gradient accumulation are mathematically equivalent. '
+            "Two ranks of micro-batch=64 produce the same loss as one process accumulating "
+            "2x64=128. The measured backward time includes both autograd and Gloo "
+            'AllReduce."'
+        )
         return 0
     print("ITER-10 SMOKE: FAIL")
     return 1

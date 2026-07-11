@@ -7,7 +7,13 @@ from typing import Any
 
 from mlperf.assets import asset_dossier, huggingface_model_dossier
 from mlperf.edu_cli import public_audit_warnings, workload_run_selector
-from mlperf.registry import Workload, load_registry, select_workloads
+from mlperf.registry import (
+    Workload,
+    baseline_is_current_review_evidence,
+    baseline_is_protocol_superseded,
+    load_registry,
+    select_workloads,
+)
 
 
 PUBLIC_REVIEW_STATUSES = ("score-bearing", "performance-bearing")
@@ -258,12 +264,30 @@ def evidence_contract_section(workload: Workload) -> str:
     raw = workload.raw
     baseline = raw.get("verified_baseline") or {}
     calibration = raw.get("calibration_observation") or {}
+    if baseline_is_protocol_superseded(baseline):
+        baseline_role = "historical-protocol-superseded"
+        baseline_disclosure = (
+            "Retained for historical traceability only; it does not validate the current "
+            "contract and is not an MLCommons-verified result."
+        )
+    elif baseline_is_current_review_evidence(baseline):
+        baseline_role = "current-review-evidence"
+        baseline_disclosure = (
+            "Project reference evidence; not an MLCommons-verified result."
+        )
+    else:
+        baseline_role = "development-only"
+        baseline_disclosure = (
+            "Development evidence only; not an MLCommons-verified result."
+        )
     rows = [
         ("Reference protocol", compact_dict(raw.get("performance_reference_protocol"))),
         ("Measurement protocol", compact_dict(raw.get("measurement_protocol"))),
         ("Checkpoint contract", compact_dict(raw.get("checkpoint_contract"))),
         ("Task-quality evaluation", compact_dict(raw.get("quality_evaluation"))),
         ("Baseline record", compact_dict(baseline)),
+        ("Baseline record role", baseline_role),
+        ("Baseline disclosure", baseline_disclosure),
         ("Baseline evidence status", baseline.get("evidence_status", "not declared")),
         ("Baseline review eligible", baseline.get("review_eligible", "not declared")),
         ("Baseline evidence file", baseline.get("evidence_file", "not declared")),
@@ -393,6 +417,14 @@ def public_review_notes(
                 f"{workload.public_status} baseline is not backed by a committed reference summary; "
                 f"evidence status is {evidence_status or 'not declared'}"
             )
+        if baseline_is_protocol_superseded(baseline):
+            reason = str(baseline.get("superseded_reason") or "").strip()
+            detail = f" Reason: {reason}" if reason else ""
+            warnings.append(
+                "replacement blocker: the committed packet is historical and uses a "
+                "protocol superseded by the current benchmark contract; a clean reference "
+                f"sweep is required before promotion.{detail}"
+            )
     calibration = workload.raw.get("calibration_observation")
     if (
         workload.public_status == "performance-bearing"
@@ -420,11 +452,17 @@ def public_review_notes(
                 f"shared checkpoint source {checkpoint_source.id} is not backed by a committed "
                 f"reference summary; evidence status is {source_status or 'not declared'}"
             )
-        elif source_baseline.get("reference_package_availability") != "published":
-            warnings.append(
-                f"external-publication blocker: the raw reference package for shared checkpoint "
-                f"source {checkpoint_source.id} is not yet publicly retrievable"
-            )
+        else:
+            if baseline_is_protocol_superseded(source_baseline):
+                warnings.append(
+                    f"replacement blocker: shared checkpoint source {checkpoint_source.id} "
+                    "has only protocol-superseded historical evidence"
+                )
+            if source_baseline.get("reference_package_availability") != "published":
+                warnings.append(
+                    f"external-publication blocker: the raw reference package for shared checkpoint "
+                    f"source {checkpoint_source.id} is not yet publicly retrievable"
+                )
     if warnings:
         return warnings
     return ["No public-release warning from the current structured audit."]

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
@@ -20,7 +21,11 @@ from mlperf.assets import (
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed
+from mlperf.runners.common import (
+    configured_seed,
+    synchronize_device,
+    training_measurement_protocol,
+)
 
 
 def run_resnet18_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -201,7 +206,7 @@ def run_mobilenet_composed_max(workload: Workload, output_dir: Path) -> dict[str
 def run_mobilenet_composed(
     workload: Workload, output_dir: Path, *, profile: str, repetitions: int
 ) -> dict[str, Any]:
-    """Run MobileNetV2 with composed pruning and fake quantization primitives."""
+    """Run fp16 MobileNetV2 with composed pruning and fake-int8 accounting."""
     root = find_project_root()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
@@ -217,15 +222,19 @@ def run_mobilenet_composed(
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = int(os.environ.get("MLPERF_EDU_MOBILENET_COMP_BATCH_SIZE", "2"))
+    if batch_size < 1 or repetitions < 1:
+        raise ValueError(
+            "composed MobileNet requires positive batch and repetition counts"
+        )
 
-    model = MobileNetV2Local(num_classes=100).to(device)
+    model = MobileNetV2Local(num_classes=100).to(device=device, dtype=torch.float16)
     model.eval()
     baseline_param_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
     sparsity = prune_2of4(model)
     quant = fake_quantize_int8(model)
     effective_bytes = effective_param_bytes(model)
 
-    images = torch.randn(batch_size, 3, 32, 32, device=device)
+    images = torch.randn(batch_size, 3, 32, 32, device=device, dtype=torch.float16)
     start = time.perf_counter()
     with torch.inference_mode():
         logits = None
@@ -238,20 +247,31 @@ def run_mobilenet_composed(
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = (output_dir / f"{workload.id}_{profile}_report.json").resolve()
     manifest_path = (output_dir / f"{workload.id}_{profile}.provd.json").resolve()
+    functional_target = 1.0
+    functional_met = bool(
+        repetitions >= 1
+        and duration > 0
+        and torch.isfinite(logits).all().item()
+        and list(logits.shape) == [batch_size, 100]
+        and baseline_param_bytes > effective_bytes > 0
+        and baseline_param_bytes / effective_bytes > functional_target
+        and all(parameter.dtype == torch.float16 for parameter in model.parameters())
+    )
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
         "profile": profile,
-        "status": "passed",
-        "backend": "pytorch-cpu",
+        "status": "passed" if functional_met else "quality_failed",
+        "backend": "pytorch-cpu-fp16",
         "data_mode": "synthetic-deterministic",
         "seed": seed,
         "compression": {
             "structured_sparsity": "2:4",
             "quantization": "fake-int8",
-            "runtime_note": "Algorithmic compression only; PyTorch CPU/MPS does not use fused 2:4 or int8 kernels here.",
+            "execution_precision": "fp16",
+            "runtime_note": "The dense runtime is fp16. Structured sparsity and int8 are algorithmic storage accounting only; this path does not use fused sparse/int8 kernels.",
         },
         "metrics": {
             "duration_seconds": float(duration),
@@ -269,12 +289,17 @@ def run_mobilenet_composed(
             "n_quantized_params": int(quant["n_quantized_params"]),
             "logits_shape": list(logits.shape),
             "repetitions": repetitions,
+            "execution_dtype": "float16",
+            "functional_check_met": functional_met,
         },
         "quality": {
-            "metric": workload.quality_metric,
-            "target": workload.quality_value,
-            "quality_required": False,
-            "note": "Compression-composition workload validates inference and byte accounting; task quality requires a trained checkpoint.",
+            "metric": "effective_compression_ratio",
+            "metric_key": "effective_compression_ratio",
+            "target": functional_target,
+            "direction": "higher",
+            "target_met": functional_met,
+            "quality_required": True,
+            "note": "The systems-only functional gate requires finite fp16 logits and a computed packed-storage ratio above one. It does not claim task accuracy or kernel speedup.",
         },
         "artifacts": {
             "report": str(report_path),
@@ -284,7 +309,7 @@ def run_mobilenet_composed(
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="single_stream",
+        scenario=workload.scenario or "offline",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -342,6 +367,7 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     val_accuracies: list[float] = []
     epoch_times: list[float] = []
     samples_seen = 0
+    synchronize_device(device)
     start = time.perf_counter()
     for _epoch in range(epochs):
         t0 = time.perf_counter()
@@ -360,7 +386,12 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         val_losses.append(val_loss)
         val_accuracies.append(val_acc)
         epoch_times.append(time.perf_counter() - t0)
+    synchronize_device(device)
     duration = time.perf_counter() - start
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError(
+            "ResNet-18 train-and-evaluation duration must be finite and positive"
+        )
 
     final_accuracy = val_accuracies[-1]
     target = float(
@@ -394,6 +425,7 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "n_bytes": asset.n_bytes,
         },
         "seed": seed,
+        "measurement_protocol": training_measurement_protocol(workload),
         "config": {
             "batch_size": batch_size,
             "epochs": epochs,
@@ -408,6 +440,7 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "top1_accuracy": float(final_accuracy),
             "evaluation_samples": int(evaluated_samples),
             "duration_seconds": float(duration),
+            "train_and_eval_seconds": float(duration),
             "samples": int(samples_seen),
             "samples_per_second": float(samples_seen / duration)
             if duration > 0
@@ -443,7 +476,6 @@ def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         report_path=report_path,
         weights_path=checkpoint_path,
         weights_n_params=n_params,
-        weights_dtype="float32",
         dataset_name=asset.name,
         dataset_files=list(asset.files),
         rng_seed=seed,
@@ -499,6 +531,7 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     val_accuracies: list[float] = []
     epoch_times: list[float] = []
     samples_seen = 0
+    synchronize_device(device)
     start = time.perf_counter()
     for _epoch in range(epochs):
         t0 = time.perf_counter()
@@ -517,7 +550,12 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         val_losses.append(val_loss)
         val_accuracies.append(val_acc)
         epoch_times.append(time.perf_counter() - t0)
+    synchronize_device(device)
     duration = time.perf_counter() - start
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError(
+            "MobileNetV2 train-and-evaluation duration must be finite and positive"
+        )
 
     final_accuracy = val_accuracies[-1]
     target = float(
@@ -551,6 +589,7 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "n_bytes": asset.n_bytes,
         },
         "seed": seed,
+        "measurement_protocol": training_measurement_protocol(workload),
         "config": {
             "batch_size": batch_size,
             "epochs": epochs,
@@ -565,6 +604,7 @@ def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "top1_accuracy": float(final_accuracy),
             "evaluation_samples": int(evaluated_samples),
             "duration_seconds": float(duration),
+            "train_and_eval_seconds": float(duration),
             "samples": int(samples_seen),
             "samples_per_second": float(samples_seen / duration)
             if duration > 0

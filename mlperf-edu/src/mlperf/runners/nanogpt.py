@@ -15,7 +15,11 @@ from mlperf.assets import ensure_tinyshakespeare, sha256_file
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd, verify_provd
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed
+from mlperf.runners.common import (
+    configured_seed,
+    synchronize_device,
+    training_measurement_protocol,
+)
 
 
 def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -204,7 +208,7 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     context_len = _env_int("MLPERF_EDU_PREFILL_MAX_CONTEXT", 1792)
     batch_size = _env_int("MLPERF_EDU_PREFILL_MAX_BATCH", 1)
     n_warmup = _env_int("MLPERF_EDU_PREFILL_MAX_WARMUP", 3)
-    n_iter = _env_int("MLPERF_EDU_PREFILL_MAX_ITER", 10)
+    n_iter = _env_int("MLPERF_EDU_PREFILL_MAX_ITER", 20)
     model, checkpoint_path, checkpoint_lineage = _load_max_nanogpt_model(
         output_dir, device, context_len
     )
@@ -236,6 +240,9 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "n_warmup": n_warmup,
             "n_iter": n_iter,
             "model_size": os.environ.get("MLPERF_EDU_MAX_MODEL_SIZE", "base"),
+            "prompt_seed": result["prompt_seed"],
+            "prompt_sha256": result["prompt_sha256"],
+            "kv_cache_materialized": result["kv_cache_materialized"],
         },
         "metrics": {
             **result,
@@ -244,16 +251,16 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "quality": {
             "metric": "prefill_tokens_per_sec",
             "metric_key": "prefill_tokens_per_sec",
-            "target": "> 0",
+            "target": 0.0,
+            "direction": "higher",
             "quality_required": True,
             "target_met": target_met,
             "note": "The functional gate requires a quality-approved checkpoint and positive measured prefill throughput.",
         },
         "measurement_protocol": {
+            **(workload.raw.get("measurement_protocol") or {}),
             "warmup_runs": n_warmup,
             "measured_runs": n_iter,
-            "latency_statistics": ["median", "p90", "p99"],
-            "timing_scope": "synchronized checkpoint-backed forward passes over one fixed-shape prompt batch",
         },
         "checkpoint_provenance": checkpoint_lineage,
         "artifacts": {
@@ -330,6 +337,8 @@ def run_decode_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "status": "passed",
         "backend": "pytorch-cpu",
         "data_mode": "synthetic-deterministic",
+        "scenario": "single_stream",
+        "measurement_mode": "sequential_microbenchmark",
         "seed": seed,
         "metrics": {
             **result,
@@ -349,7 +358,7 @@ def run_decode_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="server",
+        scenario="single_stream",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -414,6 +423,8 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "status": "passed" if target_met else "quality_failed",
         "backend": f"pytorch-{device.type}",
         "data_mode": "checkpoint-backed",
+        "scenario": "single_stream",
+        "measurement_mode": "sequential_microbenchmark",
         "seed": seed,
         "config": {
             "prefill_ctx": prefill_ctx,
@@ -421,6 +432,8 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "batch_size": batch_size,
             "repetitions": repetitions,
             "model_size": os.environ.get("MLPERF_EDU_MAX_MODEL_SIZE", "base"),
+            "prompt_seed": result["prompt_seed"],
+            "prompt_sha256": result["prompt_sha256"],
         },
         "metrics": {
             **result,
@@ -430,15 +443,15 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "metric": "decode_steps",
             "metric_key": "decode_steps",
             "target": decode_steps,
+            "direction": "equal",
             "quality_required": True,
             "target_met": target_met,
             "note": "The functional gate requires a quality-approved checkpoint, the configured decode length, and positive throughput.",
         },
         "measurement_protocol": {
+            **(workload.raw.get("measurement_protocol") or {}),
             "warmup_runs": warmup_runs,
             "measured_runs": repetitions,
-            "latency_statistics": ["median", "p90", "p99"],
-            "timing_scope": "synchronized checkpoint-backed requests with per-token ITL samples",
         },
         "checkpoint_provenance": checkpoint_lineage,
         "artifacts": {
@@ -452,7 +465,7 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="server",
+        scenario="single_stream",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -484,6 +497,25 @@ class _TextDataset(Dataset):
         return (
             self.tokens[idx : idx + self.seq_len],
             self.tokens[idx + 1 : idx + self.seq_len + 1],
+        )
+
+
+class _NonOverlappingTextDataset(Dataset):
+    """Deterministic disjoint contexts for representative quality evaluation."""
+
+    def __init__(self, tokens: torch.Tensor, seq_len: int) -> None:
+        self.tokens = tokens
+        self.seq_len = seq_len
+        self.total_target_tokens = max(0, len(tokens) - 1)
+
+    def __len__(self) -> int:
+        return self.total_target_tokens // self.seq_len
+
+    def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
+        start = idx * self.seq_len
+        return (
+            self.tokens[start : start + self.seq_len],
+            self.tokens[start + 1 : start + self.seq_len + 1],
         )
 
 
@@ -530,11 +562,13 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     train_losses: list[float] = []
     val_losses: list[float] = []
+    val_tokens_evaluated: list[int] = []
     epoch_times: list[float] = []
+    synchronize_device(device)
     start = time.perf_counter()
     tokens_seen = 0
 
-    for _epoch in range(epochs):
+    for epoch in range(epochs):
         t0 = time.perf_counter()
         train_loss, train_tokens = _train_epoch(
             model,
@@ -543,16 +577,28 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss = _validate(model, val_loader, device, max_batches=val_batches)
+        quality_epoch = epoch == epochs - 1
+        val_loss, evaluated_tokens, _ = _validate(
+            model,
+            val_loader,
+            device,
+            max_batches=None if quality_epoch else val_batches,
+        )
         scheduler.step()
         tokens_seen += train_tokens
         train_losses.append(train_loss)
         val_losses.append(val_loss)
+        val_tokens_evaluated.append(evaluated_tokens)
         epoch_times.append(time.perf_counter() - t0)
 
+    synchronize_device(device)
     duration = time.perf_counter() - start
     final_train_loss = train_losses[-1]
     final_val_loss = val_losses[-1]
+    quality_eval_tokens = val_tokens_evaluated[-1]
+    validation_dataset = val_loader.dataset
+    validation_target_tokens = int(validation_dataset.total_target_tokens)
+    quality_eval_coverage = quality_eval_tokens / validation_target_tokens
     target = _env_float(
         "MLPERF_EDU_MAX_QUALITY_TARGET", float(workload.quality_value or 2.3)
     )
@@ -581,6 +627,7 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "n_bytes": asset.n_bytes,
         },
         "seed": seed,
+        "measurement_protocol": training_measurement_protocol(workload),
         "config": {
             "model_size": model_size,
             "model_kwargs": model_kwargs,
@@ -589,6 +636,8 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "epochs": epochs,
             "batches_per_epoch": batches_per_epoch,
             "val_batches": val_batches,
+            "epoch_validation_sampling": "disjoint contexts from split start",
+            "quality_evaluation": "complete nonoverlapping validation split",
             "lr": lr,
         },
         "metrics": {
@@ -596,12 +645,17 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "final_val_loss": float(final_val_loss),
             "cross_entropy_loss": float(final_val_loss),
             "duration_seconds": float(duration),
+            "train_and_eval_seconds": float(duration),
             "tokens": int(tokens_seen),
             "tokens_per_second": float(tokens_seen / duration) if duration > 0 else 0.0,
             "n_params": int(n_params),
             "epoch_times": epoch_times,
             "train_losses": train_losses,
             "val_losses": val_losses,
+            "val_tokens_evaluated": val_tokens_evaluated,
+            "quality_eval_tokens": int(quality_eval_tokens),
+            "quality_eval_sequences": int(len(validation_dataset)),
+            "quality_eval_coverage": float(quality_eval_coverage),
         },
         "quality": {
             "metric": workload.quality_metric,
@@ -805,19 +859,69 @@ def _aggregate_decode_results(results: list[dict[str, Any]]) -> dict[str, Any]:
     itl_samples = [
         float(value) for result in results for value in result.get("itl_samples_s", [])
     ]
-    ttft_samples = [float(result["ttft_s"]) for result in results]
-    prefill_samples = [float(result["prefill_warm_s"]) for result in results]
-    if not itl_samples:
-        raise ValueError("decode measurement produced no inter-token latency samples")
+    ttft_samples = [float(result["request_ttft_s"]) for result in results]
+    first_decode_samples = [
+        float(result["first_decode_latency_s"]) for result in results
+    ]
+    prefill_samples = [float(result["prefill_latency_s"]) for result in results]
+    request_end_to_end_samples = [
+        float(result["request_end_to_end_latency_s"]) for result in results
+    ]
+    prompt_identities = {
+        (result.get("prompt_seed"), result.get("prompt_sha256")) for result in results
+    }
+    if len(prompt_identities) != 1:
+        raise ValueError("decode repetitions must use one fixed canonical prompt")
+    expected_itl_samples = int(first["decode_steps"]) - 1
+    if any(
+        len(result.get("itl_samples_s", [])) != expected_itl_samples
+        for result in results
+    ):
+        raise ValueError(
+            "decode measurement did not retain one ITL sample per subsequent token"
+        )
+    if not itl_samples or any(value <= 0 for value in itl_samples):
+        raise ValueError(
+            "decode measurement produced invalid inter-token latency samples"
+        )
+    if any(
+        result["first_decode_latency_s"] != result["itl_samples_s"][0]
+        for result in results
+    ):
+        raise ValueError(
+            "first-decode latency must be the first subsequent-token ITL sample"
+        )
+    if any(ttft < prefill for ttft, prefill in zip(ttft_samples, prefill_samples)):
+        raise ValueError(
+            "request TTFT must include prompt prefill and first-token selection"
+        )
+    if any(
+        float(result["request_end_to_end_latency_s"])
+        < float(result["request_ttft_s"])
+        + sum(float(value) for value in result["itl_samples_s"])
+        for result in results
+    ):
+        raise ValueError(
+            "request end-to-end latency must span TTFT and every subsequent-token interval"
+        )
     median_itl = statistics.median(itl_samples)
     return {
         "phase": "decode",
         "prefill_ctx": int(first["prefill_ctx"]),
         "decode_steps": int(first["decode_steps"]),
         "batch_size": int(first["batch_size"]),
+        "prompt_seed": int(first["prompt_seed"]),
+        "prompt_sha256": str(first["prompt_sha256"]),
         "prefill_warm_s": statistics.median(prefill_samples),
+        "prefill_latency_s": statistics.median(prefill_samples),
         "prefill_warm_p90_s": _percentile(prefill_samples, 0.90),
         "prefill_warm_p99_s": _percentile(prefill_samples, 0.99),
+        "prefill_latency_samples_s": prefill_samples,
+        "first_decode_latency_s": statistics.median(first_decode_samples),
+        "first_decode_latency_p90_s": _percentile(first_decode_samples, 0.90),
+        "first_decode_latency_p99_s": _percentile(first_decode_samples, 0.99),
+        "first_decode_latency_samples_s": first_decode_samples,
+        "request_ttft_s": statistics.median(ttft_samples),
         "ttft_s": statistics.median(ttft_samples),
         "ttft_p90_s": _percentile(ttft_samples, 0.90),
         "ttft_p99_s": _percentile(ttft_samples, 0.99),
@@ -826,11 +930,19 @@ def _aggregate_decode_results(results: list[dict[str, Any]]) -> dict[str, Any]:
         "itl_p99_s": _percentile(itl_samples, 0.99),
         "request_ttft_samples_s": ttft_samples,
         "itl_samples_s": itl_samples,
+        "request_end_to_end_latency_s": statistics.median(request_end_to_end_samples),
+        "request_end_to_end_latency_p90_s": _percentile(
+            request_end_to_end_samples, 0.90
+        ),
+        "request_end_to_end_latency_p99_s": _percentile(
+            request_end_to_end_samples, 0.99
+        ),
+        "request_end_to_end_samples_s": request_end_to_end_samples,
         "kv_cache_bytes": int(first["kv_cache_bytes"]),
         "achieved_bw_gbps": statistics.median(
             float(result["achieved_bw_gbps"]) for result in results
         ),
-        "output_tokens_per_sec": 1.0 / median_itl,
+        "output_tokens_per_sec": int(first["batch_size"]) / median_itl,
     }
 
 
@@ -856,7 +968,7 @@ def _tinyshakespeare_loaders(
     seed: int,
 ) -> tuple[DataLoader, DataLoader]:
     train_ds = _TextDataset(_read_tokens(train_path), seq_len=seq_len)
-    val_ds = _TextDataset(_read_tokens(val_path), seq_len=seq_len)
+    val_ds = _NonOverlappingTextDataset(_read_tokens(val_path), seq_len=seq_len)
     if len(train_ds) < batch_size or len(val_ds) < batch_size:
         raise ValueError(
             "TinyShakespeare split is too small for the configured max run; "
@@ -871,7 +983,7 @@ def _tinyshakespeare_loaders(
             drop_last=True,
             generator=generator,
         ),
-        DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=True),
+        DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=False),
     )
 
 
@@ -907,13 +1019,20 @@ def _validate(
     loader: DataLoader,
     device: torch.device,
     *,
-    max_batches: int,
-) -> float:
+    max_batches: int | None,
+) -> tuple[float, int, int]:
     model.eval()
-    losses: list[float] = []
+    weighted_loss = 0.0
+    evaluated_tokens = 0
+    evaluated_batches = 0
     for batch_idx, (inputs, targets) in enumerate(loader):
-        if batch_idx >= max_batches:
+        if max_batches is not None and batch_idx >= max_batches:
             break
         _, loss = model(inputs.to(device), targets=targets.to(device))
-        losses.append(float(loss.item()))
-    return sum(losses) / len(losses) if losses else float("inf")
+        batch_tokens = int(targets.numel())
+        weighted_loss += float(loss.item()) * batch_tokens
+        evaluated_tokens += batch_tokens
+        evaluated_batches += 1
+    if not evaluated_tokens:
+        return float("inf"), 0, 0
+    return weighted_loss / evaluated_tokens, evaluated_tokens, evaluated_batches

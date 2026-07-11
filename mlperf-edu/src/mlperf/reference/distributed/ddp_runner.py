@@ -2,10 +2,11 @@
 Iter-10 (Dean): two-process DDP via torch.multiprocessing + Gloo on localhost.
 
 Picks micro-DLRM as the workload:
-  - 1M params at fp32 = 4 MB of gradients per AllReduce.
-  - Loopback Gloo handles this in ~0.5-1 ms.
-  - Iter-5.6 found micro-DLRM at small batch is compute-bound on the MLP,
-    so DDP overhead becomes the natural rate-limiter.
+  - The configured model has 22,977 parameters.
+  - Its fp32 gradients contain 91,908 bytes (~92 KB decimal, 89.8 KiB) per
+    full-gradient synchronization.
+  - The reported backward timing includes autograd and Gloo AllReduce. It is
+    not an isolated network-communication measurement.
 
 Smoke gate (Q4 in Dean's iter-10 spec):
   | loss_ddp(step=50) - loss_gradacc(step=50) | / loss_gradacc(step=50) < 0.02
@@ -73,7 +74,7 @@ def _ddp_worker(
     # deterministically from the rank's seed offset so total batch =
     # world_size * micro_batch matches the gradient-accumulation baseline.
     last_loss = 0.0
-    allreduce_time_total = 0.0
+    backward_with_allreduce_time_total = 0.0
     for step in range(n_steps):
         # Per-rank data shard.
         dense, sparse_indices, sparse_offsets, targets = _build_inputs(
@@ -88,17 +89,26 @@ def _ddp_worker(
         t_back = time.perf_counter()
         loss.backward()
         # AllReduce happens implicitly during backward via DDP's reducer.
-        allreduce_time_total += time.perf_counter() - t_back
+        backward_with_allreduce_time_total += time.perf_counter() - t_back
 
         optimizer.step()
         last_loss = loss.item()
 
     if rank == 0:
+        n_params = sum(parameter.numel() for parameter in model.parameters())
+        gradient_payload_bytes_fp32 = sum(
+            parameter.numel() * parameter.element_size()
+            for parameter in model.parameters()
+        )
         result_queue.put(
             {
                 "rank": rank,
                 "final_loss": last_loss,
-                "allreduce_time_per_step_ms": allreduce_time_total / n_steps * 1000,
+                "backward_with_allreduce_time_per_step_ms": (
+                    backward_with_allreduce_time_total / n_steps * 1000
+                ),
+                "n_params": n_params,
+                "gradient_payload_bytes_fp32": gradient_payload_bytes_fp32,
             }
         )
 

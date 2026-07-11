@@ -109,6 +109,33 @@ def test_declared_quality_asset_exists_and_matches_digest():
     assert check_taxonomy.check_workload_evidence("slm/slm-decode", workload.raw) == []
 
 
+def test_superseded_baseline_requires_exact_lifecycle_and_keeps_internal_checks():
+    workload = load_registry()["resnet18-train"]
+    body = json.loads(json.dumps(workload.raw))
+    body["verified_baseline"]["review_eligible"] = True
+
+    errors = check_taxonomy.check_workload_evidence("vision/resnet18-train", body)
+    assert any(
+        "historical evidence lifecycle must be exactly" in error for error in errors
+    )
+
+    evidence_file = workload.raw["verified_baseline"]["evidence_file"]
+    payload = json.loads(
+        (Path(__file__).resolve().parents[1] / evidence_file).read_text()
+    )
+    assert (
+        check_taxonomy.check_historical_reference_summary(
+            "vision/resnet18-train", payload
+        )
+        == []
+    )
+    payload["aggregate"]["quality"]["mean"] += 0.01
+    errors = check_taxonomy.check_historical_reference_summary(
+        "vision/resnet18-train", payload
+    )
+    assert any("recomputed value" in error for error in errors)
+
+
 def test_committed_baseline_requires_content_addressed_package():
     errors = check_taxonomy.check_workload_evidence(
         "vision/example",
@@ -244,6 +271,161 @@ def test_reference_summary_indexes_every_raw_artifact_with_full_hashes():
     payload["runs"][0]["artifacts"][0]["sha256"] = "sha256:short"
     errors = check_taxonomy.check_reference_summary("vision/example", body, payload)
     assert any("does not contain a full SHA-256 digest" in error for error in errors)
+
+
+def test_schema_04_score_summary_separates_timed_primary_and_quality_gate():
+    body = {
+        "public": {"status": "score-bearing"},
+        "measurement_protocol": {"primary_metric": "train_and_eval_seconds"},
+        "quality_target": {
+            "metric": "accuracy",
+            "value": 0.7,
+            "direction": "higher",
+            "tolerance": 0.0,
+            "reference_runs": 1,
+            "reference_protocol": {"profile": "max", "seeds": [0]},
+        },
+    }
+    run = {
+        "requested_seed": 0,
+        "execution_ok": True,
+        "evidence_valid": True,
+        "seed_match": True,
+        "manifest_verified": True,
+        "quality_target_met": True,
+        "primary_metric_declared": "train_and_eval_seconds",
+        "primary_metric_key": "train_and_eval_seconds",
+        "primary_metric_value": 12.5,
+        "quality_metric_declared": "accuracy",
+        "quality_metric_key": "accuracy",
+        "quality_value": 0.75,
+        "functional_metric_declared": None,
+        "functional_metric_key": None,
+        "functional_metric_value": None,
+        "wall_seconds": 13.0,
+        "timed_out": False,
+        "invalid_reasons": [],
+        "grade": {
+            "passed": True,
+            "target_met": True,
+            "metric": "accuracy",
+            "value": 0.75,
+            "target": 0.7,
+        },
+        "report_path": "seed_0/report.json",
+        "manifest_path": "seed_0/run.provd.json",
+        "artifacts": [
+            {
+                "role": "report",
+                "path": "seed_0/report.json",
+                "sha256": "sha256:" + "c" * 64,
+                "n_bytes": 100,
+            },
+            {
+                "role": "provenance",
+                "path": "seed_0/run.provd.json",
+                "sha256": "sha256:" + "d" * 64,
+                "n_bytes": 200,
+            },
+        ],
+    }
+    payload = {
+        "schema": "mlperf-edu-reference-evidence/0.4",
+        "workload": "example",
+        "status": "valid",
+        "eligible_for_public_baseline": True,
+        "evidence_tier": "public-candidate",
+        "public_status": "score-bearing",
+        "profile": "max",
+        "evidence_id": "example_max_attempt",
+        "reference_metric_role": "performance",
+        "primary_metric": {
+            "name": "train_and_eval_seconds",
+            "role": "performance",
+        },
+        "quality_metric": "accuracy",
+        "quality_target": 0.7,
+        "quality_direction": "higher",
+        "quality_gate": {
+            "metric": "accuracy",
+            "target": 0.7,
+            "direction": "higher",
+            "tolerance": 0.0,
+            "all_runs_must_pass": True,
+        },
+        "functional_gate": None,
+        "repeatability": None,
+        "invalid_reasons": [],
+        "acceptance": {
+            "passed": True,
+            "statistic": "median",
+            "operator": ">=",
+            "target": 0.7,
+            "value": 0.75,
+            "all_runs_passed": True,
+            "passed_runs": 1,
+            "run_count": 1,
+            "tolerance": 0.0,
+        },
+        "source": {
+            "git_dirty": False,
+            "git_sha": "a" * 40,
+            "git_status_sha256": check_taxonomy.EMPTY_SHA256,
+            "git_patch_sha256": check_taxonomy.EMPTY_SHA256,
+            "tool_sha256": check_taxonomy.SWEEP_TOOL_SHA256,
+        },
+        "seeds_requested": [0],
+        "basis": {
+            "reference_protocol": {"seeds": [0]},
+            "quality_target": {
+                "metric": "accuracy",
+                "target": 0.7,
+                "direction": "higher",
+                "tolerance": 0.0,
+                "all_runs_must_pass": True,
+            },
+        },
+        "runs": [run],
+        "aggregate": {
+            "primary_metric": {
+                "count": 1,
+                "median": 12.5,
+                "mean": 12.5,
+                "min": 12.5,
+                "max": 12.5,
+                "stdev": 0.0,
+            },
+            "quality": {
+                "count": 1,
+                "median": 0.75,
+                "mean": 0.75,
+                "min": 0.75,
+                "max": 0.75,
+                "stdev": 0.0,
+            },
+            "wall_seconds": {
+                "count": 1,
+                "median": 13.0,
+                "mean": 13.0,
+                "min": 13.0,
+                "max": 13.0,
+                "stdev": 0.0,
+            },
+        },
+    }
+
+    assert check_taxonomy.check_reference_summary("vision/example", body, payload) == []
+
+    payload["runs"][0]["primary_metric_value"] = 0.75
+    errors = check_taxonomy.check_reference_summary("vision/example", body, payload)
+    assert any("aggregate.primary_metric" in error for error in errors)
+
+    payload["runs"][0]["primary_metric_value"] = 12.5
+    payload["runs"][0]["quality_value"] = 0.1
+    errors = check_taxonomy.check_reference_summary("vision/example", body, payload)
+    assert any(
+        "does not satisfy the registry quality target" in error for error in errors
+    )
 
 
 def committed_summary(workload_id: str) -> tuple[dict, dict]:

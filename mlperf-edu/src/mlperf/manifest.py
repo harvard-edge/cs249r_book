@@ -6,10 +6,12 @@ hash chain that actually binds: source-tree git SHA, weights bytes,
 dataset bytes, RNG state, hardware fingerprint, and the roofline
 measurement sidecar.
 
-Every leaf is a recomputable fact about the run. The Merkle root and its
-domain-separated integrity digest provide tamper detection, not producer
-authentication. A verifier walks every leaf and recomputes its hash from the
-artifact on disk; mismatches are reported per leaf.
+The manifest separates recomputable artifact facts from recorded run context.
+The verifier rehashes the source checkout, weights, dataset files, sidecars,
+and report bytes when those artifacts are available, and checks internal
+consistency for RNG and hardware records. The Merkle root and its
+domain-separated integrity digest provide tamper detection, not producer or
+hardware attestation; mismatches are reported per leaf.
 """
 
 from __future__ import annotations
@@ -20,7 +22,7 @@ import json
 import secrets
 import subprocess
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 
@@ -76,15 +78,12 @@ def _git_leaf(repo_root: Path) -> dict:
             text=True,
             stderr=subprocess.DEVNULL,
         ).strip()
-        dirty = (
-            subprocess.run(
-                ["git", "diff-index", "--quiet", "HEAD", "--"],
-                cwd=repo_root,
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            ).returncode
-            != 0
+        status = subprocess.check_output(
+            ["git", "status", "--porcelain=v1", "--untracked-files=all", "--"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
         )
+        dirty = bool(status)
     except (subprocess.CalledProcessError, FileNotFoundError):
         return {
             "git_sha": None,
@@ -113,12 +112,32 @@ def _git_leaf(repo_root: Path) -> dict:
     patch_hash = None
     if dirty:
         diff = subprocess.check_output(
-            ["git", "diff"],
+            ["git", "diff", "--binary", "HEAD", "--"],
             cwd=repo_root,
-            text=True,
             stderr=subprocess.DEVNULL,
         )
-        patch_hash = _sha256(diff.encode())
+        untracked = subprocess.check_output(
+            ["git", "ls-files", "--others", "--exclude-standard", "-z"],
+            cwd=repo_root,
+            stderr=subprocess.DEVNULL,
+        ).split(b"\0")
+        dirty_h = hashlib.sha256()
+        dirty_h.update(b"git-diff-head-v1\0")
+        dirty_h.update(diff)
+        dirty_h.update(b"\0untracked-files-v1\0")
+        for raw_path in sorted(path for path in untracked if path):
+            relative = raw_path.decode("utf-8", errors="surrogateescape")
+            path = repo_root / relative
+            if not path.is_file():
+                continue
+            digest, n_bytes = _hash_file(path)
+            dirty_h.update(raw_path)
+            dirty_h.update(b"\0")
+            dirty_h.update(str(n_bytes).encode("ascii"))
+            dirty_h.update(b"\0")
+            dirty_h.update(digest.encode("ascii"))
+            dirty_h.update(b"\n")
+        patch_hash = dirty_h.hexdigest()
 
     return {
         "git_sha": sha,
@@ -152,6 +171,97 @@ def weights_leaf(
     }
 
 
+def safe_logical_asset_path(value: str) -> str:
+    """Validate and normalize an archive-portable model-asset path."""
+    if not isinstance(value, str) or not value or "\\" in value:
+        raise ValueError("model asset logical_path must be a nonempty POSIX path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        raise ValueError(
+            f"model asset logical_path must stay within its asset root: {value!r}"
+        )
+    normalized = path.as_posix()
+    if normalized != value:
+        raise ValueError(
+            f"model asset logical_path must be normalized POSIX text: {value!r}"
+        )
+    return normalized
+
+
+def _multi_file_weights_merkle(files: list[dict[str, Any]]) -> str:
+    """Aggregate content-addressed model assets independent of host paths."""
+    root_h = hashlib.sha256()
+    for item in sorted(files, key=lambda row: (row["logical_path"], row["role"])):
+        record = {
+            "logical_path": item["logical_path"],
+            "role": item["role"],
+            "sha256": item["sha256"],
+            "n_bytes": item["n_bytes"],
+        }
+        root_h.update(_canon(record))
+        root_h.update(b"\0")
+    return "sha256:" + root_h.hexdigest()
+
+
+def multi_file_weights_leaf(
+    *,
+    name: str,
+    revision: str,
+    file_records: list[dict[str, Any]],
+    n_params: int | None = None,
+    dtype: str | None = None,
+) -> dict:
+    """Bind every file used to resolve a versioned model and tokenizer."""
+    if not isinstance(name, str) or not name.strip():
+        raise ValueError("multi-file weights require a nonempty model name")
+    if not isinstance(revision, str) or not revision.strip():
+        raise ValueError("multi-file weights require a nonempty resolved revision")
+    if not file_records:
+        raise ValueError("multi-file weights require at least one asset file")
+
+    files: list[dict[str, Any]] = []
+    logical_paths: set[str] = set()
+    for index, record in enumerate(file_records):
+        if not isinstance(record, dict):
+            raise ValueError(f"model asset record {index} must be a mapping")
+        raw_path = record.get("path")
+        if not isinstance(raw_path, (str, Path)):
+            raise ValueError(f"model asset record {index} has no file path")
+        path = Path(raw_path)
+        if not path.is_file():
+            raise ValueError(f"model asset file is missing or not regular: {path}")
+        logical_path = safe_logical_asset_path(str(record.get("logical_path") or ""))
+        if logical_path in logical_paths:
+            raise ValueError(f"duplicate model asset logical_path: {logical_path!r}")
+        logical_paths.add(logical_path)
+        role = record.get("role")
+        if not isinstance(role, str) or not role.strip():
+            raise ValueError(f"model asset {logical_path!r} has no provenance role")
+        digest, n_bytes = _hash_file(path)
+        files.append(
+            {
+                "path": str(path),
+                "logical_path": logical_path,
+                "role": role,
+                "sha256": "sha256:" + digest,
+                "n_bytes": n_bytes,
+            }
+        )
+
+    files.sort(key=lambda row: (row["logical_path"], row["role"]))
+    return {
+        "format": "content-addressed-model-assets/0.1",
+        "name": name,
+        "revision": revision,
+        "files": files,
+        "file_count": len(files),
+        "n_bytes": sum(int(item["n_bytes"]) for item in files),
+        "merkle_root": _multi_file_weights_merkle(files),
+        "n_params": n_params,
+        "torch_dtype": dtype,
+    }
+
+
 def dataset_leaf(name: str, file_paths: list[str | Path]) -> dict:
     """Leaf binding the dataset by per-file hash + Merkle root."""
     files: list[dict] = []
@@ -171,12 +281,31 @@ def dataset_leaf(name: str, file_paths: list[str | Path]) -> dict:
 def rng_leaf(
     seed: int | None, torch_state_bytes: bytes | None, numpy_state_bytes: bytes | None
 ) -> dict:
+    torch_initial_state_bytes = None
+    if seed is not None:
+        try:
+            import torch
+
+            generator = torch.Generator(device="cpu")
+            generator.manual_seed(int(seed))
+            torch_initial_state_bytes = generator.get_state().numpy().tobytes()
+        except (ImportError, RuntimeError, TypeError, ValueError):
+            torch_initial_state_bytes = None
     return {
         "seed": seed,
-        "torch_initial_state_sha256": ("sha256:" + _sha256(torch_state_bytes))
+        "torch_initial_state_sha256": ("sha256:" + _sha256(torch_initial_state_bytes))
+        if torch_initial_state_bytes
+        else None,
+        "torch_initial_state_derivation": (
+            "torch.Generator(device=cpu).manual_seed(seed)"
+            if torch_initial_state_bytes
+            else None
+        ),
+        "torch_captured_state_sha256": ("sha256:" + _sha256(torch_state_bytes))
         if torch_state_bytes
         else None,
-        "numpy_state_sha256": ("sha256:" + _sha256(numpy_state_bytes))
+        "torch_captured_state_point": "manifest-construction",
+        "numpy_captured_state_sha256": ("sha256:" + _sha256(numpy_state_bytes))
         if numpy_state_bytes
         else None,
     }
@@ -310,6 +439,9 @@ def build_provd(
     report: dict,
     report_path: str | Path,
     weights_path: str | Path | None = None,
+    weights_files: list[dict[str, Any]] | None = None,
+    weights_name: str | None = None,
+    weights_revision: str | None = None,
     weights_n_params: int | None = None,
     weights_dtype: str | None = None,
     dataset_name: str = "unknown",
@@ -323,14 +455,28 @@ def build_provd(
     """Construct a complete provenance manifest."""
     import datetime
 
+    if weights_path is not None and weights_files is not None:
+        raise ValueError("weights_path and weights_files are mutually exclusive")
+    if weights_files is not None and (not weights_name or not weights_revision):
+        raise ValueError(
+            "weights_name and weights_revision are required with weights_files"
+        )
     repo = Path(repo_root) if repo_root else Path(__file__).resolve().parents[2]
+    if weights_files is not None:
+        weights = multi_file_weights_leaf(
+            name=str(weights_name),
+            revision=str(weights_revision),
+            file_records=weights_files,
+            n_params=weights_n_params,
+            dtype=weights_dtype,
+        )
+    elif weights_path:
+        weights = weights_leaf(weights_path, weights_n_params, weights_dtype)
+    else:
+        weights = {"path": None, "sha256": None, "note": "no weights checkpoint"}
     leaves = {
         "source_tree": _git_leaf(repo),
-        "weights": (
-            weights_leaf(weights_path, weights_n_params, weights_dtype)
-            if weights_path
-            else {"path": None, "sha256": None, "note": "no weights checkpoint"}
-        ),
+        "weights": weights,
         "dataset": dataset_leaf(dataset_name, dataset_files or []),
         "rng": rng_leaf(rng_seed, torch_state_bytes, numpy_state_bytes),
         "hardware": hardware_leaf(hardware_fingerprint),
@@ -381,7 +527,7 @@ def resolve_artifact_path(manifest_path: str | Path, artifact_path: str | Path) 
 def verify_provd(
     manifest_path: str | Path, repo_root: str | Path | None = None
 ) -> VerificationResult:
-    """Walk every leaf and recompute its hash from the artifact on disk."""
+    """Recompute available artifact hashes and check recorded-leaf consistency."""
     manifest_path = Path(manifest_path).resolve()
     manifest = json.loads(manifest_path.read_text())
     res = VerificationResult(workload=manifest["workload"])
@@ -429,30 +575,170 @@ def verify_provd(
 
     # Weights.
     w = leaves["weights"]
-    if w.get("path") and not w.get("sha256"):
-        res.add(
-            "weights.sha256", False, f"digest absent for declared file: {w['path']}"
+    weight_files = w.get("files")
+    if weight_files is not None:
+        multi_file_header_ok = (
+            w.get("format") == "content-addressed-model-assets/0.1"
+            and isinstance(w.get("name"), str)
+            and bool(w.get("name", "").strip())
+            and isinstance(w.get("revision"), str)
+            and bool(w.get("revision", "").strip())
+            and isinstance(weight_files, list)
+            and bool(weight_files)
+            and not w.get("path")
+            and not w.get("sha256")
         )
-    if w.get("sha256") and not w.get("path"):
-        res.add("weights.path", False, "digest declared without an artifact path")
-    if w.get("path") and w.get("sha256"):
-        weights_path = resolve_artifact_path(manifest_path, w["path"])
-        if weights_path.exists():
-            actual, n_bytes = _hash_file(weights_path)
-            ok = ("sha256:" + actual) == w["sha256"]
+        res.add(
+            "weights.multi_file_header",
+            multi_file_header_ok,
+            "multi-file weights require format, model name, resolved revision, and files only",
+        )
+        recomputed_files: list[dict[str, Any]] = []
+        logical_paths: set[str] = set()
+        all_files_ok = multi_file_header_ok
+        for index, item in enumerate(
+            weight_files if isinstance(weight_files, list) else []
+        ):
+            if not isinstance(item, dict):
+                all_files_ok = False
+                res.add(
+                    f"weights.files[{index}]",
+                    False,
+                    "model asset record must be a mapping",
+                )
+                continue
+            logical_path = item.get("logical_path")
+            try:
+                safe_logical_asset_path(logical_path)
+                logical_ok = logical_path not in logical_paths
+            except (TypeError, ValueError):
+                logical_ok = False
+            res.add(
+                f"weights.files[{index}].logical_path",
+                logical_ok,
+                f"archive-portable unique logical path required: {logical_path!r}",
+            )
+            if logical_ok:
+                logical_paths.add(logical_path)
+            role = item.get("role")
+            role_ok = isinstance(role, str) and bool(role.strip())
+            res.add(
+                f"weights.files[{index}].role",
+                role_ok,
+                f"nonempty provenance role required: {role!r}",
+            )
+            raw_path = item.get("path")
+            digest = item.get("sha256")
+            record_ok = (
+                logical_ok
+                and role_ok
+                and isinstance(raw_path, str)
+                and bool(raw_path)
+                and isinstance(digest, str)
+                and digest.startswith("sha256:")
+            )
+            if not record_ok:
+                all_files_ok = False
+                res.add(
+                    f"weights.files[{index}].sha256",
+                    False,
+                    "model asset requires path, role, logical path, and SHA-256",
+                )
+                continue
+            asset_path = resolve_artifact_path(manifest_path, raw_path)
+            if not asset_path.is_file():
+                all_files_ok = False
+                res.add(
+                    f"weights.files[{index}].sha256",
+                    False,
+                    f"file missing or not regular: {raw_path}",
+                )
+                continue
+            actual, n_bytes = _hash_file(asset_path)
+            actual_digest = "sha256:" + actual
+            digest_ok = actual_digest == digest
+            size_ok = item.get("n_bytes") == n_bytes
+            res.add(
+                f"weights.files[{index}].sha256",
+                digest_ok,
+                f"claimed {str(digest)[:18]}, recomputed {actual_digest[:18]}",
+            )
+            res.add(
+                f"weights.files[{index}].n_bytes",
+                size_ok,
+                f"claimed {item.get('n_bytes')}, recomputed {n_bytes}",
+            )
+            all_files_ok = all_files_ok and digest_ok and size_ok
+            recomputed_files.append(
+                {
+                    "logical_path": logical_path,
+                    "role": role,
+                    "sha256": actual_digest,
+                    "n_bytes": n_bytes,
+                }
+            )
+
+        expected_file_count = len(weight_files) if isinstance(weight_files, list) else 0
+        expected_n_bytes = sum(
+            int(item["n_bytes"])
+            for item in recomputed_files
+            if isinstance(item.get("n_bytes"), int)
+        )
+        count_ok = w.get("file_count") == expected_file_count == len(recomputed_files)
+        bytes_ok = (
+            w.get("n_bytes") == expected_n_bytes
+            and len(recomputed_files) == expected_file_count
+        )
+        res.add(
+            "weights.file_count",
+            count_ok,
+            f"claimed {w.get('file_count')}, recomputed {len(recomputed_files)}",
+        )
+        res.add(
+            "weights.n_bytes",
+            bytes_ok,
+            f"claimed {w.get('n_bytes')}, recomputed {expected_n_bytes}",
+        )
+        recomputed_merkle = (
+            _multi_file_weights_merkle(recomputed_files) if recomputed_files else None
+        )
+        merkle_ok = (
+            all_files_ok
+            and recomputed_merkle is not None
+            and recomputed_merkle == w.get("merkle_root")
+        )
+        res.add(
+            "weights.merkle_root",
+            merkle_ok,
+            f"claimed {str(w.get('merkle_root'))[:18]}, recomputed {str(recomputed_merkle)[:18]}",
+        )
+    else:
+        if w.get("path") and not w.get("sha256"):
             res.add(
                 "weights.sha256",
-                ok,
-                f"claimed {w['sha256'][:18]}, recomputed sha256:{actual[:12]}",
+                False,
+                f"digest absent for declared file: {w['path']}",
             )
-            if w.get("n_bytes") is not None:
+        if w.get("sha256") and not w.get("path"):
+            res.add("weights.path", False, "digest declared without an artifact path")
+        if w.get("path") and w.get("sha256"):
+            weights_path = resolve_artifact_path(manifest_path, w["path"])
+            if weights_path.exists():
+                actual, n_bytes = _hash_file(weights_path)
+                ok = ("sha256:" + actual) == w["sha256"]
                 res.add(
-                    "weights.n_bytes",
-                    n_bytes == w["n_bytes"],
-                    f"claimed {w['n_bytes']}, recomputed {n_bytes}",
+                    "weights.sha256",
+                    ok,
+                    f"claimed {w['sha256'][:18]}, recomputed sha256:{actual[:12]}",
                 )
-        else:
-            res.add("weights.sha256", False, f"file missing: {w['path']}")
+                if w.get("n_bytes") is not None:
+                    res.add(
+                        "weights.n_bytes",
+                        n_bytes == w["n_bytes"],
+                        f"claimed {w['n_bytes']}, recomputed {n_bytes}",
+                    )
+            else:
+                res.add("weights.sha256", False, f"file missing: {w['path']}")
 
     # Dataset Merkle.
     d = leaves["dataset"]
@@ -496,6 +782,20 @@ def verify_provd(
             "dataset.merkle_root",
             ok_files and recomputed == d["merkle_root"],
             f"claimed {d['merkle_root'][:18]}, recomputed {recomputed[:18]}",
+        )
+
+    # RNG initialization is reproducible from the declared seed for new
+    # manifests. Captured post-work states remain recorded context because the
+    # verifier cannot replay the benchmark merely from a digest.
+    rng = leaves.get("rng") or {}
+    if rng.get("torch_initial_state_derivation"):
+        recomputed_rng = rng_leaf(rng.get("seed"), None, None)
+        claimed_initial = rng.get("torch_initial_state_sha256")
+        recomputed_initial = recomputed_rng.get("torch_initial_state_sha256")
+        res.add(
+            "rng.torch_initial_state_sha256",
+            claimed_initial == recomputed_initial,
+            f"claimed {str(claimed_initial)[:18]}, recomputed {str(recomputed_initial)[:18]}",
         )
 
     # Roofline sidecar.

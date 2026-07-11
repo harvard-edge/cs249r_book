@@ -106,11 +106,12 @@ def test_family_pages_use_default_variant_and_disclose_mixed_metadata(
     ) in page
     assert (
         "| [fp32-b16](#variant-fp32-b16) | `nanogpt-decode-fp32-b16` "
-        "| nanogpt-small-86m | 88.3M | prompt-suite-local | server | systems-only |"
+        "| NanoGPTWhiteBox(vocab=256, width=64, heads=4, layers=2) fp32 batch-16 "
+        "| 124672 | prompt-suite-local | single_stream | systems-only |"
     ) in page
     assert (
         "| [decode](#variant-decode) | `nanogpt-decode` | nanogpt-12m "
-        "| 11.5M | prompt-suite-local | server | performance-bearing |"
+        "| 11.5M | prompt-suite-local | single_stream | performance-bearing |"
     ) in page
 
 
@@ -147,7 +148,6 @@ def test_public_candidate_pages_disclose_committed_reference_evidence(
         if workload.public_status not in {"score-bearing", "performance-bearing"}:
             continue
         baseline = workload.raw.get("verified_baseline") or {}
-        assert baseline.get("review_eligible") is True
         assert baseline.get("evidence_status") == "committed-reference-summary"
         assert baseline.get("evidence_tier") == "public-candidate"
         assert baseline.get("evidence_file", "").startswith("reference_results/")
@@ -162,9 +162,19 @@ def test_public_candidate_pages_disclose_committed_reference_evidence(
             ROOT / "site" / "benchmarks" / workload.suite / f"{family}.qmd"
         ]
         assert "| **Evidence status** | committed-reference-summary |" in page
-        assert "| **Review eligible** | True |" in page
+        if baseline.get("protocol_compatibility") == "superseded":
+            assert baseline.get("review_eligible") is False
+            assert baseline.get("replacement_required") is True
+            assert baseline.get("superseded_reason")
+            assert "| **Review eligible** | False |" in page
+            assert "Historical Project Reference (Protocol Superseded)" in page
+            assert "Recorded Project Reference Baseline" not in page
+            assert "must be replaced by a clean reference sweep" in page
+        else:
+            assert baseline.get("review_eligible") is True
+            assert "| **Review eligible** | True |" in page
+            assert "Recorded Project Reference Baseline" in page
         assert "| **Evidence file** | reference_results/" in page
-        assert "Recorded Project Reference Baseline" in page
         assert "not an MLCommons-verified result" in page
         if workload.public_status == "score-bearing":
             assert workload.scenario == "training"

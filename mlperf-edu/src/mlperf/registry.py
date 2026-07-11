@@ -607,6 +607,246 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
     if max_execution_issues:
         raise ValueError(f"invalid max execution boundaries: {max_execution_issues}")
 
+    canonical_max_issues: list[str] = []
+    for workload in workloads.values():
+        if workload.public_status not in {"score-bearing", "performance-bearing"}:
+            continue
+        contract = workload.raw.get("canonical_max_contract")
+        if not isinstance(contract, dict):
+            canonical_max_issues.append(
+                f"{workload.id}: public candidate must declare canonical_max_contract"
+            )
+            continue
+        for field in ("model_id", "dataset", "data_mode"):
+            if not str(contract.get(field) or "").strip():
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical_max_contract.{field} is required"
+                )
+        if contract.get("dataset") != workload.dataset:
+            canonical_max_issues.append(
+                f"{workload.id}: canonical_max_contract.dataset must match registry dataset"
+            )
+        if workload.public_status == "score-bearing":
+            dataset_sha256 = contract.get("dataset_sha256")
+            if not (
+                isinstance(dataset_sha256, str)
+                and dataset_sha256.startswith("sha256:")
+                and len(dataset_sha256) == 71
+            ):
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical score max requires a prefixed dataset SHA-256"
+                )
+        model_source = workload.raw.get("model_source")
+        if isinstance(model_source, dict):
+            if contract.get("model_revision") != model_source.get("revision"):
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical max model revision must match model_source.revision"
+                )
+            if not isinstance(contract.get("quality_evaluation"), dict):
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical external-model max requires quality_evaluation"
+                )
+            else:
+                declared_quality = workload.raw.get("quality_evaluation") or {}
+                expected_suite_sha256 = declared_quality.get("asset_sha256")
+                if expected_suite_sha256:
+                    expected_suite_sha256 = f"sha256:{expected_suite_sha256}"
+                canonical_evaluation = contract["quality_evaluation"]
+                expected_quality_fields = {
+                    "suite": declared_quality.get("suite"),
+                    "fixture_version": declared_quality.get("fixture_version"),
+                    "suite_sha256": expected_suite_sha256,
+                    "cases": declared_quality.get("cases"),
+                    "categories": declared_quality.get("categories"),
+                    "aggregation": declared_quality.get("aggregation"),
+                    "category_guard": declared_quality.get("category_guard"),
+                }
+                for field, expected in expected_quality_fields.items():
+                    if (
+                        expected is not None
+                        and canonical_evaluation.get(field) != expected
+                    ):
+                        canonical_max_issues.append(
+                            f"{workload.id}: canonical quality evaluation {field} "
+                            "must match the declared quality fixture"
+                        )
+                expected_quality_gates = {
+                    "overall_perplexity": {
+                        "metric_key": "perplexity",
+                        "target": declared_quality.get("maximum"),
+                        "direction": "lower",
+                    },
+                    "worst_category_perplexity": {
+                        "metric_key": "worst_category_perplexity",
+                        "target": declared_quality.get("worst_category_maximum"),
+                        "direction": "lower",
+                    },
+                }
+                if canonical_evaluation.get("gates") != expected_quality_gates:
+                    canonical_max_issues.append(
+                        f"{workload.id}: canonical quality evaluation gates must "
+                        "match the declared overall and worst-category limits"
+                    )
+        config = contract.get("config")
+        if not isinstance(config, dict) or not config:
+            canonical_max_issues.append(
+                f"{workload.id}: canonical_max_contract.config must be a nonempty mapping"
+            )
+        quality = contract.get("quality")
+        if not isinstance(quality, dict):
+            canonical_max_issues.append(
+                f"{workload.id}: canonical_max_contract.quality must be a mapping"
+            )
+        else:
+            for field in ("metric", "metric_key", "target", "direction"):
+                if field not in quality or quality[field] is None:
+                    canonical_max_issues.append(
+                        f"{workload.id}: canonical_max_contract.quality.{field} is required"
+                    )
+            expected_metric = (
+                (workload.raw.get("functional_check") or {}).get("metric")
+                if workload.public_status == "performance-bearing"
+                else workload.quality_metric
+            )
+            if quality.get("metric") != expected_metric:
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical max quality metric must match the public contract"
+                )
+            if workload.public_status == "score-bearing":
+                if quality.get("target") != workload.quality_value:
+                    canonical_max_issues.append(
+                        f"{workload.id}: canonical max quality target must match quality_target.value"
+                    )
+                if quality.get("direction") != workload.quality_direction:
+                    canonical_max_issues.append(
+                        f"{workload.id}: canonical max quality direction must match quality_target.direction"
+                    )
+        quality_gates = contract.get("quality_gates")
+        if quality_gates is not None:
+            if not isinstance(quality_gates, dict) or not quality_gates:
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical_max_contract.quality_gates must be a nonempty mapping"
+                )
+            else:
+                for gate_name, gate in quality_gates.items():
+                    if not isinstance(gate, dict):
+                        canonical_max_issues.append(
+                            f"{workload.id}: canonical quality gate {gate_name} must be a mapping"
+                        )
+                        continue
+                    for field in ("metric_key", "target", "direction"):
+                        if field not in gate or gate[field] is None:
+                            canonical_max_issues.append(
+                                f"{workload.id}: canonical quality gate {gate_name}.{field} is required"
+                            )
+        measurement = workload.raw.get("measurement_protocol")
+        if not isinstance(measurement, dict) or not measurement:
+            canonical_max_issues.append(
+                f"{workload.id}: canonical public max requires measurement_protocol"
+            )
+        elif not str(measurement.get("primary_metric") or "").strip():
+            canonical_max_issues.append(
+                f"{workload.id}: measurement_protocol.primary_metric is required"
+            )
+        elif (
+            workload.public_status == "score-bearing"
+            and measurement.get("primary_metric") != "train_and_eval_seconds"
+        ):
+            canonical_max_issues.append(
+                f"{workload.id}: score-bearing max primary metric must be train_and_eval_seconds"
+            )
+        if workload.public_status == "score-bearing" and isinstance(measurement, dict):
+            if measurement.get("scenario") != "training":
+                canonical_max_issues.append(
+                    f"{workload.id}: score-bearing measurement scenario must be training"
+                )
+            if measurement.get("outer_reference_runs") != 5:
+                canonical_max_issues.append(
+                    f"{workload.id}: score-bearing measurement requires five outer reference runs"
+                )
+        if workload.public_status == "performance-bearing":
+            timing_counts = contract.get("timing_sample_counts")
+            if not isinstance(timing_counts, dict) or not timing_counts:
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical performance max requires timing_sample_counts"
+                )
+            elif any(
+                isinstance(value, bool) or not isinstance(value, int) or value < 1
+                for value in timing_counts.values()
+            ):
+                canonical_max_issues.append(
+                    f"{workload.id}: canonical timing sample counts must be positive integers"
+                )
+    if canonical_max_issues:
+        raise ValueError(f"invalid canonical max contracts: {canonical_max_issues}")
+
+
+def baseline_is_protocol_superseded(value: object) -> bool:
+    """Return whether a baseline is retained only as protocol-superseded history."""
+    return (
+        isinstance(value, dict) and value.get("protocol_compatibility") == "superseded"
+    )
+
+
+def baseline_is_current_review_evidence(value: object) -> bool:
+    """Return whether a baseline may support the workload's current contract."""
+    return (
+        isinstance(value, dict)
+        and value.get("evidence_status") == "committed-reference-summary"
+        and value.get("review_eligible") is True
+        and not baseline_is_protocol_superseded(value)
+        and value.get("replacement_required") is not True
+    )
+
+
+def baseline_lifecycle_issues(
+    baseline: dict[str, Any], *, public_status: str
+) -> list[str]:
+    """Validate the fail-closed current-versus-historical evidence state."""
+    issues: list[str] = []
+    compatibility = baseline.get("protocol_compatibility")
+    replacement_required = baseline.get("replacement_required")
+    if compatibility not in (None, "current", "superseded"):
+        issues.append(
+            f"{public_status} verified_baseline has unsupported "
+            f"protocol_compatibility {compatibility!r}"
+        )
+
+    if baseline_is_protocol_superseded(baseline):
+        if baseline.get("review_eligible") is not False:
+            issues.append(
+                f"{public_status} protocol-superseded verified_baseline must set "
+                "review_eligible to false"
+            )
+        if replacement_required is not True:
+            issues.append(
+                f"{public_status} protocol-superseded verified_baseline must set "
+                "replacement_required to true"
+            )
+        if not str(baseline.get("superseded_reason") or "").strip():
+            issues.append(
+                f"{public_status} protocol-superseded verified_baseline must explain "
+                "superseded_reason"
+            )
+        issues.append(
+            f"{public_status} verified_baseline uses a superseded protocol and "
+            "requires a replacement reference sweep"
+        )
+        return issues
+
+    if replacement_required is True:
+        issues.append(
+            f"{public_status} verified_baseline may require replacement only when "
+            "protocol_compatibility is superseded"
+        )
+    elif replacement_required not in (None, False):
+        issues.append(
+            f"{public_status} verified_baseline replacement_required must be boolean"
+        )
+    if baseline.get("review_eligible") is not True:
+        issues.append(f"{public_status} verified_baseline must be review eligible")
+    return issues
+
 
 def public_contract_issues(workload: Workload) -> list[str]:
     """Return public-result contract blockers for one workload."""
@@ -640,6 +880,14 @@ def public_contract_issues(workload: Workload) -> list[str]:
             issues.append(f"missing {profile} runner")
 
     if workload.public_status in {"score-bearing", "performance-bearing"}:
+        if not isinstance(workload.raw.get("canonical_max_contract"), dict):
+            issues.append(
+                f"{workload.public_status} workload must declare canonical_max_contract"
+            )
+        if not isinstance(workload.raw.get("measurement_protocol"), dict):
+            issues.append(
+                f"{workload.public_status} workload must declare measurement_protocol"
+            )
         baseline = workload.raw.get("verified_baseline")
         if not isinstance(baseline, dict):
             issues.append(
@@ -650,10 +898,11 @@ def public_contract_issues(workload: Workload) -> list[str]:
                 issues.append(
                     f"{workload.public_status} verified_baseline must cite a committed reference summary"
                 )
-            if baseline.get("review_eligible") is not True:
-                issues.append(
-                    f"{workload.public_status} verified_baseline must be review eligible"
+            issues.extend(
+                baseline_lifecycle_issues(
+                    baseline, public_status=workload.public_status
                 )
+            )
 
     if workload.public_status == "score-bearing":
         if not workload.dataset:
@@ -721,29 +970,31 @@ def public_contract_issues(workload: Workload) -> list[str]:
             issues.append(
                 "score-bearing workload must declare quality_target.reviewer_notes"
             )
-        baseline = verified_baseline_value(workload)
-        if baseline is None:
-            issues.append(
-                "score-bearing verified_baseline must include the quality metric or a known alias"
-            )
-        elif (
-            workload.quality_direction in {"higher", "lower"}
-            and workload.quality_value is not None
-        ):
-            try:
-                if not quality_target_satisfied(
-                    float(baseline),
-                    float(workload.quality_value),
-                    direction=workload.quality_direction,
-                    tolerance=float(workload.quality_tolerance or 0),
-                ):
-                    issues.append(
-                        f"verified_baseline does not satisfy quality target ({baseline} vs {workload.quality_value}, {workload.quality_direction})"
-                    )
-            except (TypeError, ValueError):
+        baseline_record = workload.raw.get("verified_baseline")
+        if not baseline_is_protocol_superseded(baseline_record):
+            baseline = verified_baseline_value(workload)
+            if baseline is None:
                 issues.append(
-                    "quality target and verified_baseline values must be numeric"
+                    "score-bearing verified_baseline must include the quality metric or a known alias"
                 )
+            elif (
+                workload.quality_direction in {"higher", "lower"}
+                and workload.quality_value is not None
+            ):
+                try:
+                    if not quality_target_satisfied(
+                        float(baseline),
+                        float(workload.quality_value),
+                        direction=workload.quality_direction,
+                        tolerance=float(workload.quality_tolerance or 0),
+                    ):
+                        issues.append(
+                            f"verified_baseline does not satisfy quality target ({baseline} vs {workload.quality_value}, {workload.quality_direction})"
+                        )
+                except (TypeError, ValueError):
+                    issues.append(
+                        "quality target and verified_baseline values must be numeric"
+                    )
 
     if workload.public_status == "performance-bearing":
         if not any(

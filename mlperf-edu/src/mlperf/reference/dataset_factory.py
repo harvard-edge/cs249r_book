@@ -248,6 +248,8 @@ def get_cifar10_dataloaders(
 # ---------------------------------------------------------------------------
 
 MOVIELENS_DIR = os.path.join(DATASET_ROOT, "local_tensors", "movielens", "ml-100k")
+MOVIELENS_TRAIN_RATINGS = "u1.base"
+MOVIELENS_EVALUATION_RATINGS = "u1.test"
 
 
 class MovieLensRecommendationDataset(data.Dataset):
@@ -256,7 +258,7 @@ class MovieLensRecommendationDataset(data.Dataset):
 
     Converts the classic user-item rating dataset into a binary
     click-through format compatible with the DLRM architecture:
-    - Dense features: normalized user age, occupation encoding
+    - Dense features: normalized user age, gender, and item genres
     - Sparse features: user_id (943 users), item_id (1682 items),
       genre (18 genres)
     - Binary label: rating >= 4 → positive (click), else negative
@@ -269,11 +271,11 @@ class MovieLensRecommendationDataset(data.Dataset):
     All user/item IDs are reproducible from the raw data files.
     """
 
-    def __init__(self, data_dir=None):
+    def __init__(self, data_dir=None, *, ratings_file: str = "u.data"):
         if data_dir is None:
             data_dir = MOVIELENS_DIR
 
-        ratings_path = os.path.join(data_dir, "u.data")
+        ratings_path = os.path.join(data_dir, ratings_file)
         users_path = os.path.join(data_dir, "u.user")
 
         if not os.path.exists(ratings_path):
@@ -323,18 +325,8 @@ class MovieLensRecommendationDataset(data.Dataset):
         age_mean = sum(ages) / len(ages)
         age_std = (sum((a - age_mean) ** 2 for a in ages) / len(ages)) ** 0.5
 
-        # First pass: compute per-user rating stats for dense features
-        user_ratings = {}
-        with open(ratings_path, "r") as f:
-            for line in f:
-                parts = line.strip().split("\t")
-                uid, rating = int(parts[0]), float(parts[2])
-                user_ratings.setdefault(uid, []).append(rating)
-        user_avg = {u: sum(rs) / len(rs) for u, rs in user_ratings.items()}
-        user_cnt = {u: len(rs) for u, rs in user_ratings.items()}
-        max_cnt = max(user_cnt.values())
-
-        # Second pass: build feature tensors
+        # Build feature tensors. No feature may be derived from rating labels:
+        # doing so before the train/validation split leaks held-out outcomes.
         dense_list = []
         sparse_list = []
         labels_list = []
@@ -346,16 +338,13 @@ class MovieLensRecommendationDataset(data.Dataset):
                 item_id = int(parts[1])
                 rating = float(parts[2])
 
-                # Dense features: user age, gender, avg rating, activity level
+                # Dense features: user demographics and item metadata only.
                 age_norm = (user_ages.get(user_id, 30) - age_mean) / (age_std + 1e-8)
                 gender = user_genders.get(user_id, 0.0)
-                avg_r = (user_avg.get(user_id, 3.0) - 3.0) / 2.0  # center around 0
-                activity = user_cnt.get(user_id, 1) / max_cnt  # 0-1
 
-                # Add item genre features (up to 12 most common)
+                # Add 14 item genre flags to preserve the 16-wide dense input.
                 genres = item_genres.get(item_id, [0.0] * 19)
-                # Select 12 genre slots to fill 16 total dense features
-                dense = [age_norm, gender, avg_r, activity] + genres[:12]
+                dense = [age_norm, gender] + genres[:14]
                 dense_list.append(dense)
 
                 # Sparse features: user_id, item_id, occupation
@@ -377,6 +366,7 @@ class MovieLensRecommendationDataset(data.Dataset):
             torch.tensor([s[2] for s in sparse_list], dtype=torch.long),
         ]
         self.labels = torch.tensor(labels_list, dtype=torch.float32).unsqueeze(1)
+        self.ratings_file = ratings_file
 
     def __len__(self):
         return len(self.labels)
@@ -406,6 +396,32 @@ def _dlrm_collate_fn(batch):
     return dense, sparse_indices, sparse_offsets, labels
 
 
+def load_movielens_fixed_split(
+    data_dir: str | None = None,
+) -> tuple[data.Dataset, data.Dataset]:
+    """Load the immutable MovieLens u1 train/evaluation split."""
+    if data_dir is None:
+        data_dir = MOVIELENS_DIR
+    train_path = os.path.join(data_dir, MOVIELENS_TRAIN_RATINGS)
+    evaluation_path = os.path.join(data_dir, MOVIELENS_EVALUATION_RATINGS)
+    missing = [
+        path for path in (train_path, evaluation_path) if not os.path.isfile(path)
+    ]
+    if missing:
+        raise FileNotFoundError(
+            "MovieLens fixed split is incomplete; expected u1.base and u1.test under "
+            f"{data_dir}: missing {', '.join(os.path.basename(path) for path in missing)}"
+        )
+    return (
+        MovieLensRecommendationDataset(
+            data_dir=data_dir, ratings_file=MOVIELENS_TRAIN_RATINGS
+        ),
+        MovieLensRecommendationDataset(
+            data_dir=data_dir, ratings_file=MOVIELENS_EVALUATION_RATINGS
+        ),
+    )
+
+
 def get_dlrm_dram_dataloaders(batch_size: int = 1024, num_workers: int = 0) -> tuple:
     """
     Returns (train_loader, val_loader) for the DRAM-bound DLRM variant.
@@ -425,16 +441,7 @@ def get_dlrm_dataloaders(batch_size: int = 256, num_workers: int = 0) -> tuple:
 
     Used by: Micro-DLRM.
     """
-    full_ds = MovieLensRecommendationDataset()
-
-    # 80/20 split
-    n_train = int(len(full_ds) * 0.8)
-    n_val = len(full_ds) - n_train
-    train_ds, val_ds = data.random_split(
-        full_ds,
-        [n_train, n_val],
-        generator=torch.Generator().manual_seed(SPLIT_SEED),
-    )
+    train_ds, val_ds = load_movielens_fixed_split()
 
     train_loader = data.DataLoader(
         train_ds,

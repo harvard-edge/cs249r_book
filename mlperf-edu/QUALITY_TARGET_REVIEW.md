@@ -5,6 +5,11 @@ performance-bearing candidates in the current 30-row registry. The labels are
 MLPerf EDU project classifications. They are not approved MLCommons result
 categories.
 
+The label `protocol-superseded historical reference` applies to all eight
+retained summaries from source commit `0ec4d3e1`. Their values document earlier
+protocols and are not eligible evidence for the current contracts. Replacement
+five-execution packets are pending for every public candidate.
+
 ## Evidence Vocabulary
 
 | **State** | **Meaning** |
@@ -12,7 +17,7 @@ categories.
 | Implemented | The runner, report fields, gate, and registry protocol exist. |
 | Calibrated | One or more local measurements informed the current threshold. Calibration values can expose an implausible target, but they are not release evidence. |
 | Validated | A fresh artifact passed its runner gate, provenance verification, grading, and report-level review contract. |
-| Committed-summary | A clean source revision produced a complete create-once reference attempt, and the repository retains its exact summary and SHA-256 digest. All eight current candidates have this state at source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. |
+| Committed-summary | A clean source revision produced a complete create-once reference attempt, and the repository retains its exact summary and SHA-256 digest. The eight retained packets from `0ec4d3e1c415944227d0754d170edb0addc1d925` have this archival state but are protocol-superseded and not current evidence. |
 | Release-evidenced | A reviewer has received and verified the committed summary and complete raw packet at an agreed handoff or publication location. The current raw packets are available for local handoff but have not yet been transferred or assigned public URLs. |
 | Externally approved | Dataset policy, target rationale, naming, and result wording have the required reviewer decisions. This state cannot be granted by repository tests. |
 
@@ -40,16 +45,13 @@ evidence must start from a clean source snapshot. Its default evidence root is
 outside the checkout under `~/.mlperf-edu/reference_runs` so generated output
 does not contaminate that source snapshot.
 
-## Committed Reference Snapshot
+## Historical Reference Snapshot
 
-`reference_results/index.json` records eight valid, review-eligible summaries
-from clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`.
-The repository stores the compact summaries and their content digests. Complete
-reports, manifests, checkpoints, model metadata, and raw timing samples remain
-available by local handoff. Thirty-five policy-permitted run packages have also
-been created and verified. Packaging correctly rejected the five DLRM runs
-because the MovieLens-derived artifacts are not redistributable under the
-current policy. No row has a public raw-artifact URL yet.
+`reference_results/index.json` records eight summaries from clean source commit
+`0ec4d3e1c415944227d0754d170edb0addc1d925`. Their evidence IDs and digests are
+preserved for traceability, but all eight are superseded and not review
+eligible under the current contracts. The table below is an archival index,
+not a current result set.
 
 | **Workload** | **Evidence ID** | **Summary SHA-256** |
 |:---|:---|:---|
@@ -64,18 +66,17 @@ current policy. No row has a public raw-artifact URL yet.
 
 ## Score-Bearing Candidates
 
-| **Workload** | **Metric and Target** | **Committed Reference Result** | **Why the Gate Is Meaningful** | **Release State** |
+| **Workload** | **Metric and Target** | **Current Calibration Boundary** | **Why the Gate Is Meaningful** | **Release State** |
 |:---|:---|:---|:---|:---|
-| `nanogpt-train` | cross-entropy loss `<= 2.30` | Seeds 0-4 at `1.9744`-`2.1648`, median `2.0789`, after 25 epochs | Rejects a broken language-model training path on the deterministic Project Gutenberg corpus recipe. | Committed-summary; all five runs and the median passed. |
-| `micro-dlrm-train` | best validation accuracy `>= 0.70` | Seeds 0-4 at `0.7019`-`0.7094`, median `0.7041` | Checks learned recommendation quality on a fixed MovieLens split. The narrow margin makes raw per-seed review important. | Committed-summary; all five runs and the median passed. MovieLens policy remains external. |
-| `anomaly-ae-train` | anomaly AUROC `>= 0.95` | Seeds 0-4 at `0.9645`-`0.9701`, median `0.9666`, on 10,000 test examples | Measures anomaly discrimination from per-sample reconstruction errors. Training MSE alone cannot establish detection quality. | Committed-summary; all five runs and the median passed. |
-| `resnet18-train` | Fashion-MNIST top-1 accuracy `>= 0.85` | Seeds 0-4 at `0.8630`-`0.8781`, median `0.8750` | Rejects plumbing-only or materially degraded training while retaining a modest laptop and backend margin. | Committed-summary; all five runs and the median passed. |
-| `mobilenetv2-train` | Fashion-MNIST top-1 accuracy `>= 0.78` | Seeds 0-4 at `0.7970`-`0.8238`, median `0.8089`; median wall time `85.335` seconds on the recorded MPS system | Replaces the former 70% plumbing threshold with a materially stronger quality floor for the mobile architecture. | Committed-summary; all five runs and the median passed. |
+| `nanogpt-train` | cross-entropy loss `<= 2.30` | Existing bounded calibration supports the unchanged target. | Rejects a broken language-model training path on the deterministic Project Gutenberg corpus recipe. | Replacement five-run packet pending. |
+| `micro-dlrm-train` | fixed-final-epoch ROC AUC `>= 0.76` | Five bounded seeds reached `0.7671`-`0.7696` on the official split without label-derived aggregate features. | Tests recommendation ranking on an untouched fixed evaluation split without checkpoint selection on test labels. | Replacement five-run packet pending; the prior accuracy packet is ineligible. |
+| `anomaly-ae-train` | macro AUROC `>= 0.93`, worst-class AUROC `>= 0.90`, learned-control margin `>= 0.20` | Five bounded seeds reached macro AUROC `0.9370`-`0.9422`, worst-class AUROC `0.9132`-`0.9212`, and minimum control margin `0.2491`-`0.2570`. | Requires classwise reconstruction-error discrimination and measurable improvement over zero, centroid, and untrained controls. | Replacement five-run packet pending; the former zero-versus-all packet is ineligible. |
+| `resnet18-train` | Fashion-MNIST top-1 accuracy `>= 0.85` | Existing bounded calibration supports the unchanged target. | Rejects plumbing-only or materially degraded training while retaining a modest laptop and backend margin. | Replacement five-run packet pending. |
+| `mobilenetv2-train` | Fashion-MNIST top-1 accuracy `>= 0.78` | Existing bounded calibration supports the unchanged target. | Provides a second architecture-level vision quality check at notebook scale. | Replacement five-run packet pending. |
 
-The values above come from the committed summaries rather than copied
-calibration notes. Every individual run and each five-run median passed. Any
-change to executable source, preprocessing, training schedule, framework
-contract, or target machine class requires a new create-once sweep.
+Calibration values above are target rationale only. They cannot be promoted by
+copying them into the reference index. Every current result requires a new
+create-once five-run sweep from the final clean source revision.
 
 ## Performance-Bearing Candidates
 
@@ -90,18 +91,19 @@ performance values to be no greater than `0.05`.
 
 | **Workload** | **Functional and Quality Gate** | **Default Measurement** | **Provenance Requirement** | **Release State** |
 |:---|:---|:---|:---|:---|
-| `nanogpt-inference --variant prefill` | Positive prefill throughput from a quality-approved NanoGPT checkpoint | Three discarded warmups and ten synchronized forward passes; median, p90, p99 | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Committed-summary; five executions passed, median `124578.18` tokens/s, range `114052.80`-`125183.01`, CV `4.60%`. |
-| `nanogpt-inference --variant decode` | Completes 64 decode steps with positive throughput from the same checkpoint lineage | Three discarded warmups and 20 measured requests; TTFT and inter-token median, p90, p99 | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Committed-summary; five executions completed 64 steps, median `131.8344` tokens/s, range `127.1281`-`133.7293`, CV `2.09%`. |
-| `smollm2-chat-inference --variant baseline` | At least eight generated tokens and continuation perplexity `<= 10` on four bundled cases | Three warmups and 20 measured requests; separate prefill and generation median, p90, p99 | Pinned model revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, model metadata, prompt-suite digest | Committed-summary; all five executions passed the token and perplexity gates, with median `101.3853` tokens/s, range `100.4041`-`102.4841`, CV `0.86%`. |
+| `nanogpt-inference --variant prefill` | Positive prefill throughput from a quality-approved NanoGPT checkpoint | Fixed content-addressed prompt, fresh KV cache, three discarded warmups, and 20 synchronized forward passes; median, p90, p99 | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Replacement five-run packet pending; the former ten-sample packet is ineligible. |
+| `nanogpt-inference --variant decode` | Completes 64 decode steps with positive throughput from the same checkpoint lineage | Three discarded warmups and 20 single-stream requests; causal TTFT, first-decode latency, and subsequent ITL statistics | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Replacement five-run packet pending under the corrected timing boundary. |
+| `smollm2-chat-inference --variant baseline` | At least eight generated tokens, token-weighted continuation perplexity `<= 7`, and worst-category perplexity `<= 24` on 28 attributed cases | Three warmups and 20 measured requests; separate prefill and generation median, p90, p99 | Pinned model revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, model metadata, v2 fixture version and digest, case count, categories, and aggregation | Protocol-superseded; the former five-run packet used four cases and an unweighted case mean. A replacement five-run packet is required. |
 
 The NanoGPT timing rows inherit task quality from the training checkpoint. A
 random or unidentified checkpoint cannot carry public-candidate performance.
-Both rows use the median-quality seed-4 training checkpoint, SHA-256
-`a0d2f31a747355d47d11c6aa77eb09faf2232f84cb519accb286a78159fb2d8a`,
-from the verified lineage package with SHA-256
-`0b0173d78e2c3315c4687b6319beb8a2826c98bce7f52710542f4b496edadd20`.
-The SLM row evaluates continuation-only negative log likelihood, records the
-four-case suite digest, and keeps network access outside the measurement.
+Both rows must use the same newly verified training checkpoint lineage selected
+from the replacement NanoGPT training sweep. The prior seed-4 package remains a
+historical artifact and cannot satisfy the current inference contracts.
+The SLM row evaluates continuation-only negative log likelihood, weights every
+continuation token equally, records the attributed 28-case v2 suite digest, and
+keeps network access outside the measurement. A separate weakest-category gate
+prevents easy categories from masking material degradation.
 
 ## Systems-Only Rows
 
@@ -129,7 +131,7 @@ declared research dataset is not consumed by the current systems-only runner.
 | rl | `micro-rl-train` | Stochastic-control methodology and repeated-run policy are not defined for public scoring. |
 | slm | `smollm2-chat-inference --variant batched-b4` | Batched-serving research variant without a promoted comparison contract. |
 | slm | `smollm2-chat-inference --variant long-context` | Long-context research variant without a promoted comparison contract. |
-| slm | `smollm2-chat-inference --variant quantized-int8` | Generation completes, but recorded perplexity `19.8108` and NLL delta `0.9580` fail the current parity limits. |
+| slm | `smollm2-chat-inference --variant quantized-int8` | The historical v1 run completed generation but recorded perplexity `19.8108` and NLL delta `0.9580`. Those values and their parity decision are protocol-superseded; v2 calibration is required. |
 | timeseries | `micro-lstm-train` | Synthetic micro-shard systems path; real-data target and source review deferred. |
 | tiny | `dscnn-kws-train` | Fast paths use synthetic micro-shards; Speech Commands scoring protocol is not promoted. |
 | tiny | `wake-vision-vww` | Fast paths use synthetic micro-shards; Wake Vision scoring and release policy are not promoted. |
@@ -142,7 +144,7 @@ declared research dataset is not consumed by the current systems-only runner.
 |:---|:---|:---|
 | Target robustness | Accept or revise each metric, threshold, five-seed rule, and rerun trigger. | Five clean score packets plus target margins and raw values. |
 | NanoGPT inference | Approve checkpoint lineage, prompt shape, prefill and decode scenarios, and latency statistics. | Training packet, checkpoint digest, prefill packet, decode packet. |
-| SLM inference | Approve the model revision, four-case continuation fixture, perplexity limit, token floor, and scenario. | Model dossier, fixture digest, quality results, timing samples. |
+| SLM inference | Approve the model revision, attributed 28-case continuation fixture, token-weighted aggregation, dual perplexity limits, token floor, and scenario. | Model dossier, fixture digest, per-case and per-category quality results, timing samples. |
 | Vision | Accept Fashion-MNIST as the first course-scale public training dataset. | Dataset dossier and both five-seed vision packets. |
 | Anomaly detection | Accept the zero-versus-nonzero split, AUROC target, and attribution. | MNIST dossier and five-seed anomaly packet. |
 | Recommender | Approve fetch-only MovieLens use or move the row to systems-only and select a replacement. | Dataset terms, audit warning, and DLRM packet. |

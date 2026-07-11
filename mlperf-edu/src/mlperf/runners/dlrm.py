@@ -14,8 +14,13 @@ from torch.utils.data import DataLoader
 from mlperf.assets import ensure_movielens_100k
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
+from mlperf.reference.dataset_factory import _dlrm_collate_fn as _base_dlrm_collate_fn
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed
+from mlperf.runners.common import (
+    configured_seed,
+    synchronize_device,
+    training_measurement_protocol,
+)
 
 
 def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
@@ -252,14 +257,18 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "min",
+        "scenario": workload.scenario,
         "status": "passed" if target_met else "quality_failed",
         "backend": "torch-distributed-gloo-cpu",
         "data_mode": "synthetic-deterministic",
+        "dataset": workload.dataset,
         "seed": seed,
         "config": {
             "world_size": world_size,
             "n_steps": n_steps,
             "micro_batch": micro_batch,
+            "backend": "gloo",
+            "transport": "localhost-loopback",
         },
         "metrics": {
             "duration_seconds": float(duration),
@@ -269,8 +278,14 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "relative_loss_delta": float(relative_loss_delta)
             if relative_loss_delta is not None
             else None,
-            "allreduce_time_per_step_ms": float(
-                ddp.get("allreduce_time_per_step_ms", 0.0)
+            "backward_with_allreduce_time_per_step_ms": float(
+                ddp.get("backward_with_allreduce_time_per_step_ms", 0.0)
+            )
+            if not error
+            else None,
+            "n_params": int(ddp.get("n_params", 0)) if not error else None,
+            "gradient_payload_bytes_fp32": int(
+                ddp.get("gradient_payload_bytes_fp32", 0)
             )
             if not error
             else None,
@@ -293,12 +308,12 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario,
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        dataset_name="synthetic-deterministic-ddp",
+        dataset_name=workload.dataset or "synthetic-deterministic-ddp",
         dataset_files=[],
         rng_seed=seed,
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
@@ -311,16 +326,13 @@ def run_distributed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
 
 def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run the DRAM-bound DLRM variant on MovieLens-100K."""
+    """Run the cache-stress DLRM variant on MovieLens-100K."""
     root = find_project_root()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
     from mlperf.reference.cloud.micro_dlrm_dram import MicroDLRMDRAM
-    from mlperf.reference.dataset_factory import (
-        MovieLensRecommendationDataset,
-        _dlrm_collate_fn,
-    )
+    from mlperf.reference.dataset_factory import load_movielens_fixed_split
 
     seed = configured_seed()
     torch.manual_seed(seed)
@@ -332,31 +344,24 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     batches_per_epoch = _env_int("MLPERF_EDU_DLRM_DRAM_MAX_BATCHES_PER_EPOCH", 25)
     val_batches = _env_int("MLPERF_EDU_DLRM_DRAM_MAX_VAL_BATCHES", 50)
     lr = _env_float("MLPERF_EDU_DLRM_DRAM_MAX_LR", 1e-2)
-    m_spa = _env_int("MLPERF_EDU_DLRM_DRAM_MAX_M_SPA", 64)
+    m_spa = _env_int("MLPERF_EDU_DLRM_DRAM_MAX_M_SPA", 256)
     virtual_table_size = _env_int("MLPERF_EDU_DLRM_DRAM_MAX_VIRTUAL_TABLE_SIZE", 65_536)
 
-    dataset = MovieLensRecommendationDataset(data_dir=str(asset.root))
-    n_train = int(len(dataset) * 0.8)
-    n_val = len(dataset) - n_train
-    train_ds, val_ds = torch.utils.data.random_split(
-        dataset,
-        [n_train, n_val],
-        generator=torch.Generator().manual_seed(seed),
-    )
+    train_ds, val_ds = load_movielens_fixed_split(str(asset.root))
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
         shuffle=True,
         drop_last=True,
-        collate_fn=_dlrm_collate_fn,
+        collate_fn=_dlrm_dram_collate_fn,
         generator=torch.Generator().manual_seed(seed),
     )
     val_loader = DataLoader(
         val_ds,
         batch_size=batch_size,
         shuffle=False,
-        drop_last=True,
-        collate_fn=_dlrm_collate_fn,
+        drop_last=False,
+        collate_fn=_dlrm_dram_collate_fn,
     )
 
     model = MicroDLRMDRAM(
@@ -372,6 +377,7 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     train_losses: list[float] = []
     val_losses: list[float] = []
     val_accuracies: list[float] = []
+    val_aurocs: list[float] = []
     epoch_times: list[float] = []
     samples_seen = 0
     start = time.perf_counter()
@@ -385,13 +391,14 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss, val_acc = _validate(
+        val_loss, val_acc, val_auc = _validate(
             model, val_loader, device, max_batches=val_batches
         )
         samples_seen += train_samples
         train_losses.append(train_loss)
         val_losses.append(val_loss)
         val_accuracies.append(val_acc)
+        val_aurocs.append(val_auc)
         epoch_times.append(time.perf_counter() - t0)
     duration = time.perf_counter() - start
 
@@ -434,11 +441,21 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "lr": lr,
             "m_spa": m_spa,
             "virtual_table_size": virtual_table_size,
+            "split": {
+                "train": "u1.base",
+                "validation": "u1.test",
+                "training_seed_affects_split": False,
+            },
+            "feature_recipe": (
+                "demographics-item-genres-v2-no-rating-aggregates-plus-user-item-cross"
+            ),
+            "memory_regime_claim": "unmeasured; requires hardware-local profiling",
         },
         "metrics": {
             "final_train_loss": float(train_losses[-1]),
             "final_val_loss": float(val_losses[-1]),
             "final_accuracy": float(final_accuracy),
+            "final_roc_auc": float(val_aurocs[-1]),
             "duration_seconds": float(duration),
             "samples": int(samples_seen),
             "samples_per_second": float(samples_seen / duration)
@@ -449,6 +466,7 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "epoch_times": epoch_times,
             "train_losses": train_losses,
             "val_losses": val_losses,
+            "val_aurocs": val_aurocs,
             "val_accuracies": val_accuracies,
         },
         "quality": {
@@ -468,7 +486,7 @@ def run_dram_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "training",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -534,14 +552,18 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "max",
+        "scenario": workload.scenario,
         "status": "passed" if target_met else "quality_failed",
         "backend": "torch-distributed-gloo-cpu",
         "data_mode": "synthetic-deterministic",
+        "dataset": workload.dataset,
         "seed": seed,
         "config": {
             "world_size": world_size,
             "n_steps": n_steps,
             "micro_batch": micro_batch,
+            "backend": "gloo",
+            "transport": "localhost-loopback",
         },
         "metrics": {
             "duration_seconds": float(duration),
@@ -551,8 +573,14 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "relative_loss_delta": float(relative_loss_delta)
             if relative_loss_delta is not None
             else None,
-            "allreduce_time_per_step_ms": float(
-                ddp.get("allreduce_time_per_step_ms", 0.0)
+            "backward_with_allreduce_time_per_step_ms": float(
+                ddp.get("backward_with_allreduce_time_per_step_ms", 0.0)
+            )
+            if not error
+            else None,
+            "n_params": int(ddp.get("n_params", 0)) if not error else None,
+            "gradient_payload_bytes_fp32": int(
+                ddp.get("gradient_payload_bytes_fp32", 0)
             )
             if not error
             else None,
@@ -575,12 +603,12 @@ def run_distributed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario,
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        dataset_name="synthetic-deterministic-ddp",
+        dataset_name=workload.dataset or "synthetic-deterministic-ddp",
         dataset_files=[],
         rng_seed=seed,
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
@@ -600,8 +628,8 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.cloud.micro_dlrm import MicroDLRMWhiteBox
     from mlperf.reference.dataset_factory import (
-        MovieLensRecommendationDataset,
         _dlrm_collate_fn,
+        load_movielens_fixed_split,
     )
 
     seed = configured_seed()
@@ -612,17 +640,10 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     batch_size = _env_int("MLPERF_EDU_DLRM_MAX_BATCH_SIZE", 256)
     epochs = _env_int("MLPERF_EDU_DLRM_MAX_EPOCHS", 21)
     batches_per_epoch = _env_int("MLPERF_EDU_DLRM_MAX_BATCHES_PER_EPOCH", 50)
-    val_batches = _env_int("MLPERF_EDU_DLRM_MAX_VAL_BATCHES", 100)
+    evaluation_batches = _env_int("MLPERF_EDU_DLRM_MAX_EVALUATION_BATCHES", 100)
     lr = _env_float("MLPERF_EDU_DLRM_MAX_LR", 1e-2)
 
-    dataset = MovieLensRecommendationDataset(data_dir=str(asset.root))
-    n_train = int(len(dataset) * 0.8)
-    n_val = len(dataset) - n_train
-    train_ds, val_ds = torch.utils.data.random_split(
-        dataset,
-        [n_train, n_val],
-        generator=torch.Generator().manual_seed(seed),
-    )
+    train_ds, evaluation_ds = load_movielens_fixed_split(str(asset.root))
     train_loader = DataLoader(
         train_ds,
         batch_size=batch_size,
@@ -631,11 +652,11 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         collate_fn=_dlrm_collate_fn,
         generator=torch.Generator().manual_seed(seed),
     )
-    val_loader = DataLoader(
-        val_ds,
+    evaluation_loader = DataLoader(
+        evaluation_ds,
         batch_size=batch_size,
         shuffle=False,
-        drop_last=True,
+        drop_last=False,
         collate_fn=_dlrm_collate_fn,
     )
 
@@ -643,15 +664,9 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
 
     train_losses: list[float] = []
-    val_losses: list[float] = []
-    val_accuracies: list[float] = []
     epoch_times: list[float] = []
-    best_accuracy = -1.0
-    best_epoch = 0
-    best_train_loss = float("inf")
-    best_val_loss = float("inf")
-    best_state: dict[str, torch.Tensor] | None = None
     samples_seen = 0
+    synchronize_device(device)
     start = time.perf_counter()
     for _epoch in range(epochs):
         t0 = time.perf_counter()
@@ -662,37 +677,26 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             device,
             max_batches=batches_per_epoch,
         )
-        val_loss, val_acc = _validate(
-            model, val_loader, device, max_batches=val_batches
-        )
         samples_seen += train_samples
         train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        val_accuracies.append(val_acc)
         epoch_times.append(time.perf_counter() - t0)
-        if val_acc > best_accuracy:
-            best_accuracy = val_acc
-            best_epoch = len(val_accuracies)
-            best_train_loss = train_loss
-            best_val_loss = val_loss
-            best_state = {
-                name: tensor.detach().cpu().clone()
-                for name, tensor in model.state_dict().items()
-            }
+    evaluation_loss, evaluation_accuracy, evaluation_auroc = _validate(
+        model, evaluation_loader, device, max_batches=evaluation_batches
+    )
+    synchronize_device(device)
     duration = time.perf_counter() - start
 
-    final_accuracy = val_accuracies[-1]
     target = _env_float(
-        "MLPERF_EDU_DLRM_MAX_ACCURACY_TARGET", float(workload.quality_value or 0.7)
+        "MLPERF_EDU_DLRM_MAX_AUROC_TARGET", float(workload.quality_value or 0.7)
     )
-    target_met = best_accuracy >= target
+    target_met = evaluation_auroc >= target
     n_params = sum(p.numel() for p in model.parameters())
 
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = (output_dir / "micro-dlrm-train_max_report.json").resolve()
     manifest_path = (output_dir / "micro-dlrm-train_max.provd.json").resolve()
     checkpoint_path = (output_dir / "micro-dlrm-train_max_checkpoint.pt").resolve()
-    torch.save(best_state or model.state_dict(), checkpoint_path)
+    torch.save(model.state_dict(), checkpoint_path)
 
     report = {
         "schema": "mlperf-edu-report/0.1",
@@ -711,25 +715,29 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "n_bytes": asset.n_bytes,
         },
         "seed": seed,
+        "measurement_protocol": training_measurement_protocol(workload),
         "config": {
             "batch_size": batch_size,
             "epochs": epochs,
             "batches_per_epoch": batches_per_epoch,
-            "val_batches": val_batches,
+            "evaluation_batches": evaluation_batches,
             "lr": lr,
-            "quality_epoch_selection": "best_validation_accuracy",
+            "quality_epoch_selection": "fixed_final_epoch",
+            "split": {
+                "train": "u1.base",
+                "evaluation": "u1.test",
+                "training_seed_affects_split": False,
+            },
+            "feature_recipe": "demographics-item-genres-v2-no-rating-aggregates",
         },
         "metrics": {
             "final_train_loss": float(train_losses[-1]),
-            "final_val_loss": float(val_losses[-1]),
-            "final_accuracy": float(final_accuracy),
-            "last_epoch_accuracy": float(final_accuracy),
-            "best_train_loss": float(best_train_loss),
-            "best_val_loss": float(best_val_loss),
-            "best_accuracy": float(best_accuracy),
-            "accuracy": float(best_accuracy),
-            "best_epoch": int(best_epoch),
+            "evaluation_loss": float(evaluation_loss),
+            "evaluation_accuracy": float(evaluation_accuracy),
+            "evaluation_roc_auc": float(evaluation_auroc),
+            "roc_auc": float(evaluation_auroc),
             "duration_seconds": float(duration),
+            "train_and_eval_seconds": float(duration),
             "samples": int(samples_seen),
             "samples_per_second": float(samples_seen / duration)
             if duration > 0
@@ -737,8 +745,6 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "n_params": int(n_params),
             "epoch_times": epoch_times,
             "train_losses": train_losses,
-            "val_losses": val_losses,
-            "val_accuracies": val_accuracies,
         },
         "quality": {
             "metric": workload.quality_metric,
@@ -746,9 +752,9 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "direction": "higher",
             "target_met": target_met,
             "quality_required": True,
-            "override": "MLPERF_EDU_DLRM_MAX_ACCURACY_TARGET" in os.environ,
-            "metric_key": "best_accuracy",
-            "note": "Quality is evaluated at the best validation checkpoint reached during the run; final_* metrics record the last epoch.",
+            "override": "MLPERF_EDU_DLRM_MAX_AUROC_TARGET" in os.environ,
+            "metric_key": "roc_auc",
+            "note": "Quality is ROC AUC on the untouched u1.test split after the fixed final training epoch; evaluation labels never select a checkpoint.",
         },
         "artifacts": {
             "report": str(report_path),
@@ -781,6 +787,19 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
 def _env_int(name: str, default: int) -> int:
     return int(os.environ.get(name, default))
+
+
+def _dlrm_dram_collate_fn(batch):
+    """Add a stable user-item cross so MovieLens addresses the stress table broadly."""
+    dense, sparse_indices, sparse_offsets, labels = _base_dlrm_collate_fn(batch)
+    user_ids, item_ids = sparse_indices[:2]
+    user_item_cross = user_ids * 1682 + item_ids
+    return (
+        dense,
+        [user_ids, item_ids, user_item_cross],
+        sparse_offsets,
+        labels,
+    )
 
 
 def _env_float(name: str, default: float) -> float:
@@ -857,11 +876,13 @@ def _validate(
     device: torch.device,
     *,
     max_batches: int,
-) -> tuple[float, float]:
+) -> tuple[float, float, float]:
     model.eval()
     losses: list[float] = []
     correct = 0
     total = 0
+    scores: list[float] = []
+    binary_labels: list[int] = []
     for batch_idx, batch in enumerate(loader):
         if batch_idx >= max_batches:
             break
@@ -872,6 +893,32 @@ def _validate(
         losses.append(float(loss.item()))
         correct += int((preds == labels).sum().item())
         total += int(labels.numel())
+        scores.extend(float(value) for value in outputs.detach().cpu().view(-1))
+        binary_labels.extend(int(value) for value in labels.detach().cpu().view(-1))
     avg_loss = sum(losses) / len(losses) if losses else float("inf")
     accuracy = correct / total if total else 0.0
-    return avg_loss, accuracy
+    return avg_loss, accuracy, _binary_auroc(scores, binary_labels)
+
+
+def _binary_auroc(scores: list[float], labels: list[int]) -> float:
+    """Compute binary ROC AUC using average ranks for tied scores."""
+    pairs = sorted(zip(scores, labels, strict=True), key=lambda item: item[0])
+    rank_sum_positive = 0.0
+    index = 0
+    while index < len(pairs):
+        end = index + 1
+        while end < len(pairs) and pairs[end][0] == pairs[index][0]:
+            end += 1
+        average_rank = ((index + 1) + end) / 2.0
+        rank_sum_positive += average_rank * sum(
+            label == 1 for _, label in pairs[index:end]
+        )
+        index = end
+    positives = sum(label == 1 for label in labels)
+    negatives = len(labels) - positives
+    if positives == 0 or negatives == 0:
+        return float("nan")
+    return float(
+        (rank_sum_positive - positives * (positives + 1) / 2.0)
+        / (positives * negatives)
+    )

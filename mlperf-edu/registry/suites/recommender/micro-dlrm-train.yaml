@@ -5,8 +5,8 @@ dataset: movielens-100k
 dataset_source: Harper & Konstan (2015), MovieLens-100K, 100K ratings from 943 users and 1,682
   movies; fetched from GroupLens into the local cache and not redistributed
 quality_target:
-  metric: accuracy
-  value: 0.7
+  metric: roc_auc
+  value: 0.76
   direction: higher
   target_basis: reference_runs
   tolerance: 0.0
@@ -14,39 +14,89 @@ quality_target:
   variance_summary:
     runs: 5
     statistic: median
-    acceptance_rule: median best validation accuracy must be >= target
-    metric: accuracy
-    median: 0.7040765224358975
-    min: 0.7018729967948718
-    max: 0.7093850160256411
-    mean: 0.7044170673076924
-    sample_stdev: 0.003068281575263232
-    spread_note: The clean five-seed public-candidate sweep with the fixed MovieLens split
-      reached best validation accuracy from 0.7018729968 to 0.7093850160 after the text-occupation
-      encoding fix. Every seed passed the 0.70 target.
+    acceptance_rule: median fixed-final-epoch evaluation ROC AUC must be >= target
+    metric: roc_auc
+    median: 0.7677678928436241
+    min: 0.7671171627454848
+    max: 0.7696129592578403
+    mean: 0.7680442529571659
+    sample_stdev: 0.0009575452177736948
+    spread_note: Five calibrated seeds on the official u1.base/u1.test split produced fixed-final-epoch
+      evaluation ROC AUC from 0.7671172 to 0.7696130 without label-derived aggregate features.
+      Every seed passed the 0.76 target; promotion requires a fresh canonical reference sweep.
   reference_protocol:
     profile: max
     backend: pytorch-cpu reference path unless the report declares a different backend
     machine_class: laptop-class CPU or laptop-class accelerator with full hardware fingerprint
-    dataset_mode: fetched MovieLens-100K with fixed split, preprocessing, and seed; no synthetic
-      fallback
+    dataset_mode: fetched MovieLens-100K with the official u1.base training and u1.test validation
+      split, demographics and item-genre features only, and no synthetic fallback
     seeds:
     - 0
     - 1
     - 2
     - 3
     - 4
-    aggregation: median best validation accuracy across five independent reference runs
+    aggregation: median fixed-final-epoch evaluation ROC AUC across five independent reference
+      runs
+    repeatability_metric: sample coefficient of variation of train_and_eval_seconds across
+      the five reference runs
+    repeatability_limit: 0.05
+    repeatability_action: withhold the performance reference and rerun the complete protocol
+      when the coefficient of variation exceeds 5%
     artifact_policy: preserve JSON, HTML, CSV, .provd.json, run fingerprint, dataset asset
       metadata, and raw metric values for each run
     rerun_policy: rerun all five references when model code, dataset preprocessing, optimizer
       schedule, PyTorch major version, or target hardware class changes
   reviewer_notes:
-  - The clean best-validation reference satisfies the public target across seeds 0-4. Dataset
-    and source provenance remain tied to fetched MovieLens-100K.
+  - ROC AUC is evaluated once on the untouched official u1.test split after a fixed 21-epoch
+    schedule. Evaluation labels do not select a checkpoint, and training seeds do not alter
+    split membership. The feature recipe excludes rating-derived user or item aggregates.
+measurement_protocol:
+  primary_metric: train_and_eval_seconds
+  scenario: training
+  timing_scope: fixed canonical training loop plus scheduled validation
+  included_phases:
+  - optimizer steps
+  - scheduled validation
+  - learning-rate scheduler steps when configured
+  excluded_phases:
+  - dataset or asset fetching
+  - model construction
+  - checkpoint serialization
+  - report and provenance serialization
+  device_synchronization: synchronize immediately before and after the measured train-and-evaluation
+    region
+  outer_reference_runs: 5
+canonical_max_contract:
+  model_id: micro-dlrm-1m
+  dataset: movielens-100k
+  dataset_sha256: sha256:4d34c01cc280f86c60b02567a37c00a9785fe883d221a4f87968a641cce5386f
+  data_mode: real
+  config:
+    batch_size: 256
+    epochs: 21
+    batches_per_epoch: 50
+    evaluation_batches: 100
+    lr: 0.01
+    quality_epoch_selection: fixed_final_epoch
+    split:
+      train: u1.base
+      evaluation: u1.test
+      training_seed_affects_split: false
+    feature_recipe: demographics-item-genres-v2-no-rating-aggregates
+  quality:
+    metric: roc_auc
+    metric_key: roc_auc
+    target: 0.76
+    direction: higher
 verified_baseline:
   evidence_status: committed-reference-summary
-  review_eligible: true
+  review_eligible: false
+  protocol_compatibility: superseded
+  replacement_required: true
+  superseded_reason: The current contract removes rating-derived features, uses the official
+    fixed split, evaluates the untouched test partition once at the final epoch, and scores
+    ROC AUC; this packet used the former accuracy protocol.
   evidence_tier: public-candidate
   evidence_id: micro-dlrm-train_max_20260711T085501.915367Z
   evidence_file: reference_results/micro-dlrm-train/micro-dlrm-train_max_20260711T085501.915367Z.json
@@ -84,16 +134,14 @@ verified_baseline:
   wall_seconds_mean: 4.935867724567652
   wall_seconds_sample_stdev: 0.06850625987072577
   accepted_runs: 5
-  baseline_note: Clean five-run project reference from exact source commit 0ec4d3e1. Evidence
-    semantics were recomputed from the raw reports and manifests during promotion. Every seed
-    passed the declared quality gate. Raw attempts are retained on the source machine. Portable
-    packaging is blocked by the current MovieLens redistribution policy, and no public package
-    URL is recorded. This is not an MLCommons-verified result.
+  baseline_note: This packet used the former accuracy protocol with rating-derived features
+    and a noncanonical evaluation method. It is retained only for historical traceability and
+    cannot support the current ROC-AUC contract. A clean five-seed replacement packet is required.
 scenario: training
 public:
   status: score-bearing
-  rationale: Uses MovieLens-100K with an explicit accuracy target and a small DLRM shape aligned
-    with the MLPerf recommendation workload family.
+  rationale: Uses MovieLens-100K with a fixed official validation split, an explicit ROC-AUC
+    target, and a small DLRM shape aligned with the MLPerf recommendation workload family.
 runner:
   min: mlperf.runners.dlrm:run_min
   max: mlperf.runners.dlrm:run_max

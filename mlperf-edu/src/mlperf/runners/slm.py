@@ -1,17 +1,17 @@
 from __future__ import annotations
 
-import json
 import hashlib
+import json
 import math
 import os
 import statistics
 import sys
-import time
 import tempfile
+import time
 from contextlib import contextmanager, nullcontext
+from importlib import resources
 from pathlib import Path
 from typing import Any
-from importlib import resources
 
 import torch
 
@@ -23,6 +23,13 @@ from mlperf.runners.common import configured_seed
 
 DEFAULT_MODEL_ID = "HuggingFaceTB/SmolLM2-135M-Instruct"
 DEFAULT_MODEL_REVISION = "12fd25f77366fa6b3b4b768ec3050bf629380bac"
+SLM_QUALITY_SCHEMA = "mlperf-edu-slm-quality/0.2"
+SLM_QUALITY_FIXTURE_VERSION = "2.0.0"
+SLM_QUALITY_AGGREGATION = "token-weighted-continuation-nll"
+SLM_QUALITY_CATEGORY_GUARD = "maximum-category-perplexity"
+SLM_QUALITY_MIN_CASES = 20
+DEFAULT_MAX_PERPLEXITY = 7.0
+DEFAULT_MAX_WORST_CATEGORY_PERPLEXITY = 24.0
 MODEL_ALIASES = {
     "smollm2-135m": DEFAULT_MODEL_ID,
     "qwen2.5-0.5b": "Qwen/Qwen2.5-0.5B-Instruct",
@@ -141,6 +148,9 @@ def run_decode(
 ) -> dict[str, Any]:
     seed = configured_seed()
     torch.manual_seed(seed)
+    scenario = str(workload.scenario or "").strip()
+    if not scenario:
+        raise ValueError(f"SLM workload {workload.id!r} must declare a scenario")
     device = select_device()
     max_context_tokens = context_tokens or int(
         os.environ.get("MLPERF_EDU_SLM_CONTEXT_TOKENS", "64")
@@ -152,6 +162,11 @@ def run_decode(
     decode_tokens = int(
         os.environ.get("MLPERF_EDU_SLM_DECODE_TOKENS", default_decode_tokens)
     )
+    if decode_tokens < 2:
+        raise ValueError(
+            "SLM decode measurement requires at least two output tokens so that "
+            "inter-token latency is defined"
+        )
     target_tokens = int(
         os.environ.get(
             "MLPERF_EDU_SLM_TARGET_TOKENS", workload.quality_value or decode_tokens
@@ -165,6 +180,7 @@ def run_decode(
 
     model = model_bundle["model"]
     tokenizer = model_bundle.get("tokenizer")
+    source_model_dtype = model_parameter_dtype(model)
     reference_quality = None
     if quantization and tokenizer is not None:
         model.eval()
@@ -205,8 +221,6 @@ def run_decode(
                 input_ids,
                 attention_mask,
                 decode_tokens=decode_tokens,
-                pad_token_id=model_bundle["pad_token_id"],
-                eos_token_id=model_bundle["eos_token_id"],
             )
         measurements = [
             _run_slm_request(
@@ -214,49 +228,72 @@ def run_decode(
                 input_ids,
                 attention_mask,
                 decode_tokens=decode_tokens,
-                pad_token_id=model_bundle["pad_token_id"],
-                eos_token_id=model_bundle["eos_token_id"],
             )
             for _ in range(measured_runs)
         ]
 
-    prefill_latencies = [float(item[0]) for item in measurements]
-    generation_latencies = [float(item[1]) for item in measurements]
+    prefill_latencies = [float(item["prefill_latency_s"]) for item in measurements]
+    ttft_latencies = [float(item["request_ttft_s"]) for item in measurements]
+    request_latencies = [
+        float(item["request_end_to_end_latency_s"]) for item in measurements
+    ]
+    generation_latencies = [
+        sum(float(value) for value in item["itl_samples_s"]) for item in measurements
+    ]
+    itl_samples = [
+        float(value) for item in measurements for value in item["itl_samples_s"]
+    ]
+    if not itl_samples or any(value <= 0 for value in itl_samples):
+        raise ValueError(
+            "SLM decode measurement produced invalid inter-token latency samples"
+        )
     prefill_latency = statistics.median(prefill_latencies)
+    request_ttft = statistics.median(ttft_latencies)
+    request_latency = statistics.median(request_latencies)
     generation_latency = statistics.median(generation_latencies)
-    prefill = measurements[-1][2]
-    generated = measurements[-1][3]
+    median_itl = statistics.median(itl_samples)
+    prefill = measurements[-1]["prefill"]
+    generated = measurements[-1]["generated"]
 
     measured_batch_size = int(input_ids.shape[0])
     context_tokens = int(input_ids.shape[-1])
-    total_tokens = int(generated.shape[-1])
-    generated_tokens = max(0, total_tokens - context_tokens)
+    generated_tokens = int(generated.shape[-1])
     total_context_tokens = context_tokens * measured_batch_size
     total_generated_tokens = generated_tokens * measured_batch_size
-    per_token_decode_latency = (
-        float(generation_latency / generated_tokens) if generated_tokens else 0.0
-    )
-    output_ids = generated[0, context_tokens:]
+    decode_interval_tokens = max(0, generated_tokens - 1) * measured_batch_size
+    output_ids = generated[0]
     output_text = decode_output(output_ids, tokenizer)
-    absolute_perplexity_limit = float(
-        os.environ.get("MLPERF_EDU_SLM_MAX_PERPLEXITY", "10")
-    )
-    quantized_nll_delta_limit = float(
-        os.environ.get("MLPERF_EDU_SLM_MAX_NLL_DELTA", "0.10")
-    )
-    task_quality_met = bool(
-        task_quality
-        and task_quality["perplexity"] <= absolute_perplexity_limit
-        and (
-            reference_quality is None
-            or task_quality["mean_nll"] - reference_quality["mean_nll"]
-            <= quantized_nll_delta_limit
+    declared_quality_limits = slm_quality_gate_limits(workload)
+    quality_limit_environment = {
+        "max_perplexity": "MLPERF_EDU_SLM_MAX_PERPLEXITY",
+        "max_worst_category_perplexity": (
+            "MLPERF_EDU_SLM_MAX_WORST_CATEGORY_PERPLEXITY"
+        ),
+        "max_quantized_nll_delta": "MLPERF_EDU_SLM_MAX_NLL_DELTA",
+    }
+    effective_quality_limits = {
+        name: validate_slm_quality_limit(
+            os.environ.get(environment_name, declared_quality_limits[name]),
+            label=environment_name
+            if environment_name in os.environ
+            else f"quality_evaluation.{name}",
         )
+        for name, environment_name in quality_limit_environment.items()
+    }
+    absolute_perplexity_limit = effective_quality_limits["max_perplexity"]
+    worst_category_perplexity_limit = effective_quality_limits[
+        "max_worst_category_perplexity"
+    ]
+    quantized_nll_delta_limit = effective_quality_limits["max_quantized_nll_delta"]
+    task_quality_gates = slm_quality_gate_results(
+        task_quality,
+        max_perplexity=absolute_perplexity_limit,
+        max_worst_category_perplexity=worst_category_perplexity_limit,
+        reference_result=reference_quality,
+        max_quantized_nll_delta=quantized_nll_delta_limit,
     )
-    public_quality_required = workload.public_status == "performance-bearing"
-    target_met = generated_tokens >= target_tokens and (
-        tiny_local or task_quality_met or not public_quality_required
-    )
+    task_quality_met = task_quality_gates["passed"] is True
+    target_met = generated_tokens >= target_tokens and (tiny_local or task_quality_met)
 
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = (output_dir / f"{workload.id}_{profile}_report.json").resolve()
@@ -287,6 +324,10 @@ def run_decode(
         "config": model_bundle.get("config", {}),
         "task_quality": task_quality,
         "reference_task_quality": reference_quality,
+        "model_asset_count": len(model_bundle.get("asset_files") or []),
+        "model_asset_roles": sorted(
+            {str(item.get("role")) for item in model_bundle.get("asset_files") or []}
+        ),
     }
     metadata_path.write_text(
         json.dumps(model_metadata, indent=2, sort_keys=True) + "\n"
@@ -297,6 +338,7 @@ def run_decode(
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
+        "scenario": scenario,
         "profile": profile,
         "status": "passed" if target_met else "quality_failed",
         "backend": f"transformers-{device.type}"
@@ -312,6 +354,7 @@ def run_decode(
             "target_generated_tokens": target_tokens,
             "max_context_tokens": max_context_tokens,
             "prompt_mode": prompt_mode,
+            "prompt_sha256": hashlib.sha256(prompt.encode("utf-8")).hexdigest(),
             "batch_size": measured_batch_size,
             "quantization": quantization,
             "tiny_local": tiny_local,
@@ -338,23 +381,43 @@ def run_decode(
             "generation_latency_s": float(generation_latency),
             "generation_latency_p90_s": percentile(generation_latencies, 0.90),
             "generation_latency_p99_s": percentile(generation_latencies, 0.99),
-            "time_to_first_token_s": float(prefill_latency + per_token_decode_latency),
-            "inter_token_latency_s": per_token_decode_latency,
+            "prefill_latency_samples_s": prefill_latencies,
+            "request_ttft_samples_s": ttft_latencies,
+            "itl_samples_s": itl_samples,
+            "request_end_to_end_samples_s": request_latencies,
+            "request_end_to_end_latency_s": float(request_latency),
+            "request_end_to_end_latency_p90_s": percentile(request_latencies, 0.90),
+            "request_end_to_end_latency_p99_s": percentile(request_latencies, 0.99),
+            "time_to_first_token_s": float(request_ttft),
+            "time_to_first_token_p90_s": percentile(ttft_latencies, 0.90),
+            "time_to_first_token_p99_s": percentile(ttft_latencies, 0.99),
+            "inter_token_latency_s": float(median_itl),
+            "inter_token_latency_p90_s": percentile(itl_samples, 0.90),
+            "inter_token_latency_p99_s": percentile(itl_samples, 0.99),
+            "decode_interval_tokens": decode_interval_tokens,
             "prefill_tokens_per_sec": float(total_context_tokens / prefill_latency)
             if prefill_latency
             else 0.0,
-            "requests_per_sec": float(measured_batch_size / generation_latency)
-            if generation_latency
+            "requests_per_sec": float(measured_batch_size / request_latency)
+            if request_latency
             else 0.0,
-            "output_tokens_per_sec": float(total_generated_tokens / generation_latency)
-            if generation_latency
-            else 0.0,
+            "output_tokens_per_sec": float(measured_batch_size / median_itl),
             "n_params": int(n_params),
             "model_state_bytes": int(model_state_bytes),
             "prompt_chars": len(rendered_prompts[0]),
             "logits_shape": list(prefill.logits.shape),
             "quality_mean_nll": task_quality.get("mean_nll") if task_quality else None,
             "quality_perplexity": task_quality.get("perplexity")
+            if task_quality
+            else None,
+            "quality_worst_category_perplexity": task_quality.get(
+                "worst_category_perplexity"
+            )
+            if task_quality
+            else None,
+            "quality_total_continuation_tokens": task_quality.get(
+                "total_continuation_tokens"
+            )
             if task_quality
             else None,
             "quality_nll_delta": (
@@ -367,26 +430,57 @@ def run_decode(
         },
         "quality": {
             "metric": workload.quality_metric,
+            "metric_key": "generated_tokens",
             "target": target_tokens,
             "direction": "higher",
             "quality_required": True,
             "target_met": target_met,
             "override": "MLPERF_EDU_SLM_TARGET_TOKENS" in os.environ,
-            "note": "The serving gate requires the requested output length and a bounded continuation perplexity on the bundled quality suite; quantized runs must also preserve NLL parity.",
+            "note": "The serving gate requires the requested output length and bounded continuation perplexity, computed token-weighted overall and in the weakest category; quantized runs must also preserve NLL parity.",
         },
         "quality_evaluation": {
             "status": "passed" if (tiny_local or task_quality_met) else "failed",
-            "suite": "mlperf-edu-slm-quality/0.1",
-            "max_perplexity": absolute_perplexity_limit,
+            "suite": SLM_QUALITY_SCHEMA,
+            "fixture_version": SLM_QUALITY_FIXTURE_VERSION,
+            "cases": task_quality.get("cases") if task_quality else None,
+            "categories": task_quality.get("categories") if task_quality else None,
+            "aggregation": SLM_QUALITY_AGGREGATION,
+            "category_guard": SLM_QUALITY_CATEGORY_GUARD,
+            "gates": task_quality_gates,
             "max_quantized_nll_delta": quantized_nll_delta_limit,
+            "contract": {
+                "source": (
+                    "workload.quality_evaluation"
+                    if workload.raw.get("quality_evaluation") is not None
+                    else "runner-defaults"
+                ),
+                "declared_limits": declared_quality_limits,
+                "effective_limits": effective_quality_limits,
+                "environment_overrides": sorted(
+                    environment_name
+                    for environment_name in quality_limit_environment.values()
+                    if environment_name in os.environ
+                ),
+            },
             "result": task_quality,
             "reference_result": reference_quality,
         },
         "measurement_protocol": {
+            **(workload.raw.get("measurement_protocol") or {}),
             "warmup_runs": warmup_runs,
             "measured_runs": measured_runs,
-            "latency_statistics": ["median", "p90", "p99"],
-            "timing_scope": "separate prefill and greedy generation timings on a fixed prompt batch",
+            "raw_sample_metrics": [
+                "prefill_latency_samples_s",
+                "request_ttft_samples_s",
+                "itl_samples_s",
+                "request_end_to_end_samples_s",
+            ],
+            "timing_scope": (
+                "one cache-reusing greedy request path per fixed prompt batch; "
+                "TTFT spans prompt prefill through the first output token, ITL "
+                "samples time only subsequent cached-token steps, and end-to-end "
+                "latency spans the complete request"
+            ),
         },
         "artifacts": {
             "report": str(report_path),
@@ -396,19 +490,31 @@ def run_decode(
     }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 
-    manifest = build_provd(
-        workload=workload.id,
-        scenario="single_stream",
-        division="open",
-        hardware_fingerprint=detect_hardware(),
-        report=report,
-        report_path=report_path,
-        dataset_name=model_bundle["model_id"],
-        dataset_files=[metadata_path, slm_quality_suite_path()],
-        rng_seed=seed,
-        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
-        repo_root=find_project_root(),
-    )
+    manifest_args: dict[str, Any] = {
+        "workload": workload.id,
+        "scenario": scenario,
+        "division": "open",
+        "hardware_fingerprint": detect_hardware(),
+        "report": report,
+        "report_path": report_path,
+        "dataset_name": model_bundle["model_id"],
+        "dataset_files": [metadata_path, slm_quality_suite_path()],
+        "rng_seed": seed,
+        "torch_state_bytes": torch.get_rng_state().numpy().tobytes(),
+        "repo_root": find_project_root(),
+    }
+    asset_files = model_bundle.get("asset_files")
+    if asset_files:
+        manifest_args.update(
+            {
+                "weights_files": asset_files,
+                "weights_name": model_bundle["model_id"],
+                "weights_revision": model_bundle.get("revision"),
+                "weights_n_params": int(n_params),
+                "weights_dtype": source_model_dtype,
+            }
+        )
+    manifest = build_provd(**manifest_args)
     manifest_path.write_text(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
     )
@@ -421,71 +527,469 @@ def _run_slm_request(
     attention_mask: torch.Tensor,
     *,
     decode_tokens: int,
-    pad_token_id: int,
-    eos_token_id: int,
-) -> tuple[float, float, Any, torch.Tensor]:
+) -> dict[str, Any]:
+    """Run one fixed-length greedy request while reusing the prompt KV cache."""
+    if decode_tokens < 2:
+        raise ValueError(
+            "SLM request requires at least two output tokens to measure inter-token latency"
+        )
     synchronize_device(input_ids.device)
-    start_prefill = time.perf_counter()
+    request_start = time.perf_counter()
     with torch.inference_mode():
         prefill = model(
             input_ids=input_ids, attention_mask=attention_mask, use_cache=True
         )
     synchronize_device(input_ids.device)
-    prefill_latency = time.perf_counter() - start_prefill
+    prefill_latency = time.perf_counter() - request_start
 
-    start_generate = time.perf_counter()
-    with torch.inference_mode():
-        generated = model.generate(
-            input_ids=input_ids,
-            attention_mask=attention_mask,
-            max_new_tokens=decode_tokens,
-            do_sample=False,
-            pad_token_id=pad_token_id,
-            eos_token_id=eos_token_id,
-            use_cache=True,
-        )
+    past_key_values = getattr(prefill, "past_key_values", None)
+    if past_key_values is None:
+        raise ValueError("SLM model did not return a KV cache for greedy decode")
+    next_token = prefill.logits[:, -1, :].argmax(dim=-1, keepdim=True)
     synchronize_device(input_ids.device)
-    generation_latency = time.perf_counter() - start_generate
-    return prefill_latency, generation_latency, prefill, generated
+    request_ttft = time.perf_counter() - request_start
+    generated_tokens = [next_token]
+    decode_attention_mask = attention_mask
+    itl_samples: list[float] = []
+
+    with torch.inference_mode():
+        for _ in range(decode_tokens - 1):
+            decode_attention_mask = torch.cat(
+                (
+                    decode_attention_mask,
+                    torch.ones(
+                        (decode_attention_mask.shape[0], 1),
+                        dtype=decode_attention_mask.dtype,
+                        device=decode_attention_mask.device,
+                    ),
+                ),
+                dim=-1,
+            )
+            synchronize_device(input_ids.device)
+            token_start = time.perf_counter()
+            decode_output = model(
+                input_ids=next_token,
+                attention_mask=decode_attention_mask,
+                past_key_values=past_key_values,
+                use_cache=True,
+            )
+            past_key_values = getattr(decode_output, "past_key_values", None)
+            if past_key_values is None:
+                raise ValueError("SLM model stopped returning a KV cache during decode")
+            next_token = decode_output.logits[:, -1, :].argmax(dim=-1, keepdim=True)
+            synchronize_device(input_ids.device)
+            itl_samples.append(time.perf_counter() - token_start)
+            generated_tokens.append(next_token)
+
+    request_end_to_end_latency = time.perf_counter() - request_start
+    return {
+        "prefill_latency_s": prefill_latency,
+        "request_ttft_s": request_ttft,
+        "itl_samples_s": itl_samples,
+        "request_end_to_end_latency_s": request_end_to_end_latency,
+        "prefill": prefill,
+        "generated": torch.cat(generated_tokens, dim=-1),
+    }
 
 
 def evaluate_slm_quality(
     model: torch.nn.Module, tokenizer: Any, device: torch.device
 ) -> dict[str, Any]:
-    """Measure continuation-only NLL on the bundled deterministic quality suite."""
+    """Measure token-weighted continuation NLL through a cache-reusing path."""
     suite_path = slm_quality_suite_path()
     raw = suite_path.read_bytes()
-    suite = json.loads(raw)
-    losses: list[float] = []
+    suite = load_slm_quality_suite(raw)
+    case_results: list[dict[str, Any]] = []
     with torch.inference_mode():
         for case in suite["cases"]:
             prompt = str(case["prompt"])
             continuation = str(case["continuation"])
-            combined = tokenizer(prompt + continuation, return_tensors="pt")
-            prompt_tokens = tokenizer(prompt, return_tensors="pt")["input_ids"].shape[
-                -1
-            ]
-            input_ids = combined["input_ids"].to(device)
-            attention_mask = combined.get(
-                "attention_mask", torch.ones_like(input_ids)
-            ).to(device)
-            labels = input_ids.clone()
-            labels[:, : min(prompt_tokens, labels.shape[-1] - 1)] = -100
-            output = model(
-                input_ids=input_ids,
-                attention_mask=attention_mask,
-                labels=labels,
-                use_cache=False,
+            case_nll, continuation_tokens = _continuation_nll_with_cache(
+                model,
+                tokenizer,
+                device,
+                prompt=prompt,
+                continuation=continuation,
             )
-            losses.append(float(output.loss.item()))
-    mean_nll = statistics.fmean(losses)
+            expected_tokens = suite["expected_continuation_tokens"][case["id"]]
+            if continuation_tokens != expected_tokens:
+                raise ValueError(
+                    f"SLM quality case {case['id']!r} tokenized to "
+                    f"{continuation_tokens} continuation tokens; the pinned fixture "
+                    f"requires {expected_tokens}"
+                )
+            case_results.append(
+                {
+                    "id": case["id"],
+                    "category": case["category"],
+                    "mean_nll": case_nll,
+                    "continuation_tokens": continuation_tokens,
+                }
+            )
+    aggregate = aggregate_slm_quality_cases(case_results)
     return {
-        "cases": len(losses),
-        "mean_nll": mean_nll,
-        "perplexity": math.exp(min(mean_nll, 50.0)),
-        "case_nll": losses,
+        "suite": suite["schema"],
+        "fixture_version": suite["fixture_version"],
+        "aggregation": suite["aggregation"]["primary"],
+        "category_guard": suite["aggregation"]["guard"],
+        "cases": len(case_results),
+        "categories": len(suite["category_definitions"]),
+        **aggregate,
+        "case_results": case_results,
         "suite_sha256": f"sha256:{hashlib.sha256(raw).hexdigest()}",
     }
+
+
+def load_slm_quality_suite(raw: bytes) -> dict[str, Any]:
+    """Parse and fail closed on the versioned, attributed SLM fixture."""
+    try:
+        suite = json.loads(raw)
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ValueError("SLM quality fixture is not valid UTF-8 JSON") from exc
+    if not isinstance(suite, dict):
+        raise ValueError("SLM quality fixture must be a JSON object")
+    if suite.get("schema") != SLM_QUALITY_SCHEMA:
+        raise ValueError(f"SLM quality fixture schema must be {SLM_QUALITY_SCHEMA!r}")
+    if suite.get("fixture_version") != SLM_QUALITY_FIXTURE_VERSION:
+        raise ValueError(
+            f"SLM quality fixture version must be {SLM_QUALITY_FIXTURE_VERSION!r}"
+        )
+
+    attribution = suite.get("attribution")
+    if not isinstance(attribution, dict) or any(
+        not str(attribution.get(field) or "").strip()
+        for field in ("creator", "license", "method")
+    ):
+        raise ValueError(
+            "SLM quality fixture attribution must declare creator, license, and method"
+        )
+
+    aggregation = suite.get("aggregation")
+    expected_aggregation = {
+        "primary": SLM_QUALITY_AGGREGATION,
+        "category": SLM_QUALITY_AGGREGATION,
+        "guard": SLM_QUALITY_CATEGORY_GUARD,
+    }
+    if aggregation != expected_aggregation:
+        raise ValueError(
+            "SLM quality fixture must use token-weighted overall/category NLL "
+            "and the maximum-category-perplexity guard"
+        )
+
+    category_definitions = suite.get("category_definitions")
+    if not isinstance(category_definitions, dict) or len(category_definitions) < 4:
+        raise ValueError("SLM quality fixture must define at least four categories")
+    if any(
+        not isinstance(name, str)
+        or not name.strip()
+        or not isinstance(description, str)
+        or not description.strip()
+        for name, description in category_definitions.items()
+    ):
+        raise ValueError("SLM quality fixture category definitions must be nonempty")
+
+    cases = suite.get("cases")
+    if not isinstance(cases, list) or len(cases) < SLM_QUALITY_MIN_CASES:
+        raise ValueError(
+            f"SLM quality fixture must contain at least {SLM_QUALITY_MIN_CASES} cases"
+        )
+    case_ids: set[str] = set()
+    category_counts = {str(category): 0 for category in category_definitions}
+    for index, case in enumerate(cases):
+        if not isinstance(case, dict):
+            raise ValueError(f"SLM quality fixture case {index} must be an object")
+        for field in ("id", "category", "source", "prompt", "continuation"):
+            if not isinstance(case.get(field), str) or not case[field].strip():
+                raise ValueError(
+                    f"SLM quality fixture case {index} must declare nonempty {field}"
+                )
+        case_id = str(case["id"])
+        if case_id in case_ids:
+            raise ValueError(f"SLM quality fixture duplicates case id {case_id!r}")
+        case_ids.add(case_id)
+        category = str(case["category"])
+        if category not in category_counts:
+            raise ValueError(
+                f"SLM quality fixture case {case_id!r} uses undeclared category {category!r}"
+            )
+        if not str(case["continuation"]).startswith(" "):
+            raise ValueError(
+                f"SLM quality fixture case {case_id!r} continuation must begin with a space"
+            )
+        category_counts[category] += 1
+    expected_tokens = suite.get("expected_continuation_tokens")
+    if not isinstance(expected_tokens, dict) or set(expected_tokens) != case_ids:
+        raise ValueError(
+            "SLM quality fixture expected_continuation_tokens must cover every case exactly"
+        )
+    if any(
+        isinstance(value, bool) or not isinstance(value, int) or value < 1
+        for value in expected_tokens.values()
+    ):
+        raise ValueError(
+            "SLM quality fixture expected continuation-token counts must be positive integers"
+        )
+    sparse_categories = sorted(
+        category for category, count in category_counts.items() if count < 3
+    )
+    if sparse_categories:
+        raise ValueError(
+            "SLM quality fixture categories must each contain at least three cases: "
+            f"{sparse_categories}"
+        )
+    return suite
+
+
+def aggregate_slm_quality_cases(
+    case_results: list[dict[str, Any]],
+) -> dict[str, Any]:
+    """Aggregate continuation losses by token globally and within categories."""
+    if not case_results:
+        raise ValueError("SLM quality aggregation requires at least one case")
+    category_rows: dict[str, list[dict[str, Any]]] = {}
+    for index, result in enumerate(case_results):
+        category = result.get("category")
+        nll = result.get("mean_nll")
+        token_count = result.get("continuation_tokens")
+        if not isinstance(category, str) or not category:
+            raise ValueError(f"SLM quality result {index} has no category")
+        if (
+            isinstance(nll, bool)
+            or not isinstance(nll, (int, float))
+            or not math.isfinite(float(nll))
+            or float(nll) < 0
+        ):
+            raise ValueError(f"SLM quality result {index} has invalid NLL")
+        if (
+            isinstance(token_count, bool)
+            or not isinstance(token_count, int)
+            or token_count < 1
+        ):
+            raise ValueError(f"SLM quality result {index} has invalid token count")
+        category_rows.setdefault(category, []).append(result)
+
+    total_tokens = sum(int(result["continuation_tokens"]) for result in case_results)
+    total_nll = math.fsum(
+        float(result["mean_nll"]) * int(result["continuation_tokens"])
+        for result in case_results
+    )
+    mean_nll = total_nll / total_tokens
+    category_results: dict[str, dict[str, Any]] = {}
+    for category in sorted(category_rows):
+        rows = category_rows[category]
+        category_tokens = sum(int(row["continuation_tokens"]) for row in rows)
+        category_nll = (
+            math.fsum(
+                float(row["mean_nll"]) * int(row["continuation_tokens"]) for row in rows
+            )
+            / category_tokens
+        )
+        category_results[category] = {
+            "cases": len(rows),
+            "continuation_tokens": category_tokens,
+            "mean_nll": category_nll,
+            "perplexity": math.exp(min(category_nll, 50.0)),
+        }
+    worst_category = max(
+        category_results,
+        key=lambda category: (
+            float(category_results[category]["mean_nll"]),
+            category,
+        ),
+    )
+    return {
+        "mean_nll": mean_nll,
+        "perplexity": math.exp(min(mean_nll, 50.0)),
+        "total_continuation_tokens": total_tokens,
+        "category_results": category_results,
+        "worst_category": worst_category,
+        "worst_category_nll": category_results[worst_category]["mean_nll"],
+        "worst_category_perplexity": category_results[worst_category]["perplexity"],
+    }
+
+
+def slm_quality_gate_results(
+    result: dict[str, Any] | None,
+    *,
+    max_perplexity: float,
+    max_worst_category_perplexity: float,
+    reference_result: dict[str, Any] | None = None,
+    max_quantized_nll_delta: float = 0.1,
+) -> dict[str, Any]:
+    """Evaluate the conjunctive overall, category, and optional parity gates."""
+    gates: dict[str, Any] = {}
+    for name, metric_key, target in (
+        ("overall_perplexity", "perplexity", max_perplexity),
+        (
+            "worst_category_perplexity",
+            "worst_category_perplexity",
+            max_worst_category_perplexity,
+        ),
+    ):
+        value = result.get(metric_key) if isinstance(result, dict) else None
+        met = bool(
+            not isinstance(value, bool)
+            and isinstance(value, (int, float))
+            and math.isfinite(float(value))
+            and float(value) <= float(target)
+        )
+        gates[name] = {
+            "metric_key": metric_key,
+            "value": value,
+            "target": float(target),
+            "direction": "lower",
+            "met": met,
+        }
+    if reference_result is not None:
+        result_nll = result.get("mean_nll") if isinstance(result, dict) else None
+        reference_nll = reference_result.get("mean_nll")
+        delta = (
+            float(result_nll) - float(reference_nll)
+            if isinstance(result_nll, (int, float))
+            and not isinstance(result_nll, bool)
+            and isinstance(reference_nll, (int, float))
+            and not isinstance(reference_nll, bool)
+            else None
+        )
+        gates["quantized_nll_delta"] = {
+            "metric_key": "mean_nll_delta",
+            "value": delta,
+            "target": float(max_quantized_nll_delta),
+            "direction": "lower",
+            "met": bool(
+                delta is not None
+                and math.isfinite(delta)
+                and delta <= float(max_quantized_nll_delta)
+            ),
+        }
+    gates["passed"] = all(
+        isinstance(gate, dict) and gate.get("met") is True
+        for name, gate in gates.items()
+        if name != "passed"
+    )
+    return gates
+
+
+def validate_slm_quality_limit(value: Any, *, label: str) -> float:
+    """Return one finite, nonnegative SLM quality-gate limit."""
+    if isinstance(value, bool):
+        raise ValueError(f"{label} must be a finite nonnegative number")
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{label} must be a finite nonnegative number") from exc
+    if not math.isfinite(numeric) or numeric < 0:
+        raise ValueError(f"{label} must be a finite nonnegative number")
+    return numeric
+
+
+def slm_quality_gate_limits(workload: Workload) -> dict[str, float]:
+    """Resolve quality ceilings from the selected workload variant contract."""
+    evaluation = workload.raw.get("quality_evaluation")
+    if evaluation is None:
+        evaluation = {}
+    if not isinstance(evaluation, dict):
+        raise ValueError(
+            f"SLM workload {workload.id!r} quality_evaluation must be a mapping"
+        )
+    expected_bindings = {
+        "suite": SLM_QUALITY_SCHEMA,
+        "fixture_version": SLM_QUALITY_FIXTURE_VERSION,
+        "aggregation": SLM_QUALITY_AGGREGATION,
+        "category_guard": SLM_QUALITY_CATEGORY_GUARD,
+    }
+    for field, expected in expected_bindings.items():
+        if field in evaluation and evaluation[field] != expected:
+            raise ValueError(
+                f"SLM workload {workload.id!r} quality_evaluation.{field} "
+                f"must be {expected!r}"
+            )
+    return {
+        "max_perplexity": validate_slm_quality_limit(
+            evaluation.get("maximum", DEFAULT_MAX_PERPLEXITY),
+            label=f"{workload.id}.quality_evaluation.maximum",
+        ),
+        "max_worst_category_perplexity": validate_slm_quality_limit(
+            evaluation.get(
+                "worst_category_maximum", DEFAULT_MAX_WORST_CATEGORY_PERPLEXITY
+            ),
+            label=f"{workload.id}.quality_evaluation.worst_category_maximum",
+        ),
+        "max_quantized_nll_delta": validate_slm_quality_limit(
+            evaluation.get("max_quantized_nll_delta", 0.1),
+            label=f"{workload.id}.quality_evaluation.max_quantized_nll_delta",
+        ),
+    }
+
+
+def _continuation_nll_with_cache(
+    model: torch.nn.Module,
+    tokenizer: Any,
+    device: torch.device,
+    *,
+    prompt: str,
+    continuation: str,
+) -> tuple[float, int]:
+    """Score exact continuation tokens after one prompt prefill."""
+    prompt_inputs = tokenizer(prompt, return_tensors="pt", add_special_tokens=True)
+    continuation_inputs = tokenizer(
+        continuation, return_tensors="pt", add_special_tokens=False
+    )
+    prompt_ids = prompt_inputs["input_ids"].to(device)
+    prompt_attention_mask = prompt_inputs.get(
+        "attention_mask", torch.ones_like(prompt_ids)
+    ).to(device)
+    continuation_ids = continuation_inputs["input_ids"].to(device)
+    if prompt_ids.shape[0] != 1 or continuation_ids.shape[0] != 1:
+        raise ValueError("SLM quality cases must tokenize to a single request")
+    if prompt_ids.shape[-1] < 1:
+        raise ValueError("SLM quality prompt produced no tokens")
+    if continuation_ids.shape[-1] < 1:
+        raise ValueError("SLM quality continuation produced no tokens")
+
+    output = model(
+        input_ids=prompt_ids,
+        attention_mask=prompt_attention_mask,
+        use_cache=True,
+    )
+    past_key_values = getattr(output, "past_key_values", None)
+    if past_key_values is None:
+        raise ValueError("SLM model did not return a KV cache for quality evaluation")
+    logits = output.logits[:, -1, :]
+    attention_mask = prompt_attention_mask
+    token_losses: list[float] = []
+
+    for index in range(int(continuation_ids.shape[-1])):
+        target = continuation_ids[:, index]
+        token_loss = torch.nn.functional.cross_entropy(logits.float(), target)
+        token_losses.append(float(token_loss.item()))
+        if index == continuation_ids.shape[-1] - 1:
+            continue
+        attention_mask = torch.cat(
+            (
+                attention_mask,
+                torch.ones(
+                    (attention_mask.shape[0], 1),
+                    dtype=attention_mask.dtype,
+                    device=attention_mask.device,
+                ),
+            ),
+            dim=-1,
+        )
+        output = model(
+            input_ids=target[:, None],
+            attention_mask=attention_mask,
+            past_key_values=past_key_values,
+            use_cache=True,
+        )
+        past_key_values = getattr(output, "past_key_values", None)
+        if past_key_values is None:
+            raise ValueError(
+                "SLM model stopped returning a KV cache during quality evaluation"
+            )
+        logits = output.logits[:, -1, :]
+
+    return statistics.fmean(token_losses), len(token_losses)
 
 
 def slm_quality_suite_path() -> Path:
@@ -548,23 +1052,30 @@ def load_hf_model(device: torch.device) -> dict[str, Any]:
         "Warning: You are sending unauthenticated requests to the HF Hub",
         "Loading weights:",
     ):
-        tokenizer = AutoTokenizer.from_pretrained(
-            model_id, revision=revision, local_files_only=local_only
+        snapshot_path = snapshot_model(
+            model_id, revision=revision, local_only=local_only
         )
+        tokenizer = AutoTokenizer.from_pretrained(snapshot_path, local_files_only=True)
         model = AutoModelForCausalLM.from_pretrained(
-            model_id, revision=revision, local_files_only=local_only
+            snapshot_path, local_files_only=True
         )
     if tokenizer.pad_token_id is None:
         tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.padding_side = "left"
+    tokenizer.truncation_side = "left"
     model.to(device)
     config = getattr(model, "config", None)
+    resolved_revision = resolved_snapshot_revision(snapshot_path, fallback=revision)
     return {
         "model": model,
         "tokenizer": tokenizer,
         "model_id": model_id,
         "model_alias": alias_or_id if alias_or_id != model_id else None,
         "model_type": getattr(config, "model_type", type(model).__name__),
-        "revision": revision,
+        "revision": resolved_revision,
+        "requested_revision": revision,
+        "snapshot_path": str(snapshot_path),
+        "asset_files": hf_model_asset_records(snapshot_path),
         "pad_token_id": tokenizer.pad_token_id,
         "eos_token_id": tokenizer.eos_token_id,
         "config": config.to_dict() if config is not None else {},
@@ -628,6 +1139,20 @@ def state_dict_nbytes(model: torch.nn.Module) -> int:
     return int(total)
 
 
+def model_parameter_dtype(model: torch.nn.Module) -> str | None:
+    dtypes = sorted(
+        {
+            str(parameter.dtype).removeprefix("torch.")
+            for parameter in model.parameters()
+        }
+    )
+    if not dtypes:
+        return None
+    if len(dtypes) == 1:
+        return dtypes[0]
+    return ",".join(dtypes)
+
+
 def encode_prompt(
     prompt: str,
     *,
@@ -662,10 +1187,10 @@ def encode_prompts(
         )
         attention_mask = torch.zeros_like(input_ids)
         for idx, token_ids in enumerate(encoded):
-            input_ids[idx, : len(token_ids)] = torch.tensor(
+            input_ids[idx, -len(token_ids) :] = torch.tensor(
                 token_ids, dtype=torch.long, device=device
             )
-            attention_mask[idx, : len(token_ids)] = 1
+            attention_mask[idx, -len(token_ids) :] = 1
         return input_ids, attention_mask, prompts
 
     rendered_prompts = []
@@ -745,12 +1270,89 @@ def resolve_model_id(alias_or_id: str) -> str:
 
 
 def snapshot_model(
-    model_id_or_alias: str | None = None, *, local_only: bool = False
+    model_id_or_alias: str | None = None,
+    *,
+    revision: str | None = None,
+    local_only: bool = False,
 ) -> Path:
     from huggingface_hub import snapshot_download
 
     model_id = resolve_model_id(
         model_id_or_alias or os.environ.get("MLPERF_EDU_SLM_MODEL_ID", DEFAULT_MODEL_ID)
     )
-    path = snapshot_download(repo_id=model_id, local_files_only=local_only)
+    resolved_revision = revision or os.environ.get(
+        "MLPERF_EDU_SLM_REVISION", DEFAULT_MODEL_REVISION
+    )
+    path = snapshot_download(
+        repo_id=model_id, revision=resolved_revision, local_files_only=local_only
+    )
     return Path(path)
+
+
+def resolved_snapshot_revision(snapshot_path: Path, *, fallback: str) -> str:
+    path = Path(snapshot_path)
+    if path.name and path.parent.name == "snapshots":
+        return path.name
+    return fallback
+
+
+def hf_model_asset_records(snapshot_path: Path) -> list[dict[str, Any]]:
+    """Return content-critical HF snapshot files with archive-stable names."""
+    root = Path(snapshot_path)
+    if not root.is_dir():
+        raise ValueError(f"HF model snapshot is missing or not a directory: {root}")
+    records: list[dict[str, Any]] = []
+    for path in sorted(item for item in root.rglob("*") if item.is_file()):
+        logical_path = path.relative_to(root).as_posix()
+        if _skip_hf_snapshot_asset(logical_path):
+            continue
+        records.append(
+            {
+                "path": path,
+                "logical_path": logical_path,
+                "role": hf_model_asset_role(logical_path),
+            }
+        )
+    roles = {str(record["role"]) for record in records}
+    missing = sorted({"config", "tokenizer", "weights"} - roles)
+    if missing:
+        raise ValueError(
+            f"HF model snapshot {root} is missing required asset roles: {missing}"
+        )
+    return records
+
+
+def _skip_hf_snapshot_asset(logical_path: str) -> bool:
+    name = Path(logical_path).name
+    return name in {
+        ".gitattributes",
+        "README.md",
+        "LICENSE",
+        "LICENSE.txt",
+        "LICENSE.md",
+    }
+
+
+def hf_model_asset_role(logical_path: str) -> str:
+    name = Path(logical_path).name
+    if name in {"config.json", "generation_config.json"}:
+        return "config"
+    if name in {
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "vocab.json",
+        "vocab.txt",
+        "merges.txt",
+        "tokenizer.model",
+        "sentencepiece.bpe.model",
+        "added_tokens.json",
+    }:
+        return "tokenizer"
+    if name.endswith(".safetensors.index.json") or name.endswith(".bin.index.json"):
+        return "weights_index"
+    if name.endswith((".safetensors", ".bin", ".pt", ".pth", ".gguf")):
+        return "weights"
+    if name.endswith(".json"):
+        return "model_metadata"
+    return "model_asset"

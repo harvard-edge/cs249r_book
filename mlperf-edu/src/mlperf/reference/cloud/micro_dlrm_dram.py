@@ -1,10 +1,10 @@
 """
 MLPerf EDU: Micro-DLRM-DRAM (Cloud Division)
 
-DRAM-bound DLRM variant. Same MLP topology as MicroDLRMWhiteBox, but
-sparse lookups go through a virtual hashed embedding table sized to
-exceed the canonical M-series LLC reference (~12 MB on M1 base; larger
-on M-Pro/Max but the same factor-of-20 cushion holds across the family).
+DRAM-stress DLRM variant. Same MLP topology as MicroDLRMWhiteBox, but
+sparse lookups go through a wider virtual hashed embedding table. The
+runner reports the exact physical table size; a DRAM-bound classification
+still requires a measured cache/bandwidth study on the submitted system.
 
 Why this exists
 ---------------
@@ -20,29 +20,19 @@ ID space into a much larger virtual table via a deterministic vectorized
 hash, mirroring the "hash trick" used at scale (Weinberger et al. 2009;
 Meta's hashed embedding tables in production DLRM).
 
-Pedagogical contract (canonical reference: Apple M1 base, 68 GB/s unified, 12 MB LLC)
--------------------------------------------------------------------------------------
-  - micro-dlrm           : sustained BW < 5 GB/s, MLP > 80% of step time.
-  - micro-dlrm-dram (us) : sustained BW 50-65 GB/s on M1 base; on
-                           larger Apple Silicon (M-Pro/Max), bandwidth
-                           scales but the regime classification holds.
-                           Embedding lookups > 70% of step time;
-                           step time linear in row width but insensitive
-                           to MLP width.
-
-The pair is meant to be run together so students *measure the bottleneck
-transition* — same data, same MLP, different memory access pattern.
+The pair is meant to be run together so students can measure whether a
+bottleneck transition occurs on their hardware. No bandwidth or cache-regime
+claim is inferred from table allocation alone.
 
 Why m_spa=256 (vs 8 in the cache variant)
 -----------------------------------------
 PyTorch's CPU EmbeddingBag has ~50 us of fixed overhead per call. With
-an 8-dim row (32 bytes), 8192 lookups transfer only 256 KB of bytes
-total -- well under L1's bandwidth limit, so the bottleneck is
-PyTorch dispatch overhead and the table size is irrelevant. With a
-256-dim row (1024 bytes), 8192 random lookups against an 8M-row table
-transfer 8 MB through DRAM and the bandwidth signal becomes
-unambiguous. Production DLRM uses 64-512 dim embeddings precisely
-because anything smaller is dispatch-bound, not bandwidth-bound.
+an 8-dim row (32 bytes), a notebook-sized batch transfers too little
+embedding data to separate lookup cost from dispatch overhead. A
+256-dim row is 1024 bytes, making the memory surface measurable while
+the 64 MiB default table stays practical for local labs. Production
+DLRM commonly uses wider embeddings, but the actual bottleneck here is
+left to profiling rather than asserted from geometry.
 
 Provenance
 ----------
@@ -76,19 +66,22 @@ def _hash_mod(idx: torch.Tensor, seed: int, mod: int) -> torch.Tensor:
 class MicroDLRMDRAM(nn.Module):
     """DRAM-bound DLRM: same MLP topology, hash-mapped virtual embedding table.
 
-    Defaults tuned for the canonical M-series reference (M1 base: 12 MB
-    LLC, 68 GB/s unified; M-Max class: more headroom on both axes):
-        virtual_table_size=2_000_000, m_spa=32  ->  256 MB table (~21x LLC).
-    Adjust virtual_table_size up if your machine has > 32 MB LLC.
+    Notebook-safe defaults allocate a 64 MiB physical table:
+        virtual_table_size=65_536, m_spa=256.
+    The MLPerf EDU runner adds a deterministic user-item cross so the small
+    MovieLens vocabulary can address a broad portion of that table. Whether
+    this exceeds the effective cache is reported as unmeasured until profiled.
     """
 
-    def __init__(self,
-                 m_spa: int = 256,
-                 virtual_table_size: int = 2_000_000,
-                 num_hash_seeds=(0xA5A5A5A5, 0x5A5A5A5A, 0xC3C3C3C3),
-                 ln_bot=(16, 8, 8),
-                 ln_top=(32, 16, 1),
-                 sparse_grad: bool = True):
+    def __init__(
+        self,
+        m_spa: int = 256,
+        virtual_table_size: int = 65_536,
+        num_hash_seeds=(0xA5A5A5A5, 0x5A5A5A5A, 0xC3C3C3C3),
+        ln_bot=(16, 8, 8),
+        ln_top=(32, 16, 1),
+        sparse_grad: bool = True,
+    ):
         super().__init__()
         self.m_spa = m_spa
         self.virtual_table_size = virtual_table_size
@@ -101,7 +94,10 @@ class MicroDLRMDRAM(nn.Module):
         # sparse=True keeps Adam moment buffers small (only touched rows
         # accumulate optimizer state).
         self.virtual_emb = nn.EmbeddingBag(
-            virtual_table_size, m_spa, mode="sum", sparse=sparse_grad,
+            virtual_table_size,
+            m_spa,
+            mode="sum",
+            sparse=sparse_grad,
         )
 
         # Bottom MLP for dense features (identical to MicroDLRMWhiteBox).

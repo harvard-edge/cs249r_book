@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import hashlib
 import json
@@ -13,6 +14,7 @@ import tempfile
 import time
 import webbrowser
 import zipfile
+from collections.abc import Iterable
 from datetime import datetime, timezone
 from html import escape
 from importlib import import_module
@@ -53,6 +55,7 @@ from .manifest import (
     measurement_leaf,
     merkle_root,
     resolve_artifact_path,
+    safe_logical_asset_path,
     verify_provd,
 )
 from .power import PowerMeter
@@ -88,6 +91,17 @@ PROFILE_DESCRIPTIONS = {
     "pro": "Research envelope exposing controlled variants and optimization knobs.",
 }
 LEGACY_QUALITY_REQUIRED_FIELD = "gated"
+PROMOTED_BASELINE_FIELDS = frozenset(
+    {
+        "evidence_id",
+        "evidence_sha256",
+        "promoted_aggregate",
+        "source_git_sha",
+        "source_verified_baseline",
+        "variance_summary",
+        "verified_baseline",
+    }
+)
 
 
 def quality_required_value(quality: dict[str, Any], default: Any = False) -> Any:
@@ -1029,6 +1043,7 @@ def enrich_reports_for_display(
 def enrich_report_for_display(
     report: dict[str, Any], workloads: dict[str, Workload]
 ) -> None:
+    strip_promoted_baseline_metadata(report)
     if "workloads" in report:
         for item in report.get("workloads", []):
             if isinstance(item, dict):
@@ -1062,17 +1077,20 @@ def enrich_report_for_display(
             quality.setdefault("tolerance", workload.quality_tolerance)
         if workload.quality_reference_runs:
             quality.setdefault("reference_runs", workload.quality_reference_runs)
-        if workload.quality_variance_summary:
-            quality.setdefault("variance_summary", workload.quality_variance_summary)
         if workload.quality_reference_protocol:
             quality.setdefault(
-                "reference_protocol", workload.quality_reference_protocol
+                "reference_protocol", copy.deepcopy(workload.quality_reference_protocol)
             )
-        if workload.quality_reviewer_notes:
-            quality.setdefault("reviewer_notes", list(workload.quality_reviewer_notes))
         functional_check = workload.raw.get("functional_check")
         if isinstance(functional_check, dict):
-            quality.setdefault("functional_check", functional_check)
+            quality.setdefault("functional_check", copy.deepcopy(functional_check))
+
+    performance_reference_protocol = workload.raw.get("performance_reference_protocol")
+    if isinstance(performance_reference_protocol, dict):
+        report.setdefault(
+            "performance_reference_protocol",
+            copy.deepcopy(performance_reference_protocol),
+        )
 
     report.setdefault(
         "public",
@@ -1081,6 +1099,8 @@ def enrich_report_for_display(
             "rationale": workload.public_rationale,
         },
     )
+    report.setdefault("model", workload.model)
+    report.setdefault("scenario", workload.scenario)
     if workload.dataset:
         report.setdefault("dataset", workload.dataset)
         report.setdefault(
@@ -1119,6 +1139,26 @@ def enrich_report_for_display(
         report.setdefault("run_selector", workload_run_selector(workload))
 
     report["review_contract"] = evaluate_report_contract(workload, report)
+    strip_promoted_baseline_metadata(report)
+
+
+def strip_promoted_baseline_metadata(value: Any) -> None:
+    """Remove registry results that would make fresh evidence circular.
+
+    A run owns its observed metrics, target decision, protocol snapshot, and
+    content-addressed lineage. Promoted multi-run aggregates belong only in the
+    registry and reference-evidence summaries; copying them into a new raw run
+    would make that run appear to substantiate results produced before it.
+    """
+    if isinstance(value, dict):
+        for key in list(value):
+            if key in PROMOTED_BASELINE_FIELDS:
+                value.pop(key, None)
+                continue
+            strip_promoted_baseline_metadata(value[key])
+    elif isinstance(value, list):
+        for item in value:
+            strip_promoted_baseline_metadata(item)
 
 
 def checkpoint_provenance_for(
@@ -1147,7 +1187,6 @@ def checkpoint_provenance_for(
                 "source_quality_direction": source.quality_direction,
                 "source_target_basis": source.quality_target_basis,
                 "source_reference_runs": source.quality_reference_runs,
-                "source_verified_baseline": source.raw.get("verified_baseline", {}),
             }
         )
     return {key: value for key, value in provenance.items() if value not in (None, "")}
@@ -1173,18 +1212,96 @@ def attach_run_fingerprints(
 def build_run_fingerprint(
     report: dict[str, Any], *, hardware: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    hw = hardware or report.get("hardware") or detect_hardware()
     manifest = load_report_manifest(report)
+    manifest_hardware = None
+    if isinstance(manifest, dict):
+        manifest_hardware = ((manifest.get("leaves") or {}).get("hardware") or {}).get(
+            "fingerprint"
+        )
+        if not isinstance(manifest_hardware, dict):
+            manifest_hardware = None
+    hw = hardware or report.get("hardware") or manifest_hardware or detect_hardware()
     fingerprint = {
         "schema": "mlperf-edu-run-fingerprint/0.1",
         "hardware": hardware_fingerprint_summary(hw),
-        "software": software_fingerprint_summary(),
+        "software": software_fingerprint_summary(hw),
         "execution": execution_fingerprint_summary(report),
+        "comparison_fingerprint_hash_algorithm": "sha256",
+        "comparison_fingerprint_hash_scope": "canonical-run-comparison-record",
     }
     asset_hashes = asset_hashes_from_manifest(manifest)
     if asset_hashes:
         fingerprint["asset_hashes"] = asset_hashes
+    fingerprint["comparison_fingerprint_sha256"] = run_comparison_fingerprint_sha256(
+        fingerprint
+    )
     return fingerprint
+
+
+def run_comparison_fingerprint_sha256(fingerprint: dict[str, Any]) -> str:
+    """Hash the canonical performance-comparison context."""
+    payload = json.dumps(
+        run_comparison_fingerprint_record(fingerprint),
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+
+def run_comparison_fingerprint_record(
+    fingerprint: dict[str, Any],
+) -> dict[str, Any]:
+    """Return comparison inputs while excluding paths and result outcomes."""
+    software = dict(fingerprint.get("software") or {})
+    software.pop("python_executable", None)
+    execution = dict(fingerprint.get("execution") or {})
+    execution.pop("status", None)
+    # Seeds are intentional repeated-run variables. Keep them in the complete
+    # run fingerprint and provenance, but exclude them from the digest that
+    # decides whether separate executions share one comparison context.
+    execution.pop("seed", None)
+    record = {
+        "schema": fingerprint.get("schema"),
+        "hardware": fingerprint.get("hardware") or {},
+        "software": software,
+        "execution": execution,
+        "comparison_fingerprint_hash_algorithm": fingerprint.get(
+            "comparison_fingerprint_hash_algorithm"
+        ),
+        "comparison_fingerprint_hash_scope": fingerprint.get(
+            "comparison_fingerprint_hash_scope"
+        ),
+    }
+    asset_hashes = comparison_asset_hashes(fingerprint)
+    if asset_hashes:
+        record["asset_hashes"] = asset_hashes
+    return record
+
+
+def comparison_asset_hashes(fingerprint: dict[str, Any]) -> dict[str, Any]:
+    """Return input asset hashes that define a repeatable comparison context."""
+    asset_hashes = fingerprint.get("asset_hashes")
+    if not isinstance(asset_hashes, dict):
+        return {}
+    normalized = strip_path_fields(copy.deepcopy(asset_hashes))
+    execution = fingerprint.get("execution") or {}
+    scenario = str(execution.get("scenario") or "").lower()
+    if scenario in {"training", "train"} and isinstance(normalized, dict):
+        normalized.pop("weights", None)
+    return normalized if isinstance(normalized, dict) else {}
+
+
+def strip_path_fields(value: Any) -> Any:
+    """Remove host-local filesystem locations from a comparison record."""
+    if isinstance(value, dict):
+        return {
+            key: strip_path_fields(item) for key, item in value.items() if key != "path"
+        }
+    if isinstance(value, list):
+        return [strip_path_fields(item) for item in value]
+    return value
 
 
 def hardware_fingerprint_summary(hardware: dict[str, Any]) -> dict[str, Any]:
@@ -1192,20 +1309,31 @@ def hardware_fingerprint_summary(hardware: dict[str, Any]) -> dict[str, Any]:
         "machine_model",
         "chip",
         "cpu",
+        "cpu_topology",
         "gpu",
+        "accelerator",
         "memory_gb",
+        "cache_sizes",
         "os",
         "os_version",
         "python_version",
         "pytorch_version",
         "backend",
+        "availability_detected_backend",
+        "available_backends",
+        "fingerprint_schema",
+        "fingerprint_hash_algorithm",
+        "fingerprint_hash_scope",
         "fingerprint_hash",
+        "fingerprint_sha256",
     )
     return {key: hardware.get(key) for key in keys if hardware.get(key) is not None}
 
 
-def software_fingerprint_summary() -> dict[str, Any]:
-    return {
+def software_fingerprint_summary(
+    hardware: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    summary = {
         "python": platform.python_version(),
         "python_executable": sys.executable,
         "platform": platform.platform(),
@@ -1214,6 +1342,17 @@ def software_fingerprint_summary() -> dict[str, Any]:
         "transformers": package_version("transformers"),
         "mlperf_edu": package_version("mlperf-edu"),
     }
+    if hardware:
+        audio_backend = hardware.get("audio_backend")
+        if audio_backend is not None:
+            summary["audio_backend"] = audio_backend
+        torch_runtime = hardware.get("torch_runtime")
+        if isinstance(torch_runtime, dict):
+            summary["torch_runtime"] = torch_runtime
+        performance_environment = hardware.get("performance_environment")
+        if isinstance(performance_environment, dict):
+            summary["performance_environment"] = performance_environment
+    return summary
 
 
 def package_version(package: str) -> str | None:
@@ -1244,9 +1383,43 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
                 if isinstance(item, dict) and item.get("data_mode")
             }
         )
+        devices = sorted(
+            {
+                str(item.get("device_requested") or item.get("device"))
+                for item in workloads
+                if isinstance(item, dict)
+                and (item.get("device_requested") or item.get("device"))
+            }
+        )
+        scenarios = sorted(
+            {
+                str(item.get("scenario"))
+                for item in workloads
+                if isinstance(item, dict) and item.get("scenario")
+            }
+        )
+        precision_records = unique_fingerprint_records(
+            report_precision_summary(item)
+            for item in workloads
+            if isinstance(item, dict)
+        )
+        compilation_records = unique_fingerprint_records(
+            report_compilation_summary(item)
+            for item in workloads
+            if isinstance(item, dict)
+        )
     else:
         backends = [str(report.get("backend"))] if report.get("backend") else []
         data_modes = [str(report.get("data_mode"))] if report.get("data_mode") else []
+        selected_device = report.get("device_requested") or report.get("device")
+        devices = [str(selected_device)] if selected_device else []
+        scenarios = [str(report.get("scenario"))] if report.get("scenario") else []
+        precision_records = unique_fingerprint_records(
+            [report_precision_summary(report)]
+        )
+        compilation_records = unique_fingerprint_records(
+            [report_compilation_summary(report)]
+        )
     summary = {
         "profile": report.get("profile"),
         "suite": report.get("suite"),
@@ -1254,10 +1427,88 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
         "variant": report.get("variant"),
         "seed": report.get("seed"),
         "status": report.get("status"),
+        "scenario": scenarios[0] if len(scenarios) == 1 else None,
+        "scenarios": scenarios,
+        # ``backends`` is retained for report compatibility. The explicit name
+        # distinguishes execution selection from hardware availability.
         "backends": backends,
+        "report_selected_backends": backends,
+        "report_selected_devices": devices,
         "data_modes": data_modes,
+        "report_selected_precision": precision_records,
+        "report_selected_compilation": compilation_records,
     }
     return {key: value for key, value in summary.items() if value not in (None, [], "")}
+
+
+def report_precision_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """Return explicit report precision fields without inferring model dtype."""
+    keys = (
+        "dtype",
+        "precision",
+        "mixed_precision",
+        "amp",
+        "autocast",
+        "quantization",
+    )
+    precision = {key: report[key] for key in keys if report.get(key) is not None}
+    for container_name in ("configuration", "metrics"):
+        container = report.get(container_name)
+        if not isinstance(container, dict):
+            continue
+        for key in keys:
+            if key not in precision and container.get(key) is not None:
+                precision[key] = container[key]
+    return precision
+
+
+def report_compilation_summary(report: dict[str, Any]) -> dict[str, Any]:
+    """Return compilation mode only when the workload report exposes it."""
+    compilation: dict[str, Any] = {}
+    nested = report.get("compilation")
+    nested_keys = ("enabled", "mode", "backend", "fullgraph", "dynamic")
+    if isinstance(nested, dict):
+        compilation.update(
+            {key: nested[key] for key in nested_keys if nested.get(key) is not None}
+        )
+    elif nested is not None:
+        compilation["value"] = nested
+
+    aliases = {
+        "compiled": "enabled",
+        "torch_compile": "torch_compile",
+        "compile_mode": "mode",
+        "compilation_mode": "mode",
+        "compile_backend": "backend",
+    }
+    for source, destination in aliases.items():
+        if destination not in compilation and report.get(source) is not None:
+            compilation[destination] = report[source]
+    configuration = report.get("configuration")
+    if isinstance(configuration, dict):
+        for source, destination in aliases.items():
+            if destination not in compilation and configuration.get(source) is not None:
+                compilation[destination] = configuration[source]
+    return compilation
+
+
+def unique_fingerprint_records(
+    records: Iterable[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """Deduplicate JSON records while preserving a canonical order."""
+    indexed: dict[str, dict[str, Any]] = {}
+    for record in records:
+        if not record:
+            continue
+        canonical = json.dumps(
+            record,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        indexed[canonical] = record
+    return [indexed[key] for key in sorted(indexed)]
 
 
 def load_report_manifest(report: dict[str, Any]) -> dict[str, Any] | None:
@@ -1288,6 +1539,25 @@ def asset_hashes_from_manifest(manifest: dict[str, Any] | None) -> dict[str, Any
             "path": weights.get("path"),
             "sha256": weights.get("sha256"),
             "n_bytes": weights.get("n_bytes"),
+        }
+    elif weights.get("files"):
+        hashes["weights"] = {
+            "format": weights.get("format"),
+            "name": weights.get("name"),
+            "revision": weights.get("revision"),
+            "merkle_root": weights.get("merkle_root"),
+            "file_count": weights.get("file_count"),
+            "n_bytes": weights.get("n_bytes"),
+            "files": [
+                {
+                    "logical_path": item.get("logical_path"),
+                    "role": item.get("role"),
+                    "sha256": item.get("sha256"),
+                    "n_bytes": item.get("n_bytes"),
+                }
+                for item in weights.get("files") or []
+                if isinstance(item, dict)
+            ],
         }
 
     dataset = leaves.get("dataset") or {}
@@ -2015,7 +2285,10 @@ def hardware_section_html(report: dict[str, Any]) -> str:
         "python_version",
         "pytorch_version",
         "backend",
+        "availability_detected_backend",
+        "available_backends",
         "fingerprint_hash",
+        "fingerprint_sha256",
         "machine_class",
         "platform",
         "processor",
@@ -2025,9 +2298,15 @@ def hardware_section_html(report: dict[str, Any]) -> str:
         if key in hardware:
             details.append((key, hardware.get(key)))
     if backends:
-        details.append(("workload_backends", ", ".join(backends)))
+        details.append(("report_selected_backends", ", ".join(backends)))
     software = run_fingerprint.get("software") or {}
-    for key in ("torchvision", "transformers", "mlperf_edu"):
+    for key in (
+        "torchvision",
+        "transformers",
+        "mlperf_edu",
+        "torch_runtime",
+        "performance_environment",
+    ):
         if software.get(key) and key not in hardware:
             details.append((key, software.get(key)))
     if not details and hardware:
@@ -2147,11 +2426,6 @@ def report_row(
 ) -> dict[str, Any]:
     metrics = item.get("metrics") or {}
     quality = item.get("quality") or {}
-    variance_summary = (
-        quality.get("variance_summary")
-        if isinstance(quality.get("variance_summary"), dict)
-        else {}
-    )
     checkpoint_provenance = (
         item.get("checkpoint_provenance")
         if isinstance(item.get("checkpoint_provenance"), dict)
@@ -2216,7 +2490,7 @@ def report_row(
         "target": quality.get("target", ""),
         "target_basis": quality.get("target_basis", ""),
         "reference_runs": quality.get("reference_runs", ""),
-        "reference_statistic": variance_summary.get("statistic", ""),
+        "reference_statistic": reference_statistic_summary(quality),
         "reference_protocol": reference_protocol_summary(
             quality.get("reference_protocol")
         ),
@@ -2283,6 +2557,23 @@ def reference_protocol_summary(protocol: Any) -> str:
     if isinstance(seeds, list) and seeds:
         parts.append("seeds=" + ",".join(str(seed) for seed in seeds))
     return "; ".join(parts)
+
+
+def reference_statistic_summary(quality: dict[str, Any]) -> str:
+    """Return the planned aggregation statistic without copying past results."""
+    explicit = quality.get("reference_statistic")
+    if explicit not in (None, ""):
+        return str(explicit)
+    protocol = quality.get("reference_protocol")
+    if not isinstance(protocol, dict):
+        return ""
+    aggregation = str(protocol.get("aggregation") or "").strip()
+    if not aggregation:
+        return ""
+    statistic = aggregation.split(maxsplit=1)[0].lower()
+    if statistic in {"mean", "median", "minimum", "maximum", "min", "max"}:
+        return statistic
+    return ""
 
 
 def checkpoint_source_quality_summary(provenance: dict[str, Any]) -> str:
@@ -2515,10 +2806,27 @@ def collect_package_files(
         )
 
     leaves = manifest.get("leaves") or {}
-    weights_path = (leaves.get("weights") or {}).get("path")
+    weights = leaves.get("weights") or {}
+    weights_path = weights.get("path")
     if weights_path:
         resolved = resolve_artifact_path(manifest_path, weights_path)
         add("weights", resolved, f"weights/{resolved.name}")
+    for index, item in enumerate(weights.get("files") or []):
+        if not isinstance(item, dict) or not item.get("path"):
+            raise ValueError(f"invalid multi-file weights record at index {index}")
+        logical_path = safe_logical_asset_path(str(item.get("logical_path") or ""))
+        role = item.get("role")
+        if not isinstance(role, str) or not role.strip():
+            raise ValueError(f"model asset {logical_path!r} has no provenance role")
+        safe_role = "".join(
+            char if char.isalnum() or char in "-_" else "_" for char in role
+        )
+        resolved = resolve_artifact_path(manifest_path, item["path"])
+        add(
+            f"weights:{safe_role}",
+            resolved,
+            f"weights/model-assets/{logical_path}",
+        )
 
     roofline_path = (leaves.get("roofline_sidecar") or {}).get("path")
     if roofline_path:
@@ -2775,7 +3083,11 @@ def build_portable_package_files(
             raise ValueError(f"manifest artifact was not collected: {raw_path}")
         leaf["path"] = _archive_relative(archive_name, manifest_archive)
 
-    rewrite_leaf_path(leaves.get("weights") or {})
+    weights = leaves.get("weights") or {}
+    rewrite_leaf_path(weights)
+    for item in weights.get("files") or []:
+        if isinstance(item, dict):
+            rewrite_leaf_path(item)
     rewrite_leaf_path(leaves.get("roofline_sidecar") or {})
     dataset = leaves.get("dataset") or {}
     for item in dataset.get("files") or []:
@@ -2894,6 +3206,11 @@ def verify_package_archive(
         path_values = [
             ((leaves.get("measurement") or {}).get("report_path")),
             ((leaves.get("weights") or {}).get("path")),
+            *[
+                item.get("path")
+                for item in ((leaves.get("weights") or {}).get("files") or [])
+                if isinstance(item, dict)
+            ],
             ((leaves.get("roofline_sidecar") or {}).get("path")),
             *[
                 item.get("path")

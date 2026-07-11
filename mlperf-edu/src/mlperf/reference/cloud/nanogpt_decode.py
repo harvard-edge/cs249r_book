@@ -8,12 +8,16 @@ serving cost in production.
 
 Pair with nanogpt-prefill (same checkpoint) to observe the
 prefill-vs-decode bottleneck split.
+
+This reference path is a sequential single-stream microbenchmark. It does
+not model concurrent requests, an arrival process, queueing, or a server SLO.
 """
 
 import statistics
 import time
 import torch
 
+from .nanogpt_prefill import FIXED_PROMPT_SEED, fixed_token_prompt
 from .nanogpt_train import NanoGPTWhiteBox
 
 
@@ -33,11 +37,12 @@ def kv_cache_bytes(past_key_values, dtype_bytes: int = 4) -> int:
 
 
 class NanoGPTDecode:
-    """Warms the KV cache to `prefill_ctx`, then times `decode_steps` single-token steps.
+    """Prefill once, emit the first token, then time cached-token steps.
 
-    Reports time-to-first-token (TTFT), median + p99 inter-token latency
-    (ITL), final KV-cache bytes, and an achieved-bandwidth estimate
-    derived from streaming the cached K,V each step.
+    Request TTFT spans prompt processing through selection of the first output
+    token from the prefill logits. Each inter-token latency (ITL) sample then
+    measures one cache-reusing forward pass that emits the next token. The first
+    such ITL is also retained as ``first_decode_latency_s`` for diagnostics.
     """
 
     def __init__(
@@ -47,6 +52,14 @@ class NanoGPTDecode:
         decode_steps: int = 64,
         batch_size: int = 1,
     ):
+        if prefill_ctx < 1:
+            raise ValueError("prefill_ctx must be at least one token")
+        if decode_steps < 2:
+            raise ValueError(
+                "decode_steps must be at least two so inter-token latency is defined"
+            )
+        if batch_size < 1:
+            raise ValueError("batch_size must be at least one")
         max_ctx = prefill_ctx + decode_steps
         if max_ctx > model.config["max_seq_len"]:
             raise ValueError(
@@ -66,8 +79,11 @@ class NanoGPTDecode:
 
     def run(self, emit_sidecar: bool = True) -> dict:
         device = next(self.model.parameters()).device
-        prompt = torch.randint(
-            0, self.vocab, (self.batch, self.prefill_ctx), device=device
+        prompt, prompt_sha256 = fixed_token_prompt(
+            batch_size=self.batch,
+            context_len=self.prefill_ctx,
+            vocab_size=self.vocab,
+            device=device,
         )
         n_params = sum(p.numel() for p in self.model.parameters())
         cfg = self.model.config
@@ -84,21 +100,20 @@ class NanoGPTDecode:
         )
 
         with torch.no_grad():
-            # Warm the cache and get the last-step logits.
+            # Prefill the cache. Request timing starts before prompt processing.
             _sync(device)
-            t_prefill_start = time.perf_counter()
+            request_start = time.perf_counter()
             logits, kv = self.model(prompt, use_kv_cache=True)
             _sync(device)
-            prefill_time = time.perf_counter() - t_prefill_start
+            prefill_time = time.perf_counter() - request_start
 
-            # First decode step (TTFT measured here; the prefill is the
-            # "prompt processing" phase, not part of TTFT in serving SLOs).
+            # A causal-LM prefill already produces the logits for the first
+            # output token. TTFT ends when that token has been selected; an
+            # additional cached forward pass would actually emit token two.
+            output_token = self._sample(logits[:, -1, :])
             _sync(device)
-            t0 = time.perf_counter()
-            next_tok = self._sample(logits[:, -1, :])
-            logits, kv = self.model(next_tok, use_kv_cache=True, past_key_values=kv)
-            _sync(device)
-            ttft = time.perf_counter() - t0
+            request_ttft = time.perf_counter() - request_start
+            generated_tokens = [output_token]
 
             per_step = []
             n_loop = self.decode_steps - 1
@@ -112,27 +127,32 @@ class NanoGPTDecode:
                     n_iter=n_loop,
                 ):
                     for _ in range(n_loop):
-                        next_tok = self._sample(logits[:, -1, :])
                         _sync(device)
                         t = time.perf_counter()
                         logits, kv = self.model(
-                            next_tok, use_kv_cache=True, past_key_values=kv
+                            output_token, use_kv_cache=True, past_key_values=kv
                         )
+                        output_token = self._sample(logits[:, -1, :])
                         _sync(device)
                         per_step.append(time.perf_counter() - t)
+                        generated_tokens.append(output_token)
             else:
                 for _ in range(n_loop):
-                    next_tok = self._sample(logits[:, -1, :])
                     _sync(device)
                     t = time.perf_counter()
                     logits, kv = self.model(
-                        next_tok, use_kv_cache=True, past_key_values=kv
+                        output_token, use_kv_cache=True, past_key_values=kv
                     )
+                    output_token = self._sample(logits[:, -1, :])
                     _sync(device)
                     per_step.append(time.perf_counter() - t)
+                    generated_tokens.append(output_token)
+
+            request_end_to_end_latency = time.perf_counter() - request_start
 
         kv_bytes = kv_cache_bytes(kv)
         median_itl = statistics.median(per_step) if per_step else float("nan")
+        first_decode_latency = per_step[0] if per_step else float("nan")
         p90_itl = (
             sorted(per_step)[max(0, int(len(per_step) * 0.90 + 0.999999) - 1)]
             if per_step
@@ -153,21 +173,31 @@ class NanoGPTDecode:
             "prefill_ctx": self.prefill_ctx,
             "decode_steps": self.decode_steps,
             "batch_size": self.batch,
+            "prompt_seed": FIXED_PROMPT_SEED,
+            "prompt_sha256": prompt_sha256,
             "prefill_warm_s": prefill_time,
-            "ttft_s": ttft,
+            "prefill_latency_s": prefill_time,
+            "first_decode_latency_s": first_decode_latency,
+            "request_ttft_s": request_ttft,
+            "ttft_s": request_ttft,
+            "request_end_to_end_latency_s": request_end_to_end_latency,
             "itl_median_s": median_itl,
             "itl_p90_s": p90_itl,
             "itl_p99_s": p99_itl,
             "itl_samples_s": per_step,
+            "generated_token_ids": torch.cat(generated_tokens, dim=-1)
+            .detach()
+            .cpu()
+            .tolist(),
             "kv_cache_bytes": kv_bytes,
             "achieved_bw_gbps": achieved_bw_gbps,
-            "output_tokens_per_sec": 1.0 / median_itl if per_step else 0.0,
+            "output_tokens_per_sec": self.batch / median_itl if per_step else 0.0,
         }
 
 
 def run_benchmark(
     checkpoint_path: str = None,
-    scenario: str = "Offline",
+    scenario: str = "SingleStream",
     prefill_ctx: int = 1792,
     decode_steps: int = 64,
     batch_size: int = 1,

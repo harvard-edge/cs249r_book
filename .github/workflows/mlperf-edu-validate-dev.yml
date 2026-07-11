@@ -64,6 +64,8 @@ jobs:
             src/mlperf/assets.py
             src/mlperf/contracts.py
             src/mlperf/edu_cli.py
+            src/mlperf/fingerprint.py
+            src/mlperf/harness.py
             src/mlperf/__init__.py
             src/mlperf/loadgen.py
             src/mlperf/manifest.py
@@ -71,16 +73,21 @@ jobs:
             src/mlperf/roofline.py
             src/mlperf/registry.py
             src/mlperf/runners
+            src/mlperf/reference/cloud/micro_dlrm_dram.py
             src/mlperf/reference/cloud/nanogpt_decode.py
             src/mlperf/reference/cloud/nanogpt_prefill.py
             src/mlperf/reference/cloud/micro_diffusion.py
             src/mlperf/reference/dataset_factory.py
             src/mlperf/reference/distributed/ddp_runner.py
             src/mlperf/reference/edge/resnet_train.py
+            src/mlperf/reference/mobile/mobilenet_compress.py
             src/mlperf/reference/tiny/anomaly_detection_ae.py
             src/mlperf/reference/tiny/dscnn_kws.py
+            scripts/smoke_distributed.py
+            scripts/smoke_nanogpt_phases.py
             tools/check_taxonomy.py
             tools/check_reference_claims.py
+            tools/check_site_layout.py
             tools/build_handoff_manifest.py
             tools/build_wheel.py
             tools/export_registry_layout.py
@@ -98,16 +105,29 @@ jobs:
             paper/check_paper_pdf.py
             paper/generate_registry_snapshot.py
             tests/test_edu_cli.py
+            tests/test_anomaly_methodology.py
+            tests/test_composed_mobilenet.py
+            tests/test_contracts.py
+            tests/test_dlrm_dram_methodology.py
             tests/test_educational_entrypoints.py
+            tests/test_extended_max_contracts.py
+            tests/test_fingerprint.py
             tests/test_generate_docs.py
             tests/test_handoff_manifest.py
+            tests/test_harness.py
             tests/test_import_reference_evidence.py
+            tests/test_inference_timing_semantics.py
             tests/test_manifest.py
+            tests/test_nanogpt_validation.py
             tests/test_reference_sweep.py
             tests/test_reference_claims.py
             tests/test_registry.py
             tests/test_review_packets.py
+            tests/test_slm_quality.py
+            tests/test_sync_verified_baselines.py
+            tests/test_systems_workflow_parity.py
             tests/test_taxonomy.py
+            tests/test_training_measurement_protocol.py
           )
           uv run ruff check "${paths[@]}"
           uv run ruff format --check "${paths[@]}"
@@ -178,6 +198,7 @@ jobs:
           set +e
           uv run mlperf audit --policy public 2>&1 | tee public-audit.txt
           status=${PIPESTATUS[0]}
+          printf '%s\n' "$status" > public-audit-exit-code.txt
           {
             echo '## Strict Public-Release Audit'
             echo ''
@@ -195,7 +216,9 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: mlperf-edu-public-audit
-          path: ${{ env.MLPERF_EDU_ROOT }}/public-audit.txt
+          path: ${{ env.MLPERF_EDU_ROOT }}/public-audit*.txt
+          if-no-files-found: error
+          retention-days: 30
 
   smoke-and-labs:
     name: 'Actual Smoke Validation and Lab Entry Points'
@@ -236,6 +259,7 @@ jobs:
           name: mlperf-edu-smoke-reports
           path: ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-smoke/**
           if-no-files-found: error
+          retention-days: 30
 
   wheel-smoke:
     name: 'Clean Wheel Install and Packaged Registry'
@@ -321,12 +345,35 @@ jobs:
       - name: Check Internal Links
         run: python3 shared/scripts/check-internal-links.py mlperf-edu/site --quiet
 
+      - name: Install the Browser Layout Checker
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          uv pip install playwright==1.58.0
+          uv run playwright install --with-deps chromium
+
+      - name: Check Every Page at Desktop and Narrow Viewports
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          uv run python tools/check_site_layout.py \
+            --build-dir site/_build \
+            --report-dir site-layout-report
+
       - name: Upload the Rendered Preview
         uses: actions/upload-artifact@v7
         with:
           name: mlperf-edu-site
           path: ${{ env.MLPERF_EDU_ROOT }}/site/_build/**
           if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the Browser Layout Report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mlperf-edu-site-layout
+          path: ${{ env.MLPERF_EDU_ROOT }}/site-layout-report/**
+          if-no-files-found: error
+          retention-days: 14
 
   paper-build:
     name: 'Paper Build and PDF Verification'
@@ -368,6 +415,7 @@ jobs:
           name: mlperf-edu-review-paper
           path: ${{ env.MLPERF_EDU_ROOT }}/paper/output/pdf/mlperf-edu-review-draft.pdf
           if-no-files-found: error
+          retention-days: 30
 
   external-links:
     name: 'External Link Integrity'

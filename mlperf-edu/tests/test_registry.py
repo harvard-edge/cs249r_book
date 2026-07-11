@@ -15,6 +15,9 @@ from mlperf.registry import (
     RESEARCH_WORKLOADS,
     STANDARD_WORKLOAD_ORDER,
     STANDARD_WORKLOADS,
+    baseline_is_current_review_evidence,
+    baseline_is_protocol_superseded,
+    baseline_lifecycle_issues,
     load_registry,
     public_contract_report,
     select_workloads,
@@ -281,7 +284,7 @@ def test_public_inference_contracts_pin_quality_and_provenance():
     slm = workloads["slm-decode"].raw
 
     assert prefill["measurement_protocol"]["warmup_runs"] == 3
-    assert prefill["measurement_protocol"]["measured_runs"] == 10
+    assert prefill["measurement_protocol"]["measured_runs"] == 20
     assert prefill["measurement_protocol"]["primary_metric"] == "prefill_tokens_per_sec"
     assert prefill["checkpoint_contract"]["source_workload"] == "nanogpt-train"
     assert decode["measurement_protocol"]["warmup_runs"] == 3
@@ -293,19 +296,27 @@ def test_public_inference_contracts_pin_quality_and_provenance():
     model_source = slm["model_source"]
     assert model_source["revision"] == "12fd25f77366fa6b3b4b768ec3050bf629380bac"
     quality = slm["quality_evaluation"]
-    assert quality["suite"] == "mlperf-edu-slm-quality/0.1"
+    assert quality["suite"] == "mlperf-edu-slm-quality/0.2"
+    assert quality["fixture_version"] == "2.0.0"
     assert (
         quality["asset_sha256"]
-        == "5fa25872d0b7dc986b12137256b16fd6329267d1640f03e4e04f1dc4e8c8ed5f"
+        == "3d6d06b99dd92f1cf86fcde10f77b4db060397003bf654cc52c3148087ede556"
     )
-    assert quality["maximum"] == 10.0
+    assert quality["cases"] == 28
+    assert quality["categories"] == 7
+    assert quality["aggregation"] == "token-weighted-continuation-nll"
+    assert quality["category_guard"] == "maximum-category-perplexity"
+    assert quality["maximum"] == 7.0
+    assert quality["worst_category_maximum"] == 24.0
     assert slm["measurement_protocol"]["primary_metric"] == "output_tokens_per_sec"
 
     for body in (prefill, decode, slm):
         baseline = body["verified_baseline"]
         assert baseline["evidence_status"] == "committed-reference-summary"
-        assert baseline["review_eligible"] is True
         assert baseline["functional_passes"] == 5
+        assert baseline_is_current_review_evidence(
+            baseline
+        ) or baseline_is_protocol_superseded(baseline)
 
 
 def test_all_public_candidates_have_committed_five_seed_evidence():
@@ -320,7 +331,13 @@ def test_all_public_candidates_have_committed_five_seed_evidence():
     for workload in selected:
         baseline = workload.raw["verified_baseline"]
         assert baseline["evidence_status"] == "committed-reference-summary"
-        assert baseline["review_eligible"] is True
+        if baseline_is_protocol_superseded(baseline):
+            assert baseline["review_eligible"] is False
+            assert baseline["protocol_compatibility"] == "superseded"
+            assert baseline["replacement_required"] is True
+            assert baseline["superseded_reason"]
+        else:
+            assert baseline_is_current_review_evidence(baseline)
         assert baseline["evidence_tier"] == "public-candidate"
         assert baseline["reference_package_availability"] == "local-handoff"
         assert baseline["external_publication_status"] == "pending"
@@ -338,9 +355,10 @@ def test_systems_only_rows_do_not_claim_uncommitted_verified_baselines():
         assert "verified_baseline" not in workload.raw, workload.id
         calibration = workload.raw.get("calibration_observation")
         if calibration:
-            assert calibration.get("evidence_status") == (
-                "historical-unverified-no-committed-artifact"
-            ), workload.id
+            assert calibration.get("evidence_status") in {
+                "historical-unverified-no-committed-artifact",
+                "bounded-local-methodology-check",
+            }, workload.id
 
 
 def test_systems_only_max_paths_declare_their_execution_boundaries():
@@ -387,10 +405,63 @@ def test_systems_only_max_paths_declare_their_execution_boundaries():
     } == {"synthetic-micro-shard"}
 
 
-def test_public_contract_report_has_no_blockers():
-    issues = public_contract_report(load_registry())
+def test_public_contract_report_has_only_declared_replacement_blockers():
+    workloads = load_registry()
+    issues = public_contract_report(workloads)
 
-    assert all(not workload_issues for workload_issues in issues.values())
+    for workload_id, workload_issues in issues.items():
+        baseline = workloads[workload_id].raw.get("verified_baseline") or {}
+        if baseline.get("replacement_required") is True:
+            assert workload_issues == [
+                f"{workloads[workload_id].public_status} verified_baseline uses a "
+                "superseded protocol and requires a replacement reference sweep"
+            ]
+        else:
+            assert not workload_issues, (workload_id, workload_issues)
+
+
+def test_verified_baseline_lifecycle_state_machine_fails_closed():
+    status = "score-bearing"
+    valid_historical = {
+        "evidence_status": "committed-reference-summary",
+        "review_eligible": False,
+        "protocol_compatibility": "superseded",
+        "replacement_required": True,
+        "superseded_reason": "The protected measurement surface changed.",
+    }
+    assert baseline_lifecycle_issues(valid_historical, public_status=status) == [
+        "score-bearing verified_baseline uses a superseded protocol and requires "
+        "a replacement reference sweep"
+    ]
+
+    reviewable_history = {**valid_historical, "review_eligible": True}
+    missing_replacement = {**valid_historical, "replacement_required": False}
+    unexplained_history = {**valid_historical, "superseded_reason": ""}
+    orphan_replacement = {
+        "review_eligible": True,
+        "replacement_required": True,
+    }
+
+    assert any(
+        "review_eligible to false" in issue
+        for issue in baseline_lifecycle_issues(reviewable_history, public_status=status)
+    )
+    assert any(
+        "replacement_required to true" in issue
+        for issue in baseline_lifecycle_issues(
+            missing_replacement, public_status=status
+        )
+    )
+    assert any(
+        "superseded_reason" in issue
+        for issue in baseline_lifecycle_issues(
+            unexplained_history, public_status=status
+        )
+    )
+    assert any(
+        "only when protocol_compatibility is superseded" in issue
+        for issue in baseline_lifecycle_issues(orphan_replacement, public_status=status)
+    )
 
 
 def test_public_asset_dossiers_include_size_and_hash_policy():
