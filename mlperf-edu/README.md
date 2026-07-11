@@ -25,8 +25,8 @@ MLCommons-approved result categories.
 | **State** | **What It Means Here** |
 |:---|:---|
 | Implemented | The CLI, native registry, `min` and `max` runners, reports, provenance verification, portable packaging, labs, tutorial smoke, generated site, and validation workflows exist in this tree. |
-| Must be revalidated | The complete test suite, actual `smoke`, `max`, and `release` presets, clean wheel install, package extraction, generated-file checks, site render, and paper build must all pass on the final source revision. |
-| Committed reference summaries | Eight content-addressed summaries cover all five score-bearing and three performance-bearing candidates. Every summary is valid and review-eligible and records clean source commit `318cd842efe3b90cbf56a109797d2bed4ad3dc09`. The complete create-once attempts remain available by local handoff; no public artifact URL is claimed. |
+| Must be revalidated | The complete test suite, actual `smoke`, `coverage`, `max`, and `release` presets, clean wheel install, package extraction, generated-file checks, site render, and paper build must all pass on the final source revision. |
+| Committed reference summaries | Eight content-addressed summaries cover all five score-bearing and three performance-bearing candidates. Every summary is valid and review-eligible and records clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. The complete create-once attempts remain available by local handoff; no public artifact URL is claimed. |
 | Verification limits | The committed summaries do not substitute for same-revision hosted CI, independent reproduction, or representative desktop and narrow browser inspection. Those gates remain recorded in the release ledger. |
 | External decision | The component license, MovieLens-100K policy, public result wording, project name, and any MLCommons relationship require decisions outside this repository. |
 
@@ -114,11 +114,11 @@ acceptance statistic.
 
 | **Workload** | **Dataset** | **Required `max` Metric** | **Target** | **Release-Evidence State** |
 |:---|:---|:---|---:|:---|
-| `nanogpt-train` | Project Gutenberg TinyShakespeare recipe | cross-entropy loss | `<= 2.30` | Committed summary from `318cd842`; seeds 0-4 reached `1.9997`-`2.1939`, median `2.0568`; passed. |
-| `micro-dlrm-train` | MovieLens-100K | best validation accuracy | `>= 0.70` | Committed summary from `318cd842`; seeds 0-4 reached `0.7019`-`0.7094`, median `0.7041`; passed. Raw evidence stays local while MovieLens policy is unresolved. |
-| `anomaly-ae-train` | MNIST | anomaly AUROC | `>= 0.95` | Committed summary from `318cd842`; seeds 0-4 reached `0.9645`-`0.9701`, median `0.9666`; passed. |
-| `resnet18-train` | Fashion-MNIST | top-1 accuracy | `>= 0.85` | Committed summary from `318cd842`; seeds 0-4 reached `0.8630`-`0.8781`, median `0.8750`; passed. |
-| `mobilenetv2-train` | Fashion-MNIST | top-1 accuracy | `>= 0.78` | Committed summary from `318cd842`; seeds 0-4 reached `0.7970`-`0.8238`, median `0.8089`; passed. |
+| `nanogpt-train` | Project Gutenberg TinyShakespeare recipe | cross-entropy loss | `<= 2.30` | Committed summary from `0ec4d3e1`; seeds 0-4 reached `1.9744`-`2.1648`, median `2.0789`; passed. |
+| `micro-dlrm-train` | MovieLens-100K | best validation accuracy | `>= 0.70` | Committed summary from `0ec4d3e1`; seeds 0-4 reached `0.7019`-`0.7094`, median `0.7041`; passed. Raw evidence stays local while MovieLens policy is unresolved. |
+| `anomaly-ae-train` | MNIST | anomaly AUROC | `>= 0.95` | Committed summary from `0ec4d3e1`; seeds 0-4 reached `0.9645`-`0.9701`, median `0.9666`; passed. |
+| `resnet18-train` | Fashion-MNIST | top-1 accuracy | `>= 0.85` | Committed summary from `0ec4d3e1`; seeds 0-4 reached `0.8630`-`0.8781`, median `0.8750`; passed. |
+| `mobilenetv2-train` | Fashion-MNIST | top-1 accuracy | `>= 0.78` | Committed summary from `0ec4d3e1`; seeds 0-4 reached `0.7970`-`0.8238`, median `0.8089`; passed. |
 
 The anomaly row grades discrimination across labeled normal and anomalous
 examples. Reconstruction MSE remains diagnostic and is not the public target.
@@ -141,16 +141,17 @@ below describes the repeated measurements inside each execution.
 | **Workload** | **Functional and Quality Gate** | **Default Timing Protocol** |
 |:---|:---|:---|
 | `nanogpt-inference --variant prefill` | A quality-approved NanoGPT checkpoint with a recorded SHA-256 digest must complete prefill with positive throughput. | Three discarded warmups and ten synchronized measurements; median, p90, and p99 latency. |
-| `nanogpt-inference --variant decode` | The same checkpoint lineage must complete 64 decode steps with positive throughput. | One discarded warmup and five synchronized measured requests; TTFT and inter-token median, p90, and p99 latency. |
-| `smollm2-chat-inference --variant baseline` | Pinned SmolLM2 revision, at least eight generated tokens, and continuation perplexity `<= 10` on the bundled four-case suite. | One warmup and five measured requests; separate prefill and generation median, p90, and p99 latency. |
+| `nanogpt-inference --variant decode` | The same checkpoint lineage must complete 64 decode steps with positive throughput. | Three discarded warmups and twenty synchronized measured requests; TTFT and inter-token median, p90, and p99 latency. |
+| `smollm2-chat-inference --variant baseline` | Pinned SmolLM2 revision, at least eight generated tokens, and continuation perplexity `<= 10` on the bundled four-case suite. | Three warmups and twenty measured requests; separate prefill and generation median, p90, and p99 latency. |
 
 The three committed performance summaries come from clean source commit
-`318cd842`. NanoGPT prefill reached a median `117797.22` tokens/s across five
-outer executions, and decode reached a median `175.8925` tokens/s. Both retain
+`0ec4d3e1`. NanoGPT prefill reached a median `124578.18` tokens/s across five
+outer executions, and decode reached a median `131.8344` tokens/s. Both retain
 the same verified training package and checkpoint lineage. The SLM candidate
 passed the token and perplexity gates in all five outer executions; output
-throughput had a median `127.9239` tokens/s and a range of
-`90.8442`-`137.2689` tokens/s on the recorded MPS host.
+throughput had a median `101.3853` tokens/s and a range of
+`100.4041`-`102.4841` tokens/s on the recorded MPS host. All three performance
+summaries satisfy the declared 5% cross-seed coefficient-of-variation limit.
 
 The dynamic-int8 SLM variant is systems-only. Its current calibration completes
 generation but fails the quality-parity gate, so its latency is not eligible as
@@ -172,6 +173,11 @@ paths, SHA-256 and size indexes, and a clean-extraction verification step.
 It refuses known restricted or unresolved dataset bytes, including MovieLens,
 so a local hash-verifiable run cannot accidentally become a redistribution.
 
+`tools/build_handoff_manifest.py` closes a reviewer handoff across the committed
+index, historical raw attempts, source lock, NanoGPT lineage archive, and every
+policy-permitted portable run package. Its output records policy-blocked runs
+explicitly and must be written outside the checkout.
+
 For checkpoint-backed NanoGPT inference, the report carries the checkpoint
 digest and training-quality dependency. For the SLM candidate, the report
 carries the pinned model revision, bundled quality-suite digest, model metadata,
@@ -188,11 +194,14 @@ uv run mlperf validate smoke --output-dir submissions/validation-smoke
 # Generated-source and documentation drift
 uv run python tools/export_registry_layout.py --check
 uv run python tools/export_flat_registry.py --check
+uv run python tools/sync_verified_baselines.py --check
 uv run python tools/check_taxonomy.py
+uv run python tools/check_reference_claims.py --check
 uv run python tools/generate_review_packets.py --check
 uv run python tools/generate_docs.py --check
 
 # Evidence-bearing full execution
+uv run mlperf validate coverage --output-dir submissions/validation-coverage
 uv run mlperf validate max --keep-going --output-dir submissions/validation-max
 uv run mlperf validate release --keep-going --output-dir submissions/validation-release
 ```

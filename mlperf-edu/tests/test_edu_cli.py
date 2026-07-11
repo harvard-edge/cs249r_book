@@ -2304,7 +2304,10 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
     assert decode_report["metrics"]["output_tokens_per_sec"] > 0
     assert decode_report["measurement_protocol"]["warmup_runs"] == 3
     assert decode_report["measurement_protocol"]["measured_runs"] == 20
-    assert len(decode_report["metrics"]["request_ttft_samples_s"]) == 5
+    assert (
+        len(decode_report["metrics"]["request_ttft_samples_s"])
+        == (decode_report["measurement_protocol"]["measured_runs"])
+    )
     assert decode_report["checkpoint_provenance"]["source_manifest_verified"] is True
     assert decode_report["review_contract"]["status"] == "passed"
     assert decode_report["review_contract"]["metric"] == "output_tokens_per_sec"

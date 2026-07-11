@@ -17,8 +17,11 @@
 ## Reviewer Commands
 
 ```bash
-mlperf fetch --workload smollm2-chat-inference --variant baseline --profile max --dry-run
-mlperf run --workload smollm2-chat-inference --variant baseline --profile max
+OUTPUT_DIR="submissions/review-smollm2-chat-inference__baseline"
+mlperf fetch --workload smollm2-chat-inference --variant baseline --profile max
+mlperf run --workload smollm2-chat-inference --variant baseline --profile max --output-dir "$OUTPUT_DIR"
+for manifest in "$OUTPUT_DIR"/*.provd.json; do mlperf verify "$manifest"; done
+mlperf grade "$OUTPUT_DIR" --output "$OUTPUT_DIR/grade.json"
 ```
 
 ## Functional Contract
@@ -34,18 +37,16 @@ mlperf run --workload smollm2-chat-inference --variant baseline --profile max
 
 | Field | Value |
 |---|---|
-| Reference protocol | profile=max; reference_runs=5; backend=Transformers and PyTorch CPU or accelerator path recorded with the complete execution and hardware fingerprint; machine_class=laptop-class CPU or laptop-class accelerator; dataset_mode=local-prompt inference with the pinned model revision and bundled deterministic quality suite; seeds=0, 1, 2, 3, 4; aggregation=median output_tokens_per_sec across five independent seeded runs; functional_acceptance=every run must generate at least eight tokens and pass continuation perplexity at or below 10; artifact_policy=create a new immutable attempt directory and SHA-256 index every report, provenance manifest, model metadata file, export, and runner-declared artifact; rerun_policy=if any run fails or times out, create a new attempt and rerun all five seeds; never replace one seed in an existing attempt |
-| Measurement protocol | primary_metric=output_tokens_per_sec; warmup_runs=1; measured_runs=5; latency_statistics=median, p90, p99; timed_phases=prefill, greedy generation; timing_scope=synchronized timings over one fixed prompt and 16 requested decode tokens |
-| Checkpoint contract |  |
+| Reference protocol | profile=max; reference_runs=5; backend=Transformers and PyTorch CPU or accelerator path recorded with the complete execution and hardware fingerprint; machine_class=laptop-class CPU or laptop-class accelerator; dataset_mode=local-prompt inference with the pinned model revision and bundled deterministic quality suite; seeds=0, 1, 2, 3, 4; aggregation=median output_tokens_per_sec across five independent seeded runs; repeatability_metric=sample coefficient of variation of output_tokens_per_sec across the five reference runs; repeatability_limit=0.05; repeatability_action=withhold the performance reference and rerun the complete protocol when the coefficient of variation exceeds 5%; functional_acceptance=every run must generate at least eight tokens and pass continuation perplexity at or below 10; artifact_policy=create a new immutable attempt directory and SHA-256 index every report, provenance manifest, model metadata file, export, and runner-declared artifact; rerun_policy=if any run fails or times out, create a new attempt and rerun all five seeds; never replace one seed in an existing attempt |
+| Measurement protocol | primary_metric=output_tokens_per_sec; warmup_runs=3; measured_runs=20; latency_statistics=median, p90, p99; timed_phases=prefill, greedy generation; timing_scope=synchronized timings over one fixed prompt and 16 requested decode tokens |
 | Task-quality evaluation | suite=mlperf-edu-slm-quality/0.1; asset=src/mlperf_edu/slm_quality_prompts.json; asset_sha256=5fa25872d0b7dc986b12137256b16fd6329267d1640f03e4e04f1dc4e8c8ed5f; cases=4; method=mean continuation-only negative log likelihood over the deterministic suite; metric=continuation_perplexity; maximum=10.0 |
-| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=slm-decode_max_20260711T062558.103544Z; evidence_file=reference_results/slm-decode/slm-decode_max_20260711T062558.103544Z.json; evidence_sha256=e8289a8b809c02c37f22a238fd08b0108f08be596fbf5c5c54400040c6633bb2; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=318cd842efe3b90cbf56a109797d2bed4ad3dc09; profile=max; device_requested=mps; data_mode=local-prompt; execution_backend=transformers-mps; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=output_tokens_per_sec; metric_values_by_seed=127.92388533412783, 137.26889899463168, 90.8441621235267, 135.3306353387672, 101.83907035935408; output_tokens_per_sec=127.92388533412783; median=127.92388533412783; min=90.8441621235267; max=137.26889899463168; mean=118.64133043008151; sample_stdev=21.015967404904472; wall_seconds_median=3.1219681249931455; wall_seconds_min=2.8841313329758123; wall_seconds_max=3.6776643749326468; wall_seconds_mean=3.2093715915689245; wall_seconds_sample_stdev=0.32529526741613135; accepted_runs=5; functional_passes=5; generated_tokens=16; quality_perplexity=7.600481673911702; quality_mean_nll=2.028211623430252; baseline_note=Clean five-seed project reference from exact source commit 318cd842. Every run used the pinned model revision, passed the output-length and continuation-perplexity gates, and recorded repeated synchronized timings. The 17.7% cross-seed throughput coefficient of variation is disclosed as a machine observation, not a speed target. Raw packages are retained for local reviewer handoff but have no public URL. This is not an MLCommons-verified result. |
+| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=slm-decode_max_20260711T085533.624561Z; evidence_file=reference_results/slm-decode/slm-decode_max_20260711T085533.624561Z.json; evidence_sha256=c13f7b7afb626cd4f3cdcb9620693a95ce8d46881d1e8c6f18ba0234442f1185; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=0ec4d3e1c415944227d0754d170edb0addc1d925; profile=max; device_requested=mps; data_mode=local-prompt; execution_backend=transformers-mps; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=output_tokens_per_sec; metric_values_by_seed=101.38529541609195, 102.48414654372193, 102.2509860916646, 100.94140984139794, 100.4041265980697; output_tokens_per_sec=101.38529541609195; median=101.38529541609195; min=100.4041265980697; max=102.48414654372193; mean=101.49319289818922; sample_stdev=0.8744157286630143; wall_seconds_median=7.074083874933422; wall_seconds_min=6.775917749968357; wall_seconds_max=7.900906833005138; wall_seconds_mean=7.1484462999971585; wall_seconds_sample_stdev=0.4419313057434206; accepted_runs=5; functional_passes=5; coefficient_of_variation=0.00861551108693729; baseline_note=Clean five-run project reference from exact source commit 0ec4d3e1. Evidence semantics were recomputed from the raw reports and manifests during promotion. Every run passed its functional gate. The primary performance metric has 0.86% sample coefficient of variation across the five runs, within the 5% promotion limit. The speed is a machine observation, not a portable target. Content-addressed portable run packages are retained for local review, but no public package URL is recorded. This is not an MLCommons-verified result. |
 | Baseline evidence status | committed-reference-summary |
 | Baseline review eligible | True |
-| Baseline evidence file | reference_results/slm-decode/slm-decode_max_20260711T062558.103544Z.json |
+| Baseline evidence file | reference_results/slm-decode/slm-decode_max_20260711T085533.624561Z.json |
 | Reference package availability | local-handoff |
 | External publication status | pending |
 | External publication URL | not declared |
-| Calibration observation |  |
 
 ## Taxonomy Evidence
 
@@ -63,7 +64,6 @@ mlperf run --workload smollm2-chat-inference --variant baseline --profile max
 | Dataset source | mlperf-edu://bundled/prompts |
 | Dataset license status | bundled-project-asset |
 | Dataset release status | public-ok-bundled |
-| Dataset release next step |  |
 | Dataset citation | Bundled deterministic prompts maintained by MLPerf EDU. |
 | Model source | https://huggingface.co/HuggingFaceTB/SmolLM2-135M-Instruct |
 | Model license | Apache-2.0 |
@@ -75,7 +75,7 @@ mlperf run --workload smollm2-chat-inference --variant baseline --profile max
 
 ## Public Review Notes
 
-- external-publication blocker: reference evidence package is retained for local handoff but is not yet publicly retrievable
+- external-publication blocker: registry declares local-handoff reference evidence, but no published package URL is recorded
 
 ## Source Provenance
 

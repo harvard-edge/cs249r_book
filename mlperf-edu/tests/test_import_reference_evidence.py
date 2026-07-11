@@ -13,7 +13,7 @@ from tools import import_reference_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "reference_results" / "index.json"
-SOURCE_SHA = "318cd842efe3b90cbf56a109797d2bed4ad3dc09"
+SOURCE_SHA = "0ec4d3e1c415944227d0754d170edb0addc1d925"
 
 
 def test_reference_index_binds_all_exact_imported_summary_bytes():
@@ -311,5 +311,5 @@ def test_source_tool_digest_is_bound_to_exact_git_object(monkeypatch):
 
 def test_committed_summaries_bind_the_current_sweep_tool_bytes():
     assert import_reference_evidence.check_taxonomy.SWEEP_TOOL_SHA256 == (
-        "sha256:5f87b6ee757947ebaa3278a9e73bfafa1eda1d9896b6f1e5eb3c9181922d8a98"
+        "sha256:b5409e20385add7cd7b7f6814bf902affa71fe4b43532477d2f82b1d05fd2bfd"
     )

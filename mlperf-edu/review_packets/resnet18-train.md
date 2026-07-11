@@ -15,8 +15,11 @@
 ## Reviewer Commands
 
 ```bash
-mlperf fetch --workload resnet18-train --profile max --dry-run
-mlperf run --workload resnet18-train --profile max
+OUTPUT_DIR="submissions/review-resnet18-train"
+mlperf fetch --workload resnet18-train --profile max
+mlperf run --workload resnet18-train --profile max --output-dir "$OUTPUT_DIR"
+for manifest in "$OUTPUT_DIR"/*.provd.json; do mlperf verify "$manifest"; done
+mlperf grade "$OUTPUT_DIR" --output "$OUTPUT_DIR/grade.json"
 ```
 
 ## Quality Contract
@@ -30,24 +33,18 @@ mlperf run --workload resnet18-train --profile max
 | Reference runs | 5 |
 | Acceptance rule | median top-1 accuracy must be >= target |
 | Reference protocol | profile=max; backend=pytorch-cpu reference path unless the report declares a different backend; machine_class=laptop-class CPU or laptop-class accelerator with full hardware fingerprint; dataset_mode=fetched Fashion-MNIST with fixed torchvision transforms, five epochs, 100 training batches per epoch, and the complete 10,000-example test split; no synthetic fallback; seeds=0, 1, 2, 3, 4; aggregation=median top-1 accuracy across five independent reference runs; artifact_policy=preserve JSON, HTML, CSV, .provd.json, run fingerprint, dataset asset metadata, and raw metric values for each run; rerun_policy=rerun all five references when model code, dataset preprocessing, optimizer schedule, PyTorch major version, or target hardware class changes |
-| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=resnet18-train_max_20260711T061831.652339Z; evidence_file=reference_results/resnet18-train/resnet18-train_max_20260711T061831.652339Z.json; evidence_sha256=e7be43f43508509f18ae322c94df5d6e0a581171f71640bb1326cab0e03e46af; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=318cd842efe3b90cbf56a109797d2bed4ad3dc09; profile=max; device_requested=mps; data_mode=real; execution_backend=pytorch-mps; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=top1_accuracy; metric_values_by_seed=0.8781, 0.8755, 0.8673, 0.863, 0.875; top1_accuracy=0.875; median=0.875; min=0.863; max=0.8781; mean=0.87178; sample_stdev=0.006350354320823367; wall_seconds_median=24.984452249947935; wall_seconds_min=24.256964416941628; wall_seconds_max=25.508572624996305; wall_seconds_mean=24.869510699971578; wall_seconds_sample_stdev=0.5320824950729544; accepted_runs=5; baseline_note=Clean five-seed project reference from exact source commit 318cd842. Every run passed. Throughput and time fields are machine observations, not portable targets. The raw package is retained for local reviewer handoff but has no public URL. This is not an MLCommons-verified result. |
 
 ## Measurement and Evidence Contract
 
 | Field | Value |
 |---|---|
-| Reference protocol |  |
-| Measurement protocol |  |
-| Checkpoint contract |  |
-| Task-quality evaluation |  |
-| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=resnet18-train_max_20260711T061831.652339Z; evidence_file=reference_results/resnet18-train/resnet18-train_max_20260711T061831.652339Z.json; evidence_sha256=e7be43f43508509f18ae322c94df5d6e0a581171f71640bb1326cab0e03e46af; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=318cd842efe3b90cbf56a109797d2bed4ad3dc09; profile=max; device_requested=mps; data_mode=real; execution_backend=pytorch-mps; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=top1_accuracy; metric_values_by_seed=0.8781, 0.8755, 0.8673, 0.863, 0.875; top1_accuracy=0.875; median=0.875; min=0.863; max=0.8781; mean=0.87178; sample_stdev=0.006350354320823367; wall_seconds_median=24.984452249947935; wall_seconds_min=24.256964416941628; wall_seconds_max=25.508572624996305; wall_seconds_mean=24.869510699971578; wall_seconds_sample_stdev=0.5320824950729544; accepted_runs=5; baseline_note=Clean five-seed project reference from exact source commit 318cd842. Every run passed. Throughput and time fields are machine observations, not portable targets. The raw package is retained for local reviewer handoff but has no public URL. This is not an MLCommons-verified result. |
+| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=resnet18-train_max_20260711T084315.135227Z; evidence_file=reference_results/resnet18-train/resnet18-train_max_20260711T084315.135227Z.json; evidence_sha256=fa08884c733c616157cac879c46c9833bb1f5c9ade1dfb45648658d05c491aa8; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=0ec4d3e1c415944227d0754d170edb0addc1d925; profile=max; device_requested=mps; data_mode=real; execution_backend=pytorch-mps; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=top1_accuracy; metric_values_by_seed=0.8781, 0.8755, 0.8673, 0.863, 0.875; top1_accuracy=0.875; median=0.875; min=0.863; max=0.8781; mean=0.87178; sample_stdev=0.006350354320823367; wall_seconds_median=44.01704033301212; wall_seconds_min=43.64901420800015; wall_seconds_max=45.53280479100067; wall_seconds_mean=44.20926372481044; wall_seconds_sample_stdev=0.7716991522189321; accepted_runs=5; baseline_note=Clean five-run project reference from exact source commit 0ec4d3e1. Evidence semantics were recomputed from the raw reports and manifests during promotion. Every seed passed the declared quality gate. Content-addressed portable run packages are retained for local review, but no public package URL is recorded. This is not an MLCommons-verified result. |
 | Baseline evidence status | committed-reference-summary |
 | Baseline review eligible | True |
-| Baseline evidence file | reference_results/resnet18-train/resnet18-train_max_20260711T061831.652339Z.json |
+| Baseline evidence file | reference_results/resnet18-train/resnet18-train_max_20260711T084315.135227Z.json |
 | Reference package availability | local-handoff |
 | External publication status | pending |
 | External publication URL | not declared |
-| Calibration observation |  |
 
 ## Taxonomy Evidence
 
@@ -74,7 +71,7 @@ mlperf run --workload resnet18-train --profile max
 
 ## Public Review Notes
 
-- external-publication blocker: reference evidence package is retained for local handoff but is not yet publicly retrievable
+- external-publication blocker: registry declares local-handoff reference evidence, but no published package URL is recorded
 
 ## Source Provenance
 

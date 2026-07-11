@@ -7,7 +7,10 @@ statistics, hardware fingerprint, and a complete SHA-256 and byte-size index
 of every retained run artifact.
 
 The large raw sweep attempts are retained separately on the source machine for
-local review. They are not embedded here because checkpoints and
+local review. Thirty-five policy-permitted run packages have been created and
+verified for local handoff. The package tool correctly blocked the five DLRM
+runs because their MovieLens-derived artifacts cannot be redistributed under
+the current policy. The raw attempts are not embedded here because checkpoints and
 dataset-derived artifacts would make the source repository unsuitable for
 ordinary classroom use. Some raw manifests contain absolute source-machine
 paths, so an attempt directory is not a portable publication archive. A
@@ -15,7 +18,8 @@ registry row marked `reference_package_availability: local-handoff` records
 that bounded availability and the lack of a public URL. It does not mean that
 the committed summary is a self-contained or portable result package.
 
-`index.json` binds all promoted summaries to the exact source revision.
+`index.json` binds all promoted summaries to exact source revision
+`0ec4d3e1c415944227d0754d170edb0addc1d925`.
 `source_lock.json` additionally binds the measurement-bearing code, quality
 asset, and normalized native contracts used by the eight public candidates.
 The lock deliberately excludes promoted baseline rows and publication-only
@@ -25,14 +29,18 @@ importer also creates an exact generated mirror under
 `src/mlperf_edu/reference_results/`, which makes the evidence summaries
 available in the installed wheel. The workload registry independently records
 each summary path and SHA-256 digest, and `tools/check_taxonomy.py` rejects any
-mismatch between a displayed baseline and its cited summary.
+mismatch between a displayed baseline and its cited summary. The current source
+lock SHA-256 is
+`42cf76614351260bf946633ab9b23341d6053a491d0632258d49b53d36a66e20`.
 
-Evidence schema 0.2 retains the field name `aggregate.quality` for every
-primary metric. On performance rows, that object contains throughput samples,
-not task-quality scores. The schema also carries a legacy `quality_target`
-field whose value can be the functional token floor. It is not a speed target.
-The normalized index identifies `reference_metric_role: performance` and the
-separate `functional_gate`; validators bind that gate to the raw report before
+Evidence schema 0.3 records the canonical promoted value under
+`aggregate.primary_metric`. It retains `aggregate.quality` as an exact legacy
+mirror for compatibility. On performance rows, both objects contain throughput
+samples rather than task-quality scores, `quality_target` is null, and the
+functional requirement is recorded separately under `functional_gate`. The
+normalized index identifies `reference_metric_role: performance`; validators
+bind the gate to the raw report and require the sample coefficient of variation
+across the five reference executions to be no greater than `0.05` before
 promotion.
 
 The evidence source commit necessarily precedes the promotion commit that adds

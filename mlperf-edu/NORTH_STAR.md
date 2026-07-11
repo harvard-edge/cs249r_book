@@ -11,7 +11,9 @@ That is an ambition, not the current release state. Today the project is an
 independent review preview with 30 executable registry rows, five
 score-bearing candidates, three performance-bearing candidates, and 22
 systems-only rows. Eight exact reference summaries are committed and their raw
-packets are retained for local handoff. Full same-revision validation and
+packets are retained for local handoff. Thirty-five policy-permitted run
+packages are verified; the five DLRM packages remain correctly blocked by the
+restricted-dataset policy. Full same-revision validation and
 hosted CI, public packet URLs, asset decisions, independent reproduction, and
 MLCommons review remain gates.
 
@@ -113,7 +115,7 @@ promise that every laptop completes in the same time.
 
 | **Milestone** | **Exit Evidence** |
 |:---|:---|
-| Review-ready preview | Final-source tests, actual release validation, five score packets, inference chain, portable package, rendered site, verified paper, and explicit external questions. |
+| Review-ready preview | Final-source tests, actual release validation, five score packets, inference chain, policy-permitted portable packages, rendered site, verified paper, and explicit external questions. |
 | Independent teaching release | Authoritative component license, stable install artifact, macOS and Linux evidence, instructor pilot, and no unresolved in-repository gate. |
 | MLCommons-reviewed project | Written decisions on name, sponsor, rules, result wording, assets, targets, and scenarios. |
 | Research baseline | Multiple independent reproductions and papers that use the suite without private maintainer intervention. |

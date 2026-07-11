@@ -27,7 +27,7 @@ targets, inference scenarios, asset policy, report schema, and result wording.
 
 The current reference snapshot contains eight committed, content-addressed
 summaries produced from clean source commit
-`318cd842efe3b90cbf56a109797d2bed4ad3dc09`. All five score-bearing and three
+`0ec4d3e1c415944227d0754d170edb0addc1d925`. All five score-bearing and three
 performance-bearing candidates passed their declared five-execution contracts.
 The complete raw attempts are retained for local handoff, but no public
 artifact URL is claimed. This closes the in-repository reference-generation
@@ -56,7 +56,7 @@ Inference, Tiny, Client, or official submission rules.
 | Reports | JSON, HTML, CSV, quality state, hardware and software fingerprint, dataset and model dossiers | Reports remain project artifacts until the release and external policy gates close. |
 | Provenance | Exact report bytes and semantics, source, dataset, weights, seed, hardware, optional sidecars, unauthenticated digest | Integrity does not authenticate the producer or establish result acceptance. |
 | Packaging | Schema 0.2 archive, relative paths, complete SHA-256 and byte-size index, clean-extraction verification | The retained NanoGPT lineage package passed all 56 verification checks; public distribution and reviewer URL remain undecided. |
-| Reference evidence | Eight committed summaries from clean source `318cd842`, each with five fresh-process runs, grading, verification, immutable attempts, artifact indexes, and digest sidecars | Raw attempts remain local-handoff artifacts and still require reviewer access and independent reproduction. |
+| Reference evidence | Eight committed summaries from clean source `0ec4d3e1`, each with five fresh-process runs, grading, verification, immutable attempts, artifact indexes, and digest sidecars | Thirty-five policy-permitted run packages are portable and verified. Five MovieLens packages remain policy-blocked; public URLs and independent reproduction remain open. |
 | Inference | Checkpoint-backed NanoGPT prefill and decode; pinned SmolLM2 with continuation-perplexity gate | Scenario, fixture, target, and timing policy need domain review. |
 | Education | Three CPU and network-free lab smokes plus one implemented tutorial with provenance verification | Longer tutorial program remains roadmap work. |
 | Website | Registry and dataset generated pages, CLI reference, Quarto build, link checks, preview and guarded live workflows | Workflow presence does not prove deployment, and representative desktop and narrow in-app browser inspection is not yet recorded. |
@@ -70,14 +70,14 @@ report contract. The five-run median must also pass.
 
 | **Candidate** | **Data or Model** | **Gate** | **Current Evidence Boundary** |
 |:---|:---|:---|:---|
-| NanoGPT training | Deterministic excerpt generated from Project Gutenberg eBook 100 | cross-entropy loss `<= 2.30` | Committed summary from `318cd842`; five runs at `1.9997`-`2.1939`, median `2.0568`; passed. |
-| Micro-DLRM training | MovieLens-100K | best validation accuracy `>= 0.70` | Committed summary from `318cd842`; five runs at `0.7019`-`0.7094`, median `0.7041`; passed. Raw evidence remains local while dataset policy is unresolved. |
-| MNIST anomaly autoencoder | MNIST, zero treated as normal | anomaly AUROC `>= 0.95` | Committed summary from `318cd842`; five runs at `0.9645`-`0.9701`, median `0.9666`; passed. |
-| ResNet-18 training | Fashion-MNIST | top-1 accuracy `>= 0.85` | Committed summary from `318cd842`; five runs at `0.8630`-`0.8781`, median `0.8750`; passed. |
-| MobileNetV2 training | Fashion-MNIST | top-1 accuracy `>= 0.78` | Committed summary from `318cd842`; five runs at `0.7970`-`0.8238`, median `0.8089`; passed. |
-| NanoGPT prefill | Quality-approved NanoGPT checkpoint | positive checkpoint-backed prefill throughput | Committed summary from `318cd842`; five executions, median `117797.22` tokens/s; shared packaged training lineage verified. |
-| NanoGPT decode | Same quality-approved checkpoint | 64 decode steps and positive throughput | Committed summary from `318cd842`; five executions completed 64 steps, median `175.8925` tokens/s; shared lineage verified. |
-| SmolLM2 baseline | Pinned 135M model revision and four bundled continuation cases | at least eight tokens and perplexity `<= 10` | Committed summary from `318cd842`; all five executions passed the token and perplexity gates, with median `127.9239` tokens/s. |
+| NanoGPT training | Deterministic excerpt generated from Project Gutenberg eBook 100 | cross-entropy loss `<= 2.30` | Committed summary from `0ec4d3e1`; five runs at `1.9744`-`2.1648`, median `2.0789`; passed. |
+| Micro-DLRM training | MovieLens-100K | best validation accuracy `>= 0.70` | Committed summary from `0ec4d3e1`; five runs at `0.7019`-`0.7094`, median `0.7041`; passed. Raw evidence remains local while dataset policy is unresolved. |
+| MNIST anomaly autoencoder | MNIST, zero treated as normal | anomaly AUROC `>= 0.95` | Committed summary from `0ec4d3e1`; five runs at `0.9645`-`0.9701`, median `0.9666`; passed. |
+| ResNet-18 training | Fashion-MNIST | top-1 accuracy `>= 0.85` | Committed summary from `0ec4d3e1`; five runs at `0.8630`-`0.8781`, median `0.8750`; passed. |
+| MobileNetV2 training | Fashion-MNIST | top-1 accuracy `>= 0.78` | Committed summary from `0ec4d3e1`; five runs at `0.7970`-`0.8238`, median `0.8089`; passed. |
+| NanoGPT prefill | Quality-approved NanoGPT checkpoint | positive checkpoint-backed prefill throughput | Committed summary from `0ec4d3e1`; five executions, median `124578.18` tokens/s and 4.60% CV; shared packaged training lineage verified. |
+| NanoGPT decode | Same quality-approved checkpoint | 64 decode steps and positive throughput | Committed summary from `0ec4d3e1`; five executions completed 64 steps, median `131.8344` tokens/s and 2.09% CV; shared lineage verified. |
+| SmolLM2 baseline | Pinned 135M model revision and four bundled continuation cases | at least eight tokens and perplexity `<= 10` | Committed summary from `0ec4d3e1`; all five executions passed the token and perplexity gates, with median `101.3853` tokens/s and 0.86% CV. |
 
 The dynamic-int8 SLM variant remains systems-only because its current
 calibration completes generation but fails the quality-parity limit. This is an
@@ -148,7 +148,7 @@ The requested review topics follow.
 
 The project should not arrive with avoidable in-repository failures. The packet
 must include all of the following, with measurements anchored to source commit
-`318cd842` and any later evidence-only commit identified separately.
+`0ec4d3e1` and any later evidence-only commit identified separately.
 
 - Complete tests and generated-source checks.
 - Actual `smoke`, `coverage`, `max`, and `release` validation artifacts.

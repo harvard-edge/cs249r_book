@@ -87,7 +87,7 @@ SHA-256 digest sidecar.
 
 The current thresholds are listed in
 [QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). The five score rows now
-have committed reference summaries from clean source commit `318cd842`; older
+have committed reference summaries from clean source commit `0ec4d3e1`; older
 development calibration fields are historical rationale rather than the
 authoritative reference result.
 
@@ -111,14 +111,14 @@ Checkpoint-backed NanoGPT inference must retain all of the following evidence.
 - Positive throughput and completed functional work.
 
 The prefill default uses three discarded warmups and ten measurements. The
-decode default uses one discarded warmup and five measured requests. Prefill
+decode default uses three discarded warmups and twenty measured requests. Prefill
 reports median, p90, and p99 latency. Decode reports TTFT and inter-token
 median, p90, and p99 latency across the measured requests.
 
 The SmolLM2 baseline must retain its pinned revision, model metadata, bundled
 four-case fixture digest, continuation-only NLL and perplexity, generation
 length, and repeated timing. Its default gate requires at least eight generated
-tokens and perplexity at most 10. Its default protocol uses one warmup and five
+tokens and perplexity at most 10. Its default protocol uses three warmups and twenty
 measured requests with separate prefill and generation median, p90, and p99
 latencies.
 
@@ -129,17 +129,18 @@ it.
 ## Current Committed Reference Set
 
 `reference_results/index.json` contains eight content-addressed summaries from
-clean source commit `318cd842efe3b90cbf56a109797d2bed4ad3dc09`. All eight
+clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. All eight
 record `status: valid`, `eligible_for_public_baseline: true`, seeds 0 through 4,
 passing individual contracts, and passing aggregate acceptance.
 
-The score medians are `2.0568` NanoGPT cross-entropy loss, `0.7041` DLRM
+The score medians are `2.0789` NanoGPT cross-entropy loss, `0.7041` DLRM
 accuracy, `0.9666` anomaly AUROC, `0.8750` ResNet-18 top-1 accuracy, and
-`0.8089` MobileNetV2 top-1 accuracy. The performance medians are `117797.22`
-NanoGPT prefill tokens/s, `175.8925` NanoGPT decode tokens/s, and `127.9239`
+`0.8089` MobileNetV2 top-1 accuracy. The performance medians are `124578.18`
+NanoGPT prefill tokens/s, `131.8344` NanoGPT decode tokens/s, and `101.3853`
 SmolLM2 output tokens/s. These are project candidate observations on the
 recorded Apple M5 Max system, not official MLPerf results or cross-system
-performance claims.
+performance claims. Each performance reference stays within the declared 5%
+cross-seed coefficient-of-variation limit.
 
 The repository commits compact summaries and digests, not every raw artifact.
 Complete create-once attempts are retained for local handoff, and

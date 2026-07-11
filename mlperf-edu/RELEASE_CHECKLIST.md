@@ -29,14 +29,14 @@ final gate sequence below.
 | Implemented | Native registry and package mirrors | `registry/`, `workloads.yaml`, and `src/mlperf_edu/workloads.yaml`. | Both registry export checks. |
 | Implemented | Complete registry execution surface | 30 rows declare `min` and `max` runners. | Actual `coverage`, `max`, and `release` validation. |
 | Implemented | Candidate result classification | Five score-bearing, three performance-bearing, 22 systems-only. | Registry audit and generated-page drift checks. |
-| Implemented | Strong score gates | NanoGPT `<=2.30`, DLRM `>=0.70`, anomaly AUROC `>=0.95`, ResNet `>=0.85`, MobileNetV2 `>=0.78`. | Verified by five committed summaries from clean source `318cd842`. |
+| Implemented | Strong score gates | NanoGPT `<=2.30`, DLRM `>=0.70`, anomaly AUROC `>=0.95`, ResNet `>=0.85`, MobileNetV2 `>=0.78`. | Verified by five committed summaries from clean source `0ec4d3e1`. |
 | Implemented | Report-level public review contract | `src/mlperf/contracts.py` checks data mode, seed, quality, timing, checkpoint or model lineage, and artifacts. | Actual `max` and `release` validation with zero contract failures. |
-| Implemented | Repeatable inference timing | NanoGPT prefill and decode plus pinned SmolLM2 baseline record warmups, measured runs, and median, p90, p99 statistics. | Verified by three committed five-execution summaries from clean source `318cd842`. |
-| Implemented | Training-to-inference lineage | NanoGPT inference requires the training checkpoint and records its SHA-256 digest and quality dependency. | Verified with median training seed 2, checkpoint SHA-256 `f77a294989349bd9f270012536e361f1a7a8692d62c6b6209c2a5a57037d22be`, and both inference packets. |
+| Implemented | Repeatable inference timing | NanoGPT prefill and decode plus pinned SmolLM2 baseline record warmups, measured runs, median, p90, p99, and cross-execution CV. | Verified by three committed five-execution summaries from clean source `0ec4d3e1`; all three CVs are at or below `5%`. |
+| Implemented | Training-to-inference lineage | NanoGPT inference requires the training checkpoint and records its SHA-256 digest and quality dependency. | Verified with median-quality training seed 4, checkpoint SHA-256 `a0d2f31a747355d47d11c6aa77eb09faf2232f84cb519accb286a78159fb2d8a`, and both inference packets. |
 | Implemented | SLM task-quality fixture | Pinned SmolLM2 revision and bundled four-case continuation suite with perplexity gate. | Verified in five executions. Every execution passed the token and perplexity gates with the pinned revision and fixture digest retained. |
 | Implemented | Honest quantized boundary | Dynamic-int8 SLM row is systems-only after failing the current quality-parity calibration. | Registry, docs, and packet regeneration. |
 | Implemented | Exact report provenance | Manifest binds canonical report content and exact report bytes with SHA-256 and size evidence. | Manifest and package portability tests. |
-| Implemented | Portable package schema 0.2 | Relative paths, complete artifact index, digest and byte-size checks, and clean-extraction verification. | NanoGPT lineage package SHA-256 `1403c78341e7598b9cc4c0a10e67d54886edb58996c7622a0c3f2ef9f880bfa3` passed all 56 archive checks. |
+| Implemented | Portable package schema 0.2 | Relative paths, complete artifact index, digest and byte-size checks, and clean-extraction verification. | NanoGPT lineage package SHA-256 `0b0173d78e2c3315c4687b6319beb8a2826c98bce7f52710542f4b496edadd20` passed all 56 archive checks; 35 policy-permitted run packages were also created and verified. |
 | Implemented | Five-seed sweep tool | Fresh-process seeds, seed/report/manifest agreement, grading, immutable attempts, artifact index, digest sidecar, and portable NanoGPT training-lineage staging. | Eight clean public-candidate summaries are committed for the five score and three performance candidates. |
 | Implemented | Systems-only execution boundaries | Every systems-only row declares the exact max data mode, whether fetched or declared assets are used, and whether a quality target is enforced. | Registry validation and generated-page truth tests. |
 | Implemented | Classroom entry points | Three labs accept literal `--smoke`; Tutorial 01 has a noninteractive provenance smoke. | Four commands pass on CPU without network. |
@@ -48,7 +48,7 @@ final gate sequence below.
 ## Committed Reference Evidence
 
 The current evidence set was collected on July 11, 2026, from clean source
-commit `318cd842efe3b90cbf56a109797d2bed4ad3dc09`. The reference sweep commands
+commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. The reference sweep commands
 below exited zero for every candidate, and all eight summaries report
 `status: valid` and `eligible_for_public_baseline: true`. The recorded platform
 is an Apple M5 Max laptop with CPU or MPS selected by the declared protocol.
@@ -56,9 +56,12 @@ is an Apple M5 Max laptop with CPU or MPS selected by the declared protocol.
 aggregates, and source revision.
 
 Complete create-once attempt directories remain outside the checkout under the
-local reference root and are available by local handoff. The raw packets do not
-yet have reviewer-facing public URLs. The MovieLens packet remains local-only
-until its redistribution and candidate-policy decision is resolved. The later
+local reference root and are available by local handoff. Thirty-five
+policy-permitted run packages have been created and verified; the package tool
+correctly blocked the five DLRM runs because their MovieLens-derived artifacts
+cannot be redistributed under the current policy. The raw packets do not yet
+have reviewer-facing public URLs. The MovieLens packet remains local-only until
+its redistribution and candidate-policy decision is resolved. The later
 promotion revision adds the exact summaries, fail-closed cross-checks,
 documentation, and packaging without changing runner, data, model, measurement,
 grading, or report-contract behavior. A post-freeze change to any of those
@@ -69,13 +72,13 @@ records.
 
 | **Status** | **Gate** | **Required Evidence** |
 |:---|:---|:---|
-| Verified | Evidence source stability | Reference collection began from clean commit `318cd842efe3b90cbf56a109797d2bed4ad3dc09`; every summary records empty source-status and source-patch digests. |
+| Verified | Evidence source stability | Reference collection began from clean commit `0ec4d3e1c415944227d0754d170edb0addc1d925`; every summary records empty source-status and source-patch digests, and source lock SHA-256 `42cf76614351260bf946633ab9b23341d6053a491d0632258d49b53d36a66e20` binds 28 files and eight candidate contracts. |
 | Pending | Complete local tests | Full `uv run pytest` output from the final revision. |
 | Pending | Generated-file consistency | Native layout, flat mirrors, taxonomy, review packets, and docs checks all pass together. |
 | Verified | Five score packets | Five committed summaries cover valid create-once seeds 0–4 attempts for NanoGPT, DLRM, anomaly detection, ResNet-18, and MobileNetV2. All individual runs and medians passed. |
-| Verified | Inference chain | The committed NanoGPT training, prefill, and decode summaries share the verified seed-2 checkpoint lineage; the committed SLM summary records five passing outer executions. |
+| Verified | Inference chain | The committed NanoGPT training, prefill, and decode summaries share the verified seed-4 checkpoint lineage; prefill CV is `4.60%`, decode CV is `2.09%`, and the committed SLM summary records five passing outer executions with CV `0.86%`. |
 | Pending | Actual validation presets | Fresh `smoke`, `coverage`, `max`, and `release` executions with zero run, grade, provenance, or review-contract failures. |
-| Verified | Package portability | The retained NanoGPT lineage archive uses package schema 0.2 and passed 56 index, hash, size, path, extraction, and source-verification checks. |
+| Verified | Package portability | The retained NanoGPT lineage archive uses package schema 0.2 and passed 56 index, hash, size, path, extraction, and source-verification checks. Thirty-five policy-permitted run packages verified; five DLRM packages were correctly policy-blocked. |
 | Pending | Clean wheel environments | Wheel installed outside the checkout on supported Python and at least Linux plus the primary macOS laptop environment. |
 | Pending | Lab and tutorial regression | All three lab smokes and Tutorial 01 smoke pass on CPU without network access. |
 | Pending | Site review | Generated docs current, Quarto render complete, and links clean; representative desktop and narrow browser views still need visual inspection. The in-app browser was unavailable during the local review. |
@@ -110,7 +113,9 @@ uv run pytest
 
 uv run python tools/export_registry_layout.py --check
 uv run python tools/export_flat_registry.py --check
+uv run python tools/sync_verified_baselines.py --check
 uv run python tools/check_taxonomy.py
+uv run python tools/check_reference_claims.py --check
 uv run python tools/generate_review_packets.py --check
 uv run python tools/generate_docs.py --check
 
@@ -139,6 +144,11 @@ uv run python examples/lab3_arch_comparison.py --smoke
 uv run python tutorials/smoke_first_benchmark.py
 
 uv run python tools/build_wheel.py
+WHEEL=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+test -n "$WHEEL"
+uv venv /tmp/mlperf-edu-review-wheel --python 3.12
+uv pip install --python /tmp/mlperf-edu-review-wheel/bin/python "$WHEEL"
+(cd /tmp && /tmp/mlperf-edu-review-wheel/bin/mlperf audit)
 quarto render site
 python3 ../shared/scripts/check-internal-links.py site --quiet
 make -C paper clean all
@@ -157,7 +167,7 @@ zero.
 Run these commands only after the source-cleanliness guard passes. The tool's
 default output root is `~/.mlperf-edu/reference_runs`. These are reproduction
 commands for the current committed summaries; retain a new create-once attempt
-rather than overwriting the evidence from `318cd842`.
+rather than overwriting the evidence from `0ec4d3e1`.
 
 ```bash
 uv run python tools/run_reference_sweep.py \
@@ -189,15 +199,15 @@ into YAML is insufficient.
 ## Inference Evidence Commands
 
 Package one passing run from the clean NanoGPT training sweep. The committed
-inference chain uses the median seed-2 training run. The inference
+inference chain uses the median-quality seed-4 training run. The inference
 sweep verifies that package, rejects unsafe or unindexed ZIP members, stages the
 checkpoint, report, and manifest inside its create-once attempt, and records
 only attempt-relative lineage paths. Replace the manifest placeholder below
-with the retained seed-2 directory or another explicitly justified passing
+with the retained seed-4 directory or another explicitly justified passing
 training run from a new sweep.
 
 ```bash
-NANOGPT_TRAIN_MANIFEST="<clean-training-attempt>/seed_2/nanogpt-train_max.provd.json"
+NANOGPT_TRAIN_MANIFEST="<clean-training-attempt>/seed_4/nanogpt-train_max.provd.json"
 NANOGPT_LINEAGE_PACKAGE="/tmp/nanogpt-training-lineage.zip"
 uv run mlperf package "$NANOGPT_TRAIN_MANIFEST" \
   --output "$NANOGPT_LINEAGE_PACKAGE"
@@ -223,6 +233,36 @@ and summarize variation across the five executions. `mlperf package` performs
 its own clean-extraction check, refuses an unverifiable manifest, and refuses
 known restricted or unresolved dataset bytes. MovieLens remains a local-only
 evidence path until its external policy decision closes.
+
+## Reviewer Handoff Manifest
+
+Build the handoff manifest only after the promotion revision is committed. The
+command verifies the committed summaries against the retained historical
+attempts, rechecks the shared NanoGPT lineage, hashes every indexed byte in the
+portable packages, and records policy-blocked attempts without creating a
+prohibited archive.
+
+```bash
+: "${MLPERF_EDU_REFERENCE_ROOT:?set the retained reference-attempt root}"
+: "${MLPERF_EDU_REFERENCE_PACKAGE_ROOT:?set the portable-package root}"
+: "${MLPERF_EDU_HANDOFF_OUTPUT:?set an output path outside the checkout}"
+
+uv run python tools/build_handoff_manifest.py \
+  --evidence-root "$MLPERF_EDU_REFERENCE_ROOT" \
+  --portable-package-root "$MLPERF_EDU_REFERENCE_PACKAGE_ROOT" \
+  --lineage-archive \
+    "$MLPERF_EDU_REFERENCE_ROOT/nanogpt-training-lineage-median.zip" \
+  --promotion-git-sha "$(git rev-parse HEAD)" \
+  --output "$MLPERF_EDU_HANDOFF_OUTPUT"
+
+uv run python tools/build_handoff_manifest.py \
+  --evidence-root "$MLPERF_EDU_REFERENCE_ROOT" \
+  --portable-package-root "$MLPERF_EDU_REFERENCE_PACKAGE_ROOT" \
+  --lineage-archive \
+    "$MLPERF_EDU_REFERENCE_ROOT/nanogpt-training-lineage-median.zip" \
+  --promotion-git-sha "$(git rev-parse HEAD)" \
+  --output "$MLPERF_EDU_HANDOFF_OUTPUT" --check
+```
 
 ## Review-Ready Decision
 
