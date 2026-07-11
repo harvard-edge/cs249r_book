@@ -25,7 +25,7 @@ MLCommons-approved result categories.
 | **State** | **What It Means Here** |
 |:---|:---|
 | Implemented | The CLI, native registry, `min` and `max` runners, reports, provenance verification, portable packaging, labs, tutorial smoke, generated site, and validation workflows exist in this tree. |
-| Must be revalidated | The complete test suite, actual `smoke`, `coverage`, `max`, and `release` presets, clean wheel install, package extraction, generated-file checks, site render, and paper build must all pass on the final source revision. |
+| Local validation complete | The promotion revision recorded in `review-ece36ac566/handoff_manifest.json` passed 241 tests, actual `smoke`, `coverage`, `max`, and `release` presets, clean wheel install, package extraction, generated-file checks, site render, link checks, and the paper build. The retained local packet is content-addressed in the release ledger. |
 | Committed reference summaries | Eight content-addressed summaries cover all five score-bearing and three performance-bearing candidates. Every summary is valid and review-eligible and records clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. The complete create-once attempts remain available by local handoff; no public artifact URL is claimed. |
 | Verification limits | The committed summaries do not substitute for same-revision hosted CI, independent reproduction, or representative desktop and narrow browser inspection. Those gates remain recorded in the release ledger. |
 | External decision | The component license, MovieLens-100K policy, public result wording, project name, and any MLCommons relationship require decisions outside this repository. |

@@ -13,8 +13,8 @@ score-bearing candidates, three performance-bearing candidates, and 22
 systems-only rows. Eight exact reference summaries are committed and their raw
 packets are retained for local handoff. Thirty-five policy-permitted run
 packages are verified; the five DLRM packages remain correctly blocked by the
-restricted-dataset policy. Full same-revision validation and
-hosted CI, public packet URLs, asset decisions, independent reproduction, and
+restricted-dataset policy. Local same-revision validation is complete. Hosted
+CI, public packet URLs, asset decisions, independent reproduction, and
 MLCommons review remain gates.
 
 ## Core Thesis

@@ -68,23 +68,44 @@ grading, or report-contract behavior. A post-freeze change to any of those
 measurement-bearing surfaces requires new sweeps rather than editing these
 records.
 
+## Local Verification Snapshot
+
+The promotion revision recorded by `review-ece36ac566/handoff_manifest.json`
+completed the local release matrix on July 11, 2026, on macOS 26.4 with an
+Apple M5 Max. A later ledger-only commit may record these results, but the
+promotion revision remains the exact executable source named by the retained
+validation reports and handoff manifest.
+
+| **Artifact** | **Result** | **SHA-256** |
+|:---|:---|:---|
+| `validation-smoke` | 12 of 12 default `min` workloads passed | `6954a13d3cd99fb66cd0faee4793c91540e522c3b46eb70602f172b839354eb9` |
+| `validation-coverage` | 30 of 30 `min` workloads passed | `33d32ff1256ec4411c7c430579bfa9e4903ac05d1dce3694d4c5ccad58175b60` |
+| `validation-max` | 30 of 30 `max` workloads passed | `bfcd71c94d4ed7602d8dec75a8d5037a7203c7d53c66365494cb7c184967aca7` |
+| `validation-release` | 60 of 60 `min` and `max` workloads passed | `e40edcea473c1982a272d69bee558ea67e0b32963c7f8e57663b48cb4890493a` |
+| Clean Python 3.12 wheel | Installed outside the checkout, audited, and executed a verified smoke workload | `94a28beab06a8f70ae85793460ba7e74d9d3a0e31603908ae2c019c541c11bb4` |
+| Reviewer handoff manifest | 8 summaries, 40 valid attempts, 35 reverified packages, and 5 policy-blocked DLRM attempts | `0fabaaed4cf71754b9a7074729b7ff267799a450d678d6bdbb4960116c461a6a` |
+| Strict public audit | 0 blockers and 9 expected external warnings | `e80a606345c6f2e0d47abc33f789201e2961aaeffeb7ee27eb4f778e57965613` |
+| Review paper PDF | 6 visually inspected and mechanically verified pages | `22c12622281d8c31976f4b1c29dc922ae91964fd32c05f3401b36a6ef6b8a510` |
+
 ## Repository Verification Status
 
 | **Status** | **Gate** | **Required Evidence** |
 |:---|:---|:---|
 | Verified | Evidence source stability | Reference collection began from clean commit `0ec4d3e1c415944227d0754d170edb0addc1d925`; every summary records empty source-status and source-patch digests, and source lock SHA-256 `42cf76614351260bf946633ab9b23341d6053a491d0632258d49b53d36a66e20` binds 28 files and eight candidate contracts. |
-| Pending | Complete local tests | Full `uv run pytest` output from the final revision. |
-| Pending | Generated-file consistency | Native layout, flat mirrors, taxonomy, review packets, and docs checks all pass together. |
+| Verified | Complete local tests | The promotion revision recorded by the handoff manifest passed all 241 tests. |
+| Verified | Generated-file consistency | Native layout, flat mirrors, verified baselines, taxonomy, claims, review packets, and generated docs passed together. |
 | Verified | Five score packets | Five committed summaries cover valid create-once seeds 0–4 attempts for NanoGPT, DLRM, anomaly detection, ResNet-18, and MobileNetV2. All individual runs and medians passed. |
 | Verified | Inference chain | The committed NanoGPT training, prefill, and decode summaries share the verified seed-4 checkpoint lineage; prefill CV is `4.60%`, decode CV is `2.09%`, and the committed SLM summary records five passing outer executions with CV `0.86%`. |
-| Pending | Actual validation presets | Fresh `smoke`, `coverage`, `max`, and `release` executions with zero run, grade, provenance, or review-contract failures. |
+| Verified | Actual validation presets | Fresh `smoke`, `coverage`, `max`, and `release` executions passed 12, 30, 30, and 60 workload-profile checks with zero run, grade, provenance, or review-contract failures. |
 | Verified | Package portability | The retained NanoGPT lineage archive uses package schema 0.2 and passed 56 index, hash, size, path, extraction, and source-verification checks. Thirty-five policy-permitted run packages verified; five DLRM packages were correctly policy-blocked. |
-| Pending | Clean wheel environments | Wheel installed outside the checkout on supported Python and at least Linux plus the primary macOS laptop environment. |
-| Pending | Lab and tutorial regression | All three lab smokes and Tutorial 01 smoke pass on CPU without network access. |
-| Pending | Site review | Generated docs current, Quarto render complete, and links clean; representative desktop and narrow browser views still need visual inspection. The in-app browser was unavailable during the local review. |
-| Pending | Paper review | PDF builds from synchronized registry evidence, verifier passes, and every page receives visual inspection. |
+| Verified | Clean wheel environment on macOS | The wheel installed in a clean Python 3.12.13 environment outside the checkout; dependency checks, packaged evidence checks, installed audit, installed smoke, and provenance verification passed. |
+| Pending | Clean wheel environment on Linux | The hosted Linux wheel job must pass on the pushed review revision. |
+| Verified | Lab and tutorial regression | All three lab smokes and Tutorial 01 smoke passed on CPU without network access. |
+| Verified | Automated site review | All 43 pages rendered; required outputs, internal links, and 47 supported external HTTP links passed with zero errors. |
+| Pending | Site visual review | Representative desktop and narrow browser views still need inspection. The in-app browser was unavailable during the local review. |
+| Verified | Paper review | The PDF built from synchronized evidence; both verifier passes and visual inspection of all six pages succeeded. |
 | Pending | Hosted CI evidence | Development and full benchmark workflows are green for the same review revision and their artifacts are retained. Local evidence does not imply this hosted gate passed. |
-| Pending | Release notes | Notes state independent-preview status, supported install, evidence revision, known limitations, and non-endorsement. |
+| Verified | Review notes | `README.md`, `PROPOSAL.md`, `PUBLIC_RULES.md`, and this ledger state the independent-preview status, supported install, evidence revision, known limitations, and non-endorsement. |
 
 ## External Decisions
 
