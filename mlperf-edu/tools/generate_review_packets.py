@@ -181,6 +181,7 @@ def summary_table(workload: Workload) -> str:
                 ("Variant", workload.variant or ""),
             ]
         )
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
     return markdown_table(("Field", "Value"), rows)
 
 
@@ -191,14 +192,29 @@ def command_block(workload: Workload) -> str:
         args = f"--workload {workload_name} --variant {variant}"
     else:
         args = f"--workload {selector}"
-    return "\n".join(
+    slug = packet_slug(workload)
+    commands = [
+        "```bash",
+        f'OUTPUT_DIR="submissions/review-{slug}"',
+    ]
+    shared_checkpoint = workload.raw.get("shared_checkpoint")
+    if shared_checkpoint:
+        commands.extend(
+            [
+                f"mlperf fetch --workload {shared_checkpoint} --profile max",
+                f'mlperf run --workload {shared_checkpoint} --profile max --output-dir "$OUTPUT_DIR"',
+            ]
+        )
+    commands.extend(
         [
-            "```bash",
-            f"mlperf fetch {args} --profile max --dry-run",
-            f"mlperf run {args} --profile max",
+            f"mlperf fetch {args} --profile max",
+            f'mlperf run {args} --profile max --output-dir "$OUTPUT_DIR"',
+            'for manifest in "$OUTPUT_DIR"/*.provd.json; do mlperf verify "$manifest"; done',
+            'mlperf grade "$OUTPUT_DIR" --output "$OUTPUT_DIR/grade.json"',
             "```",
         ]
     )
+    return "\n".join(commands)
 
 
 def quality_section(workload: Workload) -> str:
@@ -215,8 +231,8 @@ def quality_section(workload: Workload) -> str:
                 (quality.get("variance_summary") or {}).get("acceptance_rule", ""),
             ),
             ("Reference protocol", compact_dict(quality.get("reference_protocol"))),
-            ("Baseline record", compact_dict(workload.raw.get("verified_baseline"))),
         ]
+        rows = [(field, value) for field, value in rows if value not in (None, "")]
         return "\n".join(
             ["## Quality Contract", "", markdown_table(("Field", "Value"), rows)]
         )
@@ -232,6 +248,7 @@ def quality_section(workload: Workload) -> str:
             "; ".join(str(note) for note in functional.get("reviewer_notes", [])),
         ),
     ]
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
     return "\n".join(
         ["## Functional Contract", "", markdown_table(("Field", "Value"), rows)]
     )
@@ -246,6 +263,7 @@ def evidence_contract_section(workload: Workload) -> str:
         ("Measurement protocol", compact_dict(raw.get("measurement_protocol"))),
         ("Checkpoint contract", compact_dict(raw.get("checkpoint_contract"))),
         ("Task-quality evaluation", compact_dict(raw.get("quality_evaluation"))),
+        ("Baseline record", compact_dict(baseline)),
         ("Baseline evidence status", baseline.get("evidence_status", "not declared")),
         ("Baseline review eligible", baseline.get("review_eligible", "not declared")),
         ("Baseline evidence file", baseline.get("evidence_file", "not declared")),
@@ -263,6 +281,7 @@ def evidence_contract_section(workload: Workload) -> str:
         ),
         ("Calibration observation", compact_dict(calibration)),
     ]
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
     return "\n".join(
         [
             "## Measurement and Evidence Contract",
@@ -315,6 +334,7 @@ def asset_section(workload: Workload) -> str:
                 ("Model rationale", model.get("selection_rationale", "")),
             ]
         )
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
     return "\n".join(["## Assets", "", markdown_table(("Field", "Value"), rows)])
 
 
@@ -364,23 +384,23 @@ def public_review_notes(
 ) -> list[str]:
     warnings = public_audit_warnings(workload)
     baseline = workload.raw.get("verified_baseline")
-    if workload.public_status == "score-bearing":
+    if workload.public_status in {"score-bearing", "performance-bearing"}:
         evidence_status = (
             baseline.get("evidence_status") if isinstance(baseline, dict) else None
         )
         if evidence_status != "committed-reference-summary":
             warnings.append(
-                "score-bearing baseline is not backed by a committed reference summary; "
+                f"{workload.public_status} baseline is not backed by a committed reference summary; "
                 f"evidence status is {evidence_status or 'not declared'}"
             )
-        elif baseline.get("reference_package_availability") != "published":
-            warnings.append(
-                "external-publication blocker: the content-addressed raw reference package "
-                f"is {baseline.get('reference_package_availability', 'not declared')} and is not yet publicly retrievable"
-            )
     calibration = workload.raw.get("calibration_observation")
-    if workload.public_status == "performance-bearing" and isinstance(
-        calibration, dict
+    if (
+        workload.public_status == "performance-bearing"
+        and isinstance(calibration, dict)
+        and not (
+            isinstance(baseline, dict)
+            and baseline.get("evidence_status") == "committed-reference-summary"
+        )
     ):
         warnings.append(
             "calibration values are informational and are not a review baseline; "

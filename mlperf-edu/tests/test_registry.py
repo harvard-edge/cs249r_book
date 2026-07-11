@@ -284,8 +284,8 @@ def test_public_inference_contracts_pin_quality_and_provenance():
     assert prefill["measurement_protocol"]["measured_runs"] == 10
     assert prefill["measurement_protocol"]["primary_metric"] == "prefill_tokens_per_sec"
     assert prefill["checkpoint_contract"]["source_workload"] == "nanogpt-train"
-    assert decode["measurement_protocol"]["warmup_runs"] == 1
-    assert decode["measurement_protocol"]["measured_runs"] == 5
+    assert decode["measurement_protocol"]["warmup_runs"] == 3
+    assert decode["measurement_protocol"]["measured_runs"] == 20
     assert decode["measurement_protocol"]["decode_steps_per_request"] == 64
     assert decode["measurement_protocol"]["primary_metric"] == "output_tokens_per_sec"
     assert decode["checkpoint_contract"]["digest"] == "sha256"
@@ -300,9 +300,33 @@ def test_public_inference_contracts_pin_quality_and_provenance():
     )
     assert quality["maximum"] == 10.0
     assert slm["measurement_protocol"]["primary_metric"] == "output_tokens_per_sec"
-    assert slm["calibration_observation"]["evidence_status"] == (
-        "local-calibration-awaiting-committed-review-artifact"
-    )
+
+    for body in (prefill, decode, slm):
+        baseline = body["verified_baseline"]
+        assert baseline["evidence_status"] == "committed-reference-summary"
+        assert baseline["review_eligible"] is True
+        assert baseline["functional_passes"] == 5
+
+
+def test_all_public_candidates_have_committed_five_seed_evidence():
+    workloads = load_registry()
+    selected = [
+        workload
+        for workload in workloads.values()
+        if workload.public_status in {"score-bearing", "performance-bearing"}
+    ]
+
+    assert len(selected) == 8
+    for workload in selected:
+        baseline = workload.raw["verified_baseline"]
+        assert baseline["evidence_status"] == "committed-reference-summary"
+        assert baseline["review_eligible"] is True
+        assert baseline["evidence_tier"] == "public-candidate"
+        assert baseline["reference_package_availability"] == "local-handoff"
+        assert baseline["external_publication_status"] == "pending"
+        assert baseline["seeds"] == [0, 1, 2, 3, 4]
+        assert len(baseline["metric_values_by_seed"]) == 5
+        assert len(baseline["evidence_sha256"]) == 64
 
 
 def test_systems_only_rows_do_not_claim_uncommitted_verified_baselines():

@@ -192,8 +192,8 @@ def run_decode(
         if quantization == "dynamic-int8"
         else nullcontext()
     )
-    warmup_runs = int(os.environ.get("MLPERF_EDU_SLM_WARMUP_RUNS", "1"))
-    measured_runs = int(os.environ.get("MLPERF_EDU_SLM_MEASURED_RUNS", "5"))
+    warmup_runs = int(os.environ.get("MLPERF_EDU_SLM_WARMUP_RUNS", "3"))
+    measured_runs = int(os.environ.get("MLPERF_EDU_SLM_MEASURED_RUNS", "20"))
     if warmup_runs < 1 or measured_runs < 3:
         raise ValueError(
             "SLM max measurement requires >=1 warmup and >=3 measured runs"

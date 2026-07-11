@@ -25,6 +25,15 @@ request to publish competitive results. The most useful first review would
 address the project name, sponsoring group, candidate workload set, quality
 targets, inference scenarios, asset policy, report schema, and result wording.
 
+The current reference snapshot contains eight committed, content-addressed
+summaries produced from clean source commit
+`318cd842efe3b90cbf56a109797d2bed4ad3dc09`. All five score-bearing and three
+performance-bearing candidates passed their declared five-execution contracts.
+The complete raw attempts are retained for local handoff, but no public
+artifact URL is claimed. This closes the in-repository reference-generation
+step without implying MLCommons approval, hosted CI success, independent
+reproduction, or publication readiness.
+
 ## Problem the Project Addresses
 
 Production benchmark suites teach important discipline, but their scale,
@@ -46,12 +55,12 @@ Inference, Tiny, Client, or official submission rules.
 | CLI | `doctor`, `init`, `list`, `show`, `info`, `fetch`, `run`, `report`, `verify`, `package`, `grade`, `validate`, `audit`, `cache` | Supported preview install is a locked source checkout; no package-index release is claimed. |
 | Reports | JSON, HTML, CSV, quality state, hardware and software fingerprint, dataset and model dossiers | Reports remain project artifacts until the release and external policy gates close. |
 | Provenance | Exact report bytes and semantics, source, dataset, weights, seed, hardware, optional sidecars, unauthenticated digest | Integrity does not authenticate the producer or establish result acceptance. |
-| Packaging | Schema 0.2 archive, relative paths, complete SHA-256 and byte-size index, clean-extraction verification | Must be demonstrated from a final candidate run. |
-| Score evidence | Fresh-process five-seed tool with grading, verification, immutable attempts, artifact indexes, and digest sidecar | Final-source packets remain to be retained and reviewed. |
+| Packaging | Schema 0.2 archive, relative paths, complete SHA-256 and byte-size index, clean-extraction verification | The retained NanoGPT lineage package passed all 56 verification checks; public distribution and reviewer URL remain undecided. |
+| Reference evidence | Eight committed summaries from clean source `318cd842`, each with five fresh-process runs, grading, verification, immutable attempts, artifact indexes, and digest sidecars | Raw attempts remain local-handoff artifacts and still require reviewer access and independent reproduction. |
 | Inference | Checkpoint-backed NanoGPT prefill and decode; pinned SmolLM2 with continuation-perplexity gate | Scenario, fixture, target, and timing policy need domain review. |
 | Education | Three CPU and network-free lab smokes plus one implemented tutorial with provenance verification | Longer tutorial program remains roadmap work. |
-| Website | Registry and dataset generated pages, CLI reference, Quarto build, link checks, preview and guarded live workflows | Workflow presence does not prove that the final revision has deployed. |
-| Validation | Fast blocking workflow plus scheduled or manual actual `max` and `release` workflow with a five-hour timeout | Green same-revision workflow artifacts remain a release requirement. |
+| Website | Registry and dataset generated pages, CLI reference, Quarto build, link checks, preview and guarded live workflows | Workflow presence does not prove deployment, and representative desktop and narrow in-app browser inspection is not yet recorded. |
+| Validation | Fast blocking workflow plus scheduled or manual actual `max` and `release` workflow with a five-hour timeout | Green hosted same-revision workflow artifacts remain a release requirement. |
 
 ## Candidate Result Set
 
@@ -61,14 +70,14 @@ report contract. The five-run median must also pass.
 
 | **Candidate** | **Data or Model** | **Gate** | **Current Evidence Boundary** |
 |:---|:---|:---|:---|
-| NanoGPT training | Deterministic excerpt generated from Project Gutenberg eBook 100 | cross-entropy loss `<= 2.30` | Five-seed development calibration recorded; clean final-revision packet pending. |
-| Micro-DLRM training | MovieLens-100K | best validation accuracy `>= 0.70` | Five-seed calibration recorded; clean packet and dataset-policy decision pending. |
-| MNIST anomaly autoencoder | MNIST, zero treated as normal | anomaly AUROC `>= 0.95` | Five-seed full-test development calibration recorded; clean packet pending. |
-| ResNet-18 training | Fashion-MNIST | top-1 accuracy `>= 0.85` | Five-seed full-test development calibration recorded; clean packet pending. |
-| MobileNetV2 training | Fashion-MNIST | top-1 accuracy `>= 0.78` | Five-seed full-test development calibration recorded; clean packet pending. |
-| NanoGPT prefill | Quality-approved NanoGPT checkpoint | positive checkpoint-backed prefill throughput | Five reference executions; each has a checkpoint digest, three warmups, ten measured runs, median, p90, p99. Final chain pending. |
-| NanoGPT decode | Same quality-approved checkpoint | 64 decode steps and positive throughput | Five reference executions; each has a checkpoint digest, one warmup, five measured requests, TTFT and inter-token percentiles. Final chain pending. |
-| SmolLM2 baseline | Pinned 135M model revision and four bundled continuation cases | at least eight tokens and perplexity `<= 10` | Five development executions passed; output throughput median `74.04` tokens/s, range `73.67`-`87.12`. Clean final packet pending. |
+| NanoGPT training | Deterministic excerpt generated from Project Gutenberg eBook 100 | cross-entropy loss `<= 2.30` | Committed summary from `318cd842`; five runs at `1.9997`-`2.1939`, median `2.0568`; passed. |
+| Micro-DLRM training | MovieLens-100K | best validation accuracy `>= 0.70` | Committed summary from `318cd842`; five runs at `0.7019`-`0.7094`, median `0.7041`; passed. Raw evidence remains local while dataset policy is unresolved. |
+| MNIST anomaly autoencoder | MNIST, zero treated as normal | anomaly AUROC `>= 0.95` | Committed summary from `318cd842`; five runs at `0.9645`-`0.9701`, median `0.9666`; passed. |
+| ResNet-18 training | Fashion-MNIST | top-1 accuracy `>= 0.85` | Committed summary from `318cd842`; five runs at `0.8630`-`0.8781`, median `0.8750`; passed. |
+| MobileNetV2 training | Fashion-MNIST | top-1 accuracy `>= 0.78` | Committed summary from `318cd842`; five runs at `0.7970`-`0.8238`, median `0.8089`; passed. |
+| NanoGPT prefill | Quality-approved NanoGPT checkpoint | positive checkpoint-backed prefill throughput | Committed summary from `318cd842`; five executions, median `117797.22` tokens/s; shared packaged training lineage verified. |
+| NanoGPT decode | Same quality-approved checkpoint | 64 decode steps and positive throughput | Committed summary from `318cd842`; five executions completed 64 steps, median `175.8925` tokens/s; shared lineage verified. |
+| SmolLM2 baseline | Pinned 135M model revision and four bundled continuation cases | at least eight tokens and perplexity `<= 10` | Committed summary from `318cd842`; all five executions passed the token and perplexity gates, with median `127.9239` tokens/s. |
 
 The dynamic-int8 SLM variant remains systems-only because its current
 calibration completes generation but fails the quality-parity limit. This is an
@@ -138,19 +147,24 @@ The requested review topics follow.
 ## Known Gates Before an External Review Packet
 
 The project should not arrive with avoidable in-repository failures. The packet
-must include all of the following from one frozen source revision.
+must include all of the following, with measurements anchored to source commit
+`318cd842` and any later evidence-only commit identified separately.
 
 - Complete tests and generated-source checks.
 - Actual `smoke`, `coverage`, `max`, and `release` validation artifacts.
-- Five create-once score evidence directories and digest sidecars.
-- One quality-passing NanoGPT checkpoint followed by prefill and decode reports.
-- One pinned SmolLM2 baseline report with task-quality evidence.
+- The eight committed summaries, their digest index, and a handoff map for all
+  create-once raw attempts. Public artifact URLs may remain explicitly
+  unassigned for the bounded review.
+- The verified NanoGPT training package, checkpoint digest, prefill packet, and
+  decode packet.
+- The pinned SmolLM2 packet with task-quality evidence and fixture digest.
 - Provenance verification, grading, and portable package examples.
 - Clean wheel installs on Linux and the primary macOS laptop environment.
-- Generated review packets, rendered website, link checks, and visual review.
+- Generated review packets, rendered website, link checks, and representative
+  browser visual review. The latter remains an explicit local verification gap.
 - A synchronized, verified companion-paper PDF.
-- The strict public audit JSON showing either no warning or the explicit
-  unresolved MovieLens warning.
+- The strict public audit JSON showing either no warning or the explicit raw-package
+  publication and MovieLens policy warnings.
 
 External gates should be presented rather than concealed. They include the
 component license, MovieLens policy, independent reproduction, target and

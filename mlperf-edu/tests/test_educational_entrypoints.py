@@ -171,3 +171,30 @@ def test_wheel_guard_rejects_a_retired_module(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="retired module"):
         verify_wheel(wheel_path)
+
+
+def test_wheel_guard_rejects_corrupt_reference_evidence(tmp_path: Path) -> None:
+    wheel_path = tmp_path / "corrupt-evidence.whl"
+    index_path = PROJECT_ROOT / "reference_results" / "index.json"
+    index = json.loads(index_path.read_text())
+    with zipfile.ZipFile(wheel_path, "w") as archive:
+        archive.writestr(
+            "mlperf_edu/workloads.yaml",
+            (PROJECT_ROOT / "src/mlperf_edu/workloads.yaml").read_bytes(),
+        )
+        archive.writestr(
+            "mlperf_edu/slm_quality_prompts.json",
+            (PROJECT_ROOT / "src/mlperf_edu/slm_quality_prompts.json").read_bytes(),
+        )
+        archive.writestr(
+            "mlperf_edu/reference_results/index.json", index_path.read_bytes()
+        )
+        archive.writestr(
+            "mlperf_edu/reference_results/source_lock.json",
+            (PROJECT_ROOT / "reference_results/source_lock.json").read_bytes(),
+        )
+        for entry in index["summaries"]:
+            archive.writestr(f"mlperf_edu/{entry['path']}", b"wrong")
+
+    with pytest.raises(RuntimeError, match="digest mismatch"):
+        verify_wheel(wheel_path)

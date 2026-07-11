@@ -86,8 +86,10 @@ attempt is create-once and receives an evidence summary plus an unauthenticated
 SHA-256 digest sidecar.
 
 The current thresholds are listed in
-[QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). Registry calibration
-values remain provisional until final source-revision packets are retained.
+[QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). The five score rows now
+have committed reference summaries from clean source commit `318cd842`; older
+development calibration fields are historical rationale rather than the
+authoritative reference result.
 
 ## Performance-Bearing Rule
 
@@ -123,6 +125,28 @@ latencies.
 The dynamic-int8 SLM path is systems-only because its current calibration fails
 the task-quality parity limits. Completing generation is not enough to promote
 it.
+
+## Current Committed Reference Set
+
+`reference_results/index.json` contains eight content-addressed summaries from
+clean source commit `318cd842efe3b90cbf56a109797d2bed4ad3dc09`. All eight
+record `status: valid`, `eligible_for_public_baseline: true`, seeds 0 through 4,
+passing individual contracts, and passing aggregate acceptance.
+
+The score medians are `2.0568` NanoGPT cross-entropy loss, `0.7041` DLRM
+accuracy, `0.9666` anomaly AUROC, `0.8750` ResNet-18 top-1 accuracy, and
+`0.8089` MobileNetV2 top-1 accuracy. The performance medians are `117797.22`
+NanoGPT prefill tokens/s, `175.8925` NanoGPT decode tokens/s, and `127.9239`
+SmolLM2 output tokens/s. These are project candidate observations on the
+recorded Apple M5 Max system, not official MLPerf results or cross-system
+performance claims.
+
+The repository commits compact summaries and digests, not every raw artifact.
+Complete create-once attempts are retained for local handoff, and
+reviewer-facing public URLs remain unassigned. The DLRM raw packet is local-only
+while the MovieLens policy decision remains open. A summary does not close
+hosted CI, independent reproduction, representative browser inspection,
+dataset policy, target and scenario review, naming, or result-wording approval.
 
 ## Systems-Only Rule
 
@@ -227,4 +251,5 @@ An independent preview may show implemented machinery and explicit open gates.
 It may not claim an official score, endorsement, or MLCommons publication. A
 public candidate release requires every in-repository gate in
 [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) and all applicable external
-decisions. Stronger wording requires written MLCommons approval.
+decisions. The current eight committed summaries satisfy the reference-evidence
+step only. Stronger wording requires written MLCommons approval.

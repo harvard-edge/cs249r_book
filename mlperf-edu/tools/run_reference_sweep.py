@@ -36,7 +36,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TOOL_NAME = "run_reference_sweep.py"
-TOOL_VERSION = "2.2.0"
+TOOL_VERSION = "2.3.0"
 TOOL_ID = f"tools/{TOOL_NAME} v{TOOL_VERSION}"
 SCORE_PUBLIC_DATA_MODES = frozenset({"real"})
 PERFORMANCE_PUBLIC_DATA_MODES = frozenset({"real", "checkpoint-backed", "local-prompt"})
@@ -958,6 +958,18 @@ def build_basis(
     dataset_mode: Any,
     eligible: bool,
 ) -> dict[str, Any]:
+    performance = workload.public_status == "performance-bearing"
+    functional = dict(workload.raw.get("functional_check") or {})
+    functional_targets = {
+        json.dumps((row.get("grade") or {}).get("target"), sort_keys=True)
+        for row in rows
+        if (row.get("grade") or {}).get("target") is not None
+    }
+    functional_target = None
+    if len(functional_targets) == 1:
+        functional_target = json.loads(next(iter(functional_targets)))
+    if performance:
+        functional["target"] = functional_target
     return {
         "eligible_for_public_baseline": eligible,
         "variance_summary": {
@@ -978,12 +990,16 @@ def build_basis(
             "artifact_policy": "Preserve and SHA-256 index every report, provenance manifest, checkpoint, and runner-declared artifact.",
             "generated_by": TOOL_ID,
         },
-        "quality_target": {
-            "metric": metric_name,
-            "target": getattr(workload, "quality_value", None),
-            "direction": getattr(workload, "quality_direction", None),
-        },
-        "functional_check": workload.raw.get("functional_check"),
+        "quality_target": (
+            None
+            if performance
+            else {
+                "metric": metric_name,
+                "target": getattr(workload, "quality_value", None),
+                "direction": getattr(workload, "quality_direction", None),
+            }
+        ),
+        "functional_check": functional,
     }
 
 
@@ -1277,6 +1293,7 @@ def main(argv: list[str] | None = None) -> int:
             getattr(workload, "quality_value", None),
             getattr(workload, "quality_direction", None),
         )
+    protocol = _declared_protocol(workload)
     invalid_reasons = validate_sweep(
         workload=workload,
         seeds=args.seeds,
@@ -1285,12 +1302,35 @@ def main(argv: list[str] | None = None) -> int:
         acceptance=acceptance,
         evidence_tier=evidence_tier,
     )
+    repeatability = None
+    if workload.public_status == "performance-bearing":
+        repeatability_limit = float(protocol.get("repeatability_limit"))
+        mean = quality_aggregate.get("mean")
+        stdev = quality_aggregate.get("stdev")
+        coefficient_of_variation = (
+            float(stdev) / float(mean)
+            if isinstance(mean, (int, float))
+            and float(mean) > 0
+            and isinstance(stdev, (int, float))
+            else None
+        )
+        repeatability = {
+            "metric": protocol.get("repeatability_metric"),
+            "coefficient_of_variation": coefficient_of_variation,
+            "limit": repeatability_limit,
+            "passed": coefficient_of_variation is not None
+            and coefficient_of_variation <= repeatability_limit,
+        }
+        if repeatability["passed"] is not True:
+            invalid_reasons.append(
+                "performance reference repeatability exceeds the declared "
+                f"coefficient-of-variation limit {repeatability_limit:g}"
+            )
     if evidence_tier == "public-candidate" and source.get("git_dirty") is not False:
         invalid_reasons.append(
             "public reference evidence must be produced from a clean Git worktree"
         )
     eligible = not invalid_reasons
-    protocol = _declared_protocol(workload)
     dataset_mode = protocol.get("dataset_mode")
     finished = datetime.now(timezone.utc)
     lineage_summary = None
@@ -1322,8 +1362,17 @@ def main(argv: list[str] | None = None) -> int:
                     ),
                 }
             )
+    basis = build_basis(
+        workload=workload,
+        profile=args.profile,
+        rows=rows,
+        quality=quality_aggregate,
+        metric_name=metric_name,
+        dataset_mode=dataset_mode,
+        eligible=eligible,
+    )
     artifact = {
-        "schema": "mlperf-edu-reference-evidence/0.2",
+        "schema": "mlperf-edu-reference-evidence/0.3",
         "evidence_id": evidence_id,
         "status": "valid" if eligible else "invalid",
         "eligible_for_public_baseline": eligible
@@ -1356,22 +1405,36 @@ def main(argv: list[str] | None = None) -> int:
             if workload.public_status == "performance-bearing"
             else "quality"
         ),
+        "primary_metric": {
+            "name": metric_name,
+            "role": (
+                "performance"
+                if workload.public_status == "performance-bearing"
+                else "quality"
+            ),
+        },
         "quality_metric": metric_name,
-        "quality_target": getattr(workload, "quality_value", None),
+        "quality_target": (
+            None
+            if workload.public_status == "performance-bearing"
+            else getattr(workload, "quality_value", None)
+        ),
         "quality_direction": getattr(workload, "quality_direction", None),
+        "functional_gate": (
+            basis["functional_check"]
+            if workload.public_status == "performance-bearing"
+            else None
+        ),
         "runs": rows,
-        "aggregate": {"quality": quality_aggregate, "wall_seconds": wall_aggregate},
+        "aggregate": {
+            "primary_metric": quality_aggregate,
+            "quality": quality_aggregate,
+            "wall_seconds": wall_aggregate,
+        },
+        "repeatability": repeatability,
         "seed_sensitivity": sensitivity,
         "acceptance": acceptance,
-        "basis": build_basis(
-            workload=workload,
-            profile=args.profile,
-            rows=rows,
-            quality=quality_aggregate,
-            metric_name=metric_name,
-            dataset_mode=dataset_mode,
-            eligible=eligible,
-        ),
+        "basis": basis,
         "source": source,
         "nanogpt_training_lineage": lineage_summary,
     }

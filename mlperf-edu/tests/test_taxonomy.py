@@ -140,23 +140,43 @@ def test_reference_summary_indexes_every_raw_artifact_with_full_hashes():
     body = {
         "public": {"status": "score-bearing"},
         "quality_target": {
+            "metric": "accuracy",
+            "value": 0.7,
+            "direction": "higher",
             "reference_runs": 1,
-            "reference_protocol": {"seeds": [0]},
+            "reference_protocol": {"profile": "max", "seeds": [0]},
         },
     }
     payload = {
-        "schema": "mlperf-edu-reference-evidence/0.2",
+        "schema": "mlperf-edu-reference-evidence/0.3",
         "workload": "example",
         "status": "valid",
         "eligible_for_public_baseline": True,
         "evidence_tier": "public-candidate",
         "public_status": "score-bearing",
+        "profile": "max",
+        "evidence_id": "example_max_attempt",
+        "quality_metric": "accuracy",
+        "quality_direction": "higher",
+        "quality_target": 0.7,
+        "reference_metric_role": "quality",
+        "primary_metric": {"name": "accuracy", "role": "quality"},
+        "functional_gate": None,
+        "repeatability": None,
         "invalid_reasons": [],
-        "acceptance": {"passed": True},
+        "acceptance": {
+            "passed": True,
+            "statistic": "median",
+            "operator": ">=",
+            "target": 0.7,
+            "value": 0.75,
+        },
         "source": {
             "git_dirty": False,
             "git_sha": "a" * 40,
-            "tool_sha256": "sha256:" + "b" * 64,
+            "git_status_sha256": check_taxonomy.EMPTY_SHA256,
+            "git_patch_sha256": check_taxonomy.EMPTY_SHA256,
+            "tool_sha256": check_taxonomy.SWEEP_TOOL_SHA256,
         },
         "seeds_requested": [0],
         "basis": {"reference_protocol": {"seeds": [0]}},
@@ -168,6 +188,8 @@ def test_reference_summary_indexes_every_raw_artifact_with_full_hashes():
                 "seed_match": True,
                 "manifest_verified": True,
                 "quality_target_met": True,
+                "quality_value": 0.75,
+                "wall_seconds": 1.25,
                 "timed_out": False,
                 "invalid_reasons": [],
                 "grade": {"passed": True},
@@ -189,6 +211,32 @@ def test_reference_summary_indexes_every_raw_artifact_with_full_hashes():
                 ],
             }
         ],
+        "aggregate": {
+            "primary_metric": {
+                "count": 1,
+                "median": 0.75,
+                "mean": 0.75,
+                "min": 0.75,
+                "max": 0.75,
+                "stdev": 0.0,
+            },
+            "quality": {
+                "count": 1,
+                "median": 0.75,
+                "mean": 0.75,
+                "min": 0.75,
+                "max": 0.75,
+                "stdev": 0.0,
+            },
+            "wall_seconds": {
+                "count": 1,
+                "median": 1.25,
+                "mean": 1.25,
+                "min": 1.25,
+                "max": 1.25,
+                "stdev": 0.0,
+            },
+        },
     }
 
     assert check_taxonomy.check_reference_summary("vision/example", body, payload) == []
@@ -196,6 +244,163 @@ def test_reference_summary_indexes_every_raw_artifact_with_full_hashes():
     payload["runs"][0]["artifacts"][0]["sha256"] = "sha256:short"
     errors = check_taxonomy.check_reference_summary("vision/example", body, payload)
     assert any("does not contain a full SHA-256 digest" in error for error in errors)
+
+
+def committed_summary(workload_id: str) -> tuple[dict, dict]:
+    workload = load_registry()[workload_id]
+    body = json.loads(json.dumps(workload.raw))
+    evidence_file = body["verified_baseline"]["evidence_file"]
+    path = Path(__file__).resolve().parents[1] / evidence_file
+    return body, json.loads(path.read_text())
+
+
+def test_committed_baseline_display_fields_cannot_drift_from_summary():
+    body, payload = committed_summary("resnet18-train")
+
+    assert (
+        check_taxonomy.check_reference_summary("vision/resnet18-train", body, payload)
+        == []
+    )
+
+    body["verified_baseline"]["median"] += 0.01
+    body["verified_baseline"]["metric_values_by_seed"][0] -= 0.01
+    body["verified_baseline"]["source_git_sha"] = "0" * 40
+    errors = check_taxonomy.check_reference_summary(
+        "vision/resnet18-train", body, payload
+    )
+    assert any("verified_baseline.median" in error for error in errors)
+    assert any("verified_baseline.metric_values_by_seed" in error for error in errors)
+    assert any("verified_baseline.source_git_sha" in error for error in errors)
+
+
+def test_committed_summary_aggregates_are_recomputed_from_seed_values():
+    body, payload = committed_summary("anomaly-ae-train")
+    payload["aggregate"]["quality"]["mean"] += 0.01
+
+    errors = check_taxonomy.check_reference_summary(
+        "tiny/anomaly-ae-train", body, payload
+    )
+
+    assert any("recomputed value" in error for error in errors)
+    assert any("verified_baseline.mean" in error for error in errors)
+
+
+def test_reference_summary_acceptance_cannot_drift_or_hide_a_failed_seed():
+    body, payload = committed_summary("resnet18-train")
+    payload["acceptance"]["value"] += 0.01
+
+    errors = check_taxonomy.check_reference_summary(
+        "vision/resnet18-train", body, payload
+    )
+    assert any("acceptance.value" in error for error in errors)
+
+    body, payload = committed_summary("resnet18-train")
+    payload["runs"][0]["quality_value"] = 0.1
+    errors = check_taxonomy.check_reference_summary(
+        "vision/resnet18-train", body, payload
+    )
+    assert any(
+        "does not satisfy the registry quality target" in error for error in errors
+    )
+
+
+def test_reference_summary_paths_and_ids_are_portable():
+    body, payload = committed_summary("resnet18-train")
+    payload["evidence_id"] = "bad\nidentifier"
+    payload["runs"][0]["artifacts"][0]["path"] = "..\\outside.json"
+
+    errors = check_taxonomy.check_reference_summary(
+        "vision/resnet18-train", body, payload
+    )
+    assert any("evidence_id is not portable" in error for error in errors)
+    assert any("path is missing, absolute, or escapes" in error for error in errors)
+
+
+def test_nanogpt_lineage_requires_stable_indexed_training_artifacts():
+    body, payload = committed_summary("nanogpt-prefill")
+    payload["runs"][0]["artifacts"] = [
+        artifact
+        for artifact in payload["runs"][0]["artifacts"]
+        if artifact["role"] != "source_training_report"
+    ]
+
+    errors = check_taxonomy.check_reference_summary(
+        "language/nanogpt-prefill", body, payload
+    )
+
+    assert any("exactly one source_training_report" in error for error in errors)
+
+
+def test_nanogpt_lineage_roles_are_checked_before_baseline_promotion():
+    body, payload = committed_summary("nanogpt-prefill")
+    body.pop("verified_baseline")
+    payload["runs"][0]["artifacts"] = [
+        artifact
+        for artifact in payload["runs"][0]["artifacts"]
+        if artifact["role"] != "source_training_provenance"
+    ]
+
+    errors = check_taxonomy.check_reference_summary(
+        "language/nanogpt-prefill", body, payload
+    )
+    assert any("exactly one source_training_provenance" in error for error in errors)
+
+
+def test_slm_summary_requires_content_addressed_model_metadata():
+    body, payload = committed_summary("slm-decode")
+    payload["runs"][0]["artifacts"] = [
+        artifact
+        for artifact in payload["runs"][0]["artifacts"]
+        if artifact["role"] != "model_metadata"
+    ]
+
+    errors = check_taxonomy.check_reference_summary("slm/slm-decode", body, payload)
+
+    assert any("lacks model_metadata" in error for error in errors)
+
+
+def test_slm_model_metadata_is_checked_before_baseline_promotion():
+    body, payload = committed_summary("slm-decode")
+    body.pop("verified_baseline")
+    payload["runs"][0]["artifacts"] = [
+        artifact
+        for artifact in payload["runs"][0]["artifacts"]
+        if artifact["role"] != "model_metadata"
+    ]
+
+    errors = check_taxonomy.check_reference_summary("slm/slm-decode", body, payload)
+    assert any("lacks model_metadata" in error for error in errors)
+
+
+def test_checkpoint_dependents_bind_to_committed_training_summary():
+    workloads = {
+        workload_id: json.loads(json.dumps(workload.raw))
+        for workload_id, workload in load_registry().items()
+    }
+    workloads["nanogpt-prefill"]["verified_baseline"][
+        "source_training_evidence_sha256"
+    ] = "0" * 64
+
+    errors = check_taxonomy.check_shared_checkpoint_evidence(workloads)
+
+    assert any("source_training_evidence_sha256" in error for error in errors)
+
+
+def test_checkpoint_dependents_bind_the_selected_seed_and_checkpoint_digest():
+    workloads = {
+        workload_id: json.loads(json.dumps(workload.raw))
+        for workload_id, workload in load_registry().items()
+    }
+    workloads["nanogpt-prefill"]["verified_baseline"]["source_training_seed"] = 1
+    workloads["nanogpt-decode"]["verified_baseline"][
+        "source_training_checkpoint_sha256"
+    ] = "0" * 64
+
+    errors = check_taxonomy.check_shared_checkpoint_evidence(workloads)
+    assert any(
+        "does not select the committed median-quality" in error for error in errors
+    )
+    assert any("does not match the selected training run" in error for error in errors)
 
 
 def test_taxonomy_cli_passes_current_registry():

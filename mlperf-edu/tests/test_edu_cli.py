@@ -779,8 +779,13 @@ def test_audit_public_policy_fails_on_unresolved_warnings():
     assert data["policy"] == "public"
     assert data["blocker_count"] == 0
     assert data["warning_blocked"] is True
-    assert data["warning_count"] > 0
+    assert data["warning_count"] >= 5
     assert len(data["warnings"]) == data["warning_count"]
+    for workload in data["workloads"]:
+        assert any(
+            "no published package URL is recorded" in warning
+            for warning in workload["warnings"]
+        )
 
 
 def test_audit_filters_by_canonical_workload_and_variant():
@@ -2297,8 +2302,8 @@ def test_nanogpt_max_run_writes_verifiable_artifacts(tmp_path):
     assert decode_report["metrics"]["prefill_ctx"] == 8
     assert decode_report["metrics"]["decode_steps"] == 4
     assert decode_report["metrics"]["output_tokens_per_sec"] > 0
-    assert decode_report["measurement_protocol"]["warmup_runs"] == 1
-    assert decode_report["measurement_protocol"]["measured_runs"] == 5
+    assert decode_report["measurement_protocol"]["warmup_runs"] == 3
+    assert decode_report["measurement_protocol"]["measured_runs"] == 20
     assert len(decode_report["metrics"]["request_ttft_samples_s"]) == 5
     assert decode_report["checkpoint_provenance"]["source_manifest_verified"] is True
     assert decode_report["review_contract"]["status"] == "passed"

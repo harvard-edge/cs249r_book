@@ -90,6 +90,14 @@ def esc(value: Any) -> str:
     return text.replace("|", "\\|")
 
 
+def table_cell(value: Any) -> str:
+    """Render a nonempty markdown table cell."""
+    if value is None:
+        return "—"
+    rendered = esc(value)
+    return rendered if rendered else "—"
+
+
 def badge(status: str) -> str:
     slug = status.replace(" ", "-")
     return f'<span class="badge status-{slug}">{status}</span>'
@@ -185,6 +193,44 @@ def group_families(
         family = workload.canonical_workload or workload.id
         families.setdefault(family, []).append(workload)
     return families
+
+
+def family_lead(members: list[Workload]) -> Workload:
+    """Return the declared default variant, falling back to the first member."""
+    if not members:
+        raise ValueError("workload family must contain at least one member")
+    return next((member for member in members if member.default_variant), members[0])
+
+
+def family_metadata_cell(lead: Workload, value: Any, values: list[Any]) -> str:
+    """Render lead metadata and disclose when variants carry different values."""
+    normalized = {
+        "" if candidate is None else str(candidate).strip() for candidate in values
+    }
+    rendered = table_cell(value)
+    if len(normalized) <= 1:
+        return rendered
+    role = "default" if lead.default_variant else "lead"
+    return f"{rendered} ({role}; variants differ)"
+
+
+def family_status_cell(members: list[Workload], lead: Workload) -> str:
+    """Lead with the default status while retaining mixed-family disclosure."""
+    lead_status = table_cell(lead.public_status)
+    other_statuses = sorted(
+        {
+            member.public_status
+            for member in members
+            if member.public_status and member.public_status != lead.public_status
+        }
+    )
+    if not other_statuses:
+        return lead_status
+    role = "default" if lead.default_variant else "lead"
+    return (
+        f"{lead_status} ({role}); other variants include "
+        f"{', '.join(table_cell(status) for status in other_statuses)}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -520,7 +566,7 @@ def public_line(w: Workload) -> str:
 def family_page(
     family: str, members: list[Workload], source_paths: dict[str, str]
 ) -> str:
-    lead = members[0]
+    lead = family_lead(members)
     suite = lead.suite
     lines = [
         "---",
@@ -539,19 +585,23 @@ def family_page(
 
     lines.append(
         f"This workload family exposes **{len(members)} measured variants** "
-        f"of `{family}`. Every variant shares the family's model and dataset "
-        "contract; each row below is independently runnable and reported."
+        f"of `{family}`. Each variant is independently runnable and reported. "
+        "The table records model and dataset contracts per variant because "
+        "those contracts can differ within a family."
     )
     lines.append("")
     lines.append(
-        "| **Variant** | **Workload ID** | **Scenario** | **Candidate result status** |"
+        "| **Variant** | **Workload ID** | **Model** | **Params** | **Dataset** "
+        "| **Scenario** | **Candidate result status** |"
     )
-    lines.append("|:---|:---|:---|:---|")
+    lines.append("|:---|:---|:---|:---|:---|:---|:---|")
     for member in members:
         anchor = f"#variant-{member.variant}"
         lines.append(
             f"| [{esc(member.variant)}]({anchor}) | `{esc(member.id)}` "
-            f"| {esc(member.scenario or '')} | {esc(member.public_status)} |"
+            f"| {table_cell(member.model)} | {table_cell(member.raw.get('params'))} "
+            f"| {table_cell(member.dataset)} | {table_cell(member.scenario)} "
+            f"| {table_cell(member.public_status)} |"
         )
     lines.append("")
     for member in members:
@@ -569,14 +619,22 @@ def family_page(
 
 
 def family_row(family: str, members: list[Workload], depth: int) -> str:
-    lead = members[0]
+    lead = family_lead(members)
     variants = f"{len(members)}" if len(members) > 1 else "—"
-    statuses = sorted({m.public_status for m in members})
     href = workload_href(lead.suite, family, depth)
+    model = family_metadata_cell(lead, lead.model, [member.model for member in members])
+    params = family_metadata_cell(
+        lead,
+        lead.raw.get("params"),
+        [member.raw.get("params") for member in members],
+    )
+    dataset = family_metadata_cell(
+        lead, lead.dataset, [member.dataset for member in members]
+    )
     return (
-        f"| [`{family}`]({href}) | {esc(lead.suite)} | {esc(lead.model)} "
-        f"| {esc(lead.raw.get('params') or '')} | {esc(lead.dataset or '')} "
-        f"| {variants} | {esc(', '.join(statuses))} |"
+        f"| [`{family}`]({href}) | {table_cell(lead.suite)} | {model} "
+        f"| {params} | {dataset} | {variants} "
+        f"| {family_status_cell(members, lead)} |"
     )
 
 
@@ -596,7 +654,7 @@ def benchmarks_index(
     for suite in sorted(suite_meta):
         by_suite[suite] = []
     for family, members in families.items():
-        by_suite.setdefault(members[0].suite, []).append(family)
+        by_suite.setdefault(family_lead(members).suite, []).append(family)
 
     lines = [
         "---",
@@ -859,7 +917,7 @@ def stats_partial(
     status_counts: dict[str, int] = {}
     for w in workloads.values():
         status_counts[w.public_status] = status_counts.get(w.public_status, 0) + 1
-    suites_used = {members[0].suite for members in families.values()}
+    suites_used = {family_lead(members).suite for members in families.values()}
     status_text = ", ".join(
         f"{count} {status}" for status, count in sorted(status_counts.items())
     )
@@ -873,7 +931,9 @@ def stats_partial(
     ]
     for suite in sorted(suites_used):
         meta = suite_meta.get(suite, {})
-        count = sum(1 for members in families.values() if members[0].suite == suite)
+        count = sum(
+            1 for members in families.values() if family_lead(members).suite == suite
+        )
         lines.append(
             f"| [{esc(meta.get('title', suite))}](benchmarks/{suite}/index.qmd) "
             f"| {esc(meta.get('summary', ''))} | {count} |"
@@ -901,7 +961,9 @@ def build_outputs() -> dict[Path, str]:
     source_paths = index_source_paths()
     families = group_families(workloads)
 
-    unknown = {m[0].suite for m in families.values()} - set(suite_meta)
+    unknown = {family_lead(members).suite for members in families.values()} - set(
+        suite_meta
+    )
     if unknown:
         raise ValueError(f"suites missing from registry/suites.yaml: {sorted(unknown)}")
 
@@ -912,7 +974,7 @@ def build_outputs() -> dict[Path, str]:
     )
     per_suite: OrderedDict[str, list[tuple[str, list[Workload]]]] = OrderedDict()
     for family, members in families.items():
-        per_suite.setdefault(members[0].suite, []).append((family, members))
+        per_suite.setdefault(family_lead(members).suite, []).append((family, members))
     for suite, suite_families in per_suite.items():
         outputs[site / "benchmarks" / suite / "index.qmd"] = suite_index(
             suite, suite_meta.get(suite, {}), suite_families

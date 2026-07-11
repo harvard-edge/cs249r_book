@@ -10,8 +10,10 @@ the baseline without becoming a benchmark maintainer.
 That is an ambition, not the current release state. Today the project is an
 independent review preview with 30 executable registry rows, five
 score-bearing candidates, three performance-bearing candidates, and 22
-systems-only rows. Final reference packets, full same-revision validation,
-asset decisions, independent reproduction, and MLCommons review remain gates.
+systems-only rows. Eight exact reference summaries are committed and their raw
+packets are retained for local handoff. Full same-revision validation and
+hosted CI, public packet URLs, asset decisions, independent reproduction, and
+MLCommons review remain gates.
 
 ## Core Thesis
 
@@ -119,15 +121,15 @@ promise that every laptop completes in the same time.
 
 ## Near-Term Order
 
-1. Freeze one source revision and make every in-repository release gate pass.
-2. Retain the five clean score packets and the checkpoint-linked inference
-   evidence.
-3. Reconcile the generated site, review packets, and paper to those artifacts.
-4. Resolve component licensing and the MovieLens decision.
-5. Ask MLCommons for bounded feedback on naming, sponsorship, target policy,
+1. Finish and retain the same-revision local validation ledger, then obtain
+   green hosted CI for that review revision.
+2. Transfer or publish the eight raw reference packets and run an independent
+   reproduction on a second machine.
+3. Resolve component licensing and the MovieLens decision.
+4. Ask MLCommons for bounded feedback on naming, sponsorship, target policy,
    scenario scope, and result wording.
-6. Pilot the exact release in courses and with independent artifact reviewers.
-7. Promote systems-only rows one at a time as evidence warrants.
+5. Pilot the exact release in courses and with independent artifact reviewers.
+6. Promote systems-only rows one at a time as evidence warrants.
 
 The north star is reached when running MLPerf EDU is ordinary, interpreting it
 is disciplined, and challenging its evidence is straightforward.

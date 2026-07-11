@@ -4,6 +4,8 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 from pathlib import Path
 import shutil
 import subprocess
@@ -51,18 +53,88 @@ def verify_wheel(wheel_path: Path) -> None:
     """Fail if a wheel contains a retired module from stale build state."""
     with zipfile.ZipFile(wheel_path) as archive:
         members = set(archive.namelist())
-    forbidden = sorted(FORBIDDEN_WHEEL_MEMBERS.intersection(members))
-    if forbidden:
-        raise RuntimeError(
-            "wheel contains retired module(s), likely from stale build state: "
-            + ", ".join(forbidden)
-        )
-    required = {"mlperf_edu/workloads.yaml", "mlperf_edu/slm_quality_prompts.json"}
-    missing = sorted(required.difference(members))
-    if missing:
-        raise RuntimeError(
-            "wheel is missing required packaged asset(s): " + ", ".join(missing)
-        )
+        forbidden = sorted(FORBIDDEN_WHEEL_MEMBERS.intersection(members))
+        if forbidden:
+            raise RuntimeError(
+                "wheel contains retired module(s), likely from stale build state: "
+                + ", ".join(forbidden)
+            )
+
+        evidence_index_path = ROOT / "reference_results" / "index.json"
+        evidence_index_bytes = evidence_index_path.read_bytes()
+        evidence_index = json.loads(evidence_index_bytes)
+        exact_assets = {
+            "mlperf_edu/workloads.yaml": ROOT / "src" / "mlperf_edu" / "workloads.yaml",
+            "mlperf_edu/slm_quality_prompts.json": ROOT
+            / "src"
+            / "mlperf_edu"
+            / "slm_quality_prompts.json",
+            "mlperf_edu/reference_results/index.json": ROOT
+            / "src"
+            / "mlperf_edu"
+            / "reference_results"
+            / "index.json",
+            "mlperf_edu/reference_results/source_lock.json": ROOT
+            / "src"
+            / "mlperf_edu"
+            / "reference_results"
+            / "source_lock.json",
+        }
+        expected_reference_members = {
+            "mlperf_edu/reference_results/index.json",
+            "mlperf_edu/reference_results/source_lock.json",
+            *{
+                f"mlperf_edu/{entry['path']}"
+                for entry in evidence_index.get("summaries") or []
+            },
+        }
+        required = {*exact_assets, *expected_reference_members}
+        missing = sorted(required.difference(members))
+        if missing:
+            raise RuntimeError(
+                "wheel is missing required packaged asset(s): " + ", ".join(missing)
+            )
+        actual_reference_members = {
+            member
+            for member in members
+            if member.startswith("mlperf_edu/reference_results/")
+            and member.endswith(".json")
+        }
+        extras = sorted(actual_reference_members.difference(expected_reference_members))
+        if extras:
+            raise RuntimeError(
+                "wheel contains stale unindexed reference evidence: "
+                + ", ".join(extras)
+            )
+
+        for member, source in exact_assets.items():
+            if archive.read(member) != source.read_bytes():
+                raise RuntimeError(
+                    f"wheel asset {member} does not match the source mirror"
+                )
+        if (
+            archive.read("mlperf_edu/reference_results/index.json")
+            != evidence_index_bytes
+        ):
+            raise RuntimeError(
+                "wheel reference index does not match the canonical index"
+            )
+        lock_data = archive.read("mlperf_edu/reference_results/source_lock.json")
+        expected_lock_digest = (evidence_index.get("source_lock") or {}).get("sha256")
+        actual_lock_digest = "sha256:" + hashlib.sha256(lock_data).hexdigest()
+        if actual_lock_digest != expected_lock_digest:
+            raise RuntimeError("wheel reference source-lock digest mismatch")
+        for entry in evidence_index.get("summaries") or []:
+            member = f"mlperf_edu/{entry['path']}"
+            data = archive.read(member)
+            digest = hashlib.sha256(data).hexdigest()
+            if digest != entry.get("evidence_sha256"):
+                raise RuntimeError(f"wheel reference summary digest mismatch: {member}")
+            source = ROOT / "src" / "mlperf_edu" / str(entry["path"])
+            if data != source.read_bytes():
+                raise RuntimeError(
+                    f"wheel reference summary does not match source mirror: {member}"
+                )
 
 
 def build_wheel(out_dir: Path) -> Path:

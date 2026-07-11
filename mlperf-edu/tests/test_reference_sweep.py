@@ -224,8 +224,15 @@ def test_main_writes_create_once_valid_evidence_and_digest(tmp_path, monkeypatch
     assert len(summaries) == 1
     summary_path = summaries[0]
     summary = json.loads(summary_path.read_text())
-    assert summary["schema"] == "mlperf-edu-reference-evidence/0.2"
+    assert summary["schema"] == "mlperf-edu-reference-evidence/0.3"
     assert summary["status"] == "valid"
+    assert summary["primary_metric"] == {
+        "name": "top1_accuracy",
+        "role": "quality",
+    }
+    assert summary["aggregate"]["primary_metric"] == summary["aggregate"]["quality"]
+    assert summary["functional_gate"] is None
+    assert summary["repeatability"] is None
     assert summary["eligible_for_public_baseline"] is True
     assert summary["seed_sensitivity"]["verdict"] == "sensitive"
     assert (

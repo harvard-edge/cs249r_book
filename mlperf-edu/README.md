@@ -4,9 +4,9 @@
 >
 > MLPerf EDU is not an official MLCommons benchmark and is not endorsed by
 > MLCommons. The repository contains a runnable candidate suite, but a release
-> claim requires fresh validation evidence, complete five-seed reference
-> packets, closed asset-policy decisions, and external review. Do not describe
-> results from this tree as official MLPerf results.
+> claim still requires complete final validation, reviewer access to retained
+> raw evidence, closed asset-policy decisions, and external review. Do not
+> describe results from this tree as official MLPerf results.
 <!-- MLPERF-EDU-STATUS:END -->
 
 # MLPerf EDU
@@ -26,7 +26,8 @@ MLCommons-approved result categories.
 |:---|:---|
 | Implemented | The CLI, native registry, `min` and `max` runners, reports, provenance verification, portable packaging, labs, tutorial smoke, generated site, and validation workflows exist in this tree. |
 | Must be revalidated | The complete test suite, actual `smoke`, `max`, and `release` presets, clean wheel install, package extraction, generated-file checks, site render, and paper build must all pass on the final source revision. |
-| Evidence pending | Every score-bearing target needs one clean, create-once five-seed evidence packet produced from the final source revision. Registry calibration values are not a substitute for those packets. |
+| Committed reference summaries | Eight content-addressed summaries cover all five score-bearing and three performance-bearing candidates. Every summary is valid and review-eligible and records clean source commit `318cd842efe3b90cbf56a109797d2bed4ad3dc09`. The complete create-once attempts remain available by local handoff; no public artifact URL is claimed. |
+| Verification limits | The committed summaries do not substitute for same-revision hosted CI, independent reproduction, or representative desktop and narrow browser inspection. Those gates remain recorded in the release ledger. |
 | External decision | The component license, MovieLens-100K policy, public result wording, project name, and any MLCommons relationship require decisions outside this repository. |
 
 The executable release ledger is [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
@@ -113,16 +114,22 @@ acceptance statistic.
 
 | **Workload** | **Dataset** | **Required `max` Metric** | **Target** | **Release-Evidence State** |
 |:---|:---|:---|---:|:---|
-| `nanogpt-train` | Project Gutenberg TinyShakespeare recipe | cross-entropy loss | `<= 2.30` | Seeds 0-4 reached `1.9816`-`2.1345`, median `2.0878`; clean final-revision packet pending. |
-| `micro-dlrm-train` | MovieLens-100K | best validation accuracy | `>= 0.70` | Five-seed calibration is recorded; clean packet and MovieLens policy decision pending. |
-| `anomaly-ae-train` | MNIST | anomaly AUROC | `>= 0.95` | Five-seed full-test development calibration is recorded; clean packet pending. |
-| `resnet18-train` | Fashion-MNIST | top-1 accuracy | `>= 0.85` | Five-seed full-test development calibration is recorded; clean packet pending. |
-| `mobilenetv2-train` | Fashion-MNIST | top-1 accuracy | `>= 0.78` | Five-seed full-test development calibration is recorded; clean packet pending. |
+| `nanogpt-train` | Project Gutenberg TinyShakespeare recipe | cross-entropy loss | `<= 2.30` | Committed summary from `318cd842`; seeds 0-4 reached `1.9997`-`2.1939`, median `2.0568`; passed. |
+| `micro-dlrm-train` | MovieLens-100K | best validation accuracy | `>= 0.70` | Committed summary from `318cd842`; seeds 0-4 reached `0.7019`-`0.7094`, median `0.7041`; passed. Raw evidence stays local while MovieLens policy is unresolved. |
+| `anomaly-ae-train` | MNIST | anomaly AUROC | `>= 0.95` | Committed summary from `318cd842`; seeds 0-4 reached `0.9645`-`0.9701`, median `0.9666`; passed. |
+| `resnet18-train` | Fashion-MNIST | top-1 accuracy | `>= 0.85` | Committed summary from `318cd842`; seeds 0-4 reached `0.8630`-`0.8781`, median `0.8750`; passed. |
+| `mobilenetv2-train` | Fashion-MNIST | top-1 accuracy | `>= 0.78` | Committed summary from `318cd842`; seeds 0-4 reached `0.7970`-`0.8238`, median `0.8089`; passed. |
 
 The anomaly row grades discrimination across labeled normal and anomalous
 examples. Reconstruction MSE remains diagnostic and is not the public target.
 The target rationale and rerun rules live in
 [QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md).
+
+The exact evidence IDs, full SHA-256 digests, and aggregates are indexed in
+`reference_results/index.json`. The compact summaries are committed review
+records. Their raw reports, manifests, checkpoints, and timing samples remain
+local-handoff artifacts until a reviewer-facing publication location is
+approved and populated.
 
 ## Candidate Inference Methodology
 
@@ -137,10 +144,13 @@ below describes the repeated measurements inside each execution.
 | `nanogpt-inference --variant decode` | The same checkpoint lineage must complete 64 decode steps with positive throughput. | One discarded warmup and five synchronized measured requests; TTFT and inter-token median, p90, and p99 latency. |
 | `smollm2-chat-inference --variant baseline` | Pinned SmolLM2 revision, at least eight generated tokens, and continuation perplexity `<= 10` on the bundled four-case suite. | One warmup and five measured requests; separate prefill and generation median, p90, and p99 latency. |
 
-The SLM development calibration completed five outer executions. All five
-passed the token and perplexity gates; output throughput had a median of
-`74.04` tokens/s and a range of `73.67`-`87.12` tokens/s on the recorded MPS
-host. A clean-commit public-candidate packet is still required.
+The three committed performance summaries come from clean source commit
+`318cd842`. NanoGPT prefill reached a median `117797.22` tokens/s across five
+outer executions, and decode reached a median `175.8925` tokens/s. Both retain
+the same verified training package and checkpoint lineage. The SLM candidate
+passed the token and perplexity gates in all five outer executions; output
+throughput had a median `127.9239` tokens/s and a range of
+`90.8442`-`137.2689` tokens/s on the recorded MPS host.
 
 The dynamic-int8 SLM variant is systems-only. Its current calibration completes
 generation but fails the quality-parity gate, so its latency is not eligible as
@@ -191,7 +201,9 @@ The full workflow has a five-hour CI timeout and uploads its artifacts. A dry
 run shows selection only and never counts as benchmark evidence. The live site
 workflow requires both recent development validation and recent full benchmark
 validation before a manual publish. Workflow presence does not mean either
-workflow has passed or deployed for the current revision.
+workflow has passed or deployed for the current revision. No hosted
+same-revision CI result or representative in-app browser inspection is claimed
+by the committed reference summaries.
 
 ## Labs and Tutorial
 
@@ -238,6 +250,7 @@ mlperf-edu/
 ├── tools/                    # Registry, docs, review, and reference-sweep tools
 ├── examples/                 # Three complete classroom labs
 ├── tutorials/                # One implemented notebook and CI smoke
+├── reference_results/         # Committed content-addressed evidence summaries
 ├── review_packets/           # Generated public-candidate review packets
 ├── site/                     # Quarto review site
 ├── paper/                    # Draft companion paper

@@ -30,7 +30,7 @@ mlperf run --workload mobilenetv2-train --profile max
 | Reference runs | 5 |
 | Acceptance rule | median top-1 accuracy must be >= target |
 | Reference protocol | profile=max; backend=pytorch-cpu reference path unless the report declares a different backend; machine_class=laptop-class CPU or laptop-class accelerator with full hardware fingerprint; dataset_mode=fetched Fashion-MNIST with fixed torchvision transforms, eight epochs, 100 training batches per epoch, and the complete 10,000-example test split; no synthetic fallback; seeds=0, 1, 2, 3, 4; aggregation=median top-1 accuracy across five independent reference runs; artifact_policy=preserve JSON, HTML, CSV, .provd.json, run fingerprint, dataset asset metadata, and raw metric values for each run; rerun_policy=rerun all five references when model code, dataset preprocessing, optimizer schedule, PyTorch major version, or target hardware class changes |
-| Baseline record | evidence_status=pending-clean-public-candidate-reference-summary; review_eligible=False; calibration_tier=development; development_summary_id=mobilenetv2-train_max_20260711T044736.880449Z; development_summary_sha256=675621b4c853b9ff250af8d80ae96903336d6d4a5ee9756671e848440e4b0eea; development_summary_availability=local-handoff; seeds=0, 1, 2, 3, 4; top1_accuracy_by_seed=0.8089, 0.8139, 0.797, 0.8238, 0.8008; top1_accuracy=0.8089; accuracy=0.8089; five_seed_accuracy_median=0.8089; five_seed_accuracy_min=0.797; five_seed_accuracy_max=0.8238; five_seed_accuracy_stdev=0.010656312683100081; epochs=8; duration_seconds_median=96.70496737502981; duration_seconds_min=87.97821220802143; duration_seconds_max=107.52852020796854; note=Fresh real-data Apple MPS development calibration across seeds 0-4. The values are not review eligible until a clean committed reference summary indexes every raw artifact in the retained reference package. |
+| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=mobilenetv2-train_max_20260711T062054.539361Z; evidence_file=reference_results/mobilenetv2-train/mobilenetv2-train_max_20260711T062054.539361Z.json; evidence_sha256=9532063b214c92e954531dc2ec4252b6e6c2c86e10a6a6c00ed340b7b2d50c62; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=318cd842efe3b90cbf56a109797d2bed4ad3dc09; profile=max; device_requested=mps; data_mode=real; execution_backend=pytorch-mps; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=top1_accuracy; metric_values_by_seed=0.8089, 0.8139, 0.797, 0.8238, 0.8008; top1_accuracy=0.8089; median=0.8089; min=0.797; max=0.8238; mean=0.8088799999999999; sample_stdev=0.010656312683100081; wall_seconds_median=40.44746512500569; wall_seconds_min=38.940279499976896; wall_seconds_max=41.26678062498104; wall_seconds_mean=40.3596491002012; wall_seconds_sample_stdev=0.9089845594524596; accepted_runs=5; baseline_note=Clean five-seed project reference from exact source commit 318cd842. Every run passed. Throughput and time fields are machine observations, not portable targets. The raw package is retained for local reviewer handoff but has no public URL. This is not an MLCommons-verified result. |
 
 ## Measurement and Evidence Contract
 
@@ -40,11 +40,12 @@ mlperf run --workload mobilenetv2-train --profile max
 | Measurement protocol |  |
 | Checkpoint contract |  |
 | Task-quality evaluation |  |
-| Baseline evidence status | pending-clean-public-candidate-reference-summary |
-| Baseline review eligible | False |
-| Baseline evidence file | not declared |
-| Reference package availability | not declared |
-| External publication status | not declared |
+| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=mobilenetv2-train_max_20260711T062054.539361Z; evidence_file=reference_results/mobilenetv2-train/mobilenetv2-train_max_20260711T062054.539361Z.json; evidence_sha256=9532063b214c92e954531dc2ec4252b6e6c2c86e10a6a6c00ed340b7b2d50c62; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=318cd842efe3b90cbf56a109797d2bed4ad3dc09; profile=max; device_requested=mps; data_mode=real; execution_backend=pytorch-mps; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=top1_accuracy; metric_values_by_seed=0.8089, 0.8139, 0.797, 0.8238, 0.8008; top1_accuracy=0.8089; median=0.8089; min=0.797; max=0.8238; mean=0.8088799999999999; sample_stdev=0.010656312683100081; wall_seconds_median=40.44746512500569; wall_seconds_min=38.940279499976896; wall_seconds_max=41.26678062498104; wall_seconds_mean=40.3596491002012; wall_seconds_sample_stdev=0.9089845594524596; accepted_runs=5; baseline_note=Clean five-seed project reference from exact source commit 318cd842. Every run passed. Throughput and time fields are machine observations, not portable targets. The raw package is retained for local reviewer handoff but has no public URL. This is not an MLCommons-verified result. |
+| Baseline evidence status | committed-reference-summary |
+| Baseline review eligible | True |
+| Baseline evidence file | reference_results/mobilenetv2-train/mobilenetv2-train_max_20260711T062054.539361Z.json |
+| Reference package availability | local-handoff |
+| External publication status | pending |
 | External publication URL | not declared |
 | Calibration observation |  |
 
@@ -73,7 +74,7 @@ mlperf run --workload mobilenetv2-train --profile max
 
 ## Public Review Notes
 
-- score-bearing baseline is not backed by a committed reference summary; evidence status is pending-clean-public-candidate-reference-summary
+- external-publication blocker: reference evidence package is retained for local handoff but is not yet publicly retrievable
 
 ## Source Provenance
 

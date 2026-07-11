@@ -30,7 +30,7 @@ mlperf run --workload anomaly-ae-train --profile max
 | Reference runs | 5 |
 | Acceptance rule | median anomaly AUROC must be >= target |
 | Reference protocol | profile=max; backend=pytorch-cpu reference path unless the report declares a different backend; machine_class=laptop-class CPU or laptop-class accelerator with full hardware fingerprint; dataset_mode=fetched MNIST with fixed normal/anomaly digit split, preprocessing, and seed; no synthetic fallback; seeds=0, 1, 2, 3, 4; aggregation=median anomaly AUROC across five independent reference runs; artifact_policy=preserve JSON, HTML, CSV, .provd.json, run fingerprint, dataset asset metadata, and raw metric values for each run; rerun_policy=rerun all five references when model code, dataset preprocessing, optimizer schedule, PyTorch major version, or target hardware class changes |
-| Baseline record | evidence_status=pending-clean-public-candidate-reference-summary; review_eligible=False; calibration_tier=development; development_summary_id=anomaly-ae-train_max_20260711T044139.487599Z; development_summary_sha256=4c82157b2fff4e91505cf0e3eaa8d23e8db946e85e098b09bdd303001a40e2f2; development_summary_availability=local-handoff; seeds=0, 1, 2, 3, 4; anomaly_auroc_by_seed=0.9666612742658038, 0.9701133535454093, 0.9665642110502738, 0.9645168333408751, 0.9658918955608851; anomaly_auroc=0.9665642110502738; five_seed_anomaly_auroc_median=0.9665642110502738; five_seed_anomaly_auroc_min=0.9645168333408751; five_seed_anomaly_auroc_max=0.9701133535454093; five_seed_anomaly_auroc_stdev=0.0020662715355119; duration_seconds_median=6.911759666982107; duration_seconds_min=6.631815499975346; duration_seconds_max=7.671591209014878; note=Fresh real-data CPU development calibration across seeds 0-4. The values are not review eligible until a clean public-candidate sweep commits a complete artifact index and retains its content-addressed raw package for review. |
+| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=anomaly-ae-train_max_20260711T061301.162532Z; evidence_file=reference_results/anomaly-ae-train/anomaly-ae-train_max_20260711T061301.162532Z.json; evidence_sha256=634b6dd63a22e3013a13210e114daeec68b9266ae78fd01a43c7e670690783e9; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=318cd842efe3b90cbf56a109797d2bed4ad3dc09; profile=max; device_requested=cpu; data_mode=real; execution_backend=pytorch-cpu; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=anomaly_auroc; metric_values_by_seed=0.9666612742658038, 0.9701133535454093, 0.9665642110502738, 0.9645168333408751, 0.9658918955608851; anomaly_auroc=0.9665642110502738; median=0.9665642110502738; min=0.9645168333408751; max=0.9701133535454093; mean=0.9667495135526494; sample_stdev=0.0020662715355119; wall_seconds_median=4.573835415998474; wall_seconds_min=4.530495124985464; wall_seconds_max=4.715450500021689; wall_seconds_mean=4.608597349771299; wall_seconds_sample_stdev=0.07633000623238935; accepted_runs=5; baseline_note=Clean five-seed project reference from exact source commit 318cd842. Every run passed. The content-addressed raw package is retained for local reviewer handoff but does not yet have a public URL. This is not an MLCommons-verified result. |
 
 ## Measurement and Evidence Contract
 
@@ -40,11 +40,12 @@ mlperf run --workload anomaly-ae-train --profile max
 | Measurement protocol |  |
 | Checkpoint contract |  |
 | Task-quality evaluation |  |
-| Baseline evidence status | pending-clean-public-candidate-reference-summary |
-| Baseline review eligible | False |
-| Baseline evidence file | not declared |
-| Reference package availability | not declared |
-| External publication status | not declared |
+| Baseline record | evidence_status=committed-reference-summary; review_eligible=True; evidence_tier=public-candidate; evidence_id=anomaly-ae-train_max_20260711T061301.162532Z; evidence_file=reference_results/anomaly-ae-train/anomaly-ae-train_max_20260711T061301.162532Z.json; evidence_sha256=634b6dd63a22e3013a13210e114daeec68b9266ae78fd01a43c7e670690783e9; reference_package_availability=local-handoff; external_publication_status=pending; source_git_sha=318cd842efe3b90cbf56a109797d2bed4ad3dc09; profile=max; device_requested=cpu; data_mode=real; execution_backend=pytorch-cpu; hardware_chip=Apple M5 Max; seeds=0, 1, 2, 3, 4; primary_metric=anomaly_auroc; metric_values_by_seed=0.9666612742658038, 0.9701133535454093, 0.9665642110502738, 0.9645168333408751, 0.9658918955608851; anomaly_auroc=0.9665642110502738; median=0.9665642110502738; min=0.9645168333408751; max=0.9701133535454093; mean=0.9667495135526494; sample_stdev=0.0020662715355119; wall_seconds_median=4.573835415998474; wall_seconds_min=4.530495124985464; wall_seconds_max=4.715450500021689; wall_seconds_mean=4.608597349771299; wall_seconds_sample_stdev=0.07633000623238935; accepted_runs=5; baseline_note=Clean five-seed project reference from exact source commit 318cd842. Every run passed. The content-addressed raw package is retained for local reviewer handoff but does not yet have a public URL. This is not an MLCommons-verified result. |
+| Baseline evidence status | committed-reference-summary |
+| Baseline review eligible | True |
+| Baseline evidence file | reference_results/anomaly-ae-train/anomaly-ae-train_max_20260711T061301.162532Z.json |
+| Reference package availability | local-handoff |
+| External publication status | pending |
 | External publication URL | not declared |
 | Calibration observation |  |
 
@@ -73,7 +74,7 @@ mlperf run --workload anomaly-ae-train --profile max
 
 ## Public Review Notes
 
-- score-bearing baseline is not backed by a committed reference summary; evidence status is pending-clean-public-candidate-reference-summary
+- external-publication blocker: reference evidence package is retained for local handoff but is not yet publicly retrievable
 
 ## Source Provenance
 

@@ -4959,6 +4959,20 @@ def public_audit_warnings(workload: Workload) -> list[str]:
         if dataset_warning:
             warnings.append(dataset_warning)
 
+    baseline = workload.raw.get("verified_baseline") or {}
+    if baseline.get("evidence_status") == "committed-reference-summary":
+        availability = baseline.get("reference_package_availability")
+        publication = baseline.get("external_publication_status")
+        if availability != "published" or publication != "published":
+            warnings.append(
+                "external-publication blocker: registry declares local-handoff "
+                "reference evidence, but no published package URL is recorded"
+            )
+        elif not baseline.get("external_publication_url"):
+            warnings.append(
+                "published reference evidence package lacks an external publication URL"
+            )
+
     model_source = workload.raw.get("model_source")
     if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
         dossier = huggingface_model_dossier(model_source, model_name=workload.model)

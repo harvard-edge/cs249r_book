@@ -639,6 +639,22 @@ def public_contract_issues(workload: Workload) -> list[str]:
         if profile not in runner:
             issues.append(f"missing {profile} runner")
 
+    if workload.public_status in {"score-bearing", "performance-bearing"}:
+        baseline = workload.raw.get("verified_baseline")
+        if not isinstance(baseline, dict):
+            issues.append(
+                f"{workload.public_status} workload must declare verified_baseline"
+            )
+        else:
+            if baseline.get("evidence_status") != "committed-reference-summary":
+                issues.append(
+                    f"{workload.public_status} verified_baseline must cite a committed reference summary"
+                )
+            if baseline.get("review_eligible") is not True:
+                issues.append(
+                    f"{workload.public_status} verified_baseline must be review eligible"
+                )
+
     if workload.public_status == "score-bearing":
         if not workload.dataset:
             issues.append("score-bearing workload must declare a dataset")
@@ -650,8 +666,6 @@ def public_contract_issues(workload: Workload) -> list[str]:
             issues.append("score-bearing workload must declare quality_target.metric")
         if workload.quality_value is None:
             issues.append("score-bearing workload must declare quality_target.value")
-        if not isinstance(workload.raw.get("verified_baseline"), dict):
-            issues.append("score-bearing workload must declare verified_baseline")
         if workload.quality_direction not in {"higher", "lower"}:
             issues.append(
                 "score-bearing workload must declare quality_target.direction as higher or lower"

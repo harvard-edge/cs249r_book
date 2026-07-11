@@ -31,9 +31,10 @@ def main() -> int:
     required = [
         "REVIEW DRAFT",
         "not an official MLCommons benchmark",
-        "Development calibration",
+        "Committed Reference Evidence",
+        "local reviewer handoff",
         "unauthenticated integrity",
-        "clean-commit",
+        "cross-platform replication",
     ]
     for phrase in required:
         if phrase not in full_text:
@@ -42,6 +43,15 @@ def main() -> int:
     for pattern in forbidden:
         if re.search(pattern, full_text, flags=re.IGNORECASE):
             raise SystemExit(f"placeholder found in PDF: {pattern}")
+    stale_evidence_claims = [
+        "development-tier five-seed calibrations",
+        "clean-commit timing bundles",
+        "five-seed bundles do not yet exist",
+        "The next milestone is evidence closure",
+    ]
+    for phrase in stale_evidence_claims:
+        if phrase.lower() in full_text.lower():
+            raise SystemExit(f"stale evidence claim found in PDF: {phrase!r}")
 
     source = paper_path.read_text()
     bib = bib_path.read_text()

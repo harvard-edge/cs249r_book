@@ -33,10 +33,16 @@ import hashlib
 import json
 import math
 import re
+import statistics
 import sys
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 import yaml
+
+try:
+    from tools import reference_source_lock
+except ModuleNotFoundError:  # Direct `python tools/check_taxonomy.py` execution.
+    import reference_source_lock  # type: ignore[no-redef]
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 WORKLOADS_YAML = REPO_ROOT / "workloads.yaml"
@@ -58,7 +64,17 @@ VALID_VALUES = {
 
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 PREFIXED_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
-REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.2"
+EVIDENCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
+CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x1f\x7f]")
+REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.3"
+REFERENCE_INDEX_SCHEMA = "mlperf-edu-reference-index/0.2"
+EMPTY_SHA256 = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+SWEEP_TOOL_SHA256 = (
+    "sha256:"
+    + hashlib.sha256(
+        (REPO_ROOT / "tools" / "run_reference_sweep.py").read_bytes()
+    ).hexdigest()
+)
 MEASUREMENT_FIELDS = {
     "peak_bytes_per_step",
     "flops_per_byte",
@@ -69,6 +85,55 @@ MEASUREMENT_FIELDS = {
     "measured_at",
     "platform_machine_class",
 }
+
+
+def numbers_match(actual: object, expected: object) -> bool:
+    """Compare serialized benchmark numbers without hiding meaningful drift."""
+    if isinstance(actual, bool) or isinstance(expected, bool):
+        return actual == expected
+    if isinstance(actual, (int, float)) and isinstance(expected, (int, float)):
+        return math.isclose(
+            float(actual), float(expected), rel_tol=1e-12, abs_tol=1e-12
+        )
+    return actual == expected
+
+
+def list_values_match(actual: object, expected: object) -> bool:
+    if not isinstance(actual, list) or not isinstance(expected, list):
+        return False
+    return len(actual) == len(expected) and all(
+        numbers_match(left, right) for left, right in zip(actual, expected, strict=True)
+    )
+
+
+def is_safe_posix_relative_path(value: object) -> bool:
+    """Return whether *value* is a portable, strict POSIX relative path."""
+    if (
+        not isinstance(value, str)
+        or not value
+        or "\\" in value
+        or CONTROL_CHARACTER_RE.search(value)
+    ):
+        return False
+    path = PurePosixPath(value)
+    return (
+        not path.is_absolute()
+        and path.as_posix() == value
+        and all(part not in {"", ".", ".."} for part in path.parts)
+        and ":" not in path.parts[0]
+    )
+
+
+def recompute_aggregate(values: list[float]) -> dict[str, int | float]:
+    clean = [float(value) for value in values]
+    return {
+        "count": len(clean),
+        "median": statistics.median(clean),
+        "mean": statistics.fmean(clean),
+        "min": min(clean),
+        "max": max(clean),
+        "stdev": statistics.stdev(clean) if len(clean) > 1 else 0.0,
+    }
 
 
 def check_regime(name: str, regime: dict) -> tuple[list[str], dict]:
@@ -307,6 +372,14 @@ def check_workload_evidence(name: str, body: dict) -> list[str]:
         )
 
     baseline = body.get("verified_baseline") or {}
+    public_status = (body.get("public") or {}).get("status")
+    if (
+        public_status in {"score-bearing", "performance-bearing"}
+        and baseline.get("evidence_status") != "committed-reference-summary"
+    ):
+        errors.append(
+            f"{name}: {public_status} workload must cite a committed-reference-summary"
+        )
     development_digest = baseline.get("development_summary_sha256")
     if development_digest is not None:
         if not SHA256_RE.fullmatch(str(development_digest)):
@@ -387,6 +460,9 @@ def check_performance_reference_protocol(name: str, body: dict) -> list[str]:
         "dataset_mode",
         "seeds",
         "aggregation",
+        "repeatability_metric",
+        "repeatability_limit",
+        "repeatability_action",
         "functional_acceptance",
         "artifact_policy",
         "rerun_policy",
@@ -408,6 +484,15 @@ def check_performance_reference_protocol(name: str, body: dict) -> list[str]:
         errors.append(
             f"{name}: performance_reference_protocol seeds contain duplicates"
         )
+    repeatability_limit = protocol.get("repeatability_limit")
+    if (
+        isinstance(repeatability_limit, bool)
+        or not isinstance(repeatability_limit, (int, float))
+        or not 0 < float(repeatability_limit) < 1
+    ):
+        errors.append(
+            f"{name}: performance_reference_protocol.repeatability_limit must be between 0 and 1"
+        )
     primary_metric = (body.get("measurement_protocol") or {}).get("primary_metric")
     if not primary_metric:
         errors.append(f"{name}: measurement_protocol.primary_metric is missing")
@@ -419,6 +504,467 @@ def check_performance_reference_protocol(name: str, body: dict) -> list[str]:
         errors.append(
             f"{name}: functional_check.reference_runs is ambiguous; declare performance_reference_protocol.reference_runs"
         )
+    return errors
+
+
+def check_summary_aggregate_integrity(
+    name: str, payload: dict, runs: list[dict]
+) -> list[str]:
+    """Recompute the summary statistics from the indexed per-seed values."""
+    errors: list[str] = []
+    aggregate = payload.get("aggregate")
+    if not isinstance(aggregate, dict):
+        return [f"{name}: reference summary aggregate is missing or not an object"]
+
+    for series_name, run_field in (
+        ("quality", "quality_value"),
+        ("wall_seconds", "wall_seconds"),
+    ):
+        values: list[float] = []
+        for index, run in enumerate(runs):
+            value = run.get(run_field)
+            if (
+                isinstance(value, bool)
+                or not isinstance(value, (int, float))
+                or not math.isfinite(float(value))
+            ):
+                errors.append(
+                    f"{name}: reference summary run {index} has invalid {run_field}"
+                )
+            else:
+                values.append(float(value))
+        if len(values) != len(runs):
+            continue
+        declared = aggregate.get(series_name)
+        if not isinstance(declared, dict):
+            errors.append(
+                f"{name}: reference summary aggregate.{series_name} is missing or not an object"
+            )
+            continue
+        computed = recompute_aggregate(values)
+        for field, expected in computed.items():
+            if not numbers_match(declared.get(field), expected):
+                errors.append(
+                    f"{name}: reference summary aggregate.{series_name}.{field} "
+                    f"is {declared.get(field)!r}, recomputed value is {expected!r}"
+                )
+    return errors
+
+
+def check_summary_acceptance(
+    name: str, body: dict, payload: dict, runs: list[dict]
+) -> list[str]:
+    """Bind the summary's acceptance claim to the registry and raw run values."""
+    errors: list[str] = []
+    acceptance = payload.get("acceptance") or {}
+    values = [run.get("quality_value") for run in runs]
+    if any(
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+        for value in values
+    ):
+        return [f"{name}: reference summary acceptance has invalid run values"]
+    median = statistics.median(float(value) for value in values)
+    public_status = (body.get("public") or {}).get("status")
+    if public_status == "score-bearing":
+        target = body.get("quality_target") or {}
+        direction = target.get("direction")
+        target_value = target.get("value")
+        tolerance = float(target.get("tolerance") or 0.0)
+        expected_operator = "<=" if direction == "lower" else ">="
+        expected = {
+            "statistic": "median",
+            "operator": expected_operator,
+            "target": target_value,
+            "value": median,
+        }
+        if payload.get("reference_metric_role") != "quality":
+            errors.append(
+                f"{name}: score summary reference_metric_role must be quality"
+            )
+        if payload.get("quality_metric") != target.get("metric"):
+            errors.append(
+                f"{name}: score summary quality_metric does not match registry"
+            )
+        if payload.get("quality_direction") != target.get("direction"):
+            errors.append(
+                f"{name}: score summary quality_direction does not match registry"
+            )
+        if not numbers_match(payload.get("quality_target"), target.get("value")):
+            errors.append(
+                f"{name}: score summary quality_target does not match registry"
+            )
+        if payload.get("repeatability") is not None:
+            errors.append(f"{name}: score summary repeatability must be null")
+        if payload.get("functional_gate") is not None:
+            errors.append(f"{name}: score summary functional_gate must be null")
+        if isinstance(target_value, (int, float)):
+            for index, value in enumerate(values):
+                numeric = float(value)
+                passed = (
+                    numeric - tolerance <= float(target_value)
+                    if direction == "lower"
+                    else numeric + tolerance >= float(target_value)
+                )
+                if not passed:
+                    errors.append(
+                        f"{name}: reference summary run {index} does not satisfy the registry quality target"
+                    )
+    elif public_status == "performance-bearing":
+        expected = {
+            "statistic": "all_runs",
+            "operator": "==",
+            "target": len(runs),
+            "value": len(runs),
+            "condition": (body.get("functional_check") or {}).get("condition"),
+        }
+        if payload.get("reference_metric_role") != "performance":
+            errors.append(
+                f"{name}: performance summary reference_metric_role must be performance"
+            )
+        if payload.get("quality_metric") != (
+            body.get("measurement_protocol") or {}
+        ).get("primary_metric"):
+            errors.append(
+                f"{name}: performance summary metric does not match measurement protocol"
+            )
+        if payload.get("quality_target") is not None:
+            errors.append(
+                f"{name}: performance summary quality_target must be null; use functional_gate"
+            )
+        basis = payload.get("basis") or {}
+        if basis.get("quality_target") is not None:
+            errors.append(
+                f"{name}: performance summary basis.quality_target must be null"
+            )
+        functional = basis.get("functional_check") or {}
+        registry_functional = body.get("functional_check") or {}
+        if functional.get("metric") != registry_functional.get("metric"):
+            errors.append(
+                f"{name}: performance summary functional metric does not match registry"
+            )
+        if functional.get("condition") != registry_functional.get("condition"):
+            errors.append(
+                f"{name}: performance summary functional condition does not match registry"
+            )
+        if payload.get("functional_gate") != functional:
+            errors.append(
+                f"{name}: performance summary functional_gate does not match its basis"
+            )
+        grade_targets = {
+            json.dumps((run.get("grade") or {}).get("target"), sort_keys=True)
+            for run in runs
+        }
+        if len(grade_targets) != 1 or functional.get("target") != json.loads(
+            next(iter(grade_targets), "null")
+        ):
+            errors.append(
+                f"{name}: performance summary functional target does not match raw grades"
+            )
+        for index, value in enumerate(values):
+            if float(value) <= 0:
+                errors.append(
+                    f"{name}: performance summary run {index} has non-positive primary metric"
+                )
+        repeatability = payload.get("repeatability") or {}
+        aggregate = (payload.get("aggregate") or {}).get("primary_metric") or {}
+        mean = aggregate.get("mean")
+        stdev = aggregate.get("stdev")
+        limit = (body.get("performance_reference_protocol") or {}).get(
+            "repeatability_limit"
+        )
+        computed = (
+            float(stdev) / float(mean)
+            if isinstance(mean, (int, float))
+            and not isinstance(mean, bool)
+            and float(mean) > 0
+            and isinstance(stdev, (int, float))
+            and not isinstance(stdev, bool)
+            else None
+        )
+        expected_repeatability = {
+            "metric": (body.get("performance_reference_protocol") or {}).get(
+                "repeatability_metric"
+            ),
+            "coefficient_of_variation": computed,
+            "limit": limit,
+            "passed": computed is not None
+            and isinstance(limit, (int, float))
+            and computed <= float(limit),
+        }
+        if repeatability != expected_repeatability:
+            errors.append(
+                f"{name}: performance summary repeatability does not match recomputed values"
+            )
+    else:
+        return errors
+
+    for field, expected_value in expected.items():
+        actual = acceptance.get(field)
+        if not numbers_match(actual, expected_value):
+            errors.append(
+                f"{name}: reference summary acceptance.{field} is {actual!r}, "
+                f"expected {expected_value!r}"
+            )
+    return errors
+
+
+def check_nanogpt_lineage(name: str, baseline: dict, payload: dict) -> list[str]:
+    """Verify the portable training-to-inference lineage recorded by NanoGPT."""
+    errors: list[str] = []
+    lineage = payload.get("nanogpt_training_lineage")
+    if not isinstance(lineage, dict):
+        return [f"{name}: checkpoint-backed NanoGPT summary lacks training lineage"]
+    expected = {
+        "required": True,
+        "status": "staged",
+        "package_schema": "mlperf-edu-package/0.2",
+        "source_workload": "nanogpt-train",
+    }
+    for field, value in expected.items():
+        if lineage.get(field) != value:
+            errors.append(
+                f"{name}: NanoGPT lineage {field} is {lineage.get(field)!r}, expected {value!r}"
+            )
+    package_digest = str(lineage.get("package_sha256") or "")
+    if not PREFIXED_SHA256_RE.fullmatch(package_digest):
+        errors.append(f"{name}: NanoGPT lineage package_sha256 is missing or invalid")
+    elif baseline and baseline.get(
+        "source_training_package_sha256"
+    ) != package_digest.removeprefix("sha256:"):
+        errors.append(
+            f"{name}: verified_baseline.source_training_package_sha256 does not match NanoGPT lineage"
+        )
+
+    role_paths = {
+        "checkpoint": "source_training_checkpoint",
+        "source_training_provenance": "source_training_manifest",
+        "source_training_report": "source_training_report",
+    }
+    for role, lineage_field in role_paths.items():
+        expected_path = lineage.get(lineage_field)
+        if not is_safe_posix_relative_path(expected_path):
+            errors.append(
+                f"{name}: NanoGPT lineage {lineage_field} is not a safe relative path"
+            )
+            continue
+        indexed: list[dict] = []
+        for run_index, run in enumerate(payload.get("runs") or []):
+            matches = [
+                artifact
+                for artifact in run.get("artifacts") or []
+                if isinstance(artifact, dict) and artifact.get("role") == role
+            ]
+            if len(matches) != 1:
+                errors.append(
+                    f"{name}: reference summary run {run_index} must index exactly one {role} artifact"
+                )
+            else:
+                indexed.append(matches[0])
+        if len(indexed) != len(payload.get("runs") or []):
+            continue
+        if {artifact.get("path") for artifact in indexed} != {expected_path}:
+            errors.append(
+                f"{name}: {role} artifact paths do not match NanoGPT lineage {lineage_field}"
+            )
+        digests = {artifact.get("sha256") for artifact in indexed}
+        if len(digests) != 1 or not PREFIXED_SHA256_RE.fullmatch(
+            str(next(iter(digests), ""))
+        ):
+            errors.append(
+                f"{name}: {role} artifact digest is missing or differs across seeds"
+            )
+        elif role == "checkpoint" and baseline:
+            checkpoint_digest = str(next(iter(digests))).removeprefix("sha256:")
+            if baseline.get("source_training_checkpoint_sha256") != checkpoint_digest:
+                errors.append(
+                    f"{name}: verified_baseline.source_training_checkpoint_sha256 "
+                    "does not match NanoGPT lineage"
+                )
+    return errors
+
+
+def check_reference_payload_roles(name: str, body: dict, payload: dict) -> list[str]:
+    """Validate workload-specific payload roles independently of a baseline row."""
+    errors: list[str] = []
+    baseline = body.get("verified_baseline") or {}
+    if body.get("shared_checkpoint") == "nanogpt-train":
+        errors.extend(check_nanogpt_lineage(name, baseline, payload))
+    if payload.get("workload") == "slm-decode":
+        for index, run in enumerate(payload.get("runs") or []):
+            roles = {
+                artifact.get("role")
+                for artifact in run.get("artifacts") or []
+                if isinstance(artifact, dict)
+            }
+            if "model_metadata" not in roles:
+                errors.append(
+                    f"{name}: reference summary run {index} lacks model_metadata"
+                )
+    return errors
+
+
+def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> list[str]:
+    """Bind every displayed baseline field to its committed evidence summary."""
+    errors: list[str] = []
+    baseline = body.get("verified_baseline") or {}
+    runs = payload.get("runs") or []
+    quality_values = [run.get("quality_value") for run in runs]
+    quality_aggregate = (payload.get("aggregate") or {}).get("quality") or {}
+    wall_aggregate = (payload.get("aggregate") or {}).get("wall_seconds") or {}
+    source = payload.get("source") or {}
+
+    expected_fields = {
+        "evidence_id": payload.get("evidence_id"),
+        "evidence_tier": payload.get("evidence_tier"),
+        "source_git_sha": source.get("git_sha"),
+        "profile": payload.get("profile"),
+        "device_requested": payload.get("device_requested"),
+        "primary_metric": payload.get("quality_metric"),
+        "accepted_runs": len(runs),
+    }
+    for field, expected in expected_fields.items():
+        if not numbers_match(baseline.get(field), expected):
+            errors.append(
+                f"{name}: verified_baseline.{field} is {baseline.get(field)!r}, "
+                f"reference summary value is {expected!r}"
+            )
+
+    expected_lists = {
+        "seeds": payload.get("seeds_requested"),
+        "metric_values_by_seed": quality_values,
+    }
+    for field, expected in expected_lists.items():
+        if not list_values_match(baseline.get(field), expected):
+            errors.append(
+                f"{name}: verified_baseline.{field} does not match the reference summary"
+            )
+
+    for run_field, baseline_field in (
+        ("backend", "execution_backend"),
+        ("chip", "hardware_chip"),
+        ("data_mode", "data_mode"),
+    ):
+        observed = [run.get(run_field) for run in runs]
+        if any(not isinstance(value, str) or not value for value in observed):
+            errors.append(
+                f"{name}: reference summary has a missing or invalid {run_field}"
+            )
+            continue
+        unique = set(observed)
+        if len(unique) != 1:
+            errors.append(
+                f"{name}: reference summary does not have one stable {run_field} across seeds"
+            )
+        else:
+            expected = next(iter(unique))
+            if baseline.get(baseline_field) != expected:
+                errors.append(
+                    f"{name}: verified_baseline.{baseline_field} is "
+                    f"{baseline.get(baseline_field)!r}, reference summary value is {expected!r}"
+                )
+
+    metric = payload.get("quality_metric")
+    if not isinstance(metric, str) or not metric:
+        errors.append(f"{name}: reference summary quality_metric is missing")
+    elif not numbers_match(baseline.get(metric), quality_aggregate.get("median")):
+        errors.append(
+            f"{name}: verified_baseline.{metric} does not match the committed median"
+        )
+
+    aggregate_fields = {
+        "median": quality_aggregate.get("median"),
+        "min": quality_aggregate.get("min"),
+        "max": quality_aggregate.get("max"),
+        "mean": quality_aggregate.get("mean"),
+        "sample_stdev": quality_aggregate.get("stdev"),
+        "wall_seconds_median": wall_aggregate.get("median"),
+        "wall_seconds_min": wall_aggregate.get("min"),
+        "wall_seconds_max": wall_aggregate.get("max"),
+        "wall_seconds_mean": wall_aggregate.get("mean"),
+        "wall_seconds_sample_stdev": wall_aggregate.get("stdev"),
+    }
+    for field, expected in aggregate_fields.items():
+        if not numbers_match(baseline.get(field), expected):
+            errors.append(
+                f"{name}: verified_baseline.{field} does not match the reference summary"
+            )
+
+    public_status = (body.get("public") or {}).get("status")
+    if public_status == "score-bearing":
+        if payload.get("reference_metric_role") != "quality":
+            errors.append(
+                f"{name}: score-bearing reference summary metric role must be quality"
+            )
+        quality_target = body.get("quality_target") or {}
+        if payload.get("quality_metric") != quality_target.get("metric"):
+            errors.append(
+                f"{name}: reference summary metric does not match quality_target.metric"
+            )
+        if not numbers_match(
+            payload.get("quality_target"), quality_target.get("value")
+        ):
+            errors.append(
+                f"{name}: reference summary target does not match quality_target.value"
+            )
+        if payload.get("quality_direction") != quality_target.get("direction"):
+            errors.append(
+                f"{name}: reference summary direction does not match quality_target.direction"
+            )
+        variance = quality_target.get("variance_summary") or {}
+        variance_fields = {
+            "runs": len(runs),
+            "median": quality_aggregate.get("median"),
+            "min": quality_aggregate.get("min"),
+            "max": quality_aggregate.get("max"),
+            "mean": quality_aggregate.get("mean"),
+            "sample_stdev": quality_aggregate.get("stdev"),
+        }
+        for field, expected in variance_fields.items():
+            if not numbers_match(variance.get(field), expected):
+                errors.append(
+                    f"{name}: quality_target.variance_summary.{field} does not match committed evidence"
+                )
+    elif public_status == "performance-bearing":
+        if payload.get("reference_metric_role") != "performance":
+            errors.append(
+                f"{name}: performance-bearing reference summary metric role must be performance"
+            )
+        primary_metric = (body.get("measurement_protocol") or {}).get("primary_metric")
+        if payload.get("quality_metric") != primary_metric:
+            errors.append(
+                f"{name}: reference summary metric does not match measurement_protocol.primary_metric"
+            )
+        if baseline.get("functional_passes") != len(runs):
+            errors.append(
+                f"{name}: verified_baseline.functional_passes must equal the accepted run count"
+            )
+        mean = quality_aggregate.get("mean")
+        stdev = quality_aggregate.get("stdev")
+        repeatability_limit = (body.get("performance_reference_protocol") or {}).get(
+            "repeatability_limit"
+        )
+        if (
+            isinstance(mean, (int, float))
+            and not isinstance(mean, bool)
+            and float(mean) > 0
+            and isinstance(stdev, (int, float))
+            and not isinstance(stdev, bool)
+            and isinstance(repeatability_limit, (int, float))
+            and not isinstance(repeatability_limit, bool)
+        ):
+            coefficient_of_variation = float(stdev) / float(mean)
+            if coefficient_of_variation > float(repeatability_limit):
+                errors.append(
+                    f"{name}: reference performance coefficient of variation "
+                    f"{coefficient_of_variation:.6f} exceeds repeatability limit "
+                    f"{float(repeatability_limit):.6f}"
+                )
+        else:
+            errors.append(
+                f"{name}: reference performance repeatability cannot be computed"
+            )
     return errors
 
 
@@ -439,6 +985,7 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
     expected_values = {
         "schema": REFERENCE_EVIDENCE_SCHEMA,
         "workload": workload_id,
+        "profile": reference_protocol.get("profile"),
         "status": "valid",
         "eligible_for_public_baseline": True,
         "evidence_tier": "public-candidate",
@@ -449,6 +996,24 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
             errors.append(
                 f"{name}: reference summary {field} is {payload.get(field)!r}, expected {expected!r}"
             )
+    expected_metric_role = (
+        "performance"
+        if (body.get("public") or {}).get("status") == "performance-bearing"
+        else "quality"
+    )
+    expected_primary_metric = {
+        "name": payload.get("quality_metric"),
+        "role": expected_metric_role,
+    }
+    if payload.get("primary_metric") != expected_primary_metric:
+        errors.append(
+            f"{name}: reference summary primary_metric does not match its metric role"
+        )
+    aggregate = payload.get("aggregate") or {}
+    if aggregate.get("primary_metric") != aggregate.get("quality"):
+        errors.append(
+            f"{name}: reference summary aggregate.primary_metric does not match the legacy aggregate.quality mirror"
+        )
     if payload.get("invalid_reasons"):
         errors.append(f"{name}: reference summary contains invalid_reasons")
     if (payload.get("acceptance") or {}).get("passed") is not True:
@@ -458,12 +1023,20 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
         errors.append(
             f"{name}: reference summary was not produced from a clean Git worktree"
         )
-    if not PREFIXED_SHA256_RE.fullmatch(str(source.get("tool_sha256") or "")):
+    for field in ("git_status_sha256", "git_patch_sha256"):
+        if source.get(field) != EMPTY_SHA256:
+            errors.append(
+                f"{name}: reference summary source.{field} does not prove an empty clean-source record"
+            )
+    if source.get("tool_sha256") != SWEEP_TOOL_SHA256:
         errors.append(
-            f"{name}: reference summary source.tool_sha256 is missing or invalid"
+            f"{name}: reference summary source.tool_sha256 does not match the sweep tool"
         )
     if not re.fullmatch(r"[0-9a-f]{40}", str(source.get("git_sha") or "")):
         errors.append(f"{name}: reference summary source.git_sha is missing or invalid")
+    evidence_id = payload.get("evidence_id")
+    if not isinstance(evidence_id, str) or not EVIDENCE_ID_RE.fullmatch(evidence_id):
+        errors.append(f"{name}: reference summary evidence_id is not portable")
 
     runs = payload.get("runs")
     if not isinstance(runs, list) or not runs:
@@ -530,7 +1103,7 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
             n_bytes = artifact.get("n_bytes")
             if not role:
                 errors.append(f"{artifact_label} has no role")
-            if not path or Path(path).is_absolute() or ".." in Path(path).parts:
+            if not is_safe_posix_relative_path(path):
                 errors.append(
                     f"{artifact_label} path is missing, absolute, or escapes its package"
                 )
@@ -555,6 +1128,256 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
             errors.append(f"{label} report_path is not present in the artifact index")
         if run.get("manifest_path") not in paths:
             errors.append(f"{label} manifest_path is not present in the artifact index")
+    dict_runs = [run for run in runs if isinstance(run, dict)]
+    if len(dict_runs) == len(runs):
+        errors.extend(check_summary_aggregate_integrity(name, payload, dict_runs))
+        errors.extend(check_summary_acceptance(name, body, payload, dict_runs))
+        errors.extend(check_reference_payload_roles(name, body, payload))
+    baseline = body.get("verified_baseline") or {}
+    if baseline.get("evidence_status") == "committed-reference-summary" and len(
+        dict_runs
+    ) == len(runs):
+        errors.extend(check_registry_summary_alignment(name, body, payload))
+    return errors
+
+
+def load_committed_summary(body: dict) -> dict | None:
+    baseline = body.get("verified_baseline") or {}
+    if baseline.get("evidence_status") != "committed-reference-summary":
+        return None
+    relative_path = baseline.get("evidence_file")
+    if not relative_path:
+        return None
+    path = (REPO_ROOT / str(relative_path)).resolve()
+    try:
+        path.relative_to(REPO_ROOT.resolve())
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (ValueError, OSError, json.JSONDecodeError):
+        return None
+    return payload if isinstance(payload, dict) else None
+
+
+def check_shared_checkpoint_evidence(workloads: dict[str, dict]) -> list[str]:
+    """Bind dependent inference baselines to the committed training baseline."""
+    errors: list[str] = []
+    for workload_id, body in workloads.items():
+        source_id = body.get("shared_checkpoint")
+        if not source_id:
+            continue
+        name = f"{body.get('suite', 'unknown')}/{workload_id}"
+        source = workloads.get(str(source_id))
+        if source is None:
+            errors.append(
+                f"{name}: shared checkpoint source {source_id!r} is not in the registry"
+            )
+            continue
+        baseline = body.get("verified_baseline") or {}
+        source_baseline = source.get("verified_baseline") or {}
+        if baseline.get("evidence_status") != "committed-reference-summary":
+            continue
+        if source_baseline.get("evidence_status") != "committed-reference-summary":
+            errors.append(
+                f"{name}: shared checkpoint source {source_id} lacks committed evidence"
+            )
+            continue
+        expected_links = {
+            "source_training_evidence_id": source_baseline.get("evidence_id"),
+            "source_training_evidence_sha256": source_baseline.get("evidence_sha256"),
+        }
+        for field, expected in expected_links.items():
+            if baseline.get(field) != expected:
+                errors.append(
+                    f"{name}: verified_baseline.{field} does not match shared checkpoint source {source_id}"
+                )
+
+        payload = load_committed_summary(body)
+        source_payload = load_committed_summary(source)
+        if payload is None or source_payload is None:
+            continue
+        lineage = payload.get("nanogpt_training_lineage") or {}
+        if lineage.get("source_workload") != source_id:
+            errors.append(
+                f"{name}: evidence lineage source_workload does not match shared checkpoint {source_id}"
+            )
+            continue
+
+        dependent_checkpoint_digests: set[str] = set()
+        for run in payload.get("runs") or []:
+            if not isinstance(run, dict):
+                continue
+            dependent_checkpoint_digests.update(
+                str(artifact.get("sha256"))
+                for artifact in run.get("artifacts") or []
+                if isinstance(artifact, dict) and artifact.get("role") == "checkpoint"
+            )
+        selected_seed = baseline.get("source_training_seed")
+        selected_checkpoint_digest = baseline.get("source_training_checkpoint_sha256")
+        if (
+            isinstance(selected_seed, bool)
+            or not isinstance(selected_seed, int)
+            or not SHA256_RE.fullmatch(str(selected_checkpoint_digest or ""))
+        ):
+            errors.append(
+                f"{name}: verified_baseline must identify a source_training_seed "
+                "and source_training_checkpoint_sha256"
+            )
+            continue
+        source_median = (
+            (source_payload.get("aggregate") or {}).get("quality") or {}
+        ).get("median")
+        selected_runs = [
+            run
+            for run in source_payload.get("runs") or []
+            if isinstance(run, dict) and run.get("requested_seed") == selected_seed
+        ]
+        source_checkpoint_digests = {
+            str(artifact.get("sha256"))
+            for run in selected_runs
+            for artifact in run.get("artifacts") or []
+            if isinstance(artifact, dict) and artifact.get("role") == "checkpoint"
+        }
+        if len(selected_runs) != 1 or len(source_checkpoint_digests) != 1:
+            errors.append(
+                f"{name}: shared checkpoint source does not identify exactly one selected-seed checkpoint"
+            )
+            continue
+        if not numbers_match(selected_runs[0].get("quality_value"), source_median):
+            errors.append(
+                f"{name}: source_training_seed does not select the committed median-quality training run"
+            )
+        expected_checkpoint = "sha256:" + str(selected_checkpoint_digest)
+        if source_checkpoint_digests != {expected_checkpoint}:
+            errors.append(
+                f"{name}: source_training_checkpoint_sha256 does not match the selected training run"
+            )
+        if dependent_checkpoint_digests != {expected_checkpoint}:
+            errors.append(
+                f"{name}: inference evidence checkpoint digest does not match the selected training checkpoint"
+            )
+    return errors
+
+
+def check_reference_index(workloads: dict[str, dict]) -> list[str]:
+    """Validate index closure, source lock, and registry-to-summary bindings."""
+    errors: list[str] = []
+    index_path = REPO_ROOT / "reference_results" / "index.json"
+    try:
+        index_bytes = index_path.read_bytes()
+        index = json.loads(index_bytes)
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+        return [f"reference index cannot be read: {exc}"]
+    if not isinstance(index, dict):
+        return ["reference index root must be an object"]
+    if index.get("schema") != REFERENCE_INDEX_SCHEMA:
+        errors.append(
+            f"reference index schema is {index.get('schema')!r}, "
+            f"expected {REFERENCE_INDEX_SCHEMA!r}"
+        )
+    source_git_sha = index.get("source_git_sha")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(source_git_sha or "")):
+        errors.append("reference index source_git_sha is missing or invalid")
+
+    source_lock = index.get("source_lock") or {}
+    lock_relative = source_lock.get("path")
+    if not is_safe_posix_relative_path(lock_relative):
+        errors.append("reference index source_lock.path is not portable")
+    else:
+        lock_path = (REPO_ROOT / str(lock_relative)).resolve()
+        try:
+            lock_path.relative_to(REPO_ROOT.resolve())
+            lock_bytes = lock_path.read_bytes()
+        except (ValueError, OSError) as exc:
+            errors.append(f"reference source lock cannot be read: {exc}")
+        else:
+            lock_digest = reference_source_lock.sha256_bytes(lock_bytes)
+            if source_lock.get("sha256") != lock_digest:
+                errors.append("reference index source-lock digest does not match")
+            try:
+                lock_payload = reference_source_lock.load_source_lock(
+                    lock_path,
+                    project_root=REPO_ROOT,
+                    expected_source_git_sha=str(source_git_sha),
+                )
+            except reference_source_lock.SourceLockError as exc:
+                errors.append(f"reference source lock is invalid: {exc}")
+            else:
+                expected_lock_fields = {
+                    "schema": lock_payload.get("schema"),
+                    "file_count": lock_payload.get("file_count"),
+                    "contract_count": lock_payload.get("contract_count"),
+                }
+                for field, expected in expected_lock_fields.items():
+                    if source_lock.get(field) != expected:
+                        errors.append(
+                            f"reference index source_lock.{field} does not match the lock"
+                        )
+
+    entries = index.get("summaries")
+    if not isinstance(entries, list):
+        return [*errors, "reference index summaries must be a list"]
+    if index.get("summary_count") != len(entries):
+        errors.append("reference index summary_count does not match its entries")
+    expected_workloads = {
+        workload_id
+        for workload_id, body in workloads.items()
+        if (body.get("public") or {}).get("status")
+        in {"score-bearing", "performance-bearing"}
+    }
+    indexed_workloads: set[str] = set()
+    indexed_paths: set[str] = set()
+    for position, entry in enumerate(entries):
+        label = f"reference index summaries[{position}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{label} is not an object")
+            continue
+        workload_id = entry.get("workload")
+        relative_path = entry.get("path")
+        if not isinstance(workload_id, str) or workload_id in indexed_workloads:
+            errors.append(f"{label} has a missing or duplicate workload")
+            continue
+        indexed_workloads.add(workload_id)
+        if (
+            not is_safe_posix_relative_path(relative_path)
+            or not str(relative_path).startswith("reference_results/")
+            or relative_path in indexed_paths
+        ):
+            errors.append(f"{label}.path is unsafe or duplicated")
+            continue
+        indexed_paths.add(str(relative_path))
+        path = (REPO_ROOT / str(relative_path)).resolve()
+        try:
+            path.relative_to(REPO_ROOT.resolve())
+            data = path.read_bytes()
+            payload = json.loads(data)
+        except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            errors.append(f"{label} cannot load its summary: {exc}")
+            continue
+        digest = hashlib.sha256(data).hexdigest()
+        if entry.get("evidence_sha256") != digest:
+            errors.append(f"{label} evidence_sha256 does not match summary bytes")
+        if payload.get("evidence_id") != entry.get("evidence_id"):
+            errors.append(f"{label} evidence_id does not match its summary")
+        if payload.get("workload") != workload_id:
+            errors.append(f"{label} workload does not match its summary")
+        body = workloads.get(workload_id) or {}
+        baseline = body.get("verified_baseline") or {}
+        expected_baseline = {
+            "evidence_id": entry.get("evidence_id"),
+            "evidence_file": relative_path,
+            "evidence_sha256": entry.get("evidence_sha256"),
+            "source_git_sha": source_git_sha,
+        }
+        for field, expected in expected_baseline.items():
+            if baseline.get(field) != expected:
+                errors.append(
+                    f"{workload_id}: verified_baseline.{field} does not match the reference index"
+                )
+    if indexed_workloads != expected_workloads:
+        errors.append(
+            "reference index workload closure mismatch; "
+            f"missing={sorted(expected_workloads - indexed_workloads)}, "
+            f"extra={sorted(indexed_workloads - expected_workloads)}"
+        )
     return errors
 
 
@@ -657,6 +1480,7 @@ def main() -> int:
         return 2
 
     all_errors: list[str] = []
+    workload_bodies: dict[str, dict] = {}
     cell_counts: dict[tuple, list[str]] = {}
     unmeasured_axes: dict[str, list[str]] = {
         "working_set": [],
@@ -668,6 +1492,7 @@ def main() -> int:
     for div, workloads in suites.items():
         for name, body in workloads.items():
             n_workloads += 1
+            workload_bodies[name] = body
             full_name = f"{div}/{name}"
             if "regime" not in body:
                 all_errors.append(f"{full_name}: no regime block")
@@ -690,6 +1515,9 @@ def main() -> int:
                 values.get("dispatch"),
             )
             cell_counts.setdefault(cell, []).append(full_name)
+
+    all_errors.extend(check_shared_checkpoint_evidence(workload_bodies))
+    all_errors.extend(check_reference_index(workload_bodies))
 
     print(f"Inspected {n_workloads} workloads.")
     print()

@@ -30,18 +30,34 @@ def test_generate_review_packets(tmp_path):
     assert "## Measurement and Evidence Contract" in nanogpt
     assert "## Taxonomy Evidence" in nanogpt
     assert "value=unmeasured; evidence=none; sha256=none" in nanogpt
-    assert "pending-clean-public-candidate-reference-summary" in nanogpt
-    assert "baseline is not backed by a committed reference summary" in nanogpt
+    assert "committed-reference-summary" in nanogpt
+    assert "reference_results/nanogpt-train/" in nanogpt
+    assert "external-publication blocker" in nanogpt
+    assert "baseline is not backed by a committed reference summary" not in nanogpt
 
     prefill = (tmp_path / "nanogpt-inference__prefill.md").read_text()
     assert "## Checkpoint Lineage" in prefill
     assert "Source quality" in prefill
     assert "cross_entropy_loss lower 2.3 basis=reference_runs" in prefill
     assert "primary_metric=prefill_tokens_per_sec" in prefill
-    assert (
-        "shared checkpoint source nanogpt-train is not backed by a committed" in prefill
+    assert "reference_results/nanogpt-prefill/" in prefill
+    assert "nanogpt-prefill_max_20260711T062700.039263Z" in prefill
+    assert "dac0ec14b806b33a96349d4f4635c0b02b72ee665203589c95015ad33b019dd4" in prefill
+    assert "metric_values_by_seed=" in prefill
+    assert "not an MLCommons-verified result" in prefill
+    assert "raw reference package for shared checkpoint source nanogpt-train" in prefill
+    assert "no published package URL is recorded" in prefill
+    train_command = "mlperf run --workload nanogpt-train --profile max"
+    inference_command = (
+        "mlperf run --workload nanogpt-inference --variant prefill --profile max"
     )
-    assert "reference summary" in prefill
+    assert train_command in prefill
+    assert inference_command in prefill
+    assert prefill.index(train_command) < prefill.index(inference_command)
+    assert "mlperf fetch --workload nanogpt-train --profile max" in prefill
+    assert "--dry-run" not in prefill
+    assert "mlperf verify" in prefill
+    assert "mlperf grade" in prefill
 
     slm = (tmp_path / "smollm2-chat-inference__baseline.md").read_text()
     assert "## Functional Contract" in slm
@@ -49,7 +65,16 @@ def test_generate_review_packets(tmp_path):
     assert "Apache-2.0" in slm
     assert "mlperf-edu-slm-quality/0.1" in slm
     assert "primary_metric=output_tokens_per_sec" in slm
-    assert "calibration values are informational" in slm
+    assert "reference_results/slm-decode/" in slm
+    assert "e8289a8b809c02c37f22a238fd08b0108f08be596fbf5c5c54400040c6633bb2" in slm
+    assert "metric_values_by_seed=" in slm
+    assert "not an MLCommons-verified result" in slm
+    assert "external-publication blocker" in slm
+    assert "calibration values are informational" not in slm
+
+    for packet in tmp_path.glob("*.md"):
+        for line in packet.read_text().splitlines():
+            assert not line.endswith("|  |"), (packet.name, line)
 
     check = subprocess.run(
         [

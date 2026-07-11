@@ -380,7 +380,8 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     prefill_ctx = _env_int("MLPERF_EDU_DECODE_MAX_PREFILL_CTX", 1792)
     decode_steps = _env_int("MLPERF_EDU_DECODE_MAX_STEPS", 64)
     batch_size = _env_int("MLPERF_EDU_DECODE_MAX_BATCH", 1)
-    repetitions = _env_int("MLPERF_EDU_DECODE_MAX_REPETITIONS", 5)
+    warmup_runs = _env_int("MLPERF_EDU_DECODE_MAX_WARMUPS", 3)
+    repetitions = _env_int("MLPERF_EDU_DECODE_MAX_REPETITIONS", 20)
     model, checkpoint_path, checkpoint_lineage = _load_max_nanogpt_model(
         output_dir, device, prefill_ctx + decode_steps
     )
@@ -391,7 +392,8 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         decode_steps=decode_steps,
         batch_size=batch_size,
     )
-    decode.run(emit_sidecar=False)
+    for _ in range(warmup_runs):
+        decode.run(emit_sidecar=False)
     results = [decode.run(emit_sidecar=False) for _ in range(repetitions)]
     result = _aggregate_decode_results(results)
     n_params = sum(p.numel() for p in model.parameters())
@@ -433,7 +435,7 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "note": "The functional gate requires a quality-approved checkpoint, the configured decode length, and positive throughput.",
         },
         "measurement_protocol": {
-            "warmup_runs": 1,
+            "warmup_runs": warmup_runs,
             "measured_runs": repetitions,
             "latency_statistics": ["median", "p90", "p99"],
             "timing_scope": "synchronized checkpoint-backed requests with per-token ITL samples",
