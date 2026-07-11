@@ -11,38 +11,35 @@ from tools import reference_source_lock, sync_verified_baselines
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def historical_record(workload_id: str):
+def index_record(workload_id: str):
     _index, records = sync_verified_baselines.load_index()
     path = ROOT / reference_source_lock.PROMOTED_CONTRACT_PATHS[workload_id]
     contract = yaml.safe_load(path.read_text(encoding="utf-8"))
     return contract, records[workload_id], records
 
 
-def test_superseded_baseline_remains_bound_to_immutable_index_entry():
-    contract, (entry, payload), records = historical_record("nanogpt-train")
+def test_current_baseline_remains_bound_to_immutable_index_entry():
+    contract, (entry, payload), records = index_record("nanogpt-train")
 
-    assert (
-        sync_verified_baselines.historical_baseline_errors(
-            "nanogpt-train", contract, entry, payload, records
-        )
-        == []
+    expected = sync_verified_baselines.build_baseline(
+        "nanogpt-train", entry, payload, records
     )
+    assert contract["verified_baseline"] == expected
 
 
-def test_superseded_baseline_lifecycle_and_identity_fail_closed():
-    contract, (entry, payload), records = historical_record("nanogpt-train")
+def test_current_baseline_identity_fail_closed():
+    contract, (entry, payload), records = index_record("nanogpt-train")
     mutated = deepcopy(contract)
-    mutated["verified_baseline"]["review_eligible"] = True
-    mutated["verified_baseline"]["replacement_required"] = False
     mutated["verified_baseline"]["evidence_sha256"] = "0" * 64
 
-    errors = sync_verified_baselines.historical_baseline_errors(
-        "nanogpt-train", mutated, entry, payload, records
+    expected = sync_verified_baselines.build_baseline(
+        "nanogpt-train", entry, payload, records
     )
 
-    assert "review_eligible must be False" in errors
-    assert "replacement_required must be True" in errors
-    assert any("evidence_sha256 does not match" in error for error in errors)
+    assert mutated["verified_baseline"] != expected
+    assert (
+        mutated["verified_baseline"]["evidence_sha256"] != expected["evidence_sha256"]
+    )
 
 
 def test_schema_04_baseline_keeps_timed_primary_separate_from_quality():

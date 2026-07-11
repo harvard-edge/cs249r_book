@@ -22,10 +22,10 @@ A registry label alone is not evidence. The final `max` report, release
 validation, retained reference packet, asset policy, and reviewer decisions
 must all agree.
 
-The label `protocol-superseded historical reference` applies to all eight
-retained summaries from source commit `0ec4d3e1`. None is eligible under the
-current contracts. Current result claims require fresh five-execution packets
-from the final clean benchmark revision.
+The current committed reference set contains eight clean five-execution
+summaries from source commit `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`.
+Those summaries are review-eligible for local handoff under the current
+contracts.
 
 ## Profile Semantics
 
@@ -90,10 +90,10 @@ individual reports must pass their targets. The median must also pass. Each
 attempt is create-once and receives an evidence summary plus an unauthenticated
 SHA-256 digest sidecar.
 
-The current thresholds are listed in
-[QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). The five score rows retain
-protocol-superseded packets from clean source commit `0ec4d3e1`. Their current
-registry calibration fields are rationale, not replacement release evidence.
+The current thresholds and committed five-run evidence are listed in
+[QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). Registry calibration
+fields remain rationale; the committed summaries in `reference_results/` are
+the review evidence.
 
 ## Performance-Bearing Rule
 
@@ -142,18 +142,24 @@ the task-quality parity limits, and the fixture change supersedes those exact
 numbers. Completing generation is not enough to promote it; v2 overall,
 weakest-category, and NLL-parity gates must all pass.
 
-## Historical Committed Reference Set
+## Current Committed Reference Set
 
 `reference_results/index.json` contains eight content-addressed summaries from
-clean source commit `0ec4d3e1c415944227d0754d170edb0addc1d925`. Their embedded
-validity fields describe the protocols that existed when they were collected.
-The current registry explicitly marks every packet as superseded,
-`review_eligible: false`, and `replacement_required: true`.
+clean source commit `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. Each summary
+uses seeds `0,1,2,3,4`, has `eligible_for_public_baseline: true`, and points to
+the same source lock. The public-candidate repeatability limit is `5%`
+coefficient of variation for timed performance references.
 
-The old score and performance values are preserved only to make protocol
-evolution auditable. They must not be copied into a current results table or
-used to support a benchmark claim. Replacement packets must use the current
-dual-metric evidence schema, contracts, and final clean source revision.
+| **Workload** | **Evidence ID** | **Primary Metric Median** | **Minimum** | **Maximum** | **CV** |
+|:---|:---|---:|---:|---:|---:|
+| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T185950.479514Z` | `3.1185` | `3.0778` | `3.2159` | n/a |
+| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T185902.723780Z` | `1.8956` | `1.8684` | `1.9025` | n/a |
+| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T190411.719846Z` | `57.7264` | `57.5393` | `58.1860` | n/a |
+| `nanogpt-decode` | `nanogpt-decode_max_20260711T191026.069877Z` | `124.6054` | `123.4936` | `125.0866` | `0.47%` |
+| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T190945.837856Z` | `122609.21` | `120209.46` | `122699.81` | `0.92%` |
+| `nanogpt-train` | `nanogpt-train_max_20260711T185153.818986Z` | `73.0170` | `70.8778` | `73.5426` | n/a |
+| `resnet18-train` | `resnet18-train_max_20260711T190054.049258Z` | `31.1051` | `30.3761` | `31.9132` | n/a |
+| `slm-decode` | `slm-decode_max_20260711T191209.721134Z` | `102.7963` | `97.3773` | `104.7385` | `2.95%` |
 
 The repository commits compact summaries and digests, not every raw artifact.
 Complete create-once attempts are retained for local handoff, and

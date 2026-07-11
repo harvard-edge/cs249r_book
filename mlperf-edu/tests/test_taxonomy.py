@@ -112,7 +112,9 @@ def test_declared_quality_asset_exists_and_matches_digest():
 def test_superseded_baseline_requires_exact_lifecycle_and_keeps_internal_checks():
     workload = load_registry()["resnet18-train"]
     body = json.loads(json.dumps(workload.raw))
+    body["verified_baseline"]["protocol_compatibility"] = "superseded"
     body["verified_baseline"]["review_eligible"] = True
+    body["verified_baseline"]["replacement_required"] = False
 
     errors = check_taxonomy.check_workload_evidence("vision/resnet18-train", body)
     assert any(
@@ -457,7 +459,7 @@ def test_committed_baseline_display_fields_cannot_drift_from_summary():
 
 def test_committed_summary_aggregates_are_recomputed_from_seed_values():
     body, payload = committed_summary("anomaly-ae-train")
-    payload["aggregate"]["quality"]["mean"] += 0.01
+    payload["aggregate"]["primary_metric"]["mean"] += 0.01
 
     errors = check_taxonomy.check_reference_summary(
         "tiny/anomaly-ae-train", body, payload
@@ -465,6 +467,13 @@ def test_committed_summary_aggregates_are_recomputed_from_seed_values():
 
     assert any("recomputed value" in error for error in errors)
     assert any("verified_baseline.mean" in error for error in errors)
+
+
+def test_schema_04_performance_summary_uses_primary_metric_not_quality_metric():
+    body, payload = committed_summary("slm-decode")
+
+    assert payload["quality_metric"] is None
+    assert check_taxonomy.check_reference_summary("slm/slm-decode", body, payload) == []
 
 
 def test_reference_summary_acceptance_cannot_drift_or_hide_a_failed_seed():

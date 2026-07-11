@@ -1254,7 +1254,16 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
                 f"{name}: performance-bearing reference summary metric role must be performance"
             )
         primary_metric = (body.get("measurement_protocol") or {}).get("primary_metric")
-        if payload.get("quality_metric") != primary_metric:
+        if dual_metrics:
+            if (payload.get("primary_metric") or {}).get("name") != primary_metric:
+                errors.append(
+                    f"{name}: reference summary metric does not match measurement_protocol.primary_metric"
+                )
+            if payload.get("quality_metric") is not None:
+                errors.append(
+                    f"{name}: performance summary quality_metric must be null"
+                )
+        elif payload.get("quality_metric") != primary_metric:
             errors.append(
                 f"{name}: reference summary metric does not match measurement_protocol.primary_metric"
             )

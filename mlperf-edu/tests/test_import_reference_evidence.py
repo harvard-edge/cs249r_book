@@ -13,7 +13,7 @@ from tools import import_reference_evidence
 
 ROOT = Path(__file__).resolve().parents[1]
 INDEX_PATH = ROOT / "reference_results" / "index.json"
-SOURCE_SHA = "0ec4d3e1c415944227d0754d170edb0addc1d925"
+SOURCE_SHA = "b4366b7614f0bb8ba0a1d6224832d4caea64e68a"
 
 
 def _bind_comparison_fingerprint(
@@ -39,10 +39,8 @@ def test_reference_index_binds_all_exact_imported_summary_bytes():
     )
     assert slm_entry["reference_metric_role"] == "performance"
     assert slm_entry["functional_gate"]["metric"] == "generated_tokens"
-    assert (
-        "not a speed threshold"
-        in slm_entry["legacy_summary_semantics"]["quality_target"]
-    )
+    assert slm_entry["metric"] == "output_tokens_per_sec"
+    assert "legacy_summary_semantics" not in slm_entry
 
     selected = {}
     for entry in index["summaries"]:
@@ -587,7 +585,7 @@ def test_source_tool_digest_is_bound_to_exact_git_object(monkeypatch):
     assert calls[1][2].startswith(f"{SOURCE_SHA}:")
 
 
-def test_committed_summaries_bind_their_historical_sweep_tool_bytes():
+def test_committed_summaries_bind_their_source_sweep_tool_bytes():
     expected = import_reference_evidence.source_sweep_tool_sha256(SOURCE_SHA)
     index = json.loads(INDEX_PATH.read_text(encoding="utf-8"))
 
@@ -595,4 +593,4 @@ def test_committed_summaries_bind_their_historical_sweep_tool_bytes():
         payload = json.loads((ROOT / entry["path"]).read_text(encoding="utf-8"))
         assert payload["source"]["tool_sha256"] == expected
 
-    assert import_reference_evidence.check_taxonomy.SWEEP_TOOL_SHA256 != expected
+    assert import_reference_evidence.check_taxonomy.SWEEP_TOOL_SHA256 == expected

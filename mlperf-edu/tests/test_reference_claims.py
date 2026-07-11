@@ -33,7 +33,7 @@ def _errors_after_replacement(
 ) -> list[str]:
     mutated = dict(documents)
     assert current in mutated[document]
-    mutated[document] = mutated[document].replace(current, stale, 1)
+    mutated[document] = mutated[document].replace(current, stale)
     return check_reference_claims.check_documents(claims, mutated)
 
 
@@ -141,9 +141,9 @@ def test_claim_check_rejects_medians_swapped_between_rows():
     marker = "`__median_swap__`"
     assert f"`{nanogpt}`" in proposal
     assert f"`{dlrm}`" in proposal
-    proposal = proposal.replace(f"`{nanogpt}`", marker, 1)
-    proposal = proposal.replace(f"`{dlrm}`", f"`{nanogpt}`", 1)
-    proposal = proposal.replace(marker, f"`{dlrm}`", 1)
+    proposal = proposal.replace(f"`{nanogpt}`", marker)
+    proposal = proposal.replace(f"`{dlrm}`", f"`{nanogpt}`")
+    proposal = proposal.replace(marker, f"`{dlrm}`")
     mutated = dict(documents)
     mutated["PROPOSAL.md"] = proposal
 

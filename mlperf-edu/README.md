@@ -26,17 +26,17 @@ MLCommons-approved result categories.
 |:---|:---|
 | Implemented | The CLI, native registry, `min` and `max` runners, reports, provenance verification, portable packaging, labs, tutorial smoke, generated site, and validation workflows exist in this tree. |
 | Historical validation snapshot | The promotion revision recorded in `review-ece36ac566/handoff_manifest.json` passed 241 tests, the four validation presets, a clean wheel install, package extraction, generated-file checks, site render, link checks, and the paper build. Subsequent protocol changes require the complete matrix to run again on the final revision. |
-| Replacement reference evidence pending | Eight content-addressed summaries from source commit `0ec4d3e1c415944227d0754d170edb0addc1d925` remain for traceability. They are not review-eligible under the current contracts. Fresh five-execution packets are required for all five score-bearing and three performance-bearing candidates. |
-| Verification limits | The committed summaries do not substitute for same-revision hosted CI, independent reproduction, or representative desktop and narrow browser inspection. Those gates remain recorded in the release ledger. |
+| Current reference evidence committed | Eight content-addressed summaries from source commit `b4366b7614f0bb8ba0a1d6224832d4caea64e68a` are committed and review-eligible for local handoff under the current contracts. |
+| Verification limits | The committed summaries do not substitute for hosted CI on a pushed revision, independent reproduction, or representative desktop and narrow browser inspection. Those gates remain recorded in the release ledger. |
 | External decision | The component license, MovieLens-100K policy, public result wording, project name, and any MLCommons relationship require decisions outside this repository. |
 
 The executable release ledger is [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md).
 The target-by-target evidence review is
 [QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md).
 
-The label `protocol-superseded historical reference` applies to every retained
-summary from source commit `0ec4d3e1`. Numeric results from those packets are
-historical context only and must not be presented as current benchmark evidence.
+The current committed reference evidence uses source commit
+`b4366b7614f0bb8ba0a1d6224832d4caea64e68a`; its raw create-once attempts are
+available for local handoff.
 
 ## Install From a Checkout
 
@@ -118,11 +118,11 @@ acceptance statistic.
 
 | **Workload** | **Dataset** | **Required `max` Metric** | **Target** | **Release-Evidence State** |
 |:---|:---|:---|---:|:---|
-| `nanogpt-train` | Project Gutenberg TinyShakespeare recipe | cross-entropy loss | `<= 2.30` | Replacement five-run packet pending. |
-| `micro-dlrm-train` | MovieLens-100K official `u1.base`/`u1.test` split | fixed-final-epoch ROC AUC | `>= 0.76` | Replacement five-run packet pending. The prior accuracy packet is protocol-superseded. |
-| `anomaly-ae-train` | MNIST hard-curve-v1 | macro anomaly AUROC | `>= 0.93` | Replacement five-run packet pending; every run must also reach worst-class AUROC `>= 0.90` and learned-control margin `>= 0.20`. |
-| `resnet18-train` | Fashion-MNIST | top-1 accuracy | `>= 0.85` | Replacement five-run packet pending. |
-| `mobilenetv2-train` | Fashion-MNIST | top-1 accuracy | `>= 0.78` | Replacement five-run packet pending. |
+| `nanogpt-train` | Project Gutenberg TinyShakespeare recipe | cross-entropy loss | `<= 2.30` | Current five-run packet committed. |
+| `micro-dlrm-train` | MovieLens-100K official `u1.base`/`u1.test` split | fixed-final-epoch ROC AUC | `>= 0.76` | Current five-run packet committed; raw MovieLens-derived artifacts remain local-only pending policy review. |
+| `anomaly-ae-train` | MNIST hard-curve-v1 | macro anomaly AUROC | `>= 0.93` | Current five-run packet committed; every run also reaches worst-class AUROC `>= 0.90` and learned-control margin `>= 0.20`. |
+| `resnet18-train` | Fashion-MNIST | top-1 accuracy | `>= 0.85` | Current five-run packet committed. |
+| `mobilenetv2-train` | Fashion-MNIST | top-1 accuracy | `>= 0.78` | Current five-run packet committed. |
 
 The anomaly row trains on digit 5 and evaluates digits 3, 8, and 9 separately.
 Its macro score, worst-class gate, and margin over three no-training controls
@@ -131,10 +131,8 @@ target.
 The target rationale and rerun rules live in
 [QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md).
 
-The exact IDs, full SHA-256 digests, and aggregates for the superseded packets
-are indexed in `reference_results/index.json`. They remain archival records,
-not current review evidence. Fresh packets will replace them only after the
-final source revision and complete local matrix pass.
+The exact IDs, full SHA-256 digests, and aggregates for the current packets are
+indexed in `reference_results/index.json`.
 
 ## Candidate Inference Methodology
 
@@ -149,11 +147,27 @@ below describes the repeated measurements inside each execution.
 | `nanogpt-inference --variant decode` | The same checkpoint lineage must complete 64 decode steps with positive throughput. | Single-stream sequential microbenchmark with three discarded warmups and twenty synchronized requests. Request TTFT spans prompt prefill through first-token selection; every subsequent cached-token interval is an ITL, and the first is retained separately as first-decode latency. |
 | `smollm2-chat-inference --variant baseline` | Pinned SmolLM2 revision, at least eight generated tokens, token-weighted continuation perplexity `<= 7` overall, and worst-category perplexity `<= 24` on the attributed 28-case v2 suite. | Three warmups and twenty cache-reusing greedy requests. TTFT spans prompt prefill through the first output token; subsequent ITLs and complete request latency are retained separately. |
 
-All three retained performance summaries predate the current timing or quality
-contracts. NanoGPT prefill now measures fresh cache materialization with twenty
-samples, decode uses corrected causal TTFT and ITL boundaries, and SmolLM2 uses
-the attributed 28-case v2 suite. None is review eligible until a fresh five-run
-packet passes its current contract.
+All three performance-bearing summaries are current five-run packets. NanoGPT
+prefill measures fresh cache materialization with twenty samples, decode uses
+causal TTFT and ITL boundaries, and SmolLM2 uses the attributed 28-case v2
+suite.
+
+## Current Reference Evidence
+
+Source revision: `b4366b7614f0bb8ba0a1d6224832d4caea64e68a`. The public
+candidate repeatability limit is `5%` coefficient of variation for timed
+performance references.
+
+| **Workload** | **Evidence ID** | **Primary Metric Median** | **Minimum** | **Maximum** | **CV** |
+|:---|:---|---:|---:|---:|---:|
+| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T185950.479514Z` | `3.1185` | `3.0778` | `3.2159` | n/a |
+| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T185902.723780Z` | `1.8956` | `1.8684` | `1.9025` | n/a |
+| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T190411.719846Z` | `57.7264` | `57.5393` | `58.1860` | n/a |
+| `nanogpt-decode` | `nanogpt-decode_max_20260711T191026.069877Z` | `124.6054` | `123.4936` | `125.0866` | `0.47%` |
+| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T190945.837856Z` | `122609.21` | `120209.46` | `122699.81` | `0.92%` |
+| `nanogpt-train` | `nanogpt-train_max_20260711T185153.818986Z` | `73.0170` | `70.8778` | `73.5426` | n/a |
+| `resnet18-train` | `resnet18-train_max_20260711T190054.049258Z` | `31.1051` | `30.3761` | `31.9132` | n/a |
+| `slm-decode` | `slm-decode_max_20260711T191209.721134Z` | `102.7963` | `97.3773` | `104.7385` | `2.95%` |
 
 The dynamic-int8 SLM variant is systems-only. Its historical v1 calibration
 completed generation but failed quality parity, and its exact values are now

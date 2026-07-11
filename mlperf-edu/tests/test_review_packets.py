@@ -31,8 +31,7 @@ def test_generate_review_packets(tmp_path):
     assert "## Taxonomy Evidence" in nanogpt
     assert "value=unmeasured; evidence=none; sha256=none" in nanogpt
     assert "committed-reference-summary" in nanogpt
-    assert "historical-protocol-superseded" in nanogpt
-    assert "replacement blocker" in nanogpt
+    assert "current-review-evidence" in nanogpt
     assert "reference_results/nanogpt-train/" in nanogpt
     assert "external-publication blocker" in nanogpt
     assert "baseline is not backed by a committed reference summary" not in nanogpt
@@ -43,14 +42,11 @@ def test_generate_review_packets(tmp_path):
     assert "cross_entropy_loss lower 2.3 basis=reference_runs" in prefill
     assert "primary_metric=prefill_tokens_per_sec" in prefill
     assert "reference_results/nanogpt-prefill/" in prefill
-    assert "nanogpt-prefill_max_20260711T084140.159367Z" in prefill
-    assert "bc3e8f01c279d1d2bbf0f8a24b15e85270584a5d35e16883a9751b4b5a04b68b" in prefill
+    assert "nanogpt-prefill_max_20260711T190945.837856Z" in prefill
+    assert "38118741360d53028e1e6977eba95eff33c7830aa382e45ee4744618e7938d83" in prefill
     assert "metric_values_by_seed=" in prefill
     assert "not an MLCommons-verified result" in prefill
     assert "raw reference package for shared checkpoint source nanogpt-train" in prefill
-    assert (
-        "shared checkpoint source nanogpt-train has only protocol-superseded" in prefill
-    )
     assert "no published package URL is recorded" in prefill
     train_command = "mlperf run --workload nanogpt-train --profile max"
     inference_command = (
@@ -72,12 +68,11 @@ def test_generate_review_packets(tmp_path):
     assert "token-weighted-continuation-nll" in slm
     assert "primary_metric=output_tokens_per_sec" in slm
     assert "reference_results/slm-decode/" in slm
-    assert "c13f7b7afb626cd4f3cdcb9620693a95ce8d46881d1e8c6f18ba0234442f1185" in slm
+    assert "74bd019ccf8f8551174ec95df3ba60af8849b523ec20d9c34263c72467496dc8" in slm
     assert "metric_values_by_seed=" in slm
     assert "not an MLCommons-verified result" in slm
     assert "external-publication blocker" in slm
-    assert "historical-protocol-superseded" in slm
-    assert "replacement blocker" in slm
+    assert "current-review-evidence" in slm
     assert "calibration values are informational" not in slm
 
     for packet in tmp_path.glob("*.md"):
