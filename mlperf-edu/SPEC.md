@@ -270,6 +270,11 @@ and release candidates. It expands to registry-driven `run` and `grade` commands
 using stable output directories named for the validation item, such as
 `submissions/validation/min-default`.
 
+When no seed environment variable is present, `max` validation uses seed 0
+from the declared five-seed reference protocol. Validation reports record the
+resolved seed and whether it came from the protocol default or an explicit
+environment override.
+
 Benchmark profiles remain `min`, `max`, and `pro`. Validation presets name the
 scale they exercise:
 

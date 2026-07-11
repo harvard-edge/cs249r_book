@@ -11,6 +11,7 @@ from pathlib import Path
 
 import torch
 
+from mlperf import edu_cli
 from mlperf.edu_cli import (
     default_collection_for,
     enrich_report_for_display,
@@ -1228,6 +1229,31 @@ def test_validate_max_dry_run_lists_product_max_suites(tmp_path):
     assert "all workloads" in result.stdout
     assert "dry-run complete" in result.stdout
     assert not any(tmp_path.iterdir())
+
+
+def test_validation_seed_environment_uses_reference_seed_for_max(monkeypatch):
+    for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SLM_SEED"):
+        monkeypatch.delenv(name, raising=False)
+
+    selection = edu_cli.validation_seed_environment("max")
+
+    assert selection == {
+        "seed": 0,
+        "source": "reference_protocol_default",
+        "set_max_seed": True,
+    }
+
+
+def test_validation_seed_environment_preserves_explicit_seed(monkeypatch):
+    monkeypatch.setenv("MLPERF_EDU_SEED", "3")
+
+    selection = edu_cli.validation_seed_environment("max")
+
+    assert selection == {
+        "seed": 3,
+        "source": "MLPERF_EDU_SEED",
+        "set_max_seed": False,
+    }
 
 
 def test_validate_smoke_runs_starter_grades_and_summarizes(tmp_path):

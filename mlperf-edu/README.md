@@ -223,6 +223,11 @@ uv run mlperf validate max --keep-going --output-dir submissions/validation-max
 uv run mlperf validate release --keep-going --output-dir submissions/validation-release
 ```
 
+The `max` and `release` presets use reference-protocol seed 0 when no seed
+environment variable is set. Each validation record includes the resolved seed
+and its source. Set `MLPERF_EDU_SEED` explicitly to audit another declared
+reference seed.
+
 The full workflow has a five-hour CI timeout and uploads its artifacts. A dry
 run shows selection only and never counts as benchmark evidence. The live site
 workflow requires both recent development validation and recent full benchmark

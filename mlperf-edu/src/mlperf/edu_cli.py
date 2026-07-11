@@ -3566,7 +3566,24 @@ def cmd_validate(args: argparse.Namespace) -> int:
             run_args.collection = selector_name
         else:
             run_args.collection = None
-        run_status = cmd_run(run_args)
+        validation_seed = validation_seed_environment(profile)
+        record["seed"] = validation_seed["seed"]
+        record["seed_source"] = validation_seed["source"]
+        console.print(
+            "[bold]Validation seed:[/bold] "
+            f"{validation_seed['seed']} ({validation_seed['source']})"
+        )
+        previous_max_seed = os.environ.get("MLPERF_EDU_MAX_SEED")
+        if validation_seed["set_max_seed"]:
+            os.environ["MLPERF_EDU_MAX_SEED"] = str(validation_seed["seed"])
+        try:
+            run_status = cmd_run(run_args)
+        finally:
+            if validation_seed["set_max_seed"]:
+                if previous_max_seed is None:
+                    os.environ.pop("MLPERF_EDU_MAX_SEED", None)
+                else:
+                    os.environ["MLPERF_EDU_MAX_SEED"] = previous_max_seed
         record["run_exit"] = run_status
         record.update(latest_aggregate_exports(output_dir, profile))
         contract_failures = validation_contract_failures(record.get("report"))
@@ -3676,6 +3693,29 @@ def resolve_validation_preset(args: argparse.Namespace) -> str:
     if any(candidate != selected for candidate in candidates[1:]):
         raise ValueError(f"conflicting validation presets: {', '.join(candidates)}")
     return selected
+
+
+def validation_seed_environment(profile: str) -> dict[str, Any]:
+    """Choose and record the deterministic seed used by a validation item."""
+    for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SLM_SEED"):
+        value = os.environ.get(name)
+        if value is not None:
+            return {
+                "seed": int(value),
+                "source": name,
+                "set_max_seed": False,
+            }
+    if profile == "max":
+        return {
+            "seed": 0,
+            "source": "reference_protocol_default",
+            "set_max_seed": True,
+        }
+    return {
+        "seed": 42,
+        "source": "runner_default",
+        "set_max_seed": False,
+    }
 
 
 def validation_plan(
