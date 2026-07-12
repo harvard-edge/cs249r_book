@@ -96,7 +96,9 @@ def test_build_source_lock_binds_exact_commit_and_current_measurement_surface():
         "kind": "python-remove-top-level-functions/0.1",
         "removed_top_level_functions": ["public_contract_issues"],
     }
-    reference_source_lock.verify_source_lock(lock, expected_source_git_sha=source_git_sha)
+    reference_source_lock.verify_source_lock(
+        lock, expected_source_git_sha=source_git_sha
+    )
 
 
 def test_promoted_reference_local_dependencies_are_locked():
@@ -132,7 +134,9 @@ VALUE = protected()
     )
     measurement_change = before.replace(b"return 1", b"return 2")
 
-    normalized = reference_source_lock.normalize_source_bytes("src/mlperf/edu_cli.py", before)
+    normalized = reference_source_lock.normalize_source_bytes(
+        "src/mlperf/edu_cli.py", before
+    )
     assert normalized == reference_source_lock.normalize_source_bytes(
         "src/mlperf/edu_cli.py", publication_change
     )
@@ -209,7 +213,9 @@ def test_verify_source_lock_rejects_changed_protected_contract_field(tmp_path):
         expected_paths=("runner.py",),
         expected_contracts={"example": "contract.yaml"},
     )
-    contract_path.write_text(contract_path.read_text().replace("value: 0.8", "value: 0.9"))
+    contract_path.write_text(
+        contract_path.read_text().replace("value: 0.8", "value: 0.9")
+    )
 
     with pytest.raises(reference_source_lock.SourceLockError, match="contract sha256"):
         reference_source_lock.verify_source_lock(
@@ -234,6 +240,9 @@ quality_target:
   - display only
 verified_baseline:
   median: 0.9
+verified_baselines:
+  example__max__training:
+    median: 0.9
 calibration_observation:
   median: 0.7
 """
@@ -242,7 +251,9 @@ calibration_observation:
     )
     protected_change = original.replace(b"value: 0.8", b"value: 0.85")
 
-    projected = reference_source_lock.measurement_contract_bytes(original, workload_id="example")
+    projected = reference_source_lock.measurement_contract_bytes(
+        original, workload_id="example"
+    )
     assert projected == reference_source_lock.measurement_contract_bytes(
         metadata_change, workload_id="example"
     )

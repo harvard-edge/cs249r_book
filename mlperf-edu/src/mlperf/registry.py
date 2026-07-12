@@ -621,32 +621,24 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
             canonical_max_issues.append(
                 f"{workload.id}: canonical_max_contract.dataset must match registry dataset"
             )
-        if workload.public_status == "score-bearing":
-            dataset_sha256 = contract.get("dataset_sha256")
-            if not (
-                isinstance(dataset_sha256, str)
-                and dataset_sha256.startswith("sha256:")
-                and len(dataset_sha256) == 71
-            ):
-                canonical_max_issues.append(
-                    f"{workload.id}: canonical score max requires a prefixed dataset SHA-256"
-                )
         model_source = workload.raw.get("model_source")
         if isinstance(model_source, dict):
             if contract.get("model_revision") != model_source.get("revision"):
                 canonical_max_issues.append(
                     f"{workload.id}: canonical max model revision must match model_source.revision"
                 )
-            if not isinstance(contract.get("quality_evaluation"), dict):
-                canonical_max_issues.append(
-                    f"{workload.id}: canonical external-model max requires quality_evaluation"
-                )
-            else:
-                declared_quality = workload.raw.get("quality_evaluation") or {}
+            declared_quality = workload.raw.get("quality_evaluation") or {}
+            if declared_quality:
+                canonical_evaluation = contract.get("quality_evaluation")
+                if not isinstance(canonical_evaluation, dict):
+                    canonical_max_issues.append(
+                        f"{workload.id}: declared quality evaluation must be present "
+                        "in canonical_max_contract"
+                    )
+                    continue
                 expected_suite_sha256 = declared_quality.get("asset_sha256")
                 if expected_suite_sha256:
                     expected_suite_sha256 = f"sha256:{expected_suite_sha256}"
-                canonical_evaluation = contract["quality_evaluation"]
                 expected_quality_fields = {
                     "suite": declared_quality.get("suite"),
                     "fixture_version": declared_quality.get("fixture_version"),
@@ -743,21 +735,10 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
             canonical_max_issues.append(
                 f"{workload.id}: measurement_protocol.primary_metric is required"
             )
-        elif (
-            workload.public_status == "score-bearing"
-            and measurement.get("primary_metric") != "train_and_eval_seconds"
-        ):
-            canonical_max_issues.append(
-                f"{workload.id}: score-bearing max primary metric must be train_and_eval_seconds"
-            )
-        if workload.public_status == "score-bearing" and isinstance(measurement, dict):
-            if measurement.get("scenario") != "training":
-                canonical_max_issues.append(
-                    f"{workload.id}: score-bearing measurement scenario must be training"
-                )
+        if isinstance(measurement, dict):
             if measurement.get("outer_reference_runs") != 5:
                 canonical_max_issues.append(
-                    f"{workload.id}: score-bearing measurement requires five outer reference runs"
+                    f"{workload.id}: public measurement requires five outer reference runs"
                 )
         if workload.public_status == "performance-bearing":
             timing_counts = contract.get("timing_sample_counts")
@@ -859,8 +840,6 @@ def public_contract_issues(workload: Workload) -> list[str]:
         and workload.scenario not in PUBLIC_RESULT_SCENARIOS
     ):
         issues.append("public-result workload uses an unsupported scenario")
-    elif workload.public_status == "score-bearing" and workload.scenario != "training":
-        issues.append("current score-bearing workloads must use the training scenario")
     elif (
         workload.public_status == "performance-bearing"
         and workload.scenario == "training"
@@ -898,6 +877,40 @@ def public_contract_issues(workload: Workload) -> list[str]:
                     baseline, public_status=workload.public_status
                 )
             )
+        baselines = workload.raw.get("verified_baselines")
+        phase_count = len(
+            (
+                ((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get(
+                    "phases", {}
+                )
+            )
+        )
+        if not isinstance(baselines, dict) or len(baselines) != 1 + phase_count:
+            issues.append(
+                f"{workload.public_status} workload must bind every canonical and "
+                "phase execution under verified_baselines"
+            )
+        elif isinstance(baseline, dict):
+            canonical_case = baseline.get("case_id")
+            if (
+                canonical_case not in baselines
+                or baselines.get(canonical_case) != baseline
+            ):
+                issues.append(
+                    "verified_baseline must match its canonical verified_baselines entry"
+                )
+            for identifier, case_baseline in baselines.items():
+                if not isinstance(case_baseline, dict):
+                    issues.append(f"verified_baselines.{identifier} must be a mapping")
+                    continue
+                issues.extend(
+                    baseline_lifecycle_issues(
+                        case_baseline,
+                        public_status=str(
+                            case_baseline.get("result_role") or "unknown"
+                        ),
+                    )
+                )
 
     if workload.public_status == "score-bearing":
         if not workload.dataset:

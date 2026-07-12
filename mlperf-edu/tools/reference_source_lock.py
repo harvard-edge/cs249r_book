@@ -31,6 +31,7 @@ CONTRACT_PROJECTION_NORMALIZATION = "native-registry-measurement-contract/0.1"
 CONTRACT_EXCLUDED_TOP_LEVEL_FIELDS = (
     "calibration_observation",
     "verified_baseline",
+    "verified_baselines",
 )
 CONTRACT_EXCLUDED_QUALITY_TARGET_FIELDS = (
     "reviewer_notes",
@@ -132,7 +133,9 @@ def validate_relative_path(value: object, *, label: str = "source path") -> str:
 
 def normalize_paths(paths: Iterable[object]) -> tuple[str, ...]:
     """Validate, deduplicate, and sort measurement-surface paths."""
-    normalized = [validate_relative_path(path, label="measurement source path") for path in paths]
+    normalized = [
+        validate_relative_path(path, label="measurement source path") for path in paths
+    ]
     if not normalized:
         raise SourceLockError("measurement source path list must not be empty")
     if len(set(normalized)) != len(normalized):
@@ -171,7 +174,9 @@ def normalize_source_bytes(
         text = data.decode("utf-8")
         tree = ast.parse(text, filename=relative_path)
     except (UnicodeDecodeError, SyntaxError) as exc:
-        raise SourceLockError(f"cannot parse protected Python source {relative_path}") from exc
+        raise SourceLockError(
+            f"cannot parse protected Python source {relative_path}"
+        ) from exc
 
     lines = data.splitlines(keepends=True)
     removals: list[tuple[int, int, str]] = []
@@ -189,20 +194,26 @@ def normalize_source_bytes(
             )
         node = matches[0]
         if node.end_lineno is None:
-            raise SourceLockError(f"{relative_path}: cannot determine the end of {function_name!r}")
-        first_line = min([node.lineno, *(decorator.lineno for decorator in node.decorator_list)])
+            raise SourceLockError(
+                f"{relative_path}: cannot determine the end of {function_name!r}"
+            )
+        first_line = min(
+            [node.lineno, *(decorator.lineno for decorator in node.decorator_list)]
+        )
         removals.append((first_line - 1, node.end_lineno, function_name))
 
     for (left_start, left_end, _), (right_start, _, _) in zip(
         sorted(removals), sorted(removals)[1:]
     ):
         if left_end > right_start:
-            raise SourceLockError(f"{relative_path}: normalized top-level function ranges overlap")
+            raise SourceLockError(
+                f"{relative_path}: normalized top-level function ranges overlap"
+            )
 
     for start, end, function_name in sorted(removals, reverse=True):
-        marker = (f"# mlperf-edu source lock removed top-level function {function_name}\n").encode(
-            "utf-8"
-        )
+        marker = (
+            f"# mlperf-edu source lock removed top-level function {function_name}\n"
+        ).encode("utf-8")
         lines[start:end] = [marker]
     return b"".join(lines)
 
@@ -230,9 +241,13 @@ def _construct_unique_mapping(
         try:
             duplicate = key in result
         except TypeError as exc:
-            raise SourceLockError("registry contract contains an unhashable key") from exc
+            raise SourceLockError(
+                "registry contract contains an unhashable key"
+            ) from exc
         if duplicate:
-            raise SourceLockError(f"registry contract contains duplicate YAML key: {key!r}")
+            raise SourceLockError(
+                f"registry contract contains duplicate YAML key: {key!r}"
+            )
         result[key] = loader.construct_object(value_node, deep=deep)
     return result
 
@@ -256,7 +271,9 @@ def measurement_contract_bytes(
     if not isinstance(payload, dict):
         raise SourceLockError(f"{label} root must be an object")
     if payload.get("id") != workload_id:
-        raise SourceLockError(f"{label} id={payload.get('id')!r}, expected {workload_id!r}")
+        raise SourceLockError(
+            f"{label} id={payload.get('id')!r}, expected {workload_id!r}"
+        )
 
     projection = copy.deepcopy(payload)
     for field in CONTRACT_EXCLUDED_TOP_LEVEL_FIELDS:
@@ -290,7 +307,9 @@ def _project_file(project_root: Path, relative_path: str) -> Path:
     return resolved
 
 
-def local_python_dependencies(relative_path: str, *, project_root: Path = PROJECT_ROOT) -> set[str]:
+def local_python_dependencies(
+    relative_path: str, *, project_root: Path = PROJECT_ROOT
+) -> set[str]:
     """Resolve direct local Python imports for one protected source file."""
     relative_path = validate_relative_path(relative_path)
     pure_path = PurePosixPath(relative_path)
@@ -306,7 +325,9 @@ def local_python_dependencies(relative_path: str, *, project_root: Path = PROJEC
             filename=relative_path,
         )
     except SyntaxError as exc:
-        raise SourceLockError(f"cannot parse protected Python source {relative_path}") from exc
+        raise SourceLockError(
+            f"cannot parse protected Python source {relative_path}"
+        ) from exc
 
     def resolve_module(module_name: str) -> str | None:
         if not module_name:
@@ -344,7 +365,8 @@ def local_python_dependencies(relative_path: str, *, project_root: Path = PROJEC
                 module_name = node.module or ""
             module_names.append(module_name)
             module_names.extend(
-                ".".join(part for part in (module_name, alias.name) if part) for alias in node.names
+                ".".join(part for part in (module_name, alias.name) if part)
+                for alias in node.names
             )
         for module_name in module_names:
             resolved = resolve_module(module_name)
@@ -363,7 +385,9 @@ def _git_root(project_root: Path) -> Path:
             text=True,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise SourceLockError(f"cannot locate Git repository for {project_root}") from exc
+        raise SourceLockError(
+            f"cannot locate Git repository for {project_root}"
+        ) from exc
     git_root = Path(result.stdout.strip()).resolve()
     try:
         project_root.resolve().relative_to(git_root)
@@ -375,8 +399,12 @@ def _git_root(project_root: Path) -> Path:
 
 
 def _validate_source_commit(source_git_sha: object, *, git_root: Path) -> str:
-    if not isinstance(source_git_sha, str) or not GIT_OBJECT_ID_RE.fullmatch(source_git_sha):
-        raise SourceLockError("source_git_sha must be a complete lowercase Git object ID")
+    if not isinstance(source_git_sha, str) or not GIT_OBJECT_ID_RE.fullmatch(
+        source_git_sha
+    ):
+        raise SourceLockError(
+            "source_git_sha must be a complete lowercase Git object ID"
+        )
     try:
         subprocess.run(
             ["git", "cat-file", "-e", f"{source_git_sha}^{{commit}}"],
@@ -385,7 +413,9 @@ def _validate_source_commit(source_git_sha: object, *, git_root: Path) -> str:
             capture_output=True,
         )
     except (OSError, subprocess.CalledProcessError) as exc:
-        raise SourceLockError(f"source Git commit is unavailable: {source_git_sha}") from exc
+        raise SourceLockError(
+            f"source Git commit is unavailable: {source_git_sha}"
+        ) from exc
     return source_git_sha
 
 
@@ -551,12 +581,21 @@ def verify_source_lock(
             "source lock fields must be exactly " + repr(sorted(expected_top_level))
         )
     if payload.get("schema") != SOURCE_LOCK_SCHEMA:
-        raise SourceLockError(f"unsupported source lock schema: {payload.get('schema')!r}")
+        raise SourceLockError(
+            f"unsupported source lock schema: {payload.get('schema')!r}"
+        )
 
     source_git_sha = payload.get("source_git_sha")
-    if not isinstance(source_git_sha, str) or not GIT_OBJECT_ID_RE.fullmatch(source_git_sha):
-        raise SourceLockError("source_git_sha must be a complete lowercase Git object ID")
-    if expected_source_git_sha is not None and source_git_sha != expected_source_git_sha:
+    if not isinstance(source_git_sha, str) or not GIT_OBJECT_ID_RE.fullmatch(
+        source_git_sha
+    ):
+        raise SourceLockError(
+            "source_git_sha must be a complete lowercase Git object ID"
+        )
+    if (
+        expected_source_git_sha is not None
+        and source_git_sha != expected_source_git_sha
+    ):
         raise SourceLockError(
             f"source_git_sha={source_git_sha!r}, expected {expected_source_git_sha!r}"
         )
@@ -575,14 +614,17 @@ def verify_source_lock(
             raise SourceLockError(f"{label} must be an object")
         if set(entry) != {"path", "normalization", "sha256", "n_bytes"}:
             raise SourceLockError(
-                f"{label} fields must be exactly " "['n_bytes', 'normalization', 'path', 'sha256']"
+                f"{label} fields must be exactly "
+                "['n_bytes', 'normalization', 'path', 'sha256']"
             )
         relative_path = validate_relative_path(entry.get("path"), label=f"{label}.path")
         seen.append(relative_path)
 
         normalization = entry.get("normalization")
         if normalization != source_normalization(relative_path):
-            raise SourceLockError(f"{label}.normalization is not permitted for {relative_path}")
+            raise SourceLockError(
+                f"{label}.normalization is not permitted for {relative_path}"
+            )
 
         digest = entry.get("sha256")
         if not isinstance(digest, str) or not SHA256_RE.fullmatch(digest):
@@ -625,7 +667,9 @@ def verify_source_lock(
         raise SourceLockError("source lock contracts must be a non-empty list")
     contract_count = payload.get("contract_count")
     if isinstance(contract_count, bool) or contract_count != len(contracts):
-        raise SourceLockError(f"contract_count={contract_count!r}, expected {len(contracts)}")
+        raise SourceLockError(
+            f"contract_count={contract_count!r}, expected {len(contracts)}"
+        )
 
     seen_contracts: dict[str, str] = {}
     previous_workload: str | None = None
@@ -658,7 +702,9 @@ def verify_source_lock(
 
         relative_path = validate_relative_path(entry.get("path"), label=f"{label}.path")
         if relative_path in seen_contracts.values():
-            raise SourceLockError(f"source lock contains duplicate contract path: {relative_path}")
+            raise SourceLockError(
+                f"source lock contains duplicate contract path: {relative_path}"
+            )
         seen_contracts[workload_id] = relative_path
         if entry.get("normalization") != expected_contract_normalization:
             raise SourceLockError(f"{label}.normalization is not permitted")
@@ -679,11 +725,13 @@ def verify_source_lock(
             actual_digest = sha256_bytes(current_data)
             if len(current_data) != n_bytes:
                 raise SourceLockError(
-                    f"{workload_id}: contract n_bytes={n_bytes}, " f"recomputed {len(current_data)}"
+                    f"{workload_id}: contract n_bytes={n_bytes}, "
+                    f"recomputed {len(current_data)}"
                 )
             if actual_digest != digest:
                 raise SourceLockError(
-                    f"{workload_id}: contract sha256={digest}, " f"recomputed {actual_digest}"
+                    f"{workload_id}: contract sha256={digest}, "
+                    f"recomputed {actual_digest}"
                 )
 
     if expected_contracts is not None:
@@ -698,7 +746,9 @@ def verify_source_lock(
             extra = sorted(set(seen_contracts) - set(expected_contract_map))
             wrong_paths = sorted(
                 workload_id
-                for workload_id in set(seen_contracts).intersection(expected_contract_map)
+                for workload_id in set(seen_contracts).intersection(
+                    expected_contract_map
+                )
                 if seen_contracts[workload_id] != expected_contract_map[workload_id]
             )
             raise SourceLockError(
@@ -732,7 +782,9 @@ def load_source_lock(
         raise SourceLockError(f"source lock is missing or is a symlink: {path}")
     data = path.read_bytes()
     try:
-        payload = json.loads(data.decode("utf-8"), object_pairs_hook=_object_without_duplicate_keys)
+        payload = json.loads(
+            data.decode("utf-8"), object_pairs_hook=_object_without_duplicate_keys
+        )
     except (UnicodeDecodeError, json.JSONDecodeError) as exc:
         raise SourceLockError(f"invalid source-lock JSON in {path}: {exc}") from exc
     if not isinstance(payload, dict):

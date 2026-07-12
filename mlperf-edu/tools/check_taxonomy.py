@@ -67,12 +67,14 @@ PREFIXED_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 EVIDENCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x1f\x7f]")
 REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.4"
+PROMOTION_REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.5"
 LEGACY_REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.3"
 SUPPORTED_REFERENCE_EVIDENCE_SCHEMAS = {
     LEGACY_REFERENCE_EVIDENCE_SCHEMA,
     REFERENCE_EVIDENCE_SCHEMA,
 }
 REFERENCE_INDEX_SCHEMA = "mlperf-edu-reference-index/0.2"
+CASE_REFERENCE_INDEX_SCHEMA = "mlperf-edu-reference-index/0.3"
 EMPTY_SHA256 = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 SWEEP_TOOL_SHA256 = (
     "sha256:"
@@ -409,6 +411,7 @@ def check_workload_evidence(name: str, body: dict) -> list[str]:
             baseline.get("replacement_required"),
         )
         superseded_lifecycle = ("superseded", False, True)
+        current_lifecycle = ("current", True, False)
         lifecycle_declared = any(
             field in baseline
             for field in (
@@ -418,11 +421,12 @@ def check_workload_evidence(name: str, body: dict) -> list[str]:
         )
         protocol_superseded = lifecycle == superseded_lifecycle
         if lifecycle_declared and not protocol_superseded:
-            errors.append(
-                f"{name}: historical evidence lifecycle must be exactly "
-                "protocol_compatibility=superseded, review_eligible=false, "
-                "replacement_required=true"
-            )
+            if lifecycle != current_lifecycle:
+                errors.append(
+                    f"{name}: current evidence lifecycle must be exactly "
+                    "protocol_compatibility=current, review_eligible=true, "
+                    "replacement_required=false"
+                )
         file_errors = check_declared_file(
             name,
             label="verified_baseline.evidence_file",
@@ -464,6 +468,10 @@ def check_workload_evidence(name: str, body: dict) -> list[str]:
             else:
                 if protocol_superseded:
                     errors.extend(check_historical_reference_summary(name, payload))
+                elif payload.get("schema") == PROMOTION_REFERENCE_EVIDENCE_SCHEMA:
+                    errors.extend(
+                        check_promoted_case_summary(name, body, baseline, payload)
+                    )
                 else:
                     errors.extend(check_reference_summary(name, body, payload))
     elif baseline.get("review_eligible") is True:
@@ -1299,6 +1307,99 @@ def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> li
     return errors
 
 
+def check_promoted_case_summary(
+    name: str,
+    body: dict,
+    baseline: dict,
+    payload: dict,
+) -> list[str]:
+    """Validate a committed schema-0.5 case against its registry baseline."""
+    errors: list[str] = []
+    expected = {
+        "schema": PROMOTION_REFERENCE_EVIDENCE_SCHEMA,
+        "workload": name.split("/", 1)[-1],
+        "profile": baseline.get("profile"),
+        "mode": baseline.get("mode"),
+        "phase": baseline.get("phase"),
+        "result_role": baseline.get("result_role"),
+        "status": "valid",
+        "evidence_tier": "promotion-candidate",
+        "eligible_for_promotion": True,
+        "eligible_for_public_baseline": False,
+        "evidence_id": baseline.get("evidence_id"),
+    }
+    for field, value in expected.items():
+        if payload.get(field) != value:
+            errors.append(
+                f"{name}: promoted summary {field} is {payload.get(field)!r}, "
+                f"expected {value!r}"
+            )
+    if payload.get("invalid_reasons") != []:
+        errors.append(f"{name}: promoted summary invalid_reasons is not empty")
+    runs = payload.get("runs")
+    if not isinstance(runs, list) or len(runs) != 5:
+        errors.append(f"{name}: promoted summary must contain five runs")
+    elif any(
+        not isinstance(run, dict)
+        or run.get("evidence_valid") is not True
+        or (run.get("promotion_contract") or {}).get("status") != "passed"
+        for run in runs
+    ):
+        errors.append(f"{name}: one or more promoted summary runs did not pass")
+    primary = (payload.get("aggregate") or {}).get("primary_metric") or {}
+    for field, baseline_field in (
+        ("median", "median"),
+        ("min", "min"),
+        ("max", "max"),
+        ("mean", "mean"),
+        ("stdev", "sample_stdev"),
+    ):
+        if not numbers_match(primary.get(field), baseline.get(baseline_field)):
+            errors.append(
+                f"{name}: promoted primary aggregate {field} does not match baseline"
+            )
+    repeatability = payload.get("primary_metric_repeatability") or {}
+    if not numbers_match(
+        repeatability.get("coefficient_of_variation"),
+        baseline.get("coefficient_of_variation"),
+    ):
+        errors.append(f"{name}: promoted timing CV does not match baseline")
+    if repeatability.get("passed") is not True:
+        errors.append(f"{name}: promoted timing repeatability did not pass")
+    source = payload.get("source") or {}
+    if (
+        source.get("git_sha") != baseline.get("source_git_sha")
+        or source.get("git_dirty") is not False
+        or source.get("git_status_sha256") != EMPTY_SHA256
+        or source.get("git_patch_sha256") != EMPTY_SHA256
+    ):
+        errors.append(
+            f"{name}: promoted summary source is not the clean baseline source"
+        )
+    if baseline.get("result_role") == "score-bearing":
+        quality = (payload.get("aggregate") or {}).get("quality") or {}
+        if payload.get("quality_metric") != baseline.get("quality_metric"):
+            errors.append(f"{name}: promoted quality metric does not match baseline")
+        if not numbers_match(quality.get("median"), baseline.get("quality_median")):
+            errors.append(f"{name}: promoted quality median does not match baseline")
+        if payload.get("functional_gate") is not None:
+            errors.append(
+                f"{name}: score-bearing promoted summary has a functional gate"
+            )
+    else:
+        if payload.get("quality_gate") is not None:
+            errors.append(f"{name}: performance promoted summary has a quality gate")
+        if not numbers_match(
+            payload.get("functional_gate"), baseline.get("functional_gate")
+        ):
+            errors.append(f"{name}: promoted functional gate does not match baseline")
+    canonical = body.get("verified_baseline") or {}
+    case_map = body.get("verified_baselines") or {}
+    if baseline is canonical and case_map.get(baseline.get("case_id")) != baseline:
+        errors.append(f"{name}: canonical baseline is absent from verified_baselines")
+    return errors
+
+
 def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
     """Validate a lightweight index for a clean, externally retained sweep package."""
     errors: list[str] = []
@@ -1670,6 +1771,174 @@ def check_shared_checkpoint_evidence(workloads: dict[str, dict]) -> list[str]:
     return errors
 
 
+def _case_id(workload: str, mode: object, phase: object = None) -> str:
+    parts = [workload, "max", str(mode)]
+    if phase:
+        parts.append(str(phase))
+    return "__".join(parts)
+
+
+def check_case_reference_index(
+    index: dict,
+    workloads: dict[str, dict],
+) -> list[str]:
+    """Validate schema-0.3 case closure and registry bindings."""
+    errors: list[str] = []
+    source_git_sha = index.get("source_git_sha")
+    if not re.fullmatch(r"[0-9a-f]{40}", str(source_git_sha or "")):
+        errors.append("case reference index source_git_sha is missing or invalid")
+    source_lock = index.get("source_lock") or {}
+    lock_relative = source_lock.get("path")
+    if not is_safe_posix_relative_path(lock_relative):
+        errors.append("case reference index source_lock.path is not portable")
+    else:
+        lock_path = (REPO_ROOT / str(lock_relative)).resolve()
+        try:
+            lock_path.relative_to(REPO_ROOT.resolve())
+            lock_bytes = lock_path.read_bytes()
+        except (ValueError, OSError) as exc:
+            errors.append(f"case reference source lock cannot be read: {exc}")
+        else:
+            if source_lock.get("sha256") != reference_source_lock.sha256_bytes(
+                lock_bytes
+            ):
+                errors.append("case reference source-lock digest does not match")
+            try:
+                lock = reference_source_lock.load_source_lock(
+                    lock_path,
+                    project_root=REPO_ROOT,
+                    expected_source_git_sha=str(source_git_sha),
+                    verify_current=True,
+                )
+            except reference_source_lock.SourceLockError as exc:
+                errors.append(f"case reference source lock is invalid: {exc}")
+            else:
+                for field in ("schema", "file_count", "contract_count"):
+                    if source_lock.get(field) != lock.get(field):
+                        errors.append(
+                            f"case reference source_lock.{field} does not match lock"
+                        )
+
+    expected_cases: set[str] = set()
+    expected_by_workload: dict[str, set[str]] = {}
+    for workload_id, body in workloads.items():
+        if (body.get("public") or {}).get("status") not in {
+            "score-bearing",
+            "performance-bearing",
+        }:
+            continue
+        canonical = body.get("canonical_max_contract") or {}
+        identifiers = {_case_id(workload_id, canonical.get("mode"))}
+        phases = ((body.get("mode_contracts") or {}).get("inference") or {}).get(
+            "phases", {}
+        )
+        identifiers.update(
+            _case_id(workload_id, "inference", phase) for phase in phases
+        )
+        expected_by_workload[workload_id] = identifiers
+        expected_cases.update(identifiers)
+
+    entries = index.get("cases")
+    if not isinstance(entries, list):
+        return [*errors, "case reference index cases must be a list"]
+    if index.get("case_count") != len(entries):
+        errors.append("case reference index case_count does not match cases")
+    if index.get("workload_count") != len(expected_by_workload):
+        errors.append("case reference index workload_count does not match registry")
+    indexed: dict[str, dict] = {}
+    for position, entry in enumerate(entries):
+        label = f"case reference index cases[{position}]"
+        if not isinstance(entry, dict):
+            errors.append(f"{label} is not an object")
+            continue
+        identifier = entry.get("case_id")
+        if not isinstance(identifier, str) or identifier in indexed:
+            errors.append(f"{label} has a missing or duplicate case_id")
+            continue
+        indexed[identifier] = entry
+        relative_path = entry.get("path")
+        if not is_safe_posix_relative_path(relative_path) or not str(
+            relative_path
+        ).startswith("reference_results/"):
+            errors.append(f"{label}.path is unsafe")
+            continue
+        path = (REPO_ROOT / str(relative_path)).resolve()
+        try:
+            path.relative_to(REPO_ROOT.resolve())
+            data = path.read_bytes()
+            payload = json.loads(data)
+        except (ValueError, OSError, UnicodeDecodeError, json.JSONDecodeError) as exc:
+            errors.append(f"{label} cannot load its summary: {exc}")
+            continue
+        if entry.get("evidence_sha256") != "sha256:" + hashlib.sha256(data).hexdigest():
+            errors.append(f"{label} evidence_sha256 does not match summary bytes")
+        expected_identity = {
+            "evidence_id": payload.get("evidence_id"),
+            "workload": payload.get("workload"),
+            "profile": payload.get("profile"),
+            "mode": payload.get("mode"),
+            "phase": payload.get("phase"),
+            "result_role": payload.get("result_role"),
+        }
+        for field, expected in expected_identity.items():
+            if entry.get(field) != expected:
+                errors.append(f"{label}.{field} does not match summary")
+        if payload.get("schema") != PROMOTION_REFERENCE_EVIDENCE_SCHEMA:
+            errors.append(f"{label} does not cite schema-0.5 promotion evidence")
+        if (payload.get("source") or {}).get("git_sha") != source_git_sha:
+            errors.append(f"{label} source commit does not match index")
+        workload_id = entry.get("workload")
+        body = workloads.get(str(workload_id)) or {}
+        baseline = (body.get("verified_baselines") or {}).get(identifier)
+        if not isinstance(baseline, dict):
+            errors.append(f"{label} has no registry verified_baselines binding")
+            continue
+        expected_baseline = {
+            "case_id": identifier,
+            "evidence_id": entry.get("evidence_id"),
+            "evidence_file": relative_path,
+            "evidence_sha256": entry.get("evidence_sha256"),
+            "source_git_sha": source_git_sha,
+            "mode": entry.get("mode"),
+            "phase": entry.get("phase"),
+            "result_role": entry.get("result_role"),
+        }
+        for field, expected in expected_baseline.items():
+            if baseline.get(field) != expected:
+                errors.append(f"{label} registry baseline {field} does not match index")
+        errors.extend(check_promoted_case_summary(label, body, baseline, payload))
+        source_training = entry.get("source_training")
+        if source_training is not None:
+            if baseline.get("source_training") != source_training:
+                errors.append(f"{label} source_training does not match baseline")
+            training_case = source_training.get("source_training_case_id")
+            if training_case not in expected_cases:
+                errors.append(f"{label} names an unknown source training case")
+
+    if set(indexed) != expected_cases:
+        errors.append(
+            "case reference index closure mismatch; "
+            f"missing={sorted(expected_cases - set(indexed))}, "
+            f"extra={sorted(set(indexed) - expected_cases)}"
+        )
+    for workload_id, identifiers in expected_by_workload.items():
+        body = workloads[workload_id]
+        baselines = body.get("verified_baselines") or {}
+        if set(baselines) != identifiers:
+            errors.append(
+                f"{workload_id}: verified_baselines closure mismatch; "
+                f"missing={sorted(identifiers - set(baselines))}, "
+                f"extra={sorted(set(baselines) - identifiers)}"
+            )
+        canonical = body.get("verified_baseline") or {}
+        canonical_id = canonical.get("case_id")
+        if canonical_id not in identifiers or baselines.get(canonical_id) != canonical:
+            errors.append(
+                f"{workload_id}: verified_baseline is not the canonical case binding"
+            )
+    return errors
+
+
 def check_reference_index(workloads: dict[str, dict]) -> list[str]:
     """Validate index closure, source lock, and registry-to-summary bindings."""
     errors: list[str] = []
@@ -1694,6 +1963,8 @@ def check_reference_index(workloads: dict[str, dict]) -> list[str]:
         return [f"reference index cannot be read: {exc}"]
     if not isinstance(index, dict):
         return ["reference index root must be an object"]
+    if index.get("schema") == CASE_REFERENCE_INDEX_SCHEMA:
+        return check_case_reference_index(index, workloads)
     if index.get("schema") != REFERENCE_INDEX_SCHEMA:
         errors.append(
             f"reference index schema is {index.get('schema')!r}, "
@@ -1830,9 +2101,12 @@ def check_declared_file(
     if not digest:
         return [f"{name}: {label} requires a full SHA-256 digest"]
     normalized_digest = str(digest).lower()
-    if not SHA256_RE.fullmatch(normalized_digest):
+    if PREFIXED_SHA256_RE.fullmatch(normalized_digest):
+        normalized_digest = normalized_digest.removeprefix("sha256:")
+    elif not SHA256_RE.fullmatch(normalized_digest):
         return [
-            f"{name}: {label} SHA-256 must be exactly 64 lowercase hexadecimal characters"
+            f"{name}: {label} SHA-256 must be 64 lowercase hexadecimal characters, "
+            "optionally prefixed with sha256:"
         ]
     path = (REPO_ROOT / str(relative_path)).resolve()
     try:
