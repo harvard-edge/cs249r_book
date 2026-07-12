@@ -38,8 +38,8 @@ CONTRACT_EXCLUDED_QUALITY_TARGET_FIELDS = (
 )
 
 # Keep this list focused on files that can change workload execution,
-# measurement, grading, or the retained quality prompt asset.  Documentation,
-# publication metadata, and generated evidence are deliberately excluded.
+# measurement, grading, or provenance. Documentation, publication metadata,
+# and generated evidence are deliberately excluded.
 MEASUREMENT_SOURCE_PATHS = (
     "src/mlperf/assets.py",
     "src/mlperf/contracts.py",
@@ -49,25 +49,25 @@ MEASUREMENT_SOURCE_PATHS = (
     "src/mlperf/manifest.py",
     "src/mlperf/power.py",
     "src/mlperf/reference/cloud/gpt2_infer.py",
-    "src/mlperf/reference/cloud/micro_dlrm.py",
     "src/mlperf/reference/cloud/nanogpt_decode.py",
     "src/mlperf/reference/cloud/nanogpt_prefill.py",
     "src/mlperf/reference/cloud/nanogpt_train.py",
-    "src/mlperf/reference/dataset_factory.py",
-    "src/mlperf/reference/edge/resnet_core.py",
-    "src/mlperf/reference/edge/resnet_train.py",
-    "src/mlperf/reference/mobile/mobilenet_core.py",
-    "src/mlperf/reference/tiny/anomaly_detection_ae.py",
-    "src/mlperf/reference/vision_data.py",
+    "src/mlperf/reference/timeseries/patchtst/__init__.py",
+    "src/mlperf/reference/timeseries/patchtst/backbone.py",
+    "src/mlperf/reference/timeseries/patchtst/layers.py",
+    "src/mlperf/reference/timeseries/patchtst/revin.py",
+    "src/mlperf/reference/tiny/mlperf_tiny_kws.py",
+    "src/mlperf/reference/tiny/mlperf_tiny_resnet.py",
     "src/mlperf/registry.py",
     "src/mlperf/roofline.py",
     "src/mlperf/runners/common.py",
-    "src/mlperf/runners/dlrm.py",
+    "src/mlperf/runners/graph.py",
     "src/mlperf/runners/nanogpt.py",
-    "src/mlperf/runners/slm.py",
+    "src/mlperf/runners/retrieval.py",
+    "src/mlperf/runners/text.py",
+    "src/mlperf/runners/timeseries.py",
     "src/mlperf/runners/tiny.py",
     "src/mlperf/runners/vision.py",
-    "src/mlperf_edu/slm_quality_prompts.json",
     "tools/run_reference_sweep.py",
 )
 
@@ -81,26 +81,24 @@ SOURCE_NORMALIZATIONS: Mapping[str, tuple[str, ...]] = {
 }
 
 PROMOTED_CONTRACT_PATHS: Mapping[str, str] = {
-    "anomaly-ae-train": "registry/suites/tiny/anomaly-ae-train.yaml",
-    "micro-dlrm-train": "registry/suites/recommender/micro-dlrm-train.yaml",
-    "mobilenetv2-train": "registry/suites/vision/mobilenetv2-train.yaml",
-    "nanogpt-decode": "registry/suites/language/nanogpt-inference/variants/decode.yaml",
-    "nanogpt-prefill": "registry/suites/language/nanogpt-inference/variants/prefill.yaml",
-    "nanogpt-train": "registry/suites/language/nanogpt-train.yaml",
-    "resnet18-train": "registry/suites/vision/resnet18-train.yaml",
-    "slm-decode": ("registry/suites/slm/smollm2-chat-inference/variants/baseline.yaml"),
+    "causal-language-modeling": "registry/suites/language/causal-language-modeling.yaml",
+    "graph-node-classification": "registry/suites/graph/graph-node-classification.yaml",
+    "image-classification": "registry/suites/vision/image-classification.yaml",
+    "information-retrieval": "registry/suites/language/information-retrieval.yaml",
+    "keyword-spotting": "registry/suites/tiny/keyword-spotting.yaml",
+    "text-classification": "registry/suites/language/text-classification.yaml",
+    "time-series-forecasting": "registry/suites/timeseries/time-series-forecasting.yaml",
 }
 
 PROMOTED_REFERENCE_PYTHON_PATHS = (
-    "src/mlperf/reference/cloud/micro_dlrm.py",
     "src/mlperf/reference/cloud/nanogpt_decode.py",
     "src/mlperf/reference/cloud/nanogpt_prefill.py",
     "src/mlperf/reference/cloud/nanogpt_train.py",
-    "src/mlperf/reference/edge/resnet_core.py",
-    "src/mlperf/reference/edge/resnet_train.py",
-    "src/mlperf/reference/mobile/mobilenet_core.py",
-    "src/mlperf/reference/tiny/anomaly_detection_ae.py",
-    "src/mlperf/reference/vision_data.py",
+    "src/mlperf/reference/timeseries/patchtst/backbone.py",
+    "src/mlperf/reference/timeseries/patchtst/layers.py",
+    "src/mlperf/reference/timeseries/patchtst/revin.py",
+    "src/mlperf/reference/tiny/mlperf_tiny_kws.py",
+    "src/mlperf/reference/tiny/mlperf_tiny_resnet.py",
 )
 
 

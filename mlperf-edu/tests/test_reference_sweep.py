@@ -4,7 +4,6 @@ import importlib.util
 import json
 import zipfile
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -24,6 +23,18 @@ def test_parse_seeds_rejects_empty_and_duplicate_values():
         sweep.parse_seeds("0,1,0")
 
 
+def test_parse_run_count_and_canonical_seed():
+    assert sweep.parse_run_count("5") == 5
+    with pytest.raises(argparse.ArgumentTypeError):
+        sweep.parse_run_count("0")
+    from mlperf.registry import load_registry
+
+    registry = load_registry()
+    assert sweep.canonical_seed(registry["causal-language-modeling"]) == 1337
+    assert sweep.canonical_seed(registry["time-series-forecasting"]) == 2021
+    assert sweep.canonical_seed(registry["image-classification"]) == 42
+
+
 def test_default_evidence_root_is_outside_source_checkout():
     assert not sweep.DEFAULT_OUTPUT_DIR.is_relative_to(sweep.ROOT)
 
@@ -32,7 +43,7 @@ def test_sweep_environment_removes_higher_priority_seed_overrides(monkeypatch):
     monkeypatch.setenv("MLPERF_EDU_SEED", "999")
     monkeypatch.setenv("MLPERF_EDU_SLM_SEED", "998")
     monkeypatch.setenv("MLPERF_EDU_DEVICE", "mps")
-    monkeypatch.setenv("MLPERF_EDU_RESNET_MAX_EPOCHS", "1")
+    monkeypatch.setenv("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_EPOCHS", "1")
     monkeypatch.setenv("MLPERF_EDU_MAX_QUALITY_TARGET", "999")
     monkeypatch.setenv("MLPERF_EDU_SLM_MODEL_ID", "unapproved/model")
     monkeypatch.setenv("MLPERF_EDU_DATA_DIR", "/tmp/noncanonical-data")
@@ -41,13 +52,13 @@ def test_sweep_environment_removes_higher_priority_seed_overrides(monkeypatch):
     assert "MLPERF_EDU_SLM_SEED" not in env
     assert env["MLPERF_EDU_MAX_SEED"] == "3"
     assert env["MLPERF_EDU_DEVICE"] == "cpu"
-    assert "MLPERF_EDU_RESNET_MAX_EPOCHS" not in env
+    assert "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_EPOCHS" not in env
     assert "MLPERF_EDU_MAX_QUALITY_TARGET" not in env
     assert "MLPERF_EDU_SLM_MODEL_ID" not in env
     assert "MLPERF_EDU_DATA_DIR" not in env
 
     with pytest.raises(ValueError, match="unsupported reference sweep"):
-        sweep.sweep_environment(3, "cpu", {"MLPERF_EDU_RESNET_MAX_EPOCHS": "1"})
+        sweep.sweep_environment(3, "cpu", {"MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_EPOCHS": "1"})
 
 
 def test_outer_execution_policy_stabilizes_all_timed_public_candidates():
@@ -59,7 +70,7 @@ def test_outer_execution_policy_stabilizes_all_timed_public_candidates():
     )
     assert policy["applies"] is True
     assert policy["process_execution_count"] == 5
-    assert policy["execution_unit"] == "one fresh Python subprocess per requested seed"
+    assert policy["execution_unit"] == "one fresh Python subprocess per repetition"
     assert [execution["execution_index"] for execution in policy["executions"]] == [
         1,
         2,
@@ -103,7 +114,7 @@ def test_main_rejects_invalid_inter_execution_cooldowns(value):
         sweep.main(
             [
                 "--workload",
-                "resnet18-train",
+                "image-classification",
                 "--inter-execution-cooldown-seconds",
                 value,
             ]
@@ -113,14 +124,15 @@ def test_main_rejects_invalid_inter_execution_cooldowns(value):
 
 def _write_fake_lineage_package(path: Path) -> None:
     report = {
-        "workload": "nanogpt-train",
+        "workload": "causal-language-modeling",
         "profile": "max",
+        "mode": "training",
         "status": "passed",
         "data_mode": "real",
         "quality": {"quality_required": True, "target_met": True},
     }
     manifest = {
-        "workload": "nanogpt-train",
+        "workload": "causal-language-modeling",
         "leaves": {
             "measurement": {"report_path": "../report/train.json"},
             "weights": {"path": "../weights/model.pt"},
@@ -142,7 +154,7 @@ def _write_fake_lineage_package(path: Path) -> None:
     ]
     index = {
         "schema": "mlperf-edu-package/0.2",
-        "workload": "nanogpt-train",
+        "workload": "causal-language-modeling",
         "manifest": "manifest/train.provd.json",
         "source_manifest": "manifest/train.provd.json",
         "included_files": included,
@@ -251,6 +263,8 @@ def fake_result(seed, value, *, data_mode="real", primary_metric_value=None):
         "quality_metric_key": "final_accuracy",
         "quality_value": value,
         "quality_target_met": True,
+        "quality_target": 0.85,
+        "quality_direction": "higher",
         "comparison_fingerprint_sha256": "a" * 64,
         "scenario": "training",
         "manifest_scenario": "training",
@@ -277,171 +291,10 @@ def fake_result(seed, value, *, data_mode="real", primary_metric_value=None):
     }
 
 
-def test_run_one_seed_cooldown_precedes_mocked_subprocess_and_never_sleeps_zero(
-    tmp_path, monkeypatch
-):
-    events = []
-    subprocess_environments = []
-    monkeypatch.setenv("MLPERF_EDU_MAX_QUALITY_TARGET", "999")
-
-    def fake_sleep(seconds):
-        events.append(("sleep", seconds))
-
-    def fake_run(command, **kwargs):
-        events.append(("subprocess", Path(command[1]).name))
-        subprocess_environments.append(kwargs["env"])
-        args = json.loads(Path(command[-2]).read_text())
-        Path(command[-1]).write_text(
-            json.dumps(fake_result(args["seed"], 100.0 + args["seed"]))
-        )
-        return SimpleNamespace(returncode=0, stdout="", stderr="")
-
-    monkeypatch.setattr(sweep.time, "sleep", fake_sleep)
-    monkeypatch.setattr(sweep.subprocess, "run", fake_run)
-    bootstrap = tmp_path / "child.py"
-    bootstrap.write_text("# subprocess is mocked\n")
-
-    common = {
-        "workload_id": "slm-decode",
-        "variant": None,
-        "profile": "max",
-        "device": "cpu",
-        "attempt_dir": tmp_path,
-        "timeout_seconds": 1.0,
-        "evidence_tier": "public-candidate",
-        "allowed_data_modes": sweep.PERFORMANCE_PUBLIC_DATA_MODES,
-    }
-    sweep.run_one_seed(bootstrap, seed=0, cooldown_before_seconds=0.0, **common)
-    sweep.run_one_seed(bootstrap, seed=1, cooldown_before_seconds=2.5, **common)
-
-    assert events == [
-        ("subprocess", "child.py"),
-        ("sleep", 2.5),
-        ("subprocess", "child.py"),
-    ]
-    assert all(
-        "MLPERF_EDU_MAX_QUALITY_TARGET" not in env for env in subprocess_environments
-    )
 
 
-def test_main_writes_create_once_valid_evidence_and_digest(tmp_path, monkeypatch):
-    values = {0: 0.86, 1: 0.87, 2: 0.88, 3: 0.89, 4: 0.90}
-
-    def run_one_seed(_bootstrap, **kwargs):
-        seed = kwargs["seed"]
-        return fake_result(
-            seed,
-            values[seed],
-            primary_metric_value=10.0 + (0.05 * seed),
-        )
-
-    monkeypatch.setattr(sweep, "run_one_seed", run_one_seed)
-    monkeypatch.setattr(
-        sweep,
-        "source_snapshot",
-        lambda: {
-            "git_sha": "abc",
-            "git_dirty": False,
-            "tool_path": "tools/run_reference_sweep.py",
-        },
-    )
-    code = sweep.main(
-        [
-            "--workload",
-            "resnet18-train",
-            "--profile",
-            "max",
-            "--seeds",
-            "0,1,2,3,4",
-            "--output-dir",
-            str(tmp_path),
-            "--timeout-seconds",
-            "1",
-            "--evidence-tier",
-            "public-candidate",
-        ]
-    )
-    assert code == 0
-    summaries = list(tmp_path.glob("*/evidence_summary.json"))
-    assert len(summaries) == 1
-    summary_path = summaries[0]
-    summary = json.loads(summary_path.read_text())
-    assert summary["schema"] == "mlperf-edu-reference-evidence/0.4"
-    assert summary["status"] == "valid"
-    assert summary["primary_metric"] == {
-        "name": "train_and_eval_seconds",
-        "role": "performance",
-    }
-    assert summary["reference_metric_role"] == "performance"
-    assert summary["quality_metric"] == "top1_accuracy"
-    assert summary["aggregate"]["primary_metric"]["median"] == 10.1
-    assert summary["aggregate"]["quality"]["median"] == 0.88
-    assert summary["aggregate"]["primary_metric"] != summary["aggregate"]["quality"]
-    assert summary["acceptance"]["all_runs_passed"] is True
-    assert summary["acceptance"]["passed_runs"] == 5
-    assert summary["quality_gate"] == {
-        "metric": "top1_accuracy",
-        "target": 0.85,
-        "direction": "higher",
-        "tolerance": 0.0,
-        "all_runs_must_pass": True,
-    }
-    assert summary["functional_gate"] is None
-    assert summary["repeatability"] is None
-    assert summary["primary_metric_repeatability"]["passed"] is True
-    assert summary["eligible_for_public_baseline"] is True
-    assert summary["seed_sensitivity"]["verdict"] == "sensitive"
-    assert (
-        summary["basis"]["reference_protocol"]["seed_interface"]
-        == "MLPERF_EDU_MAX_SEED"
-    )
-    assert summary["rerun_policy"]["mode"] == "full-sweep-only"
-    assert summary["timeout_seconds_per_seed"] == 1
-    assert summary["inter_execution_stabilization"]["applies"] is True
-    assert [
-        execution["cooldown_before_seconds"]
-        for execution in summary["inter_execution_stabilization"]["executions"]
-    ] == [0.0, 5.0, 5.0, 5.0, 5.0]
-    assert summary["runs"][0]["backend"] == "pytorch-cpu"
-    assert summary["runs"][0]["hardware_backend"] == "MPS"
-    assert summary["runs"][0]["fingerprint_backends"] == ["pytorch-cpu"]
-    sidecar = summary_path.with_suffix(".json.sha256")
-    digest, filename = sidecar.read_text().strip().split("  ")
-    assert filename == summary_path.name
-    assert digest == hashlib.sha256(summary_path.read_bytes()).hexdigest()
 
 
-def test_main_returns_nonzero_for_identical_or_nonreal_public_evidence(
-    tmp_path, monkeypatch
-):
-    def run_one_seed(_bootstrap, **kwargs):
-        return fake_result(kwargs["seed"], 0.80, data_mode="synthetic-deterministic")
-
-    monkeypatch.setattr(sweep, "run_one_seed", run_one_seed)
-    monkeypatch.setattr(
-        sweep, "source_snapshot", lambda: {"git_sha": "abc", "git_dirty": False}
-    )
-    code = sweep.main(
-        [
-            "--workload",
-            "resnet18-train",
-            "--profile",
-            "max",
-            "--seeds",
-            "0,1,2,3,4",
-            "--output-dir",
-            str(tmp_path),
-            "--evidence-tier",
-            "public-candidate",
-        ]
-    )
-    assert code == 1
-    summary_path = next(tmp_path.glob("*/evidence_summary.json"))
-    summary = json.loads(summary_path.read_text())
-    assert summary["status"] == "invalid"
-    assert summary["eligible_for_public_baseline"] is False
-    assert summary["seed_sensitivity"]["verdict"] == "identical"
-    assert any("score-bearing" in reason for reason in summary["invalid_reasons"])
 
 
 def test_score_evidence_rejects_high_variance_primary_timing(tmp_path, monkeypatch):
@@ -459,7 +312,7 @@ def test_score_evidence_rejects_high_variance_primary_timing(tmp_path, monkeypat
     code = sweep.main(
         [
             "--workload",
-            "resnet18-train",
+            "image-classification",
             "--profile",
             "max",
             "--seeds",
@@ -500,7 +353,7 @@ def test_score_evidence_requires_every_quality_run_and_primary_metric(
     code = sweep.main(
         [
             "--workload",
-            "resnet18-train",
+            "image-classification",
             "--profile",
             "max",
             "--seeds",
@@ -520,229 +373,4 @@ def test_score_evidence_requires_every_quality_run_and_primary_metric(
     assert any(
         "primary metric value is not finite and positive" in reason
         for reason in summary["invalid_reasons"]
-    )
-
-
-def test_main_accepts_performance_metric_with_all_run_functional_gate(
-    tmp_path, monkeypatch
-):
-    calls = []
-
-    def run_one_seed(_bootstrap, **kwargs):
-        calls.append(kwargs)
-        result = fake_result(
-            kwargs["seed"],
-            100.0 + kwargs["seed"],
-            data_mode="local-prompt",
-        )
-        result.update(
-            {
-                "primary_metric_declared": "output_tokens_per_sec",
-                "primary_metric_key": "output_tokens_per_sec",
-                "primary_metric_value": 100.0 + kwargs["seed"],
-                "quality_metric_declared": None,
-                "quality_metric_key": None,
-                "quality_value": None,
-                "functional_metric_declared": "generated_tokens",
-                "functional_metric_key": "generated_tokens",
-                "functional_metric_value": 16.0,
-                "reference_metric_role": "performance",
-                "grade": {
-                    "passed": True,
-                    "status": "passed",
-                    "target_met": True,
-                    "metric": "generated_tokens",
-                    "value": 16.0,
-                    "target": 8,
-                },
-            }
-        )
-        return result
-
-    monkeypatch.setattr(sweep, "run_one_seed", run_one_seed)
-    monkeypatch.setattr(
-        sweep, "source_snapshot", lambda: {"git_sha": "abc", "git_dirty": False}
-    )
-    code = sweep.main(
-        [
-            "--workload",
-            "slm-decode",
-            "--profile",
-            "max",
-            "--seeds",
-            "0,1,2,3,4",
-            "--output-dir",
-            str(tmp_path),
-            "--evidence-tier",
-            "public-candidate",
-            "--inter-execution-cooldown-seconds",
-            "2.5",
-        ]
-    )
-    assert code == 0
-    summary = json.loads(next(tmp_path.glob("*/evidence_summary.json")).read_text())
-    assert summary["eligible_for_public_baseline"] is True
-    assert summary["variant"] == "baseline"
-    assert summary["reference_metric_role"] == "performance"
-    assert summary["primary_metric"] == {
-        "name": "output_tokens_per_sec",
-        "role": "performance",
-    }
-    assert summary["quality_metric"] is None
-    assert summary["aggregate"]["quality"] is None
-    assert summary["functional_gate"]["metric"] == "generated_tokens"
-    assert summary["acceptance"]["statistic"] == "all_runs"
-    assert summary["acceptance"]["passed"] is True
-    assert [call["cooldown_before_seconds"] for call in calls] == [
-        0.0,
-        2.5,
-        2.5,
-        2.5,
-        2.5,
-    ]
-    stabilization = summary["inter_execution_stabilization"]
-    assert stabilization["applies"] is True
-    assert stabilization["configured_cooldown_seconds"] == 2.5
-    assert summary["runs"][0]["outer_process_execution"] == {
-        "execution_index": 1,
-        "seed": 0,
-        "fresh_process": True,
-        "cooldown_before_seconds": 0.0,
-    }
-    reproduction = summary["runs"][1]["reproduce"]["reference_sweep"]
-    assert reproduction["outer_process_execution"]["execution_index"] == 2
-    assert reproduction["inter_execution_cooldown"] == {
-        "cli_option": "--inter-execution-cooldown-seconds",
-        "configured_seconds": 2.5,
-        "applied_before_this_execution_seconds": 2.5,
-        "applies": True,
-    }
-
-
-def test_public_nanogpt_inference_requires_lineage_package(tmp_path, capsys):
-    code = sweep.main(
-        [
-            "--workload",
-            "nanogpt-prefill",
-            "--profile",
-            "max",
-            "--output-dir",
-            str(tmp_path),
-            "--evidence-tier",
-            "public-candidate",
-        ]
-    )
-    assert code == 2
-    assert "requires --nanogpt-lineage-package" in capsys.readouterr().err
-    assert list(tmp_path.iterdir()) == []
-
-
-def test_main_injects_staged_lineage_and_records_only_relative_paths(
-    tmp_path, monkeypatch
-):
-    captured_environments = []
-
-    def validate(_path):
-        return {"validated": True}
-
-    def stage(_validation, attempt_dir):
-        stage_root = attempt_dir / "inputs" / "nanogpt-training"
-        paths = {
-            "checkpoint": stage_root / "weights" / "model.pt",
-            "report": stage_root / "report" / "train.json",
-            "manifest": stage_root / "manifest" / "train.provd.json",
-        }
-        for path in paths.values():
-            path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("test")
-        environment = {
-            sweep.NANOGPT_LINEAGE_ENV[role]: str(path.resolve())
-            for role, path in paths.items()
-        }
-        return {
-            "package_sha256": "sha256:" + "a" * 64,
-            "package_schema": "mlperf-edu-package/0.2",
-            "source_workload": "nanogpt-train",
-            "stage_root": stage_root,
-            "paths": paths,
-            "environment": environment,
-            "verification_check_count": 12,
-        }
-
-    def run_one_seed(_bootstrap, **kwargs):
-        captured_environments.append(kwargs["environment_overrides"])
-        result = fake_result(
-            kwargs["seed"],
-            200.0 + kwargs["seed"],
-            data_mode="checkpoint-backed",
-        )
-        result.update(
-            {
-                "primary_metric_declared": "prefill_tokens_per_sec",
-                "primary_metric_key": "prefill_tokens_per_sec",
-                "primary_metric_value": 200.0 + kwargs["seed"],
-                "quality_metric_declared": None,
-                "quality_metric_key": None,
-                "quality_value": None,
-                "functional_metric_declared": "prefill_tokens_per_sec",
-                "functional_metric_key": "prefill_tokens_per_sec",
-                "functional_metric_value": 200.0 + kwargs["seed"],
-                "reference_metric_role": "performance",
-                "grade": {
-                    "passed": True,
-                    "status": "passed",
-                    "target_met": True,
-                    "metric": "prefill_tokens_per_sec",
-                    "value": 200.0 + kwargs["seed"],
-                    "target": 0,
-                },
-            }
-        )
-        return result
-
-    monkeypatch.setattr(sweep, "validate_nanogpt_lineage_package", validate)
-    monkeypatch.setattr(sweep, "stage_nanogpt_lineage_package", stage)
-    monkeypatch.setattr(sweep, "run_one_seed", run_one_seed)
-    monkeypatch.setattr(
-        sweep, "source_snapshot", lambda: {"git_sha": "abc", "git_dirty": False}
-    )
-    code = sweep.main(
-        [
-            "--workload",
-            "nanogpt-prefill",
-            "--profile",
-            "max",
-            "--seeds",
-            "0,1,2,3,4",
-            "--output-dir",
-            str(tmp_path),
-            "--evidence-tier",
-            "public-candidate",
-            "--nanogpt-lineage-package",
-            str(tmp_path / "input.zip"),
-        ]
-    )
-    assert code == 0
-    assert len(captured_environments) == 5
-    assert all(
-        set(environment) == set(sweep.NANOGPT_LINEAGE_ENV.values())
-        for environment in captured_environments
-    )
-    summary = json.loads(next(tmp_path.glob("*/evidence_summary.json")).read_text())
-    lineage = summary["nanogpt_training_lineage"]
-    assert lineage["required"] is True
-    assert lineage["status"] == "staged"
-    assert lineage["package_sha256"] == "sha256:" + "a" * 64
-    assert lineage["staged_root"] == "inputs/nanogpt-training"
-    assert lineage["source_training_report"].startswith("inputs/")
-    assert lineage["source_training_manifest"].startswith("inputs/")
-    assert lineage["source_training_checkpoint"].startswith("inputs/")
-    assert not any(
-        Path(lineage[key]).is_absolute()
-        for key in (
-            "staged_root",
-            "source_training_report",
-            "source_training_manifest",
-            "source_training_checkpoint",
-        )
     )

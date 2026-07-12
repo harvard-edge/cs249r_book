@@ -61,15 +61,11 @@ PUBLIC_RESULT_SCENARIOS = (
 
 PRODUCT_SUITES = (
     "language",
-    "slm",
     "vision",
     "recommender",
     "tiny",
-    "agent",
-    "distributed",
     "graph",
     "timeseries",
-    "rl",
 )
 
 WORKLOAD_COLLECTIONS = (
@@ -82,63 +78,31 @@ WORKLOAD_COLLECTIONS = (
 DEFAULT_WORKLOAD_COLLECTION = "starter"
 
 STARTER_WORKLOADS = {
-    "nanogpt-train",
-    "nanogpt-prefill",
-    "nanogpt-decode",
-    "slm-decode",
-    "resnet18-train",
-    "micro-dlrm-train",
-    "anomaly-ae-train",
-    "nano-rag-agent",
-    "micro-dlrm-distributed",
-    "micro-gnn-train",
-    "micro-lstm-train",
-    "micro-rl-train",
+    "causal-language-modeling",
+    "image-classification",
+    "graph-node-classification",
+    "time-series-forecasting",
 }
 
 STARTER_WORKLOAD_ORDER = (
-    "nanogpt-train",
-    "nanogpt-prefill",
-    "nanogpt-decode",
-    "slm-decode",
-    "micro-dlrm-train",
-    "resnet18-train",
-    "anomaly-ae-train",
-    "nano-rag-agent",
-    "micro-dlrm-distributed",
-    "micro-gnn-train",
-    "micro-lstm-train",
-    "micro-rl-train",
+    "causal-language-modeling",
+    "image-classification",
+    "graph-node-classification",
+    "time-series-forecasting",
 )
 
 STANDARD_WORKLOAD_ORDER = (
     *STARTER_WORKLOAD_ORDER,
-    "slm-quantized-decode",
-    "mobilenetv2-train",
-    "mobilenet-cifar100-composed-fp16",
-    "micro-dlrm-dram-train",
-    "dscnn-kws-train",
-    "wake-vision-vww",
-    "nano-codegen-agent",
-    "nano-react-agent",
-    "nano-toolcall-agent",
+    "keyword-spotting",
 )
 
 STANDARD_WORKLOADS = set(STANDARD_WORKLOAD_ORDER)
 
 RESEARCH_WORKLOAD_ORDER = (
-    "micro-bert-train",
-    "micro-diffusion-train",
-    "micro-gnn-train",
-    "micro-lstm-train",
-    "micro-rl-train",
-    "nano-lora-finetune",
-    "nano-moe-train",
-    "slm-batched-decode",
-    "slm-long-context-decode",
-    "nanogpt-decode-fp16-b16",
-    "nanogpt-decode-fp32-b16",
-    "nanogpt-decode-spec",
+    "text-classification",
+    "information-retrieval",
+    "graph-node-classification",
+    "time-series-forecasting",
 )
 
 RESEARCH_WORKLOADS = set(RESEARCH_WORKLOAD_ORDER)

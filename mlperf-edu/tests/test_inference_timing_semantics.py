@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import json
-from types import SimpleNamespace
 
 import pytest
 import torch
@@ -14,40 +13,6 @@ from mlperf.reference.cloud.nanogpt_prefill import (
 )
 from mlperf.registry import load_registry
 from mlperf.runners.nanogpt import _aggregate_decode_results, run_decode_min
-from mlperf.runners.slm import _continuation_nll_with_cache, _run_slm_request
-
-
-class _FakeHFCausalLM(torch.nn.Module):
-    def __init__(self) -> None:
-        super().__init__()
-        self.calls: list[dict[str, object]] = []
-        self.returned_caches: list[object] = []
-
-    def forward(
-        self,
-        *,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        use_cache: bool,
-        past_key_values: object | None = None,
-    ) -> SimpleNamespace:
-        assert use_cache is True
-        token_id = len(self.calls) + 1
-        logits = torch.zeros((*input_ids.shape, 16))
-        logits[:, -1, token_id] = 100.0
-        cache = object()
-        self.calls.append(
-            {
-                "input_shape": tuple(input_ids.shape),
-                "attention_length": int(attention_mask.shape[-1]),
-                "past_key_values": past_key_values,
-            }
-        )
-        self.returned_caches.append(cache)
-        return SimpleNamespace(logits=logits, past_key_values=cache)
-
-    def generate(self, *args: object, **kwargs: object) -> torch.Tensor:
-        raise AssertionError("the measured request must not call model.generate")
 
 
 class _FakeNanoGPT(torch.nn.Module):
@@ -93,85 +58,6 @@ class _FakeNanoGPT(torch.nn.Module):
         )
         self.returned_caches.append(cache)
         return logits, cache
-
-
-def test_slm_request_reuses_prefill_cache_and_measures_exact_continuation() -> None:
-    model = _FakeHFCausalLM()
-    input_ids = torch.tensor([[3, 4, 5]])
-    attention_mask = torch.ones_like(input_ids)
-
-    result = _run_slm_request(model, input_ids, attention_mask, decode_tokens=4)
-
-    assert [call["input_shape"] for call in model.calls] == [
-        (1, 3),
-        (1, 1),
-        (1, 1),
-        (1, 1),
-    ]
-    assert [call["attention_length"] for call in model.calls] == [3, 4, 5, 6]
-    assert model.calls[0]["past_key_values"] is None
-    for index in range(1, len(model.calls)):
-        assert model.calls[index]["past_key_values"] is model.returned_caches[index - 1]
-    assert result["generated"].tolist() == [[1, 2, 3, 4]]
-    assert len(result["itl_samples_s"]) == 3
-    assert result["request_ttft_s"] >= result["prefill_latency_s"] > 0
-    assert result["request_end_to_end_latency_s"] >= result["request_ttft_s"] > 0
-
-
-def test_slm_request_fails_closed_without_cache_or_decode_interval() -> None:
-    class _NoCacheModel(torch.nn.Module):
-        def forward(self, **kwargs: object) -> SimpleNamespace:
-            input_ids = kwargs["input_ids"]
-            assert isinstance(input_ids, torch.Tensor)
-            return SimpleNamespace(
-                logits=torch.zeros((*input_ids.shape, 4)), past_key_values=None
-            )
-
-    input_ids = torch.tensor([[1, 2]])
-    attention_mask = torch.ones_like(input_ids)
-    with pytest.raises(ValueError, match="at least two output tokens"):
-        _run_slm_request(_FakeHFCausalLM(), input_ids, attention_mask, decode_tokens=1)
-    with pytest.raises(ValueError, match="did not return a KV cache"):
-        _run_slm_request(_NoCacheModel(), input_ids, attention_mask, decode_tokens=2)
-
-
-def test_slm_quality_scores_exact_continuation_tokens_through_cache() -> None:
-    class _Tokenizer:
-        def __init__(self) -> None:
-            self.calls: list[tuple[str, bool]] = []
-
-        def __call__(
-            self,
-            text: str,
-            *,
-            return_tensors: str,
-            add_special_tokens: bool,
-        ) -> dict[str, torch.Tensor]:
-            assert return_tensors == "pt"
-            self.calls.append((text, add_special_tokens))
-            token_ids = [7, 8] if add_special_tokens else [1, 2]
-            input_ids = torch.tensor([token_ids])
-            return {
-                "input_ids": input_ids,
-                "attention_mask": torch.ones_like(input_ids),
-            }
-
-    model = _FakeHFCausalLM()
-    tokenizer = _Tokenizer()
-
-    nll, token_count = _continuation_nll_with_cache(
-        model,
-        tokenizer,
-        torch.device("cpu"),
-        prompt="boundary",
-        continuation=" continuation",
-    )
-
-    assert tokenizer.calls == [("boundary", True), (" continuation", False)]
-    assert token_count == 2
-    assert nll < 0.001
-    assert [call["input_shape"] for call in model.calls] == [(1, 2), (1, 1)]
-    assert model.calls[1]["past_key_values"] is model.returned_caches[0]
 
 
 def test_nanogpt_request_ttft_ends_at_first_token_then_itl_uses_cache() -> None:
@@ -280,12 +166,15 @@ def test_nanogpt_aggregate_rejects_incomplete_or_decode_only_ttft() -> None:
 
 
 def test_nanogpt_min_report_and_manifest_use_single_stream(tmp_path) -> None:
-    workload = load_registry()["nanogpt-decode"]
+    workload = load_registry()["causal-language-modeling"]
 
     report = run_decode_min(workload, tmp_path)
-    manifest = json.loads((tmp_path / "nanogpt-decode_min.provd.json").read_text())
+    manifest = json.loads(
+        (tmp_path / "causal-language-modeling_inference_decode_min.provd.json").read_text()
+    )
 
-    assert workload.scenario == "single_stream"
+    phase_contract = workload.raw["mode_contracts"]["inference"]["phases"]["decode"]
+    assert phase_contract["scenario"] == "single_stream"
     assert report["scenario"] == "single_stream"
     assert report["measurement_mode"] == "sequential_microbenchmark"
     assert manifest["scenario"] == "single_stream"

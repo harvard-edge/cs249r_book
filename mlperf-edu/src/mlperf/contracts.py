@@ -1,10 +1,8 @@
 from __future__ import annotations
 
-import hashlib
-import json
+import copy
 import math
-from functools import lru_cache
-from importlib import resources
+from dataclasses import replace
 from pathlib import Path
 from typing import Any
 
@@ -13,7 +11,7 @@ from mlperf.registry import QUALITY_BASELINE_ALIASES, Workload
 
 
 PUBLIC_DATA_MODES = {
-    "score-bearing": {"real"},
+    "score-bearing": {"real", "real-preprocessed-mlperf-tiny-accuracy-set"},
     "performance-bearing": {
         "checkpoint-backed",
         "local-prompt",
@@ -105,239 +103,6 @@ def _mapping_contract_issues(
         issues.append(
             f"report {label} contains undeclared canonical fields: {unexpected}"
         )
-    return issues
-
-
-QUALITY_RESULT_BOUND_FIELDS = {
-    "suite",
-    "fixture_version",
-    "suite_sha256",
-    "cases",
-    "categories",
-    "aggregation",
-    "category_guard",
-}
-
-
-@lru_cache(maxsize=1)
-def _slm_fixture_contract() -> tuple[str, tuple[tuple[str, str, int], ...]]:
-    """Load the packaged SLM case identities bound by the suite digest."""
-    raw = (
-        resources.files("mlperf_edu").joinpath("slm_quality_prompts.json").read_bytes()
-    )
-    try:
-        fixture = json.loads(raw)
-        cases = fixture["cases"]
-        expected_tokens = fixture["expected_continuation_tokens"]
-        rows = tuple(
-            (
-                str(case["id"]),
-                str(case["category"]),
-                int(expected_tokens[case["id"]]),
-            )
-            for case in cases
-        )
-    except (KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
-        raise ValueError("packaged SLM quality fixture contract is invalid") from exc
-    return "sha256:" + hashlib.sha256(raw).hexdigest(), rows
-
-
-def _quality_evaluation_contract_view(
-    expected: dict[str, Any], actual: dict[str, Any]
-) -> dict[str, Any]:
-    """Project report-owned values onto the canonical quality contract."""
-    result = actual.get("result")
-    result = result if isinstance(result, dict) else {}
-    view: dict[str, Any] = {}
-    for key, expected_value in expected.items():
-        if key in QUALITY_RESULT_BOUND_FIELDS:
-            view[key] = result.get(key)
-        elif key == "gates" and isinstance(expected_value, dict):
-            actual_gates = actual.get("gates")
-            actual_gates = actual_gates if isinstance(actual_gates, dict) else {}
-            view[key] = {
-                gate_name: {
-                    field: (actual_gates.get(gate_name) or {}).get(field)
-                    for field in expected_gate
-                }
-                if isinstance(expected_gate, dict)
-                and isinstance(actual_gates.get(gate_name), dict)
-                else actual_gates.get(gate_name)
-                for gate_name, expected_gate in expected_value.items()
-            }
-        else:
-            view[key] = actual.get(key)
-    return view
-
-
-def _slm_quality_result_issues(
-    expected: dict[str, Any], quality_evaluation: dict[str, Any]
-) -> list[str]:
-    """Recompute token-weighted SLM aggregates and enforce every declared gate."""
-    issues: list[str] = []
-    result = quality_evaluation.get("result")
-    if not isinstance(result, dict):
-        return ["quality evaluation result is missing"]
-    case_results = result.get("case_results")
-    expected_cases = expected.get("cases")
-    if not isinstance(case_results, list) or len(case_results) != expected_cases:
-        return [
-            f"quality evaluation case count does not match canonical {expected_cases!r}"
-        ]
-
-    fixture_sha256, fixture_rows = _slm_fixture_contract()
-    if expected.get("suite_sha256") != fixture_sha256:
-        issues.append(
-            "canonical quality suite SHA-256 does not match the packaged fixture"
-        )
-    if len(fixture_rows) != expected_cases:
-        issues.append("packaged quality fixture case count does not match canonical")
-    for index, (case, fixture_row) in enumerate(
-        zip(case_results, fixture_rows, strict=False)
-    ):
-        if not isinstance(case, dict):
-            continue
-        expected_id, expected_category, expected_tokens = fixture_row
-        if case.get("id") != expected_id:
-            issues.append(
-                f"quality evaluation case {index} id does not match the packaged fixture"
-            )
-        if case.get("category") != expected_category:
-            issues.append(
-                f"quality evaluation case {expected_id!r} category does not match the packaged fixture"
-            )
-        if case.get("continuation_tokens") != expected_tokens:
-            issues.append(
-                f"quality evaluation case {expected_id!r} token count does not match the pinned tokenizer contract"
-            )
-
-    rows: list[tuple[str, str, float, int]] = []
-    seen_ids: set[str] = set()
-    for index, case in enumerate(case_results):
-        if not isinstance(case, dict):
-            issues.append(f"quality evaluation case result {index} is invalid")
-            continue
-        case_id = case.get("id")
-        category = case.get("category")
-        nll = case.get("mean_nll")
-        tokens = case.get("continuation_tokens")
-        if not isinstance(case_id, str) or not case_id or case_id in seen_ids:
-            issues.append(
-                f"quality evaluation case result {index} has a missing or duplicate id"
-            )
-            continue
-        seen_ids.add(case_id)
-        if not isinstance(category, str) or not category:
-            issues.append(f"quality evaluation case {case_id!r} has no category")
-            continue
-        if (
-            isinstance(nll, bool)
-            or not isinstance(nll, (int, float))
-            or not math.isfinite(float(nll))
-            or float(nll) < 0
-        ):
-            issues.append(f"quality evaluation case {case_id!r} has invalid NLL")
-            continue
-        if isinstance(tokens, bool) or not isinstance(tokens, int) or tokens < 1:
-            issues.append(
-                f"quality evaluation case {case_id!r} has invalid token count"
-            )
-            continue
-        rows.append((case_id, category, float(nll), tokens))
-    if len(rows) != len(case_results):
-        return issues
-
-    total_tokens = sum(tokens for _, _, _, tokens in rows)
-    mean_nll = math.fsum(nll * tokens for _, _, nll, tokens in rows) / total_tokens
-    category_rows: dict[str, list[tuple[float, int]]] = {}
-    for _, category, nll, tokens in rows:
-        category_rows.setdefault(category, []).append((nll, tokens))
-    if len(category_rows) != expected.get("categories"):
-        issues.append(
-            "quality evaluation category count does not match canonical "
-            f"{expected.get('categories')!r}"
-        )
-    recomputed_categories: dict[str, dict[str, float | int]] = {}
-    for category, values in category_rows.items():
-        category_tokens = sum(tokens for _, tokens in values)
-        category_nll = (
-            math.fsum(nll * tokens for nll, tokens in values) / category_tokens
-        )
-        recomputed_categories[category] = {
-            "cases": len(values),
-            "continuation_tokens": category_tokens,
-            "mean_nll": category_nll,
-            "perplexity": math.exp(min(category_nll, 50.0)),
-        }
-    worst_category = max(
-        recomputed_categories,
-        key=lambda category: (
-            float(recomputed_categories[category]["mean_nll"]),
-            category,
-        ),
-    )
-    recomputed = {
-        "mean_nll": mean_nll,
-        "perplexity": math.exp(min(mean_nll, 50.0)),
-        "total_continuation_tokens": total_tokens,
-        "category_results": recomputed_categories,
-        "worst_category": worst_category,
-        "worst_category_nll": recomputed_categories[worst_category]["mean_nll"],
-        "worst_category_perplexity": recomputed_categories[worst_category][
-            "perplexity"
-        ],
-    }
-    for field, recomputed_value in recomputed.items():
-        reported_value = result.get(field)
-        if isinstance(recomputed_value, float):
-            matches = (
-                not isinstance(reported_value, bool)
-                and isinstance(reported_value, (int, float))
-                and math.isclose(
-                    float(reported_value), recomputed_value, rel_tol=1e-9, abs_tol=1e-9
-                )
-            )
-        else:
-            matches = reported_value == recomputed_value
-        if not matches:
-            issues.append(
-                f"quality evaluation {field} does not match token-weighted case results"
-            )
-
-    expected_gates = expected.get("gates")
-    actual_gates = quality_evaluation.get("gates")
-    if not isinstance(expected_gates, dict) or not isinstance(actual_gates, dict):
-        return [*issues, "quality evaluation gates are missing"]
-    if actual_gates.get("passed") is not True:
-        issues.append("quality evaluation gate conjunction did not pass")
-    for gate_name, expected_gate in expected_gates.items():
-        actual_gate = actual_gates.get(gate_name)
-        if not isinstance(expected_gate, dict) or not isinstance(actual_gate, dict):
-            issues.append(f"quality evaluation gate {gate_name!r} is missing")
-            continue
-        metric_key = expected_gate.get("metric_key")
-        value = actual_gate.get("value")
-        if actual_gate.get("met") is not True:
-            issues.append(f"quality evaluation gate {gate_name!r} did not pass")
-        if (
-            isinstance(value, bool)
-            or not isinstance(value, (int, float))
-            or not math.isfinite(float(value))
-            or result.get(metric_key) != value
-        ):
-            issues.append(
-                f"quality evaluation gate {gate_name!r} value is invalid or unbound"
-            )
-            continue
-        target = expected_gate.get("target")
-        if expected_gate.get("direction") != "lower" or not isinstance(
-            target, (int, float)
-        ):
-            issues.append(f"canonical quality evaluation gate {gate_name!r} is invalid")
-        elif float(value) > float(target):
-            issues.append(
-                f"quality evaluation gate {gate_name!r} value {value!r} exceeds {target!r}"
-            )
     return issues
 
 
@@ -614,51 +379,6 @@ def evaluate_report_contract(
                         f"metrics.{metric_key}"
                     )
 
-    expected_quality_evaluation = canonical.get("quality_evaluation")
-    if expected_quality_evaluation is not None:
-        quality_evaluation = report.get("quality_evaluation")
-        if isinstance(quality_evaluation, dict) and isinstance(
-            expected_quality_evaluation, dict
-        ):
-            selected_quality_evaluation = _quality_evaluation_contract_view(
-                expected_quality_evaluation, quality_evaluation
-            )
-        else:
-            selected_quality_evaluation = quality_evaluation
-        issues.extend(
-            _mapping_contract_issues(
-                label="quality_evaluation",
-                expected=expected_quality_evaluation,
-                actual=selected_quality_evaluation,
-            )
-        )
-        if isinstance(quality_evaluation, dict) and isinstance(
-            expected_quality_evaluation, dict
-        ):
-            issues.extend(
-                _slm_quality_result_issues(
-                    expected_quality_evaluation, quality_evaluation
-                )
-            )
-            quality_result = quality_evaluation.get("result")
-            metrics = report.get("metrics")
-            if isinstance(quality_result, dict) and isinstance(metrics, dict):
-                for metric_key, result_key in (
-                    ("quality_perplexity", "perplexity"),
-                    (
-                        "quality_worst_category_perplexity",
-                        "worst_category_perplexity",
-                    ),
-                    (
-                        "quality_total_continuation_tokens",
-                        "total_continuation_tokens",
-                    ),
-                ):
-                    if metrics.get(metric_key) != quality_result.get(result_key):
-                        issues.append(
-                            f"metrics.{metric_key} does not match quality evaluation result"
-                        )
-
     registry_measurement = workload.raw.get("measurement_protocol")
     registry_measurement = (
         registry_measurement if isinstance(registry_measurement, dict) else {}
@@ -780,14 +500,6 @@ def evaluate_report_contract(
             model_asset = report.get("model_asset")
             if not isinstance(model_asset, dict) or not model_asset.get("revision"):
                 issues.append("external model result lacks a pinned model revision")
-            quality_evaluation = report.get("quality_evaluation")
-            if (
-                not isinstance(quality_evaluation, dict)
-                or quality_evaluation.get("status") != "passed"
-            ):
-                issues.append(
-                    "external model result lacks a passing task-quality evaluation"
-                )
 
     artifacts = report.get("artifacts")
     if not isinstance(artifacts, dict):
@@ -812,6 +524,68 @@ def evaluate_report_contract(
             "issues": issues,
         }
     )
+    return result
+
+
+def evaluate_promotion_contract(
+    workload: Workload, report: dict[str, Any]
+) -> dict[str, Any]:
+    """Evaluate a max report against its canonical pre-promotion contract."""
+    mode = report.get("mode")
+    phase = report.get("phase")
+    candidate = workload
+    result_role = "score-bearing"
+
+    if mode == "inference" and phase:
+        inference = (workload.raw.get("mode_contracts") or {}).get("inference") or {}
+        phase_contract = (inference.get("phases") or {}).get(str(phase))
+        if not isinstance(phase_contract, dict):
+            return {
+                "schema": "mlperf-edu-promotion-contract/0.1",
+                "status": "failed",
+                "promotion_eligible": False,
+                "mode": mode,
+                "phase": phase,
+                "issues": [f"registry has no inference phase contract for {phase!r}"],
+            }
+        canonical_base = workload.raw.get("canonical_max_contract") or {}
+        raw = copy.deepcopy(workload.raw)
+        raw["canonical_max_contract"] = {
+            "model_id": canonical_base.get("model_id"),
+            "dataset": inference.get("dataset"),
+            "data_mode": "checkpoint-backed",
+            "config": copy.deepcopy(phase_contract.get("config") or {}),
+            "quality": copy.deepcopy(phase_contract.get("quality") or {}),
+            "timing_sample_counts": copy.deepcopy(
+                phase_contract.get("timing_sample_counts") or {}
+            ),
+        }
+        raw["measurement_protocol"] = copy.deepcopy(
+            phase_contract.get("measurement_protocol") or {}
+        )
+        raw["functional_check"] = {
+            "metric": (phase_contract.get("quality") or {}).get("metric"),
+            "condition": "The phase must complete its canonical functional gate.",
+        }
+        raw["shared_checkpoint"] = "causal-language-modeling:training:max"
+        raw.pop("model_source", None)
+        candidate = replace(
+            workload,
+            public_status="performance-bearing",
+            scenario=str(phase_contract.get("scenario") or ""),
+            raw=raw,
+        )
+        result_role = "performance-bearing"
+    else:
+        candidate = replace(workload, public_status="score-bearing")
+
+    result = evaluate_report_contract(candidate, report)
+    result["schema"] = "mlperf-edu-promotion-contract/0.1"
+    result["promotion_eligible"] = result.get("status") == "passed"
+    result["result_role"] = result_role
+    result["registry_public_status"] = workload.public_status
+    result["mode"] = mode
+    result["phase"] = phase
     return result
 
 

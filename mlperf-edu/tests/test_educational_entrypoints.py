@@ -74,8 +74,8 @@ def test_tutorial_smoke_runs_and_verifies_provenance(tmp_path: Path) -> None:
     assert completed.returncode == 0, completed.stderr or completed.stdout
     assert "TUTORIAL 01 SMOKE PASS" in completed.stdout
 
-    report_path = output_dir / "micro-lstm-train_min_report.json"
-    manifest_path = output_dir / "micro-lstm-train_min.provd.json"
+    report_path = output_dir / "time-series-forecasting_min_report.json"
+    manifest_path = output_dir / "time-series-forecasting_min.provd.json"
     assert report_path.is_file()
     assert report_path.with_suffix(".html").is_file()
     assert report_path.with_suffix(".csv").is_file()
@@ -166,35 +166,7 @@ def test_wheel_guard_rejects_a_retired_module(tmp_path: Path) -> None:
     wheel_path = tmp_path / "stale.whl"
     with zipfile.ZipFile(wheel_path, "w") as archive:
         archive.writestr("mlperf_edu/workloads.yaml", "suites: {}\n")
-        archive.writestr("mlperf_edu/slm_quality_prompts.json", "{}\n")
         archive.writestr("mlperf/core.py", "retired = True\n")
 
     with pytest.raises(RuntimeError, match="retired module"):
-        verify_wheel(wheel_path)
-
-
-def test_wheel_guard_rejects_corrupt_reference_evidence(tmp_path: Path) -> None:
-    wheel_path = tmp_path / "corrupt-evidence.whl"
-    index_path = PROJECT_ROOT / "reference_results" / "index.json"
-    index = json.loads(index_path.read_text())
-    with zipfile.ZipFile(wheel_path, "w") as archive:
-        archive.writestr(
-            "mlperf_edu/workloads.yaml",
-            (PROJECT_ROOT / "src/mlperf_edu/workloads.yaml").read_bytes(),
-        )
-        archive.writestr(
-            "mlperf_edu/slm_quality_prompts.json",
-            (PROJECT_ROOT / "src/mlperf_edu/slm_quality_prompts.json").read_bytes(),
-        )
-        archive.writestr(
-            "mlperf_edu/reference_results/index.json", index_path.read_bytes()
-        )
-        archive.writestr(
-            "mlperf_edu/reference_results/source_lock.json",
-            (PROJECT_ROOT / "reference_results/source_lock.json").read_bytes(),
-        )
-        for entry in index["summaries"]:
-            archive.writestr(f"mlperf_edu/{entry['path']}", b"wrong")
-
-    with pytest.raises(RuntimeError, match="digest mismatch"):
         verify_wheel(wheel_path)

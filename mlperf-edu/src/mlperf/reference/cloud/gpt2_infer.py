@@ -10,11 +10,13 @@ class CausalSelfAttention(nn.Module):
     bandwidth-bound decode behavior: each step appends one token's
     K and V, and attention re-reads the entire cached K, V from DRAM.
     """
-    def __init__(self, n_embd=768, n_head=12, max_seq_len=1024):
+    def __init__(self, n_embd=768, n_head=12, max_seq_len=1024, dropout=0.0, bias=True):
         super().__init__()
         assert n_embd % n_head == 0
-        self.c_attn = nn.Linear(n_embd, 3 * n_embd)
-        self.c_proj = nn.Linear(n_embd, n_embd)
+        self.c_attn = nn.Linear(n_embd, 3 * n_embd, bias=bias)
+        self.c_proj = nn.Linear(n_embd, n_embd, bias=bias)
+        self.attn_dropout = nn.Dropout(dropout)
+        self.resid_dropout = nn.Dropout(dropout)
         self.n_head = n_head
         self.n_embd = n_embd
         self.register_buffer(
@@ -45,22 +47,29 @@ class CausalSelfAttention(nn.Module):
         # Causal mask: when T==1 (decode step), attend to all cached keys.
         T_k = k.size(-2)
         att = att.masked_fill(self.bias[:, :, T_k - T:T_k, :T_k] == 0, float('-inf'))
-        att = F.softmax(att, dim=-1)
+        att = self.attn_dropout(F.softmax(att, dim=-1))
 
         y = att @ v
         y = y.transpose(1, 2).contiguous().view(B, T, C)
-        return self.c_proj(y), present_key_value
+        return self.resid_dropout(self.c_proj(y)), present_key_value
 
 class GPTBlock(nn.Module):
-    def __init__(self, n_embd=768, n_head=12, max_seq_len=1024):
+    def __init__(self, n_embd=768, n_head=12, max_seq_len=1024, dropout=0.0, bias=True):
         super().__init__()
         self.ln_1 = nn.LayerNorm(n_embd)
-        self.attn = CausalSelfAttention(n_embd, n_head, max_seq_len=max_seq_len)
+        self.attn = CausalSelfAttention(
+            n_embd,
+            n_head,
+            max_seq_len=max_seq_len,
+            dropout=dropout,
+            bias=bias,
+        )
         self.ln_2 = nn.LayerNorm(n_embd)
         self.mlp = nn.Sequential(
-            nn.Linear(n_embd, 4 * n_embd),
+            nn.Linear(n_embd, 4 * n_embd, bias=bias),
             nn.GELU(),
-            nn.Linear(4 * n_embd, n_embd)
+            nn.Linear(4 * n_embd, n_embd, bias=bias),
+            nn.Dropout(dropout),
         )
 
     def forward(self, x, use_kv_cache=False, past_key_value=None):

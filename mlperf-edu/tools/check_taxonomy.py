@@ -1674,6 +1674,19 @@ def check_reference_index(workloads: dict[str, dict]) -> list[str]:
     """Validate index closure, source lock, and registry-to-summary bindings."""
     errors: list[str] = []
     index_path = REPO_ROOT / "reference_results" / "index.json"
+    public_bodies = [
+        body
+        for body in workloads.values()
+        if (body.get("public") or {}).get("status")
+        in {"score-bearing", "performance-bearing"}
+    ]
+    if not public_bodies:
+        if index_path.exists():
+            return [
+                "reference index must be absent when no score-bearing or "
+                "performance-bearing workloads exist"
+            ]
+        return []
     try:
         index_bytes = index_path.read_bytes()
         index = json.loads(index_bytes)
@@ -1691,12 +1704,6 @@ def check_reference_index(workloads: dict[str, dict]) -> list[str]:
         errors.append("reference index source_git_sha is missing or invalid")
 
     source_lock = index.get("source_lock") or {}
-    public_bodies = [
-        body
-        for body in workloads.values()
-        if (body.get("public") or {}).get("status")
-        in {"score-bearing", "performance-bearing"}
-    ]
     historical_index = bool(public_bodies) and all(
         (
             (body.get("verified_baseline") or {}).get("protocol_compatibility"),

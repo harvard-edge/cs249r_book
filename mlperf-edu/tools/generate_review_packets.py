@@ -349,8 +349,15 @@ def asset_section(workload: Workload) -> str:
         ("Dataset citation", dataset.get("citation", "")),
     ]
     model_source = workload.raw.get("model_source")
-    if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
-        model = huggingface_model_dossier(model_source, model_name=workload.model)
+    if (
+        isinstance(model_source, dict)
+        and model_source.get("type") == "huggingface-pinned"
+    ):
+        model = huggingface_model_dossier(
+            model_source,
+            model_name=workload.model,
+            model_id=str(model_source.get("repo_id") or workload.model),
+        )
         rows.extend(
             [
                 ("Model source", model.get("source_url", "")),

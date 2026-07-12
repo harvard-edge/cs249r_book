@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import statistics
 import sys
@@ -22,6 +23,83 @@ from mlperf.runners.common import (
 )
 
 
+def run_causal_language_modeling_min(
+    workload: Workload,
+    output_dir: Path,
+    *,
+    mode: str = "training",
+    phase: str | None = None,
+) -> dict[str, Any]:
+    return _dispatch_causal_language_modeling(
+        workload, output_dir, profile="min", mode=mode, phase=phase
+    )
+
+
+def run_causal_language_modeling_max(
+    workload: Workload,
+    output_dir: Path,
+    *,
+    mode: str = "training",
+    phase: str | None = None,
+) -> dict[str, Any]:
+    return _dispatch_causal_language_modeling(
+        workload, output_dir, profile="max", mode=mode, phase=phase
+    )
+
+
+def _dispatch_causal_language_modeling(
+    workload: Workload,
+    output_dir: Path,
+    *,
+    profile: str,
+    mode: str,
+    phase: str | None,
+) -> dict[str, Any]:
+    if mode == "training":
+        report = run_min(workload, output_dir) if profile == "min" else run_max(workload, output_dir)
+        report["mode"] = "training"
+        report["phase"] = None
+        return report
+    if mode != "inference":
+        raise ValueError(f"unsupported causal-language-modeling mode: {mode}")
+    resolved_phase = phase or "full"
+    if resolved_phase == "prefill":
+        report = (
+            run_prefill_min(workload, output_dir)
+            if profile == "min"
+            else run_prefill_max(workload, output_dir)
+        )
+    elif resolved_phase in {"full", "decode"}:
+        report = (
+            run_decode_min(workload, output_dir, phase=resolved_phase)
+            if profile == "min"
+            else run_decode_max(workload, output_dir, phase=resolved_phase)
+        )
+    else:
+        raise ValueError(f"unsupported causal-language-modeling inference phase: {resolved_phase}")
+    report["mode"] = "inference"
+    report["phase"] = resolved_phase
+    phase_contract = (
+        (((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get("phases") or {}).get(resolved_phase)
+        or {}
+    )
+    if phase_contract.get("measurement_protocol"):
+        report["measurement_protocol"] = {
+            **phase_contract["measurement_protocol"],
+            **{
+                key: value
+                for key, value in (report.get("measurement_protocol") or {}).items()
+                if key in {"warmup_runs", "measured_runs"}
+            },
+        }
+    return report
+
+
+def _artifact_stem(workload: Workload, mode: str, phase: str | None = None) -> str:
+    suffix = f"_{phase}" if phase else ""
+    return f"{workload.id}_{mode}{suffix}"
+
+
 def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic one-step NanoGPT training smoke."""
     root = find_project_root()
@@ -30,7 +108,7 @@ def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
-    seed = configured_seed()
+    seed = configured_seed(default=1337)
     torch.manual_seed(seed)
     device = torch.device("cpu")
 
@@ -59,14 +137,17 @@ def run_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     n_params = sum(p.numel() for p in model.parameters())
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "nanogpt-train_min_report.json").resolve()
-    manifest_path = (output_dir / "nanogpt-train_min.provd.json").resolve()
+    stem = _artifact_stem(workload, "training")
+    report_path = (output_dir / f"{stem}_min_report.json").resolve()
+    manifest_path = (output_dir / f"{stem}_min.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "min",
+        "mode": "training",
+        "phase": None,
         "status": "passed",
         "backend": "pytorch-cpu",
         "data_mode": "synthetic-deterministic",
@@ -145,14 +226,17 @@ def run_prefill_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     n_params = sum(p.numel() for p in model.parameters())
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "nanogpt-prefill_min_report.json").resolve()
-    manifest_path = (output_dir / "nanogpt-prefill_min.provd.json").resolve()
+    stem = _artifact_stem(workload, "inference", "prefill")
+    report_path = (output_dir / f"{stem}_min_report.json").resolve()
+    manifest_path = (output_dir / f"{stem}_min.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "min",
+        "mode": "inference",
+        "phase": "prefill",
         "status": "passed",
         "backend": "pytorch-cpu",
         "data_mode": "synthetic-deterministic",
@@ -205,7 +289,7 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     seed = configured_seed()
     torch.manual_seed(seed)
     device = _select_device()
-    context_len = _env_int("MLPERF_EDU_PREFILL_MAX_CONTEXT", 1792)
+    context_len = _env_int("MLPERF_EDU_PREFILL_MAX_CONTEXT", 256)
     batch_size = _env_int("MLPERF_EDU_PREFILL_MAX_BATCH", 1)
     n_warmup = _env_int("MLPERF_EDU_PREFILL_MAX_WARMUP", 3)
     n_iter = _env_int("MLPERF_EDU_PREFILL_MAX_ITER", 20)
@@ -220,26 +304,31 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     )
     n_params = sum(p.numel() for p in model.parameters())
     target_met = bool(result.get("prefill_tokens_per_sec", 0) > 0)
+    phase_contract = workload.raw["mode_contracts"]["inference"]["phases"][
+        "prefill"
+    ]
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "nanogpt-prefill_max_report.json").resolve()
-    manifest_path = (output_dir / "nanogpt-prefill_max.provd.json").resolve()
+    stem = _artifact_stem(workload, "inference", "prefill")
+    report_path = (output_dir / f"{stem}_max_report.json").resolve()
+    manifest_path = (output_dir / f"{stem}_max.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "max",
+        "mode": "inference",
+        "phase": "prefill",
         "status": "passed" if target_met else "quality_failed",
         "backend": f"pytorch-{device.type}",
+        "model": "nanogpt-shakespeare-char",
         "data_mode": "checkpoint-backed",
+        "dataset": "prompt-suite-local",
+        "scenario": phase_contract["scenario"],
         "seed": seed,
-        "config": {
-            "context_len": context_len,
-            "batch_size": batch_size,
-            "n_warmup": n_warmup,
-            "n_iter": n_iter,
-            "model_size": os.environ.get("MLPERF_EDU_MAX_MODEL_SIZE", "base"),
+        "config": dict(phase_contract["config"]),
+        "prompt": {
             "prompt_seed": result["prompt_seed"],
             "prompt_sha256": result["prompt_sha256"],
             "kv_cache_materialized": result["kv_cache_materialized"],
@@ -257,11 +346,7 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "target_met": target_met,
             "note": "The functional gate requires a quality-approved checkpoint and positive measured prefill throughput.",
         },
-        "measurement_protocol": {
-            **(workload.raw.get("measurement_protocol") or {}),
-            "warmup_runs": n_warmup,
-            "measured_runs": n_iter,
-        },
+        "measurement_protocol": dict(phase_contract["measurement_protocol"]),
         "checkpoint_provenance": checkpoint_lineage,
         "artifacts": {
             "report": str(report_path),
@@ -294,7 +379,9 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     return report
 
 
-def run_decode_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
+def run_decode_min(
+    workload: Workload, output_dir: Path, *, phase: str = "decode"
+) -> dict[str, Any]:
     """Run a deterministic NanoGPT KV-cache decode smoke."""
     root = find_project_root()
     if str(root) not in sys.path:
@@ -326,14 +413,17 @@ def run_decode_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     n_params = sum(p.numel() for p in model.parameters())
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "nanogpt-decode_min_report.json").resolve()
-    manifest_path = (output_dir / "nanogpt-decode_min.provd.json").resolve()
+    stem = _artifact_stem(workload, "inference", phase)
+    report_path = (output_dir / f"{stem}_min_report.json").resolve()
+    manifest_path = (output_dir / f"{stem}_min.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "min",
+        "mode": "inference",
+        "phase": phase,
         "status": "passed",
         "backend": "pytorch-cpu",
         "data_mode": "synthetic-deterministic",
@@ -375,7 +465,9 @@ def run_decode_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     return report
 
 
-def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
+def run_decode_max(
+    workload: Workload, output_dir: Path, *, phase: str = "decode"
+) -> dict[str, Any]:
     """Run checkpoint-backed NanoGPT KV-cache decode inference."""
     root = find_project_root()
     if str(root) not in sys.path:
@@ -386,7 +478,7 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     seed = configured_seed()
     torch.manual_seed(seed)
     device = _select_device()
-    prefill_ctx = _env_int("MLPERF_EDU_DECODE_MAX_PREFILL_CTX", 1792)
+    prefill_ctx = _env_int("MLPERF_EDU_DECODE_MAX_PREFILL_CTX", 192)
     decode_steps = _env_int("MLPERF_EDU_DECODE_MAX_STEPS", 64)
     batch_size = _env_int("MLPERF_EDU_DECODE_MAX_BATCH", 1)
     warmup_runs = _env_int("MLPERF_EDU_DECODE_MAX_WARMUPS", 3)
@@ -410,28 +502,30 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         result.get("decode_steps") == decode_steps
         and result.get("output_tokens_per_sec", 0) > 0
     )
+    phase_contract = workload.raw["mode_contracts"]["inference"]["phases"][phase]
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "nanogpt-decode_max_report.json").resolve()
-    manifest_path = (output_dir / "nanogpt-decode_max.provd.json").resolve()
+    stem = _artifact_stem(workload, "inference", phase)
+    report_path = (output_dir / f"{stem}_max_report.json").resolve()
+    manifest_path = (output_dir / f"{stem}_max.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "max",
+        "mode": "inference",
+        "phase": phase,
         "status": "passed" if target_met else "quality_failed",
         "backend": f"pytorch-{device.type}",
+        "model": "nanogpt-shakespeare-char",
         "data_mode": "checkpoint-backed",
-        "scenario": "single_stream",
+        "dataset": "prompt-suite-local",
+        "scenario": phase_contract["scenario"],
         "measurement_mode": "sequential_microbenchmark",
         "seed": seed,
-        "config": {
-            "prefill_ctx": prefill_ctx,
-            "decode_steps": decode_steps,
-            "batch_size": batch_size,
-            "repetitions": repetitions,
-            "model_size": os.environ.get("MLPERF_EDU_MAX_MODEL_SIZE", "base"),
+        "config": dict(phase_contract["config"]),
+        "prompt": {
             "prompt_seed": result["prompt_seed"],
             "prompt_sha256": result["prompt_sha256"],
         },
@@ -448,11 +542,7 @@ def run_decode_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "target_met": target_met,
             "note": "The functional gate requires a quality-approved checkpoint, the configured decode length, and positive throughput.",
         },
-        "measurement_protocol": {
-            **(workload.raw.get("measurement_protocol") or {}),
-            "warmup_runs": warmup_runs,
-            "measured_runs": repetitions,
-        },
+        "measurement_protocol": dict(phase_contract["measurement_protocol"]),
         "checkpoint_provenance": checkpoint_lineage,
         "artifacts": {
             "report": str(report_path),
@@ -527,18 +617,21 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
-    seed = configured_seed()
+    seed = configured_seed(default=1337)
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
 
     asset = ensure_tinyshakespeare(download=True)
-    batch_size = _env_int("MLPERF_EDU_MAX_BATCH_SIZE", 16)
-    seq_len = _env_int("MLPERF_EDU_MAX_SEQ_LEN", 64)
-    epochs = _env_int("MLPERF_EDU_MAX_EPOCHS", 25)
-    batches_per_epoch = _env_int("MLPERF_EDU_MAX_BATCHES_PER_EPOCH", 100)
-    val_batches = _env_int("MLPERF_EDU_MAX_VAL_BATCHES", 20)
-    lr = _env_float("MLPERF_EDU_MAX_LR", 3e-4)
+    batch_size = _env_int("MLPERF_EDU_MAX_BATCH_SIZE", 64)
+    seq_len = _env_int("MLPERF_EDU_MAX_SEQ_LEN", 256)
+    max_iters = _env_int("MLPERF_EDU_MAX_ITERS", 5000)
+    eval_interval = _env_int("MLPERF_EDU_MAX_EVAL_INTERVAL", 250)
+    eval_iters = _env_int("MLPERF_EDU_MAX_EVAL_ITERS", 200)
+    lr = _env_float("MLPERF_EDU_MAX_LR", 1e-3)
+    min_lr = _env_float("MLPERF_EDU_MAX_MIN_LR", 1e-4)
+    warmup_iters = _env_int("MLPERF_EDU_MAX_WARMUP_ITERS", 100)
+    beta2 = _env_float("MLPERF_EDU_MAX_BETA2", 0.99)
     model_size = os.environ.get("MLPERF_EDU_MAX_MODEL_SIZE", "base")
 
     device = _select_device()
@@ -546,69 +639,79 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     model = NanoGPTWhiteBox(**model_kwargs).to(device)
     n_params = sum(p.numel() for p in model.parameters())
 
-    train_loader, val_loader = _tinyshakespeare_loaders(
-        train_path=asset.root / "tinyshakespeare_train.txt",
-        val_path=asset.root / "tinyshakespeare_val.txt",
-        batch_size=batch_size,
-        seq_len=seq_len,
-        seed=seed,
-    )
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-2)
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer,
-        T_max=max(1, epochs),
-        eta_min=lr * 0.1,
+    train_tokens, val_tokens = _tinyshakespeare_token_tensors(asset.root)
+    optimizer = torch.optim.AdamW(
+        model.parameters(),
+        lr=lr,
+        weight_decay=0.1,
+        betas=(0.9, beta2),
     )
 
     train_losses: list[float] = []
     val_losses: list[float] = []
-    val_tokens_evaluated: list[int] = []
-    epoch_times: list[float] = []
+    eval_iterations: list[int] = []
+    iteration_times: list[float] = []
+    best_val_loss = float("inf")
+    best_state: dict[str, torch.Tensor] | None = None
     synchronize_device(device)
     start = time.perf_counter()
-    tokens_seen = 0
-
-    for epoch in range(epochs):
-        t0 = time.perf_counter()
-        train_loss, train_tokens = _train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            max_batches=batches_per_epoch,
+    for iteration in range(max_iters + 1):
+        iteration_start = time.perf_counter()
+        learning_rate = _canonical_nanogpt_lr(
+            iteration,
+            learning_rate=lr,
+            min_lr=min_lr,
+            warmup_iters=warmup_iters,
+            decay_iters=max_iters,
         )
-        quality_epoch = epoch == epochs - 1
-        val_loss, evaluated_tokens, _ = _validate(
-            model,
-            val_loader,
-            device,
-            max_batches=None if quality_epoch else val_batches,
+        for group in optimizer.param_groups:
+            group["lr"] = learning_rate
+        if iteration % eval_interval == 0:
+            train_eval, val_eval = _estimate_canonical_losses(
+                model,
+                train_tokens,
+                val_tokens,
+                batch_size=batch_size,
+                seq_len=seq_len,
+                eval_iters=eval_iters,
+                device=device,
+            )
+            train_losses.append(train_eval)
+            val_losses.append(val_eval)
+            eval_iterations.append(iteration)
+            if val_eval < best_val_loss:
+                best_val_loss = val_eval
+                best_state = {
+                    key: value.detach().clone()
+                    for key, value in model.state_dict().items()
+                }
+        inputs, targets = _random_nanogpt_batch(
+            train_tokens,
+            batch_size=batch_size,
+            seq_len=seq_len,
+            device=device,
         )
-        scheduler.step()
-        tokens_seen += train_tokens
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        val_tokens_evaluated.append(evaluated_tokens)
-        epoch_times.append(time.perf_counter() - t0)
+        model.train()
+        optimizer.zero_grad(set_to_none=True)
+        _, loss = model(inputs, targets=targets)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
+        optimizer.step()
+        iteration_times.append(time.perf_counter() - iteration_start)
 
     synchronize_device(device)
     duration = time.perf_counter() - start
-    final_train_loss = train_losses[-1]
-    final_val_loss = val_losses[-1]
-    quality_eval_tokens = val_tokens_evaluated[-1]
-    validation_dataset = val_loader.dataset
-    validation_target_tokens = int(validation_dataset.total_target_tokens)
-    quality_eval_coverage = quality_eval_tokens / validation_target_tokens
     target = _env_float(
-        "MLPERF_EDU_MAX_QUALITY_TARGET", float(workload.quality_value or 2.3)
+        "MLPERF_EDU_MAX_QUALITY_TARGET", float(workload.quality_value or 1.4697)
     )
-    target_met = final_val_loss <= target
+    target_met = best_val_loss <= target
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "nanogpt-train_max_report.json").resolve()
-    manifest_path = (output_dir / "nanogpt-train_max.provd.json").resolve()
-    checkpoint_path = (output_dir / "nanogpt-train_max_checkpoint.pt").resolve()
-    torch.save(model.state_dict(), checkpoint_path)
+    stem = _artifact_stem(workload, "training")
+    report_path = (output_dir / f"{stem}_max_report.json").resolve()
+    manifest_path = (output_dir / f"{stem}_max.provd.json").resolve()
+    checkpoint_path = (output_dir / f"{stem}_max_checkpoint.pt").resolve()
+    torch.save(best_state or model.state_dict(), checkpoint_path)
 
     report = {
         "schema": "mlperf-edu-report/0.1",
@@ -616,8 +719,11 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "max",
+        "mode": "training",
+        "phase": None,
         "status": "passed" if target_met else "quality_failed",
         "backend": f"pytorch-{device.type}",
+        "model": "nanogpt-shakespeare-char",
         "data_mode": "real",
         "dataset": {
             "name": asset.name,
@@ -629,33 +735,43 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "seed": seed,
         "measurement_protocol": training_measurement_protocol(workload),
         "config": {
-            "model_size": model_size,
-            "model_kwargs": model_kwargs,
+            "random_seed": seed,
+            "vocab_size": model_kwargs["vocab_size"],
+            "n_layer": model_kwargs["n_layer"],
+            "n_head": model_kwargs["n_head"],
+            "n_embd": model_kwargs["n_embd"],
+            "dropout": model_kwargs.get("dropout", 0.0),
+            "bias": model_kwargs.get("bias", True),
             "batch_size": batch_size,
-            "seq_len": seq_len,
-            "epochs": epochs,
-            "batches_per_epoch": batches_per_epoch,
-            "val_batches": val_batches,
-            "epoch_validation_sampling": "disjoint contexts from split start",
-            "quality_evaluation": "complete nonoverlapping validation split",
-            "lr": lr,
+            "block_size": seq_len,
+            "max_iters": max_iters,
+            "eval_interval": eval_interval,
+            "eval_iters": eval_iters,
+            "learning_rate": lr,
+            "min_lr": min_lr,
+            "warmup_iters": warmup_iters,
+            "beta2": beta2,
+            "weight_decay": 0.1,
+            "grad_clip": 1.0,
         },
         "metrics": {
-            "final_train_loss": float(final_train_loss),
-            "final_val_loss": float(final_val_loss),
-            "cross_entropy_loss": float(final_val_loss),
+            "final_train_eval_loss": float(train_losses[-1]),
+            "final_val_eval_loss": float(val_losses[-1]),
+            "best_val_loss": float(best_val_loss),
+            "cross_entropy_loss": float(best_val_loss),
             "duration_seconds": float(duration),
             "train_and_eval_seconds": float(duration),
-            "tokens": int(tokens_seen),
-            "tokens_per_second": float(tokens_seen / duration) if duration > 0 else 0.0,
+            "tokens": int((max_iters + 1) * batch_size * seq_len),
+            "tokens_per_second": float(
+                ((max_iters + 1) * batch_size * seq_len) / duration
+            )
+            if duration > 0
+            else 0.0,
             "n_params": int(n_params),
-            "epoch_times": epoch_times,
+            "iteration_times": iteration_times,
+            "eval_iterations": eval_iterations,
             "train_losses": train_losses,
             "val_losses": val_losses,
-            "val_tokens_evaluated": val_tokens_evaluated,
-            "quality_eval_tokens": int(quality_eval_tokens),
-            "quality_eval_sequences": int(len(validation_dataset)),
-            "quality_eval_coverage": float(quality_eval_coverage),
         },
         "quality": {
             "metric": workload.quality_metric,
@@ -696,7 +812,7 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     return report
 
 
-def _max_model_kwargs(model_size: str, seq_len: int) -> dict[str, int]:
+def _max_model_kwargs(model_size: str, seq_len: int) -> dict[str, Any]:
     if model_size == "tiny":
         return {
             "vocab_size": 128,
@@ -708,11 +824,13 @@ def _max_model_kwargs(model_size: str, seq_len: int) -> dict[str, int]:
     if model_size != "base":
         raise ValueError("MLPERF_EDU_MAX_MODEL_SIZE must be 'base' or 'tiny'")
     return {
-        "vocab_size": 128,
+        "vocab_size": 65,
         "n_embd": 384,
         "n_head": 6,
         "n_layer": 6,
-        "max_seq_len": max(2048, seq_len),
+        "max_seq_len": max(256, seq_len),
+        "dropout": 0.2,
+        "bias": True,
     }
 
 
@@ -731,7 +849,7 @@ def _load_max_nanogpt_model(
         Path(
             os.environ.get(
                 "MLPERF_EDU_NANOGPT_CHECKPOINT",
-                output_dir / "nanogpt-train_max_checkpoint.pt",
+                output_dir / "causal-language-modeling_training_max_checkpoint.pt",
             )
         )
         .expanduser()
@@ -740,7 +858,7 @@ def _load_max_nanogpt_model(
     if not checkpoint.exists():
         raise FileNotFoundError(
             f"NanoGPT max checkpoint not found at {checkpoint}. "
-            "Run `mlperf run --workload nanogpt-train --profile max --output-dir <same-dir>` first, "
+            "Run `mlperf run --workload causal-language-modeling --mode training --profile max --output-dir <same-dir>` first, "
             "or set MLPERF_EDU_NANOGPT_CHECKPOINT."
         )
 
@@ -748,7 +866,7 @@ def _load_max_nanogpt_model(
         Path(
             os.environ.get(
                 "MLPERF_EDU_NANOGPT_TRAIN_REPORT",
-                checkpoint.parent / "nanogpt-train_max_report.json",
+                checkpoint.parent / "causal-language-modeling_training_max_report.json",
             )
         )
         .expanduser()
@@ -758,7 +876,7 @@ def _load_max_nanogpt_model(
         Path(
             os.environ.get(
                 "MLPERF_EDU_NANOGPT_TRAIN_MANIFEST",
-                checkpoint.parent / "nanogpt-train_max.provd.json",
+                checkpoint.parent / "causal-language-modeling_training_max.provd.json",
             )
         )
         .expanduser()
@@ -784,7 +902,8 @@ def _load_max_nanogpt_model(
     source_report = json.loads(source_report_path.read_text())
     source_quality = source_report.get("quality") or {}
     if (
-        source_report.get("workload") != "nanogpt-train"
+        source_report.get("workload") != "causal-language-modeling"
+        or source_report.get("mode") != "training"
         or source_report.get("profile") != "max"
         or source_report.get("status") != "passed"
         or source_report.get("data_mode") != "real"
@@ -816,7 +935,7 @@ def _load_max_nanogpt_model(
     lineage = {
         "checkpoint_path": str(checkpoint),
         "checkpoint_sha256": checkpoint_sha256,
-        "source_workload": "nanogpt-train",
+        "source_workload": "causal-language-modeling",
         "source_report_path": str(source_report_path),
         "source_report_sha256": f"sha256:{sha256_file(source_report_path)}",
         "source_manifest_path": str(source_manifest_path),
@@ -957,6 +1076,89 @@ def _percentile(values: list[float], quantile: float) -> float:
 def _read_tokens(path: Path) -> torch.Tensor:
     text = path.read_text(encoding="utf-8")
     return torch.tensor(list(text.encode("ascii", errors="replace")), dtype=torch.long)
+
+
+def _tinyshakespeare_token_tensors(root: Path) -> tuple[torch.Tensor, torch.Tensor]:
+    full_text = (root / "tinyshakespeare.txt").read_text(encoding="utf-8")
+    characters = sorted(set(full_text))
+    if len(characters) != 65:
+        raise ValueError(
+            f"canonical Tiny Shakespeare tokenizer expected 65 symbols, found {len(characters)}"
+        )
+    stoi = {character: index for index, character in enumerate(characters)}
+
+    def encode(path: Path) -> torch.Tensor:
+        text = path.read_text(encoding="utf-8")
+        return torch.tensor([stoi[character] for character in text], dtype=torch.long)
+
+    train = encode(root / "tinyshakespeare_train.txt")
+    validation = encode(root / "tinyshakespeare_val.txt")
+    if len(train) != 1_003_854 or len(validation) != 111_540:
+        raise ValueError(
+            "canonical nanoGPT split expected 1,003,854 train and 111,540 validation tokens"
+        )
+    return train, validation
+
+
+def _random_nanogpt_batch(
+    tokens: torch.Tensor,
+    *,
+    batch_size: int,
+    seq_len: int,
+    device: torch.device,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    indices = torch.randint(len(tokens) - seq_len, (batch_size,))
+    inputs = torch.stack([tokens[index : index + seq_len] for index in indices])
+    targets = torch.stack(
+        [tokens[index + 1 : index + 1 + seq_len] for index in indices]
+    )
+    return inputs.to(device), targets.to(device)
+
+
+@torch.no_grad()
+def _estimate_canonical_losses(
+    model: torch.nn.Module,
+    train_tokens: torch.Tensor,
+    validation_tokens: torch.Tensor,
+    *,
+    batch_size: int,
+    seq_len: int,
+    eval_iters: int,
+    device: torch.device,
+) -> tuple[float, float]:
+    model.eval()
+    aggregates: list[float] = []
+    for tokens in (train_tokens, validation_tokens):
+        losses: list[float] = []
+        for _ in range(eval_iters):
+            inputs, targets = _random_nanogpt_batch(
+                tokens,
+                batch_size=batch_size,
+                seq_len=seq_len,
+                device=device,
+            )
+            _, loss = model(inputs, targets=targets)
+            losses.append(float(loss.item()))
+        aggregates.append(statistics.fmean(losses))
+    model.train()
+    return aggregates[0], aggregates[1]
+
+
+def _canonical_nanogpt_lr(
+    iteration: int,
+    *,
+    learning_rate: float,
+    min_lr: float,
+    warmup_iters: int,
+    decay_iters: int,
+) -> float:
+    if iteration < warmup_iters:
+        return learning_rate * (iteration + 1) / (warmup_iters + 1)
+    if iteration > decay_iters:
+        return min_lr
+    decay_ratio = (iteration - warmup_iters) / (decay_iters - warmup_iters)
+    coefficient = 0.5 * (1.0 + math.cos(math.pi * decay_ratio))
+    return min_lr + coefficient * (learning_rate - min_lr)
 
 
 def _tinyshakespeare_loaders(

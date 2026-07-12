@@ -1,11 +1,10 @@
 #!/usr/bin/env python3
-"""Produce reviewable multi-seed reference evidence through the product path.
+"""Produce reviewable multi-run reference evidence through the product path.
 
-Each seed runs in a fresh process using the public ``MLPERF_EDU_MAX_SEED``
-interface. The tool never patches framework RNG functions. A run is invalid when
-the report or provenance manifest records a different seed, when its manifest
-does not verify, when grading fails, or when a public candidate uses a data mode
-outside the contract for its score-bearing or performance-bearing status.
+Each repetition runs in a fresh process using the workload's canonical seed.
+The tool never patches framework RNG functions. A run is invalid when the report
+or provenance manifest records a different seed, its manifest does not verify,
+grading fails, or the score-bearing data mode differs from the canonical contract.
 
 Evidence is written to a new attempt directory and never overwritten. Every run
 artifact is SHA-256 indexed, and the final evidence summary receives a separate
@@ -36,12 +35,12 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TOOL_NAME = "run_reference_sweep.py"
-TOOL_VERSION = "3.0.0"
+TOOL_VERSION = "4.0.0"
 TOOL_ID = f"tools/{TOOL_NAME} v{TOOL_VERSION}"
 SCORE_PUBLIC_DATA_MODES = frozenset({"real"})
 PERFORMANCE_PUBLIC_DATA_MODES = frozenset({"real", "checkpoint-backed", "local-prompt"})
 PUBLIC_STATUSES = frozenset({"score-bearing", "performance-bearing"})
-REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.4"
+REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.5"
 DEFAULT_TIMEOUT_SECONDS = 7200.0
 DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS = 5.0
 MAX_INTER_EXECUTION_COOLDOWN_SECONDS = 300.0
@@ -129,6 +128,7 @@ def main():
         os.environ["MLPERF_EDU_DEVICE"] = str(args["device"])
 
     result = {
+        "execution_index": int(args["execution_index"]),
         "requested_seed": seed,
         "workload_id": args["workload_id"],
         "profile": args["profile"],
@@ -147,6 +147,7 @@ def main():
             write_report_exports,
         )
         from mlperf.manifest import verify_provd
+        from mlperf.contracts import evaluate_promotion_contract
         from mlperf.registry import load_registry
 
         registry = load_registry()
@@ -154,7 +155,13 @@ def main():
         output_dir = Path(args["output_dir"])
         output_dir.mkdir(parents=True, exist_ok=False)
         started = time.perf_counter()
-        report = run_workload(workload, args["profile"], output_dir)
+        report = run_workload(
+            workload,
+            args["profile"],
+            output_dir,
+            mode=args.get("mode"),
+            phase=args.get("phase"),
+        )
         wall_seconds = time.perf_counter() - started
 
         artifacts = report.get("artifacts") or {}
@@ -167,6 +174,8 @@ def main():
         report = json.loads(report_path.read_text())
         enrich_report_for_display(report, registry)
         attach_run_fingerprints(report)
+        promotion_contract = evaluate_promotion_contract(workload, report)
+        report["promotion_contract"] = promotion_contract
         report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
         update_measurement_manifest(report, report_path, manifest_path)
         exports = write_report_exports(report, report_path, open_report=False)
@@ -176,18 +185,20 @@ def main():
         grade = grade_manifest(manifest_path)
         quality = report.get("quality") or {}
         metrics = report.get("metrics") or {}
-        measurement_protocol = workload.raw.get("measurement_protocol") or {}
+        if args.get("mode") == "inference":
+            phase_contract = (
+                ((workload.raw.get("mode_contracts") or {}).get("inference") or {})
+                .get("phases", {})
+                .get(args.get("phase") or "full", {})
+            )
+            measurement_protocol = phase_contract.get("measurement_protocol") or {}
+            registry_scenario = phase_contract.get("scenario")
+        else:
+            measurement_protocol = workload.raw.get("measurement_protocol") or {}
+            registry_scenario = getattr(workload, "scenario", None)
         primary_metric = measurement_protocol.get("primary_metric")
-        quality_metric = (
-            getattr(workload, "quality_metric", None)
-            if workload.public_status == "score-bearing"
-            else None
-        )
-        functional_metric = (
-            quality.get("metric") or getattr(workload, "quality_metric", None)
-            if workload.public_status == "performance-bearing"
-            else None
-        )
+        quality_metric = quality.get("metric") or getattr(workload, "quality_metric", None)
+        functional_metric = quality_metric
 
         def finite_metric(metric_name, *, preferred_key=None):
             key = None
@@ -215,7 +226,6 @@ def main():
         data_mode = report.get("data_mode")
         report_scenario = report.get("scenario")
         manifest_scenario = manifest.get("scenario")
-        registry_scenario = getattr(workload, "scenario", None)
         execution_backend = str(report.get("backend") or "")
         requested_device = args.get("device")
         invalid_reasons = []
@@ -229,7 +239,7 @@ def main():
             invalid_reasons.append(f"report recorded seed {report_seed!r}, requested {seed}")
         if manifest_seed != seed:
             invalid_reasons.append(f"manifest recorded seed {manifest_seed!r}, requested {seed}")
-        if args["evidence_tier"] == "public-candidate":
+        if args["evidence_tier"] in {"public-candidate", "promotion-candidate"}:
             if not registry_scenario:
                 invalid_reasons.append("registry scenario is missing")
             if report_scenario != registry_scenario:
@@ -246,13 +256,9 @@ def main():
             invalid_reasons.append(
                 f"declared primary metric {primary_metric!r} has no finite numeric report value"
             )
-        if workload.public_status == "score-bearing" and gate_metric_value is None:
+        if gate_metric_value is None:
             invalid_reasons.append(
                 f"declared quality metric {quality_metric!r} has no finite numeric report value"
-            )
-        if workload.public_status == "performance-bearing" and gate_metric_value is None:
-            invalid_reasons.append(
-                f"declared functional metric {functional_metric!r} has no finite numeric report value"
             )
         if quality.get("target_met") is not True:
             invalid_reasons.append(
@@ -262,13 +268,21 @@ def main():
             invalid_reasons.append(
                 f"report execution backend {execution_backend!r} does not match requested device {requested_device!r}"
             )
-        if args["evidence_tier"] == "public-candidate" and data_mode not in args["allowed_data_modes"]:
+        if args["evidence_tier"] in {"public-candidate", "promotion-candidate"} and data_mode not in args["allowed_data_modes"]:
             invalid_reasons.append(
                 f"public candidate data_mode {data_mode!r} is not allowed for {workload.public_status} evidence"
             )
         review_contract = report.get("review_contract") or {}
         if args["evidence_tier"] == "public-candidate" and review_contract.get("status") != "passed":
             invalid_reasons.append("report review contract did not pass")
+        if (
+            args["evidence_tier"] == "promotion-candidate"
+            and promotion_contract.get("status") != "passed"
+        ):
+            invalid_reasons.append(
+                "report promotion contract did not pass: "
+                + "; ".join(promotion_contract.get("issues") or [])
+            )
         if args["evidence_tier"] == "public-candidate":
             expected_review = {
                 "metric": primary_metric,
@@ -336,13 +350,16 @@ def main():
             "primary_metric_key": primary_metric_key,
             "primary_metric_value": primary_metric_value,
             "quality_metric_declared": quality_metric,
-            "quality_metric_key": gate_metric_key if quality_metric else None,
-            "quality_value": gate_metric_value if quality_metric else None,
+            "quality_metric_key": gate_metric_key,
+            "quality_value": gate_metric_value,
             "functional_metric_declared": functional_metric,
             "functional_metric_key": gate_metric_key if functional_metric else None,
             "functional_metric_value": gate_metric_value if functional_metric else None,
             "reference_metric_role": "performance",
             "quality_target_met": quality.get("target_met"),
+            "quality_target": quality.get("target"),
+            "quality_direction": quality.get("direction"),
+            "promotion_contract": promotion_contract,
             "comparison_fingerprint_sha256": comparison_fingerprint_sha256,
             "scenario": report_scenario,
             "manifest_scenario": manifest_scenario,
@@ -399,6 +416,49 @@ def parse_seeds(raw: str) -> list[int]:
     if len(set(seeds)) != len(seeds):
         raise argparse.ArgumentTypeError("--seeds must not contain duplicates")
     return seeds
+
+
+def parse_run_count(raw: str) -> int:
+    try:
+        count = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("--runs must be an integer") from exc
+    if count < 1:
+        raise argparse.ArgumentTypeError("--runs must be at least one")
+    return count
+
+
+def canonical_seed(workload: Any) -> int:
+    contract = workload.raw.get("canonical_max_contract") or {}
+    config = contract.get("config") or {}
+    value = config.get("random_seed", 42)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise ValueError(f"{workload.id} canonical random seed must be an integer")
+    return value
+
+
+def execution_contract(
+    workload: Any, *, mode: str | None, phase: str | None
+) -> dict[str, Any]:
+    if mode == "inference":
+        phases = (
+            ((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get(
+                "phases", {}
+            )
+        )
+        resolved_phase = phase or "full"
+        contract = phases.get(resolved_phase)
+        if not isinstance(contract, dict):
+            raise ValueError(
+                f"{workload.id} has no inference phase contract for {resolved_phase!r}"
+            )
+        return contract
+    return {
+        "scenario": workload.scenario,
+        "measurement_protocol": workload.raw.get("measurement_protocol") or {},
+        "config": (workload.raw.get("canonical_max_contract") or {}).get("config")
+        or {},
+    }
 
 
 def aggregate(values: list[float]) -> dict[str, Any]:
@@ -505,8 +565,10 @@ def _preflight_lineage_archive(package_path: Path) -> dict[str, Any]:
         raise LineagePackageError(
             "lineage package must use schema mlperf-edu-package/0.2"
         )
-    if index.get("workload") != "nanogpt-train":
-        raise LineagePackageError("lineage package must contain a nanogpt-train result")
+    if index.get("workload") != "causal-language-modeling":
+        raise LineagePackageError(
+            "lineage package must contain a causal-language-modeling result"
+        )
     included = index.get("included_files")
     if not isinstance(included, list) or not included:
         raise LineagePackageError("lineage package index has no included files")
@@ -630,8 +692,10 @@ def _validate_staged_lineage(
         raise LineagePackageError(
             "packaged NanoGPT training manifest is invalid"
         ) from exc
-    if manifest.get("workload") != "nanogpt-train":
-        raise LineagePackageError("packaged provenance is not for nanogpt-train")
+    if manifest.get("workload") != "causal-language-modeling":
+        raise LineagePackageError(
+            "packaged provenance is not for causal-language-modeling"
+        )
     leaves = manifest.get("leaves") or {}
     report_path = _staged_artifact_path(
         manifest_path,
@@ -653,7 +717,8 @@ def _validate_staged_lineage(
         ) from exc
     quality = report.get("quality") or {}
     if (
-        report.get("workload") != "nanogpt-train"
+        report.get("workload") != "causal-language-modeling"
+        or report.get("mode") != "training"
         or report.get("profile") != "max"
         or report.get("status") != "passed"
         or report.get("data_mode") != "real"
@@ -661,7 +726,8 @@ def _validate_staged_lineage(
         or quality.get("target_met") is not True
     ):
         raise LineagePackageError(
-            "lineage package must contain a passing real-data nanogpt-train max report"
+            "lineage package must contain a passing real-data "
+            "causal-language-modeling training max report"
         )
     provenance_checks = _verify_provenance_checks(manifest_path)
     failed = [name for name, ok, _detail in provenance_checks if not ok]
@@ -763,6 +829,9 @@ def run_one_seed(
     variant: str | None,
     profile: str,
     seed: int,
+    execution_index: int,
+    mode: str | None,
+    phase: str | None,
     device: str | None,
     attempt_dir: Path,
     timeout_seconds: float,
@@ -781,8 +850,8 @@ def run_one_seed(
             "cooldown_before_seconds must be finite, nonnegative, and no greater "
             f"than {MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g}"
         )
-    seed_dir = attempt_dir / f"seed_{seed}"
-    with tempfile.TemporaryDirectory(prefix=f"mlperf-edu-seed-{seed}-") as tmp:
+    run_dir = attempt_dir / f"run_{execution_index:03d}"
+    with tempfile.TemporaryDirectory(prefix=f"mlperf-edu-run-{execution_index:03d}-") as tmp:
         args_path = Path(tmp) / "args.json"
         result_path = Path(tmp) / "result.json"
         child_args = {
@@ -791,8 +860,11 @@ def run_one_seed(
             "variant": variant,
             "profile": profile,
             "seed": seed,
+            "execution_index": execution_index,
+            "mode": mode,
+            "phase": phase,
             "device": device,
-            "output_dir": str(seed_dir),
+            "output_dir": str(run_dir),
             "evidence_tier": evidence_tier,
             "allowed_data_modes": sorted(allowed_data_modes),
         }
@@ -821,6 +893,7 @@ def run_one_seed(
             stderr_tail = _tail(process.stderr)
         except subprocess.TimeoutExpired as exc:
             return {
+                "execution_index": execution_index,
                 "requested_seed": seed,
                 "execution_ok": False,
                 "evidence_valid": False,
@@ -835,6 +908,8 @@ def run_one_seed(
                     variant,
                     profile,
                     seed,
+                    mode,
+                    phase,
                     device,
                     bool(environment_overrides),
                 ),
@@ -844,6 +919,7 @@ def run_one_seed(
             result = json.loads(result_path.read_text())
         else:
             result = {
+                "execution_index": execution_index,
                 "requested_seed": seed,
                 "execution_ok": False,
                 "evidence_valid": False,
@@ -858,6 +934,8 @@ def run_one_seed(
             variant,
             profile,
             seed,
+            mode,
+            phase,
             device,
             bool(environment_overrides),
         )
@@ -877,12 +955,18 @@ def reproduce_record(
     variant: str | None,
     profile: str,
     seed: int,
+    mode: str | None,
+    phase: str | None,
     device: str | None,
     uses_nanogpt_lineage_package: bool = False,
 ) -> dict[str, Any]:
     command = ["uv", "run", "mlperf", "run", "--workload", workload_id]
     if variant:
         command.extend(["--variant", variant])
+    if mode:
+        command.extend(["--mode", mode])
+    if phase:
+        command.extend(["--phase", phase])
     command.extend(["--profile", profile, "--output-dir", "<NEW_OUTPUT_DIR>"])
     env = {"MLPERF_EDU_MAX_SEED": str(seed)}
     if device:
@@ -932,7 +1016,7 @@ def build_outer_execution_policy(
     configured_cooldown_seconds: float,
 ) -> dict[str, Any]:
     """Describe the fixed delay between fresh timed public-candidate processes."""
-    applies = public_status in PUBLIC_STATUSES and evidence_tier == "public-candidate"
+    applies = evidence_tier in {"public-candidate", "promotion-candidate"}
     executions = [
         {
             "execution_index": index,
@@ -951,7 +1035,7 @@ def build_outer_execution_policy(
             "all public-candidate score-bearing and performance-bearing workloads"
         ),
         "mode": "fixed-delay-between-fresh-processes" if applies else "not-applied",
-        "execution_unit": "one fresh Python subprocess per requested seed",
+        "execution_unit": "one fresh Python subprocess per repetition",
         "process_execution_count": len(executions),
         "configured_cooldown_seconds": configured_cooldown_seconds,
         "default_cooldown_seconds": DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS,
@@ -995,6 +1079,7 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
     manifest_seed = result.get("manifest_recorded_seed")
     seed_match = report_seed == requested and manifest_seed == requested
     return {
+        "execution_index": result.get("execution_index"),
         "requested_seed": requested,
         "report_recorded_seed": report_seed,
         "manifest_recorded_seed": manifest_seed,
@@ -1011,6 +1096,9 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
         "functional_metric_value": result.get("functional_metric_value"),
         "reference_metric_role": result.get("reference_metric_role"),
         "quality_target_met": result.get("quality_target_met"),
+        "quality_target": result.get("quality_target"),
+        "quality_direction": result.get("quality_direction"),
+        "promotion_contract": result.get("promotion_contract"),
         "comparison_fingerprint_sha256": result.get("comparison_fingerprint_sha256"),
         "scenario": result.get("scenario"),
         "manifest_scenario": result.get("manifest_scenario"),
@@ -1084,6 +1172,9 @@ def aggregate_acceptance(
     elif direction == "higher":
         passed = float(aggregate_value) >= float(target)
         operator = ">="
+    elif direction == "equal":
+        passed = float(aggregate_value) == float(target)
+        operator = "=="
     else:
         return {
             "passed": False,
@@ -1130,6 +1221,10 @@ def score_acceptance(
             numeric_passed = float(value) - tolerance <= float(target)
         elif direction == "higher" and numeric:
             numeric_passed = float(value) + tolerance >= float(target)
+        elif direction == "equal" and numeric:
+            numeric_passed = math.isclose(
+                float(value), float(target), rel_tol=0.0, abs_tol=tolerance
+            )
         else:
             numeric_passed = False
         per_run_passes.append(
@@ -1172,7 +1267,15 @@ def performance_acceptance(
     }
 
 
-def public_data_modes_for(workload: Any) -> frozenset[str]:
+def public_data_modes_for(
+    workload: Any, *, mode: str | None = None, phase: str | None = None
+) -> frozenset[str]:
+    if workload.public_status == "experimental":
+        if mode == "inference" and workload.id == "causal-language-modeling":
+            return frozenset({"checkpoint-backed"})
+        contract = workload.raw.get("canonical_max_contract") or {}
+        data_mode = contract.get("data_mode")
+        return frozenset({str(data_mode)}) if data_mode else frozenset()
     if workload.public_status == "score-bearing":
         return SCORE_PUBLIC_DATA_MODES
     if workload.public_status == "performance-bearing":
@@ -1223,6 +1326,7 @@ def build_basis(
     quality_metric_name: str | None,
     dataset_mode: Any,
     eligible: bool,
+    evidence_tier: str,
 ) -> dict[str, Any]:
     performance = workload.public_status == "performance-bearing"
     functional = dict(workload.raw.get("functional_check") or {})
@@ -1238,8 +1342,22 @@ def build_basis(
         functional["target"] = functional_target
     variance_aggregate = primary_aggregate if performance else quality_aggregate or {}
     variance_metric = primary_metric_name if performance else quality_metric_name
+    quality_targets = {
+        float(row["quality_target"])
+        for row in rows
+        if not isinstance(row.get("quality_target"), bool)
+        and isinstance(row.get("quality_target"), (int, float))
+    }
+    quality_directions = {
+        str(row["quality_direction"])
+        for row in rows
+        if row.get("quality_direction")
+    }
     return {
-        "eligible_for_public_baseline": eligible,
+        "eligible_for_public_baseline": eligible
+        and workload.public_status in PUBLIC_STATUSES,
+        "eligible_for_promotion": eligible
+        and evidence_tier == "promotion-candidate",
         "primary_metric": {
             "name": primary_metric_name,
             "role": "performance",
@@ -1268,8 +1386,12 @@ def build_basis(
             if performance
             else {
                 "metric": quality_metric_name,
-                "target": getattr(workload, "quality_value", None),
-                "direction": getattr(workload, "quality_direction", None),
+                "target": next(iter(quality_targets))
+                if len(quality_targets) == 1
+                else None,
+                "direction": next(iter(quality_directions))
+                if len(quality_directions) == 1
+                else None,
                 "tolerance": getattr(workload, "quality_tolerance", None),
                 "all_runs_must_pass": True,
             }
@@ -1333,6 +1455,8 @@ def validate_sweep(
     *,
     workload: Any,
     seeds: list[int],
+    mode: str | None,
+    phase: str | None,
     rows: list[dict[str, Any]],
     sensitivity: dict[str, Any],
     acceptance: dict[str, Any],
@@ -1345,9 +1469,9 @@ def validate_sweep(
                 row.get("invalid_reasons") or ["unknown validation failure"]
             )
             reasons.append(f"seed {row.get('requested_seed')}: {details}")
-        expected_primary = (workload.raw.get("measurement_protocol") or {}).get(
-            "primary_metric"
-        )
+        expected_primary = execution_contract(
+            workload, mode=mode, phase=phase
+        )["measurement_protocol"].get("primary_metric")
         if row.get("primary_metric_declared") != expected_primary:
             reasons.append(
                 f"seed {row.get('requested_seed')}: primary metric declaration "
@@ -1369,13 +1493,10 @@ def validate_sweep(
                 f"seed {row.get('requested_seed')}: primary metric value is not "
                 "finite and positive"
             )
-        if workload.public_status == "score-bearing":
-            if row.get("quality_metric_declared") != getattr(
-                workload, "quality_metric", None
-            ):
+        if workload.public_status != "performance-bearing":
+            if not row.get("quality_metric_declared"):
                 reasons.append(
-                    f"seed {row.get('requested_seed')}: quality metric declaration "
-                    "does not match the registry"
+                    f"run {row.get('execution_index')}: quality metric declaration is missing"
                 )
             quality_value = row.get("quality_value")
             if (
@@ -1386,7 +1507,7 @@ def validate_sweep(
                 reasons.append(
                     f"seed {row.get('requested_seed')}: quality metric value is not finite"
                 )
-        elif workload.public_status == "performance-bearing":
+        else:
             expected_functional = (workload.raw.get("functional_check") or {}).get(
                 "metric"
             )
@@ -1404,8 +1525,6 @@ def validate_sweep(
                 reasons.append(
                     f"seed {row.get('requested_seed')}: functional metric value is not finite"
                 )
-    if sensitivity["verdict"] != "sensitive":
-        reasons.append(f"seed sensitivity is {sensitivity['verdict']}, not sensitive")
     primary_metric_keys = {
         row.get("primary_metric_key") for row in rows if row.get("primary_metric_key")
     }
@@ -1414,11 +1533,7 @@ def validate_sweep(
             "runs did not resolve to exactly one primary metric key: "
             f"{sorted(primary_metric_keys)}"
         )
-    gate_field = (
-        "quality_metric_key"
-        if workload.public_status == "score-bearing"
-        else "functional_metric_key"
-    )
+    gate_field = "quality_metric_key"
     gate_metric_keys = {row.get(gate_field) for row in rows if row.get(gate_field)}
     if len(gate_metric_keys) != 1:
         reasons.append(
@@ -1431,23 +1546,21 @@ def validate_sweep(
             f"{acceptance.get('reason') or acceptance}"
         )
 
-    if evidence_tier == "public-candidate":
-        protocol = _declared_protocol(workload)
-        declared_runs = (
-            protocol.get("reference_runs")
-            if workload.public_status == "performance-bearing"
-            else getattr(workload, "quality_reference_runs", None)
-        )
+    if evidence_tier in {"public-candidate", "promotion-candidate"}:
+        protocol = execution_contract(
+            workload, mode=mode, phase=phase
+        )["measurement_protocol"]
+        declared_runs = protocol.get("outer_reference_runs")
         if isinstance(declared_runs, int) and len(seeds) != declared_runs:
             reasons.append(
                 f"registry requires {declared_runs} reference runs, received {len(seeds)}"
             )
-        protocol_seeds = protocol.get("seeds")
-        if isinstance(protocol_seeds, list) and seeds != protocol_seeds:
+        expected_seed = canonical_seed(workload)
+        if any(seed != expected_seed for seed in seeds):
             reasons.append(
-                f"requested seeds {seeds} do not match registry protocol seeds {protocol_seeds}"
+                f"promotion evidence must repeat canonical seed {expected_seed}, received {seeds}"
             )
-        allowed_modes = public_data_modes_for(workload)
+        allowed_modes = public_data_modes_for(workload, mode=mode, phase=phase)
         invalid_modes = sorted(
             {
                 str(row.get("data_mode"))
@@ -1505,8 +1618,10 @@ def print_summary(rows: list[dict[str, Any]], artifact_path: Path, valid: bool) 
     print(f"evidence summary: {artifact_path}")
 
 
-def _uses_nanogpt_training_lineage(workload: Any) -> bool:
-    return str(workload.raw.get("shared_checkpoint") or "") == "nanogpt-train"
+def _uses_nanogpt_training_lineage(
+    workload: Any, *, mode: str | None
+) -> bool:
+    return workload.id == "causal-language-modeling" and mode == "inference"
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -1517,7 +1632,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--workload", required=True)
     parser.add_argument("--variant")
     parser.add_argument("--profile", default="max")
-    parser.add_argument("--seeds", type=parse_seeds, default=parse_seeds("0,1,2,3,4"))
+    parser.add_argument("--mode", choices=("training", "inference"))
+    parser.add_argument("--phase", choices=("full", "prefill", "decode"))
+    parser.add_argument("--runs", type=parse_run_count, default=5)
+    parser.add_argument(
+        "--seeds",
+        type=parse_seeds,
+        default=None,
+        help="development-only seed list; promotion evidence repeats the canonical seed",
+    )
     parser.add_argument(
         "--device", choices=("cpu", "mps", "default"), default="default"
     )
@@ -1545,14 +1668,15 @@ def main(argv: list[str] | None = None) -> int:
     )
     parser.add_argument(
         "--evidence-tier",
-        choices=("auto", "public-candidate", "development"),
+        choices=("auto", "promotion-candidate", "public-candidate", "development"),
         default="auto",
     )
     parser.add_argument(
         "--nanogpt-lineage-package",
         help=(
             "verified mlperf-edu-package/0.2 archive from a passing real-data "
-            "nanogpt-train max run; required for public-candidate NanoGPT inference"
+            "causal-language-modeling training max run; required for promotion "
+            "or public-candidate NanoGPT inference"
         ),
     )
     args = parser.parse_args(argv)
@@ -1592,6 +1716,16 @@ def main(argv: list[str] | None = None) -> int:
             file=sys.stderr,
         )
         return 2
+    try:
+        selected_contract = execution_contract(
+            workload, mode=args.mode, phase=args.phase
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if args.phase and args.mode != "inference":
+        print("error: --phase requires --mode inference", file=sys.stderr)
+        return 2
     if load_runner(workload, args.profile) is None:
         print(f"error: no {args.profile!r} runner for {workload.id}", file=sys.stderr)
         return 2
@@ -1601,27 +1735,34 @@ def main(argv: list[str] | None = None) -> int:
         evidence_tier = (
             "public-candidate"
             if workload.public_status in PUBLIC_STATUSES
-            else "development"
+            else "promotion-candidate"
         )
+    requested_seeds = args.seeds or [canonical_seed(workload)] * args.runs
     outer_execution_policy = build_outer_execution_policy(
         public_status=workload.public_status,
         evidence_tier=evidence_tier,
-        seeds=args.seeds,
+        seeds=requested_seeds,
         configured_cooldown_seconds=args.inter_execution_cooldown_seconds,
     )
-    uses_nanogpt_lineage = _uses_nanogpt_training_lineage(workload)
-    lineage_required = evidence_tier == "public-candidate" and uses_nanogpt_lineage
+    uses_nanogpt_lineage = _uses_nanogpt_training_lineage(
+        workload, mode=args.mode
+    )
+    lineage_required = (
+        evidence_tier in {"public-candidate", "promotion-candidate"}
+        and uses_nanogpt_lineage
+    )
     if args.nanogpt_lineage_package and not uses_nanogpt_lineage:
         print(
             "error: --nanogpt-lineage-package is only valid for a workload that "
-            "declares shared_checkpoint: nanogpt-train",
+            "is causal-language-modeling inference",
             file=sys.stderr,
         )
         return 2
     if lineage_required and not args.nanogpt_lineage_package:
         print(
             "error: public-candidate NanoGPT inference requires "
-            "--nanogpt-lineage-package from a passing real-data nanogpt-train max run",
+            "--nanogpt-lineage-package from a passing real-data "
+            "causal-language-modeling training max run",
             file=sys.stderr,
         )
         return 2
@@ -1636,7 +1777,9 @@ def main(argv: list[str] | None = None) -> int:
             print(f"error: invalid NanoGPT lineage package: {exc}", file=sys.stderr)
             return 2
 
-    allowed_data_modes = public_data_modes_for(workload)
+    allowed_data_modes = public_data_modes_for(
+        workload, mode=args.mode, phase=args.phase
+    )
     device = None if args.device == "default" else args.device
     # Bind source state before creating evidence. An explicitly selected output
     # directory may live inside the checkout; its artifacts are not source edits
@@ -1666,7 +1809,9 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     print(
-        f"{TOOL_ID}: workload={workload.id} profile={args.profile} seeds={args.seeds} "
+        f"{TOOL_ID}: workload={workload.id} profile={args.profile} "
+        f"mode={args.mode or 'default'} phase={args.phase or 'default'} "
+        f"runs={len(requested_seeds)} canonical_seed={canonical_seed(workload)} "
         f"tier={evidence_tier} timeout={args.timeout_seconds:g}s "
         "inter-execution-cooldown="
         f"{args.inter_execution_cooldown_seconds:g}s "
@@ -1676,15 +1821,19 @@ def main(argv: list[str] | None = None) -> int:
     with tempfile.TemporaryDirectory(prefix="mlperf-edu-sweep-bootstrap-") as tmp:
         bootstrap_path = Path(tmp) / "child.py"
         bootstrap_path.write_text(_CHILD_BOOTSTRAP)
-        for execution in outer_execution_policy["executions"]:
-            seed = execution["seed"]
-            print(f"running seed {seed} ...", flush=True)
+        for process_execution in outer_execution_policy["executions"]:
+            seed = process_execution["seed"]
+            execution_index = process_execution["execution_index"]
+            print(f"running repetition {execution_index} (seed {seed}) ...", flush=True)
             result = run_one_seed(
                 bootstrap_path,
                 workload_id=args.workload,
                 variant=args.variant,
                 profile=args.profile,
                 seed=seed,
+                execution_index=execution_index,
+                mode=args.mode,
+                phase=args.phase,
                 device=device,
                 attempt_dir=attempt_dir,
                 timeout_seconds=args.timeout_seconds,
@@ -1693,9 +1842,11 @@ def main(argv: list[str] | None = None) -> int:
                 environment_overrides=(
                     lineage_stage["environment"] if lineage_stage else None
                 ),
-                cooldown_before_seconds=execution["cooldown_before_seconds"],
+                cooldown_before_seconds=process_execution[
+                    "cooldown_before_seconds"
+                ],
             )
-            record_outer_execution(result, execution, outer_execution_policy)
+            record_outer_execution(result, process_execution, outer_execution_policy)
             rows.append(build_row(result))
 
     primary_metric_name = next(
@@ -1704,7 +1855,7 @@ def main(argv: list[str] | None = None) -> int:
             for row in rows
             if row.get("primary_metric_declared")
         ),
-        (workload.raw.get("measurement_protocol") or {}).get("primary_metric"),
+        selected_contract["measurement_protocol"].get("primary_metric"),
     )
     quality_metric_name = (
         next(
@@ -1715,7 +1866,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             getattr(workload, "quality_metric", None),
         )
-        if workload.public_status == "score-bearing"
+        if workload.public_status != "performance-bearing"
         else None
     )
     primary_values = [
@@ -1739,7 +1890,9 @@ def main(argv: list[str] | None = None) -> int:
     ]
     primary_aggregate = aggregate(primary_values)
     quality_aggregate = (
-        aggregate(quality_values) if workload.public_status == "score-bearing" else None
+        aggregate(quality_values)
+        if workload.public_status != "performance-bearing"
+        else None
     )
     wall_aggregate = aggregate(wall_values)
     sensitivity = (
@@ -1761,24 +1914,43 @@ def main(argv: list[str] | None = None) -> int:
         functional = workload.raw.get("functional_check") or {}
         acceptance = performance_acceptance(rows, functional.get("condition"))
     else:
+        observed_targets = {
+            float(row["quality_target"])
+            for row in rows
+            if not isinstance(row.get("quality_target"), bool)
+            and isinstance(row.get("quality_target"), (int, float))
+        }
+        observed_directions = {
+            str(row["quality_direction"])
+            for row in rows
+            if row.get("quality_direction")
+        }
+        quality_target = (
+            next(iter(observed_targets)) if len(observed_targets) == 1 else None
+        )
+        quality_direction = (
+            next(iter(observed_directions)) if len(observed_directions) == 1 else None
+        )
         acceptance = score_acceptance(
             rows,
             (quality_aggregate or {}).get("median"),
-            getattr(workload, "quality_value", None),
-            getattr(workload, "quality_direction", None),
+            quality_target,
+            quality_direction,
             tolerance=float(getattr(workload, "quality_tolerance", None) or 0.0),
         )
-    protocol = _declared_protocol(workload)
+    protocol = selected_contract["measurement_protocol"]
     invalid_reasons = validate_sweep(
         workload=workload,
-        seeds=args.seeds,
+        seeds=requested_seeds,
+        mode=args.mode,
+        phase=args.phase,
         rows=rows,
         sensitivity=sensitivity,
         acceptance=acceptance,
         evidence_tier=evidence_tier,
     )
     primary_repeatability = primary_metric_repeatability(primary_aggregate, protocol)
-    if evidence_tier == "public-candidate":
+    if evidence_tier in {"public-candidate", "promotion-candidate"}:
         repeatability_limit = primary_repeatability.get("limit")
         if repeatability_limit != PUBLIC_PRIMARY_METRIC_CV_LIMIT:
             invalid_reasons.append(
@@ -1794,7 +1966,7 @@ def main(argv: list[str] | None = None) -> int:
                 "primary performance repeatability exceeds the declared "
                 f"coefficient-of-variation limit {repeatability_limit!r}"
             )
-    if evidence_tier == "public-candidate" and source.get("git_dirty") is not False:
+    if evidence_tier in {"public-candidate", "promotion-candidate"} and source.get("git_dirty") is not False:
         invalid_reasons.append(
             "public reference evidence must be produced from a clean Git worktree"
         )
@@ -1840,6 +2012,7 @@ def main(argv: list[str] | None = None) -> int:
         quality_metric_name=quality_metric_name,
         dataset_mode=dataset_mode,
         eligible=eligible,
+        evidence_tier=evidence_tier,
     )
     comparison_fingerprints = {
         str(row.get("comparison_fingerprint_sha256"))
@@ -1856,8 +2029,11 @@ def main(argv: list[str] | None = None) -> int:
         "schema": REFERENCE_EVIDENCE_SCHEMA,
         "evidence_id": evidence_id,
         "status": "valid" if eligible else "invalid",
+        "eligible_for_promotion": eligible
+        and evidence_tier == "promotion-candidate",
         "eligible_for_public_baseline": eligible
-        and evidence_tier == "public-candidate",
+        and evidence_tier == "public-candidate"
+        and workload.public_status in PUBLIC_STATUSES,
         "invalid_reasons": invalid_reasons,
         "tool": {"id": TOOL_ID, "version": TOOL_VERSION},
         "generated_at": started.isoformat(),
@@ -1874,12 +2050,15 @@ def main(argv: list[str] | None = None) -> int:
         or workload.id,
         "variant": resolved_variant,
         "profile": args.profile,
+        "mode": args.mode,
+        "phase": args.phase,
         "public_status": workload.public_status,
         "evidence_tier": evidence_tier,
         "device_requested": args.device,
-        "timeout_seconds_per_seed": args.timeout_seconds,
+        "timeout_seconds_per_run": args.timeout_seconds,
         "inter_execution_stabilization": outer_execution_policy,
-        "seeds_requested": args.seeds,
+        "canonical_seed": canonical_seed(workload),
+        "seeds_requested": requested_seeds,
         "dataset_mode_declared": dataset_mode,
         "allowed_public_data_modes": sorted(allowed_data_modes),
         "reference_metric_role": "performance",
@@ -1891,12 +2070,12 @@ def main(argv: list[str] | None = None) -> int:
         "quality_target": (
             None
             if workload.public_status == "performance-bearing"
-            else getattr(workload, "quality_value", None)
+            else (basis.get("quality_target") or {}).get("target")
         ),
-        "quality_direction": getattr(workload, "quality_direction", None),
+        "quality_direction": (basis.get("quality_target") or {}).get("direction"),
         "quality_gate": (
             basis["quality_target"]
-            if workload.public_status == "score-bearing"
+            if workload.public_status != "performance-bearing"
             else None
         ),
         "functional_gate": (

@@ -30,7 +30,7 @@ def test_profiles_are_min_max_pro():
 
 def test_registry_loads_current_workloads():
     workloads = load_registry()
-    assert len(workloads) >= 20
+    assert len(workloads) == 7
     assert STARTER_WORKLOADS.issubset(workloads)
     assert STANDARD_WORKLOADS.issubset(workloads)
     assert RESEARCH_WORKLOADS.issubset(workloads)
@@ -43,108 +43,8 @@ def test_packaged_registry_copy_matches_flat_registry():
     assert packaged.read_text() == flat.read_text()
 
 
-def test_registry_loads_native_suite_workload_variant_layout(tmp_path):
-    language = tmp_path / "suites" / "language"
-    language.mkdir(parents=True)
-    (language / "nanogpt-train.yaml").write_text(
-        """
-model: nanogpt-12m
-dataset: tinyshakespeare
-quality_target:
-  metric: cross_entropy_loss
-  value: 2.3
-scenario: single_stream
-public:
-  status: systems-only
-  rationale: Native flat workload fixture.
-runner:
-  min: mlperf.runners.nanogpt:run_min
-  max: mlperf.runners.nanogpt:run_max
-""".lstrip()
-    )
-
-    workload_dir = tmp_path / "suites" / "slm" / "smollm2-chat-inference"
-    variants = workload_dir / "variants"
-    variants.mkdir(parents=True)
-    (workload_dir / "workload.yaml").write_text(
-        """
-id: smollm2-chat-inference
-model: SmolLM2-135M-Instruct
-dataset: prompt-suite-local
-quality_target:
-  metric: generated_tokens
-  value: 8
-functional_check:
-  metric: generated_tokens
-  condition: generated_tokens >= 8
-scenario: single_stream
-public:
-  status: performance-bearing
-  rationale: Native canonical workload fixture.
-runner:
-  min: mlperf.runners.slm:run_decode_min
-  max: mlperf.runners.slm:run_decode_max
-""".lstrip()
-    )
-    (variants / "baseline.yaml").write_text(
-        """
-id: slm-decode
-default_variant: true
-""".lstrip()
-    )
-    (variants / "quantized-int8.yaml").write_text(
-        """
-id: slm-quantized-decode
-model: SmolLM2-135M-Instruct dynamic-int8
-runner:
-  min: mlperf.runners.slm:run_quantized_decode_min
-  max: mlperf.runners.slm:run_quantized_decode_max
-""".lstrip()
-    )
-
-    workloads = load_registry(tmp_path, validate=False)
-
-    assert sorted(workloads) == ["nanogpt-train", "slm-decode", "slm-quantized-decode"]
-    assert workloads["nanogpt-train"].suite == "language"
-    assert workloads["slm-decode"].canonical_workload == "smollm2-chat-inference"
-    assert workloads["slm-decode"].variant == "baseline"
-    assert workloads["slm-decode"].default_variant is True
-    assert workloads["slm-quantized-decode"].variant == "quantized-int8"
-    assert (
-        workloads["slm-quantized-decode"].raw["runner"]["max"]
-        == "mlperf.runners.slm:run_quantized_decode_max"
-    )
 
 
-def test_canonical_workloads_and_variants_live_in_registry():
-    workloads = load_registry()
-
-    slm_variants = {
-        workload.variant: workload.id
-        for workload in workloads.values()
-        if workload.canonical_workload == "smollm2-chat-inference"
-    }
-    nanogpt_variants = {
-        workload.variant: workload.id
-        for workload in workloads.values()
-        if workload.canonical_workload == "nanogpt-inference"
-    }
-
-    assert slm_variants == {
-        "baseline": "slm-decode",
-        "quantized-int8": "slm-quantized-decode",
-        "batched-b4": "slm-batched-decode",
-        "long-context": "slm-long-context-decode",
-    }
-    assert nanogpt_variants == {
-        "prefill": "nanogpt-prefill",
-        "decode": "nanogpt-decode",
-        "fp32-b16": "nanogpt-decode-fp32-b16",
-        "fp16-b16": "nanogpt-decode-fp16-b16",
-        "speculative": "nanogpt-decode-spec",
-    }
-    assert workloads["slm-decode"].default_variant is True
-    assert workloads["nanogpt-decode"].default_variant is True
 
 
 def test_all_workloads_declare_min_and_max_runners():
@@ -162,11 +62,7 @@ def test_all_workloads_declare_public_contract_metadata():
     counts = Counter(workload.public_status for workload in workloads.values())
 
     assert set(counts).issubset(PUBLIC_STATUSES)
-    assert counts == {
-        "score-bearing": 5,
-        "performance-bearing": 3,
-        "systems-only": 22,
-    }
+    assert counts == {"experimental": 7}
     assert all(workload.public_rationale for workload in workloads.values())
 
 
@@ -187,139 +83,13 @@ def test_public_result_workloads_use_educational_mlcommons_scenarios():
             )
 
 
-def test_score_bearing_workloads_are_public_quality_contracts():
-    workloads = load_registry()
-    selected = select_workloads(workloads, public_status="score-bearing")
-
-    assert {workload.id for workload in selected} == {
-        "anomaly-ae-train",
-        "micro-dlrm-train",
-        "mobilenetv2-train",
-        "nanogpt-train",
-        "resnet18-train",
-    }
-    for workload in selected:
-        assert workload.dataset, workload.id
-        assert workload.raw.get("dataset_source"), workload.id
-        assert has_asset_dossier(workload.dataset), workload.id
-        assert workload.quality_metric, workload.id
-        assert workload.quality_value is not None, workload.id
-        assert workload.quality_direction in {"higher", "lower"}, workload.id
-        assert workload.quality_target_basis in QUALITY_TARGET_BASES, workload.id
-        assert workload.quality_reference_runs, workload.id
-        assert workload.quality_variance_summary, workload.id
-        assert (
-            workload.quality_variance_summary["runs"] == workload.quality_reference_runs
-        ), workload.id
-        assert workload.quality_variance_summary["statistic"], workload.id
-        assert workload.quality_variance_summary["acceptance_rule"], workload.id
-        assert isinstance(workload.quality_reference_protocol, dict), workload.id
-        for field in REFERENCE_PROTOCOL_FIELDS:
-            assert workload.quality_reference_protocol.get(field), (workload.id, field)
-        assert (
-            len(workload.quality_reference_protocol["seeds"])
-            == workload.quality_reference_runs
-        ), workload.id
-        assert workload.quality_reviewer_notes, workload.id
-        assert workload.raw.get("verified_baseline"), workload.id
 
 
-def test_performance_bearing_workloads_have_functional_contracts():
-    workloads = load_registry()
-    selected = select_workloads(workloads, public_status="performance-bearing")
-
-    assert {workload.id for workload in selected} == {
-        "nanogpt-decode",
-        "nanogpt-prefill",
-        "slm-decode",
-    }
-    for workload in selected:
-        functional_check = workload.raw.get("functional_check")
-        assert isinstance(functional_check, dict), workload.id
-        assert functional_check.get("metric"), workload.id
-        assert functional_check.get("condition"), workload.id
-        assert "reference_runs" not in functional_check, workload.id
-        reference_protocol = workload.raw.get("performance_reference_protocol")
-        assert isinstance(reference_protocol, dict), workload.id
-        assert reference_protocol.get("profile") == "max", workload.id
-        assert reference_protocol.get("reference_runs") == 5, workload.id
-        assert reference_protocol.get("seeds") == [0, 1, 2, 3, 4], workload.id
-        for field in (
-            "backend",
-            "machine_class",
-            "dataset_mode",
-            "aggregation",
-            "functional_acceptance",
-            "artifact_policy",
-            "rerun_policy",
-        ):
-            assert reference_protocol.get(field), (workload.id, field)
-        protocol = workload.raw.get("measurement_protocol")
-        assert isinstance(protocol, dict), workload.id
-        assert int(protocol.get("warmup_runs", 0)) >= 1, workload.id
-        assert int(protocol.get("measured_runs", 0)) >= 3, workload.id
-        assert protocol.get("latency_statistics") == ["median", "p90", "p99"], (
-            workload.id
-        )
-        assert protocol.get("timing_scope"), workload.id
-        assert (
-            workload.raw.get("model_source")
-            or workload.raw.get("shared_checkpoint")
-            or workload.dataset
-        ), workload.id
-        model_source = workload.raw.get("model_source")
-        if isinstance(model_source, dict):
-            assert model_source.get("license"), workload.id
-        if workload.raw.get("shared_checkpoint"):
-            assert workload.raw.get("quality_dependency"), workload.id
-        if workload.dataset:
-            assert workload.raw.get("dataset_source"), workload.id
-            assert has_asset_dossier(workload.dataset), workload.id
 
 
-def test_public_inference_contracts_pin_quality_and_provenance():
-    workloads = load_registry()
-    prefill = workloads["nanogpt-prefill"].raw
-    decode = workloads["nanogpt-decode"].raw
-    slm = workloads["slm-decode"].raw
-
-    assert prefill["measurement_protocol"]["warmup_runs"] == 3
-    assert prefill["measurement_protocol"]["measured_runs"] == 20
-    assert prefill["measurement_protocol"]["primary_metric"] == "prefill_tokens_per_sec"
-    assert prefill["checkpoint_contract"]["source_workload"] == "nanogpt-train"
-    assert decode["measurement_protocol"]["warmup_runs"] == 3
-    assert decode["measurement_protocol"]["measured_runs"] == 20
-    assert decode["measurement_protocol"]["decode_steps_per_request"] == 64
-    assert decode["measurement_protocol"]["primary_metric"] == "output_tokens_per_sec"
-    assert decode["checkpoint_contract"]["digest"] == "sha256"
-
-    model_source = slm["model_source"]
-    assert model_source["revision"] == "12fd25f77366fa6b3b4b768ec3050bf629380bac"
-    quality = slm["quality_evaluation"]
-    assert quality["suite"] == "mlperf-edu-slm-quality/0.2"
-    assert quality["fixture_version"] == "2.0.0"
-    assert (
-        quality["asset_sha256"]
-        == "3d6d06b99dd92f1cf86fcde10f77b4db060397003bf654cc52c3148087ede556"
-    )
-    assert quality["cases"] == 28
-    assert quality["categories"] == 7
-    assert quality["aggregation"] == "token-weighted-continuation-nll"
-    assert quality["category_guard"] == "maximum-category-perplexity"
-    assert quality["maximum"] == 7.0
-    assert quality["worst_category_maximum"] == 24.0
-    assert slm["measurement_protocol"]["primary_metric"] == "output_tokens_per_sec"
-
-    for body in (prefill, decode, slm):
-        baseline = body["verified_baseline"]
-        assert baseline["evidence_status"] == "committed-reference-summary"
-        assert baseline["functional_passes"] == 5
-        assert baseline_is_current_review_evidence(
-            baseline
-        ) or baseline_is_protocol_superseded(baseline)
 
 
-def test_all_public_candidates_have_committed_five_seed_evidence():
+def test_candidates_do_not_claim_reference_evidence_before_admission():
     workloads = load_registry()
     selected = [
         workload
@@ -327,23 +97,8 @@ def test_all_public_candidates_have_committed_five_seed_evidence():
         if workload.public_status in {"score-bearing", "performance-bearing"}
     ]
 
-    assert len(selected) == 8
-    for workload in selected:
-        baseline = workload.raw["verified_baseline"]
-        assert baseline["evidence_status"] == "committed-reference-summary"
-        if baseline_is_protocol_superseded(baseline):
-            assert baseline["review_eligible"] is False
-            assert baseline["protocol_compatibility"] == "superseded"
-            assert baseline["replacement_required"] is True
-            assert baseline["superseded_reason"]
-        else:
-            assert baseline_is_current_review_evidence(baseline)
-        assert baseline["evidence_tier"] == "public-candidate"
-        assert baseline["reference_package_availability"] == "local-handoff"
-        assert baseline["external_publication_status"] == "pending"
-        assert baseline["seeds"] == [0, 1, 2, 3, 4]
-        assert len(baseline["metric_values_by_seed"]) == 5
-        assert len(baseline["evidence_sha256"]) == 64
+    assert selected == []
+    assert all("verified_baseline" not in workload.raw for workload in workloads.values())
 
 
 def test_systems_only_rows_do_not_claim_uncommitted_verified_baselines():
@@ -361,63 +116,18 @@ def test_systems_only_rows_do_not_claim_uncommitted_verified_baselines():
             }, workload.id
 
 
-def test_systems_only_max_paths_declare_their_execution_boundaries():
-    workloads = load_registry()
-    selected = [
-        workload
-        for workload in workloads.values()
-        if workload.public_status == "systems-only"
-    ]
-
-    assert len(selected) == 22
-    for workload in selected:
-        execution = workload.raw.get("max_execution")
-        assert isinstance(execution, dict), workload.id
-        assert execution["data_mode"], workload.id
-        assert isinstance(execution["quality_target_enforced"], bool), workload.id
-        assert isinstance(execution["fetched_assets_used"], bool), workload.id
-        assert isinstance(execution["declared_dataset_used"], bool), workload.id
-        assert execution["scope"] == "systems-only", workload.id
-        assert execution["note"], workload.id
-
-    extended = {
-        workload.id
-        for workload in selected
-        if str((workload.raw.get("runner") or {}).get("max", "")).startswith(
-            "mlperf.runners.extended:"
-        )
-    }
-    assert extended == {
-        "micro-bert-train",
-        "micro-diffusion-train",
-        "micro-gnn-train",
-        "micro-lstm-train",
-        "micro-rl-train",
-        "nano-lora-finetune",
-        "nano-moe-train",
-        "nanogpt-decode-fp16-b16",
-        "nanogpt-decode-fp32-b16",
-        "nanogpt-decode-spec",
-    }
-    assert {
-        workloads[workload_id].raw["max_execution"]["data_mode"]
-        for workload_id in extended
-    } == {"synthetic-micro-shard"}
 
 
-def test_public_contract_report_has_only_declared_replacement_blockers():
+def test_public_contract_report_withholds_experimental_candidates():
     workloads = load_registry()
     issues = public_contract_report(workloads)
 
-    for workload_id, workload_issues in issues.items():
-        baseline = workloads[workload_id].raw.get("verified_baseline") or {}
-        if baseline.get("replacement_required") is True:
-            assert workload_issues == [
-                f"{workloads[workload_id].public_status} verified_baseline uses a "
-                "superseded protocol and requires a replacement reference sweep"
-            ]
-        else:
-            assert not workload_issues, (workload_id, workload_issues)
+    experimental = {
+        workload.id for workload in workloads.values() if workload.public_status == "experimental"
+    }
+    assert experimental
+    for workload_id in experimental:
+        assert issues[workload_id] == ["experimental workloads are not public-release-ready"]
 
 
 def test_verified_baseline_lifecycle_state_machine_fails_closed():
@@ -475,7 +185,7 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     assert tiny["expected_download_bytes"] == 5_600_000
     assert tiny["expected_unpacked_bytes"] == 1_115_394
     assert tiny["hash_policy"]
-    assert tiny["license_status"] == "public-domain-us"
+    assert tiny["license_status"] == "mit-repository-public-domain-text"
     assert tiny["public_release_status"] == "public-ok-fetch-only"
     assert movielens["expected_unpacked_bytes"] == 16_100_896
     assert movielens["license_status"] == "noncommercial-research-education"
@@ -517,216 +227,66 @@ def test_research_selection_uses_workload_collection():
     assert [workload.id for workload in selected] == list(RESEARCH_WORKLOAD_ORDER)
 
 
-def test_nanogpt_train_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nanogpt-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.nanogpt:run_min"
-    assert runner["max"] == "mlperf.runners.nanogpt:run_max"
-
-
-def test_nano_moe_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nano-moe-train"].raw.get("runner", {})
-
-    assert workloads["nano-moe-train"].suite == "language"
-    assert runner["min"] == "mlperf.runners.extended:run_nano_moe_min"
-    assert runner["max"] == "mlperf.runners.extended:run_nano_moe_max"
-
-
-def test_small_research_training_workloads_declare_min_runners():
+def test_canonical_workloads_declare_exact_runners():
     workloads = load_registry()
     expected = {
-        "micro-bert-train": ("language", "mlperf.runners.extended:run_micro_bert_min"),
-        "micro-diffusion-train": (
+        "causal-language-modeling": (
+            "language",
+            "mlperf.runners.nanogpt:run_causal_language_modeling_min",
+            "mlperf.runners.nanogpt:run_causal_language_modeling_max",
+        ),
+        "text-classification": (
+            "language",
+            "mlperf.runners.text:run_text_classification_min",
+            "mlperf.runners.text:run_text_classification_max",
+        ),
+        "information-retrieval": (
+            "language",
+            "mlperf.runners.retrieval:run_information_retrieval_min",
+            "mlperf.runners.retrieval:run_information_retrieval_max",
+        ),
+        "image-classification": (
             "vision",
-            "mlperf.runners.extended:run_micro_diffusion_min",
+            "mlperf.runners.vision:run_image_classification_min",
+            "mlperf.runners.vision:run_image_classification_max",
         ),
-        "micro-gnn-train": ("graph", "mlperf.runners.extended:run_micro_gnn_min"),
-        "micro-lstm-train": (
+        "keyword-spotting": (
+            "tiny",
+            "mlperf.runners.tiny:run_keyword_spotting_min",
+            "mlperf.runners.tiny:run_keyword_spotting_max",
+        ),
+        "graph-node-classification": (
+            "graph",
+            "mlperf.runners.graph:run_graph_node_classification_min",
+            "mlperf.runners.graph:run_graph_node_classification_max",
+        ),
+        "time-series-forecasting": (
             "timeseries",
-            "mlperf.runners.extended:run_micro_lstm_min",
+            "mlperf.runners.timeseries:run_time_series_forecasting_min",
+            "mlperf.runners.timeseries:run_time_series_forecasting_max",
         ),
-        "micro-rl-train": ("rl", "mlperf.runners.extended:run_micro_rl_min"),
     }
 
-    for workload_id, (suite, runner_name) in expected.items():
-        assert workloads[workload_id].suite == suite
-        assert workloads[workload_id].raw.get("runner", {})["min"] == runner_name
-        assert workloads[workload_id].raw.get("runner", {})[
-            "max"
-        ] == runner_name.replace("_min", "_max")
+    assert set(workloads) == set(expected)
+    for workload_id, (suite, min_runner, max_runner) in expected.items():
+        workload = workloads[workload_id]
+        assert workload.suite == suite
+        assert workload.raw["runner"] == {"min": min_runner, "max": max_runner}
 
 
-def test_language_research_lora_and_serving_workloads_declare_min_runners():
-    workloads = load_registry()
-    expected = {
-        "nano-lora-finetune": "mlperf.runners.extended:run_nano_lora_min",
-        "nanogpt-decode-fp32-b16": "mlperf.runners.extended:run_nanogpt_decode_fp32_min",
-        "nanogpt-decode-fp16-b16": "mlperf.runners.extended:run_nanogpt_decode_fp16_min",
-        "nanogpt-decode-spec": "mlperf.runners.extended:run_nanogpt_decode_spec_min",
-    }
+def test_causal_language_modeling_declares_modes_and_phases():
+    workload = load_registry()["causal-language-modeling"]
 
-    for workload_id, runner_name in expected.items():
-        assert workloads[workload_id].suite == "language"
-        assert workloads[workload_id].raw.get("runner", {})["min"] == runner_name
-        assert workloads[workload_id].raw.get("runner", {})[
-            "max"
-        ] == runner_name.replace("_min", "_max")
+    assert workload.raw["implemented_modes"] == ["training", "inference"]
+    assert workload.raw["phases"]["inference"] == ["full", "prefill", "decode"]
+    assert workload.raw["mode_contracts"]["inference"]["dataset"] == "prompt-suite-local"
 
 
-def test_nanogpt_prefill_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nanogpt-prefill"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.nanogpt:run_prefill_min"
-    assert runner["max"] == "mlperf.runners.nanogpt:run_prefill_max"
-
-
-def test_nanogpt_decode_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nanogpt-decode"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.nanogpt:run_decode_min"
-    assert runner["max"] == "mlperf.runners.nanogpt:run_decode_max"
-
-
-def test_micro_dlrm_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["micro-dlrm-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.dlrm:run_min"
-    assert runner["max"] == "mlperf.runners.dlrm:run_max"
-
-
-def test_recommender_suite_declares_dram_runner():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="recommender")
-    dram_runner = workloads["micro-dlrm-dram-train"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == [
-        "micro-dlrm-train",
-        "micro-dlrm-dram-train",
-    ]
-    assert dram_runner["min"] == "mlperf.runners.dlrm:run_dram_min"
-    assert dram_runner["max"] == "mlperf.runners.dlrm:run_dram_max"
-
-
-def test_distributed_suite_declares_ddp_runner():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="distributed")
-    distributed_runner = workloads["micro-dlrm-distributed"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == ["micro-dlrm-distributed"]
-    assert distributed_runner["min"] == "mlperf.runners.dlrm:run_distributed_min"
-    assert distributed_runner["max"] == "mlperf.runners.dlrm:run_distributed_max"
-
-
-def test_resnet18_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["resnet18-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.vision:run_resnet18_min"
-    assert runner["max"] == "mlperf.runners.vision:run_resnet18_max"
-
-
-def test_vision_suite_declares_mobilenet_min_runners():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="vision")
-    mobilenet = workloads["mobilenetv2-train"].raw.get("runner", {})
-    composed = workloads["mobilenet-cifar100-composed-fp16"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == [
-        "resnet18-train",
-        "mobilenetv2-train",
-        "mobilenet-cifar100-composed-fp16",
-        "micro-diffusion-train",
-    ]
-    assert mobilenet["min"] == "mlperf.runners.vision:run_mobilenetv2_min"
-    assert mobilenet["max"] == "mlperf.runners.vision:run_mobilenetv2_max"
-    assert composed["min"] == "mlperf.runners.vision:run_mobilenet_composed_min"
-    assert composed["max"] == "mlperf.runners.vision:run_mobilenet_composed_max"
-
-
-def test_anomaly_ae_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["anomaly-ae-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.tiny:run_anomaly_ae_min"
-    assert runner["max"] == "mlperf.runners.tiny:run_anomaly_ae_max"
-
-
-def test_tiny_suite_declares_min_runners():
+def test_tiny_suite_contains_only_canonical_keyword_spotting():
     workloads = load_registry()
     selected = select_workloads(workloads, suite="tiny")
-    dscnn = workloads["dscnn-kws-train"].raw.get("runner", {})
-    wake = workloads["wake-vision-vww"].raw.get("runner", {})
 
-    assert [workload.id for workload in selected] == [
-        "anomaly-ae-train",
-        "dscnn-kws-train",
-        "wake-vision-vww",
-    ]
-    assert dscnn["min"] == "mlperf.runners.tiny:run_dscnn_kws_min"
-    assert dscnn["max"] == "mlperf.runners.tiny:run_dscnn_kws_max"
-    assert wake["min"] == "mlperf.runners.tiny:run_wake_vision_min"
-    assert wake["max"] == "mlperf.runners.tiny:run_wake_vision_max"
-
-
-def test_agent_suite_declares_min_runners():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="agent")
-    codegen = workloads["nano-codegen-agent"].raw.get("runner", {})
-    rag = workloads["nano-rag-agent"].raw.get("runner", {})
-    react = workloads["nano-react-agent"].raw.get("runner", {})
-    toolcall = workloads["nano-toolcall-agent"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == [
-        "nano-rag-agent",
-        "nano-codegen-agent",
-        "nano-react-agent",
-        "nano-toolcall-agent",
-    ]
-    assert codegen["min"] == "mlperf.runners.agent:run_codegen_min"
-    assert codegen["max"] == "mlperf.runners.agent:run_codegen_max"
-    assert rag["min"] == "mlperf.runners.agent:run_rag_min"
-    assert rag["max"] == "mlperf.runners.agent:run_rag_max"
-    assert react["min"] == "mlperf.runners.agent:run_react_min"
-    assert react["max"] == "mlperf.runners.agent:run_react_max"
-    assert toolcall["min"] == "mlperf.runners.agent:run_toolcall_min"
-    assert toolcall["max"] == "mlperf.runners.agent:run_toolcall_max"
-
-
-def test_slm_decode_declares_transformers_runner():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="slm")
-    runner = workloads["slm-decode"].raw.get("runner", {})
-    quantized_runner = workloads["slm-quantized-decode"].raw.get("runner", {})
-    batched_runner = workloads["slm-batched-decode"].raw.get("runner", {})
-    long_context_runner = workloads["slm-long-context-decode"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == [
-        "slm-decode",
-        "slm-quantized-decode",
-        "slm-batched-decode",
-        "slm-long-context-decode",
-    ]
-    assert workloads["slm-decode"].suite == "slm"
-    assert workloads["slm-quantized-decode"].suite == "slm"
-    assert workloads["slm-batched-decode"].suite == "slm"
-    assert workloads["slm-long-context-decode"].suite == "slm"
-    assert runner["min"] == "mlperf.runners.slm:run_decode_min"
-    assert runner["max"] == "mlperf.runners.slm:run_decode_max"
-    assert quantized_runner["min"] == "mlperf.runners.slm:run_quantized_decode_min"
-    assert quantized_runner["max"] == "mlperf.runners.slm:run_quantized_decode_max"
-    assert batched_runner["min"] == "mlperf.runners.slm:run_batched_decode_min"
-    assert batched_runner["max"] == "mlperf.runners.slm:run_batched_decode_max"
-    assert (
-        long_context_runner["min"] == "mlperf.runners.slm:run_long_context_decode_min"
-    )
-    assert (
-        long_context_runner["max"] == "mlperf.runners.slm:run_long_context_decode_max"
-    )
+    assert [workload.id for workload in selected] == ["keyword-spotting"]
 
 
 def test_unknown_workload_rejected():

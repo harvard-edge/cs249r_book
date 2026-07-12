@@ -308,7 +308,23 @@ def section_how_to_run(w: Workload) -> str:
         model_flag = f" --model {model_source['default_alias']}"
     shared_checkpoint = w.raw.get("shared_checkpoint")
     max_execution = w.raw.get("max_execution") or {}
-    if shared_checkpoint:
+    implemented_modes = set(w.raw.get("implemented_modes") or [])
+    inference_phases = ((w.raw.get("phases") or {}).get("inference") or [])
+    consolidated_training_inference = {"training", "inference"}.issubset(
+        implemented_modes
+    )
+    if consolidated_training_inference:
+        lines.append("# prepare and quality-check the training checkpoint")
+        lines.append(f'OUTPUT_DIR="submissions/{w.id}-max"')
+        lines.append(f"{CHECKOUT_COMMAND} fetch {target} --profile max")
+        lines.append(
+            f'{CHECKOUT_COMMAND} run {target} --mode training --profile max --output-dir "$OUTPUT_DIR"'
+        )
+        for phase in inference_phases:
+            lines.append(
+                f'{CHECKOUT_COMMAND} run {target} --mode inference --phase {phase} --profile max --output-dir "$OUTPUT_DIR"'
+            )
+    elif shared_checkpoint:
         lines.append("# prepare and quality-check the shared training checkpoint")
         lines.append('OUTPUT_DIR="submissions/nanogpt-inference-max"')
         lines.append(
@@ -342,9 +358,18 @@ def section_how_to_run(w: Workload) -> str:
     lines.append("")
     lines.append("# quick smoke pass")
     lines.append(f"{CHECKOUT_COMMAND} run {target} --profile min{model_flag}")
+    if consolidated_training_inference:
+        for phase in inference_phases:
+            lines.append(
+                f"{CHECKOUT_COMMAND} run {target} --mode inference --phase {phase} --profile min{model_flag}"
+            )
     lines.append("")
     lines.append("# research envelope")
-    pro_output = ' --output-dir "$OUTPUT_DIR"' if shared_checkpoint else ""
+    pro_output = (
+        ' --output-dir "$OUTPUT_DIR"'
+        if shared_checkpoint or consolidated_training_inference
+        else ""
+    )
     lines.append(
         f"{CHECKOUT_COMMAND} run {target} --profile pro{model_flag}{pro_output}"
     )
@@ -750,8 +775,13 @@ def load_dataset_catalog() -> dict[str, dict[str, Any]]:
 def dataset_usage(workloads: dict[str, Workload]) -> dict[str, list[Workload]]:
     usage: dict[str, list[Workload]] = {}
     for workload in workloads.values():
-        if workload.dataset:
-            usage.setdefault(workload.dataset, []).append(workload)
+        datasets = {workload.dataset} if workload.dataset else set()
+        mode_contracts = workload.raw.get("mode_contracts") or {}
+        for contract in mode_contracts.values():
+            if isinstance(contract, dict) and contract.get("dataset"):
+                datasets.add(str(contract["dataset"]))
+        for dataset in sorted(datasets):
+            usage.setdefault(dataset, []).append(workload)
     return usage
 
 
@@ -790,10 +820,9 @@ def validate_dataset_catalog(
                     )
 
     tiny_uri = str(catalog.get("tinyshakespeare", {}).get("uri", ""))
-    if "gutenberg.org" not in tiny_uri:
-        problems.append("tinyshakespeare must use the Project Gutenberg source")
-    if "karpathy" in tiny_uri.lower():
-        problems.append("tinyshakespeare still references the retired Karpathy mirror")
+    pinned_char_rnn_commit = "6f9487a6fe5b420b7ca9afb0d7c078e37c1d1b4e"
+    if pinned_char_rnn_commit not in tiny_uri:
+        problems.append("tinyshakespeare must use the pinned char-rnn corpus revision")
 
     if problems:
         raise ValueError(

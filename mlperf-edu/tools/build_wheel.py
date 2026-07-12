@@ -27,6 +27,10 @@ FORBIDDEN_WHEEL_MEMBERS = frozenset(
         "mlperf/reference/cloud/nanogpt_core.py",
         "mlperf/reference/cloud/nanogpt_infer.py",
         "mlperf/reference/mobile/mobilenet_infer.py",
+        "mlperf/runners/agent.py",
+        "mlperf/runners/dlrm.py",
+        "mlperf/runners/extended.py",
+        "mlperf/runners/slm.py",
         "mlperf_edu/core.py",
     }
 )
@@ -65,10 +69,6 @@ def verify_wheel(wheel_path: Path) -> None:
         evidence_index = json.loads(evidence_index_bytes)
         exact_assets = {
             "mlperf_edu/workloads.yaml": ROOT / "src" / "mlperf_edu" / "workloads.yaml",
-            "mlperf_edu/slm_quality_prompts.json": ROOT
-            / "src"
-            / "mlperf_edu"
-            / "slm_quality_prompts.json",
             "mlperf_edu/reference_results/index.json": ROOT
             / "src"
             / "mlperf_edu"

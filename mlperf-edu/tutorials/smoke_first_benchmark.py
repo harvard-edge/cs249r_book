@@ -30,7 +30,7 @@ def run_tutorial_benchmark(output_dir: Path) -> dict[str, Any]:
         "mlperf_edu",
         "run",
         "--workload",
-        "micro-lstm-train",
+        "time-series-forecasting",
         "--profile",
         "min",
         "--output-dir",
@@ -49,8 +49,8 @@ def run_tutorial_benchmark(output_dir: Path) -> dict[str, Any]:
             f"benchmark command failed ({completed.returncode}): {detail}"
         )
 
-    report_path = output_dir / "micro-lstm-train_min_report.json"
-    manifest_path = output_dir / "micro-lstm-train_min.provd.json"
+    report_path = output_dir / "time-series-forecasting_min_report.json"
+    manifest_path = output_dir / "time-series-forecasting_min.provd.json"
     html_path = report_path.with_suffix(".html")
     csv_path = report_path.with_suffix(".csv")
     missing = [

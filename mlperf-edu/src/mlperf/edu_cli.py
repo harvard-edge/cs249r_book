@@ -4,6 +4,7 @@ import argparse
 import copy
 import csv
 import hashlib
+import inspect
 import json
 import os
 import platform
@@ -26,23 +27,45 @@ from rich.console import Console
 from rich.table import Table
 
 from .assets import (
+    CIFAR10_HF_REPO_ID,
+    CIFAR10_HF_REVISION,
     CIFAR100_URL,
+    EEMBC_RUNNER_ARCHIVE_URL,
     FASHION_MNIST_SOURCE,
     MOVIELENS_100K_URL,
     MNIST_SOURCE,
     TINY_SHAKESPEARE_URL,
+    GLUE_SST2_URL,
+    OGBN_ARXIV_URL,
+    ETTM1_URL,
+    NANOBEIR_REPO_ID,
+    NANOBEIR_REVISION,
     asset_dossier,
+    cifar10_paths,
     cifar100_paths,
     data_root,
+    ensure_cifar10,
     ensure_cifar100,
     ensure_fashion_mnist,
     ensure_mnist,
+    ensure_mlperf_tiny_image,
+    ensure_mlperf_tiny_kws,
+    ensure_sst2,
+    ensure_ogbn_arxiv,
+    ensure_ettm1,
+    ensure_nanobeir_reranking,
     ensure_movielens_100k,
     ensure_tinyshakespeare,
     fashion_mnist_paths,
     huggingface_model_dossier,
     has_asset_dossier,
     mnist_paths,
+    mlperf_tiny_image_paths,
+    mlperf_tiny_kws_paths,
+    sst2_paths,
+    ogbn_arxiv_paths,
+    ettm1_paths,
+    nanobeir_reranking_paths,
     movielens_paths,
     sha256_file,
     tinyshakespeare_paths,
@@ -231,6 +254,18 @@ def build_parser() -> argparse.ArgumentParser:
     )
     run.add_argument(
         "--model", default=None, help="Model id or alias for model-backed workloads"
+    )
+    run.add_argument(
+        "--mode",
+        choices=("training", "inference"),
+        default=None,
+        help="Execution mode for a workload that defines training and inference under one identity",
+    )
+    run.add_argument(
+        "--phase",
+        choices=("full", "prefill", "decode"),
+        default=None,
+        help="Inference phase; valid only with an inference-capable single workload",
     )
     run.add_argument(
         "--power",
@@ -762,29 +797,40 @@ def cmd_fetch(args: argparse.Namespace) -> int:
 
 def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
     model_source = workload.raw.get("model_source") or {}
-    if model_source.get("type") == "huggingface":
-        from mlperf.runners.slm import (
-            DEFAULT_MODEL_ID,
-            resolve_model_id,
-            snapshot_model,
+    if model_source.get("type") == "huggingface-pinned":
+        repo_id = str(model_source["repo_id"])
+        revision = str(model_source["revision"])
+        dataset = workload.dataset or "no dataset declared"
+        dossier = asset_dossier(
+            workload.dataset, declared_source=workload.raw.get("dataset_source")
         )
-
-        requested_model = (
-            os.environ.get("MLPERF_EDU_SLM_MODEL_ID")
-            or model_source.get("default_model_id")
-            or DEFAULT_MODEL_ID
-        )
-        model_id = resolve_model_id(str(requested_model))
-        dossier = huggingface_model_dossier(
-            model_source, model_name=workload.model, model_id=model_id
-        )
-        terms = asset_terms_summary(dossier)
+        terms = asset_terms_summary(dossier) if dossier else "no structured asset dossier"
         if dry_run:
-            return f"- {workload.id}: huggingface model -> {model_id}; {terms}"
-        local_only = os.environ.get("MLPERF_EDU_SLM_LOCAL_ONLY", "0") == "1"
-        path = snapshot_model(model_id, local_only=local_only)
-        return f"- {workload.id}: huggingface model {model_id} at {path}; {terms}"
+            return (
+                f"- {workload.id}: huggingface model -> {repo_id}@{revision}; "
+                f"dataset={dataset}; {terms}"
+            )
+        from huggingface_hub import snapshot_download
 
+        snapshot = snapshot_download(
+            repo_id=repo_id,
+            revision=revision,
+            allow_patterns=model_source.get("allow_patterns"),
+            local_files_only=os.environ.get("MLPERF_EDU_HF_LOCAL_ONLY", "0") == "1",
+        )
+        if dataset == "sst2":
+            asset = ensure_sst2(download=True)
+            return (
+                f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; "
+                f"{dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+            )
+        if dataset == "nanobeir-reranking":
+            asset = ensure_nanobeir_reranking(download=True)
+            return (
+                f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; "
+                f"{dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+            )
+        return f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; dataset={dataset}; {terms}"
     shared_checkpoint = workload.raw.get("shared_checkpoint")
     if shared_checkpoint:
         dependency = workload.raw.get("quality_dependency") or shared_checkpoint
@@ -834,11 +880,59 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             return f"- {workload.id}: {dataset} -> {paths['dataset']} ({CIFAR100_URL}); {terms}"
         asset = ensure_cifar100(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "cifar10":
+        if dry_run:
+            paths = cifar10_paths()
+            evaluation_paths = mlperf_tiny_image_paths()
+            source = f"https://huggingface.co/datasets/{CIFAR10_HF_REPO_ID}/tree/{CIFAR10_HF_REVISION}"
+            return (
+                f"- {workload.id}: {dataset} -> {paths['root']} ({source}); "
+                f"MLPerf Tiny model/index -> {evaluation_paths['root']}; {terms}"
+            )
+        asset = ensure_cifar10(download=True)
+        evaluation = ensure_mlperf_tiny_image(download=True)
+        return (
+            f"- {workload.id}: {dataset} at {asset.root} "
+            f"({asset.sha256[:19]}, {asset.n_bytes} bytes); MLPerf Tiny model/index "
+            f"at {evaluation.root} ({evaluation.sha256[:19]}, "
+            f"{evaluation.n_bytes} bytes); {terms}"
+        )
     if dataset == "fashion-mnist":
         if dry_run:
             paths = fashion_mnist_paths()
             return f"- {workload.id}: {dataset} -> {paths['root']} ({FASHION_MNIST_SOURCE}); {terms}"
         asset = ensure_fashion_mnist(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "mlperf-tiny-kws-eval":
+        if dry_run:
+            paths = mlperf_tiny_kws_paths()
+            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({EEMBC_RUNNER_ARCHIVE_URL}); {terms}"
+        asset = ensure_mlperf_tiny_kws(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "sst2":
+        if dry_run:
+            paths = sst2_paths()
+            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({GLUE_SST2_URL}); {terms}"
+        asset = ensure_sst2(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "ogbn-arxiv":
+        if dry_run:
+            paths = ogbn_arxiv_paths()
+            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({OGBN_ARXIV_URL}); {terms}"
+        asset = ensure_ogbn_arxiv(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "ettm1":
+        if dry_run:
+            paths = ettm1_paths()
+            return f"- {workload.id}: {dataset} -> {paths['csv']} ({ETTM1_URL}); {terms}"
+        asset = ensure_ettm1(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "nanobeir-reranking":
+        if dry_run:
+            paths = nanobeir_reranking_paths()
+            source = f"https://huggingface.co/datasets/{NANOBEIR_REPO_ID}/tree/{NANOBEIR_REVISION}"
+            return f"- {workload.id}: {dataset} -> {paths['root']} ({source}); {terms}"
+        asset = ensure_nanobeir_reranking(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     return f"- {workload.id}: {dataset}; {terms}"
 
@@ -860,6 +954,16 @@ def cmd_run(args: argparse.Namespace) -> int:
         if not selected:
             console.print("[red]No workloads selected.[/red]")
             return 1
+        requested_mode = getattr(args, "mode", None)
+        requested_phase = getattr(args, "phase", None)
+        if (requested_mode or requested_phase) and len(selected) != 1:
+            raise ValueError("--mode and --phase require selection of exactly one workload")
+        execution_mode = None
+        execution_phase = None
+        if len(selected) == 1:
+            execution_mode, execution_phase = resolve_execution_selection(
+                selected[0], mode=requested_mode, phase=requested_phase
+            )
 
         print_run_selection(
             args.profile,
@@ -878,7 +982,13 @@ def cmd_run(args: argparse.Namespace) -> int:
             power_meter.start()
         workload_reports: list[dict[str, Any]] = []
         for workload in selected:
-            report = run_workload(workload, args.profile, output_dir)
+            report = run_workload(
+                workload,
+                args.profile,
+                output_dir,
+                mode=execution_mode,
+                phase=execution_phase,
+            )
 
             # Finalize each report and its provenance before starting the next
             # workload.  A dependent workload can bind the exact report and
@@ -1115,11 +1225,16 @@ def enrich_report_for_display(
     if workload.raw.get("model_source"):
         report.setdefault("model_source", workload.raw.get("model_source"))
         model_source = workload.raw.get("model_source") or {}
-        if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
+        if (
+            isinstance(model_source, dict)
+            and model_source.get("type") == "huggingface-pinned"
+        ):
             model_asset = report.setdefault("model_asset", {})
             if isinstance(model_asset, dict):
                 for key, value in huggingface_model_dossier(
-                    model_source, model_name=workload.model
+                    model_source,
+                    model_name=workload.model,
+                    model_id=str(model_source.get("repo_id") or workload.model),
                 ).items():
                     model_asset.setdefault(key, value)
                 model_info = report.get("model")
@@ -1662,13 +1777,56 @@ def print_run_summary(
     return 0
 
 
-def run_workload(workload: Workload, profile: str, output_dir: Path) -> dict[str, Any]:
+def resolve_execution_selection(
+    workload: Workload, *, mode: str | None, phase: str | None
+) -> tuple[str | None, str | None]:
+    implemented_modes = tuple(workload.raw.get("implemented_modes") or ())
+    if not implemented_modes:
+        if mode or phase:
+            raise ValueError(f"workload {workload.id!r} does not expose selectable modes")
+        return None, None
+    resolved_mode = mode or workload.raw.get("default_mode") or implemented_modes[0]
+    if resolved_mode not in implemented_modes:
+        raise ValueError(
+            f"workload {workload.id!r} does not implement mode {resolved_mode!r}; "
+            f"choose one of {', '.join(implemented_modes)}"
+        )
+    phases = tuple((workload.raw.get("phases") or {}).get(resolved_mode) or ())
+    resolved_phase = (
+        phase or workload.raw.get("default_phase")
+        if resolved_mode == "inference"
+        else phase
+    )
+    if resolved_phase and resolved_mode != "inference":
+        raise ValueError("--phase is valid only for inference mode")
+    if resolved_phase and resolved_phase not in phases:
+        raise ValueError(
+            f"workload {workload.id!r} does not implement phase {resolved_phase!r}; "
+            f"choose one of {', '.join(phases)}"
+        )
+    return str(resolved_mode), str(resolved_phase) if resolved_phase else None
+
+
+def run_workload(
+    workload: Workload,
+    profile: str,
+    output_dir: Path,
+    *,
+    mode: str | None = None,
+    phase: str | None = None,
+) -> dict[str, Any]:
     runner = load_runner(workload, profile)
     if runner:
-        return runner(workload, output_dir)
+        parameters = inspect.signature(runner).parameters
+        execution_kwargs: dict[str, str] = {}
+        if mode is not None and "mode" in parameters:
+            execution_kwargs["mode"] = mode
+        if phase is not None and "phase" in parameters:
+            execution_kwargs["phase"] = phase
+        return runner(workload, output_dir, **execution_kwargs)
 
     if profile == "pro" and load_runner(workload, "max"):
-        return run_pro_profile(workload, output_dir)
+        return run_pro_profile(workload, output_dir, mode=mode, phase=phase)
 
     if profile == "min":
         return smoke_workload(workload)
@@ -1680,7 +1838,13 @@ def run_workload(workload: Workload, profile: str, output_dir: Path) -> dict[str
     return unsupported
 
 
-def run_pro_profile(workload: Workload, output_dir: Path) -> dict[str, Any]:
+def run_pro_profile(
+    workload: Workload,
+    output_dir: Path,
+    *,
+    mode: str | None = None,
+    phase: str | None = None,
+) -> dict[str, Any]:
     max_runner = load_runner(workload, "max")
     if not max_runner:
         raise ValueError(f"No max runner is registered for pro fallback: {workload.id}")
@@ -1698,8 +1862,14 @@ def run_pro_profile(workload: Workload, output_dir: Path) -> dict[str, Any]:
     subreports: list[dict[str, Any]] = []
     for idx in range(repetitions):
         rep_dir = output_dir / ".pro_evidence" / workload.id / f"rep{idx + 1}"
+        parameters = inspect.signature(max_runner).parameters
+        execution_kwargs: dict[str, str] = {}
+        if mode is not None and "mode" in parameters:
+            execution_kwargs["mode"] = mode
+        if phase is not None and "phase" in parameters:
+            execution_kwargs["phase"] = phase
         with TemporaryNanogptCheckpoint(output_dir):
-            subreport = max_runner(workload, rep_dir)
+            subreport = max_runner(workload, rep_dir, **execution_kwargs)
         publish_shared_checkpoint(workload, subreport, output_dir)
         subreports.append(subreport)
     wall_time = time.perf_counter() - start
@@ -1722,6 +1892,8 @@ def run_pro_profile(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "pro",
+        "mode": mode,
+        "phase": phase,
         "status": status,
         "backend": common_field(subreports, "backend"),
         "data_mode": common_field(subreports, "data_mode"),
@@ -1771,7 +1943,10 @@ class TemporaryNanogptCheckpoint:
         self.changed = False
 
     def __enter__(self):
-        checkpoint = self.output_dir / "nanogpt-train_max_checkpoint.pt"
+        checkpoint = (
+            self.output_dir
+            / "causal-language-modeling_training_max_checkpoint.pt"
+        )
         if checkpoint.exists() and "MLPERF_EDU_NANOGPT_CHECKPOINT" not in os.environ:
             self.previous = os.environ.get("MLPERF_EDU_NANOGPT_CHECKPOINT")
             os.environ["MLPERF_EDU_NANOGPT_CHECKPOINT"] = str(checkpoint)
@@ -1790,15 +1965,22 @@ class TemporaryNanogptCheckpoint:
 def publish_shared_checkpoint(
     workload: Workload, report: dict[str, Any], output_dir: Path
 ) -> None:
-    if workload.id != "nanogpt-train":
+    if workload.id != "causal-language-modeling" or report.get("mode") != "training":
         return
-    checkpoint = (report.get("artifacts") or {}).get("checkpoint")
-    if not checkpoint:
-        return
-    source = Path(checkpoint)
-    if source.exists():
-        output_dir.mkdir(parents=True, exist_ok=True)
-        shutil.copy2(source, output_dir / "nanogpt-train_max_checkpoint.pt")
+    artifacts = report.get("artifacts") or {}
+    copies = {
+        "checkpoint": "causal-language-modeling_training_max_checkpoint.pt",
+        "report": "causal-language-modeling_training_max_report.json",
+        "provenance": "causal-language-modeling_training_max.provd.json",
+    }
+    output_dir.mkdir(parents=True, exist_ok=True)
+    for role, filename in copies.items():
+        source_value = artifacts.get(role)
+        if not source_value:
+            continue
+        source = Path(str(source_value))
+        if source.is_file():
+            shutil.copy2(source, output_dir / filename)
 
 
 def aggregate_pro_metrics(subreports: list[dict[str, Any]]) -> dict[str, Any]:
@@ -4938,19 +5120,12 @@ def model_dossier_for_query(query: str, matches: list[Workload]) -> dict[str, An
         model_source = workload.raw.get("model_source") or {}
         if (
             not isinstance(model_source, dict)
-            or model_source.get("type") != "huggingface"
+            or model_source.get("type") != "huggingface-pinned"
         ):
             continue
-        model_id = model_source.get("default_model_id")
-        aliases = model_source.get("aliases")
-        if isinstance(aliases, dict):
-            for alias, target in aliases.items():
-                if (
-                    query_lower in str(alias).lower()
-                    or query_lower in str(target).lower()
-                ):
-                    model_id = target
-                    break
+        model_id = str(model_source.get("repo_id") or workload.model)
+        if query_lower not in model_id.lower() and query_lower not in workload.model.lower():
+            continue
         return huggingface_model_dossier(
             model_source, model_name=str(model_id), model_id=str(model_id)
         )
@@ -5039,15 +5214,19 @@ def cache_selection_summary(
 def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
     rows: list[dict[str, str]] = []
     model_source = workload.raw.get("model_source") or {}
-    if model_source.get("type") == "huggingface":
-        dossier = huggingface_model_dossier(model_source, model_name=workload.model)
+    if model_source.get("type") == "huggingface-pinned":
+        model_id = str(model_source.get("repo_id") or workload.model)
+        revision = str(model_source.get("revision") or "")
+        dossier = huggingface_model_dossier(
+            model_source, model_name=workload.model, model_id=model_id
+        )
         rows.append(
             {
                 "workload": workload.id,
                 "asset": "model",
                 "status": "external",
-                "path": str(model_source.get("default_model_id", "huggingface-cache")),
-                "sha256": "",
+                "path": f"{model_id}@{revision}",
+                "sha256": "pinned-file-manifest",
                 "source": str(dossier.get("source_url", "")),
                 "license": str(dossier.get("license", "")),
                 "license_status": str(dossier.get("license_status", "")),
@@ -5343,8 +5522,15 @@ def public_audit_warnings(workload: Workload) -> list[str]:
             )
 
     model_source = workload.raw.get("model_source")
-    if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
-        dossier = huggingface_model_dossier(model_source, model_name=workload.model)
+    if (
+        isinstance(model_source, dict)
+        and model_source.get("type") == "huggingface-pinned"
+    ):
+        dossier = huggingface_model_dossier(
+            model_source,
+            model_name=workload.model,
+            model_id=str(model_source.get("repo_id") or workload.model),
+        )
         if dossier.get("license_status") == "requires-review":
             warnings.append(
                 "model license status requires review before public endorsement"

@@ -16,7 +16,7 @@ AXES = ("working_set", "arithmetic_intensity", "dispatch")
 def test_registry_withholds_all_taxonomy_claims_without_committed_evidence():
     workloads = load_registry()
 
-    assert len(workloads) == 30
+    assert len(workloads) == 7
     for workload in workloads.values():
         regime = workload.raw.get("regime") or {}
         for axis in AXES:
@@ -103,66 +103,10 @@ def test_committed_evidence_requires_exact_digest_and_matching_claim(
     assert any("evidence_sha256 mismatch" in error for error in errors)
 
 
-def test_declared_quality_asset_exists_and_matches_digest():
-    workload = load_registry()["slm-decode"]
-
-    assert check_taxonomy.check_workload_evidence("slm/slm-decode", workload.raw) == []
 
 
-def test_superseded_baseline_requires_exact_lifecycle_and_keeps_internal_checks():
-    workload = load_registry()["resnet18-train"]
-    body = json.loads(json.dumps(workload.raw))
-    body["verified_baseline"]["protocol_compatibility"] = "superseded"
-    body["verified_baseline"]["review_eligible"] = True
-    body["verified_baseline"]["replacement_required"] = False
-
-    errors = check_taxonomy.check_workload_evidence("vision/resnet18-train", body)
-    assert any(
-        "historical evidence lifecycle must be exactly" in error for error in errors
-    )
-
-    evidence_file = workload.raw["verified_baseline"]["evidence_file"]
-    payload = json.loads(
-        (Path(__file__).resolve().parents[1] / evidence_file).read_text()
-    )
-    assert (
-        check_taxonomy.check_historical_reference_summary(
-            "vision/resnet18-train", payload
-        )
-        == []
-    )
-    payload["aggregate"]["quality"]["mean"] += 0.01
-    errors = check_taxonomy.check_historical_reference_summary(
-        "vision/resnet18-train", payload
-    )
-    assert any("recomputed value" in error for error in errors)
 
 
-def test_committed_baseline_requires_content_addressed_package():
-    errors = check_taxonomy.check_workload_evidence(
-        "vision/example",
-        {
-            "verified_baseline": {
-                "evidence_status": "committed-reference-summary",
-                "review_eligible": True,
-                "reference_package_availability": "local-handoff",
-                "external_publication_status": "pending",
-            }
-        },
-    )
-
-    assert any("evidence_file path is missing" in error for error in errors)
-
-    errors = check_taxonomy.check_workload_evidence(
-        "vision/example",
-        {
-            "verified_baseline": {
-                "evidence_status": "pending-clean-public-candidate-reference-summary",
-                "review_eligible": True,
-            }
-        },
-    )
-    assert any("may be true only" in error for error in errors)
 
 
 def test_reference_summary_indexes_every_raw_artifact_with_full_hashes():
@@ -438,160 +382,26 @@ def committed_summary(workload_id: str) -> tuple[dict, dict]:
     return body, json.loads(path.read_text())
 
 
-def test_committed_baseline_display_fields_cannot_drift_from_summary():
-    body, payload = committed_summary("resnet18-train")
-
-    assert (
-        check_taxonomy.check_reference_summary("vision/resnet18-train", body, payload)
-        == []
-    )
-
-    body["verified_baseline"]["median"] += 0.01
-    body["verified_baseline"]["metric_values_by_seed"][0] -= 0.01
-    body["verified_baseline"]["source_git_sha"] = "0" * 40
-    errors = check_taxonomy.check_reference_summary(
-        "vision/resnet18-train", body, payload
-    )
-    assert any("verified_baseline.median" in error for error in errors)
-    assert any("verified_baseline.metric_values_by_seed" in error for error in errors)
-    assert any("verified_baseline.source_git_sha" in error for error in errors)
 
 
-def test_committed_summary_aggregates_are_recomputed_from_seed_values():
-    body, payload = committed_summary("anomaly-ae-train")
-    payload["aggregate"]["primary_metric"]["mean"] += 0.01
-
-    errors = check_taxonomy.check_reference_summary(
-        "tiny/anomaly-ae-train", body, payload
-    )
-
-    assert any("recomputed value" in error for error in errors)
-    assert any("verified_baseline.mean" in error for error in errors)
 
 
-def test_schema_04_performance_summary_uses_primary_metric_not_quality_metric():
-    body, payload = committed_summary("slm-decode")
-
-    assert payload["quality_metric"] is None
-    assert check_taxonomy.check_reference_summary("slm/slm-decode", body, payload) == []
 
 
-def test_reference_summary_acceptance_cannot_drift_or_hide_a_failed_seed():
-    body, payload = committed_summary("resnet18-train")
-    payload["acceptance"]["value"] += 0.01
-
-    errors = check_taxonomy.check_reference_summary(
-        "vision/resnet18-train", body, payload
-    )
-    assert any("acceptance.value" in error for error in errors)
-
-    body, payload = committed_summary("resnet18-train")
-    payload["runs"][0]["quality_value"] = 0.1
-    errors = check_taxonomy.check_reference_summary(
-        "vision/resnet18-train", body, payload
-    )
-    assert any(
-        "does not satisfy the registry quality target" in error for error in errors
-    )
 
 
-def test_reference_summary_paths_and_ids_are_portable():
-    body, payload = committed_summary("resnet18-train")
-    payload["evidence_id"] = "bad\nidentifier"
-    payload["runs"][0]["artifacts"][0]["path"] = "..\\outside.json"
-
-    errors = check_taxonomy.check_reference_summary(
-        "vision/resnet18-train", body, payload
-    )
-    assert any("evidence_id is not portable" in error for error in errors)
-    assert any("path is missing, absolute, or escapes" in error for error in errors)
 
 
-def test_nanogpt_lineage_requires_stable_indexed_training_artifacts():
-    body, payload = committed_summary("nanogpt-prefill")
-    payload["runs"][0]["artifacts"] = [
-        artifact
-        for artifact in payload["runs"][0]["artifacts"]
-        if artifact["role"] != "source_training_report"
-    ]
-
-    errors = check_taxonomy.check_reference_summary(
-        "language/nanogpt-prefill", body, payload
-    )
-
-    assert any("exactly one source_training_report" in error for error in errors)
 
 
-def test_nanogpt_lineage_roles_are_checked_before_baseline_promotion():
-    body, payload = committed_summary("nanogpt-prefill")
-    body.pop("verified_baseline")
-    payload["runs"][0]["artifacts"] = [
-        artifact
-        for artifact in payload["runs"][0]["artifacts"]
-        if artifact["role"] != "source_training_provenance"
-    ]
-
-    errors = check_taxonomy.check_reference_summary(
-        "language/nanogpt-prefill", body, payload
-    )
-    assert any("exactly one source_training_provenance" in error for error in errors)
 
 
-def test_slm_summary_requires_content_addressed_model_metadata():
-    body, payload = committed_summary("slm-decode")
-    payload["runs"][0]["artifacts"] = [
-        artifact
-        for artifact in payload["runs"][0]["artifacts"]
-        if artifact["role"] != "model_metadata"
-    ]
-
-    errors = check_taxonomy.check_reference_summary("slm/slm-decode", body, payload)
-
-    assert any("lacks model_metadata" in error for error in errors)
 
 
-def test_slm_model_metadata_is_checked_before_baseline_promotion():
-    body, payload = committed_summary("slm-decode")
-    body.pop("verified_baseline")
-    payload["runs"][0]["artifacts"] = [
-        artifact
-        for artifact in payload["runs"][0]["artifacts"]
-        if artifact["role"] != "model_metadata"
-    ]
-
-    errors = check_taxonomy.check_reference_summary("slm/slm-decode", body, payload)
-    assert any("lacks model_metadata" in error for error in errors)
 
 
-def test_checkpoint_dependents_bind_to_committed_training_summary():
-    workloads = {
-        workload_id: json.loads(json.dumps(workload.raw))
-        for workload_id, workload in load_registry().items()
-    }
-    workloads["nanogpt-prefill"]["verified_baseline"][
-        "source_training_evidence_sha256"
-    ] = "0" * 64
-
-    errors = check_taxonomy.check_shared_checkpoint_evidence(workloads)
-
-    assert any("source_training_evidence_sha256" in error for error in errors)
 
 
-def test_checkpoint_dependents_bind_the_selected_seed_and_checkpoint_digest():
-    workloads = {
-        workload_id: json.loads(json.dumps(workload.raw))
-        for workload_id, workload in load_registry().items()
-    }
-    workloads["nanogpt-prefill"]["verified_baseline"]["source_training_seed"] = 1
-    workloads["nanogpt-decode"]["verified_baseline"][
-        "source_training_checkpoint_sha256"
-    ] = "0" * 64
-
-    errors = check_taxonomy.check_shared_checkpoint_evidence(workloads)
-    assert any(
-        "does not select the committed median-quality" in error for error in errors
-    )
-    assert any("does not match the selected training run" in error for error in errors)
 
 
 def test_taxonomy_cli_passes_current_registry():
@@ -605,5 +415,5 @@ def test_taxonomy_cli_passes_current_registry():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Inspected 30 workloads." in result.stdout
-    assert "PASS: 30 workloads consistent with taxonomy invariants." in result.stdout
+    assert "Inspected 7 workloads." in result.stdout
+    assert "PASS: 7 workloads consistent with taxonomy invariants." in result.stdout

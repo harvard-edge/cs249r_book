@@ -13,12 +13,13 @@ vocab of 50,257 is BPE and does not apply to char-level data).
 """
 
 import torch
+import math
 import torch.nn as nn
 from torch.nn import functional as F
 
 from .gpt2_infer import GPTBlock
 
-CHAR_VOCAB_SIZE = 128  # ASCII range; TinyShakespeare uses 65 of these.
+CHAR_VOCAB_SIZE = 65
 
 # iter-6 (Han): GPT-2-Small canonical geometry as the "real LLM" stand-in.
 # 124M params at d_model=768, n_head=12, n_layer=12. Trains in ~30 min on
@@ -36,20 +37,59 @@ class NanoGPTWhiteBox(nn.Module):
     variant used by the LLM serving workloads.
     """
 
-    def __init__(self, vocab_size=CHAR_VOCAB_SIZE, n_embd=384, n_head=6, n_layer=6, max_seq_len=2048):
+    def __init__(
+        self,
+        vocab_size=CHAR_VOCAB_SIZE,
+        n_embd=384,
+        n_head=6,
+        n_layer=6,
+        max_seq_len=256,
+        dropout=0.2,
+        bias=True,
+    ):
         super().__init__()
         self.config = {
             "vocab_size": vocab_size, "n_embd": n_embd,
             "n_head": n_head, "n_layer": n_layer, "max_seq_len": max_seq_len,
+            "dropout": dropout, "bias": bias,
         }
         self.wte = nn.Embedding(vocab_size, n_embd)
         self.wpe = nn.Embedding(max_seq_len, n_embd)
         self.blocks = nn.ModuleList([
-            GPTBlock(n_embd, n_head, max_seq_len=max_seq_len) for _ in range(n_layer)
+            GPTBlock(
+                n_embd,
+                n_head,
+                max_seq_len=max_seq_len,
+                dropout=dropout,
+                bias=bias,
+            )
+            for _ in range(n_layer)
         ])
         self.ln_f = nn.LayerNorm(n_embd)
+        self.drop = nn.Dropout(dropout)
         self.lm_head = nn.Linear(n_embd, vocab_size, bias=False)
         self.wte.weight = self.lm_head.weight
+        self.apply(self._init_weights)
+        for block in self.blocks:
+            nn.init.normal_(
+                block.attn.c_proj.weight,
+                mean=0.0,
+                std=0.02 / math.sqrt(2 * n_layer),
+            )
+            nn.init.normal_(
+                block.mlp[2].weight,
+                mean=0.0,
+                std=0.02 / math.sqrt(2 * n_layer),
+            )
+
+    @staticmethod
+    def _init_weights(module):
+        if isinstance(module, nn.Linear):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
+            if module.bias is not None:
+                nn.init.zeros_(module.bias)
+        elif isinstance(module, nn.Embedding):
+            nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
     def forward(self, idx, targets=None, use_kv_cache=False, past_key_values=None):
         """Unified forward path for training and inference (incl. KV-cache decode).
@@ -62,7 +102,7 @@ class NanoGPTWhiteBox(nn.Module):
         b, t = idx.size()
         past_length = past_key_values[0][0].size(-2) if past_key_values is not None else 0
         pos = torch.arange(past_length, past_length + t, dtype=torch.long, device=idx.device)
-        x = self.wte(idx) + self.wpe(pos)
+        x = self.drop(self.wte(idx) + self.wpe(pos))
 
         present_kvs = [] if use_kv_cache else None
         for i, block in enumerate(self.blocks):
