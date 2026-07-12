@@ -804,7 +804,9 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
         dossier = asset_dossier(
             workload.dataset, declared_source=workload.raw.get("dataset_source")
         )
-        terms = asset_terms_summary(dossier) if dossier else "no structured asset dossier"
+        terms = (
+            asset_terms_summary(dossier) if dossier else "no structured asset dossier"
+        )
         if dry_run:
             return (
                 f"- {workload.id}: huggingface model -> {repo_id}@{revision}; "
@@ -924,7 +926,9 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
     if dataset == "ettm1":
         if dry_run:
             paths = ettm1_paths()
-            return f"- {workload.id}: {dataset} -> {paths['csv']} ({ETTM1_URL}); {terms}"
+            return (
+                f"- {workload.id}: {dataset} -> {paths['csv']} ({ETTM1_URL}); {terms}"
+            )
         asset = ensure_ettm1(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     if dataset == "nanobeir-reranking":
@@ -957,7 +961,9 @@ def cmd_run(args: argparse.Namespace) -> int:
         requested_mode = getattr(args, "mode", None)
         requested_phase = getattr(args, "phase", None)
         if (requested_mode or requested_phase) and len(selected) != 1:
-            raise ValueError("--mode and --phase require selection of exactly one workload")
+            raise ValueError(
+                "--mode and --phase require selection of exactly one workload"
+            )
         execution_mode = None
         execution_phase = None
         if len(selected) == 1:
@@ -1783,7 +1789,9 @@ def resolve_execution_selection(
     implemented_modes = tuple(workload.raw.get("implemented_modes") or ())
     if not implemented_modes:
         if mode or phase:
-            raise ValueError(f"workload {workload.id!r} does not expose selectable modes")
+            raise ValueError(
+                f"workload {workload.id!r} does not expose selectable modes"
+            )
         return None, None
     resolved_mode = mode or workload.raw.get("default_mode") or implemented_modes[0]
     if resolved_mode not in implemented_modes:
@@ -1815,26 +1823,42 @@ def run_workload(
     mode: str | None = None,
     phase: str | None = None,
 ) -> dict[str, Any]:
+    resolved_mode, resolved_phase = resolve_execution_selection(
+        workload, mode=mode, phase=phase
+    )
     runner = load_runner(workload, profile)
     if runner:
         parameters = inspect.signature(runner).parameters
         execution_kwargs: dict[str, str] = {}
-        if mode is not None and "mode" in parameters:
-            execution_kwargs["mode"] = mode
-        if phase is not None and "phase" in parameters:
-            execution_kwargs["phase"] = phase
-        return runner(workload, output_dir, **execution_kwargs)
+        if "mode" in parameters:
+            execution_kwargs["mode"] = resolved_mode
+        if resolved_phase is not None and "phase" in parameters:
+            execution_kwargs["phase"] = resolved_phase
+        report = runner(workload, output_dir, **execution_kwargs)
+        report["mode"] = resolved_mode
+        report["phase"] = resolved_phase
+        return report
 
     if profile == "pro" and load_runner(workload, "max"):
-        return run_pro_profile(workload, output_dir, mode=mode, phase=phase)
+        report = run_pro_profile(
+            workload, output_dir, mode=resolved_mode, phase=resolved_phase
+        )
+        report["mode"] = resolved_mode
+        report["phase"] = resolved_phase
+        return report
 
     if profile == "min":
-        return smoke_workload(workload)
+        report = smoke_workload(workload)
+        report["mode"] = resolved_mode
+        report["phase"] = resolved_phase
+        return report
 
     unsupported = smoke_workload(workload)
     unsupported["profile"] = profile
     unsupported["status"] = "not_implemented"
     unsupported["note"] = f"No {profile} runner is registered for this workload."
+    unsupported["mode"] = resolved_mode
+    unsupported["phase"] = resolved_phase
     return unsupported
 
 
@@ -1944,8 +1968,7 @@ class TemporaryNanogptCheckpoint:
 
     def __enter__(self):
         checkpoint = (
-            self.output_dir
-            / "causal-language-modeling_training_max_checkpoint.pt"
+            self.output_dir / "causal-language-modeling_training_max_checkpoint.pt"
         )
         if checkpoint.exists() and "MLPERF_EDU_NANOGPT_CHECKPOINT" not in os.environ:
             self.previous = os.environ.get("MLPERF_EDU_NANOGPT_CHECKPOINT")
@@ -5124,7 +5147,10 @@ def model_dossier_for_query(query: str, matches: list[Workload]) -> dict[str, An
         ):
             continue
         model_id = str(model_source.get("repo_id") or workload.model)
-        if query_lower not in model_id.lower() and query_lower not in workload.model.lower():
+        if (
+            query_lower not in model_id.lower()
+            and query_lower not in workload.model.lower()
+        ):
             continue
         return huggingface_model_dossier(
             model_source, model_name=str(model_id), model_id=str(model_id)

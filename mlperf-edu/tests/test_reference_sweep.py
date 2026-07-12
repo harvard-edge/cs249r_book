@@ -260,6 +260,72 @@ def test_performance_acceptance_requires_every_functional_gate():
     assert sweep.performance_acceptance(rows, "serving check")["passed"] is False
 
 
+def test_causal_prefill_sweep_uses_performance_bearing_semantics():
+    from mlperf.registry import load_registry
+
+    workload = load_registry()["causal-language-modeling"]
+    selected = sweep.execution_contract(workload, mode="inference", phase="prefill")
+    rows = []
+    for execution_index in range(1, 6):
+        rows.append(
+            {
+                "execution_index": execution_index,
+                "requested_seed": 1337,
+                "evidence_valid": True,
+                "result_role": "performance-bearing",
+                "reference_metric_role": "performance",
+                "primary_metric_declared": "prefill_tokens_per_sec",
+                "primary_metric_key": "prefill_tokens_per_sec",
+                "primary_metric_value": 28_000.0 + execution_index,
+                "quality_metric_key": "prefill_tokens_per_sec",
+                "functional_metric_declared": "prefill_tokens_per_sec",
+                "functional_metric_value": 28_000.0 + execution_index,
+                "quality_target_met": True,
+                "comparison_fingerprint_sha256": "a" * 64,
+                "data_mode": "checkpoint-backed",
+                "grade": {"target": 0.0},
+            }
+        )
+    acceptance = sweep.performance_acceptance(rows, "canonical functional gate")
+    errors = sweep.validate_sweep(
+        workload=workload,
+        result_role="performance-bearing",
+        seeds=[1337] * 5,
+        mode="inference",
+        phase="prefill",
+        rows=rows,
+        sensitivity={},
+        acceptance=acceptance,
+        evidence_tier="promotion-candidate",
+    )
+    assert errors == []
+
+    basis = sweep.build_basis(
+        workload=workload,
+        result_role="performance-bearing",
+        selected_contract=selected,
+        profile="max",
+        rows=rows,
+        primary_aggregate=sweep.aggregate(
+            [float(row["primary_metric_value"]) for row in rows]
+        ),
+        primary_metric_name="prefill_tokens_per_sec",
+        quality_aggregate=None,
+        quality_metric_name=None,
+        dataset_mode=None,
+        eligible=True,
+        evidence_tier="promotion-candidate",
+    )
+    assert basis["result_role"] == "performance-bearing"
+    assert basis["quality_target"] is None
+    assert basis["functional_check"] == {
+        "metric": "prefill_tokens_per_sec",
+        "metric_key": "prefill_tokens_per_sec",
+        "condition": "Every run must pass the canonical functional gate.",
+        "target": 0.0,
+    }
+
+
 def test_build_row_rejects_report_or_manifest_seed_mismatch():
     row = sweep.build_row(
         {

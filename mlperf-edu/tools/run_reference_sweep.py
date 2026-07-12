@@ -174,7 +174,7 @@ def main():
             raise FileNotFoundError("runner did not produce both report and provenance artifacts")
 
         # Match the normal CLI post-run path before verification and grading.
-        report = json.loads(report_path.read_text())
+        report = dict(report)
         enrich_report_for_display(report, registry)
         attach_run_fingerprints(report)
         promotion_contract = evaluate_promotion_contract(workload, report)
@@ -188,12 +188,13 @@ def main():
         grade = grade_manifest(manifest_path)
         quality = report.get("quality") or {}
         metrics = report.get("metrics") or {}
-        if args.get("mode") == "inference":
-            phase_contract = (
-                ((workload.raw.get("mode_contracts") or {}).get("inference") or {})
-                .get("phases", {})
-                .get(args.get("phase") or "full", {})
+        phase_contracts = (
+            ((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get(
+                "phases", {}
             )
+        )
+        if args.get("mode") == "inference" and phase_contracts:
+            phase_contract = phase_contracts.get(args.get("phase") or "full", {})
             measurement_protocol = phase_contract.get("measurement_protocol") or {}
             registry_scenario = phase_contract.get("scenario")
         else:

@@ -9,7 +9,6 @@ import zipfile
 from argparse import Namespace
 from pathlib import Path
 
-import torch
 import pytest
 
 from mlperf import edu_cli
@@ -102,6 +101,42 @@ def test_doctor_passes():
     assert "registry" in result.stdout
 
 
+def test_run_workload_records_resolved_mode_and_phase(tmp_path, monkeypatch):
+    workloads = load_registry()
+    observed = {}
+
+    def inference_runner(_workload, _output_dir):
+        return {"status": "passed"}
+
+    monkeypatch.setattr(
+        edu_cli, "load_runner", lambda _workload, _profile: inference_runner
+    )
+    report = edu_cli.run_workload(
+        workloads["image-classification"],
+        "max",
+        tmp_path,
+        mode="inference",
+    )
+    assert report["mode"] == "inference"
+    assert report["phase"] is None
+
+    def phased_runner(_workload, _output_dir, *, mode, phase):
+        observed.update(mode=mode, phase=phase)
+        return {"status": "passed"}
+
+    monkeypatch.setattr(
+        edu_cli, "load_runner", lambda _workload, _profile: phased_runner
+    )
+    report = edu_cli.run_workload(
+        workloads["causal-language-modeling"],
+        "max",
+        tmp_path,
+        mode="inference",
+        phase="prefill",
+    )
+    assert observed == {"mode": "inference", "phase": "prefill"}
+    assert report["mode"] == "inference"
+    assert report["phase"] == "prefill"
 
 
 def test_doctor_json_marks_bad_selection_as_failure():
@@ -121,8 +156,6 @@ def test_list_default_contains_canonical_language_modeling():
     assert "causal-language-modeling" in result.stdout
     assert "Public" in result.stdout
     assert "experimental" in result.stdout
-
-
 
 
 def test_list_discovery_subjects():
@@ -153,18 +186,6 @@ def test_info_profile_shows_default_selection():
     assert "Profile: min" in result.stdout
     assert "Selected 4 workload(s) for profile min (default)." in result.stdout
     assert "List details: mlperf list --profile min" in result.stdout
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_default_collection_for_profile_defaults():
@@ -254,6 +275,7 @@ def test_nanogpt_training_enrichment_excludes_prior_promoted_results():
     assert "prior-training-evidence" not in serialized
     assert "source_git_sha" not in serialized
 
+
 def test_nanogpt_inference_lineage_excludes_source_promoted_results():
     workloads = load_registry()
     workload = workloads["causal-language-modeling"]
@@ -294,6 +316,7 @@ def test_nanogpt_inference_lineage_excludes_source_promoted_results():
     assert "evidence_sha256" not in serialized
     assert "source_git_sha" not in serialized
 
+
 def test_show_workload():
     result = run_cli("show", "causal-language-modeling")
     assert result.returncode == 0
@@ -305,10 +328,6 @@ def test_show_workload():
     assert "maturity" not in result.stdout
 
 
-
-
-
-
 def test_info_dataset_shows_asset_dossier():
     result = run_cli("info", "--dataset", "tinyshakespeare")
     assert result.returncode == 0, result.stdout + result.stderr
@@ -318,8 +337,6 @@ def test_info_dataset_shows_asset_dossier():
     assert "expected_download_bytes" in result.stdout
     assert "5600000" in result.stdout
     assert "causal-language-modeling" in result.stdout
-
-
 
 
 def test_cache_list_and_verify_known_missing_workload(tmp_path):
@@ -349,30 +366,20 @@ def test_cache_list_and_verify_known_missing_workload(tmp_path):
     assert "missing" in verified.stdout
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 def test_fetch_workload_dry_run():
     result = run_cli(
-        "fetch", "--workload", "causal-language-modeling", "--profile", "min", "--dry-run"
+        "fetch",
+        "--workload",
+        "causal-language-modeling",
+        "--profile",
+        "min",
+        "--dry-run",
     )
     assert result.returncode == 0, result.stderr
-    assert "Selected 1 workload(s) for profile min (causal-language-modeling)." in result.stdout
+    assert (
+        "Selected 1 workload(s) for profile min (causal-language-modeling)."
+        in result.stdout
+    )
     assert "Would fetch 1 workload" in result.stdout
     assert "causal-language-modeling: tinyshakespeare" in result.stdout
     assert "underlying Shakespeare text is public domain" in result.stdout
@@ -387,14 +394,6 @@ def test_fetch_min_profile_uses_consolidated_workload_identity():
     assert "causal-language-modeling: tinyshakespeare" in result.stdout
     assert "nanogpt-prefill" not in result.stdout
     assert "nanogpt-decode" not in result.stdout
-
-
-
-
-
-
-
-
 
 
 def test_std_profile_is_not_a_public_alias(tmp_path):
@@ -532,8 +531,6 @@ def test_validation_seed_environment_preserves_explicit_seed(monkeypatch):
     }
 
 
-
-
 def test_validate_legacy_level_alias_maps_to_coverage(tmp_path):
     result = run_cli(
         "validate",
@@ -547,8 +544,6 @@ def test_validate_legacy_level_alias_maps_to_coverage(tmp_path):
     assert "MLPerf EDU Validation: coverage" in result.stdout
     assert "min-all" in result.stdout
     assert not any(tmp_path.iterdir())
-
-
 
 
 def test_run_with_power_writes_aggregate_power_report(tmp_path):
@@ -633,7 +628,9 @@ def test_report_command_exports_json_csv_html(tmp_path):
     report = json.loads(report_path.read_text())
     assert report["dataset"] == "tinyshakespeare"
     assert report["dataset_asset"]["id"] == "tinyshakespeare"
-    assert report["dataset_asset"]["license_status"] == "mit-repository-public-domain-text"
+    assert (
+        report["dataset_asset"]["license_status"] == "mit-repository-public-domain-text"
+    )
     assert report["dataset_asset"]["public_release_status"] == "public-ok-fetch-only"
     assert "score-bearing candidate" in report["dataset_asset"]["public_result_use"]
     assert report["quality"]["target_basis"] == "literature"
@@ -642,7 +639,9 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert report["run_fingerprint"]["schema"] == "mlperf-edu-run-fingerprint/0.1"
     assert report["run_fingerprint"]["hardware"]["fingerprint_hash"]
     assert report["run_fingerprint"]["software"]["python"]
-    assert report["run_fingerprint"]["execution"]["workload"] == "causal-language-modeling"
+    assert (
+        report["run_fingerprint"]["execution"]["workload"] == "causal-language-modeling"
+    )
     assert report["run_fingerprint"]["execution"]["profile"] == "min"
     assert report["run_fingerprint"]["execution"]["data_modes"] == [
         "synthetic-deterministic"
@@ -661,7 +660,10 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert json_result.returncode == 0, json_result.stdout + json_result.stderr
     manual_json = json.loads(json_path.read_text())
     assert manual_json["workload"] == "causal-language-modeling"
-    assert manual_json["run_fingerprint"]["execution"]["workload"] == "causal-language-modeling"
+    assert (
+        manual_json["run_fingerprint"]["execution"]["workload"]
+        == "causal-language-modeling"
+    )
 
     csv_result = run_cli(
         "report", str(report_path), "--format", "csv", "--output", str(csv_path)
@@ -680,9 +682,7 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert rows[0]["dataset_license_status"] == "mit-repository-public-domain-text"
     assert rows[0]["dataset_public_release_status"] == "public-ok-fetch-only"
     assert "score-bearing candidate" in rows[0]["dataset_public_use"]
-    assert rows[0]["dataset_release_next_step"].startswith(
-        "Keep the pinned commit"
-    )
+    assert rows[0]["dataset_release_next_step"].startswith("Keep the pinned commit")
     assert rows[0]["metric"] == "loss"
     assert rows[0]["target"] == "1.4697"
     assert rows[0]["target_basis"] == "literature"
@@ -973,18 +973,6 @@ def test_grade_uses_quality_required_not_legacy_gated(tmp_path):
     assert summary["results"][0]["target_met"] is False
 
 
-
-
-
-
-
-
-
-
-
-
-
-
 def test_nanogpt_min_run_writes_verifiable_artifacts(tmp_path):
     result = run_cli(
         "run",
@@ -1015,12 +1003,6 @@ def test_nanogpt_min_run_writes_verifiable_artifacts(tmp_path):
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
     assert "verified" in verify.stdout
-
-
-
-
-
-
 
 
 def test_causal_language_modeling_rejects_phase_for_training(tmp_path):
@@ -1057,8 +1039,12 @@ def test_nanogpt_prefill_min_run_writes_verifiable_artifacts(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    report_path = tmp_path / "causal-language-modeling_inference_prefill_min_report.json"
-    manifest_path = tmp_path / "causal-language-modeling_inference_prefill_min.provd.json"
+    report_path = (
+        tmp_path / "causal-language-modeling_inference_prefill_min_report.json"
+    )
+    manifest_path = (
+        tmp_path / "causal-language-modeling_inference_prefill_min.provd.json"
+    )
     report = json.loads(report_path.read_text())
     assert report["workload"] == "causal-language-modeling"
     assert report["mode"] == "inference"
@@ -1088,7 +1074,9 @@ def test_nanogpt_decode_min_run_writes_verifiable_artifacts(tmp_path):
     assert result.returncode == 0, result.stdout + result.stderr
 
     report_path = tmp_path / "causal-language-modeling_inference_decode_min_report.json"
-    manifest_path = tmp_path / "causal-language-modeling_inference_decode_min.provd.json"
+    manifest_path = (
+        tmp_path / "causal-language-modeling_inference_decode_min.provd.json"
+    )
     report = json.loads(report_path.read_text())
     assert report["workload"] == "causal-language-modeling"
     assert report["mode"] == "inference"
@@ -1167,12 +1155,12 @@ def test_image_classification_max_run_writes_verifiable_artifacts(tmp_path):
     assert report["metrics"]["samples"] == 200
     assert report["metrics"]["correct"] == 174
     assert Path(report["artifacts"]["weights"]).name == "pretrainedResnet.tflite"
-    assert Path(report["artifacts"]["performance_indices"]).name == "perf_samples_idxs.npy"
+    assert (
+        Path(report["artifacts"]["performance_indices"]).name == "perf_samples_idxs.npy"
+    )
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
-
-
 
 
 def test_keyword_spotting_min_run_writes_verifiable_artifacts(tmp_path):
