@@ -571,6 +571,37 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
     if max_execution_issues:
         raise ValueError(f"invalid max execution boundaries: {max_execution_issues}")
 
+    execution_role_issues: list[str] = []
+    result_roles = {"score-bearing", "performance-bearing"}
+    for workload in workloads.values():
+        canonical = workload.raw.get("canonical_max_contract") or {}
+        if canonical.get("result_role") not in result_roles:
+            execution_role_issues.append(
+                f"{workload.id}: canonical_max_contract.result_role must be one of "
+                f"{sorted(result_roles)}"
+            )
+        if canonical.get("mode") not in set(
+            workload.raw.get("implemented_modes") or []
+        ):
+            execution_role_issues.append(
+                f"{workload.id}: canonical_max_contract.mode must name an "
+                "implemented mode"
+            )
+        mode_contracts = workload.raw.get("mode_contracts") or {}
+        inference = mode_contracts.get("inference") or {}
+        phases = inference.get("phases") or {}
+        for phase, contract in phases.items():
+            if (
+                not isinstance(contract, dict)
+                or contract.get("result_role") not in result_roles
+            ):
+                execution_role_issues.append(
+                    f"{workload.id}: inference phase {phase!r} must declare a valid "
+                    "result_role"
+                )
+    if execution_role_issues:
+        raise ValueError(f"invalid execution result roles: {execution_role_issues}")
+
     canonical_max_issues: list[str] = []
     for workload in workloads.values():
         if workload.public_status not in {"score-bearing", "performance-bearing"}:

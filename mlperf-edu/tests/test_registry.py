@@ -1,12 +1,10 @@
 from collections import Counter
 from pathlib import Path
 
-from mlperf.assets import asset_dossier, has_asset_dossier
+from mlperf.assets import asset_dossier
 from mlperf.registry import (
     EDU_SCENARIOS,
     PROFILES,
-    QUALITY_TARGET_BASES,
-    REFERENCE_PROTOCOL_FIELDS,
     PUBLIC_RESULT_SCENARIOS,
     PUBLIC_STATUSES,
     STARTER_WORKLOAD_ORDER,
@@ -15,8 +13,6 @@ from mlperf.registry import (
     RESEARCH_WORKLOADS,
     STANDARD_WORKLOAD_ORDER,
     STANDARD_WORKLOADS,
-    baseline_is_current_review_evidence,
-    baseline_is_protocol_superseded,
     baseline_lifecycle_issues,
     load_registry,
     public_contract_report,
@@ -43,10 +39,6 @@ def test_packaged_registry_copy_matches_flat_registry():
     assert packaged.read_text() == flat.read_text()
 
 
-
-
-
-
 def test_all_workloads_declare_min_and_max_runners():
     workloads = load_registry()
 
@@ -66,6 +58,22 @@ def test_all_workloads_declare_public_contract_metadata():
     assert all(workload.public_rationale for workload in workloads.values())
 
 
+def test_all_execution_contracts_declare_result_roles():
+    workloads = load_registry()
+
+    for workload in workloads.values():
+        assert workload.raw["canonical_max_contract"]["result_role"] == "score-bearing"
+        assert (
+            workload.raw["canonical_max_contract"]["mode"]
+            in workload.raw["implemented_modes"]
+        )
+        phases = (
+            (workload.raw.get("mode_contracts") or {}).get("inference") or {}
+        ).get("phases", {})
+        for contract in phases.values():
+            assert contract["result_role"] == "performance-bearing"
+
+
 def test_public_result_workloads_use_educational_mlcommons_scenarios():
     workloads = load_registry()
 
@@ -83,12 +91,6 @@ def test_public_result_workloads_use_educational_mlcommons_scenarios():
             )
 
 
-
-
-
-
-
-
 def test_candidates_do_not_claim_reference_evidence_before_admission():
     workloads = load_registry()
     selected = [
@@ -98,7 +100,9 @@ def test_candidates_do_not_claim_reference_evidence_before_admission():
     ]
 
     assert selected == []
-    assert all("verified_baseline" not in workload.raw for workload in workloads.values())
+    assert all(
+        "verified_baseline" not in workload.raw for workload in workloads.values()
+    )
 
 
 def test_systems_only_rows_do_not_claim_uncommitted_verified_baselines():
@@ -116,18 +120,20 @@ def test_systems_only_rows_do_not_claim_uncommitted_verified_baselines():
             }, workload.id
 
 
-
-
 def test_public_contract_report_withholds_experimental_candidates():
     workloads = load_registry()
     issues = public_contract_report(workloads)
 
     experimental = {
-        workload.id for workload in workloads.values() if workload.public_status == "experimental"
+        workload.id
+        for workload in workloads.values()
+        if workload.public_status == "experimental"
     }
     assert experimental
     for workload_id in experimental:
-        assert issues[workload_id] == ["experimental workloads are not public-release-ready"]
+        assert issues[workload_id] == [
+            "experimental workloads are not public-release-ready"
+        ]
 
 
 def test_verified_baseline_lifecycle_state_machine_fails_closed():
@@ -279,7 +285,9 @@ def test_causal_language_modeling_declares_modes_and_phases():
 
     assert workload.raw["implemented_modes"] == ["training", "inference"]
     assert workload.raw["phases"]["inference"] == ["full", "prefill", "decode"]
-    assert workload.raw["mode_contracts"]["inference"]["dataset"] == "prompt-suite-local"
+    assert (
+        workload.raw["mode_contracts"]["inference"]["dataset"] == "prompt-suite-local"
+    )
 
 
 def test_tiny_suite_contains_only_canonical_keyword_spotting():

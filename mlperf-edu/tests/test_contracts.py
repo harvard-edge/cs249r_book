@@ -28,9 +28,7 @@ def _quality_value(quality: dict[str, object]) -> float:
     return target
 
 
-def _canonical_report(
-    workload: Workload, tmp_path: Path
-) -> dict[str, object]:
+def _canonical_report(workload: Workload, tmp_path: Path) -> dict[str, object]:
     contract = workload.raw["canonical_max_contract"]
     quality = copy.deepcopy(contract["quality"])
     quality_value = _quality_value(quality)
@@ -98,6 +96,7 @@ def test_every_admitted_max_contract_is_promotion_eligible(
 
     assert result["status"] == "passed", result["issues"]
     assert result["promotion_eligible"] is True
+    assert result["result_role"] == "score-bearing"
 
 
 def _checkpoint_lineage(tmp_path: Path) -> dict[str, object]:
@@ -155,9 +154,7 @@ def test_causal_inference_phase_contracts_are_promotion_eligible(
         "data_mode": "checkpoint-backed",
         "seed": 1337,
         "config": copy.deepcopy(phase_contract["config"]),
-        "measurement_protocol": copy.deepcopy(
-            phase_contract["measurement_protocol"]
-        ),
+        "measurement_protocol": copy.deepcopy(phase_contract["measurement_protocol"]),
         "metrics": metrics,
         "quality": {
             **quality,

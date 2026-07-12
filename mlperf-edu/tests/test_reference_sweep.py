@@ -35,6 +35,33 @@ def test_parse_run_count_and_canonical_seed():
     assert sweep.canonical_seed(registry["image-classification"]) == 42
 
 
+def test_execution_result_roles_are_case_specific():
+    from mlperf.registry import load_registry
+
+    registry = load_registry()
+    assert (
+        sweep.execution_result_role(
+            registry["causal-language-modeling"], mode="training", phase=None
+        )
+        == "score-bearing"
+    )
+    for phase in ("full", "prefill", "decode"):
+        assert (
+            sweep.execution_result_role(
+                registry["causal-language-modeling"],
+                mode="inference",
+                phase=phase,
+            )
+            == "performance-bearing"
+        )
+    assert (
+        sweep.execution_result_role(
+            registry["image-classification"], mode="inference", phase=None
+        )
+        == "score-bearing"
+    )
+
+
 def test_default_evidence_root_is_outside_source_checkout():
     assert not sweep.DEFAULT_OUTPUT_DIR.is_relative_to(sweep.ROOT)
 
@@ -58,7 +85,9 @@ def test_sweep_environment_removes_higher_priority_seed_overrides(monkeypatch):
     assert "MLPERF_EDU_DATA_DIR" not in env
 
     with pytest.raises(ValueError, match="unsupported reference sweep"):
-        sweep.sweep_environment(3, "cpu", {"MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_EPOCHS": "1"})
+        sweep.sweep_environment(
+            3, "cpu", {"MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_EPOCHS": "1"}
+        )
 
 
 def test_outer_execution_policy_stabilizes_all_timed_public_candidates():
@@ -265,6 +294,7 @@ def fake_result(seed, value, *, data_mode="real", primary_metric_value=None):
         "quality_target_met": True,
         "quality_target": 0.85,
         "quality_direction": "higher",
+        "result_role": "score-bearing",
         "comparison_fingerprint_sha256": "a" * 64,
         "scenario": "training",
         "manifest_scenario": "training",
@@ -289,12 +319,6 @@ def fake_result(seed, value, *, data_mode="real", primary_metric_value=None):
         "invalid_reasons": [],
         "reproduce": {"env": {"MLPERF_EDU_MAX_SEED": str(seed)}},
     }
-
-
-
-
-
-
 
 
 def test_score_evidence_rejects_high_variance_primary_timing(tmp_path, monkeypatch):

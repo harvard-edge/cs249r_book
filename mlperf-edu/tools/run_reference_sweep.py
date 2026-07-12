@@ -35,11 +35,14 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TOOL_NAME = "run_reference_sweep.py"
-TOOL_VERSION = "4.0.0"
+TOOL_VERSION = "4.1.0"
 TOOL_ID = f"tools/{TOOL_NAME} v{TOOL_VERSION}"
-SCORE_PUBLIC_DATA_MODES = frozenset({"real"})
+SCORE_PUBLIC_DATA_MODES = frozenset(
+    {"real", "real-preprocessed-mlperf-tiny-accuracy-set"}
+)
 PERFORMANCE_PUBLIC_DATA_MODES = frozenset({"real", "checkpoint-backed", "local-prompt"})
 PUBLIC_STATUSES = frozenset({"score-bearing", "performance-bearing"})
+RESULT_ROLES = frozenset({"score-bearing", "performance-bearing"})
 REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.5"
 DEFAULT_TIMEOUT_SECONDS = 7200.0
 DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS = 5.0
@@ -360,6 +363,7 @@ def main():
             "quality_target": quality.get("target"),
             "quality_direction": quality.get("direction"),
             "promotion_contract": promotion_contract,
+            "result_role": promotion_contract.get("result_role"),
             "comparison_fingerprint_sha256": comparison_fingerprint_sha256,
             "scenario": report_scenario,
             "manifest_scenario": manifest_scenario,
@@ -440,12 +444,10 @@ def canonical_seed(workload: Any) -> int:
 def execution_contract(
     workload: Any, *, mode: str | None, phase: str | None
 ) -> dict[str, Any]:
-    if mode == "inference":
-        phases = (
-            ((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get(
-                "phases", {}
-            )
-        )
+    phases = ((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get(
+        "phases", {}
+    )
+    if mode == "inference" and phases:
         resolved_phase = phase or "full"
         contract = phases.get(resolved_phase)
         if not isinstance(contract, dict):
@@ -453,12 +455,30 @@ def execution_contract(
                 f"{workload.id} has no inference phase contract for {resolved_phase!r}"
             )
         return contract
+    canonical = workload.raw.get("canonical_max_contract") or {}
+    canonical_mode = canonical.get("mode")
+    if mode is not None and mode != canonical_mode:
+        raise ValueError(
+            f"{workload.id} canonical max mode is {canonical_mode!r}, received {mode!r}"
+        )
     return {
+        "result_role": canonical.get("result_role"),
         "scenario": workload.scenario,
         "measurement_protocol": workload.raw.get("measurement_protocol") or {},
-        "config": (workload.raw.get("canonical_max_contract") or {}).get("config")
-        or {},
+        "config": canonical.get("config") or {},
+        "quality": canonical.get("quality") or {},
     }
+
+
+def execution_result_role(workload: Any, *, mode: str | None, phase: str | None) -> str:
+    """Return the score/performance role for one execution case."""
+    role = execution_contract(workload, mode=mode, phase=phase).get("result_role")
+    if role not in RESULT_ROLES:
+        raise ValueError(
+            f"{workload.id} execution contract must declare result_role as one of "
+            f"{sorted(RESULT_ROLES)}, received {role!r}"
+        )
+    return str(role)
 
 
 def aggregate(values: list[float]) -> dict[str, Any]:
@@ -851,7 +871,9 @@ def run_one_seed(
             f"than {MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g}"
         )
     run_dir = attempt_dir / f"run_{execution_index:03d}"
-    with tempfile.TemporaryDirectory(prefix=f"mlperf-edu-run-{execution_index:03d}-") as tmp:
+    with tempfile.TemporaryDirectory(
+        prefix=f"mlperf-edu-run-{execution_index:03d}-"
+    ) as tmp:
         args_path = Path(tmp) / "args.json"
         result_path = Path(tmp) / "result.json"
         child_args = {
@@ -1099,6 +1121,7 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
         "quality_target": result.get("quality_target"),
         "quality_direction": result.get("quality_direction"),
         "promotion_contract": result.get("promotion_contract"),
+        "result_role": result.get("result_role"),
         "comparison_fingerprint_sha256": result.get("comparison_fingerprint_sha256"),
         "scenario": result.get("scenario"),
         "manifest_scenario": result.get("manifest_scenario"),
@@ -1318,6 +1341,8 @@ def source_snapshot() -> dict[str, Any]:
 def build_basis(
     *,
     workload: Any,
+    result_role: str,
+    selected_contract: dict[str, Any],
     profile: str,
     rows: list[dict[str, Any]],
     primary_aggregate: dict[str, Any],
@@ -1328,8 +1353,15 @@ def build_basis(
     eligible: bool,
     evidence_tier: str,
 ) -> dict[str, Any]:
-    performance = workload.public_status == "performance-bearing"
+    performance = result_role == "performance-bearing"
     functional = dict(workload.raw.get("functional_check") or {})
+    if performance:
+        selected_quality = selected_contract.get("quality") or {}
+        functional = {
+            "metric": selected_quality.get("metric"),
+            "metric_key": selected_quality.get("metric_key"),
+            "condition": "Every run must pass the canonical functional gate.",
+        }
     functional_targets = {
         json.dumps((row.get("grade") or {}).get("target"), sort_keys=True)
         for row in rows
@@ -1349,15 +1381,13 @@ def build_basis(
         and isinstance(row.get("quality_target"), (int, float))
     }
     quality_directions = {
-        str(row["quality_direction"])
-        for row in rows
-        if row.get("quality_direction")
+        str(row["quality_direction"]) for row in rows if row.get("quality_direction")
     }
     return {
+        "result_role": result_role,
         "eligible_for_public_baseline": eligible
         and workload.public_status in PUBLIC_STATUSES,
-        "eligible_for_promotion": eligible
-        and evidence_tier == "promotion-candidate",
+        "eligible_for_promotion": eligible and evidence_tier == "promotion-candidate",
         "primary_metric": {
             "name": primary_metric_name,
             "role": "performance",
@@ -1454,6 +1484,7 @@ def primary_metric_repeatability(
 def validate_sweep(
     *,
     workload: Any,
+    result_role: str,
     seeds: list[int],
     mode: str | None,
     phase: str | None,
@@ -1463,15 +1494,21 @@ def validate_sweep(
     evidence_tier: str,
 ) -> list[str]:
     reasons: list[str] = []
+    selected_contract = execution_contract(workload, mode=mode, phase=phase)
     for row in rows:
         if not row.get("evidence_valid"):
             details = "; ".join(
                 row.get("invalid_reasons") or ["unknown validation failure"]
             )
             reasons.append(f"seed {row.get('requested_seed')}: {details}")
-        expected_primary = execution_contract(
-            workload, mode=mode, phase=phase
-        )["measurement_protocol"].get("primary_metric")
+        if row.get("result_role") != result_role:
+            reasons.append(
+                f"seed {row.get('requested_seed')}: promotion result role "
+                f"{row.get('result_role')!r} does not match {result_role!r}"
+            )
+        expected_primary = selected_contract["measurement_protocol"].get(
+            "primary_metric"
+        )
         if row.get("primary_metric_declared") != expected_primary:
             reasons.append(
                 f"seed {row.get('requested_seed')}: primary metric declaration "
@@ -1493,7 +1530,7 @@ def validate_sweep(
                 f"seed {row.get('requested_seed')}: primary metric value is not "
                 "finite and positive"
             )
-        if workload.public_status != "performance-bearing":
+        if result_role != "performance-bearing":
             if not row.get("quality_metric_declared"):
                 reasons.append(
                     f"run {row.get('execution_index')}: quality metric declaration is missing"
@@ -1508,9 +1545,7 @@ def validate_sweep(
                     f"seed {row.get('requested_seed')}: quality metric value is not finite"
                 )
         else:
-            expected_functional = (workload.raw.get("functional_check") or {}).get(
-                "metric"
-            )
+            expected_functional = (selected_contract.get("quality") or {}).get("metric")
             if row.get("functional_metric_declared") != expected_functional:
                 reasons.append(
                     f"seed {row.get('requested_seed')}: functional metric declaration "
@@ -1547,9 +1582,9 @@ def validate_sweep(
         )
 
     if evidence_tier in {"public-candidate", "promotion-candidate"}:
-        protocol = execution_contract(
-            workload, mode=mode, phase=phase
-        )["measurement_protocol"]
+        protocol = execution_contract(workload, mode=mode, phase=phase)[
+            "measurement_protocol"
+        ]
         declared_runs = protocol.get("outer_reference_runs")
         if isinstance(declared_runs, int) and len(seeds) != declared_runs:
             reasons.append(
@@ -1570,7 +1605,8 @@ def validate_sweep(
         )
         if invalid_modes:
             reasons.append(
-                f"public candidates allow {sorted(allowed_modes)} for {workload.public_status}, observed {invalid_modes}"
+                f"public candidates allow {sorted(allowed_modes)} for {result_role}, "
+                f"observed {invalid_modes}"
             )
         comparison_fingerprints = [
             row.get("comparison_fingerprint_sha256") for row in rows
@@ -1618,9 +1654,7 @@ def print_summary(rows: list[dict[str, Any]], artifact_path: Path, valid: bool) 
     print(f"evidence summary: {artifact_path}")
 
 
-def _uses_nanogpt_training_lineage(
-    workload: Any, *, mode: str | None
-) -> bool:
+def _uses_nanogpt_training_lineage(workload: Any, *, mode: str | None) -> bool:
     return workload.id == "causal-language-modeling" and mode == "inference"
 
 
@@ -1720,6 +1754,7 @@ def main(argv: list[str] | None = None) -> int:
         selected_contract = execution_contract(
             workload, mode=args.mode, phase=args.phase
         )
+        result_role = execution_result_role(workload, mode=args.mode, phase=args.phase)
     except ValueError as exc:
         print(f"error: {exc}", file=sys.stderr)
         return 2
@@ -1744,9 +1779,7 @@ def main(argv: list[str] | None = None) -> int:
         seeds=requested_seeds,
         configured_cooldown_seconds=args.inter_execution_cooldown_seconds,
     )
-    uses_nanogpt_lineage = _uses_nanogpt_training_lineage(
-        workload, mode=args.mode
-    )
+    uses_nanogpt_lineage = _uses_nanogpt_training_lineage(workload, mode=args.mode)
     lineage_required = (
         evidence_tier in {"public-candidate", "promotion-candidate"}
         and uses_nanogpt_lineage
@@ -1842,9 +1875,7 @@ def main(argv: list[str] | None = None) -> int:
                 environment_overrides=(
                     lineage_stage["environment"] if lineage_stage else None
                 ),
-                cooldown_before_seconds=process_execution[
-                    "cooldown_before_seconds"
-                ],
+                cooldown_before_seconds=process_execution["cooldown_before_seconds"],
             )
             record_outer_execution(result, process_execution, outer_execution_policy)
             rows.append(build_row(result))
@@ -1866,7 +1897,7 @@ def main(argv: list[str] | None = None) -> int:
             ),
             getattr(workload, "quality_metric", None),
         )
-        if workload.public_status != "performance-bearing"
+        if result_role != "performance-bearing"
         else None
     )
     primary_values = [
@@ -1890,9 +1921,7 @@ def main(argv: list[str] | None = None) -> int:
     ]
     primary_aggregate = aggregate(primary_values)
     quality_aggregate = (
-        aggregate(quality_values)
-        if workload.public_status != "performance-bearing"
-        else None
+        aggregate(quality_values) if result_role != "performance-bearing" else None
     )
     wall_aggregate = aggregate(wall_values)
     sensitivity = (
@@ -1902,7 +1931,7 @@ def main(argv: list[str] | None = None) -> int:
             metric=primary_metric_name,
             role="performance",
         )
-        if workload.public_status == "performance-bearing"
+        if result_role == "performance-bearing"
         else seed_sensitivity(
             rows,
             value_field="quality_value",
@@ -1910,9 +1939,10 @@ def main(argv: list[str] | None = None) -> int:
             role="quality",
         )
     )
-    if workload.public_status == "performance-bearing":
-        functional = workload.raw.get("functional_check") or {}
-        acceptance = performance_acceptance(rows, functional.get("condition"))
+    if result_role == "performance-bearing":
+        acceptance = performance_acceptance(
+            rows, "Every run must pass the canonical functional gate."
+        )
     else:
         observed_targets = {
             float(row["quality_target"])
@@ -1941,6 +1971,7 @@ def main(argv: list[str] | None = None) -> int:
     protocol = selected_contract["measurement_protocol"]
     invalid_reasons = validate_sweep(
         workload=workload,
+        result_role=result_role,
         seeds=requested_seeds,
         mode=args.mode,
         phase=args.phase,
@@ -1966,7 +1997,10 @@ def main(argv: list[str] | None = None) -> int:
                 "primary performance repeatability exceeds the declared "
                 f"coefficient-of-variation limit {repeatability_limit!r}"
             )
-    if evidence_tier in {"public-candidate", "promotion-candidate"} and source.get("git_dirty") is not False:
+    if (
+        evidence_tier in {"public-candidate", "promotion-candidate"}
+        and source.get("git_dirty") is not False
+    ):
         invalid_reasons.append(
             "public reference evidence must be produced from a clean Git worktree"
         )
@@ -2004,6 +2038,8 @@ def main(argv: list[str] | None = None) -> int:
             )
     basis = build_basis(
         workload=workload,
+        result_role=result_role,
+        selected_contract=selected_contract,
         profile=args.profile,
         rows=rows,
         primary_aggregate=primary_aggregate,
@@ -2029,8 +2065,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": REFERENCE_EVIDENCE_SCHEMA,
         "evidence_id": evidence_id,
         "status": "valid" if eligible else "invalid",
-        "eligible_for_promotion": eligible
-        and evidence_tier == "promotion-candidate",
+        "eligible_for_promotion": eligible and evidence_tier == "promotion-candidate",
         "eligible_for_public_baseline": eligible
         and evidence_tier == "public-candidate"
         and workload.public_status in PUBLIC_STATUSES,
@@ -2053,6 +2088,7 @@ def main(argv: list[str] | None = None) -> int:
         "mode": args.mode,
         "phase": args.phase,
         "public_status": workload.public_status,
+        "result_role": result_role,
         "evidence_tier": evidence_tier,
         "device_requested": args.device,
         "timeout_seconds_per_run": args.timeout_seconds,
@@ -2069,19 +2105,15 @@ def main(argv: list[str] | None = None) -> int:
         "quality_metric": quality_metric_name,
         "quality_target": (
             None
-            if workload.public_status == "performance-bearing"
+            if result_role == "performance-bearing"
             else (basis.get("quality_target") or {}).get("target")
         ),
         "quality_direction": (basis.get("quality_target") or {}).get("direction"),
         "quality_gate": (
-            basis["quality_target"]
-            if workload.public_status != "performance-bearing"
-            else None
+            basis["quality_target"] if result_role != "performance-bearing" else None
         ),
         "functional_gate": (
-            basis["functional_check"]
-            if workload.public_status == "performance-bearing"
-            else None
+            basis["functional_check"] if result_role == "performance-bearing" else None
         ),
         "comparison_fingerprint_sha256": comparison_fingerprint_sha256,
         "runs": rows,
@@ -2094,9 +2126,7 @@ def main(argv: list[str] | None = None) -> int:
         # Retain the established performance-only field while schema 0.4 exposes
         # primary timing repeatability for score-bearing training as well.
         "repeatability": (
-            primary_repeatability
-            if workload.public_status == "performance-bearing"
-            else None
+            primary_repeatability if result_role == "performance-bearing" else None
         ),
         "seed_sensitivity": sensitivity,
         "acceptance": acceptance,
