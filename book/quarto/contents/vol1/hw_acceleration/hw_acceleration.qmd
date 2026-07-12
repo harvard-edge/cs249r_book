@@ -1401,6 +1401,7 @@ for batch in range(32):
 
        temp[batch, feature] = h  # Extra memory storage needed
 
+
 # Normalization requires complex arithmetic
 for feature in range(512):
     mean = mean_sum[feature] / batch_size
@@ -1820,7 +1821,7 @@ To understand why "Structured" patterns are required for hardware speedup, consi
 %%%%%%%%%%%%%
 %Sparse Matrix (CSR)
 %%%%%%%%%%%%%
-\begin{scope}[local bounding box=BLOCK-B,shift={(0.0,-7.0)}]
+\begin{scope}[local bounding box=BLOCK-B,shift={(0.0,-6.7)}]
 %—1) Base + all cell coordinates ---
 \def\br{B}
 \Gridd
@@ -1878,7 +1879,7 @@ To understand why "Structured" patterns are required for hardware speedup, consi
 %%%%%%%%%%%%%
 %Block Sparse (BSR)
 %%%%%%%%%%%%%
-\begin{scope}[local bounding box=BLOCK-D,shift={(12,-7.0)}]
+\begin{scope}[local bounding box=BLOCK-D,shift={(12,-6.7)}]
 %—1) Base + all cell coordinates ---
 \def\br{D}
 \Gridd
@@ -1899,7 +1900,7 @@ To understand why "Structured" patterns are required for hardware speedup, consi
 % =========================
 % MINI GRID: 1-by-6
 % =========================
-\begin{scope}[local bounding box=MINI-G,shift={(27,2.1)},node distance=-0.75pt,
+\begin{scope}[local bounding box=MINI-G,shift={(27,2.1)},node distance=-0.95pt,
 mCell/.style={draw=black!60,rectangle,minimum width=7.5mm,
 minimum height=7.5mm,line width=0.75pt, fill=orange!15}]
 \node[mCell](R1){1};
@@ -1914,8 +1915,9 @@ minimum height=7.5mm,line width=0.75pt, fill=orange!15}]
 \node[below=1pt of BLOCK-A]{Dense Matrix};
 \node[below=1pt of BLOCK-B]{Sparse Matrix (CSR)};
 \node[below=1pt of BLOCK-C]{Block Sparse Matrix};
-\node[below=1pt of BLOCK-D]{Block Sparse  (BSR)};
-\node[below=13pt of MINI-G,align=center]{Non-zero Block Indices};
+\node[below=1pt of BLOCK-D](BSS){Block Sparse  (BSR)};
+\path[red](BSS)-|coordinate(SR1)(MINI-G);
+\node[align=center]at(SR1){Non-zero Block Indices};
 %
 %—Above   (R1,R2,R3 -> BLOCK-C) ---
 \coordinate (busC) at ([xshift=-7mm]R1.west);
@@ -2983,9 +2985,11 @@ As models increase in size and complexity, improvements in memory capacity and b
 One way to quantify this challenge is by comparing the data transfer time with the time required for computations. To do this, the following variables are defined: $D_{\text{vol}}$ is the total data volume (bytes), $\text{BW}$ is the available memory bandwidth (bytes/s), $O$ is the number of floating-point operations, $R_{\text{peak}}$ is the peak hardware throughput (FLOP/s), and $\eta_{\text{hw}}$ is the realized hardware utilization.
 
 We can express the memory transfer time $T_{\text{mem}}$ and compute time $T_{\text{compute}}$ as:
-$$T_{\text{mem}} = \frac{D_{\text{vol}}}{\text{BW}}$$
-
-$$T_{\text{compute}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$$
+\begin{gather*}
+T_{\text{mem}} = \frac{D_{\text{vol}}}{\text{BW}}
+\\
+T_{\text{compute}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}
+\end{gather*}
 
 When $T_{\text{mem}} > T_{\text{compute}}$, the system becomes memory bound. This imbalance forces the processing elements to spend more time waiting for data than performing computations, demonstrating the need for memory-optimized architectures and efficient data movement strategies to sustain high performance.
 
@@ -4401,6 +4405,8 @@ where:
 
 This equation illustrates the exponential growth of the search space, making brute-force search infeasible for all but the simplest cases. A concrete example makes the impact of these choices tangible.
 
+The combinatorial explosion revealed by this analysis, potentially billions of valid configurations for a single neural network layer, poses a practical challenge: explaining how practitioners achieve strong performance despite this vast search space. Exhaustive enumeration is impossible, yet production systems routinely find useful schedules for common kernels. The answer lies in a small set of principled dataflow patterns that reduce this intractable configuration space to a manageable set of strategic choices.
+
 ::: {#exmp-hw-acceleration-loop-ordering-small-convolution .callout-example title="Loop ordering in a small convolution"}
 
 Consider a convolution applying 16 filters of size $3{\times}3$ to an $8{\times}8$ single-channel input. The computation can be expressed as five nested loops iterating over output rows ($H_{\text{out}}$), output columns ($W_{\text{out}}$), filter count ($C_{\text{out}}$), filter height ($F_h$), and filter width ($F_w$). The $5! = 120$ possible orderings of these loops all produce the same numerical result, but they generate dramatically different memory traffic.
@@ -4412,8 +4418,6 @@ Consider a convolution applying 16 filters of size $3{\times}3$ to an $8{\times}
 **Systems insight**: Ordering A reduces weight traffic by 36$\times$ compared to Ordering B by matching the loop structure to a weight-stationary dataflow. This single reordering decision, one of the 120 possibilities predicted by the $n_{\text{loops}}! = 5! = 120$ formula, determines whether the accelerator spends its memory bandwidth loading fresh data or redundantly re-fetching weights it has already seen.
 
 :::
-
-The combinatorial explosion revealed by this analysis, potentially billions of valid configurations for a single neural network layer, poses a practical challenge: explaining how practitioners achieve strong performance despite this vast search space. Exhaustive enumeration is impossible, yet production systems routinely find useful schedules for common kernels. The answer lies in a small set of principled dataflow patterns that reduce this intractable configuration space to a manageable set of strategic choices.
 
 ## Dataflow Optimization {#sec-hardware-acceleration-dataflow-optimization-strategies-ce52}
 
@@ -5878,7 +5882,6 @@ This checklist synthesizes the principles developed throughout this chapter, tra
 
 Hardware acceleration is the force that transformed machine learning from academic curiosity to practical reality, reshaping how we design both computational systems and the algorithms that run on them. The evolution from general-purpose processors to specialized AI accelerators reflects a shift toward domain-specific computing where hardware and software are co-designed to optimize specific computational patterns. The progression from CPUs through GPUs to specialized TPUs, NPUs, and wafer-scale systems demonstrates how understanding workload characteristics drives architectural innovation, creating opportunities for orders-of-magnitude performance improvements through targeted specialization.
 
-The technical challenges of AI acceleration span multiple layers of the computing stack, from low-level memory hierarchy optimization to high-level compiler transformations and runtime orchestration. Memory bandwidth limitations create bottlenecks that require targeted techniques like data tiling, kernel fusion, and hierarchy-aware scheduling to overcome. Mapping neural network computations to hardware involves complex trade-offs between different dataflow patterns, memory allocation strategies, and execution scheduling approaches that must balance computational efficiency with resource utilization. Multi-chip and distributed acceleration extend the same logic outward, adding communication overhead, memory coherence, and workload partitioning to the system-level optimization problem.
 
 ```{python}
 #| echo: false
@@ -5912,15 +5915,18 @@ class SummaryRooflineRecap:
 
 :::
 
+The technical challenges of AI acceleration span multiple layers of the computing stack, from low-level memory hierarchy optimization to high-level compiler transformations and runtime orchestration. Memory bandwidth limitations create bottlenecks that require targeted techniques like data tiling, kernel fusion, and hierarchy-aware scheduling to overcome. Mapping neural network computations to hardware involves complex trade-offs between different dataflow patterns, memory allocation strategies, and execution scheduling approaches that must balance computational efficiency with resource utilization. Multi-chip and distributed acceleration extend the same logic outward, adding communication overhead, memory coherence, and workload partitioning to the system-level optimization problem.
+
 Engineers who internalize the Roofline model and arithmetic intensity analysis gain a diagnostic framework: when inference runs slower than expected, they can immediately determine whether the bottleneck lies in compute throughput, memory bandwidth, or software overhead, and then select the appropriate optimization strategy. This systems-level understanding transforms hardware selection from vendor comparison into principled engineering.
 
-An accelerator is easy to mistake for a faster computer. It is better understood as a machine built to move less data per useful operation, because the cost it fights is fixed by physics; moving a byte takes far more time and energy than computing on it. Every technique in this chapter (tiling, kernel fusion, the memory hierarchy, the systolic array) exists to raise arithmetic intensity, the ratio of computation to data movement, and the roofline is the bookkeeping of that single fact. None of them repeals the cost; they only relocate the bottleneck between bandwidth and compute. This is the machine constraint made concrete: the accelerator cannot make a byte cheaper to move, only ensure that fewer bytes must move for each result worth keeping.
 
 ::: {.callout-chapter-connection title="From optimization to validation"}
 
 We have now optimized the full D·A·M stack: data selection minimized training requirements, model compression reduced algorithmic complexity, and hardware acceleration maximized machine throughput. Optimization without measurement, however, is guesswork. In @sec-benchmarking, we move from theoretical FLOPs to measured latency, applying the roofline model and statistical methods to validate our optimization claims against reality.
 
 :::
+
+An accelerator is easy to mistake for a faster computer. It is better understood as a machine built to move less data per useful operation, because the cost it fights is fixed by physics; moving a byte takes far more time and energy than computing on it. Every technique in this chapter (tiling, kernel fusion, the memory hierarchy, the systolic array) exists to raise arithmetic intensity, the ratio of computation to data movement, and the roofline is the bookkeeping of that single fact. None of them repeals the cost; they only relocate the bottleneck between bandwidth and compute. This is the machine constraint made concrete: the accelerator cannot make a byte cheaper to move, only ensure that fewer bytes must move for each result worth keeping.
 
 ::: {.callout-research-questions title="For further inquiry"}
 
