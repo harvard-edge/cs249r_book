@@ -121,15 +121,22 @@ def run_image_classification_max(
     batch_size = int(
         os.environ.get("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE", "32")
     )
-    if batch_size <= 0:
-        raise ValueError("image-classification batch size must be positive")
+    repetitions = int(
+        os.environ.get("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_REPETITIONS", "50")
+    )
+    if batch_size <= 0 or repetitions <= 0:
+        raise ValueError(
+            "image-classification batch size and repetitions must be positive"
+        )
 
     dataset_asset = ensure_cifar10(download=True)
     evaluation_asset = ensure_mlperf_tiny_image(download=True)
     evaluation_paths = mlperf_tiny_image_paths()
     indices = np.load(evaluation_paths["performance_indices"], allow_pickle=False)
     if indices.shape != (200,) or len(np.unique(indices)) != 200:
-        raise ValueError("MLPerf Tiny image accuracy set must contain 200 unique indices")
+        raise ValueError(
+            "MLPerf Tiny image accuracy set must contain 200 unique indices"
+        )
     test_dataset = load_cifar10_dataset(
         root=dataset_asset.root,
         train=False,
@@ -162,10 +169,12 @@ def run_image_classification_max(
     correct = 0
     evaluated_samples = 0
     with torch.inference_mode():
-        for images, labels in loader:
-            predictions = model(images.to(device)).argmax(dim=1).cpu()
-            correct += int((predictions == labels).sum().item())
-            evaluated_samples += int(labels.numel())
+        for repetition in range(repetitions):
+            for images, labels in loader:
+                predictions = model(images.to(device)).argmax(dim=1).cpu()
+                if repetition == 0:
+                    correct += int((predictions == labels).sum().item())
+                    evaluated_samples += int(labels.numel())
     synchronize_device(device)
     duration = time.perf_counter() - start
     if not math.isfinite(duration) or duration <= 0:
@@ -176,6 +185,7 @@ def run_image_classification_max(
         )
 
     top1_accuracy = correct / evaluated_samples
+    total_samples = evaluated_samples * repetitions
     target = float(workload.quality_value or 0.85)
     target_met = top1_accuracy >= target
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -220,6 +230,7 @@ def run_image_classification_max(
         "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
             "batch_size": batch_size,
+            "repetitions": repetitions,
             "evaluation_samples": 200,
             "input_dtype": "float32",
             "input_range": "0..255",
@@ -232,8 +243,8 @@ def run_image_classification_max(
             "evaluation_samples": int(evaluated_samples),
             "duration_seconds": float(duration),
             "inference_and_evaluation_seconds": float(duration),
-            "samples": int(evaluated_samples),
-            "samples_per_second": float(evaluated_samples / duration),
+            "samples": int(total_samples),
+            "samples_per_second": float(total_samples / duration),
             "n_params": int(n_params),
         },
         "quality": {

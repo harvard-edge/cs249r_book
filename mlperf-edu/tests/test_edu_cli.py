@@ -1152,7 +1152,9 @@ def test_image_classification_max_run_writes_verifiable_artifacts(tmp_path):
     assert report["quality"]["override"] is False
     assert report["quality"]["target_met"] is True
     assert report["metrics"]["top1_accuracy"] == pytest.approx(0.87)
-    assert report["metrics"]["samples"] == 200
+    assert report["metrics"]["evaluation_samples"] == 200
+    assert report["metrics"]["samples"] == 10_000
+    assert report["config"]["repetitions"] == 50
     assert report["metrics"]["correct"] == 174
     assert Path(report["artifacts"]["weights"]).name == "pretrainedResnet.tflite"
     assert (

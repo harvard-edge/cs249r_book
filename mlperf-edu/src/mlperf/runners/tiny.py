@@ -110,10 +110,12 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
     device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
     batch_size = int(os.environ.get("MLPERF_EDU_KEYWORD_SPOTTING_MAX_BATCH_SIZE", "64"))
     repetitions = int(
-        os.environ.get("MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS", "5")
+        os.environ.get("MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS", "200")
     )
     if batch_size < 1 or repetitions < 1:
-        raise ValueError("keyword spotting requires positive batch size and repetitions")
+        raise ValueError(
+            "keyword spotting requires positive batch size and repetitions"
+        )
 
     asset = ensure_mlperf_tiny_kws(download=True)
     paths = mlperf_tiny_kws_paths()
@@ -142,7 +144,9 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
     synchronize_device(device)
     duration = time.perf_counter() - start
     if not math.isfinite(duration) or duration <= 0:
-        raise RuntimeError("keyword-spotting inference duration must be finite and positive")
+        raise RuntimeError(
+            "keyword-spotting inference duration must be finite and positive"
+        )
 
     predictions = torch.cat(outputs).argmax(dim=1)
     accuracy = float((predictions == labels).float().mean().item())
