@@ -128,11 +128,27 @@ def run_information_retrieval_max(
     at_k = 10
     dataset_metrics: dict[str, dict[str, float]] = {}
     samples_per_dataset: dict[str, int] = {}
+    samples_by_dataset = {
+        dataset_name: _load_reranking_samples(asset.root, dataset_name, rerank_k)
+        for dataset_name in DATASET_NAMES
+    }
+
+    representative = samples_by_dataset[DATASET_NAMES[0]][0]
+    warmup_pairs = [
+        [representative["query"], document]
+        for document in representative["documents"]
+    ]
+    for warmup_size in sorted({batch_size, len(warmup_pairs) % batch_size} - {0}):
+        model.predict(
+            warmup_pairs[:warmup_size],
+            batch_size=warmup_size,
+            show_progress_bar=False,
+        )
 
     synchronize_device(device)
     start = time.perf_counter()
     for dataset_name in DATASET_NAMES:
-        samples = _load_reranking_samples(asset.root, dataset_name, rerank_k)
+        samples = samples_by_dataset[dataset_name]
         evaluator = CrossEncoderRerankingEvaluator(
             samples=samples,
             at_k=at_k,

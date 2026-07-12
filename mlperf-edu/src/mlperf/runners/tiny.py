@@ -128,7 +128,8 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
     labels = labels.to(device)
 
     with torch.inference_mode():
-        model(inputs[: min(batch_size, len(inputs))])
+        for warmup_size in sorted({batch_size, len(inputs) % batch_size} - {0}):
+            model(inputs[:warmup_size])
     synchronize_device(device)
     outputs: list[torch.Tensor] = []
     start = time.perf_counter()
@@ -137,14 +138,14 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
             for start_index in range(0, len(inputs), batch_size):
                 logits = model(inputs[start_index : start_index + batch_size])
                 if repetition == 0:
-                    outputs.append(logits.detach().cpu())
+                    outputs.append(logits.detach())
     synchronize_device(device)
     duration = time.perf_counter() - start
     if not math.isfinite(duration) or duration <= 0:
         raise RuntimeError("keyword-spotting inference duration must be finite and positive")
 
     predictions = torch.cat(outputs).argmax(dim=1)
-    accuracy = float((predictions == labels.cpu()).float().mean().item())
+    accuracy = float((predictions == labels).float().mean().item())
     target = float(workload.quality_value or 0.90)
     target_met = accuracy >= target
     n_params = sum(parameter.numel() for parameter in model.parameters())

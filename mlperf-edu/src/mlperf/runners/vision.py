@@ -149,9 +149,14 @@ def run_image_classification_max(
     model = load_mlperf_tiny_float_resnet(evaluation_paths["float_model"]).to(device)
     n_params = sum(parameter.numel() for parameter in model.parameters())
 
-    first_images, _ = next(iter(loader))
     with torch.inference_mode():
-        model(first_images.to(device))
+        warmed_batch_sizes: set[int] = set()
+        for images, _ in loader:
+            current_batch_size = int(images.shape[0])
+            if current_batch_size in warmed_batch_sizes:
+                continue
+            model(images.to(device))
+            warmed_batch_sizes.add(current_batch_size)
     synchronize_device(device)
     start = time.perf_counter()
     correct = 0

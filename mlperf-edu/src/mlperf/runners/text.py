@@ -155,9 +155,10 @@ def run_text_classification_max(
     encoded = {name: value.to(device) for name, value in encoded.items()}
     labels_tensor = torch.tensor(labels, dtype=torch.long)
 
-    warmup = {name: value[: min(batch_size, len(sentences))] for name, value in encoded.items()}
     with torch.inference_mode():
-        _ = model(**warmup).logits
+        for warmup_size in sorted({batch_size, len(sentences) % batch_size} - {0}):
+            warmup = {name: value[:warmup_size] for name, value in encoded.items()}
+            model(**warmup).logits
     synchronize_device(device)
     first_outputs: list[torch.Tensor] = []
     start = time.perf_counter()
@@ -170,13 +171,13 @@ def run_text_classification_max(
                 }
                 logits = model(**batch).logits
                 if repetition == 0:
-                    first_outputs.append(logits.detach().cpu())
+                    first_outputs.append(logits.detach())
     synchronize_device(device)
     duration = time.perf_counter() - start
     if not math.isfinite(duration) or duration <= 0:
         raise RuntimeError("text-classification inference duration must be finite and positive")
 
-    predictions = torch.cat(first_outputs).argmax(dim=1)
+    predictions = torch.cat(first_outputs).argmax(dim=1).cpu()
     accuracy = float((predictions == labels_tensor).float().mean().item())
     target = float(workload.quality_value or 0.9105504587155964)
     target_met = accuracy + float(workload.quality_tolerance or 0.0) >= target
