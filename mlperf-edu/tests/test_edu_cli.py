@@ -506,16 +506,16 @@ def test_validate_max_dry_run_lists_product_max_suites(tmp_path):
     assert not any(tmp_path.iterdir())
 
 
-def test_validation_seed_environment_uses_reference_seed_for_max(monkeypatch):
+def test_validation_seed_environment_preserves_per_workload_defaults(monkeypatch):
     for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SLM_SEED"):
         monkeypatch.delenv(name, raising=False)
 
     selection = edu_cli.validation_seed_environment("max")
 
     assert selection == {
-        "seed": 0,
-        "source": "reference_protocol_default",
-        "set_max_seed": True,
+        "seed": None,
+        "source": "per_workload_canonical_default",
+        "set_max_seed": False,
     }
 
 

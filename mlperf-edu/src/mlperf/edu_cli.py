@@ -3901,7 +3901,7 @@ def resolve_validation_preset(args: argparse.Namespace) -> str:
 
 
 def validation_seed_environment(profile: str) -> dict[str, Any]:
-    """Choose and record the deterministic seed used by a validation item."""
+    """Preserve explicit overrides or let each workload use its canonical seed."""
     for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SLM_SEED"):
         value = os.environ.get(name)
         if value is not None:
@@ -3910,15 +3910,9 @@ def validation_seed_environment(profile: str) -> dict[str, Any]:
                 "source": name,
                 "set_max_seed": False,
             }
-    if profile == "max":
-        return {
-            "seed": 0,
-            "source": "reference_protocol_default",
-            "set_max_seed": True,
-        }
     return {
-        "seed": 42,
-        "source": "runner_default",
+        "seed": None,
+        "source": "per_workload_canonical_default",
         "set_max_seed": False,
     }
 

@@ -253,9 +253,29 @@ jobs:
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
         run: uv sync --locked --extra dev
 
-      - name: Execute Smoke Validation
+      - name: Execute Smoke and Complete Min Coverage
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
-        run: uv run mlperf validate smoke --output-dir submissions/ci-smoke
+        run: |
+          set -euo pipefail
+          uv run mlperf validate smoke --output-dir submissions/ci-smoke
+          uv run mlperf validate coverage --output-dir submissions/ci-coverage
+          output_dir="submissions/ci-coverage/min-all"
+          for phase in full prefill decode; do
+            uv run mlperf run \
+              --workload causal-language-modeling \
+              --mode inference \
+              --phase "$phase" \
+              --profile min \
+              --output-dir "$output_dir"
+          done
+          uv run mlperf grade "$output_dir" --output "$output_dir/ten-path-grade.json"
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          grade = json.loads(Path("submissions/ci-coverage/min-all/ten-path-grade.json").read_text())
+          assert grade["passed"] == 10 and grade["failed"] == 0, grade
+          PY
 
       - name: Execute All Lab Smoke Paths
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
@@ -269,7 +289,9 @@ jobs:
         if: always()
         with:
           name: mlperf-edu-smoke-reports
-          path: ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-smoke/**
+          path: |
+            ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-smoke/**
+            ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-coverage/**
           if-no-files-found: error
           retention-days: 30
 

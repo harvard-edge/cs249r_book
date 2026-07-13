@@ -8,7 +8,7 @@ on:
   workflow_dispatch:
     inputs:
       preset:
-        description: 'Execute every max path, or every min and max path'
+        description: 'Execute every canonical path and all causal inference phases'
         type: choice
         options:
           - release
@@ -60,6 +60,7 @@ jobs:
         run: |
           uv run pytest
           uv run python tools/export_flat_registry.py --check
+          uv run python tools/check_selection_ledger.py
           uv run python tools/sync_verified_baselines.py --check
           uv run python tools/check_taxonomy.py
           uv run python tools/check_reference_claims.py --check
@@ -84,6 +85,18 @@ jobs:
           fi
           echo "Executing actual ${preset} validation into ${output_dir}"
           uv run mlperf "${args[@]}"
+
+          max_output_dir="$output_dir/max-all"
+          for phase in full prefill decode; do
+            uv run mlperf run \
+              --workload causal-language-modeling \
+              --mode inference \
+              --phase "$phase" \
+              --profile max \
+              --output-dir "$max_output_dir"
+          done
+          uv run mlperf grade "$max_output_dir" \
+            --output "$max_output_dir/ten-case-grade.json"
 
       - name: Record the Strict Public-Release Audit
         if: always()
@@ -121,14 +134,17 @@ jobs:
             -name "mlperf_validate_${EXECUTED_PRESET}_*.json" \
             -type f -print -quit)
           test -n "$summary"
-          python3 - "$summary" "$EXECUTED_PRESET" "$registry_count" <<'PY'
+          python3 - "$summary" "$EXECUTED_PRESET" "$registry_count" "$output_dir/max-all" <<'PY'
           import json
           import pathlib
           import sys
 
+          from tools.import_reference_evidence import case_id, expected_cases
+
           report = json.loads(pathlib.Path(sys.argv[1]).read_text())
           expected_preset = sys.argv[2]
           registry_count = int(sys.argv[3])
+          max_output_dir = pathlib.Path(sys.argv[4])
           profile_count = 2 if expected_preset == "release" else 1
           if report.get("preset") != expected_preset:
               raise SystemExit(f"unexpected preset: {report.get('preset')!r}")
@@ -144,6 +160,27 @@ jobs:
               raise SystemExit(f"validation recorded failures: {totals}")
           if int(totals.get("review_contract_failures", -1)) != 0:
               raise SystemExit(f"review contracts did not pass: {totals}")
+
+          expected = set(expected_cases())
+          actual = set()
+          for path in max_output_dir.glob("*_max_report.json"):
+              payload = json.loads(path.read_text())
+              if payload.get("status") != "passed":
+                  raise SystemExit(f"case report did not pass: {path}")
+              actual.add(case_id(
+                  str(payload.get("workload")),
+                  "max",
+                  str(payload.get("mode")),
+                  payload.get("phase"),
+              ))
+          if actual != expected:
+              raise SystemExit(
+                  f"ten-case execution closure mismatch; "
+                  f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+              )
+          grade = json.loads((max_output_dir / "ten-case-grade.json").read_text())
+          if int(grade.get("passed", -1)) != 10 or int(grade.get("failed", -1)) != 0:
+              raise SystemExit(f"ten-case grading did not pass: {grade}")
           PY
 
       - name: Upload Full Validation Evidence
