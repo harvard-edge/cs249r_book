@@ -4,9 +4,6 @@ This directory is the authoring source for the native workload registry.
 Edit the workload YAML files here first, then refresh the flat compatibility
 mirrors with `tools/export_flat_registry.py`.
 
-`tools/export_registry_layout.py` remains only as a migration helper for old
-flat registries. It is not part of the normal authoring workflow.
-
 Taxonomy claims fail closed. An axis remains `unmeasured` until its committed
 measurement sidecar and SHA-256 digest pass `tools/check_taxonomy.py`.
 

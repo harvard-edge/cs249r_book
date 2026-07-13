@@ -309,7 +309,7 @@ def section_how_to_run(w: Workload) -> str:
     shared_checkpoint = w.raw.get("shared_checkpoint")
     max_execution = w.raw.get("max_execution") or {}
     implemented_modes = set(w.raw.get("implemented_modes") or [])
-    inference_phases = ((w.raw.get("phases") or {}).get("inference") or [])
+    inference_phases = (w.raw.get("phases") or {}).get("inference") or []
     consolidated_training_inference = {"training", "inference"}.issubset(
         implemented_modes
     )
@@ -342,9 +342,7 @@ def section_how_to_run(w: Workload) -> str:
         )
     else:
         if max_execution.get("fetched_assets_used") is False:
-            lines.append(
-                "# no asset fetch is required; current max uses its declared systems-only micro-shard"
-            )
+            lines.append("# no asset fetch is required by this workload contract")
         else:
             lines.append("# one-time asset preparation")
             lines.append(f"{CHECKOUT_COMMAND} fetch {target} --profile max")
@@ -852,14 +850,13 @@ def datasets_page(workloads: dict[str, Workload]) -> str:
         "The catalog is generated from the workload registry, "
         f"[`datasets.yaml`]({GITHUB_BLOB}/datasets.yaml), and the structured "
         "public-asset dossiers used by the harness. Every registry dataset is "
-        "listed. Entries that remain systems-only or need release review are "
-        "marked explicitly.",
+        "listed, and unresolved release decisions are marked explicitly.",
         "",
         "::: {.callout-note}",
         "**Release boundary.** Dataset status covers the named asset only. The "
-        "MLPerf EDU component license, package-index publication, and MLCommons "
-        "review remain separate release gates. MovieLens 100K is fetch-only and "
-        "requires an explicit policy decision before public score-bearing use.",
+        "MLPerf EDU component license, package-index publication, dataset rights, "
+        "and MLCommons review remain separate release gates. Fetch-only status "
+        "does not authorize redistribution.",
         ":::",
         "",
         "| **Dataset** | **Purpose** | **Size (MB)** | **Source** | **License status** | **Release status** | **Used by** |",

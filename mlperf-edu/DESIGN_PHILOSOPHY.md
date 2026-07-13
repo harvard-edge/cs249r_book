@@ -1,117 +1,114 @@
 # MLPerf EDU Design Philosophy
 
-MLPerf EDU explores whether disciplined benchmark methodology can fit inside a
-course laptop and remain useful for research review. The project draws
-inspiration from SPEC-style reproducibility and MLPerf-style workload, quality,
-scenario, and artifact discipline. It is an independent preview, not an
-official MLCommons benchmark.
+MLPerf EDU asks whether mature benchmark discipline can fit inside a machine
+learning systems course and remain useful for single-node research. It borrows
+the reproducibility and comparability posture of SPEC and MLPerf while keeping
+the execution boundary practical on a laptop. It is an independent preview,
+not an official MLCommons benchmark.
 
-## Inspectable Where It Teaches
+## Curate Rather Than Invent
 
-Many core teaching models are compact PyTorch implementations kept in this
-repository. Students can inspect the model, data loop, checkpoint path, and
-measurement code. The SLM suite deliberately uses pinned off-the-shelf Hugging
-Face models because model download, serving, quantization, batching, and task
-quality are the systems lessons there.
+The suite begins with an authoritative upstream workload. The upstream source
+must supply the task, model or reference implementation, dataset and split,
+evaluator, quality contract, and credible baseline. MLPerf EDU adds only the
+PyTorch execution adapter, laptop measurement protocol, quality gate,
+provenance, and report surface needed to run that contract locally.
 
-White-box does not mean that every dependency is pure Python or that every
-runner is fewer than a fixed number of lines. PyTorch, torchvision,
-Transformers, and platform kernels remain real dependencies. Reports disclose
-the backend and software environment instead of pretending those layers do not
-exist.
+A missing upstream component is not an invitation to create a convenient
+substitute. The task is deferred or rejected. This policy is why v0.1 contains
+seven workloads rather than a large coverage matrix, and why MiniGo is the RL
+reference without becoming a v0.1 workload.
 
-## Quality Before Speed
+## Design Backward From Classroom Use
 
-A fast broken model is not a baseline. Score-bearing candidates must pass a
-real-data task metric. Performance-bearing candidates must complete meaningful
-work and preserve checkpoint or model quality. Synthetic and micro-sharded
-paths remain useful for setup and systems instruction, but they are labeled
-systems-only.
+A student should be able to install the project, inspect a workload, fetch its
+pinned assets, execute a functional `min` run, perform a canonical `max` run,
+and explain the resulting quality, timing, configuration, and provenance. An
+instructor should be able to preflight the same path and grade the resulting
+artifacts. A researcher should be able to repeat a controlled single-node
+experiment without changing workload identity.
 
-The current quality boundary is concrete. Five training candidates use
-five-seed target protocols. NanoGPT inference inherits quality from a hashed
-training checkpoint. The SmolLM2 baseline uses a pinned revision and a bundled
-continuation-perplexity fixture. The dynamic-int8 SLM path stays systems-only
-because its current calibration fails quality parity.
+The seven-workload portfolio deliberately spans dense convolution, compact
+audio convolution, autoregressive Transformer training and inference, encoder
+classification, cross-encoder reranking, sparse graph message passing, and
+long-horizon forecasting. Each workload earns its place through distinct
+learning value and distinct systems behavior.
 
-## Reports Are the Interface
+## Keep Identity Stable
 
-Console output is transient. Every canonical run writes structured JSON, a
-human-readable HTML view, a CSV view, and a provenance manifest. The report
-contains the workload identity, profile, data mode, seed, metrics, target
-status, hardware and software fingerprints, asset dossiers, and artifact
-paths.
+A workload ID names the learning task. Training and inference are modes. Full,
+prefill, and decode are inference phases. Precision, quantization, compilation,
+batching, context length, scheduling, and other optimization choices are
+configurations recorded in reports. They do not create new workload IDs.
 
-Students, instructors, and artifact reviewers should reason from these files.
-Tutorial 01 follows this rule by invoking the public command, reading the JSON,
-and verifying the paired manifest.
+The three profiles express execution intent without changing the workload.
+`min` is the fast functional path, `max` is the canonical classroom comparison,
+and `pro` is the extended single-node research envelope.
 
-## Provenance Without Overclaiming
+## Gate Performance With Quality
 
-The `.provd.json` manifest binds available source, dataset, weights, seed,
-hardware, optional sidecar, and exact report evidence with SHA-256. Its
-integrity digest is unauthenticated. It detects changes but does not prove who
-produced the artifact.
+A fast invalid model is not a benchmark result. Every score-bearing case must
+pass its inherited task-quality contract before its timing is interpreted.
+Every performance-bearing phase must pass a functional contract and inherit
+the required model lineage. No median or aggregate may hide a failed
+individual run.
 
-Portable packages use relative paths, index every included file by digest and
-byte size, and verify again after clean extraction. These checks make review
-easier. They do not replace independent execution, measurement governance, or
-rights review.
+Canonical reference evidence uses five fresh processes at the canonical seed.
+Every run must pass, and the primary timing coefficient of variation must not
+exceed 5%. The evidence index records the complete case identity, source
+revision, raw values, aggregate, decision, and content digest.
 
-## Training and Inference Stay Connected
+## Treat Reports as the Interface
 
-Checkpoint-backed NanoGPT prefill and decode require the training checkpoint in
-the selected output path or through an explicit environment variable. Reports
-record the checkpoint digest and quality dependency. This creates an auditable
-training-to-serving chain rather than timing random weights.
+Console output is transient. A registered run writes structured JSON, a flat
+CSV view, a human-readable HTML report, and a provenance manifest. The report
+keeps workload, mode, phase, profile, model, data, quality, device, timing, and
+configuration together.
 
-External-model serving uses a different provenance shape. The registry pins a
-model revision, and the report records the model dossier, fixture digest,
-quality result, and timing protocol.
+The provenance manifest binds the report and retained inputs with SHA-256. It
+detects changes but does not authenticate the producer. Portable packages use
+relative paths and verify every included byte again after clean extraction.
+Independent reproduction remains necessary.
 
-## Measurement Must Be Repeatable
+## Preserve Training Lineage
 
-Candidate inference rows separate warmup from measured work, synchronize the
-active device, retain a defined sample count, and report median, p90, and p99
-latencies. Score-bearing targets run through five fresh processes with explicit
-seeds and create-once evidence packets.
+The causal-language-modeling workload keeps training, full inference, prefill,
+and decode under one identity. Canonical inference requires a checkpoint from a
+passing canonical training run. Reports record the checkpoint, source report,
+source manifest, and package digests so a serving result cannot silently use
+random or unrelated weights.
 
-Optional power data is coarse platform telemetry. Optional roofline evidence
-must come from an existing, digest-checked sidecar before it can support a
-claim. Missing measurements are labeled `unmeasured` rather than inferred from
-architecture names.
+Other inference workloads use pinned authoritative checkpoints. Their reports
+record the exact revision, model files, dataset files, and evaluator contract.
 
-## The Harness Is Fixed for Canonical Runs
+## Measure the Declared Boundary
 
-Canonical results use registered runners. The repository contains a
-`SUT_Interface` and Lab 2 uses it to compare naive and KV-cache decode with
-token parity. The product CLI does not currently accept an arbitrary `--sut`
-plugin file. A general plugin-loading protocol is roadmap work and must not be
-described as shipped.
+Asset fetching, model construction, and untimed warmup stay outside the
+canonical measured region unless an upstream contract explicitly includes
+them. Accelerator measurements synchronize at each boundary. Reference runs
+record the power source and power mode, and an intervening sleep or power-state
+change invalidates an attempt.
 
-Likewise, the implemented asset command is `mlperf fetch`. There is no
-`mlperf hydrate` command. Fetching prepares datasets or pinned model assets and
-keeps network work outside the measured run where supported.
+Optional power data is coarse platform telemetry. Optional roofline claims
+need a measured and digest-checked sidecar. Missing information remains
+`unmeasured` instead of being inferred from an architecture name.
 
-## Laptop-Scale Is an Operational Constraint
+## Keep the Scale Honest
 
-The core smoke paths and all lab smokes run on CPU without a network after
-dependencies are installed. Candidate `max` runs may download datasets or the
-pinned 135M-parameter SLM and can take materially longer. The release process
-therefore records measured runtimes instead of promising a universal time
-budget.
+The standard path targets CPU and laptop accelerators. The suite supports
+controlled studies of processors, memory systems, runtimes, compilers, and
+model execution. It does not claim to represent distributed training,
+datacenter serving, cluster scheduling, or fleet economics.
 
-Laptop-scale means no cluster is required for the standard path. It does not
-mean zero installation, zero downloads, identical runtime on every notebook,
-or calibrated energy data on unsupported hardware.
+Local execution does not mean zero downloads or identical runtimes on every
+notebook. Canonical workloads may fetch substantial assets and take tens of
+minutes. The project publishes observed hardware and runtime evidence instead
+of promising a universal duration.
 
-## Governance Is Part of Correctness
+## Separate Technical Readiness From Governance
 
-The repository separates implementation, validation evidence, and external
-approval. A green local run cannot close a dataset-rights question. A complete
-artifact cannot grant MLCommons endorsement. A registry target cannot become a
-canonical baseline without retained multi-seed evidence and review.
-
-The design succeeds when a student can understand the measured system and a
-reviewer can reproduce, challenge, and reject a result using the same visible
-contract.
+A green run cannot settle dataset rights, grant MLCommons endorsement, or
+authenticate a result producer. Technical release checks and external review
+decisions therefore remain separate. The project is ready for review when the
+seven workloads and ten evidence cases are internally complete and every open
+external decision is stated plainly.

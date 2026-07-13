@@ -22,11 +22,112 @@ import time
 from typing import Any
 
 import torch
+import torch.nn.functional as F
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 SRC_ROOT = PROJECT_ROOT / "src"
 if str(SRC_ROOT) not in sys.path:
     sys.path.insert(0, str(SRC_ROOT))
+
+
+class Expert(torch.nn.Module):
+    """Two-layer feed-forward expert used by the standalone lab."""
+
+    def __init__(self, model_width: int):
+        super().__init__()
+        self.input = torch.nn.Linear(model_width, model_width * 4, bias=False)
+        self.output = torch.nn.Linear(model_width * 4, model_width, bias=False)
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        return self.output(F.silu(self.input(inputs)))
+
+
+class SparseMoERouter(torch.nn.Module):
+    """Route each token through the selected feed-forward experts."""
+
+    def __init__(self, model_width: int, *, experts: int = 8, top_k: int = 2):
+        super().__init__()
+        self.top_k = top_k
+        self.gate = torch.nn.Linear(model_width, experts, bias=False)
+        self.experts = torch.nn.ModuleList(
+            [Expert(model_width) for _ in range(experts)]
+        )
+
+    def forward(self, inputs: torch.Tensor) -> torch.Tensor:
+        batch, tokens, width = inputs.shape
+        flattened = inputs.reshape(-1, width)
+        weights = F.softmax(self.gate(flattened), dim=1)
+        weights, selected = torch.topk(weights, self.top_k, dim=-1)
+        weights = weights / weights.sum(dim=-1, keepdim=True)
+        output = torch.zeros_like(flattened)
+        for index, expert in enumerate(self.experts):
+            rows, selected_rank = torch.where(selected == index)
+            if rows.numel():
+                output[rows] += (
+                    expert(flattened[rows]) * weights[rows, selected_rank, None]
+                )
+        return output.reshape(batch, tokens, width)
+
+
+class SparseLanguageModel(torch.nn.Module):
+    """Small decoder-style model with sparse feed-forward layers."""
+
+    def __init__(
+        self,
+        *,
+        vocab_size: int,
+        model_width: int,
+        heads: int,
+        layers: int,
+        max_sequence_length: int,
+    ):
+        super().__init__()
+        self.token_embedding = torch.nn.Embedding(vocab_size, model_width)
+        self.position_embedding = torch.nn.Embedding(max_sequence_length, model_width)
+        self.layers = torch.nn.ModuleList(
+            [
+                torch.nn.ModuleDict(
+                    {
+                        "attention_norm": torch.nn.LayerNorm(model_width),
+                        "attention": torch.nn.MultiheadAttention(
+                            model_width, heads, batch_first=True
+                        ),
+                        "moe_norm": torch.nn.LayerNorm(model_width),
+                        "moe": SparseMoERouter(model_width),
+                    }
+                )
+                for _ in range(layers)
+            ]
+        )
+        self.final_norm = torch.nn.LayerNorm(model_width)
+        self.output = torch.nn.Linear(model_width, vocab_size, bias=False)
+
+    def forward(
+        self, tokens: torch.Tensor, targets: torch.Tensor | None = None
+    ) -> tuple[torch.Tensor, torch.Tensor | None]:
+        positions = torch.arange(tokens.shape[1], device=tokens.device)
+        hidden = self.token_embedding(tokens) + self.position_embedding(positions)
+        causal_mask = torch.nn.Transformer.generate_square_subsequent_mask(
+            tokens.shape[1], device=tokens.device
+        )
+        for layer in self.layers:
+            normalized = layer["attention_norm"](hidden)
+            attention, _ = layer["attention"](
+                normalized,
+                normalized,
+                normalized,
+                attn_mask=causal_mask,
+                need_weights=False,
+            )
+            hidden = hidden + attention
+            hidden = hidden + layer["moe"](layer["moe_norm"](hidden))
+        logits = self.output(self.final_norm(hidden))
+        loss = None
+        if targets is not None:
+            loss = F.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]), targets.reshape(-1)
+            )
+        return logits, loss
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -116,34 +217,19 @@ def synthetic_batches(
 def real_batches(
     *, batch_size: int, sequence_length: int, count: int
 ) -> list[tuple[torch.Tensor, torch.Tensor]]:
-    from mlperf.reference import dataset_factory
+    from mlperf.assets import ensure_tinyshakespeare, tinyshakespeare_paths
 
-    # Both architectures use the same TinyShakespeare token contract. The
-    # corrected factory keyword is batch_size, not the removed bs alias.
-    # Point the legacy reference factory at this checkout's documented dataset
-    # root so the lab does not depend on the caller's working directory.
-    dataset_factory.DATASET_ROOT = str(PROJECT_ROOT / "datasets")
-    if sequence_length == 64:
-        train_loader, _ = dataset_factory.get_dataloaders(
-            "causal-language-modeling", batch_size=batch_size
+    ensure_tinyshakespeare(download=True)
+    data = tinyshakespeare_paths()["train"].read_bytes()
+    tokens = torch.tensor(list(data), dtype=torch.long)
+    window = sequence_length + 1
+    required = count * batch_size * window
+    if tokens.numel() < required:
+        raise RuntimeError(
+            f"Tiny Shakespeare has {tokens.numel()} bytes but the lab needs {required}"
         )
-    else:
-        train_loader, _ = dataset_factory.get_language_dataloaders(
-            batch_size=batch_size, seq_len=sequence_length
-        )
-    batches: list[tuple[torch.Tensor, torch.Tensor]] = []
-    for inputs, targets in train_loader:
-        batches.append(
-            (
-                inputs[:, :sequence_length].contiguous(),
-                targets[:, :sequence_length].contiguous(),
-            )
-        )
-        if len(batches) >= count:
-            break
-    if not batches:
-        raise RuntimeError("TinyShakespeare loader produced no training batches")
-    return batches
+    chunks = tokens[:required].reshape(count, batch_size, window)
+    return [(chunk[:, :-1].contiguous(), chunk[:, 1:].contiguous()) for chunk in chunks]
 
 
 def train_model(
@@ -261,7 +347,6 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         )
     )
 
-    from mlperf.reference.cloud.nano_moe import NanoMoEWhiteBox
     from mlperf.reference.cloud.nanogpt_train import NanoGPTWhiteBox
 
     dense = NanoGPTWhiteBox(
@@ -271,11 +356,12 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
         n_layer=args.layers,
         max_seq_len=args.sequence_length,
     ).to(device)
-    sparse = NanoMoEWhiteBox(
+    sparse = SparseLanguageModel(
         vocab_size=128,
-        d_model=args.embedding_dim,
-        n_heads=args.heads,
-        n_layers=args.layers,
+        model_width=args.embedding_dim,
+        heads=args.heads,
+        layers=args.layers,
+        max_sequence_length=args.sequence_length,
     ).to(device)
     for layer in sparse.layers:
         layer["moe"].top_k = args.top_k

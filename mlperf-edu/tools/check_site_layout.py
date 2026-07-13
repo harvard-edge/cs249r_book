@@ -18,7 +18,7 @@ VIEWPORTS = ((1440, 1000, "desktop"), (390, 844, "narrow"))
 SCREENSHOT_PAGES = (
     "index.html",
     "getting-started.html",
-    "benchmarks/language/nanogpt-train.html",
+    "benchmarks/language/causal-language-modeling.html",
     "reference/cli.html",
 )
 

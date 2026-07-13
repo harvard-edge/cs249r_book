@@ -69,7 +69,6 @@ The native registry under `registry/` is the authoring source. The root
 compatibility mirrors. Keep them synchronized with these commands.
 
 ```bash
-uv run python tools/export_registry_layout.py --check
 uv run python tools/export_flat_registry.py --check
 ```
 
@@ -131,7 +130,6 @@ minimum install and packaging subset follows.
 set -euo pipefail
 uv sync --locked --extra dev
 uv run pytest
-uv run python tools/export_registry_layout.py --check
 uv run python tools/export_flat_registry.py --check
 uv run python tools/sync_verified_baselines.py --check
 uv run python tools/check_taxonomy.py

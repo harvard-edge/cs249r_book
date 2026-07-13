@@ -54,7 +54,7 @@ their notebooks, instructor notes, timing checks, and smoke tests are committed.
 
 ## Offline Behavior
 
-Tutorial 01 uses a synthetic deterministic micro-shard and needs no dataset
+Tutorial 01 uses a deterministic synthetic smoke fixture and needs no dataset
 download. After Python dependencies are installed, its benchmark and
 verification steps run without network access. A distributable wheel can be
 built ahead of a class with `uv build`, but a complete offline teaching bundle

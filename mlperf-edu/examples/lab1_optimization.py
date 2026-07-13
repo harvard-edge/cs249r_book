@@ -348,12 +348,15 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     torch.manual_seed(args.seed)
     device = choose_device(args.device, smoke=args.smoke)
 
-    from mlperf.reference.edge.resnet_train import ResNet18WhiteBox
+    from torchvision.models import resnet18
 
     train_loader, validation_loader, dataset = load_data(
         config=config, smoke=args.smoke, seed=args.seed
     )
-    model = ResNet18WhiteBox(num_classes=10).to(device)
+    model = resnet18(weights=None, num_classes=10)
+    model.conv1 = torch.nn.Conv2d(3, 64, kernel_size=3, stride=1, padding=1, bias=False)
+    model.maxpool = torch.nn.Identity()
+    model = model.to(device)
     optimizer = torch.optim.SGD(
         model.parameters(),
         lr=config["learning_rate"],
