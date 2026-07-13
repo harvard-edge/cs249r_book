@@ -177,7 +177,7 @@ def build_parser() -> argparse.ArgumentParser:
     doctor_selection.add_argument(
         "--suite",
         choices=PRODUCT_SUITES,
-        help="Check one workload domain, such as slm or vision",
+        help="Check one workload domain, such as language or vision",
     )
     doctor_selection.add_argument(
         "--workload",
@@ -203,7 +203,7 @@ def build_parser() -> argparse.ArgumentParser:
     init_selection.add_argument(
         "--suite",
         choices=PRODUCT_SUITES,
-        help="Prepare one workload domain, such as slm or vision",
+        help="Prepare one workload domain, such as language or vision",
     )
     init_selection.add_argument(
         "--workload",
@@ -338,7 +338,7 @@ def build_parser() -> argparse.ArgumentParser:
     audit.add_argument(
         "--suite",
         choices=PRODUCT_SUITES,
-        help="Audit one workload domain, such as slm or vision",
+        help="Audit one workload domain, such as language or vision",
     )
     audit.add_argument(
         "--workload",
@@ -370,7 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
     list_parser.add_argument(
         "--suite",
         choices=PRODUCT_SUITES,
-        help="Filter by workload domain, such as slm or vision",
+        help="Filter by workload domain, such as language or vision",
     )
     list_parser.add_argument("--profile", choices=PROFILE_CHOICES, default=None)
     list_parser.add_argument(
@@ -405,7 +405,7 @@ def build_parser() -> argparse.ArgumentParser:
     info_group.add_argument(
         "--suite",
         choices=PRODUCT_SUITES,
-        help="Show one workload domain, such as slm or vision",
+        help="Show one workload domain, such as language or vision",
     )
     info_group.add_argument("--profile", choices=PROFILE_CHOICES)
     info_group.add_argument(
@@ -525,18 +525,18 @@ def add_selection(parser: argparse.ArgumentParser) -> None:
         "--suite",
         choices=PRODUCT_SUITES,
         default=None,
-        help="Run one workload domain, such as slm or vision",
+        help="Select one workload domain, such as language or vision",
     )
     group.add_argument(
         "--workload",
         default=None,
-        help="Run one workload id or canonical workload family",
+        help="Select one workload id or canonical workload family",
     )
     group.add_argument(
         "--collection",
         choices=WORKLOAD_COLLECTIONS,
         default=None,
-        help="Run an explicit workload collection",
+        help="Select an explicit workload collection",
     )
 
 
