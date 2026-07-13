@@ -7,7 +7,7 @@ target below comes from an authoritative upstream result or rule. None was
 invented to make a local implementation pass.
 
 The evidence campaign is bound to clean source revision
-`9dd6156bef95a50c21f0c47f8f65a3f5dac7296e`. Exact five-run values, evidence
+`5bba8def62e3944901a9ce0ab0725ed32bf4d3ad`. Exact five-run values, evidence
 IDs, and SHA-256 digests are generated from `reference_results/index.json`.
 This document reviews the target basis and acceptance logic rather than
 duplicating mutable result tables.

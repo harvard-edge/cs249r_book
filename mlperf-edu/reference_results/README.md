@@ -13,7 +13,7 @@ to its case ID and digest. `source_lock.json` binds the measurement-bearing
 source and normalized canonical contracts.
 
 The v0.1 evidence campaign is bound to clean source revision
-`9dd6156bef95a50c21f0c47f8f65a3f5dac7296e`. The evidence source necessarily
+`5bba8def62e3944901a9ce0ab0725ed32bf4d3ad`. The evidence source necessarily
 precedes the commit that imports the summaries. Publication-only edits may
 follow promotion, but a change to a runner, model or data preparation,
 measurement boundary, evaluator, quality target, grading rule, or report
@@ -31,7 +31,7 @@ To reproduce an import from a retained evidence root, run:
 ```bash
 uv run python tools/import_reference_evidence.py \
   --evidence-root /path/to/promotion-campaign \
-  --source-git-sha 9dd6156bef95a50c21f0c47f8f65a3f5dac7296e
+  --source-git-sha 5bba8def62e3944901a9ce0ab0725ed32bf4d3ad
 ```
 
 The importer requires exactly one accepted summary for every expected case. It
