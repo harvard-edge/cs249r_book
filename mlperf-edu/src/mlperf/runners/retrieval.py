@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import statistics
 import time
 from pathlib import Path
 from typing import Any
@@ -132,12 +131,16 @@ def run_information_retrieval_max(
         for dataset_name in DATASET_NAMES
     }
     canonical_config = workload.raw.get("canonical_max_contract", {}).get("config", {})
-    warmup_evaluations = int(canonical_config.get("warmup_evaluations", 5))
-    measurement_repetitions = int(canonical_config.get("measurement_repetitions", 3))
-    if warmup_evaluations < 1:
-        raise ValueError("warmup_evaluations must be at least one")
-    if measurement_repetitions < 1:
-        raise ValueError("measurement_repetitions must be at least one")
+    measurement_repetitions = int(canonical_config.get("measurement_repetitions", 1))
+    performance_aggregate = str(
+        canonical_config.get("performance_aggregate", "single-complete-evaluation")
+    )
+    if measurement_repetitions != 1:
+        raise ValueError("the retrieval contract requires one complete evaluation")
+    if performance_aggregate != "single-complete-evaluation":
+        raise ValueError(
+            "the retrieval contract requires the single-complete-evaluation aggregate"
+        )
 
     representative = samples_by_dataset[DATASET_NAMES[0]][0]
     warmup_pairs = [
@@ -174,26 +177,12 @@ def run_information_retrieval_max(
             samples_per_dataset[dataset_name] = len(samples)
         return dataset_metrics, samples_per_dataset
 
-    for _ in range(warmup_evaluations):
-        evaluate_once()
-        synchronize_device(device)
-
-    measured_evaluations: list[tuple[dict[str, dict[str, float]], dict[str, int]]] = []
-    repetition_seconds: list[float] = []
-    for _ in range(measurement_repetitions):
-        synchronize_device(device)
-        start = time.perf_counter()
-        measured_evaluations.append(evaluate_once())
-        synchronize_device(device)
-        repetition_seconds.append(time.perf_counter() - start)
-
-    dataset_metrics, samples_per_dataset = measured_evaluations[0]
-    if any(
-        metrics != dataset_metrics or counts != samples_per_dataset
-        for metrics, counts in measured_evaluations[1:]
-    ):
-        raise RuntimeError("unchanged retrieval evaluations produced different metrics")
-    duration = float(statistics.median(repetition_seconds))
+    synchronize_device(device)
+    start = time.perf_counter()
+    dataset_metrics, samples_per_dataset = evaluate_once()
+    synchronize_device(device)
+    duration = float(time.perf_counter() - start)
+    repetition_seconds = [duration]
 
     mean_map = float(np.mean([metrics["map"] for metrics in dataset_metrics.values()]))
     mean_mrr = float(
@@ -247,9 +236,8 @@ def run_information_retrieval_max(
             "at_k": at_k,
             "batch_size": batch_size,
             "always_rerank_positives": True,
-            "warmup_evaluations": warmup_evaluations,
             "measurement_repetitions": measurement_repetitions,
-            "performance_aggregate": "median",
+            "performance_aggregate": performance_aggregate,
         },
         "metrics": {
             "mean_ndcg_at_10": mean_ndcg,

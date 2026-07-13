@@ -315,17 +315,19 @@ def test_canonical_workloads_declare_exact_runners():
         assert workload.raw["runner"] == {"min": min_runner, "max": max_runner}
 
 
-def test_retrieval_declares_steady_state_repetition_protocol():
+def test_retrieval_declares_one_complete_evaluation_protocol():
     workload = load_registry()["information-retrieval"]
     config = workload.raw["canonical_max_contract"]["config"]
     protocol = workload.raw["measurement_protocol"]
 
-    assert config["warmup_evaluations"] == 5
-    assert config["measurement_repetitions"] == 3
-    assert config["performance_aggregate"] == "median"
+    assert "warmup_evaluations" not in config
+    assert config["measurement_repetitions"] == 1
+    assert config["performance_aggregate"] == "single-complete-evaluation"
     assert protocol["primary_metric"] == "inference_and_evaluation_seconds"
-    assert "three unchanged complete" in protocol["timing_scope"]
-    assert "five untimed complete" in " ".join(protocol["excluded_phases"])
+    assert "one complete" in protocol["timing_scope"]
+    assert "warmup for each scoring batch shape" in " ".join(
+        protocol["excluded_phases"]
+    )
 
 
 def test_causal_language_modeling_declares_modes_and_phases():
