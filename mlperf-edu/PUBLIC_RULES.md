@@ -96,7 +96,8 @@ A result disclosure must include:
 - Median, range, sample standard deviation, and timing CV
 - Dataset mode, split, versions, and artifact digests
 - Model or checkpoint identity and lineage
-- Requested device and executed backend
+- Requested device (`device_requested`), executed device (`device_executed`),
+  and executed backend
 - Hardware, operating system, Python, PyTorch, and runtime fingerprint
 - Relevant precision, compilation, batching, and scheduling configuration
 - Source Git SHA and evidence digest

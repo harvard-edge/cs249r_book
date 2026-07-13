@@ -62,8 +62,8 @@ revision, raw values, aggregate, decision, and content digest.
 
 Console output is transient. A registered run writes structured JSON, a flat
 CSV view, a human-readable HTML report, and a provenance manifest. The report
-keeps workload, mode, phase, profile, model, data, quality, device, timing, and
-configuration together.
+keeps workload, mode, phase, profile, model, data, quality, requested and
+executed devices, backend, timing, and configuration together.
 
 The provenance manifest binds the report and retained inputs with SHA-256. It
 detects changes but does not authenticate the producer. Portable packages use

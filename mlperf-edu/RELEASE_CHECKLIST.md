@@ -100,7 +100,8 @@ uv run mlperf validate coverage --output-dir /tmp/mlperf-edu-coverage
 - [ ] Clean CPU install and functional execution pass.
 - [ ] Apple Silicon MPS execution passes where supported.
 - [ ] Unsupported backends fail with an actionable message.
-- [ ] Requested and executed devices appear in reports.
+- [ ] Every report records `device_requested`, `device_executed`, and the
+  executed backend.
 - [ ] Power source and Low Power Mode are disclosed for reference campaigns.
 - [ ] Sleep or power-state changes invalidate affected attempts.
 

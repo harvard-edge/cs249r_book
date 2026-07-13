@@ -220,8 +220,8 @@ execution.
 The reference implementation targets PyTorch on CPU and Apple Silicon MPS.
 CUDA MAY be used where the same runner and quality contract apply. Backend
 availability does not imply a published baseline. Reports MUST identify the
-requested device, executed backend, software stack, processor topology,
-accelerator runtime, and performance-related environment settings.
+requested device, executed device, executed backend, software stack, processor
+topology, accelerator runtime, and performance-related environment settings.
 
 Canonical baselines are machine-specific reference results. They are not
 universal performance thresholds and MUST NOT be compared without matching
