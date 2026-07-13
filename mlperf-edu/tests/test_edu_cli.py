@@ -139,6 +139,61 @@ def test_run_workload_records_resolved_mode_and_phase(tmp_path, monkeypatch):
     assert report["phase"] == "prefill"
 
 
+def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
+    tmp_path, monkeypatch
+):
+    workload = load_registry()["image-classification"]
+    calls = []
+
+    def max_runner(_workload, output_dir):
+        calls.append(output_dir)
+        return {
+            "status": "passed",
+            "backend": "cpu",
+            "data_mode": "real",
+            "mode": "inference",
+            "metrics": {"inference_seconds": 1.0, "top1_accuracy": 0.87},
+            "artifacts": {},
+        }
+
+    def fake_load_runner(_workload, profile):
+        return max_runner if profile == "max" else None
+
+    monkeypatch.setattr(edu_cli, "load_runner", fake_load_runner)
+    monkeypatch.setenv("MLPERF_EDU_PRO_REPETITIONS", "2")
+
+    report = edu_cli.run_workload(
+        workload,
+        "pro",
+        tmp_path,
+        mode="inference",
+    )
+
+    assert len(calls) == 2
+    assert calls[0].relative_to(tmp_path).parts == (
+        ".pro_evidence",
+        "image-classification",
+        "rep1",
+    )
+    assert report["status"] == "passed"
+    assert report["profile"] == "pro"
+    assert report["mode"] == "inference"
+    assert report["pro_policy"]["repetitions"] == 2
+    assert report["metrics"]["repetitions"] == 2
+    assert report["metrics"]["inference_seconds_mean"] == 1.0
+    assert len(report["subruns"]) == 2
+    report_path = tmp_path / "image-classification_pro_report.json"
+    manifest_path = tmp_path / "image-classification_pro.provd.json"
+    assert json.loads(report_path.read_text())["status"] == "passed"
+    assert json.loads(manifest_path.read_text())["workload"] == "image-classification"
+    edu_cli.export_workload_reports([report], {workload.id: workload})
+    assert report_path.with_suffix(".html").is_file()
+    assert report_path.with_suffix(".csv").is_file()
+    grade = edu_cli.grade_manifest(manifest_path)
+    assert grade["verified"] is True
+    assert grade["passed"] is True
+
+
 def test_doctor_json_marks_bad_selection_as_failure():
     result = run_cli("doctor", "--workload", "does-not-exist", "--format", "json")
     assert result.returncode == 1
