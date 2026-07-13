@@ -24,6 +24,11 @@ duplicating mutable result tables.
 | `graph-node-classification` | Official OGB GCN recipe and `ogbn-arxiv` split | test accuracy within 0.0029 of 0.7174 | The correct OGB GCN reference is 71.74% with a published 0.29-point standard deviation. The previously quoted 72.51% belongs to a different leaderboard section and is not used. |
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at most 0.29292929292929293 | PatchTST publishes the 0.290 result. The gate divides that lower-is-better reference by the MLPerf 0.99 quality fraction, an explicit direction-aware MLPerf EDU policy inference. |
 
+The MLPerf policy input is pinned to inference-policies commit
+`c547732b539cb3a14cc5680597714c8c1df4cad0`. The referenced
+`inference_rules.adoc` bytes have SHA-256
+`4a42bec8ab869b78b41dc00e94da18113ab4fffa32aa19a8dccc814c5d12897e`.
+
 ## Performance-Bearing Phase Gates
 
 `causal-language-modeling` adds full, prefill, and decode inference. These
