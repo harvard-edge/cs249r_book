@@ -71,6 +71,8 @@ def test_sweep_environment_removes_higher_priority_seed_overrides(monkeypatch):
     monkeypatch.setenv("MLPERF_EDU_SLM_SEED", "998")
     monkeypatch.setenv("MLPERF_EDU_DEVICE", "mps")
     monkeypatch.setenv("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_EPOCHS", "1")
+    monkeypatch.setenv("MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS", "1")
+    monkeypatch.setenv("MLPERF_EDU_KEYWORD_SPOTTING_MAX_WARMUP_REPETITIONS", "1")
     monkeypatch.setenv("MLPERF_EDU_MAX_QUALITY_TARGET", "999")
     monkeypatch.setenv("MLPERF_EDU_SLM_MODEL_ID", "unapproved/model")
     monkeypatch.setenv("MLPERF_EDU_DATA_DIR", "/tmp/noncanonical-data")
@@ -80,6 +82,8 @@ def test_sweep_environment_removes_higher_priority_seed_overrides(monkeypatch):
     assert env["MLPERF_EDU_MAX_SEED"] == "3"
     assert env["MLPERF_EDU_DEVICE"] == "cpu"
     assert "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_EPOCHS" not in env
+    assert "MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS" not in env
+    assert "MLPERF_EDU_KEYWORD_SPOTTING_MAX_WARMUP_REPETITIONS" not in env
     assert "MLPERF_EDU_MAX_QUALITY_TARGET" not in env
     assert "MLPERF_EDU_SLM_MODEL_ID" not in env
     assert "MLPERF_EDU_DATA_DIR" not in env

@@ -18,6 +18,7 @@ from mlperf.registry import (
     public_contract_report,
     select_workloads,
 )
+from mlperf.runners.tiny import _canonical_config_int
 
 
 def test_profiles_are_min_max_pro():
@@ -30,6 +31,40 @@ def test_registry_loads_current_workloads():
     assert STARTER_WORKLOADS.issubset(workloads)
     assert STANDARD_WORKLOADS.issubset(workloads)
     assert RESEARCH_WORKLOADS.issubset(workloads)
+
+
+def test_keyword_spotting_runner_uses_canonical_timing_defaults(monkeypatch):
+    workload = load_registry()["keyword-spotting"]
+
+    assert (
+        _canonical_config_int(
+            workload,
+            "warmup_repetitions",
+            "MLPERF_EDU_KEYWORD_SPOTTING_MAX_WARMUP_REPETITIONS",
+            1,
+        )
+        == 1000
+    )
+    assert (
+        _canonical_config_int(
+            workload,
+            "repetitions",
+            "MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS",
+            1,
+        )
+        == 2000
+    )
+
+    monkeypatch.setenv("MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS", "17")
+    assert (
+        _canonical_config_int(
+            workload,
+            "repetitions",
+            "MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS",
+            1,
+        )
+        == 17
+    )
 
 
 def test_packaged_registry_copy_matches_flat_registry():

@@ -19,6 +19,21 @@ from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import configured_seed, synchronize_device
 
 
+def _canonical_config_int(
+    workload: Workload,
+    key: str,
+    environment_variable: str,
+    fallback: int,
+) -> int:
+    """Resolve a runner knob from an override or the canonical registry config."""
+    canonical_config = (workload.raw.get("canonical_max_contract") or {}).get(
+        "config"
+    ) or {}
+    return int(
+        os.environ.get(environment_variable, str(canonical_config.get(key, fallback)))
+    )
+
+
 def run_keyword_spotting_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a deterministic smoke test of the MLPerf Tiny DS-CNN graph."""
     root = find_project_root()
@@ -108,13 +123,28 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
     seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
-    batch_size = int(os.environ.get("MLPERF_EDU_KEYWORD_SPOTTING_MAX_BATCH_SIZE", "64"))
-    repetitions = int(
-        os.environ.get("MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS", "200")
+    batch_size = _canonical_config_int(
+        workload,
+        "batch_size",
+        "MLPERF_EDU_KEYWORD_SPOTTING_MAX_BATCH_SIZE",
+        64,
     )
-    if batch_size < 1 or repetitions < 1:
+    warmup_repetitions = _canonical_config_int(
+        workload,
+        "warmup_repetitions",
+        "MLPERF_EDU_KEYWORD_SPOTTING_MAX_WARMUP_REPETITIONS",
+        1000,
+    )
+    repetitions = _canonical_config_int(
+        workload,
+        "repetitions",
+        "MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS",
+        2000,
+    )
+    if batch_size < 1 or warmup_repetitions < 1 or repetitions < 1:
         raise ValueError(
-            "keyword spotting requires positive batch size and repetitions"
+            "keyword spotting requires positive batch size, warmup repetitions, "
+            "and measured repetitions"
         )
 
     asset = ensure_mlperf_tiny_kws(download=True)
@@ -132,6 +162,9 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
     with torch.inference_mode():
         for warmup_size in sorted({batch_size, len(inputs) % batch_size} - {0}):
             model(inputs[:warmup_size])
+        for _ in range(warmup_repetitions):
+            for start_index in range(0, len(inputs), batch_size):
+                model(inputs[start_index : start_index + batch_size])
     synchronize_device(device)
     outputs: list[torch.Tensor] = []
     start = time.perf_counter()
@@ -180,6 +213,7 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
         "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
             "batch_size": batch_size,
+            "warmup_repetitions": warmup_repetitions,
             "repetitions": repetitions,
             "samples": len(inputs),
             "input_shape": [1, 49, 10],
