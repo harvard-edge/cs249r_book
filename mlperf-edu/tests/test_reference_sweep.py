@@ -358,6 +358,23 @@ def test_build_row_rejects_report_or_manifest_seed_mismatch():
     assert row["evidence_valid"] is False
 
 
+def test_build_row_preserves_requested_and_executed_devices():
+    row = sweep.build_row(
+        {
+            "requested_seed": 42,
+            "report_recorded_seed": 42,
+            "manifest_recorded_seed": 42,
+            "execution_ok": True,
+            "evidence_valid": True,
+            "device_requested": "cpu",
+            "device_executed": "cpu",
+        }
+    )
+
+    assert row["device_requested"] == "cpu"
+    assert row["device_executed"] == "cpu"
+
+
 def fake_result(seed, value, *, data_mode="real", primary_metric_value=None):
     if primary_metric_value is None:
         primary_metric_value = 10.0 + seed

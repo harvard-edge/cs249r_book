@@ -1147,6 +1147,8 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
         "wall_seconds": result.get("wall_seconds"),
         "subprocess_wall_seconds": result.get("subprocess_wall_seconds"),
         "backend": result.get("backend"),
+        "device_requested": result.get("device_requested"),
+        "device_executed": result.get("device_executed"),
         "hardware_backend": result.get("hardware_backend"),
         "fingerprint_backends": result.get("fingerprint_backends"),
         "chip": result.get("chip"),
