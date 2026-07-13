@@ -162,6 +162,7 @@ def test_obsolete_parallel_product_surfaces_are_removed() -> None:
         "scripts/orchestration/data_fetcher.py",
         "scripts/setup_micro_datasets.sh",
         "scripts/smoke_data_quality.py",
+        "labs/data_quality/inject.py",
         "scripts/smoke_distributed.py",
         "scripts/smoke_dlrm_dram.py",
         "scripts/smoke_iter6_serving.py",
