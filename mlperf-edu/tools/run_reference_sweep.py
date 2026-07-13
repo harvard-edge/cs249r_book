@@ -140,6 +140,7 @@ def main():
     }
     try:
         from mlperf.edu_cli import (
+            annotate_execution_device,
             attach_run_fingerprints,
             enrich_report_for_display,
             grade_manifest,
@@ -166,6 +167,7 @@ def main():
             phase=args.get("phase"),
         )
         wall_seconds = time.perf_counter() - started
+        annotate_execution_device(report)
 
         artifacts = report.get("artifacts") or {}
         report_path = Path(str(artifacts.get("report", ""))).resolve()
@@ -232,6 +234,8 @@ def main():
         manifest_scenario = manifest.get("scenario")
         execution_backend = str(report.get("backend") or "")
         requested_device = args.get("device")
+        report_requested_device = report.get("device_requested")
+        report_executed_device = report.get("device_executed")
         invalid_reasons = []
         if report.get("status") != "passed":
             invalid_reasons.append(f"report status is {report.get('status')!r}, not 'passed'")
@@ -271,6 +275,17 @@ def main():
         if requested_device and requested_device.lower() not in execution_backend.lower():
             invalid_reasons.append(
                 f"report execution backend {execution_backend!r} does not match requested device {requested_device!r}"
+            )
+        expected_requested_device = str(requested_device or "auto").lower()
+        if report_requested_device != expected_requested_device:
+            invalid_reasons.append(
+                f"report device_requested {report_requested_device!r} does not match requested device {expected_requested_device!r}"
+            )
+        if not isinstance(report_executed_device, str) or not report_executed_device:
+            invalid_reasons.append("report device_executed is missing")
+        elif requested_device and report_executed_device != requested_device.lower():
+            invalid_reasons.append(
+                f"report device_executed {report_executed_device!r} does not match requested device {requested_device!r}"
             )
         if args["evidence_tier"] in {"public-candidate", "promotion-candidate"} and data_mode not in args["allowed_data_modes"]:
             invalid_reasons.append(
@@ -371,6 +386,8 @@ def main():
             "registry_scenario": registry_scenario,
             "wall_seconds": wall_seconds,
             "backend": execution_backend or None,
+            "device_requested": report_requested_device,
+            "device_executed": report_executed_device,
             "hardware_backend": hardware.get("backend"),
             "chip": hardware.get("chip"),
             "fingerprint_backends": execution.get("backends"),

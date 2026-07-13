@@ -66,6 +66,19 @@ def test_default_evidence_root_is_outside_source_checkout():
     assert not sweep.DEFAULT_OUTPUT_DIR.is_relative_to(sweep.ROOT)
 
 
+def test_child_bootstrap_records_devices_before_fingerprinting():
+    bootstrap = sweep._CHILD_BOOTSTRAP
+    import_position = bootstrap.index("            annotate_execution_device,")
+    run_position = bootstrap.index("        report = run_workload(")
+    annotation_position = bootstrap.index("        annotate_execution_device(report)")
+    fingerprint_position = bootstrap.index("        attach_run_fingerprints(report)")
+
+    assert import_position < run_position
+    assert run_position < annotation_position < fingerprint_position
+    assert '"device_requested": report_requested_device' in bootstrap
+    assert '"device_executed": report_executed_device' in bootstrap
+
+
 def test_sweep_environment_removes_higher_priority_seed_overrides(monkeypatch):
     monkeypatch.setenv("MLPERF_EDU_SEED", "999")
     monkeypatch.setenv("MLPERF_EDU_SLM_SEED", "998")
