@@ -132,7 +132,7 @@ def run_information_retrieval_max(
         for dataset_name in DATASET_NAMES
     }
     canonical_config = workload.raw.get("canonical_max_contract", {}).get("config", {})
-    warmup_evaluations = int(canonical_config.get("warmup_evaluations", 1))
+    warmup_evaluations = int(canonical_config.get("warmup_evaluations", 5))
     measurement_repetitions = int(canonical_config.get("measurement_repetitions", 3))
     if warmup_evaluations < 1:
         raise ValueError("warmup_evaluations must be at least one")

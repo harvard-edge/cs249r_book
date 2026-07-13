@@ -320,12 +320,12 @@ def test_retrieval_declares_steady_state_repetition_protocol():
     config = workload.raw["canonical_max_contract"]["config"]
     protocol = workload.raw["measurement_protocol"]
 
-    assert config["warmup_evaluations"] == 1
+    assert config["warmup_evaluations"] == 5
     assert config["measurement_repetitions"] == 3
     assert config["performance_aggregate"] == "median"
     assert protocol["primary_metric"] == "inference_and_evaluation_seconds"
     assert "three unchanged complete" in protocol["timing_scope"]
-    assert "one untimed complete" in " ".join(protocol["excluded_phases"])
+    assert "five untimed complete" in " ".join(protocol["excluded_phases"])
 
 
 def test_causal_language_modeling_declares_modes_and_phases():
