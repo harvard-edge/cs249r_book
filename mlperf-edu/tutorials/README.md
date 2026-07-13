@@ -23,8 +23,8 @@ and reads its report artifacts. It does not import runner internals.
 |:---|:---|:---|:---|
 | Anatomy of a benchmark run | Implemented and smoke-tested | 30–45 minutes | `01_first_benchmark.py` |
 
-Tutorial 01 runs the `micro-lstm-train` `min` profile. That profile is a
-deterministic functional systems run over a synthetic micro-shard. It is not a
+Tutorial 01 runs the `time-series-forecasting` `min` profile. That profile is a
+deterministic functional run over a synthetic smoke fixture. It is not a
 quality baseline. Students inspect the metrics, run fingerprint, report views,
 and provenance manifest, then verify the manifest with the CLI.
 

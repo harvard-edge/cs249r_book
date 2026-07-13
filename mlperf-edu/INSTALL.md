@@ -42,14 +42,16 @@ uv run python tools/export_flat_registry.py --check
 uv run python tools/build_wheel.py
 ```
 
-The wheel must include the packaged registry and the bundled SLM quality
-fixture. Inspect and install it in a fresh environment outside the checkout.
+The wheel must include the packaged registry, dataset catalog, and promoted
+reference-result index. Inspect and install it in a fresh environment outside
+the checkout.
 
 ```bash
 wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
 test -n "$wheel"
 unzip -l "$wheel" | grep -q 'mlperf_edu/workloads.yaml'
-unzip -l "$wheel" | grep -q 'mlperf_edu/slm_quality_prompts.json'
+unzip -l "$wheel" | grep -q 'mlperf_edu/datasets.yaml'
+unzip -l "$wheel" | grep -q 'mlperf_edu/reference_results/index.json'
 
 uv venv /tmp/mlperf-edu-wheel-smoke --python 3.12
 uv pip install --python /tmp/mlperf-edu-wheel-smoke/bin/python "$wheel"
@@ -93,22 +95,20 @@ not independent release evidence.
 ## Optional Extras
 
 ```bash
-uv sync --locked --extra audio
 uv sync --locked --extra tutorial
-uv sync --locked --extra dev --extra audio --extra tutorial
+uv sync --locked --extra dev --extra tutorial
 ```
 
-The `audio` extra installs `torchaudio` for Speech Commands experiments. The
-DS-CNN row remains systems-only, and its fast paths do not require the full
-dataset. The `tutorial` extra installs marimo for the implemented first
-notebook.
+The `tutorial` extra installs marimo for the implemented first notebook. The
+canonical keyword-spotting path consumes the pinned preprocessed MLPerf Tiny
+accuracy set and does not require `torchaudio`.
 
 ## Local Notebook Expectations
 
 The core install and all lab smoke paths run on CPU without a network after
-dependencies are installed. Score-bearing `max` runs fetch datasets on first
-use. The SLM `max` path fetches pinned model weights. Cache those assets before
-a class, airplane run, or reproducibility session.
+dependencies are installed. Canonical `max` runs fetch pinned datasets and
+model artifacts on first use. Cache those assets before a class, airplane run,
+or reproducibility session.
 
 ```bash
 uv run mlperf fetch --profile max --dry-run
@@ -133,7 +133,9 @@ uv sync --locked --extra dev
 uv run pytest
 uv run python tools/export_registry_layout.py --check
 uv run python tools/export_flat_registry.py --check
+uv run python tools/sync_verified_baselines.py --check
 uv run python tools/check_taxonomy.py
+uv run python tools/check_reference_claims.py --check
 uv run python tools/generate_review_packets.py --check
 uv run python tools/generate_docs.py --check
 uv run mlperf audit

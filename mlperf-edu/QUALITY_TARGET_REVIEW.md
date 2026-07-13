@@ -1,152 +1,82 @@
-# MLPerf EDU Quality Target Review
+# MLPerf EDU v0.1 Quality Target Review
 
-This document is the evidence ledger for the five score-bearing and three
-performance-bearing candidates in the current 30-row registry. The labels are
-MLPerf EDU project classifications. They are not approved MLCommons result
-categories.
+## Review Boundary
 
-The eight retained summaries were produced from clean source commit
-`86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. They are current local-handoff
-evidence for the present contracts.
+The v0.1 portfolio contains seven workloads and ten evidence cases. Every
+target below comes from an authoritative upstream result or rule. None was
+invented to make a local implementation pass.
 
-## Evidence Vocabulary
+The evidence campaign is bound to clean source revision
+`9dd6156bef95a50c21f0c47f8f65a3f5dac7296e`. Exact five-run values, evidence
+IDs, and SHA-256 digests are generated from `reference_results/index.json`.
+This document reviews the target basis and acceptance logic rather than
+duplicating mutable result tables.
 
-| **State** | **Meaning** |
-|:---|:---|
-| Implemented | The runner, report fields, gate, and registry protocol exist. |
-| Calibrated | One or more local measurements informed the current threshold. Calibration values can expose an implausible target, but they are not release evidence. |
-| Validated | A fresh artifact passed its runner gate, provenance verification, grading, and report-level review contract. |
-| Committed-summary | A clean source revision produced a complete create-once reference attempt, and the repository retains its exact summary and SHA-256 digest. The eight retained packets from `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3` are current local-handoff evidence. |
-| Release-evidenced | A reviewer has received and verified the committed summary and complete raw packet at an agreed handoff or publication location. The current raw packets are available for local handoff but have not yet been transferred or assigned public URLs. |
-| Externally approved | Dataset policy, target rationale, naming, and result wording have the required reviewer decisions. This state cannot be granted by repository tests. |
+## Score-Bearing Targets
 
-## Five-Seed Score Policy
+| **Workload** | **Model and Data** | **Quality Gate** | **Authority and Rationale** |
+|:---|:---|:---|:---|
+| `image-classification` | Official float ResNet8 and the 200-example MLPerf Tiny CIFAR-10 accuracy set | top-1 accuracy at least 0.85 | MLPerf Tiny fixes the model, accuracy set, metric, and threshold. The PyTorch adapter must reproduce that result without changing preprocessing. |
+| `keyword-spotting` | Official DS-CNN and the 1,000-example EEMBC MFCC accuracy set | top-1 accuracy at least 0.90 | MLPerf Tiny fixes the task and threshold. The adapter preserves the quantized input convention and model graph. |
+| `causal-language-modeling` | nanoGPT Shakespeare character configuration and Tiny Shakespeare split | best validation cross-entropy at most 1.4697 | The threshold is nanoGPT's published result for the exact 5,000-iteration recipe. |
+| `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | accuracy within the registry tolerance of the published checkpoint result | The checkpoint model card supplies the task and accuracy reference. The complete development split is evaluated. |
+| `information-retrieval` | Pinned MiniLM cross-encoder and the documented three-dataset NanoBEIR subset | mean nDCG@10 equal to 0.60716840988382 within the registry tolerance | Sentence Transformers publishes the exact evaluator example and score. |
+| `graph-node-classification` | Official OGB GCN recipe and `ogbn-arxiv` split | test accuracy within 0.0029 of 0.7174 | The correct OGB GCN reference is 71.74% with a published 0.29-point standard deviation. The previously quoted 72.51% belongs to a different leaderboard section and is not used. |
+| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at or below the registry tolerance around the published result | The PatchTST repository supplies the configuration, split, evaluator, and published ETTm1 result. |
 
-Every score-bearing candidate declares the same release protocol.
+## Performance-Bearing Phase Gates
 
-- Run the `max` profile in five fresh processes with seeds `0,1,2,3,4`.
-- Use eligible real data with no synthetic fallback.
-- Require every run to report the requested seed, pass its individual target,
-  verify its manifest, and pass grading.
-- Aggregate the five quality values with the median and require that median to
-  meet the registry target.
-- Publish the median, mean, minimum, maximum, and standard deviation. Keep every
-  JSON, HTML, CSV, manifest, checkpoint, and runner-declared artifact.
-- Index artifacts with SHA-256 and byte size. Store the evidence summary with
-  its adjacent unauthenticated SHA-256 digest.
-- Create a new full five-seed attempt if any run fails or times out. Never
-  replace one seed inside an existing attempt.
-- Rerun all five seeds after model, data preprocessing, optimizer schedule,
-  relevant framework version, or target machine-class changes.
+`causal-language-modeling` adds full, prefill, and decode inference. These
+three cases report timing only after every run passes its functional contract.
+They do not introduce a second language-quality benchmark. All phases must use
+one package selecting the median-quality committed training run.
 
-`tools/run_reference_sweep.py` enforces this product path. Public-candidate
-evidence must start from a clean source snapshot. Its default evidence root is
-outside the checkout under `~/.mlperf-edu/reference_runs` so generated output
-does not contaminate that source snapshot.
-
-## Current Reference Snapshot
-
-`reference_results/index.json` records eight summaries from clean source commit
-`86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. The public-candidate
-repeatability limit is `5%` coefficient of variation for timed performance
-references.
-
-| **Workload** | **Evidence ID** | **Summary SHA-256** | **Primary Metric Median** | **Minimum** | **Maximum** | **CV** |
-|:---|:---|:---|---:|---:|---:|---:|
-| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T204007.498158Z` | `3aef7b883d55a3f1df8a954762c5ba8d5b8ca013543a2e70bd3a37510d48798e` | `4.3060` | `4.2488` | `4.5012` | n/a |
-| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T205839.712863Z` | `946bc787b41515fbd1779e2ba75d68c0e755a15fee37bea7d4d681a529d53ab5` | `2.0394` | `1.9475` | `2.0924` | n/a |
-| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T204653.574587Z` | `8d5834986074e7d9d7d36a7b04d857d6e0e8325032de103f880a1e38c96f9cff` | `103.6699` | `103.4276` | `104.7116` | n/a |
-| `nanogpt-decode` | `nanogpt-decode_max_20260711T210118.136527Z` | `ebbfc6f421d1900cebea5142ab8256fa62aa3054a18b32a6a7929a9d09532b57` | `316.7836` | `313.2178` | `319.4718` | `0.75%` |
-| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T205947.060179Z` | `8ef84b454bbec8d5b0f0191a257b70eb494b2bfaf39979c6003e07f7b0afd032` | `3859.7758` | `3849.9537` | `3868.4721` | `0.19%` |
-| `nanogpt-train` | `nanogpt-train_max_20260711T202223.716219Z` | `8fd52fd7b03cf42c5b6b93185a7a2d0f12503e4434b057cf19fdf1f3ec2daf8e` | `117.5981` | `117.0730` | `118.2963` | n/a |
-| `resnet18-train` | `resnet18-train_max_20260711T204117.913822Z` | `ad18347f04f4b2557e16428e0c5cbc741c0ae84d9c1259163aee4dec76d05f7d` | `58.4192` | `57.3181` | `59.5123` | n/a |
-| `slm-decode` | `slm-decode_max_20260711T210317.517476Z` | `5c939ce65d2d35b680460d6e46c071063803797ca1cc3d29c11754c46bdc1524` | `61.5742` | `60.4083` | `61.9703` | `1.11%` |
-
-## Score-Bearing Candidates
-
-| **Workload** | **Metric and Target** | **Current Calibration Boundary** | **Why the Gate Is Meaningful** | **Release State** |
-|:---|:---|:---|:---|:---|
-| `nanogpt-train` | cross-entropy loss `<= 2.30` | Existing bounded calibration supports the unchanged target. | Rejects a broken language-model training path on the deterministic Project Gutenberg corpus recipe. | Current five-run packet committed. |
-| `micro-dlrm-train` | fixed-final-epoch ROC AUC `>= 0.76` | Five bounded seeds reached `0.7671`-`0.7696` on the official split without label-derived aggregate features. | Tests recommendation ranking on an untouched fixed evaluation split without checkpoint selection on test labels. | Current five-run packet committed; raw MovieLens-derived artifacts remain local-only pending policy review. |
-| `anomaly-ae-train` | macro AUROC `>= 0.93`, worst-class AUROC `>= 0.90`, learned-control margin `>= 0.20` | Five bounded seeds reached macro AUROC `0.9370`-`0.9422`, worst-class AUROC `0.9132`-`0.9212`, and minimum control margin `0.2491`-`0.2570`. | Requires classwise reconstruction-error discrimination and measurable improvement over zero, centroid, and untrained controls. | Current five-run packet committed. |
-| `resnet18-train` | Fashion-MNIST top-1 accuracy `>= 0.85` | Existing bounded calibration supports the unchanged target. | Rejects plumbing-only or materially degraded training while retaining a modest laptop and backend margin. | Current five-run packet committed. |
-| `mobilenetv2-train` | Fashion-MNIST top-1 accuracy `>= 0.78` | Existing bounded calibration supports the unchanged target. | Provides a second architecture-level vision quality check at notebook scale. | Current five-run packet committed. |
-
-Calibration values above are target rationale only. Current result claims must
-cite the committed summaries listed in the current reference snapshot.
-
-## Performance-Bearing Candidates
-
-Performance-bearing rows need nonempty work, task or checkpoint quality, and a
-repeatable timing protocol. The report-level contract requires an integer seed,
-eligible data mode, at least one warmup, at least three measured runs, declared
-latency statistics, complete artifacts, and a passing functional gate.
-Each current registry row also declares five reference executions. That is
-separate from the warmups and repeated timings inside one execution. Promotion
-also requires the sample coefficient of variation across those five primary
-performance values to be no greater than `0.05`.
-
-| **Workload** | **Functional and Quality Gate** | **Default Measurement** | **Provenance Requirement** | **Release State** |
-|:---|:---|:---|:---|:---|
-| `nanogpt-inference --variant prefill` | Positive prefill throughput from a quality-approved NanoGPT checkpoint | Fixed content-addressed prompt, fresh KV cache, three discarded warmups, and 20 synchronized forward passes; median, p90, p99 | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Current five-run packet committed; CV `0.19%`. |
-| `nanogpt-inference --variant decode` | Completes 64 decode steps with positive throughput from the same checkpoint lineage | Three discarded warmups and 20 single-stream requests; causal TTFT, first-decode latency, and subsequent ITL statistics | Checkpoint file, SHA-256 digest, source `nanogpt-train` quality dependency | Current five-run packet committed; CV `0.75%`. |
-| `smollm2-chat-inference --variant baseline` | At least eight generated tokens, token-weighted continuation perplexity `<= 7`, and worst-category perplexity `<= 24` on 28 attributed cases | Three warmups and 20 measured requests; separate prefill and generation median, p90, p99 | Pinned model revision `12fd25f77366fa6b3b4b768ec3050bf629380bac`, model metadata, v2 fixture version and digest, case count, categories, and aggregation | Current five-run packet committed; CV `1.11%`. |
-
-The NanoGPT timing rows inherit task quality from the training checkpoint. A
-random or unidentified checkpoint cannot carry public-candidate performance.
-Both rows use the same verified training checkpoint lineage selected from the
-current NanoGPT training sweep.
-The SLM row evaluates continuation-only negative log likelihood, weights every
-continuation token equally, records the attributed 28-case v2 suite digest, and
-keeps network access outside the measurement. A separate weakest-category gate
-prevents easy categories from masking material degradation.
-
-## Systems-Only Rows
-
-The remaining 22 registry rows are useful for coursework and systems research,
-but their metrics are not public score claims. Each row now declares a
-machine-readable `max_execution` boundary. The generated site states the
-reported data mode, asset use, and quality enforcement, including when the
-declared research dataset is not consumed by the current systems-only runner.
-
-| **Suite** | **Row** | **Current Boundary** |
+| **Phase** | **Primary Metric** | **Functional Requirement** |
 |:---|:---|:---|
-| agent | `nano-codegen-agent` | Local synthetic task and agent-systems scaffold; capability evaluation deferred. |
-| agent | `nano-rag-agent` | Local retrieval and generation scaffold; corpus and quality policy deferred. |
-| agent | `nano-react-agent` | Trace-execution scaffold; trace provenance and capability methodology deferred. |
-| agent | `nano-toolcall-agent` | Structured-call systems check; tool-schema evaluation policy deferred. |
-| distributed | `micro-dlrm-distributed` | Local Gloo and gradient-equivalence systems study, not a public quality score. |
-| graph | `micro-gnn-train` | Public dataset, split, and target evidence need review. |
-| language | `micro-bert-train` | Current path has not established a public SST-2 target and source policy. |
-| language | `nano-lora-finetune` | Checks frozen-base and active-adapter gradients, not downstream task quality. |
-| language | `nano-moe-train` | Deterministic micro-scale optimization row; the low loss threshold is not approved public evidence. |
-| language | `nanogpt-inference --variant fp16-b16` | Precision systems comparison without a public quality-parity contract. |
-| language | `nanogpt-inference --variant fp32-b16` | Batch decode systems comparison without the checkpoint review contract used by the candidate decode row. |
-| language | `nanogpt-inference --variant speculative` | Speculative-decode systems row; acceptance and task-quality comparability need a stronger policy. |
-| recommender | `micro-dlrm-dram-train` | Memory-pressure experiment with virtual embeddings, not a public recommender score. |
-| rl | `micro-rl-train` | Stochastic-control methodology and repeated-run policy are not defined for public scoring. |
-| slm | `smollm2-chat-inference --variant batched-b4` | Batched-serving research variant without a promoted comparison contract. |
-| slm | `smollm2-chat-inference --variant long-context` | Long-context research variant without a promoted comparison contract. |
-| slm | `smollm2-chat-inference --variant quantized-int8` | The historical v1 run completed generation but recorded perplexity `19.8108` and NLL delta `0.9580`. Those values and their parity decision are protocol-superseded; v2 calibration is required. |
-| timeseries | `micro-lstm-train` | Synthetic micro-shard systems path; real-data target and source review deferred. |
-| tiny | `dscnn-kws-train` | Fast paths use synthetic micro-shards; Speech Commands scoring protocol is not promoted. |
-| tiny | `wake-vision-vww` | Fast paths use synthetic micro-shards; Wake Vision scoring and release policy are not promoted. |
-| vision | `micro-diffusion-train` | Teaching-scale denoising scaffold without an approved generative-quality metric. |
-| vision | `mobilenet-cifar100-composed-fp16` | Compression-composition correctness row without a public task-quality parity gate. |
+| full | output tokens per second | Complete the declared prompt and generation path with finite outputs and the expected token count. |
+| prefill | prefill tokens per second | Complete the declared prompt prefill with a valid cache and finite output. |
+| decode | output tokens per second | Complete cache-backed autoregressive decode with the expected token count and finite output. |
 
-## Reviewer Decisions
+## Ten-Case Evidence Closure
 
-| **Area** | **Decision Required** | **Evidence to Review** |
-|:---|:---|:---|
-| Target robustness | Accept or revise each metric, threshold, five-seed rule, and rerun trigger. | Five clean score packets plus target margins and raw values. |
-| NanoGPT inference | Approve checkpoint lineage, prompt shape, prefill and decode scenarios, and latency statistics. | Training packet, checkpoint digest, prefill packet, decode packet. |
-| SLM inference | Approve the model revision, attributed 28-case continuation fixture, token-weighted aggregation, dual perplexity limits, token floor, and scenario. | Model dossier, fixture digest, per-case and per-category quality results, timing samples. |
-| Vision | Accept Fashion-MNIST as the first course-scale public training dataset. | Dataset dossier and both five-seed vision packets. |
-| Anomaly detection | Accept the zero-versus-nonzero split, AUROC target, and attribution. | MNIST dossier and five-seed anomaly packet. |
-| Recommender | Approve fetch-only MovieLens use or move the row to systems-only and select a replacement. | Dataset terms, audit warning, and DLRM packet. |
-| Result language | Define wording that cannot be confused with official competitive MLPerf submissions. | Public rules, sample reports, site, and release notes. |
+The required cases are:
 
-The eight summaries are committed candidates for review, not released or
-MLCommons-approved baselines. Complete raw packets remain available by local
-handoff, public artifact URLs remain unassigned, and the reviewer decisions
-above remain open.
+1. `image-classification__max__inference`
+2. `keyword-spotting__max__inference`
+3. `causal-language-modeling__max__training`
+4. `causal-language-modeling__max__inference__full`
+5. `causal-language-modeling__max__inference__prefill`
+6. `causal-language-modeling__max__inference__decode`
+7. `text-classification__max__inference`
+8. `information-retrieval__max__inference`
+9. `graph-node-classification__max__training`
+10. `time-series-forecasting__max__training`
+
+Every case needs five passing fresh-process runs and timing CV no greater than
+5%. Score-bearing cases require every individual quality value and the median
+to pass. Phase cases require five functional passes.
+
+## Target Review Questions
+
+Domain reviewers should confirm:
+
+- The upstream artifact revision and data split remain the strongest practical authority.
+- The PyTorch adapter preserves preprocessing, model semantics, and evaluator behavior.
+- The tolerance reflects the upstream reference rather than observed local convenience.
+- The measured region is long enough for stable laptop timing.
+- CPU and accelerator numeric differences cannot silently weaken the quality gate.
+- The target remains appropriate when upstream dependencies change.
+
+A source, preprocessing, evaluator, model, optimizer, schedule, or target
+change invalidates the relevant evidence and requires a fresh five-run packet.
+
+## Deferred and Rejected Coverage
+
+Machine-sound anomaly detection and visual wake words remain deferred because
+the authoritative MLPerf Tiny accuracy inputs are not directly available as a
+thin laptop adapter. Reinforcement learning remains deferred to a future
+MiniGo contract. Recommendation, diffusion, agent, retrieval-augmented
+generation, and code-agent proposals are rejected or deferred when they would
+require project-created tasks, judges, datasets, or quality targets.
+
+The selection ledger is the authoritative record of those decisions.

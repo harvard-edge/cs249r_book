@@ -125,7 +125,7 @@ def real_batches(
     dataset_factory.DATASET_ROOT = str(PROJECT_ROOT / "datasets")
     if sequence_length == 64:
         train_loader, _ = dataset_factory.get_dataloaders(
-            "nanogpt-train", batch_size=batch_size
+            "causal-language-modeling", batch_size=batch_size
         )
     else:
         train_loader, _ = dataset_factory.get_language_dataloaders(

@@ -1,723 +1,294 @@
 #!/usr/bin/env python3
-"""Fail closed when hand-written reference claims drift from verified evidence."""
+"""Fail closed when public review claims drift from verified case evidence."""
 
 from __future__ import annotations
 
 import argparse
-from dataclasses import dataclass, replace
-import hashlib
 import json
-import math
 from pathlib import Path
 import re
-from typing import Any, Iterable, Mapping
+import sys
+from typing import Any, Mapping
 
 import yaml
 
 
 ROOT = Path(__file__).resolve().parents[1]
-INDEX_PATH = Path("reference_results/index.json")
-DOCUMENT_POLICIES = {
-    "README.md": frozenset(
-        {"medians", "score-ranges", "repeatability-limit", "score-row-bindings"}
-    ),
-    "PUBLIC_RULES.md": frozenset({"medians", "repeatability-limit"}),
-    "PROPOSAL.md": frozenset(
-        {"medians", "score-ranges", "repeatability", "row-bindings"}
-    ),
-    "QUALITY_TARGET_REVIEW.md": frozenset(
-        {
-            "evidence-ids",
-            "evidence-digests",
-            "medians",
-            "ranges",
-            "repeatability",
-            "repeatability-limit",
-            "row-bindings",
-        }
-    ),
-    "RELEASE_CHECKLIST.md": frozenset({"repeatability"}),
-}
+sys.path.insert(0, str(ROOT))
+sys.path.insert(0, str(ROOT / "src"))
 
-CLAIM_ROW_ALIASES = {
-    "nanogpt-train": ("nanogpt-train", "nanogpt training"),
-    "micro-dlrm-train": ("micro-dlrm-train", "micro-dlrm training", "dlrm"),
-    "anomaly-ae-train": (
+from tools import import_reference_evidence as evidence  # noqa: E402
+from tools import reference_source_lock  # noqa: E402
+
+
+INDEX_PATH = ROOT / "reference_results" / "index.json"
+PUBLIC_DOCUMENTS = (
+    "README.md",
+    "SPEC.md",
+    "PROPOSAL.md",
+    "PUBLIC_RULES.md",
+    "QUALITY_TARGET_REVIEW.md",
+    "RELEASE_CHECKLIST.md",
+)
+WORKLOAD_DOCUMENTS = frozenset(
+    {
+        "README.md",
+        "SPEC.md",
+        "PROPOSAL.md",
+        "QUALITY_TARGET_REVIEW.md",
+        "RELEASE_CHECKLIST.md",
+    }
+)
+RETIRED_PUBLIC_IDS = frozenset(
+    {
         "anomaly-ae-train",
-        "anomaly autoencoder",
-        "anomaly auroc",
-    ),
-    "resnet18-train": ("resnet18-train", "resnet-18"),
-    "mobilenetv2-train": ("mobilenetv2-train", "mobilenetv2"),
-    "nanogpt-prefill": ("nanogpt-prefill", "nanogpt prefill", "variant prefill"),
-    "nanogpt-decode": ("nanogpt-decode", "nanogpt decode", "variant decode"),
-    "slm-decode": ("slm-decode", "smollm2"),
-}
-
+        "dscnn-kws-train",
+        "micro-bert-train",
+        "micro-diffusion-train",
+        "micro-dlrm-distributed",
+        "micro-dlrm-dram-train",
+        "micro-dlrm-train",
+        "micro-gnn-train",
+        "micro-lstm-train",
+        "micro-rl-train",
+        "mobilenet-cifar100-composed-fp16",
+        "mobilenetv2-train",
+        "nano-codegen-agent",
+        "nano-lora-finetune",
+        "nano-moe-train",
+        "nano-rag-agent",
+        "nano-react-agent",
+        "nano-toolcall-agent",
+        "nanogpt-decode",
+        "nanogpt-decode-fp16-b16",
+        "nanogpt-decode-fp32-b16",
+        "nanogpt-decode-spec",
+        "nanogpt-prefill",
+        "nanogpt-train",
+        "resnet18-train",
+        "slm-batched-decode",
+        "slm-decode",
+        "slm-long-context-decode",
+        "slm-quantized-decode",
+        "smollm2-chat-inference",
+        "wake-vision-vww",
+    }
+)
 EVIDENCE_ID_RE = re.compile(r"\b[a-z0-9][a-z0-9-]*_max_\d{8}T\d{6}\.\d{6}Z\b")
-MARKDOWN_REVISION_RE = re.compile(r"`([0-9a-f]{8,40})`")
-SHA40_RE = re.compile(r"[0-9a-f]{40}")
-HISTORICAL_DISCLOSURE = "protocol-superseded historical reference"
+SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 
 
-class ClaimDataError(ValueError):
-    """Raised when the evidence or registry cannot define a safe claim set."""
+class ClaimError(ValueError):
+    """Raised when committed evidence cannot support the public claims."""
 
 
-@dataclass(frozen=True)
-class ReferenceClaim:
-    workload: str
-    evidence_id: str
-    evidence_sha256: str
-    source_git_sha: str
-    public_status: str
-    metric: str
-    median: float
-    minimum: float
-    maximum: float
-    quality_metric: str | None
-    quality_median: float | None
-    quality_minimum: float | None
-    quality_maximum: float | None
-    coefficient_of_variation: float | None
-    repeatability_limit: float | None
-    evidence_role: str = "current-review-evidence"
-
-    @property
-    def is_current(self) -> bool:
-        return self.evidence_role == "current-review-evidence"
-
-    @property
-    def is_historical(self) -> bool:
-        return self.evidence_role == "historical-protocol-superseded"
-
-    @property
-    def display_decimals(self) -> int:
-        # Preserve the established two-decimal presentation for six-figure
-        # throughput while retaining four decimals for the other references.
-        return 2 if abs(self.median) >= 10_000 else 4
-
-    def display(self, value: float) -> str:
-        return f"{value:.{self.display_decimals}f}"
-
-    @property
-    def display_median(self) -> str:
-        return self.display(self.median)
-
-    @property
-    def display_minimum(self) -> str:
-        return self.display(self.minimum)
-
-    @property
-    def display_maximum(self) -> str:
-        return self.display(self.maximum)
-
-    @property
-    def display_cv_percent(self) -> str | None:
-        if self.coefficient_of_variation is None:
-            return None
-        return f"{100 * self.coefficient_of_variation:.2f}%"
-
-
-@dataclass(frozen=True)
-class ReferenceClaims:
-    source_git_sha: str
-    records: Mapping[str, ReferenceClaim]
-    allowed_non_source_revisions: frozenset[str]
-
-    @property
-    def current_records(self) -> Mapping[str, ReferenceClaim]:
-        return {
-            workload: claim
-            for workload, claim in self.records.items()
-            if claim.is_current
-        }
-
-    @property
-    def historical_records(self) -> Mapping[str, ReferenceClaim]:
-        return {
-            workload: claim
-            for workload, claim in self.records.items()
-            if claim.is_historical
-        }
-
-
-def _load_json(path: Path) -> dict[str, Any]:
+def load_json(path: Path) -> dict[str, Any]:
     try:
         value = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
-        raise ClaimDataError(f"cannot load {path}: {exc}") from exc
+        raise ClaimError(f"cannot load {path}: {exc}") from exc
     if not isinstance(value, dict):
-        raise ClaimDataError(f"{path} must contain a JSON object")
+        raise ClaimError(f"{path} must contain a JSON object")
     return value
 
 
-def _load_yaml(path: Path) -> dict[str, Any]:
-    try:
-        value = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
-        raise ClaimDataError(f"cannot load {path}: {exc}") from exc
-    if not isinstance(value, dict):
-        raise ClaimDataError(f"{path} must contain a YAML mapping")
-    return value
-
-
-def _number(mapping: Mapping[str, Any], key: str, label: str) -> float:
-    value = mapping.get(key)
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
-        raise ClaimDataError(f"{label}.{key} must be numeric")
-    if not math.isfinite(float(value)):
-        raise ClaimDataError(f"{label}.{key} must be finite")
-    return float(value)
-
-
-def _relative_payload_path(root: Path, value: object) -> Path:
+def safe_repository_path(value: object) -> Path:
     if not isinstance(value, str):
-        raise ClaimDataError("reference index path must be a string")
+        raise ClaimError("reference index paths must be strings")
     relative = Path(value)
     if relative.is_absolute() or ".." in relative.parts:
-        raise ClaimDataError(f"unsafe reference index path: {value!r}")
-    path = (root / relative).resolve()
+        raise ClaimError(f"unsafe reference path {value!r}")
+    path = (ROOT / relative).resolve()
     try:
-        path.relative_to(root.resolve())
+        path.relative_to(ROOT.resolve())
     except ValueError as exc:
-        raise ClaimDataError(
-            f"reference index path escapes the repository: {value!r}"
-        ) from exc
+        raise ClaimError(f"reference path escapes the repository: {value!r}") from exc
     return path
 
 
-def _equal_number(actual: object, expected: float) -> bool:
-    return (
-        not isinstance(actual, bool)
-        and isinstance(actual, (int, float))
-        and float(actual) == expected
-    )
-
-
-def validate_registry_record(
-    claim: ReferenceClaim,
-    contract: Mapping[str, Any],
-    *,
-    path: str,
-) -> list[str]:
-    """Return exact registry-to-evidence binding errors for one reference."""
-
-    errors: list[str] = []
-    baseline = contract.get("verified_baseline")
-    if not isinstance(baseline, dict):
-        return [f"{path}: missing verified_baseline mapping"]
-
-    if baseline.get("protocol_compatibility") == "superseded":
-        if baseline.get("review_eligible") is not False:
-            errors.append(
-                f"{path}: protocol-superseded evidence must not be review eligible"
-            )
-        if baseline.get("replacement_required") is not True:
-            errors.append(
-                f"{path}: protocol-superseded evidence must require replacement"
-            )
-        if not str(baseline.get("superseded_reason") or "").strip():
-            errors.append(
-                f"{path}: protocol-superseded evidence must explain superseded_reason"
-            )
-    else:
-        if baseline.get("review_eligible") is not True:
-            errors.append(f"{path}: current evidence must be review eligible")
-        if baseline.get("replacement_required") is True:
-            errors.append(
-                f"{path}: current evidence must not require a replacement sweep"
-            )
-
-    expected_scalars = {
-        "evidence_id": claim.evidence_id,
-        "evidence_sha256": claim.evidence_sha256,
-        "source_git_sha": claim.source_git_sha,
-        "primary_metric": claim.metric,
-    }
-    for key, expected in expected_scalars.items():
-        if baseline.get(key) != expected:
-            errors.append(
-                f"{path}: verified_baseline.{key} is {baseline.get(key)!r}; "
-                f"expected {expected!r}"
-            )
-
-    for key, expected in {
-        "median": claim.median,
-        "min": claim.minimum,
-        "max": claim.maximum,
-    }.items():
-        if not _equal_number(baseline.get(key), expected):
-            errors.append(
-                f"{path}: verified_baseline.{key} is {baseline.get(key)!r}; "
-                f"expected {expected!r}"
-            )
-
-    if claim.quality_metric is not None:
-        if baseline.get("quality_metric") != claim.quality_metric:
-            errors.append(
-                f"{path}: verified_baseline.quality_metric is "
-                f"{baseline.get('quality_metric')!r}; expected {claim.quality_metric!r}"
-            )
-        expected_quality = {
-            claim.quality_metric: claim.quality_median,
-            "quality_median": claim.quality_median,
-            "quality_min": claim.quality_minimum,
-            "quality_max": claim.quality_maximum,
-        }
-        for key, expected in expected_quality.items():
-            if expected is None or not _equal_number(baseline.get(key), expected):
-                errors.append(
-                    f"{path}: verified_baseline.{key} is {baseline.get(key)!r}; "
-                    f"expected {expected!r}"
-                )
-
-    if claim.coefficient_of_variation is None:
-        if "coefficient_of_variation" in baseline:
-            errors.append(
-                f"{path}: score reference must not claim a performance repeatability value"
-            )
-        return errors
-
-    if not _equal_number(
-        baseline.get("coefficient_of_variation"), claim.coefficient_of_variation
+def load_cases() -> tuple[str, dict[str, tuple[dict[str, Any], dict[str, Any]]]]:
+    index = load_json(INDEX_PATH)
+    if index.get("schema") != evidence.INDEX_SCHEMA:
+        raise ClaimError(
+            f"reference index schema is {index.get('schema')!r}, expected "
+            f"{evidence.INDEX_SCHEMA!r}"
+        )
+    source_sha = index.get("source_git_sha")
+    if not isinstance(source_sha, str) or not SHA40_RE.fullmatch(source_sha):
+        raise ClaimError("reference index source_git_sha is invalid")
+    entries = index.get("cases")
+    if not isinstance(entries, list) or index.get("case_count") != len(entries):
+        raise ClaimError("reference index case_count does not match cases")
+    expected = evidence.expected_cases()
+    if index.get("workload_count") != len(
+        {case.workload.id for case in expected.values()}
     ):
-        errors.append(
-            f"{path}: verified_baseline.coefficient_of_variation is "
-            f"{baseline.get('coefficient_of_variation')!r}; expected "
-            f"{claim.coefficient_of_variation!r}"
-        )
-    protocol = contract.get("performance_reference_protocol")
-    if not isinstance(protocol, dict):
-        errors.append(f"{path}: performance reference lacks its protocol")
-    elif not _equal_number(
-        protocol.get("repeatability_limit"), claim.repeatability_limit
-    ):
-        errors.append(
-            f"{path}: performance_reference_protocol.repeatability_limit is "
-            f"{protocol.get('repeatability_limit')!r}; expected "
-            f"{claim.repeatability_limit!r}"
-        )
-    if (
-        claim.repeatability_limit is not None
-        and claim.coefficient_of_variation > claim.repeatability_limit
-    ):
-        errors.append(
-            f"{path}: measured CV {claim.coefficient_of_variation:.6f} exceeds "
-            f"the promotion limit {claim.repeatability_limit:.6f}"
-        )
-    return errors
+        raise ClaimError("reference index workload_count is invalid")
 
-
-def _claim_from_entry(
-    root: Path, entry: Mapping[str, Any], source_git_sha: str
-) -> ReferenceClaim:
-    workload = entry.get("workload")
-    if not isinstance(workload, str) or not workload:
-        raise ClaimDataError("every reference index entry needs a workload")
-    evidence_id = entry.get("evidence_id")
-    if not isinstance(evidence_id, str) or not evidence_id:
-        raise ClaimDataError(f"{workload}: evidence_id is missing")
-    if EVIDENCE_ID_RE.fullmatch(evidence_id) is None:
-        raise ClaimDataError(f"{workload}: malformed evidence_id {evidence_id!r}")
-    if not evidence_id.startswith(f"{workload}_max_"):
-        raise ClaimDataError(f"{workload}: evidence_id belongs to another workload")
-
-    payload_path = _relative_payload_path(root, entry.get("path"))
-    payload_bytes = payload_path.read_bytes()
-    payload = _load_json(payload_path)
-    for key, expected in {
-        "workload": workload,
-        "evidence_id": evidence_id,
-        "public_status": entry.get("public_status"),
-    }.items():
-        if payload.get(key) != expected:
-            raise ClaimDataError(
-                f"{workload}: summary {key} is {payload.get(key)!r}; expected {expected!r}"
-            )
-    source = payload.get("source")
-    if not isinstance(source, dict) or source.get("git_sha") != source_git_sha:
-        raise ClaimDataError(
-            f"{workload}: summary is not bound to index source_git_sha"
-        )
-
-    entry_aggregate = entry.get("aggregate")
-    payload_aggregate = payload.get("aggregate")
-    if not isinstance(entry_aggregate, dict) or not isinstance(payload_aggregate, dict):
-        raise ClaimDataError(f"{workload}: aggregate is missing")
-    entry_primary = entry_aggregate.get("primary_metric")
-    payload_primary = payload_aggregate.get("primary_metric")
-    if not isinstance(entry_primary, dict) or entry_primary != payload_primary:
-        raise ClaimDataError(f"{workload}: index and summary primary aggregates differ")
-
-    public_status = entry.get("public_status")
-    if public_status not in {"score-bearing", "performance-bearing"}:
-        raise ClaimDataError(
-            f"{workload}: unsupported reference status {public_status!r}"
-        )
-    metric = entry.get("metric")
-    if not isinstance(metric, str):
-        raise ClaimDataError(f"{workload}: index primary metric is missing")
-    dual_metrics = payload.get("schema") == "mlperf-edu-reference-evidence/0.4"
-    payload_primary_name = (
-        (payload.get("primary_metric") or {}).get("name")
-        if dual_metrics
-        else payload.get("quality_metric")
-    )
-    if payload_primary_name != metric:
-        raise ClaimDataError(f"{workload}: index and summary primary metric differ")
-
-    quality_metric: str | None = None
-    quality_aggregate: Mapping[str, Any] | None = None
-    if dual_metrics:
-        payload_quality_metric = payload.get("quality_metric")
-        entry_quality_metric = entry.get("quality_metric")
-        if payload_quality_metric != entry_quality_metric:
-            raise ClaimDataError(f"{workload}: index and summary quality metric differ")
-        if entry.get("quality_gate") != payload.get("quality_gate"):
-            raise ClaimDataError(f"{workload}: index and summary quality gate differ")
-        if payload_quality_metric is not None:
-            if not isinstance(payload_quality_metric, str):
-                raise ClaimDataError(f"{workload}: quality metric must be a string")
-            candidate = payload_aggregate.get("quality")
-            if not isinstance(candidate, dict):
-                raise ClaimDataError(
-                    f"{workload}: score summary lacks quality aggregate"
-                )
-            quality_metric = payload_quality_metric
-            quality_aggregate = candidate
-
-    cv: float | None = None
-    repeatability_limit: float | None = None
-    if public_status == "performance-bearing":
-        repeatability = payload.get("repeatability")
-        if not isinstance(repeatability, dict):
-            raise ClaimDataError(f"{workload}: performance summary lacks repeatability")
-        cv = _number(repeatability, "coefficient_of_variation", workload)
-        repeatability_limit = _number(repeatability, "limit", workload)
-        if repeatability.get("passed") is not True or cv > repeatability_limit:
-            raise ClaimDataError(
-                f"{workload}: repeatability promotion gate did not pass"
-            )
-
-    digest = entry.get("evidence_sha256")
-    if not isinstance(digest, str) or re.fullmatch(r"[0-9a-f]{64}", digest) is None:
-        raise ClaimDataError(f"{workload}: malformed evidence_sha256")
-    if hashlib.sha256(payload_bytes).hexdigest() != digest:
-        raise ClaimDataError(
-            f"{workload}: evidence_sha256 does not match summary bytes"
-        )
-    return ReferenceClaim(
-        workload=workload,
-        evidence_id=evidence_id,
-        evidence_sha256=digest,
-        source_git_sha=source_git_sha,
-        public_status=public_status,
-        metric=metric,
-        median=_number(entry_primary, "median", workload),
-        minimum=_number(entry_primary, "min", workload),
-        maximum=_number(entry_primary, "max", workload),
-        quality_metric=quality_metric,
-        quality_median=(
-            _number(quality_aggregate, "median", workload)
-            if quality_aggregate is not None
-            else None
-        ),
-        quality_minimum=(
-            _number(quality_aggregate, "min", workload)
-            if quality_aggregate is not None
-            else None
-        ),
-        quality_maximum=(
-            _number(quality_aggregate, "max", workload)
-            if quality_aggregate is not None
-            else None
-        ),
-        coefficient_of_variation=cv,
-        repeatability_limit=repeatability_limit,
-    )
-
-
-def load_reference_claims(root: Path = ROOT) -> ReferenceClaims:
-    """Load and cross-check the index, raw summaries, and native registry."""
-
-    index = _load_json(root / INDEX_PATH)
-    source_git_sha = index.get("source_git_sha")
-    if (
-        not isinstance(source_git_sha, str)
-        or SHA40_RE.fullmatch(source_git_sha) is None
-    ):
-        raise ClaimDataError(
-            "reference index source_git_sha must be 40 lowercase hex digits"
-        )
-    entries = index.get("summaries")
-    if not isinstance(entries, list) or not entries:
-        raise ClaimDataError("reference index summaries must be a non-empty list")
-    if index.get("summary_count") != len(entries):
-        raise ClaimDataError("reference index summary_count does not match summaries")
-
-    records: dict[str, ReferenceClaim] = {}
+    records: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
     for entry in entries:
         if not isinstance(entry, dict):
-            raise ClaimDataError("reference index entries must be objects")
-        claim = _claim_from_entry(root, entry, source_git_sha)
-        if claim.workload in records:
-            raise ClaimDataError(f"duplicate reference workload {claim.workload!r}")
-        records[claim.workload] = claim
+            raise ClaimError("reference index cases must be objects")
+        case_id = entry.get("case_id")
+        if not isinstance(case_id, str) or case_id in records:
+            raise ClaimError(f"missing or duplicate case ID {case_id!r}")
+        path = safe_repository_path(entry.get("path"))
+        payload = load_json(path)
+        if evidence.sha256_file(path) != entry.get("evidence_sha256"):
+            raise ClaimError(f"{case_id}: evidence digest does not match index")
+        expected_case = expected.get(case_id)
+        if expected_case is None:
+            raise ClaimError(f"unexpected evidence case {case_id}")
+        expected_fields = {
+            "workload": expected_case.workload.id,
+            "profile": expected_case.profile,
+            "mode": expected_case.mode,
+            "phase": expected_case.phase,
+            "result_role": expected_case.result_role,
+            "evidence_id": entry.get("evidence_id"),
+        }
+        for field, expected_value in expected_fields.items():
+            if payload.get(field) != expected_value:
+                raise ClaimError(
+                    f"{case_id}: summary {field} is {payload.get(field)!r}, "
+                    f"expected {expected_value!r}"
+                )
+        source = payload.get("source") or {}
+        if source.get("git_sha") != source_sha or source.get("git_dirty") is not False:
+            raise ClaimError(f"{case_id}: summary is not from the clean source SHA")
+        runs = payload.get("runs")
+        if not isinstance(runs, list) or len(runs) != 5:
+            raise ClaimError(f"{case_id}: summary does not contain five runs")
+        if (
+            payload.get("status") != "valid"
+            or payload.get("eligible_for_promotion") is not True
+        ):
+            raise ClaimError(f"{case_id}: evidence is not promotion eligible")
+        if (payload.get("acceptance") or {}).get("passed") is not True:
+            raise ClaimError(f"{case_id}: acceptance gate did not pass")
+        repeatability = payload.get("primary_metric_repeatability") or {}
+        if repeatability.get("passed") is not True:
+            raise ClaimError(f"{case_id}: repeatability gate did not pass")
+        records[case_id] = (entry, payload)
 
-    registry_by_workload: dict[str, tuple[Path, dict[str, Any]]] = {}
-    allowed_revisions: set[str] = set()
-    for path in sorted((root / "registry" / "suites").rglob("*.yaml")):
-        contract = _load_yaml(path)
-        model_source = contract.get("model_source")
-        if isinstance(model_source, dict):
-            revision = model_source.get("revision")
-            if isinstance(revision, str) and SHA40_RE.fullmatch(revision):
-                allowed_revisions.add(revision)
-        if "verified_baseline" not in contract:
+    if set(records) != set(expected):
+        raise ClaimError(
+            "reference case closure mismatch; "
+            f"missing={sorted(set(expected) - set(records))}, "
+            f"extra={sorted(set(records) - set(expected))}"
+        )
+    return source_sha, records
+
+
+def check_registry_baselines(
+    records: Mapping[str, tuple[dict[str, Any], dict[str, Any]]],
+) -> list[str]:
+    errors: list[str] = []
+    by_workload: dict[str, dict[str, tuple[dict[str, Any], dict[str, Any]]]] = {}
+    for case_id, pair in records.items():
+        by_workload.setdefault(str(pair[1]["workload"]), {})[case_id] = pair
+    for workload, relative in sorted(
+        reference_source_lock.PROMOTED_CONTRACT_PATHS.items()
+    ):
+        path = ROOT / relative
+        contract = yaml.safe_load(path.read_text(encoding="utf-8"))
+        baselines = contract.get("verified_baselines") or {}
+        expected_cases = by_workload.get(workload, {})
+        if set(baselines) != set(expected_cases):
+            errors.append(
+                f"{relative}: verified_baselines closure differs from evidence; "
+                f"expected={sorted(expected_cases)}, actual={sorted(baselines)}"
+            )
             continue
-        workload = contract.get("id")
-        relative = path.relative_to(root)
-        if not isinstance(workload, str):
-            raise ClaimDataError(f"{relative}: verified baseline has no workload id")
-        if workload in registry_by_workload:
-            raise ClaimDataError(f"duplicate verified registry baseline for {workload}")
-        registry_by_workload[workload] = (relative, contract)
-
-    missing = set(records) - set(registry_by_workload)
-    extra = set(registry_by_workload) - set(records)
-    if missing or extra:
-        raise ClaimDataError(
-            "verified registry/index closure mismatch; "
-            f"missing={sorted(missing)}, extra={sorted(extra)}"
-        )
-
-    registry_errors: list[str] = []
-    final_records: dict[str, ReferenceClaim] = {}
-    for workload, claim in records.items():
-        path, contract = registry_by_workload[workload]
-        baseline = contract.get("verified_baseline") or {}
-        evidence_role = (
-            "historical-protocol-superseded"
-            if baseline.get("protocol_compatibility") == "superseded"
-            else "current-review-evidence"
-        )
-        final_records[workload] = replace(claim, evidence_role=evidence_role)
-        registry_errors.extend(
-            validate_registry_record(claim, contract, path=str(path))
-        )
-    if registry_errors:
-        raise ClaimDataError("registry reference drift:\n" + "\n".join(registry_errors))
-
-    return ReferenceClaims(
-        source_git_sha=source_git_sha,
-        records=final_records,
-        allowed_non_source_revisions=frozenset(allowed_revisions),
-    )
-
-
-def load_document_texts(root: Path = ROOT) -> dict[str, str]:
-    documents: dict[str, str] = {}
-    for name in DOCUMENT_POLICIES:
-        path = root / name
-        try:
-            documents[name] = path.read_text(encoding="utf-8")
-        except OSError as exc:
-            raise ClaimDataError(f"cannot load {path}: {exc}") from exc
-    return documents
-
-
-def _missing_token(name: str, label: str, token: str) -> str:
-    return f"{name}: missing current {label} `{token}`"
-
-
-def _performance_records(claims: ReferenceClaims) -> Iterable[ReferenceClaim]:
-    return (
-        claim
-        for claim in claims.current_records.values()
-        if claim.public_status == "performance-bearing"
-    )
-
-
-def _markdown_row_binds_claim(
-    rows: Iterable[str], claim: ReferenceClaim, token: str
-) -> bool:
-    aliases = CLAIM_ROW_ALIASES.get(claim.workload)
-    if not aliases:
-        raise ClaimDataError(f"no Markdown-row aliases for {claim.workload}")
-    return any(
-        token in row and any(alias in row.lower() for alias in aliases) for row in rows
-    )
+        for case_id, (entry, _payload) in expected_cases.items():
+            baseline = baselines[case_id]
+            for field in ("evidence_id", "evidence_sha256"):
+                if baseline.get(field) != entry.get(field):
+                    errors.append(f"{relative}: {case_id} has stale {field}")
+        canonical_mode = (contract.get("canonical_max_contract") or {}).get("mode")
+        canonical_candidates = [
+            case_id
+            for case_id, (_entry, payload) in expected_cases.items()
+            if payload.get("mode") == canonical_mode and payload.get("phase") is None
+        ]
+        canonical = canonical_candidates[0] if len(canonical_candidates) == 1 else None
+        if canonical not in baselines or contract.get(
+            "verified_baseline"
+        ) != baselines.get(canonical):
+            errors.append(
+                f"{relative}: canonical verified_baseline is not bound to {canonical!r}"
+            )
+    return errors
 
 
 def check_documents(
-    claims: ReferenceClaims,
-    documents: Mapping[str, str],
+    source_sha: str,
+    records: Mapping[str, tuple[dict[str, Any], dict[str, Any]]],
 ) -> list[str]:
-    """Return drift errors for the hand-written public review documents."""
-
     errors: list[str] = []
-    known_ids = {claim.evidence_id for claim in claims.records.values()}
-    for name, policy in DOCUMENT_POLICIES.items():
-        text = documents.get(name)
-        if text is None:
-            errors.append(f"{name}: document is missing")
+    workload_ids = sorted(
+        {str(payload["workload"]) for _entry, payload in records.values()}
+    )
+    known_evidence_ids = {
+        str(entry["evidence_id"]) for entry, _payload in records.values()
+    }
+    for name in PUBLIC_DOCUMENTS:
+        path = ROOT / name
+        try:
+            text = path.read_text(encoding="utf-8")
+        except OSError as exc:
+            errors.append(f"{name}: cannot read document: {exc}")
             continue
-        if claims.source_git_sha not in text:
-            errors.append(
-                _missing_token(name, "full source revision", claims.source_git_sha)
-            )
-        if claims.historical_records and HISTORICAL_DISCLOSURE not in text.lower():
-            errors.append(
-                f"{name}: missing fail-closed disclosure `{HISTORICAL_DISCLOSURE}`; "
-                "superseded packets must not be presented as current evidence"
-            )
-        markdown_rows = [
-            line for line in text.splitlines() if line.lstrip().startswith("|")
-        ]
-
-        for revision in MARKDOWN_REVISION_RE.findall(text):
-            if claims.source_git_sha.startswith(revision):
-                continue
-            if revision in claims.allowed_non_source_revisions:
-                continue
-            errors.append(
-                f"{name}: suspicious stale or unbound revision `{revision}`; "
-                "only the current source revision and registry-pinned model revisions are allowed"
-            )
-
+        lowered = text.lower()
+        for retired in sorted(RETIRED_PUBLIC_IDS):
+            if retired in text:
+                errors.append(f"{name}: retired public identifier remains: {retired}")
         for evidence_id in EVIDENCE_ID_RE.findall(text):
-            if evidence_id not in known_ids:
-                errors.append(f"{name}: stale or unbound evidence ID `{evidence_id}`")
-
-        if "evidence-ids" in policy:
-            for claim in claims.records.values():
-                if claim.evidence_id not in text:
-                    errors.append(
-                        _missing_token(
-                            name, claim.workload + " evidence ID", claim.evidence_id
-                        )
-                    )
-                elif "evidence-digests" in policy and not any(
-                    claim.evidence_id in row and claim.evidence_sha256 in row
-                    for row in markdown_rows
-                ):
-                    errors.append(
-                        f"{name}: {claim.workload} evidence ID is not bound to its "
-                        "SHA-256 digest in one Markdown row"
-                    )
-
-        if "medians" in policy:
-            for claim in claims.current_records.values():
-                token = f"`{claim.display_median}`"
-                if token not in text:
-                    errors.append(
-                        _missing_token(
-                            name, claim.workload + " median", claim.display_median
-                        )
-                    )
-
-        range_claims: Iterable[ReferenceClaim] = ()
-        if "ranges" in policy:
-            range_claims = claims.current_records.values()
-        elif "score-ranges" in policy:
-            range_claims = (
-                claim
-                for claim in claims.current_records.values()
-                if claim.public_status == "score-bearing"
-            )
-        for claim in range_claims:
-            for label, value in {
-                "minimum": claim.display_minimum,
-                "maximum": claim.display_maximum,
-            }.items():
-                if f"`{value}`" not in text:
-                    errors.append(
-                        _missing_token(name, f"{claim.workload} {label}", value)
-                    )
-
-        if "repeatability" in policy:
-            for claim in _performance_records(claims):
-                value = claim.display_cv_percent
-                if value is not None and value not in text:
-                    errors.append(_missing_token(name, claim.workload + " CV", value))
-
-        if "repeatability-limit" in policy:
-            limits = {
-                claim.repeatability_limit for claim in _performance_records(claims)
-            }
-            if not limits:
-                pass
-            elif None in limits or len(limits) != 1:
-                errors.append(
-                    f"{name}: performance references do not define one common repeatability limit"
-                )
-            else:
-                limit = next(iter(limits))
-                assert limit is not None
-                percent = f"{100 * limit:g}%"
-                decimal = f"{limit:g}"
-                if percent not in text and f"`{decimal}`" not in text:
-                    errors.append(_missing_token(name, "repeatability limit", percent))
-
-        row_claims: Iterable[ReferenceClaim] = ()
-        if "row-bindings" in policy:
-            row_claims = claims.current_records.values()
-        elif "score-row-bindings" in policy:
-            row_claims = (
-                claim
-                for claim in claims.current_records.values()
-                if claim.public_status == "score-bearing"
-            )
-        for claim in row_claims:
-            required_tokens = {"median": claim.display_median}
-            if "ranges" in policy or (
-                "score-ranges" in policy and claim.public_status == "score-bearing"
+            if evidence_id not in known_evidence_ids:
+                errors.append(f"{name}: unbound evidence ID remains: {evidence_id}")
+        if name in WORKLOAD_DOCUMENTS:
+            for workload in workload_ids:
+                if workload not in text:
+                    errors.append(f"{name}: admitted workload is missing: {workload}")
+            if not re.search(r"\bseven workloads?\b|\b7 workloads?\b", lowered):
+                errors.append(f"{name}: missing the seven-workload portfolio claim")
+            if not re.search(
+                r"\bten (?:evidence )?cases?\b|\b10 (?:evidence )?cases?\b", lowered
             ):
-                required_tokens.update(
-                    {
-                        "minimum": claim.display_minimum,
-                        "maximum": claim.display_maximum,
-                    }
-                )
-            if "repeatability" in policy and claim.display_cv_percent is not None:
-                required_tokens["CV"] = claim.display_cv_percent
-            for label, token in required_tokens.items():
-                if not _markdown_row_binds_claim(markdown_rows, claim, token):
-                    errors.append(
-                        f"{name}: {claim.workload} {label} `{token}` is not bound "
-                        "to that workload in one Markdown row"
-                    )
+                errors.append(f"{name}: missing the ten-case evidence closure claim")
+        if "30 workload" in lowered or "all thirty" in lowered:
+            errors.append(f"{name}: stale 30-workload claim remains")
+        if "eight retained" in lowered or "eight summaries" in lowered:
+            errors.append(f"{name}: stale eight-summary claim remains")
+        if (
+            name in {"QUALITY_TARGET_REVIEW.md", "RELEASE_CHECKLIST.md"}
+            and source_sha not in text
+        ):
+            errors.append(f"{name}: full evidence source SHA is missing")
     return errors
-
-
-def check_repository(root: Path = ROOT) -> tuple[ReferenceClaims, list[str]]:
-    claims = load_reference_claims(root)
-    return claims, check_documents(claims, load_document_texts(root))
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--check",
-        action="store_true",
-        help="verify committed claims without modifying files (the default behavior)",
+        "--check", action="store_true", help="verify claims without writing files"
     )
     parser.parse_args()
     try:
-        claims, errors = check_repository()
-    except ClaimDataError as exc:
-        print(f"reference claim inputs are invalid: {exc}")
+        source_sha, records = load_cases()
+        errors = check_registry_baselines(records)
+        errors.extend(check_documents(source_sha, records))
+    except (ClaimError, OSError, yaml.YAMLError) as exc:
+        print(f"FAIL: reference claim inputs are invalid: {exc}")
         return 1
     if errors:
-        print("reference claims are out of date:")
+        print("FAIL: reference claims are out of date")
         for error in errors:
-            print(f"- {error}")
+            print(f"  - {error}")
         return 1
     print(
-        f"reference claims are current ({len(DOCUMENT_POLICIES)} documents, "
-        f"{len(claims.current_records)} current and "
-        f"{len(claims.historical_records)} historical references)"
+        f"PASS: {len(records)} case claims across "
+        f"{len({payload['workload'] for _entry, payload in records.values()})} workloads"
     )
     return 0
 

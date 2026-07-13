@@ -30,9 +30,9 @@ def _(mo):
     # Tutorial 01. Anatomy of a Benchmark Run
 
     This session executes one registered workload and examines the output
-    contract. The `min` profile for `micro-lstm-train` is a deterministic
-    functional systems run over a synthetic micro-shard. It is intentionally
-    not a quality baseline. The exercise focuses on the metrics, environment
+    contract. The `min` profile for `time-series-forecasting` is a deterministic
+    functional run over a synthetic smoke fixture. It is intentionally not a
+    quality baseline. The exercise focuses on the metrics, environment
     fingerprint, and provenance needed to interpret any benchmark result.
     """)
     return

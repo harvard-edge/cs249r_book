@@ -5,7 +5,7 @@ The lab implements the current :class:`mlperf.sut.SUT_Interface` protocol and
 drives it locally. The product CLI does not yet accept arbitrary ``--sut``
 plugins. Run the canonical built-in inference workload separately with:
 
-    mlperf run --workload nanogpt-inference --variant decode --profile min
+    mlperf run --workload causal-language-modeling --mode inference --phase decode --profile min
 
 Lab results measure a local, lab-scale model. They are not publishable MLPerf
 EDU results. Token-for-token parity guards the optimization against changing

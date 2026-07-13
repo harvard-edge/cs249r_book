@@ -62,7 +62,6 @@ PUBLIC_RESULT_SCENARIOS = (
 PRODUCT_SUITES = (
     "language",
     "vision",
-    "recommender",
     "tiny",
     "graph",
     "timeseries",

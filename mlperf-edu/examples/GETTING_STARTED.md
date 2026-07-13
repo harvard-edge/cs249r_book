@@ -1,91 +1,105 @@
-# MLPerf EDU Lab Guide
+# MLPerf EDU Classroom Guide
 
-The three labs in this directory are complete classroom experiments with a
-shared execution contract. Each accepts `--smoke`, runs real model code on CPU
-without network access, performs a functional validity check, and returns a
-nonzero exit status on failure.
-
-Lab output is labeled as a classroom measurement. It is not a canonical MLPerf
-EDU submission and should not be used as public baseline evidence. The
-registered `mlperf run` workflows produce the benchmark reports and provenance
-artifacts used for review.
+MLPerf EDU has two deliberately separate teaching surfaces. Registered
+workloads create benchmark reports and provenance artifacts. The three scripts
+in this directory are standalone classroom experiments that demonstrate
+optimization ideas but never claim canonical benchmark status.
 
 ## Setup
 
-Clone the MLSysBook repository and install MLPerf EDU from its project
-directory.
+Install the locked development environment from the project directory.
 
 ```bash
-git clone https://github.com/harvard-edge/cs249r_book.git
-cd cs249r_book/mlperf-edu
-python3 -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
+uv sync --locked --extra dev
+uv run mlperf doctor
+uv run mlperf list workloads
+uv run mlperf show image-classification
 ```
 
-Check the installation and inspect the registry before running a workload.
+The v0.1 registry contains seven stable workload identities.
+
+- `image-classification`
+- `keyword-spotting`
+- `causal-language-modeling`
+- `text-classification`
+- `information-retrieval`
+- `graph-node-classification`
+- `time-series-forecasting`
+
+Training and inference are modes. Full, prefill, and decode are phases of
+causal-language-modeling inference. They are not separate workload IDs.
+
+## First Registered Run
+
+The `min` profile is the fast functional path for setup, instruction, and CI.
+It exercises real model code and the artifact pipeline, but it is not a
+canonical quality or performance baseline.
 
 ```bash
-mlperf doctor
-mlperf list workloads
-mlperf show resnet18-train
-```
-
-## Canonical CLI Workflow
-
-The `min` profile is a quick representative execution path. It is useful for
-checking installation and artifact plumbing, but a passing `min` run does not
-automatically establish the quality of a `max` baseline.
-
-```bash
-mlperf run \
-  --workload micro-lstm-train \
+OUTPUT_DIR="submissions/first-run"
+uv run mlperf run \
+  --workload time-series-forecasting \
   --profile min \
-  --output-dir submissions/first-run
+  --output-dir "$OUTPUT_DIR"
+uv run mlperf report "$OUTPUT_DIR/time-series-forecasting_min_report.json"
+uv run mlperf verify "$OUTPUT_DIR/time-series-forecasting_min.provd.json"
 ```
 
-Inspect the generated report and verify the paired provenance manifest.
+The run emits JSON, CSV, HTML, and provenance outputs. Use `max` for the
+canonical classroom contract and `pro` for repeated single-node research
+experiments under the same workload identity.
+
+## Causal Language Modeling
+
+The canonical training path creates the quality-approved checkpoint required
+by full, prefill, and decode inference. Keep every phase in the same output
+directory so the harness can verify training lineage.
 
 ```bash
-mlperf report submissions/first-run/micro-lstm-train_min_report.json
-mlperf verify submissions/first-run/micro-lstm-train_min.provd.json
+OUTPUT_DIR="submissions/causal-max"
+uv run mlperf fetch \
+  --workload causal-language-modeling \
+  --mode training \
+  --profile max
+uv run mlperf run \
+  --workload causal-language-modeling \
+  --mode training \
+  --profile max \
+  --output-dir "$OUTPUT_DIR"
+uv run mlperf run \
+  --workload causal-language-modeling \
+  --mode inference \
+  --phase decode \
+  --profile max \
+  --output-dir "$OUTPUT_DIR"
 ```
 
-Discover workload and variant identifiers from the registry instead of copying
-a static workload list from this guide.
+Run `uv run mlperf info --workload causal-language-modeling` or `uv run mlperf
+list matrix` to inspect valid mode and phase combinations.
+
+## Standalone Lab Preflight
+
+Each lab has a deterministic, CPU-only, network-free smoke path. The smoke
+executes real PyTorch operations and fails on a broken functional contract.
 
 ```bash
-mlperf list workloads
-mlperf list variants --workload nanogpt-inference
-mlperf info --workload nanogpt-inference --variant decode
+uv run python examples/lab1_optimization.py --smoke
+uv run python examples/lab2_inference_sut.py --smoke
+uv run python examples/lab3_arch_comparison.py --smoke
 ```
 
-## Fast Preflight
-
-Run all three lab entry points before a class or documentation release.
-
-```bash
-python examples/lab1_optimization.py --smoke
-python examples/lab2_inference_sut.py --smoke
-python examples/lab3_arch_comparison.py --smoke
-```
-
-The smoke paths use deterministic synthetic inputs. Their accuracy and loss
-values are functional checks, not quality targets.
+Lab JSON records `canonical_result` as `false`. These files are classroom
+measurements and cannot be submitted as MLPerf EDU reference evidence.
 
 ## Lab 1. Training-Loop Optimization
 
-Lab 1 trains the repository's complete CIFAR-style ResNet-18 architecture on
-the registered Fashion-MNIST dataset. Images are resized to 32 by 32 and
-expanded to three channels, matching the canonical workload preprocessing. The
-batch size, worker count, augmentation, optimizer, and learning-rate schedule
-settings are wired to the executed code. A full run may download Fashion-MNIST
-on the first invocation.
-
-Start with the baseline preset and save the classroom result.
+Lab 1 compares two ResNet-18 training-loop configurations on Fashion-MNIST.
+It demonstrates batching, data loading, augmentation, optimizer, and schedule
+effects. This model and dataset pair is not the registered MLPerf Tiny
+image-classification contract.
 
 ```bash
-python examples/lab1_optimization.py \
+uv run python examples/lab1_optimization.py \
   --preset baseline \
   --epochs 1 \
   --max-train-batches 100 \
@@ -93,38 +107,17 @@ python examples/lab1_optimization.py \
   --output submissions/lab1-baseline.json
 ```
 
-Run the optimized preset with the same seed and limits.
-
-```bash
-python examples/lab1_optimization.py \
-  --preset optimized \
-  --epochs 1 \
-  --max-train-batches 100 \
-  --max-validation-batches 50 \
-  --output submissions/lab1-optimized.json
-```
-
-Compare throughput and validation accuracy together. A faster run is not an
-improvement if the model's quality falls outside the assignment's allowed
-range. Instructors may set a course-specific check with `--target-accuracy`,
-but the script deliberately does not invent a universal target for every
-laptop and run budget.
-
-The canonical registered workload is separate.
-
-```bash
-mlperf run --workload resnet18-train --profile min
-```
+Instructors may set a course-specific `--target-accuracy`. The lab does not
+invent a universal quality threshold for a bounded exercise.
 
 ## Lab 2. KV-Cache Inference
 
-Lab 2 implements `mlperf.sut.SUT_Interface` and measures two real autoregressive
-decode paths. The baseline recomputes the full sequence at every step. The
-optimized path reuses attention keys and values. The comparison passes only if
-both paths produce identical tokens for every measured query.
+Lab 2 implements `mlperf.sut.SUT_Interface` and compares naïve autoregressive
+decode with KV-cache decode. It passes only when the two paths emit identical
+tokens for every measured query.
 
 ```bash
-python examples/lab2_inference_sut.py \
+uv run python examples/lab2_inference_sut.py \
   --mode compare \
   --queries 3 \
   --prompt-length 32 \
@@ -133,51 +126,33 @@ python examples/lab2_inference_sut.py \
   --output submissions/lab2-kv-cache.json
 ```
 
-The default lab-scale model uses deterministic random initialization and is
-appropriate for latency and token-parity instruction. Pass a compatible
-checkpoint with `--checkpoint` when the assignment also needs trained-model
-behavior. Neither mode reports placeholder accuracy.
-
-The current product CLI runs registered SUTs. It does not accept an arbitrary
-`--sut` plugin path. Use the built-in canonical decode workload as follows.
-
-```bash
-mlperf run \
-  --workload nanogpt-inference \
-  --variant decode \
-  --profile min
-```
+The registered benchmark counterpart is
+`causal-language-modeling --mode inference --phase decode`. The product CLI
+does not load arbitrary SUT plugins.
 
 ## Lab 3. Dense and Sparse Architectures
 
-Lab 3 trains NanoGPT and Nano-MoE on the same fixed TinyShakespeare batches.
-The `--top-k` value directly changes the sparse router. The result reports total
-parameters, active parameters per token, loss, and measured token throughput.
+Lab 3 compares dense and mixture-of-experts language-model training on the
+same fixed Tiny Shakespeare batches. It reports total parameters, active
+parameters per token, loss, and token throughput. It is an architecture lesson
+rather than an admitted benchmark workload.
 
 ```bash
-python examples/lab3_arch_comparison.py \
+uv run python examples/lab3_arch_comparison.py \
   --epochs 1 \
   --max-batches 20 \
   --top-k 2 \
   --output submissions/lab3-dense-sparse.json
 ```
 
-A bounded classroom run does not prove that one architecture converges better
-than the other. Use multiple seeds and a declared quality protocol before
-drawing a model-quality conclusion. The registered workload commands are:
+Use multiple seeds and a declared quality protocol before drawing a
+model-quality conclusion from any bounded classroom comparison.
 
-```bash
-mlperf run --workload nanogpt-train --profile min
-mlperf run --workload nano-moe-train --profile min
-```
+## Interpretation Rules
 
-## Result Interpretation
-
-Every lab JSON includes its scope, seed, device, effective configuration,
-measured metrics, and functional check. The field `canonical_result` is always
-`false`. Canonical workload reports have a different schema and are paired with
-`.provd.json` provenance manifests.
-
-Useful CLI discovery commands include `mlperf --help`, `mlperf list workloads`,
-`mlperf list variants`, `mlperf show WORKLOAD`, and `mlperf info --workload
-WORKLOAD`.
+- Compare timing only after the applicable quality or functional gate passes.
+- Keep workload identity separate from precision, compilation, batching, and
+  other configurations.
+- Treat `min` output as functional evidence only.
+- Preserve the JSON report and provenance manifest together.
+- Use the registry and generated site as the source of current workload names.

@@ -2,9 +2,9 @@
 """Lab 1. Measure ResNet-18 training-loop optimizations.
 
 This lab is an educational experiment, not a score-bearing MLPerf EDU run.
-Use the product CLI for a canonical benchmark artifact:
+Use the product CLI for a canonical image-classification artifact:
 
-    mlperf run --workload resnet18-train --profile min
+    mlperf run --workload image-classification --profile min
 
 The ``--smoke`` path is deterministic, CPU-only, and network-free. It runs a
 real ResNet-18 forward pass, backward pass, optimizer update, and validation

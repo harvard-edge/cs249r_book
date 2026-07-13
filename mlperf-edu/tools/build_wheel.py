@@ -69,6 +69,7 @@ def verify_wheel(wheel_path: Path) -> None:
         evidence_index = json.loads(evidence_index_bytes)
         exact_assets = {
             "mlperf_edu/workloads.yaml": ROOT / "src" / "mlperf_edu" / "workloads.yaml",
+            "mlperf_edu/datasets.yaml": ROOT / "src" / "mlperf_edu" / "datasets.yaml",
             "mlperf_edu/reference_results/index.json": ROOT
             / "src"
             / "mlperf_edu"
@@ -112,6 +113,11 @@ def verify_wheel(wheel_path: Path) -> None:
                 raise RuntimeError(
                     f"wheel asset {member} does not match the source mirror"
                 )
+        if (
+            archive.read("mlperf_edu/datasets.yaml")
+            != (ROOT / "datasets.yaml").read_bytes()
+        ):
+            raise RuntimeError("packaged dataset catalog does not match datasets.yaml")
         if (
             archive.read("mlperf_edu/reference_results/index.json")
             != evidence_index_bytes

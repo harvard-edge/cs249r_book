@@ -1,275 +1,140 @@
-# MLPerf EDU Public-Candidate Rules
+# MLPerf EDU Public Result Rules
 
-MLPerf EDU is an independent educational benchmark preview. It is not an
-official MLCommons benchmark and is not endorsed by MLCommons. The terms
-`score-bearing` and `performance-bearing` below are local candidate
-classifications used to decide what is ready for external review. They do not
-authorize official MLPerf result claims.
+## Status
 
-## Registry Status
-
-Every row in the native registry declares `public.status`. The current counts
-are five score-bearing, three performance-bearing, and 22 systems-only rows.
-
-| **Status** | **Required Meaning** | **Allowed Claim Before External Approval** |
-|:---|:---|:---|
-| `score-bearing` | Real data, explicit quality target, five-seed reference protocol, comparable performance, and complete artifacts. | MLPerf EDU score candidate for review. |
-| `performance-bearing` | Standard model or quality-approved checkpoint, nonempty functional or task-quality gate, repeatable timing, and complete artifacts. | MLPerf EDU performance candidate for review. |
-| `systems-only` | Runnable teaching or research workload whose current data, quality, or comparison contract is insufficient for a public score. | Classroom or systems measurement only. |
-| `experimental` | Unstable or incomplete workload. | No release claim. |
-
-A registry label alone is not evidence. The final `max` report, release
-validation, retained reference packet, asset policy, and reviewer decisions
-must all agree.
-
-The current committed reference set contains eight clean five-execution
-summaries from source commit `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`.
-Those summaries are review-eligible for local handoff under the current
-contracts.
-
-## Profile Semantics
-
-| **Profile** | **Role** | **Evidence Boundary** |
-|:---|:---|:---|
-| `min` | Fast correctness and artifact plumbing | May use synthetic or tiny deterministic inputs. It cannot establish a public quality or performance result. |
-| `max` | Candidate comparable scale | Must satisfy the row's data, quality, measurement, provenance, and report-level review contract. |
-| `pro` | Controlled research envelope | Useful for repeated or variant studies only under an explicitly recorded protocol. It is not automatically public evidence. |
-
-`smoke`, `coverage`, `max`, and `release` are validation presets, not profiles.
-`smoke` executes the default `min` collection, `coverage` executes every `min`
-row, `max` executes every `max` row, and `release` executes both complete sets.
-A dry run prints selection only and never counts as execution evidence.
-
-## Public-Candidate Report Contract
-
-`src/mlperf/contracts.py` evaluates every public-candidate `max` report. An
-eligible report must satisfy all common checks.
-
-- Runner status is `passed`.
-- The report records an integer seed.
-- The declared metric resolves to one finite numeric report value.
-- Quality or functional enforcement is enabled and its target is met.
-- Report and provenance artifact paths exist.
-- The `data_mode` is eligible for the candidate status.
-
-Score-bearing rows require `data_mode: real`. Performance-bearing rows may use
-`checkpoint-backed`, `local-prompt`, `local-prompt-batch`, or
-`local-prompt-long-context` when the registry declares the corresponding
-contract.
-
-Performance-bearing reports have additional requirements.
-
-- At least one warmup and at least three measured runs.
-- Declared latency statistics for the measured samples.
-- A checkpoint SHA-256 digest when the row depends on shared training weights.
-- A pinned model revision when the row uses an external model source.
-- A passing task-quality evaluation for external-model results.
-
-`mlperf validate max` and `mlperf validate release` collect failed
-`review_contract` blocks and fail the validation item. A locally passing runner
-cannot bypass this report-level gate.
-
-## Score-Bearing Rule
-
-The current score candidates are NanoGPT training, Micro-DLRM training, MNIST
-anomaly detection, ResNet-18 training, and MobileNetV2 training. Each must
-declare the following registry fields and execution behavior.
-
-- Real dataset, source, split, preprocessing, and fallback policy.
-- Numeric metric, direction, threshold, and tolerance.
-- `target_basis: reference_runs` with five declared runs.
-- Seeds `0,1,2,3,4` and median aggregation.
-- Backend and machine-class disclosure.
-- Artifact and full-sweep rerun policies.
-- `min` and `max` runners.
-- Explicit `training` scenario under the proposed MLPerf EDU vocabulary, pending MLCommons reviewer acceptance.
-
-The release evidence tool runs each seed in a fresh process through the product
-runner, report enrichment, provenance verification, and grading path. All five
-individual reports must pass their targets. The median must also pass. Each
-attempt is create-once and receives an evidence summary plus an unauthenticated
-SHA-256 digest sidecar.
-
-The current thresholds and committed five-run evidence are listed in
-[QUALITY_TARGET_REVIEW.md](QUALITY_TARGET_REVIEW.md). Registry calibration
-fields remain rationale; the committed summaries in `reference_results/` are
-the review evidence.
-
-## Performance-Bearing Rule
-
-The current performance candidates are NanoGPT prefill, NanoGPT decode, and the
-pinned SmolLM2 baseline.
-
-Each declares five reference executions. Every execution must pass its report
-contract and retain its within-run samples. Five reference executions do not
-mean five timed samples. They wrap the repeated timing protocol declared below.
-
-Checkpoint-backed NanoGPT inference must retain all of the following evidence.
-
-- Source training workload and quality dependency.
-- Exact checkpoint path and SHA-256 digest.
-- Source quality metric, target, target basis, and reference protocol in the
-  enriched report.
-- Fixed prompt shape and configured prefill or decode work.
-- Synchronized repeated timing with raw or aggregate latency samples.
-- Positive throughput and completed functional work.
-
-The prefill default uses one content-addressed token prompt, materializes a fresh
-KV cache, and records three discarded warmups plus twenty measurements. The
-decode default is a single-stream sequential microbenchmark with three discarded
-warmups and twenty measured requests. Its request TTFT spans prompt prefill
-through selection of the first output token. Every inter-token sample measures a
-subsequent cache-reusing step, and the first such sample is also retained as
-first-decode latency.
-This is not a server-load or arrival-process measurement.
-
-The SmolLM2 baseline must retain its pinned revision, model metadata, bundled
-28-case v2 fixture digest, fixture version, seven category labels, continuation-only
-NLL and perplexity, generation length, and repeated timing. Continuation losses
-are weighted by token count globally and within each category. The default gate
-requires at least eight generated tokens, overall perplexity at most 7, and
-worst-category perplexity at most 24. Its default protocol uses three warmups and
-twenty measured cache-reusing greedy requests. Request TTFT spans prompt prefill
-through the first output token. Subsequent token calls reuse the same KV cache,
-and the report retains raw ITL samples and end-to-end request latency separately.
-The quality pass tokenizes each expected continuation independently from its
-prompt and scores those exact tokens through the same prefill-then-cache-reuse
-path. The former four-case, case-mean packet is protocol-superseded and cannot
-support a v2 performance claim.
-
-The dynamic-int8 SLM path is systems-only. Its historical v1 calibration failed
-the task-quality parity limits, and the fixture change supersedes those exact
-numbers. Completing generation is not enough to promote it; v2 overall,
-weakest-category, and NLL-parity gates must all pass.
-
-## Current Committed Reference Set
-
-`reference_results/index.json` contains eight content-addressed summaries from
-clean source commit `86738e4654d8f77ef1cec4698b30e0ebd20dd2b3`. Each summary
-uses seeds `0,1,2,3,4`, has `eligible_for_public_baseline: true`, and points to
-the same source lock. The public-candidate repeatability limit is `5%`
-coefficient of variation for timed performance references.
-
-| **Workload** | **Evidence ID** | **Primary Metric Median** | **Minimum** | **Maximum** | **CV** |
-|:---|:---|---:|---:|---:|---:|
-| `anomaly-ae-train` | `anomaly-ae-train_max_20260711T204007.498158Z` | `4.3060` | `4.2488` | `4.5012` | n/a |
-| `micro-dlrm-train` | `micro-dlrm-train_max_20260711T205839.712863Z` | `2.0394` | `1.9475` | `2.0924` | n/a |
-| `mobilenetv2-train` | `mobilenetv2-train_max_20260711T204653.574587Z` | `103.6699` | `103.4276` | `104.7116` | n/a |
-| `nanogpt-decode` | `nanogpt-decode_max_20260711T210118.136527Z` | `316.7836` | `313.2178` | `319.4718` | `0.75%` |
-| `nanogpt-prefill` | `nanogpt-prefill_max_20260711T205947.060179Z` | `3859.7758` | `3849.9537` | `3868.4721` | `0.19%` |
-| `nanogpt-train` | `nanogpt-train_max_20260711T202223.716219Z` | `117.5981` | `117.0730` | `118.2963` | n/a |
-| `resnet18-train` | `resnet18-train_max_20260711T204117.913822Z` | `58.4192` | `57.3181` | `59.5123` | n/a |
-| `slm-decode` | `slm-decode_max_20260711T210317.517476Z` | `61.5742` | `60.4083` | `61.9703` | `1.11%` |
-
-The repository commits compact summaries and digests, not every raw artifact.
-Complete create-once attempts are retained for local handoff, and
-reviewer-facing public URLs remain unassigned. The DLRM raw packet is local-only
-while the MovieLens policy decision remains open. A summary does not close
-hosted CI, independent reproduction, representative browser inspection,
-dataset policy, target and scenario review, naming, or result-wording approval.
-
-## Systems-Only Rule
-
-A systems-only row must still be honest and executable.
-
-- Both `min` and `max` runners exist.
-- Reports label synthetic, random, tiny, local, or micro-sharded inputs.
-- Meaningless quality gates are disabled or explicitly described as functional
-  checks.
-- The registry explains the systems question and why the row is not a public
-  candidate.
-- Documentation does not reuse its configured teaching threshold as a released
-  score.
-
-Systems-only rows are appropriate for architecture, memory, precision,
-quantization, compression, distributed, agent, and control-flow studies while
-their public task contract remains incomplete.
-
-## Dataset and Model Policy
-
-Dataset dossiers expose `license_status` and `public_release_status`. The
-structured statuses are project policy inputs, not legal conclusions.
-
-| **Release Status** | **Project Behavior** |
-|:---|:---|
-| `public-ok-bundled` | The project intends to ship the asset with attribution and an applicable component license. |
-| `public-ok-with-attribution` | Preserve the named upstream attribution and license fields in reports and packages. |
-| `public-ok-fetch-only` | Fetch from upstream and preserve recipe and source metadata. Do not redistribute the upstream asset. |
-| `restricted-needs-approval` | Block strict public policy until written approval, an accepted policy, or row demotion. |
-| `systems-only-with-attribution` | Keep the row systems-only and preserve attribution. |
-| `systems-only-review-pending` | Keep the row systems-only while source or release review remains incomplete. |
-
-The complete 14-entry catalog and the MovieLens decision paths are in
-[DATASET_RELEASE_REVIEW.md](DATASET_RELEASE_REVIEW.md). External model rows must
-also pin their revision and preserve model-license metadata.
-
-## Provenance and Package Integrity
-
-Every canonical run emits JSON, HTML, CSV, and `.provd.json` artifacts. The
-manifest records source-tree evidence, weights, dataset files, seed, hardware,
-optional roofline sidecar, canonical report content, and exact report bytes
-when available.
-
-The manifest integrity record is an unauthenticated digest. It detects changes
-but does not prove the identity of the producer. Documentation and reports must
-not call it a digital signature.
-
-`mlperf verify` recomputes available evidence from disk. `mlperf package`
-requires a verified manifest, rewrites machine-local paths to archive-relative
-paths, includes referenced artifacts, indexes SHA-256 and byte size, and
-verifies the package after extraction in a clean temporary directory.
-Packaging fails closed when a known dataset dossier forbids redistribution or
-still requires a release decision. MovieLens evidence remains locally
-verifiable, but its dataset bytes cannot enter an MLPerf EDU archive.
-
-Verification establishes internal integrity. It does not establish fair
-measurement, legal permission, independent reproduction, or MLCommons
+These rules govern the independent MLPerf EDU v0.1 review candidate. They do
+not authorize the use of an official MLPerf result label or imply MLCommons
 acceptance.
 
-## Audit and Validation Boundary
+## Eligible Workloads and Cases
 
-```bash
-uv run mlperf audit
-uv run mlperf audit --policy public --format json
-uv run mlperf validate smoke
-uv run mlperf validate coverage
-uv run mlperf validate max --keep-going
-uv run mlperf validate release --keep-going
-uv run pytest
-uv run python tools/build_wheel.py
-```
+Only registry-defined cases in `reference_results/index.json` can support a
+public reference claim. The v0.1 closure contains seven workloads and ten
+evidence cases. A local run outside that closure can be useful for teaching or
+research, but it is not a promoted reference result.
 
-The development audit checks registry consistency and currently serves as a
-blocking local gate. The strict public audit fails on unresolved release-policy
-warnings, including the current MovieLens-100K warning. Audit does not execute
-models. Actual validation must run, grade, and verify the artifacts on the same
-source revision used for review.
+## Result Roles
 
-## Promotion Rule
+| **Role** | **Public Rule** |
+|:---|:---|
+| `score-bearing` | Reports the canonical task metric and timing after every quality gate passes. |
+| `performance-bearing` | Reports timing after every functional gate passes. |
+| `systems-only` | May report observations, but must not be presented as a comparable score or baseline. |
+| `deferred` | Has an authoritative reference but no admitted laptop contract. |
+| `rejected` | Does not satisfy the workload admission rule. |
 
-Promotion happens one row at a time.
+The registry role is necessary but not sufficient. The complete evidence and
+disclosure rules must also pass.
 
-1. Define the model, data, scenario, metric, target, runtime budget, and backend
-   policy.
-2. Make both profiles execute with honest data labels and complete artifacts.
-3. Calibrate the target without presenting calibration as released evidence.
-4. Produce the complete final-source reference packet.
-5. Pass development audit, strict public audit, targeted validation, full
-   release validation, package portability, and documentation checks.
-6. Obtain the applicable dataset, target, scenario, naming, and result-wording
-   decisions.
+## Profiles
 
-`experimental` may become `systems-only` after honest execution is stable.
-`systems-only` may become `performance-bearing` after its standardized work and
-timing contract are reviewable. `performance-bearing` may become
-`score-bearing` only after a real-data task-quality contract and complete
-reference evidence are stable.
+`min` is functional evidence only. It may use a deterministic reduced input
+and must never establish a public quality or performance result. `max` is the
+canonical real-data contract. `pro` retains the same workload identity while
+exposing controlled single-node research configurations.
 
-## Release Claim Rule
+Profile names do not replace result roles. A `max` run that fails quality,
+repeatability, provenance, or data policy is not public evidence.
 
-An independent preview may show implemented machinery and explicit open gates.
-It may not claim an official score, endorsement, or MLCommons publication. A
-public candidate release requires every in-repository gate in
-[RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) and all applicable external
-decisions. The current eight committed summaries satisfy the reference-evidence
-step only. Stronger wording requires written MLCommons approval.
+## Workload Identity
+
+Training and inference are modes. Full, prefill, and decode are phases.
+Batching, precision, quantization, compilation, context length, scheduling,
+and serving behavior are configurations or scenarios. Public labels must keep
+those fields separate from the workload ID.
+
+## Five-Run Promotion Protocol
+
+A promoted case must satisfy every condition below:
+
+1. Five fresh operating-system processes execute the canonical seed.
+2. Every process completes without timeout or artifact loss.
+3. Every quality or functional gate passes.
+4. The declared aggregate gate passes.
+5. The sample timing coefficient of variation is at most 5%.
+6. Every run uses the same comparison fingerprint.
+7. The source tree is clean and bound to one exact Git SHA.
+8. The attempt preserves every declared report, manifest, and artifact digest.
+
+The five fresh processes measure execution repeatability. They are not a
+five-seed training experiment. A failed process invalidates the entire
+attempt. Individual runs cannot be replaced.
+
+## Power and Interruption Policy
+
+Laptop reference campaigns should use AC power with Low Power Mode disabled.
+The operator must disclose power source and platform power policy. Sleep,
+hibernation, power-mode change, or material concurrent load invalidates the
+affected attempt. A rejected attempt may be retained for audit, but it must not
+be imported as promotion evidence.
+
+## Quality Rules
+
+A score-bearing case must inherit its task metric and quality reference from
+the admitted upstream definition. Every individual run and the aggregate must
+pass. A project-created proxy metric or synthetic substitute cannot support a
+score-bearing claim.
+
+Performance-bearing cases must pass their functional gate in every run. Their
+performance values are measurements, not pass thresholds.
+
+## Causal Lineage
+
+Full, prefill, and decode inference must use one portable package that selects
+exactly one committed training execution. The selected run must represent the
+five-run median quality. The package, checkpoint, source report, and source
+provenance digests must match across all three phases.
+
+## Required Disclosure
+
+A result disclosure must include:
+
+- Workload ID, profile, mode, phase, and scenario
+- Result role and promotion status
+- Primary metric and all five values
+- Quality metric and all five values where applicable
+- Median, range, sample standard deviation, and timing CV
+- Dataset mode, split, versions, and artifact digests
+- Model or checkpoint identity and lineage
+- Requested device and executed backend
+- Hardware, operating system, Python, PyTorch, and runtime fingerprint
+- Relevant precision, compilation, batching, and scheduling configuration
+- Source Git SHA and evidence digest
+- Any power, sleep, thermal, or background-load qualification
+- Independent-preview and non-endorsement notice
+
+The HTML report is the preferred human-readable disclosure. JSON remains the
+authoritative machine-readable record.
+
+## Provenance and Verification
+
+Every result must retain its `.provd.json` manifest with the JSON report and
+all referenced artifacts. Verification must pass against the original files
+and after clean package extraction. SHA-256 checks integrity but does not
+authenticate who produced the result.
+
+## Dataset and Package Policy
+
+Assets are fetched from pinned upstream locations. Dataset or model bytes may
+be packaged only when their redistribution policy permits it. Otherwise, the
+package must retain digests, source metadata, and a reproducible fetch recipe
+without redistributing the bytes.
+
+Unresolved licensing or redistribution policy blocks publication or packaging
+of the affected bytes. It does not permit silent substitution.
+
+## Prohibited Claims
+
+The following statements are not permitted:
+
+- Calling an independent result an official MLPerf result
+- Comparing runs whose case or comparison fingerprints differ without disclosure
+- Presenting `min`, synthetic, or systems-only output as task quality
+- Reporting timing from a failed quality or functional run
+- Hiding an interrupted, sleeping, or power-mode-changing attempt
+- Treating a configuration as a new workload to inflate coverage
+- Replacing an authoritative task with a smaller project-created proxy
+- Claiming distributed or datacenter relevance from the v0.1 suite
+
+Exact promoted values and evidence IDs come from the committed ten-case index.
+Hand-written documents must not maintain competing baseline tables.
