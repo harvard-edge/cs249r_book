@@ -90,6 +90,7 @@ from .registry import (
     PUBLIC_STATUSES,
     RESEARCH_WORKLOADS,
     STARTER_WORKLOADS,
+    WORKLOAD_COLLECTIONS,
     Workload,
     default_registry_path,
     find_project_root,
@@ -183,6 +184,12 @@ def build_parser() -> argparse.ArgumentParser:
         default=None,
         help="Check one workload id or canonical workload family",
     )
+    doctor_selection.add_argument(
+        "--collection",
+        choices=WORKLOAD_COLLECTIONS,
+        default=None,
+        help="Check an explicit workload collection",
+    )
     add_profile(doctor)
     doctor.add_argument(
         "--variant", default=None, help="Variant under a canonical workload"
@@ -202,6 +209,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--workload",
         default=None,
         help="Prepare one workload id or canonical workload family",
+    )
+    init_selection.add_argument(
+        "--collection",
+        choices=WORKLOAD_COLLECTIONS,
+        default=None,
+        help="Prepare an explicit workload collection",
     )
     init.add_argument(
         "--variant", default=None, help="Variant under a canonical workload"
@@ -519,6 +532,12 @@ def add_selection(parser: argparse.ArgumentParser) -> None:
         default=None,
         help="Run one workload id or canonical workload family",
     )
+    group.add_argument(
+        "--collection",
+        choices=WORKLOAD_COLLECTIONS,
+        default=None,
+        help="Run an explicit workload collection",
+    )
 
 
 def load_workloads(args: argparse.Namespace) -> dict[str, Workload]:
@@ -557,11 +576,18 @@ def select_cli_workloads(
     )
 
 
-def selection_label(*, suite: str | None, workload: str | None = None) -> str:
+def selection_label(
+    *,
+    suite: str | None,
+    workload: str | None = None,
+    collection: str | None = None,
+) -> str:
     if workload:
         return workload
     if suite:
         return suite
+    if collection:
+        return f"collection:{collection}"
     return "default"
 
 
@@ -631,6 +657,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             selector = selection_label(
                 suite=getattr(args, "suite", None),
                 workload=getattr(args, "workload", None),
+                collection=getattr(args, "collection", None),
             )
             if getattr(args, "variant", None):
                 selector = f"{selector}:{args.variant}"
@@ -655,6 +682,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
             "profile": profile,
             "suite": getattr(args, "suite", None),
             "workload": getattr(args, "workload", None),
+            "collection": getattr(args, "collection", None),
             "variant": getattr(args, "variant", None),
             "checks": checks,
             "selected_workloads": [workload_summary(workload) for workload in selected],
@@ -693,7 +721,11 @@ def cmd_init(args: argparse.Namespace) -> int:
     with ModelOverride(args.model):
         workloads = load_workloads(args)
         selected = select_cli_workloads(workloads, args)
-        label = selection_label(suite=args.suite, workload=args.workload)
+        label = selection_label(
+            suite=args.suite,
+            workload=args.workload,
+            collection=args.collection,
+        )
         if args.variant:
             label = f"{label}:{args.variant}"
         console.print(f"[bold]Initialized profile[/bold] {args.profile} for {label}")
@@ -703,6 +735,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             selected,
             suite=args.suite,
             workload=args.workload,
+            collection=args.collection,
             variant=args.variant,
         )
         output_dir = Path(args.output_dir).resolve()
@@ -731,6 +764,7 @@ def cmd_init(args: argparse.Namespace) -> int:
             profile="min",
             suite=args.suite,
             workload=args.workload,
+            collection=args.collection,
             variant=args.variant,
             workload_reports=workload_reports,
             output_dir=output_dir,
@@ -763,6 +797,8 @@ def print_next_commands(args: argparse.Namespace) -> None:
         selector.extend(["--suite", args.suite])
     if getattr(args, "workload", None):
         selector.extend(["--workload", args.workload])
+    if getattr(args, "collection", None):
+        selector.extend(["--collection", args.collection])
     if getattr(args, "variant", None):
         selector.extend(["--variant", args.variant])
     selector_text = " ".join(selector)
@@ -785,6 +821,7 @@ def cmd_fetch(args: argparse.Namespace) -> int:
             selected,
             suite=args.suite,
             workload=args.workload,
+            collection=args.collection,
             variant=args.variant,
         )
         console.print(
@@ -976,6 +1013,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             selected,
             suite=args.suite,
             workload=args.workload,
+            collection=args.collection,
             variant=args.variant,
         )
         if getattr(args, "dry_run", False):
@@ -1011,6 +1049,7 @@ def cmd_run(args: argparse.Namespace) -> int:
             profile=args.profile,
             suite=args.suite,
             workload=args.workload,
+            collection=args.collection,
             variant=args.variant,
             workload_reports=workload_reports,
             output_dir=output_dir,
@@ -1026,9 +1065,14 @@ def print_run_selection(
     *,
     suite: str | None,
     workload: str | None,
+    collection: str | None,
     variant: str | None,
 ) -> None:
-    selector = selection_label(suite=suite, workload=workload)
+    selector = selection_label(
+        suite=suite,
+        workload=workload,
+        collection=collection,
+    )
     if variant:
         selector = f"{selector}:{variant}"
     console.print(
@@ -1058,6 +1102,7 @@ def write_aggregate_report(
     profile: str,
     suite: str | None,
     workload: str | None,
+    collection: str | None = None,
     variant: str | None = None,
     workload_reports: list[dict[str, Any]],
     output_dir: Path,
@@ -1074,12 +1119,21 @@ def write_aggregate_report(
         "profile": profile,
         "suite": suite,
         "workload": workload,
+        "collection": collection,
         "variant": variant,
         "selection": {
-            "kind": "workload" if workload else "suite" if suite else "default",
+            "kind": (
+                "workload"
+                if workload
+                else "suite"
+                if suite
+                else "collection"
+                if collection
+                else "default"
+            ),
             "name": f"{workload}:{variant}"
             if workload and variant
-            else workload or suite or "default",
+            else workload or suite or collection or "default",
         },
         "hardware": hardware,
         "workloads": workload_reports,
@@ -4969,7 +5023,12 @@ def cmd_info(args: argparse.Namespace) -> int:
             workloads, collection=profile_collection(args.profile)
         )
         print_run_selection(
-            args.profile, selected, suite=None, workload=None, variant=None
+            args.profile,
+            selected,
+            suite=None,
+            workload=None,
+            collection=None,
+            variant=None,
         )
         console.print(f"List details: mlperf list --profile {args.profile}")
         return 0

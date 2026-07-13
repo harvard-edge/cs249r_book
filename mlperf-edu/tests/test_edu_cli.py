@@ -276,6 +276,27 @@ def test_default_collection_for_profile_defaults():
     )
 
 
+def test_explicit_collection_overrides_profile_default():
+    result = run_cli(
+        "run",
+        "--profile",
+        "min",
+        "--collection",
+        "all",
+        "--dry-run",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "Selected 7 workload(s) for profile min (collection:all)." in result.stdout
+    assert "image-classification" in result.stdout
+    assert "keyword-spotting" in result.stdout
+    assert "causal-language-modeling" in result.stdout
+    assert "text-classification" in result.stdout
+    assert "information-retrieval" in result.stdout
+    assert "graph-node-classification" in result.stdout
+    assert "time-series-forecasting" in result.stdout
+
+
 def test_report_enrichment_defaults_quality_required_from_public_contract():
     workloads = load_registry()
 
