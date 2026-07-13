@@ -4,7 +4,7 @@
 
 The review candidate contains seven workloads and ten evidence cases. Evidence
 is bound to clean source revision
-`5bba8def62e3944901a9ce0ab0725ed32bf4d3ad`. A checked box requires direct
+`3cc071737454494d6a14d58fb5dc74d190d6cf7a`. A checked box requires direct
 command output or a committed content-addressed artifact. Intent, partial runs,
 and narrow smoke checks do not prove a broad release claim.
 
@@ -64,7 +64,7 @@ training run.
 ```bash
 uv run python tools/import_reference_evidence.py \
   --evidence-root /tmp/mlperf-edu-promotion \
-  --source-git-sha 5bba8def62e3944901a9ce0ab0725ed32bf4d3ad
+  --source-git-sha 3cc071737454494d6a14d58fb5dc74d190d6cf7a
 uv run python tools/sync_verified_baselines.py
 uv run python tools/export_flat_registry.py
 uv run python tools/check_taxonomy.py
