@@ -131,10 +131,10 @@ The quality contracts are:
 | `image-classification` | top-1 accuracy at least 0.85 | MLPerf Tiny threshold |
 | `keyword-spotting` | top-1 accuracy at least 0.90 | MLPerf Tiny threshold |
 | `causal-language-modeling` | validation cross-entropy at most 1.4697 | nanoGPT published Shakespeare result |
-| `text-classification` | SST-2 accuracy within the declared published-result tolerance | pinned checkpoint model card |
+| `text-classification` | SST-2 accuracy at least 0.9105504587155964 | pinned checkpoint model-index metadata |
 | `information-retrieval` | mean nDCG@10 equal to the documented evaluator result | Sentence Transformers example |
 | `graph-node-classification` | test accuracy within the published GCN tolerance | official OGB GCN reference |
-| `time-series-forecasting` | test MSE at or below the published tolerance | official PatchTST ETTm1 result |
+| `time-series-forecasting` | test MSE at most 0.29292929292929293 | PatchTST 0.290 result divided by the MLPerf 0.99 quality fraction |
 
 `QUALITY_TARGET_REVIEW.md` records the numerical details and rationale.
 

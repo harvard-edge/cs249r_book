@@ -19,10 +19,10 @@ duplicating mutable result tables.
 | `image-classification` | Official float ResNet8 and the 200-example MLPerf Tiny CIFAR-10 accuracy set | top-1 accuracy at least 0.85 | MLPerf Tiny fixes the model, accuracy set, metric, and threshold. The PyTorch adapter must reproduce that result without changing preprocessing. |
 | `keyword-spotting` | Official DS-CNN and the 1,000-example EEMBC MFCC accuracy set | top-1 accuracy at least 0.90 | MLPerf Tiny fixes the task and threshold. The adapter preserves the quantized input convention and model graph. |
 | `causal-language-modeling` | nanoGPT Shakespeare character configuration and Tiny Shakespeare split | best validation cross-entropy at most 1.4697 | The threshold is nanoGPT's published result for the exact 5,000-iteration recipe. |
-| `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | accuracy within the registry tolerance of the published checkpoint result | The checkpoint model card supplies the task and accuracy reference. The complete development split is evaluated. |
+| `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | accuracy at least 0.9105504587155964 | The pinned model-index metadata publishes this exact verified accuracy for the GLUE SST-2 validation split. The complete split is evaluated. |
 | `information-retrieval` | Pinned MiniLM cross-encoder and the documented three-dataset NanoBEIR subset | mean nDCG@10 equal to 0.60716840988382 within the registry tolerance | Sentence Transformers publishes the exact evaluator example and score. |
 | `graph-node-classification` | Official OGB GCN recipe and `ogbn-arxiv` split | test accuracy within 0.0029 of 0.7174 | The correct OGB GCN reference is 71.74% with a published 0.29-point standard deviation. The previously quoted 72.51% belongs to a different leaderboard section and is not used. |
-| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at or below the registry tolerance around the published result | The PatchTST repository supplies the configuration, split, evaluator, and published ETTm1 result. |
+| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at most 0.29292929292929293 | PatchTST publishes the 0.290 result. The gate divides that lower-is-better reference by the MLPerf 0.99 quality fraction, an explicit direction-aware MLPerf EDU policy inference. |
 
 ## Performance-Bearing Phase Gates
 

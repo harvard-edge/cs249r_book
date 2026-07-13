@@ -40,10 +40,10 @@ uv run mlperf run --workload image-classification --profile max \
 | `image-classification` | MLPerf Tiny float ResNet8 and its 200-sample CIFAR-10 accuracy set | inference | top-1 accuracy at least 0.85 |
 | `keyword-spotting` | MLPerf Tiny DS-CNN and the 1,000-example EEMBC accuracy set | inference | top-1 accuracy at least 0.90 |
 | `causal-language-modeling` | nanoGPT Shakespeare character configuration and Tiny Shakespeare | training; full, prefill, and decode inference | validation cross-entropy at most 1.4697; every inference run passes its functional gate |
-| `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | inference | accuracy within the declared tolerance of the published checkpoint result |
+| `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | inference | accuracy at least the exact verified model-index result of 0.9105504587155964 |
 | `information-retrieval` | Sentence Transformers CrossEncoder NanoBEIR example | inference | exact documented mean nDCG@10 |
 | `graph-node-classification` | Official OGB GCN recipe on `ogbn-arxiv` | training | test accuracy within the published GCN reference tolerance |
-| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | test MSE at or below the published reference tolerance |
+| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | test MSE at most 0.29292929292929293, the direction-aware 99%-of-reference gate |
 
 The [selection ledger](registry/selection-ledger.yaml) records the authority,
 rationale, laptop evidence, and rejection or deferral reason for every audited
