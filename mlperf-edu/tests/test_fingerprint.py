@@ -7,6 +7,35 @@ from types import SimpleNamespace
 from mlperf import edu_cli, fingerprint
 
 
+def test_execution_device_annotation_distinguishes_request_from_execution(monkeypatch):
+    monkeypatch.setenv("MLPERF_EDU_DEVICE", "MPS")
+    report = {"backend": "pytorch-mps"}
+
+    edu_cli.annotate_execution_device(report)
+
+    assert report["device_requested"] == "mps"
+    assert report["device_executed"] == "mps"
+
+
+def test_execution_device_annotation_records_auto_cpu_and_preserves_plugins(
+    monkeypatch,
+):
+    monkeypatch.delenv("MLPERF_EDU_DEVICE", raising=False)
+    report = {"backend": "pytorch-cpu"}
+    edu_cli.annotate_execution_device(report)
+    assert report["device_requested"] == "auto"
+    assert report["device_executed"] == "cpu"
+
+    plugin_report = {
+        "backend": "custom-runtime",
+        "device_requested": "accelerator:0",
+        "device_executed": "custom-accelerator:0",
+    }
+    edu_cli.annotate_execution_device(plugin_report)
+    assert plugin_report["device_requested"] == "accelerator:0"
+    assert plugin_report["device_executed"] == "custom-accelerator:0"
+
+
 def test_detect_hardware_hash_binds_complete_comparison_record(monkeypatch):
     monkeypatch.setattr(fingerprint, "_detect_machine_model", lambda: "Test Laptop")
     monkeypatch.setattr(fingerprint, "_detect_chip", lambda: "Test CPU")
@@ -243,6 +272,7 @@ def test_run_fingerprint_labels_selected_backend_and_binds_run_context(monkeypat
         "seed": 0,
         "backend": "pytorch-cpu",
         "device_requested": "cpu",
+        "device_executed": "cpu",
         "dtype": "float32",
         "compilation": {
             "enabled": True,
@@ -258,6 +288,7 @@ def test_run_fingerprint_labels_selected_backend_and_binds_run_context(monkeypat
     assert execution["backends"] == ["pytorch-cpu"]
     assert execution["report_selected_backends"] == ["pytorch-cpu"]
     assert execution["report_selected_devices"] == ["cpu"]
+    assert execution["report_executed_devices"] == ["cpu"]
     assert execution["scenario"] == "single_stream"
     assert execution["scenarios"] == ["single_stream"]
     assert execution["report_selected_precision"] == [{"dtype": "float32"}]

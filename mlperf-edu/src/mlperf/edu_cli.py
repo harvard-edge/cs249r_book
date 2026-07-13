@@ -1033,6 +1033,7 @@ def cmd_run(args: argparse.Namespace) -> int:
                 mode=execution_mode,
                 phase=execution_phase,
             )
+            annotate_execution_device(report)
 
             # Finalize each report and its provenance before starting the next
             # workload.  A dependent workload can bind the exact report and
@@ -1188,6 +1189,9 @@ def export_workload_reports(
             )
             continue
         try:
+            for field in ("device_requested", "device_executed"):
+                if item.get(field) is not None:
+                    report[field] = item[field]
             enrich_report_for_display(report, workloads or {})
             attach_run_fingerprints(report)
             report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -1582,6 +1586,13 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
                 and (item.get("device_requested") or item.get("device"))
             }
         )
+        executed_devices = sorted(
+            {
+                str(item.get("device_executed"))
+                for item in workloads
+                if isinstance(item, dict) and item.get("device_executed")
+            }
+        )
         scenarios = sorted(
             {
                 str(item.get("scenario"))
@@ -1604,6 +1615,8 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
         data_modes = [str(report.get("data_mode"))] if report.get("data_mode") else []
         selected_device = report.get("device_requested") or report.get("device")
         devices = [str(selected_device)] if selected_device else []
+        executed_device = report.get("device_executed")
+        executed_devices = [str(executed_device)] if executed_device else []
         scenarios = [str(report.get("scenario"))] if report.get("scenario") else []
         precision_records = unique_fingerprint_records(
             [report_precision_summary(report)]
@@ -1625,6 +1638,7 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
         "backends": backends,
         "report_selected_backends": backends,
         "report_selected_devices": devices,
+        "report_executed_devices": executed_devices,
         "data_modes": data_modes,
         "report_selected_precision": precision_records,
         "report_selected_compilation": compilation_records,
@@ -1914,6 +1928,20 @@ def run_workload(
     unsupported["mode"] = resolved_mode
     unsupported["phase"] = resolved_phase
     return unsupported
+
+
+def annotate_execution_device(report: dict[str, Any]) -> None:
+    """Record requested and executed devices without conflating availability."""
+    if not report.get("device_requested"):
+        report["device_requested"] = os.environ.get("MLPERF_EDU_DEVICE", "auto").lower()
+    if report.get("device_executed"):
+        return
+    if report.get("device"):
+        report["device_executed"] = str(report["device"]).lower()
+        return
+    backend = str(report.get("backend") or "").lower()
+    if backend.startswith("pytorch-") and len(backend) > len("pytorch-"):
+        report["device_executed"] = backend.removeprefix("pytorch-")
 
 
 def run_pro_profile(

@@ -1189,6 +1189,8 @@ def test_image_classification_min_run_writes_verifiable_artifacts(tmp_path):
     assert report["metrics"]["samples"] == 2
     assert report["metrics"]["logits_shape"] == [2, 10]
     assert report["metrics"]["samples_per_second"] > 0
+    assert report["device_requested"] == "auto"
+    assert report["device_executed"] == "cpu"
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
@@ -1231,6 +1233,8 @@ def test_image_classification_max_run_writes_verifiable_artifacts(tmp_path):
     assert report["metrics"]["evaluation_samples"] == 200
     assert report["metrics"]["samples"] == 10_000
     assert report["config"]["repetitions"] == 50
+    assert report["device_requested"] == "cpu"
+    assert report["device_executed"] == "cpu"
     assert report["metrics"]["correct"] == 174
     assert Path(report["artifacts"]["weights"]).name == "pretrainedResnet.tflite"
     assert (
