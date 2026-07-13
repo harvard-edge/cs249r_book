@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import subprocess
@@ -11,6 +12,74 @@ from tools import check_taxonomy
 
 
 AXES = ("working_set", "arithmetic_intensity", "dispatch")
+
+
+def test_committed_causal_lineage_rechecks_every_bound_digest():
+    checkpoint = "sha256:" + "a" * 64
+    report = "sha256:" + "b" * 64
+    provenance = "sha256:" + "c" * 64
+    package = "sha256:" + "d" * 64
+    training_id = check_taxonomy.CAUSAL_TRAINING_CASE_ID
+    training_evidence = "sha256:" + "e" * 64
+    binding = {
+        "source_training_case_id": training_id,
+        "source_training_evidence_id": "training-evidence",
+        "source_training_evidence_sha256": training_evidence,
+        "source_training_execution_index": 3,
+        "source_training_checkpoint_sha256": checkpoint,
+        "source_training_report_sha256": report,
+        "source_training_provenance_sha256": provenance,
+        "source_training_package_sha256": package,
+    }
+    indexed = {
+        training_id: {
+            "evidence_id": "training-evidence",
+            "evidence_sha256": training_evidence,
+        }
+    }
+    payloads = {
+        training_id: {
+            "aggregate": {"quality": {"median": 0.75}},
+            "runs": [
+                {
+                    "execution_index": 3,
+                    "quality_value": 0.75,
+                    "artifacts": [
+                        {"role": "checkpoint", "sha256": checkpoint},
+                        {"role": "report", "sha256": report},
+                        {"role": "provenance", "sha256": provenance},
+                    ],
+                }
+            ],
+        }
+    }
+    for identifier in check_taxonomy.CAUSAL_INFERENCE_CASE_IDS:
+        indexed[identifier] = {"source_training": copy.deepcopy(binding)}
+        payloads[identifier] = {
+            "nanogpt_training_lineage": {"package_sha256": package},
+            "runs": [
+                {
+                    "artifacts": [
+                        {"role": "checkpoint", "sha256": checkpoint},
+                        {"role": "source_training_report", "sha256": report},
+                        {
+                            "role": "source_training_provenance",
+                            "sha256": provenance,
+                        },
+                    ]
+                }
+            ],
+        }
+
+    assert check_taxonomy.check_case_source_training_lineage(indexed, payloads) == []
+
+    tampered = copy.deepcopy(indexed)
+    tampered[check_taxonomy.CAUSAL_INFERENCE_CASE_IDS[-1]]["source_training"][
+        "source_training_package_sha256"
+    ] = "sha256:" + "f" * 64
+    errors = check_taxonomy.check_case_source_training_lineage(tampered, payloads)
+    assert any("do not share one source_training" in error for error in errors)
+    assert any("staged package digest" in error for error in errors)
 
 
 def test_registry_withholds_all_taxonomy_claims_without_committed_evidence():
@@ -101,12 +170,6 @@ def test_committed_evidence_requires_exact_digest_and_matching_claim(
         "language/example", "arithmetic_intensity", mismatch
     )
     assert any("evidence_sha256 mismatch" in error for error in errors)
-
-
-
-
-
-
 
 
 def test_reference_summary_indexes_every_raw_artifact_with_full_hashes():
@@ -380,28 +443,6 @@ def committed_summary(workload_id: str) -> tuple[dict, dict]:
     evidence_file = body["verified_baseline"]["evidence_file"]
     path = Path(__file__).resolve().parents[1] / evidence_file
     return body, json.loads(path.read_text())
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 
 def test_taxonomy_cli_passes_current_registry():

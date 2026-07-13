@@ -42,40 +42,6 @@ def replacement_pending(workload_id):
     return baseline.get("replacement_required") is True
 
 
-def write_tiny_movielens(root, *, n_users=12, n_items=16, n_ratings=96):
-    dataset = root / "movielens" / "ml-100k"
-    dataset.mkdir(parents=True)
-
-    with (dataset / "u.user").open("w") as f:
-        for user_id in range(1, n_users + 1):
-            f.write(f"{user_id}|{20 + user_id}|M|student|00000\n")
-
-    with (dataset / "u.item").open("w", encoding="latin-1") as f:
-        for item_id in range(1, n_items + 1):
-            genres = ["1" if idx == item_id % 19 else "0" for idx in range(19)]
-            fields = [
-                str(item_id),
-                f"Movie {item_id}",
-                "01-Jan-1995",
-                "",
-                f"http://example.com/{item_id}",
-                *genres,
-            ]
-            f.write("|".join(fields) + "\n")
-
-    ratings = []
-    for idx in range(n_ratings):
-        user_id = (idx % n_users) + 1
-        item_id = ((idx * 3) % n_items) + 1
-        rating = 5 if idx % 3 == 0 else 2
-        ratings.append(f"{user_id}\t{item_id}\t{rating}\t{idx}\n")
-
-    n_train = int(n_ratings * 0.8)
-    (dataset / "u.data").write_text("".join(ratings))
-    (dataset / "u1.base").write_text("".join(ratings[:n_train]))
-    (dataset / "u1.test").write_text("".join(ratings[n_train:]))
-
-
 def test_cli_help():
     result = run_cli("--help")
     assert result.returncode == 0
@@ -92,6 +58,17 @@ def test_list_help_explains_workload_filter():
     assert result.returncode == 0
     assert "Filter by workload id or canonical workload" in result.stdout
     assert "Workload id for variant listing" not in result.stdout
+
+
+def test_execution_commands_do_not_advertise_unimplemented_model_override():
+    for command in ("init", "fetch", "run", "show", "validate"):
+        result = run_cli(command, "--help")
+        assert result.returncode == 0, result.stderr
+        assert "--model" not in result.stdout
+
+    info = run_cli("info", "--help")
+    assert info.returncode == 0, info.stderr
+    assert "--model" in info.stdout
 
 
 def test_doctor_passes():
@@ -481,7 +458,6 @@ def test_std_profile_is_not_a_public_alias(tmp_path):
         "std",
         "--output-dir",
         str(tmp_path),
-        env_extra={"MLPERF_EDU_RAG_MAX_PASSAGES": "8"},
     )
     assert result.returncode != 0
     assert "invalid choice: 'std'" in result.stderr
@@ -583,7 +559,7 @@ def test_validate_max_dry_run_lists_product_max_suites(tmp_path):
 
 
 def test_validation_seed_environment_preserves_per_workload_defaults(monkeypatch):
-    for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SLM_SEED"):
+    for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED"):
         monkeypatch.delenv(name, raising=False)
 
     selection = edu_cli.validation_seed_environment("max")
@@ -869,19 +845,21 @@ def test_package_and_grade_verified_manifest(tmp_path):
     assert summary["results"][0]["warnings"] == []
 
 
-def test_package_policy_refuses_known_restricted_dataset_bytes():
+def test_package_policy_refuses_unresolved_canonical_dataset_bytes():
     manifest = {
         "leaves": {
             "dataset": {
-                "name": "movielens-100k",
-                "files": [{"path": "/tmp/u.data", "sha256": "sha256:placeholder"}],
+                "name": "cifar10",
+                "files": [
+                    {"path": "/tmp/test.parquet", "sha256": "sha256:placeholder"}
+                ],
             }
         }
     }
     issue = package_dataset_policy_issue(manifest)
     assert issue is not None
-    assert "restricted-needs-approval" in issue
-    assert "do not redistribute" in issue
+    assert "needs-release-decision" in issue
+    assert "avoid redistributing" in issue
 
 
 def test_package_policy_allows_open_or_artifact_free_datasets():
@@ -895,11 +873,9 @@ def test_package_policy_allows_open_or_artifact_free_datasets():
             }
         }
     }
-    restricted_without_bytes = {
-        "leaves": {"dataset": {"name": "movielens-100k", "files": []}}
-    }
+    unresolved_without_bytes = {"leaves": {"dataset": {"name": "cifar10", "files": []}}}
     assert package_dataset_policy_issue(fashion) is None
-    assert package_dataset_policy_issue(restricted_without_bytes) is None
+    assert package_dataset_policy_issue(unresolved_without_bytes) is None
 
 
 def test_package_carries_all_manifest_dependencies_and_survives_source_removal(

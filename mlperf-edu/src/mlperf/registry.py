@@ -106,11 +106,6 @@ RESEARCH_WORKLOAD_ORDER = (
 
 RESEARCH_WORKLOADS = set(RESEARCH_WORKLOAD_ORDER)
 
-SUITE_ALIASES = {
-    "edge": "vision",
-    "cloud": "language",
-}
-
 
 @dataclass(frozen=True)
 class Workload:
@@ -249,7 +244,7 @@ def normalize_registry_data(
 
             quality = raw.get("quality") or raw.get("quality_target") or {}
             public = raw.get("public") or {}
-            suite = infer_product_suite(workload_id, source_suite)
+            suite = source_suite
             maturity = "base" if workload_id in STANDARD_WORKLOADS else "research"
             reviewer_notes = quality.get("reviewer_notes") or []
             if isinstance(reviewer_notes, str):
@@ -379,40 +374,6 @@ def merge_registry_dicts(
         else:
             merged[key] = value
     return merged
-
-
-def infer_product_suite(workload_id: str, source_suite: str) -> str:
-    if workload_id.startswith("slm-"):
-        return "slm"
-    if source_suite == "agent" or "agent" in workload_id:
-        return "agent"
-    if "distributed" in workload_id:
-        return "distributed"
-    if source_suite == "edge" or "mobilenet" in workload_id or "resnet" in workload_id:
-        return "vision"
-    if "diffusion" in workload_id:
-        return "vision"
-    if "dlrm" in workload_id:
-        return "recommender"
-    if source_suite == "tiny" or "kws" in workload_id or "anomaly" in workload_id:
-        return "tiny"
-    if "gnn" in workload_id:
-        return "graph"
-    if "lstm" in workload_id:
-        return "timeseries"
-    if "rl" in workload_id:
-        return "rl"
-    if (
-        "gpt" in workload_id
-        or "bert" in workload_id
-        or "moe" in workload_id
-        or "lora" in workload_id
-        or source_suite == "cloud"
-    ):
-        return "language"
-    return SUITE_ALIASES.get(
-        source_suite, source_suite if source_suite in PRODUCT_SUITES else "language"
-    )
 
 
 def validate_registry(workloads: dict[str, Workload]) -> None:

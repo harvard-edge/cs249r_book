@@ -1,13 +1,12 @@
 """
-MLPerf EDU: NanoGPT-Prefill workload (Cloud Division)
+MLPerf EDU causal language modeling, prefill phase
 
 Single forward pass over a long context while materializing the KV cache. Exercises
 the compute-bound regime: every weight matrix is reused across `ctx_len`
 tokens, giving high arithmetic intensity. Should sit on the compute side
 of the roofline.
 
-Pair with nanogpt-decode (same checkpoint) to observe the prefill-vs-decode
-bottleneck split that defines modern LLM serving economics.
+The prefill and decode phases share one quality-approved NanoGPT checkpoint.
 """
 
 import hashlib

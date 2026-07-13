@@ -125,7 +125,6 @@ def main():
     sys.path.insert(0, str(root / "src"))
     seed = int(args["seed"])
     os.environ.pop("MLPERF_EDU_SEED", None)
-    os.environ.pop("MLPERF_EDU_SLM_SEED", None)
     os.environ["MLPERF_EDU_MAX_SEED"] = str(seed)
     if args.get("device"):
         os.environ["MLPERF_EDU_DEVICE"] = str(args["device"])

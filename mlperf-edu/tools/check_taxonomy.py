@@ -1017,101 +1017,6 @@ def check_dual_metric_summary_acceptance(
     return errors
 
 
-def check_nanogpt_lineage(name: str, baseline: dict, payload: dict) -> list[str]:
-    """Verify the portable training-to-inference lineage recorded by NanoGPT."""
-    errors: list[str] = []
-    lineage = payload.get("nanogpt_training_lineage")
-    if not isinstance(lineage, dict):
-        return [f"{name}: checkpoint-backed NanoGPT summary lacks training lineage"]
-    expected = {
-        "required": True,
-        "status": "staged",
-        "package_schema": "mlperf-edu-package/0.2",
-        "source_workload": "nanogpt-train",
-    }
-    for field, value in expected.items():
-        if lineage.get(field) != value:
-            errors.append(
-                f"{name}: NanoGPT lineage {field} is {lineage.get(field)!r}, expected {value!r}"
-            )
-    package_digest = str(lineage.get("package_sha256") or "")
-    if not PREFIXED_SHA256_RE.fullmatch(package_digest):
-        errors.append(f"{name}: NanoGPT lineage package_sha256 is missing or invalid")
-    elif baseline and baseline.get(
-        "source_training_package_sha256"
-    ) != package_digest.removeprefix("sha256:"):
-        errors.append(
-            f"{name}: verified_baseline.source_training_package_sha256 does not match NanoGPT lineage"
-        )
-
-    role_paths = {
-        "checkpoint": "source_training_checkpoint",
-        "source_training_provenance": "source_training_manifest",
-        "source_training_report": "source_training_report",
-    }
-    for role, lineage_field in role_paths.items():
-        expected_path = lineage.get(lineage_field)
-        if not is_safe_posix_relative_path(expected_path):
-            errors.append(
-                f"{name}: NanoGPT lineage {lineage_field} is not a safe relative path"
-            )
-            continue
-        indexed: list[dict] = []
-        for run_index, run in enumerate(payload.get("runs") or []):
-            matches = [
-                artifact
-                for artifact in run.get("artifacts") or []
-                if isinstance(artifact, dict) and artifact.get("role") == role
-            ]
-            if len(matches) != 1:
-                errors.append(
-                    f"{name}: reference summary run {run_index} must index exactly one {role} artifact"
-                )
-            else:
-                indexed.append(matches[0])
-        if len(indexed) != len(payload.get("runs") or []):
-            continue
-        if {artifact.get("path") for artifact in indexed} != {expected_path}:
-            errors.append(
-                f"{name}: {role} artifact paths do not match NanoGPT lineage {lineage_field}"
-            )
-        digests = {artifact.get("sha256") for artifact in indexed}
-        if len(digests) != 1 or not PREFIXED_SHA256_RE.fullmatch(
-            str(next(iter(digests), ""))
-        ):
-            errors.append(
-                f"{name}: {role} artifact digest is missing or differs across seeds"
-            )
-        elif role == "checkpoint" and baseline:
-            checkpoint_digest = str(next(iter(digests))).removeprefix("sha256:")
-            if baseline.get("source_training_checkpoint_sha256") != checkpoint_digest:
-                errors.append(
-                    f"{name}: verified_baseline.source_training_checkpoint_sha256 "
-                    "does not match NanoGPT lineage"
-                )
-    return errors
-
-
-def check_reference_payload_roles(name: str, body: dict, payload: dict) -> list[str]:
-    """Validate workload-specific payload roles independently of a baseline row."""
-    errors: list[str] = []
-    baseline = body.get("verified_baseline") or {}
-    if body.get("shared_checkpoint") == "nanogpt-train":
-        errors.extend(check_nanogpt_lineage(name, baseline, payload))
-    if payload.get("workload") == "slm-decode":
-        for index, run in enumerate(payload.get("runs") or []):
-            roles = {
-                artifact.get("role")
-                for artifact in run.get("artifacts") or []
-                if isinstance(artifact, dict)
-            }
-            if "model_metadata" not in roles:
-                errors.append(
-                    f"{name}: reference summary run {index} lacks model_metadata"
-                )
-    return errors
-
-
 def check_registry_summary_alignment(name: str, body: dict, payload: dict) -> list[str]:
     """Bind every displayed baseline field to its committed evidence summary."""
     errors: list[str] = []
@@ -1579,7 +1484,6 @@ def check_reference_summary(name: str, body: dict, payload: dict) -> list[str]:
     if len(dict_runs) == len(runs):
         errors.extend(check_summary_aggregate_integrity(name, payload, dict_runs))
         errors.extend(check_summary_acceptance(name, body, payload, dict_runs))
-        errors.extend(check_reference_payload_roles(name, body, payload))
     baseline = body.get("verified_baseline") or {}
     if baseline.get("evidence_status") == "committed-reference-summary" and len(
         dict_runs
@@ -1655,127 +1559,160 @@ def check_historical_reference_summary(name: str, payload: dict) -> list[str]:
     return errors
 
 
-def load_committed_summary(body: dict) -> dict | None:
-    baseline = body.get("verified_baseline") or {}
-    if baseline.get("evidence_status") != "committed-reference-summary":
-        return None
-    relative_path = baseline.get("evidence_file")
-    if not relative_path:
-        return None
-    path = (REPO_ROOT / str(relative_path)).resolve()
-    try:
-        path.relative_to(REPO_ROOT.resolve())
-        payload = json.loads(path.read_text(encoding="utf-8"))
-    except (ValueError, OSError, json.JSONDecodeError):
-        return None
-    return payload if isinstance(payload, dict) else None
-
-
-def check_shared_checkpoint_evidence(workloads: dict[str, dict]) -> list[str]:
-    """Bind dependent inference baselines to the committed training baseline."""
-    errors: list[str] = []
-    for workload_id, body in workloads.items():
-        source_id = body.get("shared_checkpoint")
-        if not source_id:
-            continue
-        name = f"{body.get('suite', 'unknown')}/{workload_id}"
-        source = workloads.get(str(source_id))
-        if source is None:
-            errors.append(
-                f"{name}: shared checkpoint source {source_id!r} is not in the registry"
-            )
-            continue
-        baseline = body.get("verified_baseline") or {}
-        source_baseline = source.get("verified_baseline") or {}
-        if baseline.get("evidence_status") != "committed-reference-summary":
-            continue
-        if source_baseline.get("evidence_status") != "committed-reference-summary":
-            errors.append(
-                f"{name}: shared checkpoint source {source_id} lacks committed evidence"
-            )
-            continue
-        expected_links = {
-            "source_training_evidence_id": source_baseline.get("evidence_id"),
-            "source_training_evidence_sha256": source_baseline.get("evidence_sha256"),
-        }
-        for field, expected in expected_links.items():
-            if baseline.get(field) != expected:
-                errors.append(
-                    f"{name}: verified_baseline.{field} does not match shared checkpoint source {source_id}"
-                )
-
-        payload = load_committed_summary(body)
-        source_payload = load_committed_summary(source)
-        if payload is None or source_payload is None:
-            continue
-        lineage = payload.get("nanogpt_training_lineage") or {}
-        if lineage.get("source_workload") != source_id:
-            errors.append(
-                f"{name}: evidence lineage source_workload does not match shared checkpoint {source_id}"
-            )
-            continue
-
-        dependent_checkpoint_digests: set[str] = set()
-        for run in payload.get("runs") or []:
-            if not isinstance(run, dict):
-                continue
-            dependent_checkpoint_digests.update(
-                str(artifact.get("sha256"))
-                for artifact in run.get("artifacts") or []
-                if isinstance(artifact, dict) and artifact.get("role") == "checkpoint"
-            )
-        selected_seed = baseline.get("source_training_seed")
-        selected_checkpoint_digest = baseline.get("source_training_checkpoint_sha256")
-        if (
-            isinstance(selected_seed, bool)
-            or not isinstance(selected_seed, int)
-            or not SHA256_RE.fullmatch(str(selected_checkpoint_digest or ""))
-        ):
-            errors.append(
-                f"{name}: verified_baseline must identify a source_training_seed "
-                "and source_training_checkpoint_sha256"
-            )
-            continue
-        source_median = (
-            (source_payload.get("aggregate") or {}).get("quality") or {}
-        ).get("median")
-        selected_runs = [
-            run
-            for run in source_payload.get("runs") or []
-            if isinstance(run, dict) and run.get("requested_seed") == selected_seed
-        ]
-        source_checkpoint_digests = {
-            str(artifact.get("sha256"))
-            for run in selected_runs
-            for artifact in run.get("artifacts") or []
-            if isinstance(artifact, dict) and artifact.get("role") == "checkpoint"
-        }
-        if len(selected_runs) != 1 or len(source_checkpoint_digests) != 1:
-            errors.append(
-                f"{name}: shared checkpoint source does not identify exactly one selected-seed checkpoint"
-            )
-            continue
-        if not numbers_match(selected_runs[0].get("quality_value"), source_median):
-            errors.append(
-                f"{name}: source_training_seed does not select the committed median-quality training run"
-            )
-        expected_checkpoint = "sha256:" + str(selected_checkpoint_digest)
-        if source_checkpoint_digests != {expected_checkpoint}:
-            errors.append(
-                f"{name}: source_training_checkpoint_sha256 does not match the selected training run"
-            )
-        if dependent_checkpoint_digests != {expected_checkpoint}:
-            errors.append(
-                f"{name}: inference evidence checkpoint digest does not match the selected training checkpoint"
-            )
-    return errors
-
-
 def _case_id(workload: str, mode: object, phase: object = None) -> str:
     parts = [workload, "max", str(mode)]
     if phase:
         parts.append(str(phase))
     return "__".join(parts)
+
+
+CAUSAL_TRAINING_CASE_ID = "causal-language-modeling__max__training"
+CAUSAL_INFERENCE_CASE_IDS = tuple(
+    f"causal-language-modeling__max__inference__{phase}"
+    for phase in ("full", "prefill", "decode")
+)
+SOURCE_TRAINING_FIELDS = {
+    "source_training_case_id",
+    "source_training_evidence_id",
+    "source_training_evidence_sha256",
+    "source_training_execution_index",
+    "source_training_checkpoint_sha256",
+    "source_training_report_sha256",
+    "source_training_provenance_sha256",
+    "source_training_package_sha256",
+}
+
+
+def _run_artifact_digest(run: dict, role: str) -> object:
+    digests = {
+        artifact.get("sha256")
+        for artifact in run.get("artifacts") or []
+        if isinstance(artifact, dict) and artifact.get("role") == role
+    }
+    return next(iter(digests)) if len(digests) == 1 else None
+
+
+def check_case_source_training_lineage(
+    indexed: dict[str, dict], payloads: dict[str, dict]
+) -> list[str]:
+    """Recheck the committed causal checkpoint bindings after evidence import."""
+    errors: list[str] = []
+    for identifier, entry in indexed.items():
+        if (
+            identifier not in CAUSAL_INFERENCE_CASE_IDS
+            and entry.get("source_training") is not None
+        ):
+            errors.append(f"{identifier}: unexpected source_training binding")
+
+    present_phases = [
+        identifier for identifier in CAUSAL_INFERENCE_CASE_IDS if identifier in indexed
+    ]
+    if not present_phases:
+        return errors
+    training_entry = indexed.get(CAUSAL_TRAINING_CASE_ID)
+    training_payload = payloads.get(CAUSAL_TRAINING_CASE_ID)
+    if not isinstance(training_entry, dict) or not isinstance(training_payload, dict):
+        return [*errors, "causal inference cases lack their indexed training case"]
+
+    bindings: dict[str, dict] = {}
+    for identifier in present_phases:
+        entry = indexed[identifier]
+        binding = entry.get("source_training")
+        if not isinstance(binding, dict):
+            errors.append(f"{identifier}: source_training binding is missing")
+            continue
+        bindings[identifier] = binding
+        if set(binding) != SOURCE_TRAINING_FIELDS:
+            errors.append(
+                f"{identifier}: source_training fields do not match the contract"
+            )
+        expected_identity = {
+            "source_training_case_id": CAUSAL_TRAINING_CASE_ID,
+            "source_training_evidence_id": training_entry.get("evidence_id"),
+            "source_training_evidence_sha256": training_entry.get("evidence_sha256"),
+        }
+        for field, expected in expected_identity.items():
+            if binding.get(field) != expected:
+                errors.append(
+                    f"{identifier}: source_training {field} does not match training evidence"
+                )
+        execution_index = binding.get("source_training_execution_index")
+        if (
+            isinstance(execution_index, bool)
+            or not isinstance(execution_index, int)
+            or execution_index < 1
+        ):
+            errors.append(
+                f"{identifier}: source_training execution index is not a positive integer"
+            )
+        for field in SOURCE_TRAINING_FIELDS - {
+            "source_training_case_id",
+            "source_training_evidence_id",
+            "source_training_execution_index",
+        }:
+            if not PREFIXED_SHA256_RE.fullmatch(str(binding.get(field) or "")):
+                errors.append(
+                    f"{identifier}: source_training {field} is not a full SHA-256 digest"
+                )
+
+        payload = payloads.get(identifier) or {}
+        lineage = payload.get("nanogpt_training_lineage") or {}
+        if lineage.get("package_sha256") != binding.get(
+            "source_training_package_sha256"
+        ):
+            errors.append(
+                f"{identifier}: staged package digest does not match source_training"
+            )
+        phase_role_fields = {
+            "checkpoint": "source_training_checkpoint_sha256",
+            "source_training_report": "source_training_report_sha256",
+            "source_training_provenance": "source_training_provenance_sha256",
+        }
+        for run_index, run in enumerate(payload.get("runs") or [], start=1):
+            if not isinstance(run, dict):
+                continue
+            for role, field in phase_role_fields.items():
+                if _run_artifact_digest(run, role) != binding.get(field):
+                    errors.append(
+                        f"{identifier}: run {run_index} {role} digest does not match source_training"
+                    )
+
+    if len(bindings) > 1:
+        first = next(iter(bindings.values()))
+        if any(binding != first for binding in bindings.values()):
+            errors.append(
+                "causal inference phases do not share one source_training binding"
+            )
+
+    if not bindings:
+        return errors
+    binding = next(iter(bindings.values()))
+    selected = [
+        run
+        for run in training_payload.get("runs") or []
+        if isinstance(run, dict)
+        and run.get("execution_index") == binding.get("source_training_execution_index")
+    ]
+    if len(selected) != 1:
+        errors.append("causal source_training does not select exactly one training run")
+        return errors
+    selected_run = selected[0]
+    training_role_fields = {
+        "checkpoint": "source_training_checkpoint_sha256",
+        "report": "source_training_report_sha256",
+        "provenance": "source_training_provenance_sha256",
+    }
+    for role, field in training_role_fields.items():
+        if _run_artifact_digest(selected_run, role) != binding.get(field):
+            errors.append(
+                f"causal source_training {role} digest does not match the selected training run"
+            )
+    quality_median = (
+        (training_payload.get("aggregate") or {}).get("quality") or {}
+    ).get("median")
+    if not numbers_match(selected_run.get("quality_value"), quality_median):
+        errors.append("causal source_training does not select the median-quality run")
+    return errors
 
 
 def check_case_reference_index(
@@ -1846,6 +1783,7 @@ def check_case_reference_index(
     if index.get("workload_count") != len(expected_by_workload):
         errors.append("case reference index workload_count does not match registry")
     indexed: dict[str, dict] = {}
+    payloads: dict[str, dict] = {}
     for position, entry in enumerate(entries):
         label = f"case reference index cases[{position}]"
         if not isinstance(entry, dict):
@@ -1887,6 +1825,7 @@ def check_case_reference_index(
             errors.append(f"{label} does not cite schema-0.5 promotion evidence")
         if (payload.get("source") or {}).get("git_sha") != source_git_sha:
             errors.append(f"{label} source commit does not match index")
+        payloads[identifier] = payload
         workload_id = entry.get("workload")
         body = workloads.get(str(workload_id)) or {}
         baseline = (body.get("verified_baselines") or {}).get(identifier)
@@ -1908,12 +1847,11 @@ def check_case_reference_index(
                 errors.append(f"{label} registry baseline {field} does not match index")
         errors.extend(check_promoted_case_summary(label, body, baseline, payload))
         source_training = entry.get("source_training")
-        if source_training is not None:
-            if baseline.get("source_training") != source_training:
-                errors.append(f"{label} source_training does not match baseline")
-            training_case = source_training.get("source_training_case_id")
-            if training_case not in expected_cases:
-                errors.append(f"{label} names an unknown source training case")
+        if (
+            source_training is not None
+            and baseline.get("source_training") != source_training
+        ):
+            errors.append(f"{label} source_training does not match baseline")
 
     if set(indexed) != expected_cases:
         errors.append(
@@ -1921,6 +1859,7 @@ def check_case_reference_index(
             f"missing={sorted(expected_cases - set(indexed))}, "
             f"extra={sorted(set(indexed) - expected_cases)}"
         )
+    errors.extend(check_case_source_training_lineage(indexed, payloads))
     for workload_id, identifiers in expected_by_workload.items():
         body = workloads[workload_id]
         baselines = body.get("verified_baselines") or {}
@@ -2226,7 +2165,6 @@ def main() -> int:
             )
             cell_counts.setdefault(cell, []).append(full_name)
 
-    all_errors.extend(check_shared_checkpoint_evidence(workload_bodies))
     all_errors.extend(check_reference_index(workload_bodies))
 
     print(f"Inspected {n_workloads} workloads.")

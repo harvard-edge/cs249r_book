@@ -178,7 +178,7 @@ def test_manifest_counts_packages_and_policy_blocked_attempts_honestly(
         evidence_root,
         evidence_id=blocked_evidence_id,
         report=report,
-        dataset={"name": "movielens-100k", "files": [{"path": "u.data"}]},
+        dataset={"name": "cifar10", "files": [{"path": "test.parquet"}]},
     )
     package_path = package_root / f"{open_evidence_id}-seed_0.zip"
     _write_package(
@@ -280,7 +280,10 @@ def test_manifest_counts_packages_and_policy_blocked_attempts_honestly(
         attempts["restricted-workload"]["portable_package"]["status"]
         == "policy-blocked"
     )
-    assert "GroupLens" in attempts["restricted-workload"]["portable_package"]["reason"]
+    assert (
+        "cifar10 has release status"
+        in (attempts["restricted-workload"]["portable_package"]["reason"])
+    )
     rebuilt = handoff.build_manifest(
         reference_set,
         evidence_root,

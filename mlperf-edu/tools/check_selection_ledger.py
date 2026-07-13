@@ -33,9 +33,41 @@ RATIONALE_FIELDS = {
 }
 
 
+class UniqueKeySafeLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate mapping keys."""
+
+
+def construct_unique_mapping(
+    loader: UniqueKeySafeLoader, node: yaml.nodes.MappingNode, deep: bool = False
+) -> dict:
+    loader.flatten_mapping(node)
+    result = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=deep)
+        if key in result:
+            raise yaml.constructor.ConstructorError(
+                "while constructing a mapping",
+                node.start_mark,
+                f"duplicate key {key!r}",
+                key_node.start_mark,
+            )
+        result[key] = loader.construct_object(value_node, deep=deep)
+    return result
+
+
+UniqueKeySafeLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, construct_unique_mapping
+)
+
+
 def validate(path: Path = LEDGER) -> list[str]:
-    data = yaml.safe_load(path.read_text(encoding="utf-8"))
+    try:
+        data = yaml.load(path.read_text(encoding="utf-8"), Loader=UniqueKeySafeLoader)
+    except yaml.YAMLError as exc:
+        return [f"selection ledger YAML is invalid: {exc}"]
     errors: list[str] = []
+    if not isinstance(data, dict):
+        return ["selection ledger root must be a mapping"]
     if data.get("schema") != "mlperf-edu-workload-selection/0.1":
         errors.append("unexpected or missing selection-ledger schema")
     workloads = data.get("workloads")
@@ -76,7 +108,9 @@ def validate(path: Path = LEDGER) -> list[str]:
         if not entry.get("implementation_state"):
             errors.append(f"{name}: implementation_state is required")
         if status == "admitted" and entry.get("laptop_evidence") == "pending":
-            errors.append(f"{name}: admitted workload cannot have pending laptop evidence")
+            errors.append(
+                f"{name}: admitted workload cannot have pending laptop evidence"
+            )
 
     return errors
 

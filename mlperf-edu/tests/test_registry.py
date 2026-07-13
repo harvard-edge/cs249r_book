@@ -1,7 +1,7 @@
 from collections import Counter
 from pathlib import Path
 
-from mlperf.assets import asset_dossier
+from mlperf.assets import asset_dossier, has_asset_dossier
 from mlperf.registry import (
     EDU_SCENARIOS,
     PROFILES,
@@ -217,9 +217,7 @@ def test_verified_baseline_lifecycle_state_machine_fails_closed():
 
 def test_public_asset_dossiers_include_size_and_hash_policy():
     tiny = asset_dossier("tinyshakespeare")
-    movielens = asset_dossier("movielens-100k")
-    mnist = asset_dossier("mnist")
-    cifar = asset_dossier("cifar100")
+    cifar = asset_dossier("cifar10")
     fashion = asset_dossier("fashion-mnist")
     prompt = asset_dossier("prompt-suite-local")
 
@@ -228,19 +226,22 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     assert tiny["hash_policy"]
     assert tiny["license_status"] == "mit-repository-public-domain-text"
     assert tiny["public_release_status"] == "public-ok-fetch-only"
-    assert movielens["expected_unpacked_bytes"] == 16_100_896
-    assert movielens["license_status"] == "noncommercial-research-education"
-    assert movielens["public_release_status"] == "restricted-needs-approval"
-    assert mnist["license_status"] == "cc-by-sa-3.0"
-    assert mnist["public_release_status"] == "public-ok-with-attribution"
     assert cifar["license_status"] == "source-citation-no-license"
     assert cifar["public_release_status"] == "needs-release-decision"
     assert fashion["license_status"] == "mit"
     assert fashion["license_spdx"] == "MIT"
     assert fashion["public_release_status"] == "public-ok-with-attribution"
+    assert fashion["public_result_use"] == (
+        "standalone educational lab asset; never a benchmark result"
+    )
     assert prompt["expected_download_bytes"] == 0
     assert prompt["public_result_use"] == "performance-bearing functional check"
     assert prompt["public_release_status"] == "public-ok-bundled"
+
+
+def test_retired_dataset_adapters_are_not_public_assets():
+    for dataset in ("movielens-100k", "mnist", "cifar100"):
+        assert not has_asset_dossier(dataset)
 
 
 def test_starter_selection_uses_workload_collection():

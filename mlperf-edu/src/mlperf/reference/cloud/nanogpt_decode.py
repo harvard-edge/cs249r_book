@@ -1,13 +1,12 @@
 """
-MLPerf EDU: NanoGPT-Decode workload (Cloud Division)
+MLPerf EDU causal language modeling, decode phase
 
 Autoregressive decode with a real KV cache. Each step appends one
 token's K and V, and attention re-reads the entire cached K, V from
 DRAM -- the canonical bandwidth-bound regime that dominates LLM
 serving cost in production.
 
-Pair with nanogpt-prefill (same checkpoint) to observe the
-prefill-vs-decode bottleneck split.
+The prefill and decode phases share one quality-approved NanoGPT checkpoint.
 
 This reference path is a sequential single-stream microbenchmark. It does
 not model concurrent requests, an arrival process, queueing, or a server SLO.
@@ -121,11 +120,14 @@ class NanoGPTDecode:
                 from mlperf.roofline import measure_roofline
 
                 with measure_roofline(
-                    "nanogpt-decode",
+                    "causal-language-modeling",
                     analytic_flops=lambda: flops_per_step * n_loop,
                     analytic_bytes=lambda: bytes_per_step * n_loop,
                     n_iter=n_loop,
-                ):
+                ) as roofline_context:
+                    roofline_context.update(
+                        {"mode": "inference", "phase": "decode", "model": "NanoGPT"}
+                    )
                     for _ in range(n_loop):
                         _sync(device)
                         t = time.perf_counter()

@@ -138,7 +138,7 @@ def measure_roofline(
     """Wrap a hot loop and emit a roofline sidecar on exit.
 
     Usage:
-        with measure_roofline("nanogpt-prefill",
+        with measure_roofline("causal-language-modeling",
                                analytic_flops=lambda: 2 * n_params * ctx,
                                analytic_bytes=lambda: n_params * 4 + activation_bytes,
                                n_iter=200) as ctx_dict:

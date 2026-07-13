@@ -1,13 +1,11 @@
 from __future__ import annotations
 
 import hashlib
-import gzip
 import io
 import os
 import shutil
 import subprocess
 import tarfile
-import warnings
 import zipfile
 import urllib.request
 from dataclasses import dataclass
@@ -25,8 +23,6 @@ TINY_SHAKESPEARE_TARGET_CHARS = 1_115_394
 KARPATHY_TINY_SHAKESPEARE_SHA256 = (
     "86c4e6aa9db7c042ec79f339dcb96d42b0075e16b8fc2e86bf0ca57e2dc565ed"
 )
-MOVIELENS_100K_URL = "https://files.grouplens.org/datasets/movielens/ml-100k.zip"
-MNIST_SOURCE = "torchvision://MNIST"
 FASHION_MNIST_SOURCE = "torchvision://FashionMNIST"
 CIFAR10_URL = "https://www.cs.toronto.edu/~kriz/cifar-10-python.tar.gz"
 CIFAR10_HF_REPO_ID = "uoft-cs/cifar10"
@@ -34,10 +30,6 @@ CIFAR10_HF_REVISION = "0b2714987fa478483af9968de7c934580d0bb9a2"
 CIFAR10_HF_FILES = {
     "plain_text/test-00000-of-00001.parquet": "841389e6f2d64f28bf17310e430aebac20ec3ba611a3c5e231dc93c645ce84de",
 }
-CIFAR100_URL = "https://www.cs.toronto.edu/~kriz/cifar-100-python.tar.gz"
-CIFAR100_PICKLE_WARNING = (
-    r"dtype\(\): align should be passed as Python or NumPy boolean"
-)
 MLPERF_TINY_COMMIT = "1afd2c9820f795965a6134facd0b4dfae41ef23f"
 MLPERF_TINY_IMAGE_BASE_URL = (
     "https://raw.githubusercontent.com/mlcommons/tiny/"
@@ -51,8 +43,7 @@ MLPERF_TINY_IMAGE_PERF_INDICES_SHA256 = (
 )
 EEMBC_RUNNER_COMMIT = "cf7c2f2634608a7c0ea7458ab7cb3379f2863424"
 EEMBC_RUNNER_ARCHIVE_URL = (
-    "https://github.com/eembc/benchmark-runner-ml/archive/"
-    f"{EEMBC_RUNNER_COMMIT}.tar.gz"
+    f"https://github.com/eembc/benchmark-runner-ml/archive/{EEMBC_RUNNER_COMMIT}.tar.gz"
 )
 EEMBC_RUNNER_ARCHIVE_SHA256 = (
     "87e431a6b4d3f011d672180a3fb1f08856d8074310f37653d5388ec2affc5209"
@@ -80,9 +71,7 @@ ETTM1_URL = (
     "https://raw.githubusercontent.com/zhouhaoyi/ETDataset/"
     f"{ETT_DATASET_COMMIT}/ETT-small/ETTm1.csv"
 )
-ETTM1_SHA256 = (
-    "6ce1759b1a18e3328421d5d75fadcb316c449fcd7cec32820c8dafda71986c9e"
-)
+ETTM1_SHA256 = "6ce1759b1a18e3328421d5d75fadcb316c449fcd7cec32820c8dafda71986c9e"
 NANOBEIR_REPO_ID = "sentence-transformers/NanoBEIR-en"
 NANOBEIR_REVISION = "beb106fbcfaa599c508c667041bf8c85fd78736b"
 NANOBEIR_RERANKING_FILES = {
@@ -180,65 +169,6 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
         expected_unpacked_bytes=1_115_394,
         hash_policy="Reports and provenance manifests record the pinned upstream corpus hash, exact 90/10 train/validation split hashes, and recipe marker.",
     ),
-    "movielens-100k": AssetDossier(
-        id="movielens-100k",
-        asset_type="dataset",
-        display_name="MovieLens 100K",
-        source_url=MOVIELENS_100K_URL,
-        citation="Harper and Konstan, The MovieLens Datasets, ACM TiiS 2015.",
-        license="GroupLens dataset terms",
-        license_spdx=None,
-        license_status="noncommercial-research-education",
-        terms_summary="Use for research and education with required GroupLens citation/acknowledgment; not an unrestricted redistributable asset.",
-        public_result_use="score-bearing candidate with documented download-from-source flow",
-        public_release_status="restricted-needs-approval",
-        public_release_policy="Fetch from GroupLens only and do not redistribute. Public MLPerf EDU score-bearing use needs explicit approval because the terms prohibit redistribution and commercial/revenue-bearing use without permission.",
-        release_next_step="Ask MLCommons reviewers whether MovieLens remains score-bearing with an official fetch-only policy, or move this workload to systems-only until permission is recorded.",
-        license_evidence_url="https://files.grouplens.org/datasets/movielens/ml-100k-README.txt",
-        attribution="F. Maxwell Harper and Joseph A. Konstan. The MovieLens Datasets, ACM TiiS 2015.",
-        version="ml-100k",
-        expected_download_bytes=4_924_029,
-        expected_unpacked_bytes=16_100_896,
-    ),
-    "mnist": AssetDossier(
-        id="mnist",
-        asset_type="dataset",
-        display_name="MNIST",
-        source_url=MNIST_SOURCE,
-        citation="LeCun et al., gradient-based learning applied to document recognition, 1998.",
-        license="Creative Commons Attribution-ShareAlike 3.0",
-        license_spdx="CC-BY-SA-3.0",
-        license_status="cc-by-sa-3.0",
-        terms_summary="Standard educational vision dataset fetched through torchvision mirrors; preserve attribution, license link, and share-alike obligations for redistributed derivatives.",
-        public_result_use="score-bearing candidate with attribution and fetch-from-source flow",
-        public_release_status="public-ok-with-attribution",
-        public_release_policy="Fetch from upstream mirrors; reports and packages must preserve attribution and the CC BY-SA 3.0 license reference. Do not imply licensor endorsement.",
-        release_next_step="Keep attribution and license metadata in report, CSV, HTML, and package artifacts.",
-        license_evidence_url="https://keras.io/api/datasets/mnist/",
-        attribution="Yann LeCun and Corinna Cortes; derivative of original NIST datasets.",
-        version="torchvision-MNIST",
-        expected_unpacked_bytes=66_544_770,
-    ),
-    "cifar100": AssetDossier(
-        id="cifar100",
-        asset_type="dataset",
-        display_name="CIFAR-100",
-        source_url=CIFAR100_URL,
-        citation="Krizhevsky, Learning Multiple Layers of Features from Tiny Images, 2009.",
-        license="citation requested; no explicit license identified in the official dataset page",
-        license_spdx=None,
-        license_status="source-citation-no-license",
-        terms_summary="Standard educational vision dataset downloaded from the University of Toronto source; official page requests citation but does not state a permissive redistribution license.",
-        public_result_use="score-bearing candidate after release review",
-        public_release_status="needs-release-decision",
-        public_release_policy="Fetch from the official Toronto source and avoid redistributing data in benchmark packages until terms are resolved.",
-        release_next_step="Obtain explicit release terms or switch the public score-bearing vision workload to a dataset with a clear open license.",
-        license_evidence_url="https://www.cs.toronto.edu/~kriz/cifar.html",
-        attribution="Alex Krizhevsky, Vinod Nair, and Geoffrey Hinton.",
-        version="cifar-100-python",
-        expected_download_bytes=169_001_437,
-        expected_unpacked_bytes=186_301_098,
-    ),
     "cifar10": AssetDossier(
         id="cifar10",
         asset_type="dataset",
@@ -269,10 +199,10 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
         license_spdx="MIT",
         license_status="mit",
         terms_summary="Permissively licensed image classification dataset fetched through torchvision mirrors; preserve attribution and the MIT license reference.",
-        public_result_use="score-bearing candidate with attribution and fetch-from-source flow",
+        public_result_use="standalone educational lab asset; never a benchmark result",
         public_release_status="public-ok-with-attribution",
         public_release_policy="Fetch from upstream mirrors; reports and packages must preserve attribution and the MIT license reference.",
-        release_next_step="Keep source, citation, and license metadata in report, CSV, HTML, and package artifacts.",
+        release_next_step="Keep source, citation, and license metadata with the standalone lab.",
         license_evidence_url="https://github.com/zalandoresearch/fashion-mnist/blob/master/LICENSE",
         attribution="Han Xiao, Kashif Rasul, and Roland Vollgraf; Zalando Research.",
         version="torchvision-FashionMNIST",
@@ -436,20 +366,12 @@ def huggingface_model_dossier(
     model_id: str | None = None,
 ) -> dict[str, Any]:
     resolved_model_id = (
-        model_id
-        or model_source.get("default_model_id")
-        or model_name
-        or "huggingface-model"
+        model_id or model_source.get("repo_id") or model_name or "huggingface-model"
     )
     source_url = (
         f"https://huggingface.co/{resolved_model_id}"
         if "/" in str(resolved_model_id)
         else str(resolved_model_id)
-    )
-    aliases = (
-        model_source.get("aliases")
-        if isinstance(model_source.get("aliases"), dict)
-        else {}
     )
     license_value = str(model_source.get("license", "unknown"))
     normalized_license = license_value.lower()
@@ -470,8 +392,6 @@ def huggingface_model_dossier(
         "license_status": "declared-by-upstream"
         if model_source.get("license")
         else "requires-review",
-        "default_alias": model_source.get("default_alias"),
-        "aliases": aliases,
         "revision": model_source.get("revision"),
         "terms_summary": "Model is fetched from its upstream Hugging Face repository; preserve upstream license and model card attribution.",
         "public_result_use": "performance-bearing candidate when the selected model license is compatible",
@@ -494,26 +414,7 @@ def huggingface_model_dossier(
         if model_source.get(key):
             data[key] = model_source[key]
 
-    alias_rationales = model_source.get("alias_rationales")
-    if isinstance(alias_rationales, dict):
-        data["alias_rationales"] = alias_rationales
-        rationale = model_rationale_for(resolved_model_id, aliases, alias_rationales)
-        if rationale:
-            data["selected_model_rationale"] = rationale
     return data
-
-
-def model_rationale_for(
-    model_id: str, aliases: dict[str, Any], alias_rationales: dict[str, Any]
-) -> str | None:
-    candidates = [str(model_id)]
-    for alias, target in aliases.items():
-        if str(target) == str(model_id):
-            candidates.append(str(alias))
-    for candidate in candidates:
-        if candidate in alias_rationales:
-            return str(alias_rationales[candidate])
-    return None
 
 
 def data_root() -> Path:
@@ -533,31 +434,17 @@ def sha256_file(path: Path) -> str:
     return h.hexdigest()
 
 
-def load_cifar100_dataset(*, root: Path, train: bool, download: bool, transform=None):
-    from torchvision.datasets import CIFAR100
-
-    with warnings.catch_warnings():
-        warnings.filterwarnings(
-            "ignore",
-            message=CIFAR100_PICKLE_WARNING,
-            category=Warning,
-        )
-        return CIFAR100(
-            root=str(root), train=train, download=download, transform=transform
-        )
-
-
 def load_cifar10_dataset(*, root: Path, train: bool, download: bool, transform=None):
-    parquet = root / "plain_text" / (
-        "train-00000-of-00001.parquet" if train else "test-00000-of-00001.parquet"
+    parquet = (
+        root
+        / "plain_text"
+        / ("train-00000-of-00001.parquet" if train else "test-00000-of-00001.parquet")
     )
     if parquet.is_file():
         return CIFAR10ParquetDataset(parquet, transform=transform)
     from torchvision.datasets import CIFAR10
 
-    return CIFAR10(
-        root=str(root), train=train, download=download, transform=transform
-    )
+    return CIFAR10(root=str(root), train=train, download=download, transform=transform)
 
 
 class CIFAR10ParquetDataset:
@@ -607,67 +494,6 @@ def tinyshakespeare_paths(root: Path | None = None) -> dict[str, Path]:
         "train": base / "tinyshakespeare_train.txt",
         "val": base / "tinyshakespeare_val.txt",
         "recipe": base / "tinyshakespeare_recipe.txt",
-    }
-
-
-def movielens_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "movielens")
-            if override
-            else find_project_root() / "data" / "movielens"
-        )
-    dataset = base / "ml-100k"
-    return {
-        "root": base,
-        "dataset": dataset,
-        "zip": base / "ml-100k.zip",
-        "ratings": dataset / "u.data",
-        "users": dataset / "u.user",
-        "items": dataset / "u.item",
-    }
-
-
-def mnist_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "mnist")
-            if override
-            else find_project_root() / "data" / "mnist"
-        )
-    return {
-        "root": base,
-        "raw": base / "MNIST" / "raw",
-        "processed": base / "MNIST" / "processed",
-    }
-
-
-def cifar100_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "cifar100")
-            if override
-            else find_project_root() / "data" / "cifar100"
-        )
-    return {
-        "root": base,
-        "dataset": base / "cifar-100-python",
-        "tar": base / "cifar-100-python.tar.gz",
     }
 
 
@@ -899,50 +725,6 @@ def _generate_tinyshakespeare_from_gutenberg(text: str) -> str:
     return normalized[:TINY_SHAKESPEARE_TARGET_CHARS]
 
 
-def ensure_cifar100(*, download: bool = True, root: Path | None = None) -> DatasetAsset:
-    paths = cifar100_paths(root)
-    base = paths["root"]
-    dataset = paths["dataset"]
-    tar_path = paths["tar"]
-    base.mkdir(parents=True, exist_ok=True)
-
-    try:
-        load_cifar100_dataset(root=base, train=True, download=download)
-        load_cifar100_dataset(root=base, train=False, download=download)
-    except Exception as exc:
-        if not download:
-            raise FileNotFoundError(
-                f"CIFAR-100 is missing at {base}. "
-                "Run `mlperf fetch --workload resnet18-train --profile max`."
-            ) from exc
-        if not tar_path.exists():
-            tmp = tar_path.with_suffix(".download")
-            _download(CIFAR100_URL, tmp)
-            tmp.replace(tar_path)
-        with tarfile.open(tar_path, "r:gz") as tf:
-            tf.extractall(base)
-        load_cifar100_dataset(root=base, train=True, download=False)
-        load_cifar100_dataset(root=base, train=False, download=False)
-
-    files = tuple(sorted(path for path in dataset.rglob("*") if path.is_file()))
-    if not files:
-        raise FileNotFoundError(f"CIFAR-100 produced no files under {dataset}")
-    n_bytes = sum(path.stat().st_size for path in files)
-    digest = hashlib.sha256()
-    for path in files:
-        digest.update(str(path.relative_to(base)).encode("utf-8") + b"\0")
-        digest.update(sha256_file(path).encode("ascii") + b"\n")
-
-    return DatasetAsset(
-        name="cifar100",
-        root=base,
-        files=files,
-        sha256=f"sha256:{digest.hexdigest()}",
-        n_bytes=n_bytes,
-        source=CIFAR100_URL,
-    )
-
-
 def ensure_cifar10(*, download: bool = True, root: Path | None = None) -> DatasetAsset:
     paths = cifar10_paths(root)
     base = paths["root"]
@@ -999,8 +781,8 @@ def ensure_fashion_mnist(
     except Exception as exc:
         if not download:
             raise FileNotFoundError(
-                f"Fashion-MNIST is missing at {base}. "
-                "Run `mlperf fetch --workload resnet18-train --profile max`."
+                f"Fashion-MNIST is missing at {base}. Run the standalone "
+                "optimization lab once with network access to prepare it."
             ) from exc
         raise
 
@@ -1043,12 +825,18 @@ def ensure_mlperf_tiny_kws(
         _download(EEMBC_RUNNER_ARCHIVE_URL, archive)
         if sha256_file(archive) != EEMBC_RUNNER_ARCHIVE_SHA256:
             archive.unlink(missing_ok=True)
-            raise ValueError("EEMBC runner archive SHA-256 does not match the pinned value")
+            raise ValueError(
+                "EEMBC runner archive SHA-256 does not match the pinned value"
+            )
         prefix = f"energyrunner-{EEMBC_RUNNER_COMMIT}/datasets/kws01/"
         with tarfile.open(archive, "r:gz") as tf:
-            members = [member for member in tf.getmembers() if member.name.startswith(prefix)]
+            members = [
+                member for member in tf.getmembers() if member.name.startswith(prefix)
+            ]
             if not members:
-                raise FileNotFoundError("Pinned EEMBC archive has no datasets/kws01 files")
+                raise FileNotFoundError(
+                    "Pinned EEMBC archive has no datasets/kws01 files"
+                )
             for member in members:
                 if not member.isfile():
                     continue
@@ -1059,7 +847,9 @@ def ensure_mlperf_tiny_kws(
                 target.parent.mkdir(parents=True, exist_ok=True)
                 source = tf.extractfile(member)
                 if source is None:
-                    raise FileNotFoundError(f"could not read EEMBC archive member: {member.name}")
+                    raise FileNotFoundError(
+                        f"could not read EEMBC archive member: {member.name}"
+                    )
                 with source, target.open("wb") as destination:
                     shutil.copyfileobj(source, destination)
 
@@ -1078,15 +868,21 @@ def ensure_mlperf_tiny_kws(
     for model_path, url, expected_sha256 in model_specs:
         if not model_path.is_file() or sha256_file(model_path) != expected_sha256:
             if not download:
-                raise FileNotFoundError(f"Pinned MLPerf Tiny KWS model is missing at {model_path}")
+                raise FileNotFoundError(
+                    f"Pinned MLPerf Tiny KWS model is missing at {model_path}"
+                )
             _download(url, model_path)
         if sha256_file(model_path) != expected_sha256:
             model_path.unlink(missing_ok=True)
-            raise ValueError(f"MLPerf Tiny KWS model SHA-256 mismatch: {model_path.name}")
+            raise ValueError(
+                f"MLPerf Tiny KWS model SHA-256 mismatch: {model_path.name}"
+            )
 
     files = tuple(sorted(path for path in dataset.rglob("*") if path.is_file()))
     if len(files) != 1001:
-        raise ValueError(f"MLPerf Tiny KWS evaluation set expected 1001 files, found {len(files)}")
+        raise ValueError(
+            f"MLPerf Tiny KWS evaluation set expected 1001 files, found {len(files)}"
+        )
     n_bytes = sum(path.stat().st_size for path in files)
     digest = hashlib.sha256()
     for path in files:
@@ -1168,12 +964,16 @@ def ensure_sst2(*, download: bool = True, root: Path | None = None) -> DatasetAs
         _download(GLUE_SST2_URL, archive)
         if sha256_file(archive) != GLUE_SST2_ZIP_SHA256:
             archive.unlink(missing_ok=True)
-            raise ValueError("GLUE SST-2 archive SHA-256 does not match the pinned value")
+            raise ValueError(
+                "GLUE SST-2 archive SHA-256 does not match the pinned value"
+            )
         with zipfile.ZipFile(archive) as zf:
             for info in zf.infolist():
                 relative = Path(info.filename)
                 if relative.is_absolute() or ".." in relative.parts:
-                    raise ValueError(f"unsafe GLUE SST-2 archive member: {info.filename}")
+                    raise ValueError(
+                        f"unsafe GLUE SST-2 archive member: {info.filename}"
+                    )
             zf.extractall(base)
 
     files = (paths["validation"],)
@@ -1212,12 +1012,16 @@ def ensure_ogbn_arxiv(
         _download(OGBN_ARXIV_URL, archive)
         if sha256_file(archive) != OGBN_ARXIV_ZIP_SHA256:
             archive.unlink(missing_ok=True)
-            raise ValueError("ogbn-arxiv archive SHA-256 does not match the pinned value")
+            raise ValueError(
+                "ogbn-arxiv archive SHA-256 does not match the pinned value"
+            )
         with zipfile.ZipFile(archive) as zf:
             for info in zf.infolist():
                 relative = Path(info.filename)
                 if relative.is_absolute() or ".." in relative.parts:
-                    raise ValueError(f"unsafe ogbn-arxiv archive member: {info.filename}")
+                    raise ValueError(
+                        f"unsafe ogbn-arxiv archive member: {info.filename}"
+                    )
             zf.extractall(base)
         extracted = base / "arxiv"
         if dataset.exists():
@@ -1226,11 +1030,15 @@ def ensure_ogbn_arxiv(
 
     if not archive.is_file() or sha256_file(archive) != OGBN_ARXIV_ZIP_SHA256:
         if not download:
-            raise FileNotFoundError(f"pinned ogbn-arxiv archive is missing at {archive}")
+            raise FileNotFoundError(
+                f"pinned ogbn-arxiv archive is missing at {archive}"
+            )
         _download(OGBN_ARXIV_URL, archive)
         if sha256_file(archive) != OGBN_ARXIV_ZIP_SHA256:
             archive.unlink(missing_ok=True)
-            raise ValueError("ogbn-arxiv archive SHA-256 does not match the pinned value")
+            raise ValueError(
+                "ogbn-arxiv archive SHA-256 does not match the pinned value"
+            )
 
     return DatasetAsset(
         name="ogbn-arxiv",
@@ -1306,109 +1114,6 @@ def ensure_nanobeir_reranking(
         sha256=f"sha256:{digest.hexdigest()}",
         n_bytes=sum(path.stat().st_size for path in files),
         source=f"https://huggingface.co/datasets/{NANOBEIR_REPO_ID}/tree/{NANOBEIR_REVISION}",
-    )
-
-
-def ensure_mnist(*, download: bool = True, root: Path | None = None) -> DatasetAsset:
-    paths = mnist_paths(root)
-    base = paths["root"]
-    base.mkdir(parents=True, exist_ok=True)
-    from torchvision.datasets import MNIST
-
-    try:
-        MNIST(root=str(base), train=True, download=download)
-        MNIST(root=str(base), train=False, download=download)
-    except Exception as exc:
-        if not download:
-            raise FileNotFoundError(
-                f"MNIST is missing at {base}. "
-                "Run `mlperf fetch --workload anomaly-ae-train --profile max`."
-            ) from exc
-        _download_mnist_with_curl_fallback(base)
-        MNIST(root=str(base), train=True, download=False)
-        MNIST(root=str(base), train=False, download=False)
-
-    files = tuple(
-        sorted(path for path in (base / "MNIST").rglob("*") if path.is_file())
-    )
-    if not files:
-        raise FileNotFoundError(f"MNIST produced no files under {base}")
-
-    n_bytes = sum(path.stat().st_size for path in files)
-    digest = hashlib.sha256()
-    for path in files:
-        digest.update(str(path.relative_to(base)).encode("utf-8") + b"\0")
-        digest.update(sha256_file(path).encode("ascii") + b"\n")
-
-    return DatasetAsset(
-        name="mnist",
-        root=base,
-        files=files,
-        sha256=f"sha256:{digest.hexdigest()}",
-        n_bytes=n_bytes,
-        source=MNIST_SOURCE,
-    )
-
-
-def _download_mnist_with_curl_fallback(base: Path) -> None:
-    raw = base / "MNIST" / "raw"
-    raw.mkdir(parents=True, exist_ok=True)
-    for filename, _md5 in (
-        ("train-images-idx3-ubyte.gz", ""),
-        ("train-labels-idx1-ubyte.gz", ""),
-        ("t10k-images-idx3-ubyte.gz", ""),
-        ("t10k-labels-idx1-ubyte.gz", ""),
-    ):
-        gz_path = raw / filename
-        extracted_path = raw / filename.removesuffix(".gz")
-        if extracted_path.exists():
-            continue
-        _download(f"https://ossci-datasets.s3.amazonaws.com/mnist/{filename}", gz_path)
-        with gzip.open(gz_path, "rb") as src, extracted_path.open("wb") as dst:
-            shutil.copyfileobj(src, dst)
-
-
-def ensure_movielens_100k(
-    *, download: bool = True, root: Path | None = None
-) -> DatasetAsset:
-    paths = movielens_paths(root)
-    base = paths["root"]
-    dataset = paths["dataset"]
-    zip_path = paths["zip"]
-    base.mkdir(parents=True, exist_ok=True)
-
-    required = (paths["ratings"], paths["users"], paths["items"])
-    if not all(path.exists() for path in required):
-        if not download:
-            raise FileNotFoundError(
-                f"MovieLens-100K is missing at {dataset}. "
-                "Run `mlperf fetch --workload micro-dlrm-train --profile max`."
-            )
-        if not zip_path.exists():
-            tmp = zip_path.with_suffix(".download")
-            _download(MOVIELENS_100K_URL, tmp)
-            tmp.replace(zip_path)
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(base)
-
-    missing = [path for path in required if not path.exists()]
-    if missing:
-        raise FileNotFoundError(f"MovieLens-100K is incomplete; missing: {missing}")
-
-    files = tuple(sorted(path for path in dataset.iterdir() if path.is_file()))
-    n_bytes = sum(path.stat().st_size for path in files)
-    digest = hashlib.sha256()
-    for path in files:
-        digest.update(path.name.encode("utf-8") + b"\0")
-        digest.update(sha256_file(path).encode("ascii") + b"\n")
-
-    return DatasetAsset(
-        name="movielens-100k",
-        root=dataset,
-        files=files,
-        sha256=f"sha256:{digest.hexdigest()}",
-        n_bytes=n_bytes,
-        source=MOVIELENS_100K_URL,
     )
 
 

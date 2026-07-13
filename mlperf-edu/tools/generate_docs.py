@@ -302,10 +302,6 @@ def section_how_to_run(w: Workload) -> str:
         if w.variant
         else f"--workload {w.id}"
     )
-    model_source = w.raw.get("model_source") or {}
-    model_flag = ""
-    if isinstance(model_source, dict) and model_source.get("default_alias"):
-        model_flag = f" --model {model_source['default_alias']}"
     shared_checkpoint = w.raw.get("shared_checkpoint")
     max_execution = w.raw.get("max_execution") or {}
     implemented_modes = set(w.raw.get("implemented_modes") or [])
@@ -338,7 +334,7 @@ def section_how_to_run(w: Workload) -> str:
             "# checkpoint-backed benchmark run (reuses the same output directory)"
         )
         lines.append(
-            f'{CHECKOUT_COMMAND} run {target} --profile max{model_flag} --output-dir "$OUTPUT_DIR" --open-report'
+            f'{CHECKOUT_COMMAND} run {target} --profile max --output-dir "$OUTPUT_DIR" --open-report'
         )
     else:
         if max_execution.get("fetched_assets_used") is False:
@@ -350,16 +346,14 @@ def section_how_to_run(w: Workload) -> str:
         lines.append(
             "# benchmark run (writes JSON/HTML/CSV reports + .provd provenance)"
         )
-        lines.append(
-            f"{CHECKOUT_COMMAND} run {target} --profile max{model_flag} --open-report"
-        )
+        lines.append(f"{CHECKOUT_COMMAND} run {target} --profile max --open-report")
     lines.append("")
     lines.append("# quick smoke pass")
-    lines.append(f"{CHECKOUT_COMMAND} run {target} --profile min{model_flag}")
+    lines.append(f"{CHECKOUT_COMMAND} run {target} --profile min")
     if consolidated_training_inference:
         for phase in inference_phases:
             lines.append(
-                f"{CHECKOUT_COMMAND} run {target} --mode inference --phase {phase} --profile min{model_flag}"
+                f"{CHECKOUT_COMMAND} run {target} --mode inference --phase {phase} --profile min"
             )
     lines.append("")
     lines.append("# research envelope")
@@ -368,9 +362,7 @@ def section_how_to_run(w: Workload) -> str:
         if shared_checkpoint or consolidated_training_inference
         else ""
     )
-    lines.append(
-        f"{CHECKOUT_COMMAND} run {target} --profile pro{model_flag}{pro_output}"
-    )
+    lines.append(f"{CHECKOUT_COMMAND} run {target} --profile pro{pro_output}")
     lines.append("```")
     lines.append("")
     lines.append(
@@ -533,19 +525,11 @@ def section_model_source(w: Workload) -> str:
         return ""
     rows = [
         ("Type", source.get("type")),
-        ("Default model", source.get("default_model_id")),
+        ("Model", source.get("repo_id")),
         ("Pinned revision", source.get("revision")),
-        ("Default alias", source.get("default_alias")),
         ("License", source.get("license")),
     ]
     body = kv_table(rows)
-    aliases = source.get("aliases")
-    rationales = source.get("alias_rationales") or {}
-    if isinstance(aliases, dict) and aliases:
-        body += "\n**Model aliases (`--model <alias>`):**\n\n"
-        body += "| **Alias** | **Model** | **Why it is offered** |\n|:---|:---|:---|\n"
-        for alias, model_id in aliases.items():
-            body += f"| `{esc(alias)}` | {esc(model_id)} | {esc(rationales.get(alias, ''))} |\n"
     for key in ("selection_rationale", "size_rationale", "backend_rationale"):
         if source.get(key):
             title = key.replace("_", " ").capitalize()

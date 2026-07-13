@@ -227,14 +227,34 @@ def test_performance_environment_uses_explicit_allowlist(monkeypatch):
     monkeypatch.setenv("OMP_NUM_THREADS", "4")
     monkeypatch.setenv("HF_TOKEN", "must-not-appear")
     monkeypatch.setenv("MLPERF_EDU_DATA_DIR", "/private/course-data")
-    monkeypatch.setenv("MLPERF_EDU_SLM_PROMPT", "private prompt")
+    monkeypatch.setenv("MLPERF_EDU_PRIVATE_PROMPT", "private prompt")
 
     environment = fingerprint._detect_performance_environment()
 
     assert environment == {"MLPERF_EDU_DEVICE": "cpu", "OMP_NUM_THREADS": "4"}
     assert "HF_TOKEN" not in environment
     assert "MLPERF_EDU_DATA_DIR" not in environment
-    assert "MLPERF_EDU_SLM_PROMPT" not in environment
+    assert "MLPERF_EDU_PRIVATE_PROMPT" not in environment
+
+
+def test_performance_environment_has_no_retired_workload_knobs():
+    retired_prefixes = (
+        "MLPERF_EDU_ANOMALY_",
+        "MLPERF_EDU_CODEGEN_",
+        "MLPERF_EDU_DDP_",
+        "MLPERF_EDU_DLRM_",
+        "MLPERF_EDU_MOBILENET_",
+        "MLPERF_EDU_RAG_",
+        "MLPERF_EDU_REACT_",
+        "MLPERF_EDU_RESNET_",
+        "MLPERF_EDU_SLM_",
+        "MLPERF_EDU_TOOLCALL_",
+        "MLPERF_EDU_WAKE_",
+    )
+    assert not any(
+        name.startswith(retired_prefixes)
+        for name in fingerprint.PERFORMANCE_ENVIRONMENT_ALLOWLIST
+    )
 
 
 def test_run_fingerprint_labels_selected_backend_and_binds_run_context(monkeypatch):

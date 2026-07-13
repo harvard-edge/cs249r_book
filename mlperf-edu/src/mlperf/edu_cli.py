@@ -29,11 +29,7 @@ from rich.table import Table
 from .assets import (
     CIFAR10_HF_REPO_ID,
     CIFAR10_HF_REVISION,
-    CIFAR100_URL,
     EEMBC_RUNNER_ARCHIVE_URL,
-    FASHION_MNIST_SOURCE,
-    MOVIELENS_100K_URL,
-    MNIST_SOURCE,
     TINY_SHAKESPEARE_URL,
     GLUE_SST2_URL,
     OGBN_ARXIV_URL,
@@ -42,31 +38,23 @@ from .assets import (
     NANOBEIR_REVISION,
     asset_dossier,
     cifar10_paths,
-    cifar100_paths,
     data_root,
     ensure_cifar10,
-    ensure_cifar100,
-    ensure_fashion_mnist,
-    ensure_mnist,
     ensure_mlperf_tiny_image,
     ensure_mlperf_tiny_kws,
     ensure_sst2,
     ensure_ogbn_arxiv,
     ensure_ettm1,
     ensure_nanobeir_reranking,
-    ensure_movielens_100k,
     ensure_tinyshakespeare,
-    fashion_mnist_paths,
     huggingface_model_dossier,
     has_asset_dossier,
-    mnist_paths,
     mlperf_tiny_image_paths,
     mlperf_tiny_kws_paths,
     sst2_paths,
     ogbn_arxiv_paths,
     ettm1_paths,
     nanobeir_reranking_paths,
-    movielens_paths,
     sha256_file,
     tinyshakespeare_paths,
 )
@@ -219,9 +207,6 @@ def build_parser() -> argparse.ArgumentParser:
     init.add_argument(
         "--variant", default=None, help="Variant under a canonical workload"
     )
-    init.add_argument(
-        "--model", default=None, help="Model id or alias for model-backed workloads"
-    )
     init.add_argument("--no-smoke", action="store_true")
     init.add_argument(
         "--output-dir",
@@ -235,9 +220,6 @@ def build_parser() -> argparse.ArgumentParser:
     add_profile(fetch)
     fetch.add_argument(
         "--variant", default=None, help="Variant under a canonical workload"
-    )
-    fetch.add_argument(
-        "--model", default=None, help="Model id or alias for model-backed workloads"
     )
     fetch.add_argument("--dry-run", action="store_true")
     fetch.set_defaults(func=cmd_fetch)
@@ -264,9 +246,6 @@ def build_parser() -> argparse.ArgumentParser:
         "--dry-run",
         action="store_true",
         help="Print selected workloads without running them",
-    )
-    run.add_argument(
-        "--model", default=None, help="Model id or alias for model-backed workloads"
     )
     run.add_argument(
         "--mode",
@@ -393,9 +372,6 @@ def build_parser() -> argparse.ArgumentParser:
     show.add_argument(
         "--variant", default=None, help="Variant under a canonical workload"
     )
-    show.add_argument(
-        "--model", default=None, help="Model id or alias for model-backed workloads"
-    )
     show.set_defaults(func=cmd_show)
 
     info = subparsers.add_parser(
@@ -476,9 +452,6 @@ def add_validate_arguments(parser: argparse.ArgumentParser) -> None:
         "--output-dir",
         default="submissions/validation",
         help="Root directory for validation artifacts.",
-    )
-    parser.add_argument(
-        "--model", default=None, help="Model id or alias for model-backed workloads"
     )
     parser.add_argument(
         "--skip-doctor", action="store_true", help="Skip the doctor preflight"
@@ -591,27 +564,6 @@ def selection_label(
     return "default"
 
 
-class ModelOverride:
-    def __init__(self, model: str | None) -> None:
-        self.model = model
-        self.previous: str | None = None
-
-    def __enter__(self):
-        if not self.model:
-            return self
-        self.previous = os.environ.get("MLPERF_EDU_SLM_MODEL_ID")
-        os.environ["MLPERF_EDU_SLM_MODEL_ID"] = self.model
-        return self
-
-    def __exit__(self, exc_type, exc, tb) -> None:
-        if not self.model:
-            return
-        if self.previous is None:
-            os.environ.pop("MLPERF_EDU_SLM_MODEL_ID", None)
-        else:
-            os.environ["MLPERF_EDU_SLM_MODEL_ID"] = self.previous
-
-
 def cmd_doctor(args: argparse.Namespace) -> int:
     checks: list[dict[str, str]] = []
     selected: list[Workload] = []
@@ -718,61 +670,60 @@ def cmd_init(args: argparse.Namespace) -> int:
         console.print("[red]init failed during doctor preflight[/red]")
         return doctor_status
 
-    with ModelOverride(args.model):
-        workloads = load_workloads(args)
-        selected = select_cli_workloads(workloads, args)
-        label = selection_label(
-            suite=args.suite,
-            workload=args.workload,
-            collection=args.collection,
-        )
-        if args.variant:
-            label = f"{label}:{args.variant}"
-        console.print(f"[bold]Initialized profile[/bold] {args.profile} for {label}")
-        console.print(f"Validated {len(selected)} workload definitions.")
-        print_run_selection(
-            args.profile,
-            selected,
-            suite=args.suite,
-            workload=args.workload,
-            collection=args.collection,
-            variant=args.variant,
-        )
-        output_dir = Path(args.output_dir).resolve()
-        print_init_locations(output_dir)
+    workloads = load_workloads(args)
+    selected = select_cli_workloads(workloads, args)
+    label = selection_label(
+        suite=args.suite,
+        workload=args.workload,
+        collection=args.collection,
+    )
+    if args.variant:
+        label = f"{label}:{args.variant}"
+    console.print(f"[bold]Initialized profile[/bold] {args.profile} for {label}")
+    console.print(f"Validated {len(selected)} workload definitions.")
+    print_run_selection(
+        args.profile,
+        selected,
+        suite=args.suite,
+        workload=args.workload,
+        collection=args.collection,
+        variant=args.variant,
+    )
+    output_dir = Path(args.output_dir).resolve()
+    print_init_locations(output_dir)
 
-        if args.profile != "min":
-            console.print(f"Preparing assets for {args.profile}.")
-            for workload in selected:
-                console.print(fetch_workload_asset(workload, dry_run=False))
-        else:
-            console.print(
-                "No profile assets required beyond min-profile runner-local data."
-            )
-
-        if args.no_smoke:
-            print_next_commands(args)
-            return 0
-
-        console.print("Running min-profile smoke validation.")
-        workload_reports = [
-            run_workload(workload, "min", output_dir) for workload in selected
-        ]
-        enrich_reports_for_display(workload_reports, workloads)
-        export_workload_reports(workload_reports, workloads)
-        _, report_path, exports = write_aggregate_report(
-            profile="min",
-            suite=args.suite,
-            workload=args.workload,
-            collection=args.collection,
-            variant=args.variant,
-            workload_reports=workload_reports,
-            output_dir=output_dir,
-            open_report=False,
+    if args.profile != "min":
+        console.print(f"Preparing assets for {args.profile}.")
+        for workload in selected:
+            console.print(fetch_workload_asset(workload, dry_run=False))
+    else:
+        console.print(
+            "No profile assets required beyond min-profile runner-local data."
         )
-        status = print_run_summary("min", workload_reports, report_path, exports)
+
+    if args.no_smoke:
         print_next_commands(args)
-        return status
+        return 0
+
+    console.print("Running min-profile smoke validation.")
+    workload_reports = [
+        run_workload(workload, "min", output_dir) for workload in selected
+    ]
+    enrich_reports_for_display(workload_reports, workloads)
+    export_workload_reports(workload_reports, workloads)
+    _, report_path, exports = write_aggregate_report(
+        profile="min",
+        suite=args.suite,
+        workload=args.workload,
+        collection=args.collection,
+        variant=args.variant,
+        workload_reports=workload_reports,
+        output_dir=output_dir,
+        open_report=False,
+    )
+    status = print_run_summary("min", workload_reports, report_path, exports)
+    print_next_commands(args)
+    return status
 
 
 def print_init_locations(output_dir: Path) -> None:
@@ -812,23 +763,20 @@ def print_next_commands(args: argparse.Namespace) -> None:
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
-    with ModelOverride(args.model):
-        workloads = load_workloads(args)
-        selected = select_cli_workloads(workloads, args)
-        action = "Would fetch" if args.dry_run else "Fetched/validated"
-        print_run_selection(
-            args.profile,
-            selected,
-            suite=args.suite,
-            workload=args.workload,
-            collection=args.collection,
-            variant=args.variant,
-        )
-        console.print(
-            f"{action} {len(selected)} workload(s) for profile {args.profile}."
-        )
-        for workload in selected:
-            console.print(fetch_workload_asset(workload, dry_run=args.dry_run))
+    workloads = load_workloads(args)
+    selected = select_cli_workloads(workloads, args)
+    action = "Would fetch" if args.dry_run else "Fetched/validated"
+    print_run_selection(
+        args.profile,
+        selected,
+        suite=args.suite,
+        workload=args.workload,
+        collection=args.collection,
+        variant=args.variant,
+    )
+    console.print(f"{action} {len(selected)} workload(s) for profile {args.profile}.")
+    for workload in selected:
+        console.print(fetch_workload_asset(workload, dry_run=args.dry_run))
     return 0
 
 
@@ -901,24 +849,6 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             return f"- {workload.id}: {dataset} -> {paths['full']} ({TINY_SHAKESPEARE_URL}); {terms}"
         asset = ensure_tinyshakespeare(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
-    if dataset == "movielens-100k":
-        if dry_run:
-            paths = movielens_paths()
-            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({MOVIELENS_100K_URL}); {terms}"
-        asset = ensure_movielens_100k(download=True)
-        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
-    if dataset == "mnist":
-        if dry_run:
-            paths = mnist_paths()
-            return f"- {workload.id}: {dataset} -> {paths['root']} ({MNIST_SOURCE}); {terms}"
-        asset = ensure_mnist(download=True)
-        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
-    if dataset == "cifar100":
-        if dry_run:
-            paths = cifar100_paths()
-            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({CIFAR100_URL}); {terms}"
-        asset = ensure_cifar100(download=True)
-        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     if dataset == "cifar10":
         if dry_run:
             paths = cifar10_paths()
@@ -936,12 +866,6 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             f"at {evaluation.root} ({evaluation.sha256[:19]}, "
             f"{evaluation.n_bytes} bytes); {terms}"
         )
-    if dataset == "fashion-mnist":
-        if dry_run:
-            paths = fashion_mnist_paths()
-            return f"- {workload.id}: {dataset} -> {paths['root']} ({FASHION_MNIST_SOURCE}); {terms}"
-        asset = ensure_fashion_mnist(download=True)
-        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     if dataset == "mlperf-tiny-kws-eval":
         if dry_run:
             paths = mlperf_tiny_kws_paths()
@@ -989,75 +913,71 @@ def asset_terms_summary(dossier: dict[str, Any]) -> str:
 
 
 def cmd_run(args: argparse.Namespace) -> int:
-    with ModelOverride(args.model):
-        workloads = load_workloads(args)
-        selected = select_cli_workloads(workloads, args)
-        if not selected:
-            console.print("[red]No workloads selected.[/red]")
-            return 1
-        requested_mode = getattr(args, "mode", None)
-        requested_phase = getattr(args, "phase", None)
-        if (requested_mode or requested_phase) and len(selected) != 1:
-            raise ValueError(
-                "--mode and --phase require selection of exactly one workload"
-            )
-        execution_mode = None
-        execution_phase = None
-        if len(selected) == 1:
-            execution_mode, execution_phase = resolve_execution_selection(
-                selected[0], mode=requested_mode, phase=requested_phase
-            )
+    workloads = load_workloads(args)
+    selected = select_cli_workloads(workloads, args)
+    if not selected:
+        console.print("[red]No workloads selected.[/red]")
+        return 1
+    requested_mode = getattr(args, "mode", None)
+    requested_phase = getattr(args, "phase", None)
+    if (requested_mode or requested_phase) and len(selected) != 1:
+        raise ValueError("--mode and --phase require selection of exactly one workload")
+    execution_mode = None
+    execution_phase = None
+    if len(selected) == 1:
+        execution_mode, execution_phase = resolve_execution_selection(
+            selected[0], mode=requested_mode, phase=requested_phase
+        )
 
-        print_run_selection(
+    print_run_selection(
+        args.profile,
+        selected,
+        suite=args.suite,
+        workload=args.workload,
+        collection=args.collection,
+        variant=args.variant,
+    )
+    if getattr(args, "dry_run", False):
+        console.print("[green]dry-run complete[/green]")
+        return 0
+
+    output_dir = Path(args.output_dir).resolve()
+    power_meter = PowerMeter()
+    if args.power:
+        power_meter.start()
+    workload_reports: list[dict[str, Any]] = []
+    for workload in selected:
+        report = run_workload(
+            workload,
             args.profile,
-            selected,
-            suite=args.suite,
-            workload=args.workload,
-            collection=args.collection,
-            variant=args.variant,
+            output_dir,
+            mode=execution_mode,
+            phase=execution_phase,
         )
-        if getattr(args, "dry_run", False):
-            console.print("[green]dry-run complete[/green]")
-            return 0
+        annotate_execution_device(report)
 
-        output_dir = Path(args.output_dir).resolve()
-        power_meter = PowerMeter()
-        if args.power:
-            power_meter.start()
-        workload_reports: list[dict[str, Any]] = []
-        for workload in selected:
-            report = run_workload(
-                workload,
-                args.profile,
-                output_dir,
-                mode=execution_mode,
-                phase=execution_phase,
-            )
-            annotate_execution_device(report)
+        # Finalize each report and its provenance before starting the next
+        # workload. A dependent workload can bind the exact report and
+        # manifest bytes produced by an earlier workload. Deferring all
+        # exports would mutate the source report after inference recorded its
+        # lineage digests.
+        enrich_report_for_display(report, workloads)
+        export_workload_reports([report], workloads)
+        workload_reports.append(report)
 
-            # Finalize each report and its provenance before starting the next
-            # workload.  A dependent workload can bind the exact report and
-            # manifest bytes produced by an earlier workload (NanoGPT training
-            # -> prefill/decode is the current example).  Deferring all exports
-            # until the end would mutate the source report after inference had
-            # recorded its lineage digests.
-            enrich_report_for_display(report, workloads)
-            export_workload_reports([report], workloads)
-            workload_reports.append(report)
-
-        power_report = power_meter.stop_report() if args.power else None
-        _, report_path, exports = write_aggregate_report(
-            profile=args.profile,
-            suite=args.suite,
-            workload=args.workload,
-            collection=args.collection,
-            variant=args.variant,
-            workload_reports=workload_reports,
-            output_dir=output_dir,
-            open_report=args.open_report,
-            power=power_report,
-        )
-        return print_run_summary(args.profile, workload_reports, report_path, exports)
+    power_report = power_meter.stop_report() if args.power else None
+    _, report_path, exports = write_aggregate_report(
+        profile=args.profile,
+        suite=args.suite,
+        workload=args.workload,
+        collection=args.collection,
+        variant=args.variant,
+        workload_reports=workload_reports,
+        output_dir=output_dir,
+        open_report=args.open_report,
+        power=power_report,
+    )
+    return print_run_summary(args.profile, workload_reports, report_path, exports)
 
 
 def print_run_selection(
@@ -1445,7 +1365,7 @@ def run_comparison_fingerprint_record(
     performance_environment = software.get("performance_environment")
     if isinstance(performance_environment, dict):
         performance_environment = dict(performance_environment)
-        for key in ("MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SEED", "MLPERF_EDU_SLM_SEED"):
+        for key in ("MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SEED"):
             performance_environment.pop(key, None)
         if performance_environment:
             software["performance_environment"] = performance_environment
@@ -1955,12 +1875,7 @@ def run_pro_profile(
     if not max_runner:
         raise ValueError(f"No max runner is registered for pro fallback: {workload.id}")
 
-    repetitions = int(
-        os.environ.get(
-            "MLPERF_EDU_PRO_REPETITIONS",
-            os.environ.get("MLPERF_EDU_MAX_REPETITIONS", "1"),
-        )
-    )
+    repetitions = int(os.environ.get("MLPERF_EDU_PRO_REPETITIONS", "1"))
     if repetitions < 1:
         raise ValueError("MLPERF_EDU_PRO_REPETITIONS must be >= 1")
 
@@ -2747,9 +2662,7 @@ def report_row(
     model_source = model_asset.get("source_url") or model_source_summary(
         item.get("model_source")
     )
-    model_rationale = model_asset.get("selected_model_rationale") or model_asset.get(
-        "selection_rationale", ""
-    )
+    model_rationale = model_asset.get("selection_rationale", "")
     workload_id = str(item.get("workload", item.get("id", "")))
     canonical = (
         item.get("canonical_workload") or canonical_workload_for_id(workload_id) or ""
@@ -2823,7 +2736,7 @@ def dataset_name_for_row(dataset: Any) -> str:
 def model_source_summary(model_source: Any) -> str:
     if isinstance(model_source, dict):
         return str(
-            model_source.get("default_model_id")
+            model_source.get("repo_id")
             or model_source.get("source_url")
             or model_source.get("type")
             or ""
@@ -3846,7 +3759,6 @@ def cmd_validate(args: argparse.Namespace) -> int:
             profile=profile,
             output_dir=str(output_dir),
             open_report=False,
-            model=args.model,
             power=False,
         )
         if selector_kind == "collection":
@@ -3984,7 +3896,7 @@ def resolve_validation_preset(args: argparse.Namespace) -> str:
 
 def validation_seed_environment(profile: str) -> dict[str, Any]:
     """Preserve explicit overrides or let each workload use its canonical seed."""
-    for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED", "MLPERF_EDU_SLM_SEED"):
+    for name in ("MLPERF_EDU_SEED", "MLPERF_EDU_MAX_SEED"):
         value = os.environ.get(name)
         if value is not None:
             return {
@@ -4651,25 +4563,7 @@ def default_profiles_for_workload(workload: Workload) -> str:
 
 
 def workload_role(workload: Workload) -> str:
-    workload_id = workload.id
-    if workload.suite == "agent":
-        return "agent"
-    if workload.suite == "distributed" or "distributed" in workload_id:
-        return "distributed"
-    if "spec" in workload_id:
-        return "test-time-compute"
-    if any(
-        token in workload_id
-        for token in ("quantized", "fp16", "fp32", "dram", "composed", "lora", "moe")
-    ):
-        return "optimization"
-    if any(token in workload_id for token in ("prefill", "decode", "inference")):
-        return "inference"
-    if (
-        "train" in workload_id
-        or "finetune" in workload_id
-        or workload.scenario == "training"
-    ):
+    if workload.scenario == "training":
         return "training"
     if workload.scenario in {"single_stream", "offline", "server"}:
         return "inference"
@@ -5067,7 +4961,6 @@ def cmd_info(args: argparse.Namespace) -> int:
                     registry=args.registry,
                     workload=args.workload,
                     variant=args.variant,
-                    model=args.model,
                 )
             )
         return cmd_show(
@@ -5075,7 +4968,6 @@ def cmd_info(args: argparse.Namespace) -> int:
                 registry=args.registry,
                 workload=args.workload,
                 variant=None,
-                model=args.model,
             )
         )
     if args.model:
@@ -5167,12 +5059,8 @@ def workloads_matching_model(
         model_source = workload.raw.get("model_source") or {}
         values = [
             workload.model,
-            str(model_source.get("default_model_id", "")),
-            str(model_source.get("default_alias", "")),
+            str(model_source.get("repo_id", "")),
         ]
-        aliases = model_source.get("aliases")
-        if isinstance(aliases, dict):
-            values.extend(str(item) for pair in aliases.items() for item in pair)
         if any(query_lower in value.lower() for value in values):
             matches.append(workload)
     return matches
@@ -5191,8 +5079,6 @@ def print_model_info(query: str, matches: list[Workload]) -> int:
             "provider",
             "license",
             "license_status",
-            "default_alias",
-            "selected_model_rationale",
             "selection_rationale",
             "size_rationale",
             "backend_rationale",
@@ -5201,15 +5087,6 @@ def print_model_info(query: str, matches: list[Workload]) -> int:
             value = dossier.get(key)
             if value not in (None, ""):
                 table.add_row(key, str(value))
-        aliases = dossier.get("aliases")
-        if isinstance(aliases, dict) and aliases:
-            table.add_row(
-                "aliases",
-                ", ".join(
-                    f"{alias}->{model_id}"
-                    for alias, model_id in sorted(aliases.items())
-                ),
-            )
         console.print(table)
 
     if matches:
@@ -5375,14 +5252,6 @@ def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
             tinyshakespeare_paths()["train"],
             tinyshakespeare_paths()["val"],
         ],
-        "movielens-100k": [
-            movielens_paths()["ratings"],
-            movielens_paths()["users"],
-            movielens_paths()["items"],
-        ],
-        "mnist": [mnist_paths()["root"]],
-        "cifar100": [cifar100_paths()["dataset"]],
-        "fashion-mnist": [fashion_mnist_paths()["root"]],
     }
     paths = known_paths.get(dataset)
     if not paths:
