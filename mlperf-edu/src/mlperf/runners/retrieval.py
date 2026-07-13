@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import statistics
 import time
 from pathlib import Path
 from typing import Any
@@ -126,17 +127,21 @@ def run_information_retrieval_max(
     batch_size = int(os.environ.get("MLPERF_EDU_RETRIEVAL_BATCH_SIZE", 32))
     rerank_k = 100
     at_k = 10
-    dataset_metrics: dict[str, dict[str, float]] = {}
-    samples_per_dataset: dict[str, int] = {}
     samples_by_dataset = {
         dataset_name: _load_reranking_samples(asset.root, dataset_name, rerank_k)
         for dataset_name in DATASET_NAMES
     }
+    canonical_config = workload.raw.get("canonical_max_contract", {}).get("config", {})
+    warmup_evaluations = int(canonical_config.get("warmup_evaluations", 1))
+    measurement_repetitions = int(canonical_config.get("measurement_repetitions", 3))
+    if warmup_evaluations < 1:
+        raise ValueError("warmup_evaluations must be at least one")
+    if measurement_repetitions < 1:
+        raise ValueError("measurement_repetitions must be at least one")
 
     representative = samples_by_dataset[DATASET_NAMES[0]][0]
     warmup_pairs = [
-        [representative["query"], document]
-        for document in representative["documents"]
+        [representative["query"], document] for document in representative["documents"]
     ]
     for warmup_size in sorted({batch_size, len(warmup_pairs) % batch_size} - {0}):
         model.predict(
@@ -145,29 +150,50 @@ def run_information_retrieval_max(
             show_progress_bar=False,
         )
 
-    synchronize_device(device)
-    start = time.perf_counter()
-    for dataset_name in DATASET_NAMES:
-        samples = samples_by_dataset[dataset_name]
-        evaluator = CrossEncoderRerankingEvaluator(
-            samples=samples,
-            at_k=at_k,
-            name=f"Nano{dataset_name}_R{rerank_k}",
-            write_csv=False,
-            show_progress_bar=False,
-            batch_size=batch_size,
-            always_rerank_positives=True,
-        )
-        evaluation = evaluator(model)
-        prefix = f"Nano{dataset_name}_R{rerank_k}_"
-        dataset_metrics[dataset_name] = {
-            key.removeprefix(prefix): float(value)
-            for key, value in evaluation.items()
-            if key.startswith(prefix)
-        }
-        samples_per_dataset[dataset_name] = len(samples)
-    synchronize_device(device)
-    duration = time.perf_counter() - start
+    def evaluate_once() -> tuple[dict[str, dict[str, float]], dict[str, int]]:
+        dataset_metrics: dict[str, dict[str, float]] = {}
+        samples_per_dataset: dict[str, int] = {}
+        for dataset_name in DATASET_NAMES:
+            samples = samples_by_dataset[dataset_name]
+            evaluator = CrossEncoderRerankingEvaluator(
+                samples=samples,
+                at_k=at_k,
+                name=f"Nano{dataset_name}_R{rerank_k}",
+                write_csv=False,
+                show_progress_bar=False,
+                batch_size=batch_size,
+                always_rerank_positives=True,
+            )
+            evaluation = evaluator(model)
+            prefix = f"Nano{dataset_name}_R{rerank_k}_"
+            dataset_metrics[dataset_name] = {
+                key.removeprefix(prefix): float(value)
+                for key, value in evaluation.items()
+                if key.startswith(prefix)
+            }
+            samples_per_dataset[dataset_name] = len(samples)
+        return dataset_metrics, samples_per_dataset
+
+    for _ in range(warmup_evaluations):
+        evaluate_once()
+        synchronize_device(device)
+
+    measured_evaluations: list[tuple[dict[str, dict[str, float]], dict[str, int]]] = []
+    repetition_seconds: list[float] = []
+    for _ in range(measurement_repetitions):
+        synchronize_device(device)
+        start = time.perf_counter()
+        measured_evaluations.append(evaluate_once())
+        synchronize_device(device)
+        repetition_seconds.append(time.perf_counter() - start)
+
+    dataset_metrics, samples_per_dataset = measured_evaluations[0]
+    if any(
+        metrics != dataset_metrics or counts != samples_per_dataset
+        for metrics, counts in measured_evaluations[1:]
+    ):
+        raise RuntimeError("unchanged retrieval evaluations produced different metrics")
+    duration = float(statistics.median(repetition_seconds))
 
     mean_map = float(np.mean([metrics["map"] for metrics in dataset_metrics.values()]))
     mean_mrr = float(
@@ -210,9 +236,7 @@ def run_information_retrieval_max(
             "repo_id": MODEL_ID,
             "revision": MODEL_REVISION,
             "snapshot": str(snapshot),
-            "files": {
-                name: f"sha256:{digest}" for name, digest in MODEL_FILES.items()
-            },
+            "files": {name: f"sha256:{digest}" for name, digest in MODEL_FILES.items()},
             "sentence_transformers_version": SENTENCE_TRANSFORMERS_VERSION,
         },
         "seed": seed,
@@ -223,6 +247,9 @@ def run_information_retrieval_max(
             "at_k": at_k,
             "batch_size": batch_size,
             "always_rerank_positives": True,
+            "warmup_evaluations": warmup_evaluations,
+            "measurement_repetitions": measurement_repetitions,
+            "performance_aggregate": "median",
         },
         "metrics": {
             "mean_ndcg_at_10": mean_ndcg,
@@ -233,7 +260,10 @@ def run_information_retrieval_max(
             "pairs": sum(samples_per_dataset.values()) * rerank_k,
             "duration_seconds": duration,
             "inference_and_evaluation_seconds": duration,
-            "pairs_per_second": (sum(samples_per_dataset.values()) * rerank_k) / duration,
+            "inference_and_evaluation_repetition_seconds": repetition_seconds,
+            "total_measured_seconds": float(sum(repetition_seconds)),
+            "pairs_per_second": (sum(samples_per_dataset.values()) * rerank_k)
+            / duration,
             "n_params": n_params,
         },
         "quality": {
@@ -334,7 +364,9 @@ def _snapshot_model(workload: Workload) -> Path:
     for name, expected in MODEL_FILES.items():
         path = snapshot / name
         if not path.is_file() or sha256_file(path) != expected:
-            raise ValueError(f"pinned retrieval model file failed SHA-256 verification: {name}")
+            raise ValueError(
+                f"pinned retrieval model file failed SHA-256 verification: {name}"
+            )
     if model_source.get("revision") != MODEL_REVISION:
         raise ValueError("registry retrieval-model revision does not match the runner")
     return snapshot
