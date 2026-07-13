@@ -99,6 +99,35 @@ def test_every_admitted_max_contract_is_promotion_eligible(
     assert result["result_role"] == "score-bearing"
 
 
+def test_graph_contract_applies_declared_accuracy_tolerance(tmp_path: Path) -> None:
+    workload = load_registry()["graph-node-classification"]
+    report = _canonical_report(workload, tmp_path)
+    quality = workload.raw["canonical_max_contract"]["quality"]
+    report["metrics"]["test_accuracy"] = (
+        float(quality["target"]) - float(quality["tolerance"]) + 0.0001
+    )
+
+    result = evaluate_promotion_contract(workload, report)
+
+    assert result["status"] == "passed", result["issues"]
+    assert result["promotion_eligible"] is True
+
+
+def test_graph_contract_rejects_accuracy_outside_tolerance(tmp_path: Path) -> None:
+    workload = load_registry()["graph-node-classification"]
+    report = _canonical_report(workload, tmp_path)
+    quality = workload.raw["canonical_max_contract"]["quality"]
+    report["metrics"]["test_accuracy"] = (
+        float(quality["target"]) - float(quality["tolerance"]) - 0.0001
+    )
+
+    result = evaluate_promotion_contract(workload, report)
+
+    assert result["status"] == "failed"
+    assert result["promotion_eligible"] is False
+    assert any("with tolerance" in issue for issue in result["issues"])
+
+
 def _checkpoint_lineage(tmp_path: Path) -> dict[str, object]:
     checkpoint = tmp_path / "checkpoint.pt"
     source_report = tmp_path / "training_report.json"

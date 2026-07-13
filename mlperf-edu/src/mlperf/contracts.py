@@ -134,6 +134,23 @@ def report_metric_value(
     return None, None
 
 
+def _numeric_target_met(
+    value: float,
+    target: float,
+    direction: str,
+    *,
+    tolerance: float = 0.0,
+) -> bool:
+    """Apply one direction-aware numeric gate with absolute tolerance."""
+    if direction == "higher":
+        return value + tolerance >= target
+    if direction == "lower":
+        return value - tolerance <= target
+    if direction == "equal":
+        return math.isclose(value, target, rel_tol=0.0, abs_tol=tolerance)
+    raise ValueError(f"unsupported quality direction {direction!r}")
+
+
 def evaluate_report_contract(
     workload: Workload, report: dict[str, Any]
 ) -> dict[str, Any]:
@@ -294,14 +311,28 @@ def evaluate_report_contract(
     canonical_quality = canonical_quality if isinstance(canonical_quality, dict) else {}
     canonical_target = canonical_quality.get("target")
     canonical_direction = canonical_quality.get("direction")
+    canonical_tolerance_value = canonical_quality.get("tolerance", 0.0)
+    canonical_tolerance = 0.0
+    if (
+        isinstance(canonical_tolerance_value, bool)
+        or not isinstance(canonical_tolerance_value, (int, float))
+        or not math.isfinite(float(canonical_tolerance_value))
+        or float(canonical_tolerance_value) < 0
+    ):
+        issues.append(
+            f"canonical quality tolerance {canonical_tolerance_value!r} is invalid"
+        )
+    else:
+        canonical_tolerance = float(canonical_tolerance_value)
     if functional_value is not None and isinstance(canonical_target, (int, float)):
-        if canonical_direction == "higher":
-            functional_target_met = functional_value >= float(canonical_target)
-        elif canonical_direction == "lower":
-            functional_target_met = functional_value <= float(canonical_target)
-        elif canonical_direction == "equal":
-            functional_target_met = functional_value == float(canonical_target)
-        else:
+        try:
+            functional_target_met = _numeric_target_met(
+                functional_value,
+                float(canonical_target),
+                str(canonical_direction),
+                tolerance=canonical_tolerance,
+            )
+        except ValueError:
             functional_target_met = False
             issues.append(
                 f"canonical quality direction {canonical_direction!r} is unsupported"
@@ -310,7 +341,7 @@ def evaluate_report_contract(
             issues.append(
                 f"functional metric {functional_key!r} value {functional_value!r} "
                 f"does not satisfy canonical target {canonical_direction} "
-                f"{canonical_target!r}"
+                f"{canonical_target!r} with tolerance {canonical_tolerance!r}"
             )
 
     canonical_gates = canonical.get("quality_gates")
@@ -347,6 +378,7 @@ def evaluate_report_contract(
                 gate_value = actual_gate.get("value")
                 gate_target = expected_gate.get("target")
                 gate_direction = expected_gate.get("direction")
+                gate_tolerance_value = expected_gate.get("tolerance", 0.0)
                 valid_value = (
                     not isinstance(gate_value, bool)
                     and isinstance(gate_value, (int, float))
@@ -357,19 +389,33 @@ def evaluate_report_contract(
                         f"report quality gate {gate_name!r} lacks a finite numeric value"
                     )
                     continue
-                if gate_direction == "higher":
-                    gate_passed = float(gate_value) >= float(gate_target)
-                elif gate_direction == "lower":
-                    gate_passed = float(gate_value) <= float(gate_target)
-                elif gate_direction == "equal":
-                    gate_passed = float(gate_value) == float(gate_target)
-                else:
+                valid_tolerance = (
+                    not isinstance(gate_tolerance_value, bool)
+                    and isinstance(gate_tolerance_value, (int, float))
+                    and math.isfinite(float(gate_tolerance_value))
+                    and float(gate_tolerance_value) >= 0
+                )
+                if not valid_tolerance:
+                    issues.append(
+                        f"registry canonical quality gate {gate_name!r} has invalid "
+                        f"tolerance {gate_tolerance_value!r}"
+                    )
                     gate_passed = False
+                else:
+                    try:
+                        gate_passed = _numeric_target_met(
+                            float(gate_value),
+                            float(gate_target),
+                            str(gate_direction),
+                            tolerance=float(gate_tolerance_value),
+                        )
+                    except ValueError:
+                        gate_passed = False
                 if not gate_passed:
                     issues.append(
                         f"report quality gate {gate_name!r} value {gate_value!r} "
                         f"does not satisfy canonical target {gate_direction} "
-                        f"{gate_target!r}"
+                        f"{gate_target!r} with tolerance {gate_tolerance_value!r}"
                     )
                 metric_key = expected_gate.get("metric_key")
                 metric_value = metrics.get(metric_key)
