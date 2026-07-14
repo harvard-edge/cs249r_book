@@ -5,6 +5,8 @@ Each repetition runs in a fresh process using the workload's canonical seed.
 The tool never patches framework RNG functions. A run is invalid when the report
 or provenance manifest records a different seed, its manifest does not verify,
 grading fails, or the score-bearing data mode differs from the canonical contract.
+When a measurement protocol declares complete preconditioning executions, their
+artifacts are retained and validated but excluded from all evidence aggregates.
 
 Evidence is written to a new attempt directory and never overwritten. Every run
 artifact is SHA-256 indexed, and the final evidence summary receives a separate
@@ -35,7 +37,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TOOL_NAME = "run_reference_sweep.py"
-TOOL_VERSION = "4.2.0"
+TOOL_VERSION = "4.3.0"
 TOOL_ID = f"tools/{TOOL_NAME} v{TOOL_VERSION}"
 SCORE_PUBLIC_DATA_MODES = frozenset(
     {"real", "real-preprocessed-mlperf-tiny-accuracy-set"}
@@ -43,9 +45,8 @@ SCORE_PUBLIC_DATA_MODES = frozenset(
 PERFORMANCE_PUBLIC_DATA_MODES = frozenset({"real", "checkpoint-backed", "local-prompt"})
 PUBLIC_STATUSES = frozenset({"score-bearing", "performance-bearing"})
 RESULT_ROLES = frozenset({"score-bearing", "performance-bearing"})
-REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.5"
+REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.6"
 DEFAULT_TIMEOUT_SECONDS = 7200.0
-DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS = 5.0
 MAX_INTER_EXECUTION_COOLDOWN_SECONDS = 300.0
 PUBLIC_PRIMARY_METRIC_CV_LIMIT = 0.05
 DEFAULT_OUTPUT_DIR = Path.home() / ".mlperf-edu" / "reference_runs"
@@ -487,6 +488,18 @@ def parse_run_count(raw: str) -> int:
     return count
 
 
+def parse_preconditioning_run_count(raw: str) -> int:
+    try:
+        count = int(raw)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError(
+            "--preconditioning-runs must be an integer"
+        ) from exc
+    if count < 0:
+        raise argparse.ArgumentTypeError("--preconditioning-runs must be nonnegative")
+    return count
+
+
 def canonical_seed(workload: Any) -> int:
     contract = workload.raw.get("canonical_max_contract") or {}
     config = contract.get("config") or {}
@@ -914,8 +927,11 @@ def run_one_seed(
     allowed_data_modes: frozenset[str],
     environment_overrides: dict[str, str] | None = None,
     cooldown_before_seconds: float = 0.0,
+    run_group: str | None = None,
 ) -> dict[str, Any]:
     """Run one seed in a fresh process and return its validation record."""
+    if run_group not in {None, "preconditioning"}:
+        raise ValueError(f"unsupported reference-sweep run group: {run_group!r}")
     if (
         not math.isfinite(cooldown_before_seconds)
         or cooldown_before_seconds < 0
@@ -925,7 +941,8 @@ def run_one_seed(
             "cooldown_before_seconds must be finite, nonnegative, and no greater "
             f"than {MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g}"
         )
-    run_dir = attempt_dir / f"run_{execution_index:03d}"
+    run_root = attempt_dir / run_group if run_group else attempt_dir
+    run_dir = run_root / f"run_{execution_index:03d}"
     with tempfile.TemporaryDirectory(
         prefix=f"mlperf-edu-run-{execution_index:03d}-"
     ) as tmp:
@@ -1115,7 +1132,6 @@ def build_outer_execution_policy(
         "execution_unit": "one fresh Python subprocess per repetition",
         "process_execution_count": len(executions),
         "configured_cooldown_seconds": configured_cooldown_seconds,
-        "default_cooldown_seconds": DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS,
         "maximum_cooldown_seconds": MAX_INTER_EXECUTION_COOLDOWN_SECONDS,
         "first_execution_has_no_cooldown": True,
         "timing_scope": (
@@ -1124,6 +1140,71 @@ def build_outer_execution_policy(
         ),
         "executions": executions,
     }
+
+
+def build_preconditioning_policy(
+    *,
+    seed: int,
+    execution_count: int,
+) -> dict[str, Any]:
+    """Describe complete untimed executions that establish a warm device state."""
+    if execution_count < 0:
+        raise ValueError("preconditioning execution_count must be nonnegative")
+    executions = [
+        {
+            "execution_index": index,
+            "seed": seed,
+            "fresh_process": True,
+            "output_group": "preconditioning",
+        }
+        for index in range(1, execution_count + 1)
+    ]
+    return {
+        "scope": "outer-process-preconditioning",
+        "applies": bool(executions),
+        "mode": "complete-canonical-executions" if executions else "not-applied",
+        "execution_unit": "one complete canonical workload in a fresh Python subprocess",
+        "process_execution_count": len(executions),
+        "cooldown_between_executions_seconds": 0.0,
+        "cooldown_before_first_measured_execution_seconds": 0.0,
+        "timing_scope": (
+            "Preconditioning completes before evidence repetitions. Its workload "
+            "timings and quality results are retained for audit but excluded from "
+            "all evidence aggregates, acceptance statistics, and repeatability."
+        ),
+        "executions": executions,
+    }
+
+
+def declared_preconditioning_runs(measurement_protocol: dict[str, Any]) -> int:
+    """Return the canonical aggregate-excluded preparation count."""
+    count = measurement_protocol.get("outer_preconditioning_runs")
+    if isinstance(count, bool) or not isinstance(count, int) or count < 0:
+        raise ValueError(
+            "measurement_protocol.outer_preconditioning_runs must be a "
+            "nonnegative integer"
+        )
+    return count
+
+
+def declared_inter_execution_cooldown_seconds(
+    measurement_protocol: dict[str, Any],
+) -> float:
+    """Return the canonical delay between measured outer executions."""
+    seconds = measurement_protocol.get("outer_inter_execution_cooldown_seconds")
+    if (
+        isinstance(seconds, bool)
+        or not isinstance(seconds, (int, float))
+        or not math.isfinite(float(seconds))
+        or float(seconds) < 0
+        or float(seconds) > MAX_INTER_EXECUTION_COOLDOWN_SECONDS
+    ):
+        raise ValueError(
+            "measurement_protocol.outer_inter_execution_cooldown_seconds must be "
+            "finite, nonnegative, and no greater than "
+            f"{MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g}"
+        )
+    return float(seconds)
 
 
 def record_outer_execution(
@@ -1148,6 +1229,74 @@ def record_outer_execution(
         "timing_scope": policy["timing_scope"],
     }
     result["reproduce"] = reproduce
+
+
+def record_preconditioning_execution(
+    result: dict[str, Any],
+    execution: dict[str, Any],
+    policy: dict[str, Any],
+) -> None:
+    """Bind one retained, aggregate-excluded preparation run to its policy."""
+    execution_record = dict(execution)
+    result["preconditioning_execution"] = execution_record
+    reproduce = dict(result.get("reproduce") or {})
+    reproduce["reference_sweep"] = {
+        "preconditioning_execution": execution_record,
+        "aggregate_inclusion": "excluded",
+        "timing_scope": policy["timing_scope"],
+    }
+    result["reproduce"] = reproduce
+
+
+def validate_preconditioning(
+    *,
+    rows: list[dict[str, Any]],
+    policy: dict[str, Any],
+    measured_rows: list[dict[str, Any]],
+) -> list[str]:
+    """Fail closed unless retained preparation runs match measured execution context."""
+    reasons: list[str] = []
+    executions = policy.get("executions") or []
+    if len(rows) != len(executions):
+        reasons.append(
+            "preconditioning run count does not match its declared execution policy"
+        )
+    for position, (row, execution) in enumerate(zip(rows, executions), start=1):
+        if row.get("execution_index") != execution.get("execution_index"):
+            reasons.append(
+                f"preconditioning run {position} has an inconsistent execution index"
+            )
+        if row.get("preconditioning_execution") != execution:
+            reasons.append(
+                f"preconditioning run {position} does not match its execution policy"
+            )
+        if row.get("requested_seed") != execution.get("seed"):
+            reasons.append(
+                f"preconditioning run {position} did not use the canonical seed"
+            )
+        if not row.get("evidence_valid"):
+            details = "; ".join(
+                row.get("invalid_reasons") or ["unknown validation failure"]
+            )
+            reasons.append(f"preconditioning run {position} is invalid: {details}")
+    fingerprints = {
+        str(row.get("comparison_fingerprint_sha256"))
+        for row in [*rows, *measured_rows]
+        if _valid_sha256_hex(row.get("comparison_fingerprint_sha256"))
+    }
+    expected_fingerprint_count = len(rows) + len(measured_rows)
+    valid_fingerprint_count = sum(
+        _valid_sha256_hex(row.get("comparison_fingerprint_sha256"))
+        for row in [*rows, *measured_rows]
+    )
+    if rows and (
+        valid_fingerprint_count != expected_fingerprint_count or len(fingerprints) != 1
+    ):
+        reasons.append(
+            "preconditioning and measured runs must share one valid comparison "
+            "fingerprint"
+        )
+    return reasons
 
 
 def build_row(result: dict[str, Any]) -> dict[str, Any]:
@@ -1200,6 +1349,7 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
         "timed_out": bool(result.get("timed_out")),
         "invalid_reasons": list(result.get("invalid_reasons") or []),
         "outer_process_execution": result.get("outer_process_execution"),
+        "preconditioning_execution": result.get("preconditioning_execution"),
         "reproduce": result.get("reproduce"),
         "stderr_tail": result.get("stderr_tail"),
     }
@@ -1727,6 +1877,16 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--phase", choices=("full", "prefill", "decode"))
     parser.add_argument("--runs", type=parse_run_count, default=5)
     parser.add_argument(
+        "--preconditioning-runs",
+        type=parse_preconditioning_run_count,
+        default=None,
+        help=(
+            "development-only override for complete aggregate-excluded preparation "
+            "executions; promotion and public candidates use the count declared by "
+            "the measurement protocol"
+        ),
+    )
+    parser.add_argument(
         "--seeds",
         type=parse_seeds,
         default=None,
@@ -1749,12 +1909,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument(
         "--inter-execution-cooldown-seconds",
         type=float,
-        default=DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS,
+        default=None,
         help=(
-            "fixed cooldown between fresh processes for all timed public-candidate "
-            "workloads; never applied before the first execution "
-            f"(default: {DEFAULT_INTER_EXECUTION_COOLDOWN_SECONDS:g}, maximum: "
-            f"{MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g})"
+            "development-only override for the fixed delay between measured fresh "
+            "processes; promotion and public candidates use the measurement-protocol "
+            f"value (maximum: {MAX_INTER_EXECUTION_COOLDOWN_SECONDS:g})"
         ),
     )
     parser.add_argument(
@@ -1773,7 +1932,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if not math.isfinite(args.timeout_seconds) or args.timeout_seconds <= 0:
         parser.error("--timeout-seconds must be a finite positive number")
-    if (
+    if args.inter_execution_cooldown_seconds is not None and (
         not math.isfinite(args.inter_execution_cooldown_seconds)
         or args.inter_execution_cooldown_seconds < 0
         or args.inter_execution_cooldown_seconds > MAX_INTER_EXECUTION_COOLDOWN_SECONDS
@@ -1829,12 +1988,60 @@ def main(argv: list[str] | None = None) -> int:
             if workload.public_status in PUBLIC_STATUSES
             else "promotion-candidate"
         )
+    try:
+        protocol_preconditioning_runs = declared_preconditioning_runs(
+            selected_contract["measurement_protocol"]
+        )
+        protocol_cooldown_seconds = declared_inter_execution_cooldown_seconds(
+            selected_contract["measurement_protocol"]
+        )
+    except ValueError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 2
+    if (
+        evidence_tier in {"public-candidate", "promotion-candidate"}
+        and args.preconditioning_runs is not None
+        and args.preconditioning_runs != protocol_preconditioning_runs
+    ):
+        print(
+            "error: promotion and public candidates must use "
+            "measurement_protocol.outer_preconditioning_runs "
+            f"({protocol_preconditioning_runs})",
+            file=sys.stderr,
+        )
+        return 2
+    preconditioning_run_count = (
+        args.preconditioning_runs
+        if args.preconditioning_runs is not None
+        else protocol_preconditioning_runs
+    )
+    if (
+        evidence_tier in {"public-candidate", "promotion-candidate"}
+        and args.inter_execution_cooldown_seconds is not None
+        and args.inter_execution_cooldown_seconds != protocol_cooldown_seconds
+    ):
+        print(
+            "error: promotion and public candidates must use "
+            "measurement_protocol.outer_inter_execution_cooldown_seconds "
+            f"({protocol_cooldown_seconds:g})",
+            file=sys.stderr,
+        )
+        return 2
+    inter_execution_cooldown_seconds = (
+        args.inter_execution_cooldown_seconds
+        if args.inter_execution_cooldown_seconds is not None
+        else protocol_cooldown_seconds
+    )
     requested_seeds = args.seeds or [canonical_seed(workload)] * args.runs
+    preconditioning_policy = build_preconditioning_policy(
+        seed=canonical_seed(workload),
+        execution_count=preconditioning_run_count,
+    )
     outer_execution_policy = build_outer_execution_policy(
         public_status=workload.public_status,
         evidence_tier=evidence_tier,
         seeds=requested_seeds,
-        configured_cooldown_seconds=args.inter_execution_cooldown_seconds,
+        configured_cooldown_seconds=inter_execution_cooldown_seconds,
     )
     uses_nanogpt_lineage = _uses_nanogpt_training_lineage(workload, mode=args.mode)
     lineage_required = (
@@ -1903,18 +2110,24 @@ def main(argv: list[str] | None = None) -> int:
         f"mode={args.mode or 'default'} phase={args.phase or 'default'} "
         f"runs={len(requested_seeds)} canonical_seed={canonical_seed(workload)} "
         f"tier={evidence_tier} timeout={args.timeout_seconds:g}s "
+        f"preconditioning-runs={preconditioning_run_count} "
         "inter-execution-cooldown="
-        f"{args.inter_execution_cooldown_seconds:g}s "
+        f"{inter_execution_cooldown_seconds:g}s "
         f"applies={outer_execution_policy['applies']}"
     )
+    preconditioning_rows: list[dict[str, Any]] = []
     rows: list[dict[str, Any]] = []
     with tempfile.TemporaryDirectory(prefix="mlperf-edu-sweep-bootstrap-") as tmp:
         bootstrap_path = Path(tmp) / "child.py"
         bootstrap_path.write_text(_CHILD_BOOTSTRAP)
-        for process_execution in outer_execution_policy["executions"]:
-            seed = process_execution["seed"]
-            execution_index = process_execution["execution_index"]
-            print(f"running repetition {execution_index} (seed {seed}) ...", flush=True)
+        preconditioning_failed = False
+        for preconditioning_execution in preconditioning_policy["executions"]:
+            seed = preconditioning_execution["seed"]
+            execution_index = preconditioning_execution["execution_index"]
+            print(
+                f"running preconditioning {execution_index} (seed {seed}) ...",
+                flush=True,
+            )
             result = run_one_seed(
                 bootstrap_path,
                 workload_id=args.workload,
@@ -1932,10 +2145,53 @@ def main(argv: list[str] | None = None) -> int:
                 environment_overrides=(
                     lineage_stage["environment"] if lineage_stage else None
                 ),
-                cooldown_before_seconds=process_execution["cooldown_before_seconds"],
+                run_group="preconditioning",
             )
-            record_outer_execution(result, process_execution, outer_execution_policy)
-            rows.append(build_row(result))
+            record_preconditioning_execution(
+                result, preconditioning_execution, preconditioning_policy
+            )
+            preconditioning_row = build_row(result)
+            preconditioning_rows.append(preconditioning_row)
+            if not preconditioning_row["evidence_valid"]:
+                preconditioning_failed = True
+                print(
+                    "preconditioning failed; measured repetitions are skipped",
+                    flush=True,
+                )
+                break
+        if not preconditioning_failed:
+            for process_execution in outer_execution_policy["executions"]:
+                seed = process_execution["seed"]
+                execution_index = process_execution["execution_index"]
+                print(
+                    f"running repetition {execution_index} (seed {seed}) ...",
+                    flush=True,
+                )
+                result = run_one_seed(
+                    bootstrap_path,
+                    workload_id=args.workload,
+                    variant=args.variant,
+                    profile=args.profile,
+                    seed=seed,
+                    execution_index=execution_index,
+                    mode=args.mode,
+                    phase=args.phase,
+                    device=device,
+                    attempt_dir=attempt_dir,
+                    timeout_seconds=args.timeout_seconds,
+                    evidence_tier=evidence_tier,
+                    allowed_data_modes=allowed_data_modes,
+                    environment_overrides=(
+                        lineage_stage["environment"] if lineage_stage else None
+                    ),
+                    cooldown_before_seconds=process_execution[
+                        "cooldown_before_seconds"
+                    ],
+                )
+                record_outer_execution(
+                    result, process_execution, outer_execution_policy
+                )
+                rows.append(build_row(result))
 
     primary_metric_name = next(
         (
@@ -2037,6 +2293,13 @@ def main(argv: list[str] | None = None) -> int:
         acceptance=acceptance,
         evidence_tier=evidence_tier,
     )
+    invalid_reasons.extend(
+        validate_preconditioning(
+            rows=preconditioning_rows,
+            policy=preconditioning_policy,
+            measured_rows=rows,
+        )
+    )
     primary_repeatability = primary_metric_repeatability(primary_aggregate, protocol)
     if evidence_tier in {"public-candidate", "promotion-candidate"}:
         repeatability_limit = primary_repeatability.get("limit")
@@ -2135,7 +2398,7 @@ def main(argv: list[str] | None = None) -> int:
         "digest_policy": "The adjacent SHA-256 sidecar is an unauthenticated integrity digest, not a signature.",
         "rerun_policy": {
             "mode": "full-sweep-only",
-            "rule": "If any seed fails or times out, create a new attempt and rerun every declared seed. Never replace an individual run in an existing attempt.",
+            "rule": "If any preconditioning or evidence execution fails or times out, create a new attempt and rerun the complete declared protocol. Never replace an individual execution in an existing attempt.",
         },
         "workload": workload.id,
         "canonical_workload": getattr(workload, "canonical_workload", None)
@@ -2149,6 +2412,10 @@ def main(argv: list[str] | None = None) -> int:
         "evidence_tier": evidence_tier,
         "device_requested": args.device,
         "timeout_seconds_per_run": args.timeout_seconds,
+        "preconditioning": {
+            **preconditioning_policy,
+            "runs": preconditioning_rows,
+        },
         "inter_execution_stabilization": outer_execution_policy,
         "canonical_seed": canonical_seed(workload),
         "seeds_requested": requested_seeds,
@@ -2180,8 +2447,8 @@ def main(argv: list[str] | None = None) -> int:
             "wall_seconds": wall_aggregate,
         },
         "primary_metric_repeatability": primary_repeatability,
-        # Retain the established performance-only field while schema 0.4 exposes
-        # primary timing repeatability for score-bearing training as well.
+        # Retain the established performance-only field alongside primary timing
+        # repeatability for score-bearing training.
         "repeatability": (
             primary_repeatability if result_role == "performance-bearing" else None
         ),

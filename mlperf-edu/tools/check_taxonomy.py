@@ -67,7 +67,7 @@ PREFIXED_SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 EVIDENCE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
 CONTROL_CHARACTER_RE = re.compile(r"[\x00-\x1f\x7f]")
 REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.4"
-PROMOTION_REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.5"
+PROMOTION_REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.6"
 LEGACY_REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.3"
 SUPPORTED_REFERENCE_EVIDENCE_SCHEMAS = {
     LEGACY_REFERENCE_EVIDENCE_SCHEMA,
@@ -1218,7 +1218,7 @@ def check_promoted_case_summary(
     baseline: dict,
     payload: dict,
 ) -> list[str]:
-    """Validate a committed schema-0.5 case against its registry baseline."""
+    """Validate a committed schema-0.6 case against its registry baseline."""
     errors: list[str] = []
     expected = {
         "schema": PROMOTION_REFERENCE_EVIDENCE_SCHEMA,
@@ -1822,7 +1822,7 @@ def check_case_reference_index(
             if entry.get(field) != expected:
                 errors.append(f"{label}.{field} does not match summary")
         if payload.get("schema") != PROMOTION_REFERENCE_EVIDENCE_SCHEMA:
-            errors.append(f"{label} does not cite schema-0.5 promotion evidence")
+            errors.append(f"{label} does not cite schema-0.6 promotion evidence")
         if (payload.get("source") or {}).get("git_sha") != source_git_sha:
             errors.append(f"{label} source commit does not match index")
         payloads[identifier] = payload

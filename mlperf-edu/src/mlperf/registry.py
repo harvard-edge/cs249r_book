@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from importlib import resources
 from importlib.metadata import PackageNotFoundError, files
@@ -700,6 +701,28 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
                 canonical_max_issues.append(
                     f"{workload.id}: public measurement requires five outer reference runs"
                 )
+            preconditioning_runs = measurement.get("outer_preconditioning_runs")
+            if (
+                isinstance(preconditioning_runs, bool)
+                or not isinstance(preconditioning_runs, int)
+                or preconditioning_runs < 0
+            ):
+                canonical_max_issues.append(
+                    f"{workload.id}: measurement_protocol.outer_preconditioning_runs "
+                    "must be a nonnegative integer"
+                )
+            cooldown_seconds = measurement.get("outer_inter_execution_cooldown_seconds")
+            if (
+                isinstance(cooldown_seconds, bool)
+                or not isinstance(cooldown_seconds, (int, float))
+                or not math.isfinite(float(cooldown_seconds))
+                or not 0 <= float(cooldown_seconds) <= 300
+            ):
+                canonical_max_issues.append(
+                    f"{workload.id}: measurement_protocol."
+                    "outer_inter_execution_cooldown_seconds must be finite and "
+                    "between 0 and 300"
+                )
         if workload.public_status == "performance-bearing":
             timing_counts = contract.get("timing_sample_counts")
             if not isinstance(timing_counts, dict) or not timing_counts:
@@ -713,6 +736,48 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
                 canonical_max_issues.append(
                     f"{workload.id}: canonical timing sample counts must be positive integers"
                 )
+        for mode_name, mode_contract in (
+            workload.raw.get("mode_contracts") or {}
+        ).items():
+            if not isinstance(mode_contract, dict):
+                continue
+            for phase_name, phase_contract in (
+                mode_contract.get("phases") or {}
+            ).items():
+                if not isinstance(phase_contract, dict):
+                    continue
+                phase_measurement = phase_contract.get("measurement_protocol")
+                if not isinstance(phase_measurement, dict):
+                    continue
+                label = f"{workload.id}/{mode_name}/{phase_name}"
+                if phase_measurement.get("outer_reference_runs") != 5:
+                    canonical_max_issues.append(
+                        f"{label}: public measurement requires five outer reference runs"
+                    )
+                phase_preconditioning = phase_measurement.get(
+                    "outer_preconditioning_runs"
+                )
+                if (
+                    isinstance(phase_preconditioning, bool)
+                    or not isinstance(phase_preconditioning, int)
+                    or phase_preconditioning < 0
+                ):
+                    canonical_max_issues.append(
+                        f"{label}: outer_preconditioning_runs must be a nonnegative integer"
+                    )
+                phase_cooldown = phase_measurement.get(
+                    "outer_inter_execution_cooldown_seconds"
+                )
+                if (
+                    isinstance(phase_cooldown, bool)
+                    or not isinstance(phase_cooldown, (int, float))
+                    or not math.isfinite(float(phase_cooldown))
+                    or not 0 <= float(phase_cooldown) <= 300
+                ):
+                    canonical_max_issues.append(
+                        f"{label}: outer inter-execution cooldown must be finite "
+                        "and between 0 and 300"
+                    )
     if canonical_max_issues:
         raise ValueError(f"invalid canonical max contracts: {canonical_max_issues}")
 

@@ -72,8 +72,60 @@ def _summary(case: importer.EvidenceCase) -> dict:
         _row(case, position, value)
         for position, value in enumerate(primary_values, start=1)
     ]
+    cooldown_seconds = float(
+        case.measurement_protocol["outer_inter_execution_cooldown_seconds"]
+    )
+    outer_executions = [
+        {
+            "execution_index": position,
+            "seed": case.canonical_seed,
+            "fresh_process": True,
+            "cooldown_before_seconds": 0.0 if position == 1 else cooldown_seconds,
+        }
+        for position in range(1, 6)
+    ]
+    for row, execution in zip(rows, outer_executions, strict=True):
+        row["outer_process_execution"] = execution
+        row["reproduce"] = {
+            "reference_sweep": {
+                "outer_process_execution": execution,
+                "inter_execution_cooldown": {
+                    "cli_option": "--inter-execution-cooldown-seconds",
+                    "configured_seconds": cooldown_seconds,
+                    "applied_before_this_execution_seconds": execution[
+                        "cooldown_before_seconds"
+                    ],
+                    "applies": True,
+                },
+                "timing_scope": importer.OUTER_EXECUTION_TIMING_SCOPE,
+            }
+        }
     wall_values = [float(row["wall_seconds"]) for row in rows]
     quality_values = [float(row["quality_value"]) for row in rows]
+    preconditioning_count = int(
+        case.measurement_protocol.get("outer_preconditioning_runs", 0)
+    )
+    preconditioning_executions = [
+        {
+            "execution_index": position,
+            "seed": case.canonical_seed,
+            "fresh_process": True,
+            "output_group": "preconditioning",
+        }
+        for position in range(1, preconditioning_count + 1)
+    ]
+    preconditioning_rows = []
+    for execution in preconditioning_executions:
+        row = _row(case, execution["execution_index"], 20.0)
+        row["preconditioning_execution"] = execution
+        row["reproduce"] = {
+            "reference_sweep": {
+                "preconditioning_execution": execution,
+                "aggregate_inclusion": "excluded",
+                "timing_scope": importer.PRECONDITIONING_TIMING_SCOPE,
+            }
+        }
+        preconditioning_rows.append(row)
     score = case.result_role == "score-bearing"
     functional_gate = {
         "metric": case.gate["metric"],
@@ -96,6 +148,39 @@ def _summary(case: importer.EvidenceCase) -> dict:
         "phase": case.phase,
         "result_role": case.result_role,
         "seeds_requested": [case.canonical_seed] * 5,
+        "inter_execution_stabilization": {
+            "scope": "outer-process-executions",
+            "applies": True,
+            "applicability": (
+                "all public-candidate score-bearing and performance-bearing workloads"
+            ),
+            "mode": "fixed-delay-between-fresh-processes",
+            "execution_unit": "one fresh Python subprocess per repetition",
+            "process_execution_count": 5,
+            "configured_cooldown_seconds": cooldown_seconds,
+            "maximum_cooldown_seconds": 300.0,
+            "first_execution_has_no_cooldown": True,
+            "timing_scope": importer.OUTER_EXECUTION_TIMING_SCOPE,
+            "executions": outer_executions,
+        },
+        "preconditioning": {
+            "scope": "outer-process-preconditioning",
+            "applies": bool(preconditioning_count),
+            "mode": (
+                "complete-canonical-executions"
+                if preconditioning_count
+                else "not-applied"
+            ),
+            "execution_unit": (
+                "one complete canonical workload in a fresh Python subprocess"
+            ),
+            "process_execution_count": preconditioning_count,
+            "cooldown_between_executions_seconds": 0.0,
+            "cooldown_before_first_measured_execution_seconds": 0.0,
+            "timing_scope": importer.PRECONDITIONING_TIMING_SCOPE,
+            "executions": preconditioning_executions,
+            "runs": preconditioning_rows,
+        },
         "comparison_fingerprint_sha256": FINGERPRINT,
         "primary_metric": {
             "name": case.measurement_protocol["primary_metric"],
@@ -178,6 +263,17 @@ def test_score_summary_validation_recomputes_aggregates_and_roles(tmp_path):
     tampered = copy.deepcopy(payload)
     tampered["aggregate"]["primary_metric"]["median"] = 999.0
     with pytest.raises(ValueError, match="primary aggregate"):
+        importer.validate_summary_structure(
+            path,
+            tampered,
+            case=case,
+            source_git_sha=SOURCE_SHA,
+            sweep_tool_sha256=TOOL_SHA,
+        )
+
+    tampered = copy.deepcopy(payload)
+    tampered["inter_execution_stabilization"]["configured_cooldown_seconds"] = 0
+    with pytest.raises(ValueError, match="configured_cooldown_seconds"):
         importer.validate_summary_structure(
             path,
             tampered,

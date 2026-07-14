@@ -38,7 +38,7 @@ from mlperf.registry import Workload, load_registry  # noqa: E402
 from tools import check_taxonomy, reference_source_lock  # noqa: E402
 
 
-SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.5"
+SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.6"
 INDEX_SCHEMA = "mlperf-edu-reference-index/0.3"
 SOURCE_LOCK_PATH = "reference_results/source_lock.json"
 EMPTY_SHA256 = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
@@ -50,6 +50,15 @@ SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
 OUTPUT_ROOTS = (
     ROOT / "reference_results",
     ROOT / "src" / "mlperf_edu" / "reference_results",
+)
+OUTER_EXECUTION_TIMING_SCOPE = (
+    "The cooldown occurs before subprocess launch and is excluded from "
+    "both subprocess wall time and within-run timing samples."
+)
+PRECONDITIONING_TIMING_SCOPE = (
+    "Preconditioning completes before evidence repetitions. Its workload "
+    "timings and quality results are retained for audit but excluded from "
+    "all evidence aggregates, acceptance statistics, and repeatability."
 )
 
 
@@ -395,6 +404,107 @@ def validate_summary_structure(
     if payload.get("seeds_requested") != [case.canonical_seed] * expected_runs:
         raise ValueError(f"{path}: promotion runs must repeat the canonical seed")
 
+    expected_cooldown_seconds = case.measurement_protocol.get(
+        "outer_inter_execution_cooldown_seconds"
+    )
+    if (
+        isinstance(expected_cooldown_seconds, bool)
+        or not isinstance(expected_cooldown_seconds, (int, float))
+        or not math.isfinite(float(expected_cooldown_seconds))
+        or not 0 <= float(expected_cooldown_seconds) <= 300
+    ):
+        raise ValueError(
+            f"{case.case_id}: outer inter-execution cooldown must be between 0 and 300"
+        )
+    expected_outer_executions = [
+        {
+            "execution_index": position,
+            "seed": case.canonical_seed,
+            "fresh_process": True,
+            "cooldown_before_seconds": (
+                0.0 if position == 1 else float(expected_cooldown_seconds)
+            ),
+        }
+        for position in range(1, expected_runs + 1)
+    ]
+    stabilization = payload.get("inter_execution_stabilization")
+    if not isinstance(stabilization, dict):
+        raise ValueError(f"{path}: inter-execution stabilization policy is missing")
+    for field, expected in {
+        "scope": "outer-process-executions",
+        "applies": True,
+        "applicability": (
+            "all public-candidate score-bearing and performance-bearing workloads"
+        ),
+        "mode": "fixed-delay-between-fresh-processes",
+        "execution_unit": "one fresh Python subprocess per repetition",
+        "process_execution_count": expected_runs,
+        "configured_cooldown_seconds": float(expected_cooldown_seconds),
+        "maximum_cooldown_seconds": 300.0,
+        "first_execution_has_no_cooldown": True,
+        "timing_scope": OUTER_EXECUTION_TIMING_SCOPE,
+        "executions": expected_outer_executions,
+    }.items():
+        if stabilization.get(field) != expected:
+            raise ValueError(
+                f"{path}: inter_execution_stabilization.{field} does not match "
+                "the protocol"
+            )
+
+    expected_preconditioning_runs = case.measurement_protocol.get(
+        "outer_preconditioning_runs"
+    )
+    if (
+        isinstance(expected_preconditioning_runs, bool)
+        or not isinstance(expected_preconditioning_runs, int)
+        or expected_preconditioning_runs < 0
+    ):
+        raise ValueError(
+            f"{case.case_id}: outer_preconditioning_runs must be a nonnegative integer"
+        )
+    preconditioning = payload.get("preconditioning")
+    if not isinstance(preconditioning, dict):
+        raise ValueError(f"{path}: preconditioning policy is missing")
+    expected_preconditioning_executions = [
+        {
+            "execution_index": position,
+            "seed": case.canonical_seed,
+            "fresh_process": True,
+            "output_group": "preconditioning",
+        }
+        for position in range(1, expected_preconditioning_runs + 1)
+    ]
+    for field, expected in {
+        "scope": "outer-process-preconditioning",
+        "applies": bool(expected_preconditioning_runs),
+        "mode": (
+            "complete-canonical-executions"
+            if expected_preconditioning_runs
+            else "not-applied"
+        ),
+        "execution_unit": (
+            "one complete canonical workload in a fresh Python subprocess"
+        ),
+        "process_execution_count": expected_preconditioning_runs,
+        "cooldown_between_executions_seconds": 0.0,
+        "cooldown_before_first_measured_execution_seconds": 0.0,
+        "timing_scope": PRECONDITIONING_TIMING_SCOPE,
+        "executions": expected_preconditioning_executions,
+    }.items():
+        if preconditioning.get(field) != expected:
+            raise ValueError(
+                f"{path}: preconditioning.{field} does not match the protocol"
+            )
+    preconditioning_rows = preconditioning.get("runs")
+    if (
+        not isinstance(preconditioning_rows, list)
+        or len(preconditioning_rows) != expected_preconditioning_runs
+    ):
+        raise ValueError(
+            f"{path}: expected exactly {expected_preconditioning_runs} "
+            "preconditioning runs"
+        )
+
     primary_values: list[float] = []
     quality_values: list[float] = []
     wall_values: list[float] = []
@@ -426,6 +536,7 @@ def validate_summary_structure(
             "reference_metric_role": "performance",
             "result_role": case.result_role,
             "quality_target_met": True,
+            "outer_process_execution": expected_outer_executions[position - 1],
         }
         for field, expected in required.items():
             if run.get(field) != expected:
@@ -434,6 +545,25 @@ def validate_summary_structure(
                 )
         if run.get("invalid_reasons") != []:
             raise ValueError(f"{label}: invalid_reasons is not empty")
+        reproduce_policy = (run.get("reproduce") or {}).get("reference_sweep") or {}
+        if (
+            reproduce_policy.get("outer_process_execution")
+            != expected_outer_executions[position - 1]
+        ):
+            raise ValueError(f"{label}: reproduction execution policy mismatch")
+        cooldown_record = reproduce_policy.get("inter_execution_cooldown") or {}
+        expected_cooldown_record = {
+            "cli_option": "--inter-execution-cooldown-seconds",
+            "configured_seconds": float(expected_cooldown_seconds),
+            "applied_before_this_execution_seconds": expected_outer_executions[
+                position - 1
+            ]["cooldown_before_seconds"],
+            "applies": True,
+        }
+        if cooldown_record != expected_cooldown_record:
+            raise ValueError(f"{label}: reproduction cooldown policy mismatch")
+        if reproduce_policy.get("timing_scope") != OUTER_EXECUTION_TIMING_SCOPE:
+            raise ValueError(f"{label}: reproduction timing scope mismatch")
         primary_values.append(
             _numeric(
                 run.get("primary_metric_value"),
@@ -498,6 +628,53 @@ def validate_summary_structure(
 
     if len(fingerprints) != 1:
         raise ValueError(f"{path}: runs do not share one comparison fingerprint")
+    for position, (run, execution) in enumerate(
+        zip(preconditioning_rows, expected_preconditioning_executions), start=1
+    ):
+        label = f"{path} preconditioning run {position}"
+        if not isinstance(run, dict):
+            raise ValueError(f"{label}: run row is not an object")
+        required = {
+            "execution_index": position,
+            "requested_seed": case.canonical_seed,
+            "report_recorded_seed": case.canonical_seed,
+            "manifest_recorded_seed": case.canonical_seed,
+            "seed_match": True,
+            "status": "passed",
+            "execution_ok": True,
+            "evidence_valid": True,
+            "timed_out": False,
+            "manifest_verified": True,
+            "data_mode": case.data_mode,
+            "scenario": case.scenario,
+            "manifest_scenario": case.scenario,
+            "registry_scenario": case.scenario,
+            "primary_metric_declared": primary_metric,
+            "reference_metric_role": "performance",
+            "result_role": case.result_role,
+            "quality_target_met": True,
+            "preconditioning_execution": execution,
+        }
+        for field, expected in required.items():
+            if run.get(field) != expected:
+                raise ValueError(
+                    f"{label}: {field}={run.get(field)!r}, expected {expected!r}"
+                )
+        if run.get("invalid_reasons") != []:
+            raise ValueError(f"{label}: invalid_reasons is not empty")
+        reproduce_policy = (run.get("reproduce") or {}).get("reference_sweep") or {}
+        expected_reproduce_policy = {
+            "preconditioning_execution": execution,
+            "aggregate_inclusion": "excluded",
+            "timing_scope": PRECONDITIONING_TIMING_SCOPE,
+        }
+        if reproduce_policy != expected_reproduce_policy:
+            raise ValueError(f"{label}: preparation reproduction policy mismatch")
+        _require_match(
+            f"{label} comparison fingerprint",
+            run.get("comparison_fingerprint_sha256"),
+            next(iter(fingerprints)),
+        )
     _require_match(
         f"{path} comparison fingerprint",
         payload.get("comparison_fingerprint_sha256"),
@@ -725,119 +902,135 @@ def verify_external_evidence(
     retained = {summary_path.resolve(), sidecar.resolve()}
     manifest_cache: set[Path] = set()
 
-    for position, run in enumerate(payload.get("runs") or [], start=1):
-        label = f"{case.case_id} run {position}"
-        claims: dict[str, Mapping[str, Any]] = {}
-        for claim in run.get("artifacts") or []:
-            if not isinstance(claim, dict):
-                raise ValueError(f"{label}: artifact claim is not an object")
-            role = str(claim.get("role") or "")
-            if not role or role in claims:
-                raise ValueError(f"{label}: artifact role is missing or duplicated")
-            claims[role] = claim
-            retained.add(
-                verify_file_claim(
-                    attempt_root,
-                    claim,
-                    label=f"{label} artifact {role}",
-                    cache=cache,
+    execution_groups = (
+        (
+            "preconditioning run",
+            (payload.get("preconditioning") or {}).get("runs") or [],
+        ),
+        ("run", payload.get("runs") or []),
+    )
+    for group_label, execution_rows in execution_groups:
+        for position, run in enumerate(execution_rows, start=1):
+            label = f"{case.case_id} {group_label} {position}"
+            claims: dict[str, Mapping[str, Any]] = {}
+            for claim in run.get("artifacts") or []:
+                if not isinstance(claim, dict):
+                    raise ValueError(f"{label}: artifact claim is not an object")
+                role = str(claim.get("role") or "")
+                if not role or role in claims:
+                    raise ValueError(f"{label}: artifact role is missing or duplicated")
+                claims[role] = claim
+                retained.add(
+                    verify_file_claim(
+                        attempt_root,
+                        claim,
+                        label=f"{label} artifact {role}",
+                        cache=cache,
+                    )
                 )
+            if "report" not in claims or "provenance" not in claims:
+                raise ValueError(f"{label}: report or provenance artifact is missing")
+            report_path = resolve_indexed_file(
+                attempt_root, claims["report"].get("path"), label=f"{label} report"
             )
-        if "report" not in claims or "provenance" not in claims:
-            raise ValueError(f"{label}: report or provenance artifact is missing")
-        report_path = resolve_indexed_file(
-            attempt_root, claims["report"].get("path"), label=f"{label} report"
-        )
-        manifest_path = resolve_indexed_file(
-            attempt_root,
-            claims["provenance"].get("path"),
-            label=f"{label} provenance",
-        )
-        _require_match(
-            f"{label} report path", run.get("report_path"), claims["report"].get("path")
-        )
-        _require_match(
-            f"{label} manifest path",
-            run.get("manifest_path"),
-            claims["provenance"].get("path"),
-        )
-        report, _ = load_json_object(report_path, label=f"{label} report")
-        manifest, _ = load_json_object(manifest_path, label=f"{label} provenance")
-        expected_report = {
-            "workload": case.workload.id,
-            "profile": case.profile,
-            "mode": case.mode,
-            "phase": case.phase,
-            "scenario": case.scenario,
-            "status": "passed",
-            "seed": case.canonical_seed,
-            "backend": run.get("backend"),
-            "data_mode": case.data_mode,
-        }
-        for field, expected in expected_report.items():
-            _require_match(f"{label} report.{field}", report.get(field), expected)
-        metrics = report.get("metrics") or {}
-        _require_match(
-            f"{label} primary metric bytes",
-            metrics.get(run.get("primary_metric_key")),
-            run.get("primary_metric_value"),
-        )
-        _require_match(
-            f"{label} gate metric bytes",
-            metrics.get(run.get("functional_metric_key")),
-            run.get("functional_metric_value"),
-        )
-        recomputed = recompute_promotion_contract(
-            report_path, case, source_project_root=source_project_root
-        )
-        _require_match(
-            f"{label} recomputed promotion contract",
-            report.get("promotion_contract"),
-            recomputed,
-        )
-        _require_match(
-            f"{label} summary promotion contract",
-            run.get("promotion_contract"),
-            recomputed,
-        )
-        fingerprint = report.get("run_fingerprint") or {}
-        _require_match(
-            f"{label} comparison fingerprint",
-            fingerprint.get("comparison_fingerprint_sha256"),
-            run_comparison_fingerprint_sha256(fingerprint),
-        )
-        _require_match(
-            f"{label} summary comparison fingerprint",
-            run.get("comparison_fingerprint_sha256"),
-            fingerprint.get("comparison_fingerprint_sha256"),
-        )
-        _require_match(
-            f"{label} manifest workload", manifest.get("workload"), case.workload.id
-        )
-        _require_match(
-            f"{label} manifest scenario", manifest.get("scenario"), case.scenario
-        )
-        manifest_seed = ((manifest.get("leaves") or {}).get("rng") or {}).get("seed")
-        _require_match(f"{label} manifest seed", manifest_seed, case.canonical_seed)
-        measurement = (manifest.get("leaves") or {}).get("measurement") or {}
-        _require_match(
-            f"{label} manifest report digest",
-            measurement.get("report_file_sha256"),
-            sha256_file(report_path),
-        )
-        _require_match(
-            f"{label} manifest report size",
-            measurement.get("n_bytes"),
-            report_path.stat().st_size,
-        )
-        if manifest_path not in manifest_cache:
-            verification = verify_provd(manifest_path, repo_root=source_project_root)
-            failed = [
-                name for name, passed, _detail in verification.checks if not passed
-            ]
-            if failed:
-                raise ValueError(f"{label}: provenance verification failed: {failed}")
-            manifest_cache.add(manifest_path)
+            manifest_path = resolve_indexed_file(
+                attempt_root,
+                claims["provenance"].get("path"),
+                label=f"{label} provenance",
+            )
+            _require_match(
+                f"{label} report path",
+                run.get("report_path"),
+                claims["report"].get("path"),
+            )
+            _require_match(
+                f"{label} manifest path",
+                run.get("manifest_path"),
+                claims["provenance"].get("path"),
+            )
+            report, _ = load_json_object(report_path, label=f"{label} report")
+            manifest, _ = load_json_object(manifest_path, label=f"{label} provenance")
+            expected_report = {
+                "workload": case.workload.id,
+                "profile": case.profile,
+                "mode": case.mode,
+                "phase": case.phase,
+                "scenario": case.scenario,
+                "status": "passed",
+                "seed": case.canonical_seed,
+                "backend": run.get("backend"),
+                "data_mode": case.data_mode,
+            }
+            for field, expected in expected_report.items():
+                _require_match(f"{label} report.{field}", report.get(field), expected)
+            metrics = report.get("metrics") or {}
+            _require_match(
+                f"{label} primary metric bytes",
+                metrics.get(run.get("primary_metric_key")),
+                run.get("primary_metric_value"),
+            )
+            _require_match(
+                f"{label} gate metric bytes",
+                metrics.get(run.get("functional_metric_key")),
+                run.get("functional_metric_value"),
+            )
+            recomputed = recompute_promotion_contract(
+                report_path, case, source_project_root=source_project_root
+            )
+            _require_match(
+                f"{label} recomputed promotion contract",
+                report.get("promotion_contract"),
+                recomputed,
+            )
+            _require_match(
+                f"{label} summary promotion contract",
+                run.get("promotion_contract"),
+                recomputed,
+            )
+            fingerprint = report.get("run_fingerprint") or {}
+            _require_match(
+                f"{label} comparison fingerprint",
+                fingerprint.get("comparison_fingerprint_sha256"),
+                run_comparison_fingerprint_sha256(fingerprint),
+            )
+            _require_match(
+                f"{label} summary comparison fingerprint",
+                run.get("comparison_fingerprint_sha256"),
+                fingerprint.get("comparison_fingerprint_sha256"),
+            )
+            _require_match(
+                f"{label} manifest workload", manifest.get("workload"), case.workload.id
+            )
+            _require_match(
+                f"{label} manifest scenario", manifest.get("scenario"), case.scenario
+            )
+            manifest_seed = ((manifest.get("leaves") or {}).get("rng") or {}).get(
+                "seed"
+            )
+            _require_match(f"{label} manifest seed", manifest_seed, case.canonical_seed)
+            measurement = (manifest.get("leaves") or {}).get("measurement") or {}
+            _require_match(
+                f"{label} manifest report digest",
+                measurement.get("report_file_sha256"),
+                sha256_file(report_path),
+            )
+            _require_match(
+                f"{label} manifest report size",
+                measurement.get("n_bytes"),
+                report_path.stat().st_size,
+            )
+            if manifest_path not in manifest_cache:
+                verification = verify_provd(
+                    manifest_path, repo_root=source_project_root
+                )
+                failed = [
+                    name for name, passed, _detail in verification.checks if not passed
+                ]
+                if failed:
+                    raise ValueError(
+                        f"{label}: provenance verification failed: {failed}"
+                    )
+                manifest_cache.add(manifest_path)
 
     _verify_lineage_stage(
         evidence_root,

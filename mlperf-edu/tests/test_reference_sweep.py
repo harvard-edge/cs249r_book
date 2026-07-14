@@ -84,6 +84,10 @@ def test_parse_run_count_and_canonical_seed():
     assert sweep.parse_run_count("5") == 5
     with pytest.raises(argparse.ArgumentTypeError):
         sweep.parse_run_count("0")
+    assert sweep.parse_preconditioning_run_count("0") == 0
+    assert sweep.parse_preconditioning_run_count("2") == 2
+    with pytest.raises(argparse.ArgumentTypeError):
+        sweep.parse_preconditioning_run_count("-1")
     from mlperf.registry import load_registry
 
     registry = load_registry()
@@ -203,6 +207,117 @@ def test_outer_execution_policy_stabilizes_all_timed_public_candidates():
             execution["cooldown_before_seconds"]
             for execution in not_applied["executions"]
         ] == [0.0, 0.0]
+
+
+def test_preconditioning_policy_is_complete_retained_and_aggregate_excluded():
+    policy = sweep.build_preconditioning_policy(seed=1337, execution_count=2)
+
+    assert policy["applies"] is True
+    assert policy["process_execution_count"] == 2
+    assert [execution["execution_index"] for execution in policy["executions"]] == [
+        1,
+        2,
+    ]
+    assert [execution["seed"] for execution in policy["executions"]] == [1337, 1337]
+    assert all(
+        execution["output_group"] == "preconditioning"
+        for execution in policy["executions"]
+    )
+    assert "excluded from all evidence aggregates" in policy["timing_scope"]
+
+
+def test_declared_cooldown_is_finite_bounded_and_explicit():
+    assert (
+        sweep.declared_inter_execution_cooldown_seconds(
+            {"outer_inter_execution_cooldown_seconds": 30}
+        )
+        == 30.0
+    )
+    for protocol in (
+        {},
+        {"outer_inter_execution_cooldown_seconds": True},
+        {"outer_inter_execution_cooldown_seconds": -1},
+        {"outer_inter_execution_cooldown_seconds": 301},
+        {"outer_inter_execution_cooldown_seconds": float("nan")},
+    ):
+        with pytest.raises(ValueError, match="outer_inter_execution_cooldown"):
+            sweep.declared_inter_execution_cooldown_seconds(protocol)
+
+
+def test_declared_preconditioning_count_is_nonnegative_and_explicit():
+    assert sweep.declared_preconditioning_runs({"outer_preconditioning_runs": 0}) == 0
+    assert sweep.declared_preconditioning_runs({"outer_preconditioning_runs": 2}) == 2
+    for protocol in (
+        {},
+        {"outer_preconditioning_runs": True},
+        {"outer_preconditioning_runs": -1},
+        {"outer_preconditioning_runs": 1.0},
+    ):
+        with pytest.raises(ValueError, match="outer_preconditioning_runs"):
+            sweep.declared_preconditioning_runs(protocol)
+
+
+def test_run_one_seed_rejects_unrecognized_output_group(tmp_path):
+    with pytest.raises(ValueError, match="unsupported reference-sweep run group"):
+        sweep.run_one_seed(
+            tmp_path / "child.py",
+            workload_id="image-classification",
+            variant=None,
+            profile="max",
+            seed=42,
+            execution_index=1,
+            mode="inference",
+            phase=None,
+            device="cpu",
+            attempt_dir=tmp_path,
+            timeout_seconds=1.0,
+            evidence_tier="development",
+            allowed_data_modes=frozenset({"real"}),
+            run_group="../escape",
+        )
+
+
+def test_promotion_rejects_preconditioning_override_that_differs_from_protocol():
+    with pytest.raises(SystemExit) as exc_info:
+        sweep.main(
+            [
+                "--workload",
+                "image-classification",
+                "--preconditioning-runs",
+                "-1",
+            ]
+        )
+    assert exc_info.value.code == 2
+
+    assert (
+        sweep.main(
+            [
+                "--workload",
+                "image-classification",
+                "--preconditioning-runs",
+                "1",
+                "--evidence-tier",
+                "promotion-candidate",
+            ]
+        )
+        == 2
+    )
+
+
+def test_promotion_rejects_cooldown_override_that_differs_from_protocol():
+    assert (
+        sweep.main(
+            [
+                "--workload",
+                "image-classification",
+                "--inter-execution-cooldown-seconds",
+                "1",
+                "--evidence-tier",
+                "promotion-candidate",
+            ]
+        )
+        == 2
+    )
 
 
 @pytest.mark.parametrize("value", ["nan", "inf", "-0.1", "300.1"])
@@ -470,6 +585,100 @@ def fake_result(seed, value, *, data_mode="real", primary_metric_value=None):
         "invalid_reasons": [],
         "reproduce": {"env": {"MLPERF_EDU_MAX_SEED": str(seed)}},
     }
+
+
+def test_preconditioning_is_retained_but_excluded_from_aggregates(
+    tmp_path, monkeypatch
+):
+    calls = []
+
+    def run_one_seed(_bootstrap, **kwargs):
+        calls.append(kwargs)
+        result = fake_result(
+            kwargs["seed"],
+            0.90,
+            primary_metric_value=10.0,
+        )
+        result["execution_index"] = kwargs["execution_index"]
+        result["primary_metric_declared"] = "inference_and_evaluation_seconds"
+        result["primary_metric_key"] = "inference_and_evaluation_seconds"
+        return result
+
+    monkeypatch.setattr(sweep, "run_one_seed", run_one_seed)
+    monkeypatch.setattr(
+        sweep, "source_snapshot", lambda: {"git_sha": "abc", "git_dirty": False}
+    )
+
+    code = sweep.main(
+        [
+            "--workload",
+            "image-classification",
+            "--profile",
+            "max",
+            "--seeds",
+            "0,1",
+            "--preconditioning-runs",
+            "1",
+            "--output-dir",
+            str(tmp_path),
+            "--evidence-tier",
+            "development",
+        ]
+    )
+
+    assert code == 0
+    assert len(calls) == 3
+    assert calls[0]["seed"] == 42
+    assert calls[0]["run_group"] == "preconditioning"
+    assert "run_group" not in calls[1]
+    assert "run_group" not in calls[2]
+    summary = json.loads(next(tmp_path.glob("*/evidence_summary.json")).read_text())
+    assert summary["preconditioning"]["process_execution_count"] == 1
+    assert len(summary["preconditioning"]["runs"]) == 1
+    assert len(summary["runs"]) == 2
+    assert summary["aggregate"]["primary_metric"]["count"] == 2
+
+
+def test_failed_preconditioning_skips_all_measured_repetitions(tmp_path, monkeypatch):
+    calls = []
+
+    def run_one_seed(_bootstrap, **kwargs):
+        calls.append(kwargs)
+        result = fake_result(kwargs["seed"], 0.90, primary_metric_value=10.0)
+        result["execution_index"] = kwargs["execution_index"]
+        result["evidence_valid"] = False
+        result["invalid_reasons"] = ["injected preparation failure"]
+        return result
+
+    monkeypatch.setattr(sweep, "run_one_seed", run_one_seed)
+    monkeypatch.setattr(
+        sweep, "source_snapshot", lambda: {"git_sha": "abc", "git_dirty": False}
+    )
+
+    code = sweep.main(
+        [
+            "--workload",
+            "image-classification",
+            "--profile",
+            "max",
+            "--seeds",
+            "0,1",
+            "--preconditioning-runs",
+            "2",
+            "--output-dir",
+            str(tmp_path),
+            "--evidence-tier",
+            "development",
+        ]
+    )
+
+    assert code == 1
+    assert len(calls) == 1
+    assert calls[0]["run_group"] == "preconditioning"
+    summary = json.loads(next(tmp_path.glob("*/evidence_summary.json")).read_text())
+    assert summary["status"] == "invalid"
+    assert len(summary["preconditioning"]["runs"]) == 1
+    assert summary["runs"] == []
 
 
 def test_score_evidence_rejects_high_variance_primary_timing(tmp_path, monkeypatch):

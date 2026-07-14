@@ -109,6 +109,24 @@ def test_all_execution_contracts_declare_result_roles():
             assert contract["result_role"] == "performance-bearing"
 
 
+def test_all_measurement_contracts_pin_outer_execution_stabilization():
+    workloads = load_registry()
+
+    for workload in workloads.values():
+        protocols = [workload.raw["measurement_protocol"]]
+        phases = (
+            (workload.raw.get("mode_contracts") or {}).get("inference") or {}
+        ).get("phases", {})
+        protocols.extend(
+            contract["measurement_protocol"] for contract in phases.values()
+        )
+        for protocol in protocols:
+            assert protocol["outer_reference_runs"] == 5
+            assert isinstance(protocol["outer_preconditioning_runs"], int)
+            assert protocol["outer_preconditioning_runs"] >= 0
+            assert 0 <= protocol["outer_inter_execution_cooldown_seconds"] <= 300
+
+
 def test_public_result_workloads_use_educational_mlcommons_scenarios():
     workloads = load_registry()
 
