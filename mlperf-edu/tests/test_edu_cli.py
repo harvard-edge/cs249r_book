@@ -575,7 +575,7 @@ def test_validate_coverage_dry_run_lists_all_min_suites(tmp_path):
     assert not any(tmp_path.iterdir())
 
 
-def test_validate_release_dry_run_includes_all_min_and_max(tmp_path):
+def test_validate_release_dry_run_includes_min_max_and_research_pro(tmp_path):
     result = run_cli(
         "validate",
         "release",
@@ -587,6 +587,40 @@ def test_validate_release_dry_run_includes_all_min_and_max(tmp_path):
     assert "MLPerf EDU Validation: release" in result.stdout
     assert "min-all" in result.stdout
     assert "max-all" in result.stdout
+    assert "pro-research" in result.stdout
+    assert not any(tmp_path.iterdir())
+
+
+def test_validate_pro_dry_run_lists_research_collection(tmp_path):
+    result = run_cli(
+        "validate",
+        "pro",
+        "--dry-run",
+        "--output-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "MLPerf EDU Validation: pro" in result.stdout
+    assert "pro-research" in result.stdout
+    assert "research workloads" in result.stdout
+    assert "dry-run complete" in result.stdout
+    assert not any(tmp_path.iterdir())
+
+
+def test_validate_release_suite_dry_run_includes_all_three_profiles(tmp_path):
+    result = run_cli(
+        "validate",
+        "release",
+        "--suite",
+        "tiny",
+        "--dry-run",
+        "--output-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "min-tiny" in result.stdout
+    assert "max-tiny" in result.stdout
+    assert "pro-tiny" in result.stdout
     assert not any(tmp_path.iterdir())
 
 

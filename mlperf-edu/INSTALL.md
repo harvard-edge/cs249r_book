@@ -148,7 +148,11 @@ Selection-only dry runs do not satisfy them.
 
 ```bash
 uv run python tools/generate_docs.py --check
+uv run playwright install chromium
 quarto render site
+uv run python tools/check_site_layout.py \
+  --build-dir site/_build \
+  --report-dir site-layout-report
 python3 ../shared/scripts/check-internal-links.py site --quiet
 ```
 

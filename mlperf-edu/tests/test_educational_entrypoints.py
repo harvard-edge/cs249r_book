@@ -196,6 +196,28 @@ def test_obsolete_parallel_product_surfaces_are_removed() -> None:
         assert not (PROJECT_ROOT / relative_path).exists(), relative_path
 
 
+def test_mlperf_edu_workflows_derive_current_case_and_workload_closure() -> None:
+    workflow_root = PROJECT_ROOT.parent / ".github" / "workflows"
+    dev = (workflow_root / "mlperf-edu-validate-dev.yml").read_text()
+    release = (workflow_root / "mlperf-edu-release-validation.yml").read_text()
+    combined = f"{dev}\n{release}"
+
+    for stale_claim in (
+        "ten-case",
+        "ten-path",
+        'summary_count"] == 10',
+        'len(data["workloads"]) == 7',
+    ):
+        assert stale_claim not in combined
+    assert "expected_cases" in dev
+    assert 'grade["passed"] == len(expected)' in dev
+    assert 'int(grade.get("passed", -1)) != len(expected)' in release
+    assert "pro-research" not in release  # selected by the product validation plan
+    assert '"pro": research_count' in release
+    assert "benchmarks/tiny/anomaly-detection.html" in dev
+    assert "benchmarks/tiny/visual-wake-words.html" in dev
+
+
 def test_wheel_guard_rejects_a_retired_module(tmp_path: Path) -> None:
     wheel_path = tmp_path / "stale.whl"
     with zipfile.ZipFile(wheel_path, "w") as archive:

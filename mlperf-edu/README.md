@@ -117,6 +117,7 @@ the producer or imply MLCommons acceptance.
 ```bash
 uv run pytest
 uv run mlperf validate smoke --output-dir submissions/smoke
+uv run mlperf validate pro --dry-run --output-dir submissions/pro-plan
 uv run python tools/export_flat_registry.py --check
 uv run python tools/sync_verified_baselines.py --check
 uv run python tools/check_taxonomy.py
@@ -124,6 +125,7 @@ uv run python tools/check_reference_claims.py --check
 uv run python tools/generate_docs.py --check
 uv run make -C paper clean all check
 quarto render site
+uv run python tools/check_site_layout.py --build-dir site/_build --report-dir site-layout-report
 uv build
 ```
 

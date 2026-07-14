@@ -139,6 +139,19 @@ def mapping_table(mapping: Any) -> str:
     return kv_table(rows)
 
 
+def provenance_value(key: str, value: Any) -> Any:
+    """Render trusted registry provenance without exposing Python containers."""
+    if not isinstance(value, str):
+        return value
+    if value.startswith(("https://", "http://")):
+        return f"[open source]({value})"
+    if key.endswith(("commit", "revision")):
+        return f"`{esc(value)}`"
+    if key == "path":
+        return f"`{esc(value)}`"
+    return value
+
+
 def workload_href(suite: str, family: str, depth: int) -> str:
     prefix = "../" * depth
     return f"{prefix}benchmarks/{suite}/{family}.qmd"
@@ -254,7 +267,6 @@ def section_at_a_glance(w: Workload) -> str:
         ("Scenario", w.scenario),
         ("Maturity", w.maturity),
         ("Candidate result status", w.public_status),
-        ("Provenance", raw.get("provenance")),
     ]
     body = kv_table(rows)
     note = raw.get("params_note")
@@ -267,6 +279,25 @@ def section_at_a_glance(w: Workload) -> str:
             "Inference scenario.\n"
         )
     return f"## At a Glance\n\n{body}"
+
+
+def section_provenance(w: Workload) -> str:
+    provenance = w.raw.get("provenance")
+    if not isinstance(provenance, dict) or not provenance:
+        return ""
+    adaptation = provenance.get("adaptation")
+    rows = [
+        (
+            key.replace("_", " ").capitalize(),
+            provenance_value(key, value),
+        )
+        for key, value in provenance.items()
+        if key != "adaptation"
+    ]
+    body = kv_table(rows)
+    if adaptation:
+        body += f"\n**Adaptation boundary:** {esc(adaptation)}\n"
+    return f"## Authoritative Sources and Adaptation\n\n{body}"
 
 
 def section_execution_boundary(w: Workload) -> str:
@@ -558,6 +589,7 @@ def render_workload_body(
 ) -> str:
     sections = [
         section_at_a_glance(w),
+        section_provenance(w),
         section_execution_boundary(w),
         section_how_to_run(w),
         section_quality_target(w),

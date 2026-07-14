@@ -78,7 +78,9 @@ jobs:
             src/mlperf/reference/cloud/nanogpt_prefill.py
             src/mlperf/reference/cloud/nanogpt_train.py
             src/mlperf/reference/tiny/mlperf_tiny_kws.py
+            src/mlperf/reference/tiny/mlperf_tiny_anomaly.py
             src/mlperf/reference/tiny/mlperf_tiny_resnet.py
+            src/mlperf/reference/tiny/mlperf_tiny_vww.py
             tools/check_taxonomy.py
             tools/check_reference_claims.py
             tools/check_selection_ledger.py
@@ -120,6 +122,8 @@ jobs:
             src/mlperf/reference/cloud/nanogpt_decode.py
             src/mlperf/reference/cloud/nanogpt_prefill.py
             src/mlperf/reference/tiny/mlperf_tiny_resnet.py
+            src/mlperf/reference/tiny/mlperf_tiny_anomaly.py
+            src/mlperf/reference/tiny/mlperf_tiny_vww.py
             tools/check_taxonomy.py
             tools/check_reference_claims.py
             tools/check_site_layout.py
@@ -266,7 +270,7 @@ jobs:
               --profile min \
               --output-dir "$output_dir"
           done
-          uv run mlperf grade "$output_dir" --output "$output_dir/ten-path-grade.json"
+          uv run mlperf grade "$output_dir" --output "$output_dir/coverage-case-grade.json"
           uv run python - <<'PY'
           import json
           from pathlib import Path
@@ -293,12 +297,12 @@ jobs:
               ))
           if actual != expected:
               raise SystemExit(
-                  f"ten-path execution closure mismatch; "
+                  f"case execution closure mismatch; "
                   f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
               )
-          grade_path = output_dir / "ten-path-grade.json"
+          grade_path = output_dir / "coverage-case-grade.json"
           grade = json.loads(grade_path.read_text())
-          assert grade["passed"] == 10 and grade["failed"] == 0, grade
+          assert grade["passed"] == len(expected) and grade["failed"] == 0, grade
           PY
 
       - name: Execute All Lab Smoke Paths
@@ -387,8 +391,25 @@ jobs:
               index = json.loads(archive.read("package_index.json"))
           assert index["clean_extraction_verification"]["status"] == "passed"
           PY
-          /tmp/mlperf-edu-wheel-smoke/bin/python -c 'import json; from importlib.resources import files; data=json.loads(files("mlperf_edu").joinpath("reference_results/index.json").read_text()); assert data["summary_count"] == 10'
-          python3 -c 'import json; data=json.load(open("/tmp/mlperf-edu-list.json")); assert len(data["workloads"]) == 7'
+          /tmp/mlperf-edu-wheel-smoke/bin/python - <<'PY'
+          import json
+          from importlib.resources import files
+
+          from mlperf.registry import load_registry
+
+          registry = load_registry()
+          expected_case_count = len(registry) + sum(
+              len((((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get("phases") or {}))
+              for workload in registry.values()
+          )
+          index = json.loads(
+              files("mlperf_edu").joinpath("reference_results/index.json").read_text()
+          )
+          listed = json.load(open("/tmp/mlperf-edu-list.json"))
+          assert index["case_count"] == expected_case_count, index
+          assert index["workload_count"] == len(registry), index
+          assert len(listed["workloads"]) == len(registry), listed
+          PY
 
   site-render:
     name: 'Quarto Render and Internal Links'
@@ -430,6 +451,8 @@ jobs:
           test -f mlperf-edu/site/_build/benchmarks/index.html
           test -f mlperf-edu/site/_build/benchmarks/vision/image-classification.html
           test -f mlperf-edu/site/_build/benchmarks/tiny/keyword-spotting.html
+          test -f mlperf-edu/site/_build/benchmarks/tiny/anomaly-detection.html
+          test -f mlperf-edu/site/_build/benchmarks/tiny/visual-wake-words.html
           test -f mlperf-edu/site/_build/benchmarks/language/causal-language-modeling.html
           test -f mlperf-edu/site/_build/benchmarks/language/text-classification.html
           test -f mlperf-edu/site/_build/benchmarks/language/information-retrieval.html
@@ -448,9 +471,7 @@ jobs:
 
       - name: Install the Browser Layout Checker
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
-        run: |
-          uv pip install playwright==1.58.0
-          uv run playwright install --with-deps chromium
+        run: uv run playwright install --with-deps chromium
 
       - name: Check Every Page at Desktop and Narrow Viewports
         working-directory: ${{ env.MLPERF_EDU_ROOT }}

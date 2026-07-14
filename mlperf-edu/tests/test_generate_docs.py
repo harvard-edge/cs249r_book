@@ -71,6 +71,20 @@ def test_generated_benchmark_pages_disclose_candidate_status(generated_outputs):
         assert "Candidate result status" in content or path_is_dataset(content)
 
 
+def test_generated_workload_pages_render_structured_provenance(generated_outputs):
+    workload_pages = [
+        content
+        for path, content in generated_outputs.items()
+        if "benchmarks" in path.parts and path.name != "index.qmd"
+    ]
+    assert workload_pages
+    for content in workload_pages:
+        assert "## Authoritative Sources and Adaptation" in content
+        assert "**Adaptation boundary:**" in content
+        assert "{'authority':" not in content
+        assert "[open source](https://" in content
+
+
 def test_canonical_pages_do_not_expose_retired_synthetic_max_boundaries():
     workloads = load_registry(ROOT / "registry")
     systems_only = [

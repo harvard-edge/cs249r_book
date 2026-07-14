@@ -8,11 +8,12 @@ on:
   workflow_dispatch:
     inputs:
       preset:
-        description: 'Execute every canonical path and all causal inference phases'
+        description: 'Execute canonical or research validation and all applicable causal inference phases'
         type: choice
         options:
           - release
           - max
+          - pro
         default: release
       keep_going:
         description: 'Continue through all workloads after an individual failure'
@@ -86,17 +87,19 @@ jobs:
           echo "Executing actual ${preset} validation into ${output_dir}"
           uv run mlperf "${args[@]}"
 
-          max_output_dir="$output_dir/max-all"
-          for phase in full prefill decode; do
-            uv run mlperf run \
-              --workload causal-language-modeling \
-              --mode inference \
-              --phase "$phase" \
-              --profile max \
-              --output-dir "$max_output_dir"
-          done
-          uv run mlperf grade "$max_output_dir" \
-            --output "$max_output_dir/ten-case-grade.json"
+          if [ "$preset" = "release" ] || [ "$preset" = "max" ]; then
+            max_output_dir="$output_dir/max-all"
+            for phase in full prefill decode; do
+              uv run mlperf run \
+                --workload causal-language-modeling \
+                --mode inference \
+                --phase "$phase" \
+                --profile max \
+                --output-dir "$max_output_dir"
+            done
+            uv run mlperf grade "$max_output_dir" \
+              --output "$max_output_dir/case-grade.json"
+          fi
 
       - name: Record the Strict Public-Release Audit
         if: always()
@@ -130,11 +133,13 @@ jobs:
           output_dir="submissions/ci-${EXECUTED_PRESET}"
           registry_count=$(uv run python -c \
             'from mlperf.registry import load_registry; print(len(load_registry()))')
+          research_count=$(uv run python -c \
+            'from mlperf.registry import RESEARCH_WORKLOADS, load_registry; print(len(RESEARCH_WORKLOADS.intersection(load_registry())))')
           summary=$(find "$output_dir" -maxdepth 1 \
             -name "mlperf_validate_${EXECUTED_PRESET}_*.json" \
             -type f -print -quit)
           test -n "$summary"
-          python3 - "$summary" "$EXECUTED_PRESET" "$registry_count" "$output_dir/max-all" <<'PY'
+          python3 - "$summary" "$EXECUTED_PRESET" "$registry_count" "$research_count" "$output_dir/max-all" <<'PY'
           import json
           import pathlib
           import sys
@@ -144,15 +149,20 @@ jobs:
           report = json.loads(pathlib.Path(sys.argv[1]).read_text())
           expected_preset = sys.argv[2]
           registry_count = int(sys.argv[3])
-          max_output_dir = pathlib.Path(sys.argv[4])
-          profile_count = 2 if expected_preset == "release" else 1
+          research_count = int(sys.argv[4])
+          max_output_dir = pathlib.Path(sys.argv[5])
+          expected_validations = 3 if expected_preset == "release" else 1
           if report.get("preset") != expected_preset:
               raise SystemExit(f"unexpected preset: {report.get('preset')!r}")
           if report.get("status") != "passed":
               raise SystemExit(f"validation did not pass: {report.get('status')!r}")
           totals = report.get("totals") or {}
-          expected_workloads = registry_count * profile_count
-          if int(totals.get("validations", -1)) != profile_count:
+          expected_workloads = {
+              "release": registry_count * 2 + research_count,
+              "max": registry_count,
+              "pro": research_count,
+          }[expected_preset]
+          if int(totals.get("validations", -1)) != expected_validations:
               raise SystemExit(f"incomplete validation profiles: {totals}")
           if int(totals.get("workloads", -1)) != expected_workloads:
               raise SystemExit(f"incomplete workload coverage: {totals}")
@@ -161,26 +171,30 @@ jobs:
           if int(totals.get("review_contract_failures", -1)) != 0:
               raise SystemExit(f"review contracts did not pass: {totals}")
 
-          expected = set(expected_cases())
-          actual = set()
-          for path in max_output_dir.glob("*_max_report.json"):
-              payload = json.loads(path.read_text())
-              if payload.get("status") != "passed":
-                  raise SystemExit(f"case report did not pass: {path}")
-              actual.add(case_id(
-                  str(payload.get("workload")),
-                  str(payload.get("profile")),
-                  str(payload.get("mode")),
-                  payload.get("phase"),
-              ))
-          if actual != expected:
-              raise SystemExit(
-                  f"ten-case execution closure mismatch; "
-                  f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
-              )
-          grade = json.loads((max_output_dir / "ten-case-grade.json").read_text())
-          if int(grade.get("passed", -1)) != 10 or int(grade.get("failed", -1)) != 0:
-              raise SystemExit(f"ten-case grading did not pass: {grade}")
+          if expected_preset in {"release", "max"}:
+              expected = set(expected_cases())
+              actual = set()
+              for path in max_output_dir.glob("*_max_report.json"):
+                  payload = json.loads(path.read_text())
+                  if payload.get("status") != "passed":
+                      raise SystemExit(f"case report did not pass: {path}")
+                  actual.add(case_id(
+                      str(payload.get("workload")),
+                      str(payload.get("profile")),
+                      str(payload.get("mode")),
+                      payload.get("phase"),
+                  ))
+              if actual != expected:
+                  raise SystemExit(
+                      f"case execution closure mismatch; "
+                      f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+                  )
+              grade = json.loads((max_output_dir / "case-grade.json").read_text())
+              if (
+                  int(grade.get("passed", -1)) != len(expected)
+                  or int(grade.get("failed", -1)) != 0
+              ):
+                  raise SystemExit(f"case grading did not pass: {grade}")
           PY
 
       - name: Upload Full Validation Evidence

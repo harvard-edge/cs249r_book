@@ -97,7 +97,7 @@ from .registry import (
 
 console = Console(width=140)
 DEFAULT_MLPERF_SUITE = "mlperf-edu"
-VALIDATE_PRESETS = ("smoke", "coverage", "max", "release")
+VALIDATE_PRESETS = ("smoke", "coverage", "max", "pro", "release")
 PROFILE_CHOICES = PROFILES
 LEGACY_VALIDATE_LEVELS = {
     "quick": "smoke",
@@ -432,7 +432,7 @@ def add_validate_arguments(parser: argparse.ArgumentParser) -> None:
         nargs="?",
         choices=VALIDATE_PRESETS,
         default=None,
-        help="Validation preset: smoke=fast default/min, coverage=all workloads/min, max=all workloads/max, release=all workloads/min+max.",
+        help="Validation preset: smoke=fast default/min, coverage=all workloads/min, max=all workloads/max, pro=research collection/pro, release=all workloads/min+max and research collection/pro.",
     )
     parser.add_argument(
         "--preset",
@@ -3967,12 +3967,14 @@ def validation_plan(
         selected_suites = tuple(suite for suite in present_suites if suite in allowed)
         if preset in {"smoke", "coverage"}:
             return [("suite", suite, "min") for suite in selected_suites]
-        if preset == "max":
-            return [("suite", suite, "max") for suite in selected_suites]
+        if preset in {"max", "pro"}:
+            return [("suite", suite, preset) for suite in selected_suites]
         if preset == "release":
-            return [("suite", suite, "min") for suite in selected_suites] + [
-                ("suite", suite, "max") for suite in selected_suites
-            ]
+            return (
+                [("suite", suite, "min") for suite in selected_suites]
+                + [("suite", suite, "max") for suite in selected_suites]
+                + [("suite", suite, "pro") for suite in selected_suites]
+            )
         raise ValueError(f"unknown validation preset: {preset}")
 
     if preset == "smoke":
@@ -3981,8 +3983,14 @@ def validation_plan(
         return [("collection", "all", "min")]
     if preset == "max":
         return [("collection", "all", "max")]
+    if preset == "pro":
+        return [("collection", "research", "pro")]
     if preset == "release":
-        return [("collection", "all", "min"), ("collection", "all", "max")]
+        return [
+            ("collection", "all", "min"),
+            ("collection", "all", "max"),
+            ("collection", "research", "pro"),
+        ]
     raise ValueError(f"unknown validation preset: {preset}")
 
 

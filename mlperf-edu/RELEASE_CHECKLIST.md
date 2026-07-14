@@ -86,6 +86,7 @@ uv run mlperf audit
 uv run mlperf audit --policy public
 uv run mlperf validate smoke --output-dir /tmp/mlperf-edu-smoke
 uv run mlperf validate coverage --output-dir /tmp/mlperf-edu-coverage
+uv run mlperf validate pro --output-dir /tmp/mlperf-edu-pro
 ```
 
 - [ ] Every registered `min` path passes from the public CLI.
@@ -116,6 +117,7 @@ uv run python tools/check_reference_claims.py --check
 uv run python tools/generate_docs.py --check
 uv run make -C paper clean all check
 quarto render site
+uv run python tools/check_site_layout.py --build-dir site/_build --report-dir site-layout-report
 uv build
 ```
 
