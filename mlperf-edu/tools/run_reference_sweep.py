@@ -35,7 +35,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TOOL_NAME = "run_reference_sweep.py"
-TOOL_VERSION = "4.1.0"
+TOOL_VERSION = "4.2.0"
 TOOL_ID = f"tools/{TOOL_NAME} v{TOOL_VERSION}"
 SCORE_PUBLIC_DATA_MODES = frozenset(
     {"real", "real-preprocessed-mlperf-tiny-accuracy-set"}
@@ -64,6 +64,7 @@ import hashlib
 import json
 import math
 import os
+import shutil
 import sys
 import time
 import traceback
@@ -108,6 +109,43 @@ def artifact_index(report, report_path, manifest_path, exports):
         if path in seen or not path.is_file():
             continue
         seen.add(path)
+        run_root = report_path.parent.resolve()
+        try:
+            path.relative_to(run_root)
+        except ValueError:
+            source_digest = sha256_file(path)
+            safe_role = "".join(
+                character if character.isalnum() or character in "._-" else "_"
+                for character in str(role)
+            ).strip("._-") or "artifact"
+            safe_name = "".join(
+                character if character.isalnum() or character in "._-" else "_"
+                for character in path.name
+            ).strip("._-") or "artifact"
+            retained_dir = run_root.parent / "retained_artifacts"
+            retained_dir.mkdir(parents=True, exist_ok=True)
+            retained = retained_dir / (
+                f"{safe_role}-{source_digest.removeprefix('sha256:')}-{safe_name}"
+            )
+            temporary = retained.with_name(retained.name + ".tmp")
+            if retained.exists():
+                if (
+                    retained.stat().st_size != path.stat().st_size
+                    or sha256_file(retained) != source_digest
+                ):
+                    raise ValueError(
+                        f"retained artifact collision for {role}: {retained}"
+                    )
+            else:
+                shutil.copyfile(path, temporary)
+                if (
+                    temporary.stat().st_size != path.stat().st_size
+                    or sha256_file(temporary) != source_digest
+                ):
+                    temporary.unlink(missing_ok=True)
+                    raise ValueError(f"retained artifact copy failed for {role}")
+                os.replace(temporary, retained)
+            path = retained.resolve()
         indexed.append({
             "role": role,
             "path": str(path),

@@ -1,4 +1,5 @@
 import argparse
+import ast
 import hashlib
 import importlib.util
 import json
@@ -13,6 +14,62 @@ SPEC = importlib.util.spec_from_file_location("run_reference_sweep", SCRIPT)
 assert SPEC and SPEC.loader
 sweep = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sweep)
+
+
+def _bootstrap_artifact_index():
+    tree = ast.parse(sweep._CHILD_BOOTSTRAP)
+    selected = [
+        node
+        for node in tree.body
+        if isinstance(node, (ast.Import, ast.ImportFrom))
+        or isinstance(node, ast.FunctionDef)
+        and node.name in {"sha256_file", "artifact_index"}
+    ]
+    namespace = {}
+    exec(
+        compile(ast.Module(body=selected, type_ignores=[]), "<bootstrap>", "exec"),
+        namespace,
+    )
+    return namespace["artifact_index"]
+
+
+def test_child_artifact_index_retains_external_runner_artifacts(tmp_path):
+    artifact_index = _bootstrap_artifact_index()
+    run_dir = tmp_path / "attempt" / "run_001"
+    cache_dir = tmp_path / "cache"
+    run_dir.mkdir(parents=True)
+    cache_dir.mkdir()
+    report_path = run_dir / "report.json"
+    manifest_path = run_dir / "run.provd.json"
+    report_path.write_text("{}\n", encoding="utf-8")
+    manifest_path.write_text("{}\n", encoding="utf-8")
+    external = cache_dir / "model weights.bin"
+    external.write_bytes(b"fixed upstream model bytes")
+    report = {"artifacts": {"source weights": str(external)}}
+
+    claims = artifact_index(report, report_path, manifest_path, {})
+    by_role = {claim["role"]: claim for claim in claims}
+    retained = Path(by_role["source weights"]["path"])
+
+    assert retained.parent == run_dir.parent / "retained_artifacts"
+    assert retained.read_bytes() == external.read_bytes()
+    assert by_role["source weights"]["sha256"] == (
+        "sha256:" + hashlib.sha256(external.read_bytes()).hexdigest()
+    )
+    assert by_role["source weights"]["n_bytes"] == external.stat().st_size
+    assert external.is_file()
+
+    second_run = run_dir.parent / "run_002"
+    second_run.mkdir()
+    second_report = second_run / "report.json"
+    second_manifest = second_run / "run.provd.json"
+    second_report.write_text("{}\n", encoding="utf-8")
+    second_manifest.write_text("{}\n", encoding="utf-8")
+    second_claims = artifact_index(report, second_report, second_manifest, {})
+    second_by_role = {claim["role"]: claim for claim in second_claims}
+
+    assert second_by_role["source weights"]["path"] == str(retained)
+    assert len(list(retained.parent.iterdir())) == 1
 
 
 def test_parse_seeds_rejects_empty_and_duplicate_values():
