@@ -16,6 +16,34 @@ sweep = importlib.util.module_from_spec(SPEC)
 SPEC.loader.exec_module(sweep)
 
 
+def stable_power_record():
+    snapshot = {
+        "schema": sweep.HOST_POWER_STATE_SCHEMA,
+        "platform": "Darwin",
+        "captured_at": "2026-07-14T12:00:00+00:00",
+        "provider": "macos-pmset-sysctl",
+        "supported": True,
+        "source": "external",
+        "source_raw": "AC Power",
+        "battery_percent": 100,
+        "battery_status": "charged",
+        "power_mode": 0,
+        "low_power_mode": False,
+        "last_sleep_epoch": 100,
+        "last_wake_epoch": 101,
+        "suspend_clock_offset_seconds": None,
+        "query_errors": [],
+    }
+    return {
+        "policy": dict(sweep.POWER_STABILITY_POLICY),
+        "promotion_conditions_required": True,
+        "before": dict(snapshot),
+        "after": dict(snapshot),
+        "stable": True,
+        "invalid_reasons": [],
+    }
+
+
 def _bootstrap_artifact_index():
     tree = ast.parse(sweep._CHILD_BOOTSTRAP)
     selected = [
@@ -125,6 +153,51 @@ def test_execution_result_roles_are_case_specific():
 
 def test_default_evidence_root_is_outside_source_checkout():
     assert not sweep.DEFAULT_OUTPUT_DIR.is_relative_to(sweep.ROOT)
+
+
+def test_pmset_power_state_parsing_and_promotion_gate():
+    battery = """Now drawing from 'AC Power'\n -InternalBattery-0\t87%; charging; 0:20 remaining"""
+    settings = """Battery Power:\n powermode 1\nAC Power:\n powermode 0\n"""
+    parsed = sweep._parse_pmset_battery(battery)
+    assert parsed == {
+        "source": "external",
+        "source_raw": "AC Power",
+        "battery_percent": 87,
+        "battery_status": "charging",
+    }
+    assert sweep._parse_pmset_power_mode(settings, "AC Power") == 0
+    assert sweep._parse_pmset_power_mode(settings, "Battery Power") == 1
+
+    record = stable_power_record()
+    assert (
+        sweep.assess_power_stability(
+            record["before"],
+            record["after"],
+            require_promotion_conditions=True,
+        )
+        == []
+    )
+    changed = dict(record["after"])
+    changed["source"] = "battery"
+    reasons = sweep.assess_power_stability(
+        record["before"], changed, require_promotion_conditions=True
+    )
+    assert "host power source changed during execution" in reasons
+    assert "promotion evidence requires external power throughout execution" in reasons
+
+
+def test_promotion_power_gate_rejects_low_power_and_sleep():
+    record = stable_power_record()
+    changed = dict(record["after"])
+    changed["power_mode"] = 1
+    changed["low_power_mode"] = True
+    changed["last_sleep_epoch"] = 102
+    reasons = sweep.assess_power_stability(
+        record["before"], changed, require_promotion_conditions=True
+    )
+    assert "host power mode changed during execution" in reasons
+    assert "host entered sleep during execution" in reasons
+    assert "promotion evidence requires Low Power Mode to remain disabled" in reasons
 
 
 def test_child_bootstrap_records_devices_before_fingerprinting():
@@ -464,6 +537,7 @@ def test_causal_prefill_sweep_uses_performance_bearing_semantics():
                 "functional_metric_declared": "prefill_tokens_per_sec",
                 "functional_metric_value": 28_000.0 + execution_index,
                 "quality_target_met": True,
+                "host_power": stable_power_record(),
                 "comparison_fingerprint_sha256": "a" * 64,
                 "data_mode": "checkpoint-backed",
                 "grade": {"target": 0.0},
@@ -583,6 +657,7 @@ def fake_result(seed, value, *, data_mode="real", primary_metric_value=None):
         },
         "artifacts": [],
         "invalid_reasons": [],
+        "host_power": stable_power_record(),
         "reproduce": {"env": {"MLPERF_EDU_MAX_SEED": str(seed)}},
     }
 

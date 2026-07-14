@@ -38,8 +38,10 @@ from mlperf.registry import Workload, load_registry  # noqa: E402
 from tools import check_taxonomy, reference_source_lock  # noqa: E402
 
 
-SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.6"
+SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.7"
 INDEX_SCHEMA = "mlperf-edu-reference-index/0.3"
+HOST_POWER_STATE_SCHEMA = "mlperf-edu-host-power-state/0.1"
+POWER_STABILITY_POLICY_SCHEMA = "mlperf-edu-power-stability-policy/0.1"
 SOURCE_LOCK_PATH = "reference_results/source_lock.json"
 EMPTY_SHA256 = "sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
 RESULT_ROLES = frozenset({"score-bearing", "performance-bearing"})
@@ -60,6 +62,16 @@ PRECONDITIONING_TIMING_SCOPE = (
     "timings and quality results are retained for audit but excluded from "
     "all evidence aggregates, acceptance statistics, and repeatability."
 )
+POWER_STABILITY_POLICY = {
+    "schema": POWER_STABILITY_POLICY_SCHEMA,
+    "scope": "each complete preconditioning and measured subprocess execution",
+    "promotion_requires_external_power": True,
+    "promotion_requires_low_power_mode_disabled": True,
+    "power_source_change_invalidates_execution": True,
+    "power_mode_change_invalidates_execution": True,
+    "sleep_or_wake_invalidates_execution": True,
+    "unsupported_monitoring_invalidates_promotion": True,
+}
 
 
 @dataclass(frozen=True)
@@ -319,6 +331,61 @@ def _require_match(label: str, actual: object, expected: object) -> None:
         raise ValueError(f"{label}: {actual!r} does not match {expected!r}")
 
 
+def validate_host_power_record(record: object, *, label: str) -> None:
+    """Independently prove stable external power and disabled Low Power Mode."""
+    if not isinstance(record, dict):
+        raise ValueError(f"{label}: host power record is missing")
+    if record.get("policy") != POWER_STABILITY_POLICY:
+        raise ValueError(
+            f"{label}: host power policy does not match the release contract"
+        )
+    if record.get("promotion_conditions_required") is not True:
+        raise ValueError(f"{label}: promotion power conditions were not required")
+    if record.get("stable") is not True or record.get("invalid_reasons") != []:
+        raise ValueError(f"{label}: host power record is not stable")
+    snapshots: dict[str, Mapping[str, Any]] = {}
+    for boundary in ("before", "after"):
+        snapshot = record.get(boundary)
+        if not isinstance(snapshot, dict):
+            raise ValueError(f"{label}: {boundary} host power snapshot is missing")
+        snapshots[boundary] = snapshot
+        if snapshot.get("schema") != HOST_POWER_STATE_SCHEMA:
+            raise ValueError(f"{label}: {boundary} host power schema is unsupported")
+        if snapshot.get("supported") is not True:
+            raise ValueError(
+                f"{label}: {boundary} host power monitoring is unsupported"
+            )
+        if snapshot.get("source") != "external":
+            raise ValueError(f"{label}: {boundary} host power source is not external")
+        if snapshot.get("low_power_mode") is not False:
+            raise ValueError(f"{label}: {boundary} Low Power Mode is not disabled")
+        if snapshot.get("query_errors") != []:
+            raise ValueError(f"{label}: {boundary} host power query has errors")
+        captured_at = snapshot.get("captured_at")
+        if not isinstance(captured_at, str) or not captured_at:
+            raise ValueError(f"{label}: {boundary} capture timestamp is missing")
+    before = snapshots["before"]
+    after = snapshots["after"]
+    for field in ("provider", "platform", "source", "power_mode"):
+        if before.get(field) != after.get(field):
+            raise ValueError(f"{label}: host power {field} changed during execution")
+    if before.get("provider") == "linux-sysfs-clock-boottime":
+        before_offset = _numeric(
+            before.get("suspend_clock_offset_seconds"),
+            label=f"{label} before suspend clock offset",
+        )
+        after_offset = _numeric(
+            after.get("suspend_clock_offset_seconds"),
+            label=f"{label} after suspend clock offset",
+        )
+        if abs(after_offset - before_offset) > 1.0:
+            raise ValueError(f"{label}: host suspend clock changed during execution")
+    else:
+        for field in ("last_sleep_epoch", "last_wake_epoch"):
+            if before.get(field) != after.get(field):
+                raise ValueError(f"{label}: host {field} changed during execution")
+
+
 def _target_met(value: float, gate: Mapping[str, Any], tolerance: float) -> bool:
     target = _numeric(gate.get("target"), label="quality target")
     direction = gate.get("direction")
@@ -381,6 +448,8 @@ def validate_summary_structure(
         failures.append("evidence_id is missing or unsafe")
     if payload.get("invalid_reasons") != []:
         failures.append("invalid_reasons is not empty")
+    if payload.get("power_stability_policy") != POWER_STABILITY_POLICY:
+        failures.append("power_stability_policy does not match the release contract")
     source = payload.get("source") or {}
     expected_source = {
         "git_sha": source_git_sha,
@@ -545,6 +614,7 @@ def validate_summary_structure(
                 )
         if run.get("invalid_reasons") != []:
             raise ValueError(f"{label}: invalid_reasons is not empty")
+        validate_host_power_record(run.get("host_power"), label=label)
         reproduce_policy = (run.get("reproduce") or {}).get("reference_sweep") or {}
         if (
             reproduce_policy.get("outer_process_execution")
@@ -662,6 +732,7 @@ def validate_summary_structure(
                 )
         if run.get("invalid_reasons") != []:
             raise ValueError(f"{label}: invalid_reasons is not empty")
+        validate_host_power_record(run.get("host_power"), label=label)
         reproduce_policy = (run.get("reproduce") or {}).get("reference_sweep") or {}
         expected_reproduce_policy = {
             "preconditioning_execution": execution,

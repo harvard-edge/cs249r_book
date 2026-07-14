@@ -21,6 +21,8 @@ import hashlib
 import json
 import math
 import os
+import platform
+import re
 import shutil
 import stat
 import statistics
@@ -31,13 +33,13 @@ import time
 import zipfile
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any
+from typing import Any, Mapping
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 TOOL_NAME = "run_reference_sweep.py"
-TOOL_VERSION = "4.3.0"
+TOOL_VERSION = "4.4.0"
 TOOL_ID = f"tools/{TOOL_NAME} v{TOOL_VERSION}"
 SCORE_PUBLIC_DATA_MODES = frozenset(
     {"real", "real-preprocessed-mlperf-tiny-accuracy-set"}
@@ -45,7 +47,9 @@ SCORE_PUBLIC_DATA_MODES = frozenset(
 PERFORMANCE_PUBLIC_DATA_MODES = frozenset({"real", "checkpoint-backed", "local-prompt"})
 PUBLIC_STATUSES = frozenset({"score-bearing", "performance-bearing"})
 RESULT_ROLES = frozenset({"score-bearing", "performance-bearing"})
-REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.6"
+REFERENCE_EVIDENCE_SCHEMA = "mlperf-edu-reference-evidence/0.7"
+HOST_POWER_STATE_SCHEMA = "mlperf-edu-host-power-state/0.1"
+POWER_STABILITY_POLICY_SCHEMA = "mlperf-edu-power-stability-policy/0.1"
 DEFAULT_TIMEOUT_SECONDS = 7200.0
 MAX_INTER_EXECUTION_COOLDOWN_SECONDS = 300.0
 PUBLIC_PRIMARY_METRIC_CV_LIMIT = 0.05
@@ -58,6 +62,253 @@ NANOGPT_LINEAGE_ENV = {
     "report": "MLPERF_EDU_NANOGPT_TRAIN_REPORT",
     "manifest": "MLPERF_EDU_NANOGPT_TRAIN_MANIFEST",
 }
+
+POWER_STABILITY_POLICY = {
+    "schema": POWER_STABILITY_POLICY_SCHEMA,
+    "scope": "each complete preconditioning and measured subprocess execution",
+    "promotion_requires_external_power": True,
+    "promotion_requires_low_power_mode_disabled": True,
+    "power_source_change_invalidates_execution": True,
+    "power_mode_change_invalidates_execution": True,
+    "sleep_or_wake_invalidates_execution": True,
+    "unsupported_monitoring_invalidates_promotion": True,
+}
+
+
+def _command_output(command: list[str]) -> tuple[str | None, str | None]:
+    """Return stripped command output without allowing a telemetry failure to crash."""
+    try:
+        process = subprocess.run(
+            command,
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        return None, f"{type(exc).__name__}: {exc}"
+    if process.returncode != 0:
+        detail = _tail(process.stderr or process.stdout, lines=3)
+        return None, f"exit {process.returncode}: {detail or 'no diagnostic'}"
+    return process.stdout.strip(), None
+
+
+def _parse_pmset_battery(text: str) -> dict[str, Any]:
+    source_match = re.search(r"Now drawing from '([^']+)'", text)
+    percent_match = re.search(r"\b(\d{1,3})%;", text)
+    detail_match = re.search(r"\b\d{1,3}%;\s*([^;\n]+)", text)
+    raw_source = source_match.group(1) if source_match else None
+    source = {
+        "AC Power": "external",
+        "Battery Power": "battery",
+    }.get(raw_source, "unknown")
+    percent = int(percent_match.group(1)) if percent_match else None
+    if percent is not None and not 0 <= percent <= 100:
+        percent = None
+    return {
+        "source": source,
+        "source_raw": raw_source,
+        "battery_percent": percent,
+        "battery_status": detail_match.group(1).strip() if detail_match else None,
+    }
+
+
+def _parse_pmset_power_mode(text: str, source_raw: str | None) -> int | None:
+    if source_raw not in {"AC Power", "Battery Power"}:
+        return None
+    current_section = None
+    for raw_line in text.splitlines():
+        line = raw_line.strip()
+        if line.endswith("Power:"):
+            current_section = line.removesuffix(":")
+            continue
+        if current_section != source_raw:
+            continue
+        match = re.fullmatch(r"(?:powermode|lowpowermode)\s+(-?\d+)", line)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _parse_sysctl_epoch(text: str) -> int | None:
+    match = re.search(r"\bsec\s*=\s*(\d+)", text)
+    return int(match.group(1)) if match else None
+
+
+def _capture_darwin_power_state() -> dict[str, Any]:
+    errors: list[str] = []
+    battery, error = _command_output(["pmset", "-g", "batt"])
+    if error:
+        errors.append(f"pmset battery query failed: {error}")
+    parsed = _parse_pmset_battery(battery or "")
+    settings, error = _command_output(["pmset", "-g", "custom"])
+    if error:
+        errors.append(f"pmset settings query failed: {error}")
+    power_mode = _parse_pmset_power_mode(settings or "", parsed["source_raw"])
+    sleep_text, error = _command_output(["sysctl", "-n", "kern.sleeptime"])
+    if error:
+        errors.append(f"sleep-state query failed: {error}")
+    wake_text, error = _command_output(["sysctl", "-n", "kern.waketime"])
+    if error:
+        errors.append(f"wake-state query failed: {error}")
+    sleep_epoch = _parse_sysctl_epoch(sleep_text or "")
+    wake_epoch = _parse_sysctl_epoch(wake_text or "")
+    supported = (
+        parsed["source"] != "unknown"
+        and power_mode is not None
+        and sleep_epoch is not None
+        and wake_epoch is not None
+        and not errors
+    )
+    return {
+        "provider": "macos-pmset-sysctl",
+        "supported": supported,
+        **parsed,
+        "power_mode": power_mode,
+        "low_power_mode": power_mode == 1 if power_mode is not None else None,
+        "last_sleep_epoch": sleep_epoch,
+        "last_wake_epoch": wake_epoch,
+        "suspend_clock_offset_seconds": None,
+        "query_errors": errors,
+    }
+
+
+def _capture_linux_power_state() -> dict[str, Any]:
+    root = Path("/sys/class/power_supply")
+    external_online: list[bool] = []
+    battery_present = False
+    errors: list[str] = []
+    if root.is_dir():
+        for supply in sorted(root.iterdir()):
+            try:
+                supply_type = (supply / "type").read_text().strip()
+            except OSError:
+                continue
+            if supply_type == "Battery":
+                battery_present = True
+            if supply_type not in {"Mains", "USB", "USB_C", "Wireless"}:
+                continue
+            try:
+                external_online.append((supply / "online").read_text().strip() == "1")
+            except OSError as exc:
+                errors.append(f"{supply.name} online query failed: {exc}")
+    if any(external_online):
+        source = "external"
+    elif external_online and battery_present:
+        source = "battery"
+    else:
+        source = "unknown"
+    profile, profile_error = _command_output(["powerprofilesctl", "get"])
+    if profile_error:
+        profile = None
+    suspend_clock_offset = None
+    if hasattr(time, "CLOCK_BOOTTIME"):
+        try:
+            suspend_clock_offset = (
+                time.clock_gettime(time.CLOCK_BOOTTIME) - time.monotonic()
+            )
+        except OSError as exc:
+            errors.append(f"CLOCK_BOOTTIME query failed: {exc}")
+    supported = source != "unknown" and suspend_clock_offset is not None and not errors
+    return {
+        "provider": "linux-sysfs-clock-boottime",
+        "supported": supported,
+        "source": source,
+        "source_raw": source,
+        "battery_percent": None,
+        "battery_status": None,
+        "power_mode": profile,
+        "low_power_mode": profile == "power-saver" if profile is not None else None,
+        "last_sleep_epoch": None,
+        "last_wake_epoch": None,
+        "suspend_clock_offset_seconds": suspend_clock_offset,
+        "query_errors": errors,
+    }
+
+
+def capture_host_power_state() -> dict[str, Any]:
+    """Capture source, power mode, and a suspend/wake marker for one boundary."""
+    system = platform.system()
+    if system == "Darwin":
+        state = _capture_darwin_power_state()
+    elif system == "Linux":
+        state = _capture_linux_power_state()
+    else:
+        state = {
+            "provider": "unsupported",
+            "supported": False,
+            "source": "unknown",
+            "source_raw": None,
+            "battery_percent": None,
+            "battery_status": None,
+            "power_mode": None,
+            "low_power_mode": None,
+            "last_sleep_epoch": None,
+            "last_wake_epoch": None,
+            "suspend_clock_offset_seconds": None,
+            "query_errors": [f"no power-state provider for {system}"],
+        }
+    return {
+        "schema": HOST_POWER_STATE_SCHEMA,
+        "platform": system,
+        "captured_at": datetime.now(timezone.utc).isoformat(),
+        **state,
+    }
+
+
+def assess_power_stability(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    require_promotion_conditions: bool,
+) -> list[str]:
+    """Fail closed on source/mode/sleep changes and on unsafe promotion power."""
+    reasons: list[str] = []
+    if (
+        before.get("schema") != HOST_POWER_STATE_SCHEMA
+        or after.get("schema") != HOST_POWER_STATE_SCHEMA
+    ):
+        reasons.append("host power-state snapshot schema is missing or unsupported")
+        return reasons
+    if before.get("provider") != after.get("provider"):
+        reasons.append("host power-state provider changed during execution")
+    if before.get("source") != after.get("source"):
+        reasons.append("host power source changed during execution")
+    if before.get("power_mode") != after.get("power_mode"):
+        reasons.append("host power mode changed during execution")
+    if before.get("provider") == "linux-sysfs-clock-boottime":
+        before_offset = before.get("suspend_clock_offset_seconds")
+        after_offset = after.get("suspend_clock_offset_seconds")
+        if (
+            isinstance(before_offset, bool)
+            or not isinstance(before_offset, (int, float))
+            or isinstance(after_offset, bool)
+            or not isinstance(after_offset, (int, float))
+            or abs(float(after_offset) - float(before_offset)) > 1.0
+        ):
+            reasons.append("host suspend clock changed during execution")
+    else:
+        if before.get("last_sleep_epoch") != after.get("last_sleep_epoch"):
+            reasons.append("host entered sleep during execution")
+        if before.get("last_wake_epoch") != after.get("last_wake_epoch"):
+            reasons.append("host wake state changed during execution")
+    if require_promotion_conditions:
+        if before.get("supported") is not True or after.get("supported") is not True:
+            reasons.append(
+                "promotion evidence requires supported host power monitoring"
+            )
+        if before.get("source") != "external" or after.get("source") != "external":
+            reasons.append(
+                "promotion evidence requires external power throughout execution"
+            )
+        if (
+            before.get("low_power_mode") is not False
+            or after.get("low_power_mode") is not False
+        ):
+            reasons.append(
+                "promotion evidence requires Low Power Mode to remain disabled"
+            )
+    return reasons
 
 
 _CHILD_BOOTSTRAP = r"""
@@ -910,6 +1161,51 @@ def _relative_to_attempt(path_value: str | None, attempt_dir: Path) -> str | Non
         return str(path)
 
 
+def power_stability_record(
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    evidence_tier: str,
+) -> dict[str, Any]:
+    require_promotion_conditions = evidence_tier in {
+        "public-candidate",
+        "promotion-candidate",
+    }
+    invalid_reasons = assess_power_stability(
+        before,
+        after,
+        require_promotion_conditions=require_promotion_conditions,
+    )
+    return {
+        "policy": dict(POWER_STABILITY_POLICY),
+        "promotion_conditions_required": require_promotion_conditions,
+        "before": dict(before),
+        "after": dict(after),
+        "stable": not invalid_reasons,
+        "invalid_reasons": invalid_reasons,
+    }
+
+
+def _apply_power_stability(
+    result: dict[str, Any],
+    before: Mapping[str, Any],
+    after: Mapping[str, Any],
+    *,
+    evidence_tier: str,
+) -> dict[str, Any]:
+    record = power_stability_record(
+        before,
+        after,
+        evidence_tier=evidence_tier,
+    )
+    reasons = list(result.get("invalid_reasons") or [])
+    reasons.extend(f"power stability: {reason}" for reason in record["invalid_reasons"])
+    result["host_power"] = record
+    result["invalid_reasons"] = reasons
+    result["evidence_valid"] = bool(result.get("evidence_valid")) and record["stable"]
+    return result
+
+
 def run_one_seed(
     bootstrap_path: Path,
     *,
@@ -972,6 +1268,38 @@ def run_one_seed(
         ]
         if cooldown_before_seconds > 0:
             time.sleep(cooldown_before_seconds)
+        power_before = capture_host_power_state()
+        preflight_power = power_stability_record(
+            power_before,
+            power_before,
+            evidence_tier=evidence_tier,
+        )
+        if not preflight_power["stable"]:
+            return {
+                "execution_index": execution_index,
+                "requested_seed": seed,
+                "execution_ok": False,
+                "evidence_valid": False,
+                "timed_out": False,
+                "subprocess_wall_seconds": 0.0,
+                "invalid_reasons": [
+                    f"power stability: {reason}"
+                    for reason in preflight_power["invalid_reasons"]
+                ],
+                "host_power": preflight_power,
+                "stdout_tail": "",
+                "stderr_tail": "",
+                "reproduce": reproduce_record(
+                    workload_id,
+                    variant,
+                    profile,
+                    seed,
+                    mode,
+                    phase,
+                    device,
+                    bool(environment_overrides),
+                ),
+            }
         started = time.perf_counter()
         try:
             process = subprocess.run(
@@ -986,7 +1314,7 @@ def run_one_seed(
             stdout_tail = _tail(process.stdout)
             stderr_tail = _tail(process.stderr)
         except subprocess.TimeoutExpired as exc:
-            return {
+            result = {
                 "execution_index": execution_index,
                 "requested_seed": seed,
                 "execution_ok": False,
@@ -1008,6 +1336,12 @@ def run_one_seed(
                     bool(environment_overrides),
                 ),
             }
+            return _apply_power_stability(
+                result,
+                power_before,
+                capture_host_power_state(),
+                evidence_tier=evidence_tier,
+            )
 
         if result_path.is_file():
             result = json.loads(result_path.read_text())
@@ -1041,7 +1375,12 @@ def run_one_seed(
         )
         for artifact in result.get("artifacts") or []:
             artifact["path"] = _relative_to_attempt(artifact.get("path"), attempt_dir)
-        return result
+        return _apply_power_stability(
+            result,
+            power_before,
+            capture_host_power_state(),
+            evidence_tier=evidence_tier,
+        )
 
 
 def reproduce_record(
@@ -1348,6 +1687,7 @@ def build_row(result: dict[str, Any]) -> dict[str, Any]:
         "evidence_valid": bool(result.get("evidence_valid")) and seed_match,
         "timed_out": bool(result.get("timed_out")),
         "invalid_reasons": list(result.get("invalid_reasons") or []),
+        "host_power": result.get("host_power"),
         "outer_process_execution": result.get("outer_process_execution"),
         "preconditioning_execution": result.get("preconditioning_execution"),
         "reproduce": result.get("reproduce"),
@@ -1703,6 +2043,30 @@ def validate_sweep(
     reasons: list[str] = []
     selected_contract = execution_contract(workload, mode=mode, phase=phase)
     for row in rows:
+        host_power = row.get("host_power")
+        if not isinstance(host_power, dict) or host_power.get("stable") is not True:
+            reasons.append(
+                f"seed {row.get('requested_seed')}: stable host power record is missing"
+            )
+        elif evidence_tier in {"public-candidate", "promotion-candidate"}:
+            if host_power.get("promotion_conditions_required") is not True:
+                reasons.append(
+                    f"seed {row.get('requested_seed')}: promotion power conditions were not required"
+                )
+            for boundary in ("before", "after"):
+                snapshot = host_power.get(boundary) or {}
+                if snapshot.get("supported") is not True:
+                    reasons.append(
+                        f"seed {row.get('requested_seed')}: {boundary} power monitoring is unsupported"
+                    )
+                if snapshot.get("source") != "external":
+                    reasons.append(
+                        f"seed {row.get('requested_seed')}: {boundary} power source is not external"
+                    )
+                if snapshot.get("low_power_mode") is not False:
+                    reasons.append(
+                        f"seed {row.get('requested_seed')}: {boundary} Low Power Mode is not disabled"
+                    )
         if not row.get("evidence_valid"):
             details = "; ".join(
                 row.get("invalid_reasons") or ["unknown validation failure"]
@@ -2412,6 +2776,7 @@ def main(argv: list[str] | None = None) -> int:
         "evidence_tier": evidence_tier,
         "device_requested": args.device,
         "timeout_seconds_per_run": args.timeout_seconds,
+        "power_stability_policy": dict(POWER_STABILITY_POLICY),
         "preconditioning": {
             **preconditioning_policy,
             "runs": preconditioning_rows,

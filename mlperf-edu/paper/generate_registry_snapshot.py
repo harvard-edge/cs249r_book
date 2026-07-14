@@ -26,7 +26,7 @@ SNAPSHOT = HERE / "evidence_snapshot.json"
 OUTPUT = HERE / "generated_registry.tex"
 
 INDEX_SCHEMA = "mlperf-edu-reference-index/0.3"
-SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.6"
+SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.7"
 SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.4"
 SOURCE_SHA = "3cc071737454494d6a14d58fb5dc74d190d6cf7a"
 EXPECTED_WORKLOADS = 8

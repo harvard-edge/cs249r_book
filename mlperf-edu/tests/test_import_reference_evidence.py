@@ -13,6 +13,34 @@ TOOL_SHA = "sha256:" + "b" * 64
 FINGERPRINT = "c" * 64
 
 
+def _host_power() -> dict:
+    snapshot = {
+        "schema": importer.HOST_POWER_STATE_SCHEMA,
+        "platform": "Darwin",
+        "captured_at": "2026-07-14T12:00:00+00:00",
+        "provider": "macos-pmset-sysctl",
+        "supported": True,
+        "source": "external",
+        "source_raw": "AC Power",
+        "battery_percent": 100,
+        "battery_status": "charged",
+        "power_mode": 0,
+        "low_power_mode": False,
+        "last_sleep_epoch": 100,
+        "last_wake_epoch": 101,
+        "suspend_clock_offset_seconds": None,
+        "query_errors": [],
+    }
+    return {
+        "policy": dict(importer.POWER_STABILITY_POLICY),
+        "promotion_conditions_required": True,
+        "before": dict(snapshot),
+        "after": dict(snapshot),
+        "stable": True,
+        "invalid_reasons": [],
+    }
+
+
 def _row(case: importer.EvidenceCase, position: int, primary: float) -> dict:
     gate_value = float(case.gate["target"])
     if case.gate["direction"] == "higher":
@@ -62,6 +90,7 @@ def _row(case: importer.EvidenceCase, position: int, primary: float) -> dict:
             "target_met": True,
             "target": case.gate["target"],
         },
+        "host_power": _host_power(),
         "invalid_reasons": [],
     }
 
@@ -148,6 +177,7 @@ def _summary(case: importer.EvidenceCase) -> dict:
         "phase": case.phase,
         "result_role": case.result_role,
         "seeds_requested": [case.canonical_seed] * 5,
+        "power_stability_policy": dict(importer.POWER_STABILITY_POLICY),
         "inter_execution_stabilization": {
             "scope": "outer-process-executions",
             "applies": True,
@@ -274,6 +304,17 @@ def test_score_summary_validation_recomputes_aggregates_and_roles(tmp_path):
     tampered = copy.deepcopy(payload)
     tampered["inter_execution_stabilization"]["configured_cooldown_seconds"] = 0
     with pytest.raises(ValueError, match="configured_cooldown_seconds"):
+        importer.validate_summary_structure(
+            path,
+            tampered,
+            case=case,
+            source_git_sha=SOURCE_SHA,
+            sweep_tool_sha256=TOOL_SHA,
+        )
+
+    tampered = copy.deepcopy(payload)
+    tampered["runs"][0]["host_power"]["after"]["source"] = "battery"
+    with pytest.raises(ValueError, match="power source is not external|changed"):
         importer.validate_summary_structure(
             path,
             tampered,
