@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import csv
 import hashlib
 import io
 import os
@@ -58,6 +59,32 @@ MLPERF_TINY_KWS_FLOAT_MODEL_SHA256 = (
 MLPERF_TINY_KWS_INT8_MODEL_SHA256 = (
     "aeea436800704fce17b17292e4412630ad856e9d777c044c64ef748a880bd0ae"
 )
+MLPERF_TINY_VWW_COMMIT = "4addd0fa08d216e20637637874e084895f289da4"
+MLPERF_TINY_VWW_MODEL_BASE_URL = (
+    "https://raw.githubusercontent.com/mlcommons/tiny/"
+    f"{MLPERF_TINY_VWW_COMMIT}/benchmark/training/visual_wake_words/trained_models"
+)
+MLPERF_TINY_VWW_FLOAT_MODEL_SHA256 = (
+    "115bbc094d2119561320a21f01b6500a18bea8cc8589282ab007097bec8af38c"
+)
+MLPERF_TINY_VWW_INT8_MODEL_SHA256 = (
+    "597a384c8c2c8a1276f04702f25013b7838f2f814f1ca7c174d295b73e3d6b7b"
+)
+MLPERF_TINY_VWW_ARCHIVE_URL = (
+    "https://www.silabs.com/public/files/github/machine_learning/benchmarks/"
+    "datasets/vw_coco2014_96.tar.gz"
+)
+MLPERF_TINY_VWW_ARCHIVE_SHA256 = (
+    "f8746b9e44f8a7a4293f73be9ba6e8da9239fe69798d42364aae62b915cfab58"
+)
+MLPERF_TINY_VWW_ARCHIVE_BYTES = 234_810_765
+MLPERF_TINY_VWW_LABELS_SHA256 = (
+    "3697ca57c48b23b21602ae9bdb32b1925407a1d41d79167cdfb365054cb9c33d"
+)
+MLPERF_TINY_VWW_DATASET_SHA256 = (
+    "8de5c9f84131c5a77e807356362865e9471b6ab6fc2411db0e7a0c5e129eb3b3"
+)
+MLPERF_TINY_VWW_DATASET_BYTES = 2_747_212
 GLUE_SST2_URL = "https://dl.fbaipublicfiles.com/glue/data/SST-2.zip"
 GLUE_SST2_ZIP_SHA256 = (
     "d67e16fb55739c1b32cdce9877596db1c127dc322d93c082281f64057c16deaa"
@@ -243,6 +270,28 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
         version=f"eembc-runner-{EEMBC_RUNNER_COMMIT}",
         expected_download_bytes=2_183_000,
         expected_unpacked_bytes=4_100_000,
+    ),
+    "mlperf-tiny-vww-eval": AssetDossier(
+        id="mlperf-tiny-vww-eval",
+        asset_type="dataset",
+        display_name="MLPerf Tiny visual-wake-words accuracy set",
+        source_url=MLPERF_TINY_VWW_ARCHIVE_URL,
+        citation="MLCommons MLPerf Tiny visual wake words; COCO 2014 and the Visual Wake Words dataset.",
+        license="COCO image licenses and MLCommons/EEMBC accuracy-set terms require release review",
+        license_spdx=None,
+        license_status="mlcommons-coco-review-required",
+        terms_summary="The pinned Silicon Labs archive supplies the 96 by 96 COCO-derived images, and the pinned EEMBC index selects the balanced 1,000-example MLPerf Tiny accuracy set.",
+        public_result_use="MLPerf Tiny-derived score-bearing candidate with a fixed 80% top-1 quality gate",
+        public_release_status="needs-release-decision",
+        public_release_policy="Fetch the source archive at run time and do not package or republish the evaluation images until MLCommons confirms the release policy.",
+        release_next_step="Record MLCommons approval for public fetch-only use before release promotion.",
+        license_evidence_url="https://cocodataset.org/#termsofuse",
+        attribution="MLCommons, EEMBC, Silicon Labs, COCO, and Visual Wake Words contributors.",
+        version=(
+            f"mlcommons-tiny-{MLPERF_TINY_VWW_COMMIT}-eembc-{EEMBC_RUNNER_COMMIT}"
+        ),
+        expected_download_bytes=MLPERF_TINY_VWW_ARCHIVE_BYTES,
+        expected_unpacked_bytes=MLPERF_TINY_VWW_DATASET_BYTES,
     ),
     "sst2": AssetDossier(
         id="sst2",
@@ -553,6 +602,30 @@ def mlperf_tiny_kws_paths(root: Path | None = None) -> dict[str, Path]:
         "archive": base / f"eembc-runner-{EEMBC_RUNNER_COMMIT}.tar.gz",
         "float_model": base / "kws_ref_model_float32.tflite",
         "int8_model": base / "kws_ref_model.tflite",
+    }
+
+
+def mlperf_tiny_vww_paths(root: Path | None = None) -> dict[str, Path]:
+    if root is not None:
+        base = root.resolve()
+    else:
+        override = os.environ.get("MLPERF_EDU_DATA_DIR")
+        from .registry import find_project_root
+
+        base = (
+            (Path(override).expanduser().resolve() / "mlperf-tiny-vww")
+            if override
+            else find_project_root() / "data" / "mlperf-tiny-vww"
+        )
+    return {
+        "root": base,
+        "dataset": base / "vww01",
+        "images": base / "vww01" / "images",
+        "labels": base / "vww01" / "y_labels.csv",
+        "source_archive": base / "vw_coco2014_96.tar.gz",
+        "runner_archive": base / f"eembc-runner-{EEMBC_RUNNER_COMMIT}.tar.gz",
+        "float_model": base / "vww_96_float.tflite",
+        "int8_model": base / "vww_96_int8.tflite",
     }
 
 
@@ -897,6 +970,190 @@ def ensure_mlperf_tiny_kws(
         n_bytes=n_bytes,
         source=EEMBC_RUNNER_ARCHIVE_URL,
     )
+
+
+def ensure_mlperf_tiny_vww(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
+    """Prepare the exact 1,000-image MLPerf Tiny VWW accuracy set."""
+    paths = mlperf_tiny_vww_paths(root)
+    base = paths["root"]
+    dataset = paths["dataset"]
+    base.mkdir(parents=True, exist_ok=True)
+
+    source_archive = paths["source_archive"]
+    if (
+        not source_archive.is_file()
+        or source_archive.stat().st_size != MLPERF_TINY_VWW_ARCHIVE_BYTES
+        or sha256_file(source_archive) != MLPERF_TINY_VWW_ARCHIVE_SHA256
+    ):
+        if not download:
+            raise FileNotFoundError(
+                f"MLPerf Tiny VWW source archive is missing at {source_archive}. "
+                "Run `mlperf fetch --workload visual-wake-words --profile max`."
+            )
+        source_archive.unlink(missing_ok=True)
+        _download(MLPERF_TINY_VWW_ARCHIVE_URL, source_archive)
+    if (
+        source_archive.stat().st_size != MLPERF_TINY_VWW_ARCHIVE_BYTES
+        or sha256_file(source_archive) != MLPERF_TINY_VWW_ARCHIVE_SHA256
+    ):
+        source_archive.unlink(missing_ok=True)
+        raise ValueError("MLPerf Tiny VWW source archive does not match its pin")
+
+    runner_archive = paths["runner_archive"]
+    if (
+        not runner_archive.is_file()
+        or sha256_file(runner_archive) != EEMBC_RUNNER_ARCHIVE_SHA256
+    ):
+        if not download:
+            raise FileNotFoundError(
+                f"Pinned EEMBC VWW labels are missing at {runner_archive}. "
+                "Run `mlperf fetch --workload visual-wake-words --profile max`."
+            )
+        runner_archive.unlink(missing_ok=True)
+        _download(EEMBC_RUNNER_ARCHIVE_URL, runner_archive)
+    if sha256_file(runner_archive) != EEMBC_RUNNER_ARCHIVE_SHA256:
+        runner_archive.unlink(missing_ok=True)
+        raise ValueError("EEMBC runner archive does not match its pinned SHA-256")
+
+    current_files = tuple(sorted(path for path in dataset.rglob("*") if path.is_file()))
+    current_digest = _dataset_file_digest(dataset, current_files)
+    if (
+        len(current_files) != 1001
+        or sum(path.stat().st_size for path in current_files)
+        != MLPERF_TINY_VWW_DATASET_BYTES
+        or current_digest != MLPERF_TINY_VWW_DATASET_SHA256
+    ):
+        staging = base / "vww01.staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        images = staging / "images"
+        images.mkdir(parents=True)
+
+        label_member = f"energyrunner-{EEMBC_RUNNER_COMMIT}/datasets/vww01/y_labels.csv"
+        with tarfile.open(runner_archive, "r:gz") as tf:
+            try:
+                member = tf.getmember(label_member)
+            except KeyError as exc:
+                raise FileNotFoundError(
+                    "Pinned EEMBC archive has no VWW label index"
+                ) from exc
+            source = tf.extractfile(member)
+            if source is None:
+                raise FileNotFoundError("Could not read the EEMBC VWW label index")
+            labels_bytes = source.read()
+        if hashlib.sha256(labels_bytes).hexdigest() != MLPERF_TINY_VWW_LABELS_SHA256:
+            raise ValueError("EEMBC VWW label index does not match its pin")
+        labels_path = staging / "y_labels.csv"
+        labels_path.write_bytes(labels_bytes)
+
+        labels: dict[str, int] = {}
+        with labels_path.open(newline="") as handle:
+            for row in csv.reader(handle):
+                if len(row) != 3:
+                    raise ValueError(f"invalid MLPerf Tiny VWW label row: {row}")
+                stem = Path(row[0].strip()).stem
+                label = int(row[2])
+                if stem in labels or label not in {0, 1}:
+                    raise ValueError(f"invalid MLPerf Tiny VWW label entry: {row}")
+                labels[stem] = label
+        if len(labels) != 1000 or sum(labels.values()) != 500:
+            raise ValueError(
+                "MLPerf Tiny VWW labels must contain 1,000 balanced examples"
+            )
+
+        found: dict[str, str] = {}
+        with tarfile.open(source_archive, "r|gz") as tf:
+            for member in tf:
+                if not member.isfile() or not member.name.endswith(".jpg"):
+                    continue
+                archive_path = Path(member.name)
+                stem = archive_path.stem.rsplit("_", 1)[-1]
+                if stem not in labels:
+                    continue
+                if stem in found:
+                    raise ValueError(
+                        f"multiple VWW archive images resolve to label {stem}"
+                    )
+                expected_class = "person" if labels[stem] == 1 else "non_person"
+                if (
+                    len(archive_path.parts) < 3
+                    or archive_path.parts[-2] != expected_class
+                ):
+                    raise ValueError(
+                        f"MLPerf Tiny VWW class mismatch for {member.name}"
+                    )
+                source = tf.extractfile(member)
+                if source is None:
+                    raise FileNotFoundError(
+                        f"could not read VWW archive member: {member.name}"
+                    )
+                with source, (images / f"{stem}.jpg").open("wb") as destination:
+                    shutil.copyfileobj(source, destination)
+                found[stem] = member.name
+        missing = sorted(set(labels) - set(found))
+        if missing:
+            raise FileNotFoundError(
+                f"MLPerf Tiny VWW archive is missing {len(missing)} indexed images"
+            )
+
+        staged_files = tuple(
+            sorted(path for path in staging.rglob("*") if path.is_file())
+        )
+        staged_digest = _dataset_file_digest(staging, staged_files)
+        staged_bytes = sum(path.stat().st_size for path in staged_files)
+        if (
+            len(staged_files) != 1001
+            or staged_bytes != MLPERF_TINY_VWW_DATASET_BYTES
+            or staged_digest != MLPERF_TINY_VWW_DATASET_SHA256
+        ):
+            raise ValueError("prepared MLPerf Tiny VWW dataset does not match its pin")
+        shutil.rmtree(dataset, ignore_errors=True)
+        staging.replace(dataset)
+
+    model_specs = (
+        (
+            paths["float_model"],
+            f"{MLPERF_TINY_VWW_MODEL_BASE_URL}/vww_96_float.tflite",
+            MLPERF_TINY_VWW_FLOAT_MODEL_SHA256,
+        ),
+        (
+            paths["int8_model"],
+            f"{MLPERF_TINY_VWW_MODEL_BASE_URL}/vww_96_int8.tflite",
+            MLPERF_TINY_VWW_INT8_MODEL_SHA256,
+        ),
+    )
+    for model_path, url, expected_sha256 in model_specs:
+        if not model_path.is_file() or sha256_file(model_path) != expected_sha256:
+            if not download:
+                raise FileNotFoundError(
+                    f"Pinned MLPerf Tiny VWW model is missing at {model_path}"
+                )
+            model_path.unlink(missing_ok=True)
+            _download(url, model_path)
+        if sha256_file(model_path) != expected_sha256:
+            model_path.unlink(missing_ok=True)
+            raise ValueError(
+                f"MLPerf Tiny VWW model SHA-256 mismatch: {model_path.name}"
+            )
+
+    files = tuple(sorted(path for path in dataset.rglob("*") if path.is_file()))
+    return DatasetAsset(
+        name="mlperf-tiny-vww-eval",
+        root=dataset,
+        files=files,
+        sha256=f"sha256:{MLPERF_TINY_VWW_DATASET_SHA256}",
+        n_bytes=MLPERF_TINY_VWW_DATASET_BYTES,
+        source=MLPERF_TINY_VWW_ARCHIVE_URL,
+    )
+
+
+def _dataset_file_digest(root: Path, files: tuple[Path, ...]) -> str:
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(str(path.relative_to(root)).encode("utf-8") + b"\0")
+        digest.update(sha256_file(path).encode("ascii") + b"\n")
+    return digest.hexdigest()
 
 
 def ensure_mlperf_tiny_image(

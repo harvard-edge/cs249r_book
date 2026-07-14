@@ -26,7 +26,7 @@ def test_dataset_catalog_exactly_covers_registry_datasets():
 
     generate_docs.validate_dataset_catalog(catalog, usage)
     assert set(catalog) == set(usage)
-    assert len(catalog) == 8
+    assert len(catalog) == 9
 
 
 def test_generated_stats_report_exact_candidate_status_counts(generated_outputs):
@@ -34,9 +34,9 @@ def test_generated_stats_report_exact_candidate_status_counts(generated_outputs)
     counts = Counter(workload.public_status for workload in workloads.values())
     stats = generated_outputs[ROOT / "site" / "_stats.qmd"]
 
-    assert counts == {"experimental": 7}
-    assert "**7 workloads**" in stats
-    assert "7 experimental" in stats
+    assert counts == {"experimental": 8}
+    assert "**8 workloads**" in stats
+    assert "8 experimental" in stats
 
 
 def test_tinyshakespeare_catalog_uses_pinned_upstream_corpus():
@@ -71,14 +71,6 @@ def test_generated_benchmark_pages_disclose_candidate_status(generated_outputs):
         assert "Candidate result status" in content or path_is_dataset(content)
 
 
-
-
-
-
-
-
-
-
 def test_canonical_pages_do_not_expose_retired_synthetic_max_boundaries():
     workloads = load_registry(ROOT / "registry")
     systems_only = [
@@ -92,9 +84,7 @@ def test_canonical_pages_do_not_expose_retired_synthetic_max_boundaries():
 
 def test_consolidated_language_page_runs_training_before_inference():
     workloads = load_registry(ROOT / "registry")
-    section = generate_docs.section_how_to_run(
-        workloads["causal-language-modeling"]
-    )
+    section = generate_docs.section_how_to_run(workloads["causal-language-modeling"])
     training = "run --workload causal-language-modeling --mode training --profile max"
     prefill = "run --workload causal-language-modeling --mode inference --phase prefill"
     decode = "run --workload causal-language-modeling --mode inference --phase decode"
@@ -137,7 +127,10 @@ def test_site_describes_the_actual_lab_and_sut_scope(generated_outputs):
     assert "does not expose a generic `--sut` option" in sut_page
     assert "Lab 1 | `lab1_optimization.py` | Standalone" in sut_page
     assert "Lab 3 | `lab3_arch_comparison.py` | Standalone" in sut_page
-    assert "run --workload causal-language-modeling --mode training --profile max" in sut_page
+    assert (
+        "run --workload causal-language-modeling --mode training --profile max"
+        in sut_page
+    )
     assert (
         "Fetching assets alone does\nnot create a quality-approved checkpoint"
         in sut_page

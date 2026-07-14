@@ -29,7 +29,7 @@ INDEX_SCHEMA = "mlperf-edu-reference-index/0.3"
 SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.6"
 SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.4"
 SOURCE_SHA = "3cc071737454494d6a14d58fb5dc74d190d6cf7a"
-EXPECTED_WORKLOADS = 7
+EXPECTED_WORKLOADS = 8
 EXPECTED_CASES = 10
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 
@@ -322,7 +322,7 @@ def main() -> int:
     workloads = load_registry(REGISTRY)
     require(
         len(workloads) == EXPECTED_WORKLOADS,
-        "paper registry must contain seven workloads",
+        "paper registry must contain eight workloads",
     )
     index, records = load_evidence()
     snapshot = {

@@ -27,7 +27,7 @@ def test_profiles_are_min_max_pro():
 
 def test_registry_loads_current_workloads():
     workloads = load_registry()
-    assert len(workloads) == 7
+    assert len(workloads) == 8
     assert STARTER_WORKLOADS.issubset(workloads)
     assert STANDARD_WORKLOADS.issubset(workloads)
     assert RESEARCH_WORKLOADS.issubset(workloads)
@@ -89,7 +89,7 @@ def test_all_workloads_declare_public_contract_metadata():
     counts = Counter(workload.public_status for workload in workloads.values())
 
     assert set(counts).issubset(PUBLIC_STATUSES)
-    assert counts == {"experimental": 7}
+    assert counts == {"experimental": 8}
     assert all(workload.public_rationale for workload in workloads.values())
 
 
@@ -238,6 +238,7 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     cifar = asset_dossier("cifar10")
     fashion = asset_dossier("fashion-mnist")
     prompt = asset_dossier("prompt-suite-local")
+    vww = asset_dossier("mlperf-tiny-vww-eval")
 
     assert tiny["expected_download_bytes"] == 5_600_000
     assert tiny["expected_unpacked_bytes"] == 1_115_394
@@ -255,6 +256,9 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     assert prompt["expected_download_bytes"] == 0
     assert prompt["public_result_use"] == "performance-bearing functional check"
     assert prompt["public_release_status"] == "public-ok-bundled"
+    assert vww["expected_download_bytes"] == 234_810_765
+    assert vww["expected_unpacked_bytes"] == 2_747_212
+    assert vww["public_release_status"] == "needs-release-decision"
 
 
 def test_retired_dataset_adapters_are_not_public_assets():
@@ -315,6 +319,11 @@ def test_canonical_workloads_declare_exact_runners():
             "mlperf.runners.tiny:run_keyword_spotting_min",
             "mlperf.runners.tiny:run_keyword_spotting_max",
         ),
+        "visual-wake-words": (
+            "tiny",
+            "mlperf.runners.tiny:run_visual_wake_words_min",
+            "mlperf.runners.tiny:run_visual_wake_words_max",
+        ),
         "graph-node-classification": (
             "graph",
             "mlperf.runners.graph:run_graph_node_classification_min",
@@ -359,11 +368,14 @@ def test_causal_language_modeling_declares_modes_and_phases():
     )
 
 
-def test_tiny_suite_contains_only_canonical_keyword_spotting():
+def test_tiny_suite_contains_canonical_mlperf_tiny_workloads():
     workloads = load_registry()
     selected = select_workloads(workloads, suite="tiny")
 
-    assert [workload.id for workload in selected] == ["keyword-spotting"]
+    assert [workload.id for workload in selected] == [
+        "keyword-spotting",
+        "visual-wake-words",
+    ]
 
 
 def test_unknown_workload_rejected():

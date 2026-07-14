@@ -78,6 +78,18 @@ def test_doctor_passes():
     assert "registry" in result.stdout
 
 
+def test_verify_rejects_a_report_without_a_traceback(tmp_path):
+    report = tmp_path / "workload_report.json"
+    report.write_text(json.dumps({"workload": "example", "status": "passed"}))
+
+    result = run_cli("verify", str(report))
+
+    assert result.returncode == 1
+    assert "Invalid provenance manifest" in result.stdout
+    assert "expected a .provd.json file" in result.stdout
+    assert "Traceback" not in result.stderr
+
+
 def test_run_workload_records_resolved_mode_and_phase(tmp_path, monkeypatch):
     workloads = load_registry()
     observed = {}
@@ -209,7 +221,7 @@ def test_list_discovery_subjects():
         row["profile"]: row["workloads"]
         for row in json.loads(profiles_json.stdout)["profiles"]
     }
-    assert profile_counts == {"min": 4, "max": 7, "pro": 4}
+    assert profile_counts == {"min": 4, "max": 8, "pro": 4}
 
 
 def test_info_profile_shows_default_selection():
@@ -264,9 +276,10 @@ def test_explicit_collection_overrides_profile_default():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Selected 7 workload(s) for profile min (collection:all)." in result.stdout
+    assert "Selected 8 workload(s) for profile min (collection:all)." in result.stdout
     assert "image-classification" in result.stdout
     assert "keyword-spotting" in result.stdout
+    assert "visual-wake-words" in result.stdout
     assert "causal-language-modeling" in result.stdout
     assert "text-classification" in result.stdout
     assert "information-retrieval" in result.stdout
@@ -438,6 +451,23 @@ def test_fetch_workload_dry_run():
     assert "underlying Shakespeare text is public domain" in result.stdout
     assert "terms=mit-repository-public-domain-text" in result.stdout
     assert "release=public-ok-fetch-only" in result.stdout
+
+
+def test_fetch_visual_wake_words_dry_run_discloses_exact_source():
+    result = run_cli(
+        "fetch",
+        "--workload",
+        "visual-wake-words",
+        "--profile",
+        "max",
+        "--dry-run",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "mlperf-tiny-vww-eval" in result.stdout
+    assert "vw_coco2014_96.tar.gz" in result.stdout
+    assert "mlcommons-coco-review-required" in result.stdout
+    assert "needs-release-decision" in result.stdout
 
 
 def test_fetch_min_profile_uses_consolidated_workload_identity():
@@ -1240,6 +1270,30 @@ def test_keyword_spotting_min_run_writes_verifiable_artifacts(tmp_path):
     assert report["status"] == "passed"
     assert report["metrics"]["logits_shape"] == [4, 12]
     assert report["metrics"]["samples_per_second"] > 0
+
+    verify = run_cli("verify", str(manifest_path))
+    assert verify.returncode == 0, verify.stdout + verify.stderr
+
+
+def test_visual_wake_words_min_run_writes_verifiable_artifacts(tmp_path):
+    result = run_cli(
+        "run",
+        "--workload",
+        "visual-wake-words",
+        "--profile",
+        "min",
+        "--output-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    report_path = tmp_path / "visual-wake-words_min_report.json"
+    manifest_path = tmp_path / "visual-wake-words_min.provd.json"
+    report = json.loads(report_path.read_text())
+    assert report["workload"] == "visual-wake-words"
+    assert report["status"] == "passed"
+    assert report["metrics"]["probabilities_shape"] == [4, 2]
+    assert report["metrics"]["n_params"] == 210_850
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr

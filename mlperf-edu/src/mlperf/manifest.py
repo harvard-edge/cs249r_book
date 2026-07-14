@@ -590,7 +590,16 @@ def verify_provd(
 ) -> VerificationResult:
     """Recompute available artifact hashes and check recorded-leaf consistency."""
     manifest_path = Path(manifest_path).resolve()
-    manifest = json.loads(manifest_path.read_text())
+    try:
+        manifest = json.loads(manifest_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError("provenance manifest is not valid JSON") from exc
+    if not isinstance(manifest, dict) or not isinstance(manifest.get("leaves"), dict):
+        raise ValueError(
+            "file is not an MLPerf EDU provenance manifest; expected a .provd.json file"
+        )
+    if not isinstance(manifest.get("workload"), str):
+        raise ValueError("provenance manifest is missing its workload identifier")
     res = VerificationResult(workload=manifest["workload"])
     leaves = manifest["leaves"]
 

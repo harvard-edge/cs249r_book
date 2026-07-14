@@ -94,6 +94,7 @@ STARTER_WORKLOAD_ORDER = (
 STANDARD_WORKLOAD_ORDER = (
     *STARTER_WORKLOAD_ORDER,
     "keyword-spotting",
+    "visual-wake-words",
 )
 
 STANDARD_WORKLOADS = set(STANDARD_WORKLOAD_ORDER)

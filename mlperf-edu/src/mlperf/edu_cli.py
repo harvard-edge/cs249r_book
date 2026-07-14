@@ -9,6 +9,7 @@ import json
 import os
 import platform
 import posixpath
+import re
 import shutil
 import sys
 import tempfile
@@ -30,6 +31,7 @@ from .assets import (
     CIFAR10_HF_REPO_ID,
     CIFAR10_HF_REVISION,
     EEMBC_RUNNER_ARCHIVE_URL,
+    MLPERF_TINY_VWW_ARCHIVE_URL,
     TINY_SHAKESPEARE_URL,
     GLUE_SST2_URL,
     OGBN_ARXIV_URL,
@@ -42,6 +44,7 @@ from .assets import (
     ensure_cifar10,
     ensure_mlperf_tiny_image,
     ensure_mlperf_tiny_kws,
+    ensure_mlperf_tiny_vww,
     ensure_sst2,
     ensure_ogbn_arxiv,
     ensure_ettm1,
@@ -51,6 +54,7 @@ from .assets import (
     has_asset_dossier,
     mlperf_tiny_image_paths,
     mlperf_tiny_kws_paths,
+    mlperf_tiny_vww_paths,
     sst2_paths,
     ogbn_arxiv_paths,
     ettm1_paths,
@@ -871,6 +875,15 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             paths = mlperf_tiny_kws_paths()
             return f"- {workload.id}: {dataset} -> {paths['dataset']} ({EEMBC_RUNNER_ARCHIVE_URL}); {terms}"
         asset = ensure_mlperf_tiny_kws(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "mlperf-tiny-vww-eval":
+        if dry_run:
+            paths = mlperf_tiny_vww_paths()
+            return (
+                f"- {workload.id}: {dataset} -> {paths['dataset']} "
+                f"({MLPERF_TINY_VWW_ARCHIVE_URL}); {terms}"
+            )
+        asset = ensure_mlperf_tiny_vww(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     if dataset == "sst2":
         if dry_run:
@@ -2089,7 +2102,11 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if not path.exists():
         console.print(f"[red]Manifest not found:[/red] {path}")
         return 1
-    result = verify_provd(path, repo_root=find_project_root())
+    try:
+        result = verify_provd(path, repo_root=find_project_root())
+    except (OSError, ValueError) as exc:
+        console.print(f"[red]Invalid provenance manifest:[/red] {exc}")
+        return 1
     print_verification_checks(result)
 
     if result.all_ok:
@@ -2979,9 +2996,19 @@ def print_verification_checks(result: Any) -> None:
     table.add_column("Check")
     table.add_column("Status")
     table.add_column("Detail")
+    dataset_file_checks = 0
     for name, ok, detail in result.checks:
+        if ok and re.fullmatch(r"dataset\.files\[\d+\]\.(?:sha256|n_bytes)", name):
+            dataset_file_checks += 1
+            continue
         status = "[green]ok[/green]" if ok else "[red]fail[/red]"
         table.add_row(name, status, detail)
+    if dataset_file_checks:
+        table.add_row(
+            "dataset.files",
+            "[green]ok[/green]",
+            f"{dataset_file_checks} per-file hash and size checks passed",
+        )
     console.print(table)
 
 

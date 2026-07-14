@@ -85,7 +85,7 @@ def test_committed_causal_lineage_rechecks_every_bound_digest():
 def test_registry_withholds_all_taxonomy_claims_without_committed_evidence():
     workloads = load_registry()
 
-    assert len(workloads) == 7
+    assert len(workloads) == 8
     for workload in workloads.values():
         regime = workload.raw.get("regime") or {}
         for axis in AXES:
@@ -456,5 +456,5 @@ def test_taxonomy_cli_passes_current_registry():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Inspected 7 workloads." in result.stdout
-    assert "PASS: 7 workloads consistent with taxonomy invariants." in result.stdout
+    assert "Inspected 8 workloads." in result.stdout
+    assert "PASS: 8 workloads consistent with taxonomy invariants." in result.stdout

@@ -9,13 +9,13 @@ def test_selection_ledger_is_complete():
     assert validate() == []
 
 
-def test_selection_ledger_has_seven_candidates_and_records_every_decision():
+def test_selection_ledger_has_eight_candidates_and_records_every_decision():
     data = yaml.load(LEDGER.read_text(encoding="utf-8"), Loader=UniqueKeySafeLoader)
     statuses = [entry["status"] for entry in data["workloads"].values()]
 
     assert len(statuses) == 17
-    assert statuses.count("candidate") == 7
-    assert statuses.count("deferred") == 7
+    assert statuses.count("candidate") == 8
+    assert statuses.count("deferred") == 6
     assert statuses.count("rejected") == 3
 
 

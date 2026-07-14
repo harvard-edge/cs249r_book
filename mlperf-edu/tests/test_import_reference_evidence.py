@@ -227,11 +227,11 @@ def _summary(case: importer.EvidenceCase) -> dict:
     }
 
 
-def test_expected_case_closure_has_seven_workloads_and_ten_cases():
+def test_expected_case_closure_has_eight_workloads_and_eleven_cases():
     cases = importer.expected_cases()
 
-    assert len(cases) == 10
-    assert len({case.workload.id for case in cases.values()}) == 7
+    assert len(cases) == 11
+    assert len({case.workload.id for case in cases.values()}) == 8
     assert cases["causal-language-modeling__max__training"].result_role == (
         "score-bearing"
     )
