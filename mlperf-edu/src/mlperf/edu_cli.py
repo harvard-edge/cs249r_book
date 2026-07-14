@@ -31,6 +31,7 @@ from .assets import (
     CIFAR10_HF_REPO_ID,
     CIFAR10_HF_REVISION,
     EEMBC_RUNNER_ARCHIVE_URL,
+    MLPERF_TINY_ANOMALY_ARCHIVE_URL,
     MLPERF_TINY_VWW_ARCHIVE_URL,
     TINY_SHAKESPEARE_URL,
     GLUE_SST2_URL,
@@ -42,6 +43,7 @@ from .assets import (
     cifar10_paths,
     data_root,
     ensure_cifar10,
+    ensure_mlperf_tiny_anomaly,
     ensure_mlperf_tiny_image,
     ensure_mlperf_tiny_kws,
     ensure_mlperf_tiny_vww,
@@ -53,6 +55,7 @@ from .assets import (
     huggingface_model_dossier,
     has_asset_dossier,
     mlperf_tiny_image_paths,
+    mlperf_tiny_anomaly_paths,
     mlperf_tiny_kws_paths,
     mlperf_tiny_vww_paths,
     sst2_paths,
@@ -875,6 +878,16 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             paths = mlperf_tiny_kws_paths()
             return f"- {workload.id}: {dataset} -> {paths['dataset']} ({EEMBC_RUNNER_ARCHIVE_URL}); {terms}"
         asset = ensure_mlperf_tiny_kws(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "mlperf-tiny-anomaly-eval":
+        if dry_run:
+            paths = mlperf_tiny_anomaly_paths()
+            return (
+                f"- {workload.id}: {dataset} -> {paths['dataset']} "
+                f"({MLPERF_TINY_ANOMALY_ARCHIVE_URL}; selective range fetch); "
+                f"{terms}"
+            )
+        asset = ensure_mlperf_tiny_anomaly(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     if dataset == "mlperf-tiny-vww-eval":
         if dry_run:

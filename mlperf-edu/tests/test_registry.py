@@ -27,7 +27,7 @@ def test_profiles_are_min_max_pro():
 
 def test_registry_loads_current_workloads():
     workloads = load_registry()
-    assert len(workloads) == 8
+    assert len(workloads) == 9
     assert STARTER_WORKLOADS.issubset(workloads)
     assert STANDARD_WORKLOADS.issubset(workloads)
     assert RESEARCH_WORKLOADS.issubset(workloads)
@@ -89,7 +89,7 @@ def test_all_workloads_declare_public_contract_metadata():
     counts = Counter(workload.public_status for workload in workloads.values())
 
     assert set(counts).issubset(PUBLIC_STATUSES)
-    assert counts == {"experimental": 8}
+    assert counts == {"experimental": 9}
     assert all(workload.public_rationale for workload in workloads.values())
 
 
@@ -238,6 +238,7 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     cifar = asset_dossier("cifar10")
     fashion = asset_dossier("fashion-mnist")
     prompt = asset_dossier("prompt-suite-local")
+    anomaly = asset_dossier("mlperf-tiny-anomaly-eval")
     vww = asset_dossier("mlperf-tiny-vww-eval")
 
     assert tiny["expected_download_bytes"] == 5_600_000
@@ -253,6 +254,10 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     assert fashion["public_result_use"] == (
         "standalone educational lab asset; never a benchmark result"
     )
+    assert anomaly["expected_download_bytes"] == 69_897_209
+    assert anomaly["expected_unpacked_bytes"] == 25_408_204
+    assert anomaly["license_spdx"] == "CC-BY-4.0"
+    assert anomaly["public_release_status"] == "public-ok-fetch-only"
     assert prompt["expected_download_bytes"] == 0
     assert prompt["public_result_use"] == "performance-bearing functional check"
     assert prompt["public_release_status"] == "public-ok-bundled"
@@ -319,6 +324,11 @@ def test_canonical_workloads_declare_exact_runners():
             "mlperf.runners.tiny:run_keyword_spotting_min",
             "mlperf.runners.tiny:run_keyword_spotting_max",
         ),
+        "anomaly-detection": (
+            "tiny",
+            "mlperf.runners.tiny:run_anomaly_detection_min",
+            "mlperf.runners.tiny:run_anomaly_detection_max",
+        ),
         "visual-wake-words": (
             "tiny",
             "mlperf.runners.tiny:run_visual_wake_words_min",
@@ -374,6 +384,7 @@ def test_tiny_suite_contains_canonical_mlperf_tiny_workloads():
 
     assert [workload.id for workload in selected] == [
         "keyword-spotting",
+        "anomaly-detection",
         "visual-wake-words",
     ]
 

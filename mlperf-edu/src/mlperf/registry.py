@@ -94,6 +94,7 @@ STARTER_WORKLOAD_ORDER = (
 STANDARD_WORKLOAD_ORDER = (
     *STARTER_WORKLOAD_ORDER,
     "keyword-spotting",
+    "anomaly-detection",
     "visual-wake-words",
 )
 

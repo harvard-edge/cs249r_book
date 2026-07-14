@@ -221,7 +221,7 @@ def test_list_discovery_subjects():
         row["profile"]: row["workloads"]
         for row in json.loads(profiles_json.stdout)["profiles"]
     }
-    assert profile_counts == {"min": 4, "max": 8, "pro": 4}
+    assert profile_counts == {"min": 4, "max": 9, "pro": 4}
 
 
 def test_info_profile_shows_default_selection():
@@ -276,9 +276,10 @@ def test_explicit_collection_overrides_profile_default():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Selected 8 workload(s) for profile min (collection:all)." in result.stdout
+    assert "Selected 9 workload(s) for profile min (collection:all)." in result.stdout
     assert "image-classification" in result.stdout
     assert "keyword-spotting" in result.stdout
+    assert "anomaly-detection" in result.stdout
     assert "visual-wake-words" in result.stdout
     assert "causal-language-modeling" in result.stdout
     assert "text-classification" in result.stdout
@@ -468,6 +469,23 @@ def test_fetch_visual_wake_words_dry_run_discloses_exact_source():
     assert "vw_coco2014_96.tar.gz" in result.stdout
     assert "mlcommons-coco-review-required" in result.stdout
     assert "needs-release-decision" in result.stdout
+
+
+def test_fetch_anomaly_detection_dry_run_discloses_selective_source():
+    result = run_cli(
+        "fetch",
+        "--workload",
+        "anomaly-detection",
+        "--profile",
+        "max",
+        "--dry-run",
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "mlperf-tiny-anomaly-eval" in result.stdout
+    assert "dev_data_ToyCar.zip" in result.stdout
+    assert "selective range fetch" in result.stdout
+    assert "cc-by-4.0-mlcommons-attribution" in result.stdout
 
 
 def test_fetch_min_profile_uses_consolidated_workload_identity():
@@ -1294,6 +1312,30 @@ def test_visual_wake_words_min_run_writes_verifiable_artifacts(tmp_path):
     assert report["status"] == "passed"
     assert report["metrics"]["probabilities_shape"] == [4, 2]
     assert report["metrics"]["n_params"] == 210_850
+
+    verify = run_cli("verify", str(manifest_path))
+    assert verify.returncode == 0, verify.stdout + verify.stderr
+
+
+def test_anomaly_detection_min_run_writes_verifiable_artifacts(tmp_path):
+    result = run_cli(
+        "run",
+        "--workload",
+        "anomaly-detection",
+        "--profile",
+        "min",
+        "--output-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+
+    report_path = tmp_path / "anomaly-detection_min_report.json"
+    manifest_path = tmp_path / "anomaly-detection_min.provd.json"
+    report = json.loads(report_path.read_text())
+    assert report["workload"] == "anomaly-detection"
+    assert report["status"] == "passed"
+    assert report["metrics"]["reconstruction_shape"] == [4, 640]
+    assert report["metrics"]["n_params"] == 265_864
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr

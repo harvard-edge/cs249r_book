@@ -26,7 +26,7 @@ def test_dataset_catalog_exactly_covers_registry_datasets():
 
     generate_docs.validate_dataset_catalog(catalog, usage)
     assert set(catalog) == set(usage)
-    assert len(catalog) == 9
+    assert len(catalog) == 10
 
 
 def test_generated_stats_report_exact_candidate_status_counts(generated_outputs):
@@ -34,9 +34,9 @@ def test_generated_stats_report_exact_candidate_status_counts(generated_outputs)
     counts = Counter(workload.public_status for workload in workloads.values())
     stats = generated_outputs[ROOT / "site" / "_stats.qmd"]
 
-    assert counts == {"experimental": 8}
-    assert "**8 workloads**" in stats
-    assert "8 experimental" in stats
+    assert counts == {"experimental": 9}
+    assert "**9 workloads**" in stats
+    assert "9 experimental" in stats
 
 
 def test_tinyshakespeare_catalog_uses_pinned_upstream_corpus():

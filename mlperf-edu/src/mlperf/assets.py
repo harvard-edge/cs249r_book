@@ -6,7 +6,9 @@ import io
 import os
 import shutil
 import subprocess
+import sys
 import tarfile
+import time
 import zipfile
 import urllib.request
 from dataclasses import dataclass
@@ -58,6 +60,35 @@ MLPERF_TINY_KWS_FLOAT_MODEL_SHA256 = (
 )
 MLPERF_TINY_KWS_INT8_MODEL_SHA256 = (
     "aeea436800704fce17b17292e4412630ad856e9d777c044c64ef748a880bd0ae"
+)
+MLPERF_TINY_ANOMALY_COMMIT = "4addd0fa08d216e20637637874e084895f289da4"
+MLPERF_TINY_ANOMALY_BASE_URL = (
+    f"https://raw.githubusercontent.com/mlcommons/tiny/{MLPERF_TINY_ANOMALY_COMMIT}"
+)
+MLPERF_TINY_ANOMALY_MODEL_BASE_URL = f"{MLPERF_TINY_ANOMALY_BASE_URL}/benchmark/training/anomaly_detection/trained_models"
+MLPERF_TINY_ANOMALY_LABELS_URL = (
+    f"{MLPERF_TINY_ANOMALY_BASE_URL}/benchmark/evaluation/datasets/ad01/y_labels.csv"
+)
+MLPERF_TINY_ANOMALY_ARCHIVE_URL = (
+    "https://zenodo.org/api/records/3678171/files/dev_data_ToyCar.zip/content"
+)
+MLPERF_TINY_ANOMALY_ARCHIVE_MD5 = "4dec75ca8d9f666aa9e4c1894a740501"
+MLPERF_TINY_ANOMALY_ARCHIVE_BYTES = 1_816_443_231
+MLPERF_TINY_ANOMALY_LABELS_SHA256 = (
+    "4ecd91868e197ee0a6739d4bd7abde73eac2fa31e9a88d6bc6aedefa136ff2a4"
+)
+MLPERF_TINY_ANOMALY_MEMBER_MANIFEST_SHA256 = (
+    "91e7f55220f5fb7c0d6d6d855e47b79fbd72fcc29766848a9750a73cbfe8a9d9"
+)
+MLPERF_TINY_ANOMALY_DATASET_SHA256 = (
+    "a7953bc0ad0caffd642dbdba4d0ea467515ba5480f7e0c46b62dfbe8ae61f716"
+)
+MLPERF_TINY_ANOMALY_DATASET_BYTES = 25_408_204
+MLPERF_TINY_ANOMALY_FLOAT_MODEL_SHA256 = (
+    "c66636f4d7f8af8b10518e7be750a22c9d8d46ec97326b40b0d94c097e0aad9b"
+)
+MLPERF_TINY_ANOMALY_INT8_MODEL_SHA256 = (
+    "87cf24194ef93d1d9b11a591d805526b98008e351655d29883c825c9c106ba24"
 )
 MLPERF_TINY_VWW_COMMIT = "4addd0fa08d216e20637637874e084895f289da4"
 MLPERF_TINY_VWW_MODEL_BASE_URL = (
@@ -270,6 +301,27 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
         version=f"eembc-runner-{EEMBC_RUNNER_COMMIT}",
         expected_download_bytes=2_183_000,
         expected_unpacked_bytes=4_100_000,
+    ),
+    "mlperf-tiny-anomaly-eval": AssetDossier(
+        id="mlperf-tiny-anomaly-eval",
+        asset_type="dataset",
+        display_name="MLPerf Tiny ToyCar anomaly-detection accuracy set",
+        source_url=MLPERF_TINY_ANOMALY_ARCHIVE_URL,
+        citation="Koizumi et al., ToyADMOS, 2019; DCASE 2020 Task 2; MLCommons MLPerf Tiny anomaly detection.",
+        license="ToyADMOS Creative Commons Attribution 4.0 with MLCommons reference-code terms",
+        license_spdx="CC-BY-4.0",
+        license_status="cc-by-4.0-mlcommons-attribution",
+        terms_summary="The pinned MLCommons index selects 248 ToyCar recordings from the immutable Zenodo archive and applies the upstream 128-bin librosa conversion recipe.",
+        public_result_use="direct MLPerf Tiny score-bearing candidate with the fixed 0.85 ROC AUC gate",
+        public_release_status="public-ok-fetch-only",
+        public_release_policy="Fetch only the indexed recordings from Zenodo, preserve ToyADMOS and MLCommons attribution, and do not package the derived feature files.",
+        release_next_step="Keep the Zenodo record, source-archive MD5, selected-member manifest, preprocessing versions, and derived-set hash in public artifacts.",
+        license_evidence_url="https://zenodo.org/records/3678171",
+        attribution="ToyADMOS, DCASE, Hitachi, and MLCommons contributors.",
+        version=f"mlcommons-tiny-{MLPERF_TINY_ANOMALY_COMMIT}-toyadmos-3678171",
+        expected_download_bytes=69_897_209,
+        expected_unpacked_bytes=MLPERF_TINY_ANOMALY_DATASET_BYTES,
+        hash_policy="The source archive is bound by Zenodo MD5, every selected ZIP member by its central-directory CRC and size, and the complete derived accuracy set by SHA-256.",
     ),
     "mlperf-tiny-vww-eval": AssetDossier(
         id="mlperf-tiny-vww-eval",
@@ -629,6 +681,27 @@ def mlperf_tiny_vww_paths(root: Path | None = None) -> dict[str, Path]:
     }
 
 
+def mlperf_tiny_anomaly_paths(root: Path | None = None) -> dict[str, Path]:
+    if root is not None:
+        base = root.resolve()
+    else:
+        override = os.environ.get("MLPERF_EDU_DATA_DIR")
+        from .registry import find_project_root
+
+        base = (
+            (Path(override).expanduser().resolve() / "mlperf-tiny-anomaly")
+            if override
+            else find_project_root() / "data" / "mlperf-tiny-anomaly"
+        )
+    return {
+        "root": base,
+        "dataset": base / "ad01",
+        "labels": base / "ad01" / "y_labels.csv",
+        "float_model": base / "ad01_fp32.tflite",
+        "int8_model": base / "ad01_int8.tflite",
+    }
+
+
 def mlperf_tiny_image_paths(root: Path | None = None) -> dict[str, Path]:
     if root is not None:
         base = root.resolve()
@@ -969,6 +1042,165 @@ def ensure_mlperf_tiny_kws(
         sha256=f"sha256:{digest.hexdigest()}",
         n_bytes=n_bytes,
         source=EEMBC_RUNNER_ARCHIVE_URL,
+    )
+
+
+def ensure_mlperf_tiny_anomaly(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
+    """Prepare the complete 248-recording MLPerf Tiny ToyCar accuracy set."""
+    paths = mlperf_tiny_anomaly_paths(root)
+    base = paths["root"]
+    dataset = paths["dataset"]
+    base.mkdir(parents=True, exist_ok=True)
+
+    current_files = tuple(sorted(path for path in dataset.rglob("*") if path.is_file()))
+    current_digest = _dataset_file_digest(dataset, current_files)
+    if (
+        len(current_files) != 249
+        or sum(path.stat().st_size for path in current_files)
+        != MLPERF_TINY_ANOMALY_DATASET_BYTES
+        or current_digest != MLPERF_TINY_ANOMALY_DATASET_SHA256
+    ):
+        if not download:
+            raise FileNotFoundError(
+                f"MLPerf Tiny anomaly data is missing at {dataset}. Run `mlperf "
+                "fetch --workload anomaly-detection --profile max`."
+            )
+
+        import librosa
+        import numpy as np
+        import soundfile as sf
+        from remotezip import RemoteZip
+
+        staging = base / "ad01.staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        labels_path = staging / "y_labels.csv"
+        _download(MLPERF_TINY_ANOMALY_LABELS_URL, labels_path)
+        if sha256_file(labels_path) != MLPERF_TINY_ANOMALY_LABELS_SHA256:
+            raise ValueError("MLPerf Tiny anomaly label index does not match its pin")
+
+        with labels_path.open(newline="") as handle:
+            rows = list(csv.reader(handle))
+        labels = [int(row[2]) for row in rows if len(row) == 5]
+        if (
+            len(rows) != 248
+            or len(labels) != 248
+            or labels.count(0) != 140
+            or labels.count(1) != 108
+            or any(
+                row[1:] not in [["2", "0", "2560", "512"], ["2", "1", "2560", "512"]]
+                for row in rows
+            )
+        ):
+            raise ValueError("MLPerf Tiny anomaly label index has an invalid contract")
+
+        member_names = [
+            "ToyCar/test/" + row[0].removesuffix("_hist_librosa.bin") + ".wav"
+            for row in rows
+        ]
+        with RemoteZip(MLPERF_TINY_ANOMALY_ARCHIVE_URL) as archive:
+            archive_members = {member.filename: member for member in archive.infolist()}
+            member_digest = hashlib.sha256()
+            for member_name in member_names:
+                try:
+                    member = archive_members[member_name]
+                except KeyError as exc:
+                    raise FileNotFoundError(
+                        f"ToyADMOS archive is missing {member_name}"
+                    ) from exc
+                member_digest.update(
+                    (
+                        f"{member_name}\0{member.CRC:08x}\0{member.file_size}\0"
+                        f"{member.compress_size}\n"
+                    ).encode("utf-8")
+                )
+            if member_digest.hexdigest() != MLPERF_TINY_ANOMALY_MEMBER_MANIFEST_SHA256:
+                raise ValueError(
+                    "ToyADMOS selected-member manifest does not match its pin"
+                )
+
+            for index, (row, member_name) in enumerate(
+                zip(rows, member_names, strict=True)
+            ):
+                audio_bytes = archive.read(member_name)
+                audio, sample_rate = sf.read(
+                    io.BytesIO(audio_bytes), dtype="float32", always_2d=False
+                )
+                if sample_rate != 16_000 or audio.shape != (176_000,):
+                    raise ValueError(
+                        f"unexpected ToyADMOS audio contract for {member_name}"
+                    )
+                mel_spectrogram = librosa.feature.melspectrogram(
+                    y=audio,
+                    sr=sample_rate,
+                    n_fft=1024,
+                    hop_length=512,
+                    n_mels=128,
+                    power=2.0,
+                )
+                log_mel = 10.0 * np.log10(mel_spectrogram + sys.float_info.epsilon)
+                central = log_mel[:, 50:250]
+                if central.shape != (128, 200):
+                    raise ValueError(
+                        f"unexpected ToyADMOS feature shape for {member_name}: "
+                        f"{central.shape}"
+                    )
+                np.swapaxes(central, 0, 1).astype("<f4").tofile(staging / row[0])
+                if index + 1 < len(rows):
+                    time.sleep(0.5)
+
+        staged_files = tuple(
+            sorted(path for path in staging.rglob("*") if path.is_file())
+        )
+        staged_bytes = sum(path.stat().st_size for path in staged_files)
+        staged_digest = _dataset_file_digest(staging, staged_files)
+        if (
+            len(staged_files) != 249
+            or staged_bytes != MLPERF_TINY_ANOMALY_DATASET_BYTES
+            or staged_digest != MLPERF_TINY_ANOMALY_DATASET_SHA256
+        ):
+            raise ValueError(
+                "prepared MLPerf Tiny anomaly dataset does not match its pin"
+            )
+        shutil.rmtree(dataset, ignore_errors=True)
+        staging.replace(dataset)
+
+    model_specs = (
+        (
+            paths["float_model"],
+            f"{MLPERF_TINY_ANOMALY_MODEL_BASE_URL}/ad01_fp32.tflite",
+            MLPERF_TINY_ANOMALY_FLOAT_MODEL_SHA256,
+        ),
+        (
+            paths["int8_model"],
+            f"{MLPERF_TINY_ANOMALY_MODEL_BASE_URL}/ad01_int8.tflite",
+            MLPERF_TINY_ANOMALY_INT8_MODEL_SHA256,
+        ),
+    )
+    for model_path, url, expected_sha256 in model_specs:
+        if not model_path.is_file() or sha256_file(model_path) != expected_sha256:
+            if not download:
+                raise FileNotFoundError(
+                    f"Pinned MLPerf Tiny anomaly model is missing at {model_path}"
+                )
+            model_path.unlink(missing_ok=True)
+            _download(url, model_path)
+        if sha256_file(model_path) != expected_sha256:
+            model_path.unlink(missing_ok=True)
+            raise ValueError(
+                f"MLPerf Tiny anomaly model SHA-256 mismatch: {model_path.name}"
+            )
+
+    files = tuple(sorted(path for path in dataset.rglob("*") if path.is_file()))
+    return DatasetAsset(
+        name="mlperf-tiny-anomaly-eval",
+        root=dataset,
+        files=files,
+        sha256=f"sha256:{MLPERF_TINY_ANOMALY_DATASET_SHA256}",
+        n_bytes=MLPERF_TINY_ANOMALY_DATASET_BYTES,
+        source=MLPERF_TINY_ANOMALY_ARCHIVE_URL,
     )
 
 
