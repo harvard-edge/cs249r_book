@@ -466,6 +466,7 @@ def run_visual_wake_words_max(workload: Workload, output_dir: Path) -> dict[str,
             "input_shape": [3, 96, 96],
             "source_input_dtype": "uint8-jpeg",
             "execution_dtype": "float32",
+            "input_scaling": "divide-by-255",
             "adapter": "fused-tflite-weights-to-pytorch-v1",
         },
         "metrics": {

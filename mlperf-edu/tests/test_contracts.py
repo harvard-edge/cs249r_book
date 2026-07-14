@@ -74,18 +74,7 @@ def _canonical_report(workload: Workload, tmp_path: Path) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize(
-    "workload_id",
-    [
-        "causal-language-modeling",
-        "text-classification",
-        "information-retrieval",
-        "image-classification",
-        "keyword-spotting",
-        "graph-node-classification",
-        "time-series-forecasting",
-    ],
-)
+@pytest.mark.parametrize("workload_id", sorted(load_registry()))
 def test_every_admitted_max_contract_is_promotion_eligible(
     workload_id: str, tmp_path: Path
 ) -> None:
