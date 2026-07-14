@@ -57,8 +57,10 @@ MEASUREMENT_SOURCE_PATHS = (
     "src/mlperf/reference/timeseries/patchtst/backbone.py",
     "src/mlperf/reference/timeseries/patchtst/layers.py",
     "src/mlperf/reference/timeseries/patchtst/revin.py",
+    "src/mlperf/reference/tiny/mlperf_tiny_anomaly.py",
     "src/mlperf/reference/tiny/mlperf_tiny_kws.py",
     "src/mlperf/reference/tiny/mlperf_tiny_resnet.py",
+    "src/mlperf/reference/tiny/mlperf_tiny_vww.py",
     "src/mlperf/registry.py",
     "src/mlperf/roofline.py",
     "src/mlperf/runners/common.py",
@@ -82,6 +84,7 @@ SOURCE_NORMALIZATIONS: Mapping[str, tuple[str, ...]] = {
 }
 
 PROMOTED_CONTRACT_PATHS: Mapping[str, str] = {
+    "anomaly-detection": "registry/suites/tiny/anomaly-detection.yaml",
     "causal-language-modeling": "registry/suites/language/causal-language-modeling.yaml",
     "graph-node-classification": "registry/suites/graph/graph-node-classification.yaml",
     "image-classification": "registry/suites/vision/image-classification.yaml",
@@ -89,18 +92,8 @@ PROMOTED_CONTRACT_PATHS: Mapping[str, str] = {
     "keyword-spotting": "registry/suites/tiny/keyword-spotting.yaml",
     "text-classification": "registry/suites/language/text-classification.yaml",
     "time-series-forecasting": "registry/suites/timeseries/time-series-forecasting.yaml",
+    "visual-wake-words": "registry/suites/tiny/visual-wake-words.yaml",
 }
-
-PROMOTED_REFERENCE_PYTHON_PATHS = (
-    "src/mlperf/reference/cloud/nanogpt_decode.py",
-    "src/mlperf/reference/cloud/nanogpt_prefill.py",
-    "src/mlperf/reference/cloud/nanogpt_train.py",
-    "src/mlperf/reference/timeseries/patchtst/backbone.py",
-    "src/mlperf/reference/timeseries/patchtst/layers.py",
-    "src/mlperf/reference/timeseries/patchtst/revin.py",
-    "src/mlperf/reference/tiny/mlperf_tiny_kws.py",
-    "src/mlperf/reference/tiny/mlperf_tiny_resnet.py",
-)
 
 
 class SourceLockError(ValueError):

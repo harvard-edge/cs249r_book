@@ -7,6 +7,7 @@ from pathlib import Path
 
 import pytest
 
+from mlperf.registry import load_registry
 from tools import reference_source_lock
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -103,10 +104,10 @@ def test_build_source_lock_binds_exact_commit_and_current_measurement_surface():
 
 def test_promoted_reference_local_dependencies_are_locked():
     dependencies = set()
-    roots = (
-        *reference_source_lock.PROMOTED_REFERENCE_PYTHON_PATHS,
-        "src/mlperf/edu_cli.py",
-        "src/mlperf/registry.py",
+    roots = tuple(
+        path
+        for path in reference_source_lock.MEASUREMENT_SOURCE_PATHS
+        if path.startswith("src/") and path.endswith(".py")
     )
     for path in roots:
         dependencies.update(reference_source_lock.local_python_dependencies(path))
@@ -116,6 +117,31 @@ def test_promoted_reference_local_dependencies_are_locked():
         "src/mlperf/roofline.py",
     }.issubset(dependencies)
     assert dependencies.issubset(reference_source_lock.MEASUREMENT_SOURCE_PATHS)
+
+
+def test_source_lock_contracts_exactly_cover_registered_workloads():
+    workloads = load_registry(ROOT / "registry")
+
+    assert set(reference_source_lock.PROMOTED_CONTRACT_PATHS) == set(workloads)
+    for (
+        workload_id,
+        relative_path,
+    ) in reference_source_lock.PROMOTED_CONTRACT_PATHS.items():
+        path = ROOT / relative_path
+        assert path.is_file(), relative_path
+        assert workload_id == workloads[workload_id].id
+
+
+def test_source_lock_protects_every_reference_implementation():
+    reference_root = ROOT / "src" / "mlperf" / "reference"
+    implementations = {
+        path.relative_to(ROOT).as_posix()
+        for path in reference_root.rglob("*.py")
+        if path.name != "__init__.py"
+    }
+
+    assert implementations
+    assert implementations.issubset(reference_source_lock.MEASUREMENT_SOURCE_PATHS)
 
 
 def test_python_normalization_removes_only_declared_top_level_function():
