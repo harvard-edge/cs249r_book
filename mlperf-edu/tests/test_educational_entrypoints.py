@@ -10,6 +10,7 @@ import zipfile
 import pytest
 
 from tools.build_wheel import verify_wheel
+from tools.check_reference_claims import count_claim_pattern
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
@@ -216,6 +217,36 @@ def test_mlperf_edu_workflows_derive_current_case_and_workload_closure() -> None
     assert '"pro": research_count' in release
     assert "benchmarks/tiny/anomaly-detection.html" in dev
     assert "benchmarks/tiny/visual-wake-words.html" in dev
+
+
+def test_publication_gates_derive_portfolio_closure_from_registry() -> None:
+    paper_generator = (
+        PROJECT_ROOT / "paper" / "generate_registry_snapshot.py"
+    ).read_text()
+    claim_checker = (PROJECT_ROOT / "tools" / "check_reference_claims.py").read_text()
+
+    for stale_constant in ("EXPECTED_WORKLOADS", "EXPECTED_CASES", "SOURCE_SHA"):
+        assert stale_constant not in paper_generator
+    assert "evidence.expected_cases()" in paper_generator
+    assert "set(workloads) ==" in paper_generator
+    assert "count_claim_pattern(len(workload_ids)" in claim_checker
+    assert "count_claim_pattern(len(records)" in claim_checker
+
+
+@pytest.mark.parametrize(
+    ("count", "noun", "claim"),
+    (
+        (9, "workload", "nine workloads"),
+        (9, "workload", "9 workloads"),
+        (12, "evidence case", "twelve evidence cases"),
+        (12, "evidence case", "12 evidence cases"),
+    ),
+)
+def test_publication_count_claims_accept_words_and_digits(
+    count: int, noun: str, claim: str
+) -> None:
+    assert count_claim_pattern(count, noun).search(claim)
+    assert count_claim_pattern(count + 1, noun).search(claim) is None
 
 
 def test_wheel_guard_rejects_a_retired_module(tmp_path: Path) -> None:

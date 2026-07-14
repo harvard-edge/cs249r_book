@@ -7,6 +7,7 @@ import hashlib
 import json
 import math
 import re
+import sys
 from collections import Counter
 from datetime import datetime
 from pathlib import Path
@@ -14,24 +15,24 @@ from typing import Any
 
 import yaml
 
-from mlperf.registry import Workload, load_registry
-
-
 HERE = Path(__file__).resolve().parent
 PROJECT = HERE.parent
+sys.path.insert(0, str(PROJECT))
+
+from mlperf.registry import Workload, load_registry  # noqa: E402
+from tools import import_reference_evidence as evidence  # noqa: E402
+from tools import reference_source_lock  # noqa: E402
+
+
 REGISTRY = PROJECT / "registry"
 DATASETS = PROJECT / "datasets.yaml"
 REFERENCE_INDEX = PROJECT / "reference_results" / "index.json"
 SNAPSHOT = HERE / "evidence_snapshot.json"
 OUTPUT = HERE / "generated_registry.tex"
 
-INDEX_SCHEMA = "mlperf-edu-reference-index/0.3"
-SUMMARY_SCHEMA = "mlperf-edu-reference-evidence/0.7"
 SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.4"
-SOURCE_SHA = "3cc071737454494d6a14d58fb5dc74d190d6cf7a"
-EXPECTED_WORKLOADS = 8
-EXPECTED_CASES = 10
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
+GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
 METRIC_LABELS = {
     "accuracy": "accuracy",
@@ -186,8 +187,8 @@ def dataset_rows(workloads: dict[str, Workload]) -> str:
     return "\n".join(rows)
 
 
-def safe_summary_path(value: object) -> Path:
-    require(isinstance(value, str) and value, "evidence path must be a string")
+def safe_reference_path(value: object, *, label: str) -> Path:
+    require(isinstance(value, str) and value, f"{label} path must be a string")
     relative = Path(value)
     require(not relative.is_absolute() and ".." not in relative.parts, "unsafe path")
     path = (PROJECT / relative).resolve()
@@ -200,27 +201,71 @@ def safe_summary_path(value: object) -> Path:
 
 def load_evidence() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     index = read_json(REFERENCE_INDEX)
-    require(index.get("schema") == INDEX_SCHEMA, "reference index schema mismatch")
-    require(index.get("source_git_sha") == SOURCE_SHA, "evidence source SHA mismatch")
+    require(
+        index.get("schema") == evidence.INDEX_SCHEMA,
+        "reference index schema mismatch",
+    )
+    source_git_sha = index.get("source_git_sha")
+    require(
+        isinstance(source_git_sha, str) and GIT_SHA_RE.fullmatch(source_git_sha),
+        "evidence source SHA is invalid",
+    )
+
+    expected = evidence.expected_cases()
+    expected_workloads = {case.workload.id for case in expected.values()}
     cases = index.get("cases")
     require(isinstance(cases, list), "reference index cases must be a list")
-    require(index.get("workload_count") == EXPECTED_WORKLOADS, "workload count drift")
-    require(index.get("case_count") == EXPECTED_CASES, "case count drift")
-    require(len(cases) == EXPECTED_CASES, "reference case closure is incomplete")
+    require(
+        index.get("workload_count") == len(expected_workloads),
+        "workload count drift",
+    )
+    require(index.get("case_count") == len(expected), "case count drift")
+    require(len(cases) == len(expected), "reference case closure is incomplete")
+
+    source_lock_entry = index.get("source_lock")
+    require(isinstance(source_lock_entry, dict), "reference source lock is missing")
+    require(
+        source_lock_entry.get("path") == evidence.SOURCE_LOCK_PATH,
+        "reference source-lock path drift",
+    )
+    source_lock_path = safe_reference_path(
+        source_lock_entry.get("path"), label="source lock"
+    )
+    source_lock_bytes = source_lock_path.read_bytes()
+    require(
+        sha256_bytes(source_lock_bytes) == source_lock_entry.get("sha256"),
+        "reference source-lock digest drift",
+    )
+    source_lock = reference_source_lock.load_source_lock(
+        source_lock_path,
+        project_root=PROJECT,
+        expected_source_git_sha=source_git_sha,
+    )
+    for field in ("schema", "file_count", "contract_count"):
+        require(
+            source_lock_entry.get(field) == source_lock.get(field),
+            f"reference source-lock {field} drift",
+        )
+
     seen: set[str] = set()
     records: list[dict[str, Any]] = []
     for entry in cases:
         require(isinstance(entry, dict), "reference case entry must be an object")
         case_id = str(entry.get("case_id") or "")
         require(case_id and case_id not in seen, f"duplicate case {case_id!r}")
+        expected_case = expected.get(case_id)
+        require(expected_case is not None, f"unexpected reference case {case_id!r}")
         seen.add(case_id)
-        path = safe_summary_path(entry.get("path"))
+        path = safe_reference_path(entry.get("path"), label=f"{case_id} evidence")
         data = path.read_bytes()
         digest = sha256_bytes(data)
         require(SHA256_RE.fullmatch(digest) is not None, "invalid evidence digest")
         require(digest == entry.get("evidence_sha256"), f"{case_id} digest drift")
         payload = json.loads(data)
-        require(payload.get("schema") == SUMMARY_SCHEMA, f"{case_id} schema drift")
+        require(
+            payload.get("schema") == evidence.SUMMARY_SCHEMA,
+            f"{case_id} schema drift",
+        )
         require(payload.get("status") == "valid", f"{case_id} is not valid")
         require(
             payload.get("eligible_for_promotion") is True, f"{case_id} not eligible"
@@ -232,8 +277,24 @@ def load_evidence() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         repeatability = payload.get("primary_metric_repeatability") or {}
         require(repeatability.get("passed") is True, f"{case_id} repeatability failed")
         require(len(payload.get("runs") or []) == 5, f"{case_id} needs five runs")
-        require(payload.get("workload") == entry.get("workload"), f"{case_id} drift")
+        expected_fields = {
+            "workload": expected_case.workload.id,
+            "profile": expected_case.profile,
+            "mode": expected_case.mode,
+            "phase": expected_case.phase,
+            "result_role": expected_case.result_role,
+        }
+        for field, expected_value in expected_fields.items():
+            require(
+                entry.get(field) == expected_value,
+                f"{case_id} index {field} drift",
+            )
+            require(
+                payload.get(field) == expected_value,
+                f"{case_id} summary {field} drift",
+            )
         records.append({"entry": entry, "summary": payload})
+    require(seen == set(expected), "reference case closure differs from the registry")
     return index, sorted(records, key=lambda item: item["entry"]["case_id"])
 
 
@@ -320,11 +381,11 @@ def render_tex(
 
 def main() -> int:
     workloads = load_registry(REGISTRY)
-    require(
-        len(workloads) == EXPECTED_WORKLOADS,
-        "paper registry must contain eight workloads",
-    )
     index, records = load_evidence()
+    require(
+        set(workloads) == {record["entry"]["workload"] for record in records},
+        "paper workload rows differ from the evidence closure",
+    )
     snapshot = {
         "schema": SNAPSHOT_SCHEMA,
         "snapshot_date": snapshot_date(records),

@@ -76,10 +76,42 @@ RETIRED_PUBLIC_IDS = frozenset(
 )
 EVIDENCE_ID_RE = re.compile(r"\b[a-z0-9][a-z0-9-]*_max_\d{8}T\d{6}\.\d{6}Z\b")
 SHA40_RE = re.compile(r"^[0-9a-f]{40}$")
+NUMBER_WORDS = {
+    0: "zero",
+    1: "one",
+    2: "two",
+    3: "three",
+    4: "four",
+    5: "five",
+    6: "six",
+    7: "seven",
+    8: "eight",
+    9: "nine",
+    10: "ten",
+    11: "eleven",
+    12: "twelve",
+    13: "thirteen",
+    14: "fourteen",
+    15: "fifteen",
+    16: "sixteen",
+    17: "seventeen",
+    18: "eighteen",
+    19: "nineteen",
+    20: "twenty",
+}
 
 
 class ClaimError(ValueError):
     """Raised when committed evidence cannot support the public claims."""
+
+
+def count_claim_pattern(count: int, noun: str) -> re.Pattern[str]:
+    """Match a numeric or conventional English portfolio-count claim."""
+    alternatives = [str(count)]
+    if count in NUMBER_WORDS:
+        alternatives.append(NUMBER_WORDS[count])
+    number = "|".join(re.escape(value) for value in alternatives)
+    return re.compile(rf"\b(?:{number}) {re.escape(noun)}s?\b")
 
 
 def load_json(path: Path) -> dict[str, Any]:
@@ -229,6 +261,8 @@ def check_documents(
     workload_ids = sorted(
         {str(payload["workload"]) for _entry, payload in records.values()}
     )
+    workload_claim = count_claim_pattern(len(workload_ids), "workload")
+    case_claim = count_claim_pattern(len(records), "evidence case")
     known_evidence_ids = {
         str(entry["evidence_id"]) for entry, _payload in records.values()
     }
@@ -250,12 +284,14 @@ def check_documents(
             for workload in workload_ids:
                 if workload not in text:
                     errors.append(f"{name}: admitted workload is missing: {workload}")
-            if not re.search(r"\bseven workloads?\b|\b7 workloads?\b", lowered):
-                errors.append(f"{name}: missing the seven-workload portfolio claim")
-            if not re.search(
-                r"\bten (?:evidence )?cases?\b|\b10 (?:evidence )?cases?\b", lowered
-            ):
-                errors.append(f"{name}: missing the ten-case evidence closure claim")
+            if workload_claim.search(lowered) is None:
+                errors.append(
+                    f"{name}: missing the {len(workload_ids)}-workload portfolio claim"
+                )
+            if case_claim.search(lowered) is None:
+                errors.append(
+                    f"{name}: missing the {len(records)}-evidence-case closure claim"
+                )
         if "30 workload" in lowered or "all thirty" in lowered:
             errors.append(f"{name}: stale 30-workload claim remains")
         if "eight retained" in lowered or "eight summaries" in lowered:
