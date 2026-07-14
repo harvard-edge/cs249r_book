@@ -158,5 +158,24 @@ def test_site_describes_the_actual_lab_and_sut_scope(generated_outputs):
         assert "Optimizations live in isolated" not in content
 
 
+def test_authored_site_avoids_retired_fixed_portfolio_counts():
+    authored = [
+        ROOT / "site" / "index.qmd",
+        ROOT / "site" / "getting-started.qmd",
+        ROOT / "site" / "about.qmd",
+        *(ROOT / "site" / "guide").glob("*.qmd"),
+    ]
+    content = "\n".join(path.read_text().lower() for path in authored)
+
+    retired_claims = (
+        "seven workloads",
+        "all seven",
+        "ten-case",
+        "ten evidence",
+        "ten paths",
+    )
+    assert all(claim not in content for claim in retired_claims)
+
+
 def path_is_dataset(content: str) -> bool:
     return 'title: "Dataset Catalog"' in content
