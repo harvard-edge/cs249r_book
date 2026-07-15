@@ -59,14 +59,14 @@ class GraderPipeline:
         
         # Execute absolute Cryptographic Anti-Cheating Protocol
         # We physically call the CLI `mlperf verify` gracefully validating hash mapping constraints natively
-        cli_executable = "mlperf" 
+        cli_executable = "mlperf"
         try:
             res = subprocess.run([cli_executable, "verify", target_payload], capture_output=True, text=True)
             if "CHEATING DETECTED" in res.stdout:
                 return {"HUID": huid, "Status": "INVALID", "Score": 0.0, "Energy": 0.0, "Cheating": "YES"}
         except FileNotFoundError:
-            # Fallback natively structurally reading hashes directly algebraically safely
-            pass
+            print(f"❌ [Failed] {huid}: `mlperf` CLI not found on PATH -- cannot run anti-cheat verification!")
+            return {"HUID": huid, "Status": "VERIFY_UNAVAILABLE", "Score": 0.0, "Energy": 0.0, "Cheating": "UNVERIFIED"}
 
         # Parse Native Score Matrix cleanly mapping LoadGen validations manually efficiently!
         try:
