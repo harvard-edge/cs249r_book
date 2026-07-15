@@ -1254,6 +1254,34 @@ def test_image_classification_min_run_writes_verifiable_artifacts(tmp_path):
     assert verify.returncode == 0, verify.stdout + verify.stderr
 
 
+def test_run_rejects_unsupported_device_without_traceback(tmp_path):
+    result = run_cli(
+        "run",
+        "--workload",
+        "image-classification",
+        "--profile",
+        "min",
+        "--output-dir",
+        str(tmp_path),
+        env_extra={"MLPERF_EDU_DEVICE": "not-a-device"},
+    )
+    output = result.stdout + result.stderr
+    assert result.returncode == 1
+    assert "not supported by MLPerf EDU" in output
+    assert "MLPERF_EDU_DEVICE" in output
+    assert "mlperf doctor" in output
+    assert "Traceback" not in output
+
+
+def test_device_validation_rejects_unavailable_cuda(monkeypatch):
+    import torch
+
+    monkeypatch.setenv("MLPERF_EDU_DEVICE", "cuda")
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    with pytest.raises(ValueError, match="unavailable in this PyTorch environment"):
+        edu_cli.validate_requested_torch_device()
+
+
 def test_image_classification_max_run_writes_verifiable_artifacts(tmp_path):
     required_assets = (
         PROJECT_ROOT / "data/cifar10/plain_text/test-00000-of-00001.parquet",

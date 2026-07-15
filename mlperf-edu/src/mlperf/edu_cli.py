@@ -1837,6 +1837,7 @@ def run_workload(
     mode: str | None = None,
     phase: str | None = None,
 ) -> dict[str, Any]:
+    validate_requested_torch_device()
     resolved_mode, resolved_phase = resolve_execution_selection(
         workload, mode=mode, phase=phase
     )
@@ -1874,6 +1875,57 @@ def run_workload(
     unsupported["mode"] = resolved_mode
     unsupported["phase"] = resolved_phase
     return unsupported
+
+
+def validate_requested_torch_device() -> None:
+    """Reject unavailable or unsupported explicit PyTorch device requests."""
+    requested = os.environ.get("MLPERF_EDU_DEVICE")
+    if not requested:
+        return
+    normalized = requested.strip().lower()
+    try:
+        import torch
+    except Exception as exc:
+        raise ValueError(
+            f"Requested device {requested!r}, but PyTorch could not be loaded: {exc}. "
+            "Run 'mlperf doctor' to inspect the environment."
+        ) from exc
+
+    available = ["cpu"]
+    if torch.cuda.is_available():
+        available.append("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        available.append("mps")
+
+    device_family = normalized.split(":", 1)[0]
+    if device_family not in {"cpu", "cuda", "mps"}:
+        raise ValueError(
+            f"Requested device {requested!r} is not supported by MLPerf EDU. "
+            f"Available PyTorch devices: {', '.join(available)}. Set "
+            "MLPERF_EDU_DEVICE to one of those values, or run 'mlperf doctor'."
+        )
+    if device_family not in available:
+        raise ValueError(
+            f"Requested device {requested!r} is unavailable in this PyTorch "
+            f"environment. Available PyTorch devices: {', '.join(available)}. "
+            "Choose an available device with MLPERF_EDU_DEVICE, or run "
+            "'mlperf doctor' for details."
+        )
+    try:
+        device = torch.device(normalized)
+    except (RuntimeError, TypeError, ValueError) as exc:
+        raise ValueError(
+            f"Requested device {requested!r} is invalid. Available PyTorch "
+            f"devices: {', '.join(available)}."
+        ) from exc
+    if device_family == "cuda" and device.index is not None:
+        device_count = torch.cuda.device_count()
+        if device.index < 0 or device.index >= device_count:
+            raise ValueError(
+                f"Requested device {requested!r} is unavailable; this environment "
+                f"reports {device_count} CUDA device(s). Choose a valid CUDA index, "
+                "use MLPERF_EDU_DEVICE=cpu, or run 'mlperf doctor'."
+            )
 
 
 def annotate_execution_device(report: dict[str, Any]) -> None:
