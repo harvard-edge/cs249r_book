@@ -162,7 +162,13 @@ def run_decode(
     generated_tokens = max(0, total_tokens - context_tokens)
     total_context_tokens = context_tokens * measured_batch_size
     total_generated_tokens = generated_tokens * measured_batch_size
-    per_token_decode_latency = float(generation_latency / generated_tokens) if generated_tokens else 0.0
+    # generate() redoes its own prefill pass internally (it isn't handed the
+    # KV cache from the standalone `model(...)` call above), so
+    # generation_latency includes a second, redundant prefill on top of the
+    # actual decode steps. Subtract the already-measured prefill_latency so
+    # decode-only metrics aren't polluted by it.
+    decode_only_latency = max(0.0, generation_latency - prefill_latency)
+    per_token_decode_latency = float(decode_only_latency / generated_tokens) if generated_tokens else 0.0
     output_ids = generated[0, context_tokens:]
     output_text = decode_output(output_ids, tokenizer)
     target_met = generated_tokens >= target_tokens
@@ -232,11 +238,11 @@ def run_decode(
             "total_generated_tokens": total_generated_tokens,
             "prefill_latency_s": float(prefill_latency),
             "generation_latency_s": float(generation_latency),
-            "time_to_first_token_s": float(prefill_latency + per_token_decode_latency),
+            "time_to_first_token_s": float(prefill_latency),
             "inter_token_latency_s": per_token_decode_latency,
             "prefill_tokens_per_sec": float(total_context_tokens / prefill_latency) if prefill_latency else 0.0,
             "requests_per_sec": float(measured_batch_size / generation_latency) if generation_latency else 0.0,
-            "output_tokens_per_sec": float(total_generated_tokens / generation_latency) if generation_latency else 0.0,
+            "output_tokens_per_sec": float(total_generated_tokens / decode_only_latency) if decode_only_latency else 0.0,
             "n_params": int(n_params),
             "model_state_bytes": int(model_state_bytes),
             "prompt_chars": len(rendered_prompts[0]),
