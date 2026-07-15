@@ -128,7 +128,7 @@ The "data as code" metaphor captures *what* data does (determines system behavio
 # │ Context: Data gravity prose and callout "The Physics of Data Gravity"
 # │
 # │ Goal: Quantify the physical and economic cost of moving 1 PB across regions.
-# │ Show: That egress fees can exceed $90,000, illustrating why "move compute to data" is mandatory.
+# │ Show: That cross-region transfer costs about $20,000, making compute placement consequential.
 # │ How: Calculate transfer time and cost based on network bandwidth and cloud egress rates.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -145,7 +145,7 @@ class DataGravity:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     dataset_pb = 1
     network_bw = Systems.Fabrics.Ethernet_100G.bandwidth
-    egress_rate = Infrastructure.Pricing.Cloud.EgressPerGB.rate
+    egress_rate = 0.02 * USD / GB  # scenario assumption: AWS inter-region transfer rate
     tpu_rate = Infrastructure.Pricing.Cloud.TpuV4PerHour.rate
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
@@ -277,7 +277,7 @@ According to the iron law, the system is only as fast as its slowest term. If a 
 # │ Context: @tbl-energy-movement-cost in the energy-movement callout
 # │
 # │ Goal: Quantify relative energy cost of moving vs. computing on a bit.
-# │ Show: DRAM, SSD, and network access multipliers vs. a 32-bit MAC.
+# │ Show: DRAM, SSD, and network access multipliers vs. a 32-bit FP multiply.
 # │ How: Format per-operation energies and per-bit multipliers.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -305,7 +305,7 @@ class EnergyAccessCosts:
     energy_network_pj_per_bit = energy_network.to(pJ / bit).magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(energy_dram_pj > energy_flop_fp32_pj, "DRAM access should cost more than one FP32 MAC.")
+    check(energy_dram_pj > energy_flop_fp32_pj, "DRAM access should cost more than one FP32 multiply.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     prune_pct_str = fmt_percent(prune_pct / 100, precision=0, commas=False, style='prose')
@@ -320,23 +320,23 @@ class EnergyAccessCosts:
 
 ::: {#psp-data-engineering-energy-movement-invariant .callout-perspective title="The energy-movement invariant"}
 
-The iron law in @sec-introduction-iron-law-ml-systems-c32a and the memory-wall analysis in @sec-ml-systems-system-balance-hardware-96ab imply a data-engineering invariant: *moving a bit costs anywhere from a hundred to nearly a million times more energy than computing on it*, with the multiplier rising as the data leaves the chip. Later optimization chapters exploit the same cost gradient inside model and hardware design; here, the question is how much energy the information flow from the external world already consumes before the model computes. @Tbl-energy-movement-cost makes that cost gradient explicit across the memory hierarchy.
+The iron law in @sec-introduction-iron-law-ml-systems-c32a and the memory-wall analysis in @sec-ml-systems-system-balance-hardware-96ab imply a data-engineering principle: *moving one 32-bit value costs roughly `{python} EnergyAccessCosts.dram_mult_str` to `{python} EnergyAccessCosts.network_mult_str` as much energy as the table's FP32 multiply*, with the multiplier rising as the data leaves the chip. Later optimization chapters exploit the same cost gradient inside model and hardware design; here, the question is how much energy the information flow from the external world already consumes before the model computes. @Tbl-energy-movement-cost makes that cost gradient explicit across the memory hierarchy.
 
 | **Operation**                   |                  **Energy (pJ)**                  |                **Relative Cost**                |
 |:--------------------------------|:-------------------------------------------------:|:-----------------------------------------------:|
-| **32-bit Floating Point MAC**   | `{python} EnergyAccessCosts.energy_flop_fp32_str` |                    1$\times$                    |
+| **32-bit FP Multiply**          | `{python} EnergyAccessCosts.energy_flop_fp32_str` |                    1$\times$                    |
 | **DRAM Memory Access (32-bit)** |    `{python} EnergyAccessCosts.energy_dram_str`   |    `{python} EnergyAccessCosts.dram_mult_str`   |
 | **Local SSD Access (32-bit)**   | `{python} EnergyAccessCosts.local_ssd_energy_str` | `{python} EnergyAccessCosts.local_ssd_mult_str` |
 | **Network Transfer (32-bit)**   |  `{python} EnergyAccessCosts.network_energy_str`  |  `{python} EnergyAccessCosts.network_mult_str`  |
 
-: **Energy cost of moving vs. computing on a bit**: Approximate energy per operation at each stage of the data-movement hierarchy, with multipliers normalized to a single 32-bit MAC on a per-bit basis. All rows list energy per 32-bit access (SSD and network values scale per-bit transfer costs by 32). Moving a bit costs hundreds of times more energy than computing on it for DRAM-resident data, rising to hundreds of thousands of times more when the data must traverse a data-center network. {#tbl-energy-movement-cost tbl-colwidths="[34,33,33]"}
+: **Energy cost of moving vs. computing on a 32-bit value**: Approximate energy per event at each stage of the data-movement hierarchy, with multipliers normalized to one 32-bit FP32 multiply. All rows use the same 32-bit width, so the ratios compare like-sized events. They do not by themselves prove which term dominates a complete workload; total energy also depends on the number of arithmetic operations and transfers. {#tbl-energy-movement-cost tbl-colwidths="[34,33,33]"}
 
 ```{=latex}
 \vspace*{-1.5ex}
 ```
-The cost gradient quantified in @tbl-energy-movement-cost explains why locality is the dominant lever in systems engineering: every step the data does not take is the largest energy savings available.
+The cost gradient quantified in @tbl-energy-movement-cost explains why locality can be a high-leverage systems optimization. Each avoided transfer removes its associated movement energy, although the total benefit depends on access counts and reuse.
 
-Data has physical mass. Pruning `{python} EnergyAccessCosts.prune_pct_str` of training data through deduplication does more than save disk space; it eliminates the most energy-intensive stages of the training lifecycle. This is *why* data selection is the highest-leverage tool in the systems engineer's toolkit: it addresses the problem at the most expensive source.
+Data has physical mass. Pruning `{python} EnergyAccessCosts.prune_pct_str` of training data through deduplication does more than save disk space; it reduces work in data-intensive stages of the training lifecycle. This is *why* data selection is a high-leverage tool in the systems engineer's toolkit: it addresses the problem at the most expensive source.
 
 :::
 
@@ -2292,13 +2292,13 @@ These mechanical expectations become executable assertions that can run automati
 
 Once validation becomes code, expectation suites become versioned artifacts alongside training code. When training code changes, expectation updates keep data contracts evolving with it. This coupling reduces the risk of silent divergence where code assumes data properties that the upstream pipeline no longer provides.
 
-This pattern catches approximately 60 percent of production data issues before they reach training, based on industry experience with tools like Great Expectations, Pandera, and Pydantic. The remaining issues require runtime monitoring, as some quality problems only emerge in the full production data stream.
+These checks catch many schema-level production data issues before they reach training, including missing values, invalid ranges, type errors, and contract violations. The remaining issues require runtime monitoring and outcome checks, because semantic quality problems often emerge only in the full production data stream.
 
 ### Data drift detection and response {#sec-data-engineering-detecting-responding-data-drift-509a}
 
-ML models rest on the assumption that production data resembles training data. When this assumption breaks, not through *immediate schema violations* but through *gradual statistical shifts*, model performance degrades silently without obvious errors or system failures. Unlike the validation and monitoring techniques we have examined that catch immediate data quality issues, data drift detection\index{Data Drift!detection}\index{Distribution Shift!monitoring} identifies gradual statistical changes in data distributions that compound over time to undermine model effectiveness. Production experience reveals that drift detection and response consume 30–40 percent of ongoing ML operations effort, making this a core data engineering responsibility rather than an optional advanced topic. @Sec-ml-operations builds on this foundation to address operational response orchestration and automated retraining pipelines at scale.
+ML models rest on the assumption that production data resembles training data. When this assumption breaks, not through *immediate schema violations* but through *gradual statistical shifts*, model performance can change silently without obvious errors or system failures. Unlike the validation and monitoring techniques examined above, which catch immediate data quality issues, data drift detection\index{Data Drift!detection}\index{Distribution Shift!monitoring} identifies gradual statistical changes in data distributions that may alter model behavior over time. Detecting, investigating, and responding to these changes requires sustained monitoring effort, making drift a core data engineering responsibility rather than an optional advanced topic. @Sec-ml-operations builds on this foundation with operational response orchestration, outcome validation, and evidence-based retraining pipelines at scale.
 
-::: {#lst-data-expectations lst-cap="**Data Quality Assertions**: Executable data contracts catch schema violations, missing values, and invalid entries before training begins. Production systems using this pattern detect approximately 60 percent of data issues at pipeline execution time, preventing cascading failures that would otherwise propagate to model training."}
+::: {#lst-data-expectations lst-cap="**Data Quality Assertions**: Executable data contracts catch schema violations, missing values, and invalid entries before training begins. Production systems using this pattern can detect many schema-level issues at pipeline execution time, preventing cascading failures that would otherwise propagate to model training."}
 
 ```{.python}
 import great_expectations as gx
@@ -2354,7 +2354,7 @@ if not results.success:
 
 :::
 
-@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics that make the degradation equation (@eq-degradation, from @sec-introduction-ml-vs-traditional-software-e19a) actionable: the divergence term $\mathcal{D}(P_t \lVert P_0)$ is exactly what PSI and KL divergence measure. Two key metrics operationalize this measurement: the **Population Stability Index (PSI)**\index{Population Stability Index!definition}, which quantifies how much a categorical or binned feature distribution has shifted (values above 0.2 indicate significant drift), and **Kullback-Leibler (KL) Divergence**\index{KL Divergence!definition}, which measures the information-theoretic distance between continuous distributions. When PSI exceeds 0.2 or KL divergence crosses a threshold, the system signals that $\mathcal{D}(P_t \lVert P_0)$ has grown large enough to materially impact $\text{Accuracy}(t)$.
+@Sec-appdx-data-foundations-measuring-drift-divergence-a6dd formalizes the divergence metrics used to make the divergence term $\mathcal{D}(P_t \lVert P_0)$ in @eq-degradation actionable. The **Population Stability Index (PSI)**\index{Population Stability Index!definition} quantifies changes in categorical or binned feature distributions, while **Kullback-Leibler (KL) Divergence**\index{KL Divergence!definition} measures an information-theoretic divergence between probability distributions. The two metrics encode different distributional assumptions and scales, and neither by itself supplies a universal cutoff. Teams calibrate metric-specific thresholds against a deployment baseline and monitor them over time. Crossing a threshold signals that the live distribution has moved far enough to warrant investigation and outcome checks; input divergence alone does not establish whether accuracy improved or degraded, or by how much.
 
 Understanding the three core types of drift enables targeted detection and response strategies. Each type manifests differently in production systems and requires distinct monitoring approaches.
 
@@ -2428,7 +2428,7 @@ Mitigation strategies depend on root cause analysis. Annotator retraining addres
 
 [^fn-label-drift-invisible]: **Label Quality Drift**: Degradation in annotation reliability over time, distinct from distribution shifts in the data itself. This drift type is invisible to standard feature monitoring because the features remain stable while the labels degrade -- annotator fatigue, pool turnover, or guideline evolution silently corrupt the ground truth the model learns from. Detection requires monitoring inter-annotator agreement $(\kappa)$ over rolling time windows and comparing automated labels against periodic expert audits. \index{Label Quality Drift!silent corruption}
 
-Operationalizing the PSI and KL divergence metrics introduced earlier\index{Population Stability Index!drift detection}\index{KL Divergence!distribution comparison} requires connecting them to automated alerts and retraining workflows. Data engineering is responsible for defining the drift thresholds (PSI > 0.2, KL divergence above a domain-specific threshold), selecting the monitoring window sizes (hourly for sudden shifts, weekly for gradual trends), and instrumenting pipelines to compute these metrics continuously. @Sec-ml-operations later examines how production teams turn these data-engineering signals into tiered alerts, escalation paths, cold-start monitoring, and automated response orchestration.
+Operationalizing the PSI and KL divergence metrics introduced earlier\index{Population Stability Index!drift detection}\index{KL Divergence!distribution comparison} requires connecting them to automated alerts and review workflows. Data engineering is responsible for defining domain-specific drift thresholds from baseline behavior and outcome evidence, selecting monitoring windows that can expose both sudden and gradual changes, and instrumenting pipelines to compute these metrics continuously. @Sec-ml-operations later examines how production teams combine these signals with labeled outcomes, tiered alerts, escalation paths, cold-start monitoring, and cause-specific response orchestration.
 
 Drift detection is one dimension of the quality pillar, focused on identifying statistical changes in data distributions over time. Detecting issues, however, is only half the challenge; the other half is ensuring systems continue operating effectively even when problems surface. This leads us from quality monitoring to the reliability pillar, which addresses how pipelines maintain service continuity under adverse conditions.
 
@@ -3848,7 +3848,7 @@ The performance difference directly impacts iteration velocity. Training that lo
 *Access latency spans eight orders of magnitude, cache to internet.*
 :::
 
-To build engineering judgment, practitioners must internalize the orders of magnitude separating these tiers. @Tbl-ml-latencies translates these disparities into human-scale analogies that build intuition for system design: if a CPU cycle were one second, fetching from local SSD would take two days, while a cross-country network request would span six years. Internalizing these ratios (three orders of magnitude between L1 cache and DRAM, another three between DRAM and SSD) explains why seemingly small architectural choices cascade into large performance differences.
+To build engineering judgment, practitioners must internalize the orders of magnitude separating these tiers. @Tbl-ml-latencies translates these disparities into human-scale analogies that build intuition for system design: if a CPU cycle were one second, fetching from local SSD would take two days, while a cross-country network request would span six years. Internalizing these ratios (about 2.30 orders of magnitude between L1 cache and DRAM, and three between DRAM and SSD) explains why seemingly small architectural choices cascade into large performance differences.
 
 | **Operation**            | **Latency (ns)** | **Human Scale** | **ML System Impact**         |
 |:-------------------------|:----------------:|:---------------:|:-----------------------------|
@@ -3856,8 +3856,8 @@ To build engineering judgment, practitioners must internalize the orders of magn
 | **L2 Cache Reference**   |        7         |    14 seconds   | Fast computation             |
 | **Main Memory (DRAM)**   |       100        |    3 minutes    | The "memory wall" threshold  |
 | **SSD (local NVMe)**     |     100,000      |      2 days     | Data loading bottleneck      |
-| **Network (same DC)**    |     500,000      |      1 week     | Distributed coordination lag |
-| **SSD (remote network)** |    2,000,000     |     1 month     | Training-serving skew source |
+| **Network (same DC)**    |     500,000      |    11.57 days   | Distributed coordination lag |
+| **SSD (remote network)** |    2,000,000     |    46.30 days   | Training-serving skew source |
 | **Object Store (S3)**    |    20,000,000    |      1 year     | Archival access              |
 | **Internet (CA to VA)**  |   100,000,000    |     6 years     | Global user experience       |
 
@@ -3934,7 +3934,7 @@ Understanding these quantitative relationships enables informed architectural de
 # │ Context: Callout "Storage Bandwidth Budget"
 # │
 # │ Goal: Derive the storage bandwidth required to saturate a training GPU.
-# │ Show: That SATA SSDs leave the A100 at 13% utilization for ResNet-50.
+# │ Show: That SATA SSDs leave the A100 at 26% utilization for ResNet-50.
 # │ How: Calculate required MB/s from image consumption rate and file size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -3973,9 +3973,9 @@ class StorageBandwidth:
     s3_workers = int(round((required_bw / s3_bw).to("").magnitude))
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(required_bw > 3.0 * GB / second, f"Reference accelerator storage budget should be multiple GB/s, got {required_bw_value:.1f}.")
-    check(sata_utilization_pct < 20, f"SATA utilization should be poor in this scenario, got {sata_utilization_pct}%.")
-    check(s3_workers >= 30, f"S3 worker count unexpectedly low: {s3_workers}.")
+    check(required_bw > 1.5 * GB / second, f"Reference accelerator storage budget should exceed 1.5 GB/s, got {required_bw_value:.1f}.")
+    check(sata_utilization_pct < 30, f"SATA utilization should be poor in this scenario, got {sata_utilization_pct}%.")
+    check(s3_workers >= 15, f"S3 worker count unexpectedly low: {s3_workers}.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     max_img_per_s_str = fmt_rate(max_img_per_sec, 'img/s', precision=0)
@@ -3999,7 +3999,7 @@ Designing for high-throughput training starts by matching storage throughput to 
 
 **Problem**: What storage configuration keeps a reference accelerator from being data-starved while training ResNet-50? @Sec-hardware-acceleration explains the device family later; here, the point is how a compute ceiling becomes a data-path budget.
 
-Start with the compute ceiling. The reference accelerator can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about four GFLOPs for each forward pass, and including the backward training pass raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. The training chapter derives that backward-pass machinery; here, the combined per-image cost is the input to the storage budget. Dividing accelerator peak by model cost gives an upper bound of `{python} StorageBandwidth.max_img_per_s_str`.
+Start with the compute ceiling. The reference accelerator can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about eight GFLOPs for each forward pass, and including the backward training pass raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. The training chapter derives that backward-pass machinery; here, the combined per-image cost is the input to the storage budget. Dividing accelerator peak by model cost gives an upper bound of `{python} StorageBandwidth.max_img_per_s_str`.
 
 That compute ceiling becomes a storage requirement once each image must arrive from disk or object storage. With `{python} StorageBandwidth.image_size_kb_str` JPEG-compressed images, the data path must supply that many images per second times `{python} StorageBandwidth.image_size_kb_str` per image, or approximately `{python} StorageBandwidth.required_bw_gb_per_s_str`.
 
@@ -4295,7 +4295,7 @@ The second category, **schema debt**\index{Schema Debt!workarounds}, emerges fro
 
 The third category, **quality debt**\index{Quality Debt!uncorrected errors}, consists of known data errors that remain uncorrected due to time or resource constraints. A dataset with 3 percent known label errors represents quality debt: each training run on this data produces models carrying those errors. Quality debt compounds through a particularly dangerous feedback loop, because models trained on erroneous data make predictions that become training data for downstream systems, amplifying the original errors across the ecosystem. Concrete indicators include known label error rates not yet corrected, documented biases not yet mitigated, identified duplicates not yet deduplicated, and detected drift not yet addressed through retraining.
 
-The fourth category, **freshness debt**\index{Freshness Debt!distribution divergence}, arises when training data diverges from production distributions over time. A model trained on 2023 user behavior deployed in 2025 carries freshness debt: the distribution shift between training and serving degrades performance continuously. Freshness debt is particularly dangerous because it accumulates silently. Unlike code that breaks visibly, stale models degrade gradually until performance drops below acceptable thresholds. Warning signs include time since last retraining exceeding the distribution shift rate, feature staleness from cached features not updated at the required frequency, and reference data lag where lookup tables no longer reflect current state. Classifying debt is useful only when each category has measurable warning thresholds.
+The fourth category, **freshness debt**\index{Freshness Debt!distribution divergence}, arises when training data diverges from production distributions over time. A model trained on 2023 user behavior deployed in 2025 carries freshness debt: the distribution shift between training and serving can change performance. Freshness debt is particularly dangerous because it accumulates silently. Unlike code that breaks visibly, stale models can degrade gradually until performance drops below acceptable thresholds. Warning signs include time since last retraining exceeding the expected refresh cadence, feature staleness from cached features not updated at the required frequency, and reference data lag where lookup tables no longer reflect current state. Classifying debt is useful only when each category has measurable warning thresholds.
 
 ### Measuring and projecting data debt {#sec-data-engineering-measuring-data-debt-973c}
 
@@ -4334,7 +4334,7 @@ Schema debt\index{Schema Contracts!data producers} requires preventive infrastru
 
 Quality debt\index{Quality Budget!debt remediation} demands allocated capacity—typically 10 percent of data engineering effort dedicated to remediating known label errors, documented biases, and identified duplicates. The known error backlog should be tracked and its burn-down rate measured like any engineering metric, making quality remediation visible alongside feature development rather than perpetually deferred.
 
-Freshness debt\index{Continuous Retraining!drift-triggered} cannot be addressed through periodic heroics; it requires automated retraining triggers based on drift detection rather than calendar schedules, connecting directly to the PSI and KL divergence monitoring infrastructure established in @sec-data-engineering-detecting-responding-data-drift-509a. The remediation budget must therefore include monitoring coverage and retraining capacity, not only cleanup work after accuracy has already decayed.
+Freshness debt\index{Continuous Retraining!drift-triggered} cannot be addressed through periodic heroics; it requires drift alerts and an evidence-based retraining policy, connecting directly to the PSI and KL divergence monitoring infrastructure established in @sec-data-engineering-detecting-responding-data-drift-509a. The remediation budget must therefore include monitoring coverage and retraining capacity, not only cleanup work after accuracy has already decayed.
 
 The key insight is that data debt,\index{Data Debt!strategic vs. unconscious} like technical debt, is not inherently bad. *Strategic* debt (knowingly accepting documentation shortcuts to meet a deadline) can be rational. The danger lies in *unconscious* debt that accumulates untracked until remediation costs exceed system value. Managing this trade-off requires treating data debt not as a moral failing, but as a systems parameter to be optimized alongside latency and throughput.
 
@@ -4587,7 +4587,7 @@ Engineers price a migration by dividing dataset size by network bandwidth and co
 
 **Fallacy**: *Data preprocessing can be finished once and left alone.*
 
-Data distributions drift continuously as user behavior, market conditions, and upstream systems evolve. A preprocessing pipeline validated at launch degrades silently as the world changes around it. Production systems require continuous monitoring (PSI, KL divergence) and automated retraining triggers, not periodic manual audits.
+Data distributions can drift as user behavior, market conditions, and upstream systems evolve. A preprocessing pipeline validated at launch can become stale as the world changes around it. Production systems require monitoring and evidence-based responses, not one-time validation.
 
 **Pitfall**: *Ignoring data serialization cost.*
 

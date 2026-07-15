@@ -24,11 +24,11 @@ def test_golden_roofline_resnet50_a100_batch1():
     )
 
     assert result.feasible is True
-    assert result.bottleneck == "Memory"
-    assert result.latency.m_as("ms") == pytest.approx(0.5426213830308975)
-    assert result.throughput.m_as("1/s") == pytest.approx(1842.9056267822364)
+    assert result.bottleneck == "Compute"
+    assert result.latency.m_as("ms") == pytest.approx(0.5675641025641026)
+    assert result.throughput.m_as("1/s") == pytest.approx(1761.915518409758)
     assert result.memory_footprint.m_as("GB") == pytest.approx(0.0512)
-    assert result.arithmetic_intensity.m_as("flop/byte") == pytest.approx(72.79829545454545)
+    assert result.arithmetic_intensity.m_as("flop/byte") == pytest.approx(145.5965909090909)
 
 
 def test_golden_bottleneck_intensity_scaled_units():
@@ -150,15 +150,15 @@ def test_golden_engine_utilization_and_energy_resnet50_a100():
     from mlsysim.engine.engine import Engine
 
     p = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=1)
-    assert p.mfu == pytest.approx(0.024217670095535795, rel=1e-9)
+    assert p.mfu == pytest.approx(0.046306754009487236, rel=1e-9)
     assert p.hfu == pytest.approx(p.mfu, rel=1e-12)  # no recompute -> identical
-    assert p.energy.m_as("J") == pytest.approx(0.06879405314319488, rel=1e-9)
+    assert p.energy.m_as("J") == pytest.approx(0.07546666666666667, rel=1e-9)
     assert p.overhead_dominated is True
 
     # Batch-traffic heuristic (weights x (1 + 0.1 x B)) pinned at batch 32:
     # intensity was previously pinned only implicitly at batch=1.
     p32 = Engine.solve(Models.Vision.ResNet50, Hardware.Cloud.A100, batch_size=32)
-    assert p32.arithmetic_intensity.magnitude == pytest.approx(610.1190476190476, rel=1e-9)
+    assert p32.arithmetic_intensity.magnitude == pytest.approx(1220.2380952380952, rel=1e-9)
 
 
 def test_golden_engine_non_transformer_training_memory():

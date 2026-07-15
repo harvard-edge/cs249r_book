@@ -199,11 +199,11 @@ To understand why execution strategy matters so much, return to the memory wall\
 
 The memory wall creates a critical classification: operations are either **compute-bound**\index{Compute-Bound!operation classification} (limited by arithmetic throughput, like large matrix multiplications) or **memory-bound**\index{Memory-Bound!operation classification} (limited by data movement, like activation functions and normalization). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory bound, though the large matrix multiplications that dominate total compute time can be compute bound.
 
-The key optimization for memory-bound operations is **kernel fusion**\index{Kernel Fusion!definition}\index{Kernel Fusion!optimizing memory-bound ops}, combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel-gpu-dispatch] to avoid intermediate memory traffic. Fusing a sequence of normalization, dropout, and activation operations into one kernel can yield large speedups by eliminating intermediate writes between operations. Attention kernels[^fn-flashattention-fusion-fw] use the same principle at larger scale: instead of materializing the full attention matrix in HBM, a fused implementation can keep tiles close to the compute units, cut HBM traffic by 10--20$\times$, and produce 2--4$\times$ wall-clock speedups [@dao2022].
+The key optimization for memory-bound operations is **kernel fusion**\index{Kernel Fusion!definition}\index{Kernel Fusion!optimizing memory-bound ops}, combining multiple operations into a single GPU function (called a *kernel*)[^fn-kernel-gpu-dispatch] to avoid intermediate memory traffic. Fusing a sequence of normalization, dropout, and activation operations into one kernel can yield large speedups by eliminating intermediate writes between operations. Attention kernels[^fn-flashattention-fusion-fw] use the same principle at larger scale: instead of materializing the full attention matrix in HBM, a fused implementation can keep tiles close to the compute units, cut HBM accesses by up to 9$\times$, and produce workload-specific speedups from 15 percent to 3$\times$ [@dao2022].
 
 [^fn-kernel-gpu-dispatch]: **Kernel (GPU)**: In GPU programming, a kernel is the function dispatched to execute in parallel across thousands of threads. Each kernel launch incurs 5--20 $\mu$s of CPU-side overhead for parameter assembly and GPU signaling, which means that small, unfused operations spend more time on launch overhead $(L_{\text{lat}})$ than on useful arithmetic. Reducing kernel count through fusion is therefore a direct attack on the overhead term of the iron law.
 
-[^fn-flashattention-fusion-fw]: **Fused Attention Kernel**: A fused attention kernel combines the $QK^T$ product, softmax, and value-weighted output into a tiled implementation that keeps intermediate values in on-chip memory rather than materializing the full attention matrix in HBM. FlashAttention is the canonical named example introduced in @sec-network-architectures and reports 10--20$\times$ lower HBM traffic with 2--4$\times$ wall-clock speedups [@dao2022]. The framework lesson is broader than the specific algorithm: fusion can shift an operation's position on the Roofline Model from bandwidth-limited toward throughput-limited execution by reducing round-trips through external memory. \index{Attention Mechanism!fused kernel}
+[^fn-flashattention-fusion-fw]: **Fused Attention Kernel**: A fused attention kernel combines the $QK^T$ product, softmax, and value-weighted output into a tiled implementation that keeps intermediate values in on-chip memory rather than materializing the full attention matrix in HBM. FlashAttention is the canonical named example introduced in @sec-network-architectures and reports up to 9$\times$ fewer HBM accesses with workload-specific speedups from 15 percent to 3$\times$ [@dao2022]. The framework lesson is broader than the specific algorithm: fusion can shift an operation's position on the Roofline Model from bandwidth-limited toward throughput-limited execution by reducing round-trips through external memory. \index{Attention Mechanism!fused kernel}
 
 A framework can only fuse operations it can see together. If operations execute immediately one at a time (eager execution)\index{Eager Execution!optimization limitations}, the framework cannot fuse them. If operations are recorded first into a graph (deferred execution)\index{Graph Execution!optimization advantages}, the framework can analyze and optimize the entire computation. This is why execution strategy matters so much: it determines *what* optimizations are even possible.
 
@@ -2362,9 +2362,9 @@ Mixed precision\index{Mixed-Precision!FP16 vs. FP32 trade-offs} exploits a hardw
 
 Frameworks exploit this through automatic mixed-precision APIs that select reduced precision for compute-intensive operations while maintaining FP32 where numerical stability demands it. Inside these APIs, frameworks automatically apply precision rules: matrix multiplications and convolutions use FP16 for bandwidth efficiency, while numerically sensitive operations like softmax and layer normalization remain in FP32. This selective precision maintains accuracy while achieving speedups on modern GPUs with specialized hardware units. Because FP16 has a narrower dynamic range than FP32, gradients can underflow to zero during backpropagation. Loss scaling addresses this by multiplying the loss by a large factor before the backward pass, then dividing gradients by the same factor afterward.
 
-Frameworks also support multiple precision formats including FP16, BF16[^fn-bf16-design], and TF32, NVIDIA's Tensor Core format that keeps FP32-like exponent range while using lower mantissa precision for matrix multiply. Each format makes a different trade-off between range and precision. BF16 maintains FP32's dynamic range, simplifying training by eliminating most gradient underflow issues and removing the need for loss scaling entirely. @Sec-model-training-mixedprecision-training-9218 examines the mechanics of mixed-precision training in detail, including loss scaling algorithms, memory savings analysis, and numerical stability considerations. @Lst-autocast-usage demonstrates PyTorch's mixed precision API: the `autocast` context manager automatically selects FP16 for compute-intensive operations while `GradScaler` prevents gradient underflow by dynamically scaling loss values.
+Frameworks also support multiple precision formats including FP16, BF16[^fn-bf16-design], and TF32, NVIDIA's Tensor Core format that keeps FP32-like exponent range while using lower mantissa precision for matrix multiply. Each format makes a different trade-off between range and precision. BF16 maintains FP32's dynamic range, simplifying training by eliminating most gradient underflow issues and often removing the need for loss scaling. @Sec-model-training-mixedprecision-training-9218 examines the mechanics of mixed-precision training in detail, including loss scaling algorithms, memory savings analysis, and numerical stability considerations. @Lst-autocast-usage demonstrates PyTorch's mixed precision API: the `autocast` context manager automatically selects FP16 for compute-intensive operations while `GradScaler` prevents gradient underflow by dynamically scaling loss values.
 
-[^fn-bf16-design]: **BF16 Design Rationale**: Developed by Google Brain circa 2018 specifically for TPU training stability, BF16 preserves FP32's eight-bit exponent range while halving memory footprint—an explicit trade-off of mantissa precision (7 bits vs. FP16's 10) for dynamic range. The critical consequence is loss scaling elimination: FP16's five-bit exponent causes gradient underflow for values below $6 \times 10^{-5}$, requiring manual loss scaling to keep gradients in range. BF16's FP32-matched exponent largely avoids this class of gradient underflow, eliminating the need for loss scaling in most workloads, which is why BF16 and FP16 are not interchangeable: BF16 is preferred when training stability matters; FP16 is preferred when numerical precision matters more than gradient stability. \index{BF16!design rationale}
+[^fn-bf16-design]: **BF16 Design Rationale**: Developed by Google Brain circa 2018 specifically for TPU training stability, BF16 preserves FP32's eight-bit exponent range while halving memory footprint—an explicit trade-off of mantissa precision (7 bits vs. FP16's 10) for dynamic range. FP16's smallest positive normal value is approximately $6.10 \times 10^{-5}$, but subnormal values extend to approximately $5.96 \times 10^{-8}$; loss scaling is especially important on hardware or in modes that flush those subnormals to zero. BF16's FP32-matched exponent largely avoids this class of gradient underflow, eliminating the need for loss scaling in most workloads, which is why BF16 and FP16 are not interchangeable: BF16 is preferred when training stability matters; FP16 is preferred when numerical precision matters more than gradient stability. \index{BF16!design rationale}
 
 ::: {#lst-autocast-usage lst-cap="**Mixed-Precision API**: Modern frameworks provide automatic mixed-precision support through context managers that handle precision selection and numerical stability."}
 
@@ -2393,9 +2393,9 @@ for inputs, targets in dataloader:
 
 :::
 
-BF16 training typically does not require loss scaling. Comparing @lst-bf16-training with @lst-autocast-usage line for line, the `GradScaler` construction and its `scale`, `step`, and `update` calls all disappear: BF16's FP32-matched exponent range removes the gradient underflow that forced loss scaling, so the loop collapses back to an ordinary backward pass.
+BF16 training typically does not require loss scaling. Comparing @lst-bf16-training with @lst-autocast-usage line for line, the `GradScaler` construction and its `scale`, `step`, and `update` calls all disappear: BF16's FP32-matched exponent range reduces the gradient-underflow risk that often forces loss scaling, so the loop collapses back to an ordinary backward pass.
 
-::: {#lst-bf16-training lst-cap="**BF16 Training**: BF16 maintains FP32's dynamic range, eliminating the need for loss scaling that FP16 requires."}
+::: {#lst-bf16-training lst-cap="**BF16 Training**: BF16 maintains FP32's dynamic range, often avoiding the loss scaling used for FP16 training."}
 
 ```{.python}
 # BF16 training typically does not require loss scaling
@@ -3572,7 +3572,8 @@ The execution controller coordinates work across multiple processing units and m
 # │ Context: Basic Numerical Operations section discussing GEMM dominance
 # │
 # │ Goal: Demonstrate the computational dominance of GEMM in vision models.
-# │ Show: That ResNet-50 performs 4.1 GFLOPs per forward pass.
+# │ Show: That ResNet-50 performs 8.2 GFLOPs per forward pass when a MAC
+# │       counts as two FLOPs.
 # │ How: Retrieve ResNet-50 GFLOPs from mlsysim.core.units.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4196,14 +4197,14 @@ Rather than seeking the "best" framework, effective selection first eliminates c
 
 The TensorFlow ecosystem illustrates how these axes interact concretely. Its three variants (TensorFlow\index{TensorFlow!full framework}, TensorFlow Lite\index{TensorFlow Lite!mobile deployment}, TensorFlow Lite Micro\index{TensorFlow Lite Micro!microcontroller deployment}) trace a single design philosophy across progressively tighter constraints, a pattern that generalizes to any framework family. @Tbl-tf-comparison quantifies the trade-offs.
 
-The principle is progressive constraint leading to progressive optimization: fewer supported operations enable smaller binaries, tighter memory budgets, and native lower-precision execution. Three dimensions structure this analysis: model requirements define the supported operations, software dependencies define the runtime environment, and hardware constraints define the physical limits.
+The principle is progressive constraint leading to progressive optimization: fewer supported operations enable smaller binaries, tighter memory budgets, and deployment-focused lower-precision execution. Three dimensions structure this analysis: model requirements define the supported operations, software dependencies define the runtime environment, and hardware constraints define the physical limits.
 
 |                                    |         **TensorFlow**        | **TensorFlow Lite** | **TensorFlow Lite for Microcontrollers** |
 |:-----------------------------------|:-----------------------------:|:-------------------:|:----------------------------------------:|
-| **Training**                       |              Yes              |          No         |                    No                    |
+| **Training**                       |              Yes              |       Limited       |                    No                    |
 | **Inference**                      | Yes (but inefficient on edge) | Yes (and efficient) |      Yes (and even more efficient)       |
 | **How Many Ops**                   |             ~1400             |         ~130        |                   ~50                    |
-| **Native Lower-Precision Tooling** |               No              |         Yes         |                   Yes                    |
+| **Native Lower-Precision Tooling** |              Yes              |         Yes         |                   Yes                    |
 
 : **TensorFlow Variant Software Comparison**: Design trade-offs across TensorFlow, TensorFlow Lite, and TensorFlow Lite Micro, balancing model expressiveness, binary size, and resource constraints. Supported operations decrease from approximately 1,400 in full TensorFlow to approximately fifty in TensorFlow Lite Micro, reflecting a shift from training capability to efficient edge inference. Native lower-precision tooling enables further optimization for constrained environments. {#tbl-tf-comparison tbl-colwidths="[28,26,20,26]"}
 
@@ -4213,7 +4214,7 @@ Three dimensions structure systematic framework evaluation: what the model requi
 
 #### Model requirements {#sec-ml-frameworks-model-requirements-ca8b}
 
-The first question is whether a framework can express the models a project requires. Examine @tbl-tf-comparison: notice how operator count drops from approximately $10^3$ (full TensorFlow) to $10^2$ (TensorFlow Lite) to $10^1$ (TensorFlow Lite Micro). Each reduction eliminates training capability and general-purpose operations while adding native lower-precision tooling. The engineering principle is that algorithmic expressiveness and machine efficiency trade against each other: fewer supported operations enable tighter code generation, smaller binaries, and hardware-specific optimization paths. This progressive constraint model applies to any framework family, not just TensorFlow. Layered on top of operator count is a separate axis with its own trade-off: when the graph is captured statically before execution versus assembled dynamically at runtime.
+The first question is whether a framework can express the models a project requires. Examine @tbl-tf-comparison: notice how operator count drops from approximately $10^3$ (full TensorFlow) to $10^2$ (TensorFlow Lite) to $10^1$ (TensorFlow Lite Micro). Each reduction narrows training capability and general-purpose operations while concentrating deployment tooling. The engineering principle is that algorithmic expressiveness and machine efficiency trade against each other: fewer supported operations enable tighter code generation, smaller binaries, and hardware-specific optimization paths. This progressive constraint model applies to any framework family, not just TensorFlow. Layered on top of operator count is a separate axis with its own trade-off: when the graph is captured statically before execution versus assembled dynamically at runtime.
 
 ::: {#psp-frameworks-dynamic-vs-static-computational-graphs .callout-perspective title="Dynamic vs. static computational graphs"}
 
@@ -4274,7 +4275,7 @@ The concepts developed throughout this chapter---eager vs. graph execution, reve
 ```{.python}
 # Single training step for a 2-layer MLP
 x = torch.randn(32, 784, device="cuda")  # Input batch
-y = torch.randint(0, 10, (32), device="cuda")  # Labels
+y = torch.randint(0, 10, (32,), device="cuda")  # Labels
 
 # Forward pass
 h = torch.relu(x @ W1 + b1)  # Hidden layer
@@ -4500,8 +4501,8 @@ The arithmetic-intensity column is the diagnostic column. Matrix multiplications
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Showing that small model training is overhead-bound, not compute-bound
 # │
-# │ Goal: On an A100, this small step's FLOPs take ~0.1 μs and memory takes ~2 μs, but
-# │      6 ops × 5 μs dispatch = 30 μs overhead. The step is overhead-bound!
+# │ Goal: On an A100, this small FP32 step's FLOPs and memory each take ~2 μs, but
+# │      Assume 12 ops × 5 μs dispatch = 60 μs overhead. The step is overhead-bound!
 # │      This explains why torch.compile provides 2-3x speedup for small models.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4516,9 +4517,9 @@ class MnistTrainingStepCalc:
     _input = 784
     _hidden = 256
     _output = 10
-    n_ops = 6  # 6 kernel launches
+    n_ops = 12  # Illustrative launch-count assumption
     us_per_op = 5  # 5 μs dispatch/op
-    peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    peak_flops = Hardware.Cloud.A100.compute.precision_flops["fp32"]
     mem_bw = Hardware.Cloud.A100.memory.bandwidth
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     mm1_flops = 2 * _batch * _input * _hidden * flop
@@ -4537,7 +4538,7 @@ class MnistTrainingStepCalc:
     mem_traffic = forward_mem + bwd_mem
     t_compute = (total_flops / peak_flops).to(microsecond)
     t_memory = (mem_traffic / mem_bw).to(microsecond)
-    t_overhead_us = n_ops * us_per_op  # 30 μs (dominant!)
+    t_overhead_us = n_ops * us_per_op  # 60 μs (dominant!)
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
         t_overhead_us > 10 * max(t_compute.to(microsecond).magnitude, t_memory.to(microsecond).magnitude),
@@ -4551,19 +4552,19 @@ class MnistTrainingStepCalc:
     mnist_mem_traffic_mb_str = fmt_qty(mem_traffic, MB, precision=1, commas=False)
     mnist_n_ops_str = fmt_count(n_ops, precision=0, commas=False, label="op")
     mnist_us_per_op_str = fmt_time(us_per_op, 'microsecond', precision=0, commas=False)
-    a100_peak_tflop_per_s_str = fmt_qty(peak_flops, TFLOP / second, precision=0, commas=False)
+    a100_peak_tflop_per_s_str = fmt_qty(peak_flops, TFLOP / second, precision=1, commas=False)
     a100_mem_bw_tb_per_s_str = fmt_qty(mem_bw, TB / second, precision=1, commas=False)
 ```
 
 Total: ~`{python} MnistTrainingStepCalc.mnist_total_mflop_str`, ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str` memory traffic. On an A100:
 
-- $T_{\text{compute}} \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.a100_peak_tflop_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
+- $T_{\text{compute}} \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.a100_peak_tflop_per_s_str` FP32 ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
 - $T_{\text{memory}} \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
-- $T_{\text{overhead}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
+- Assuming `{python} MnistTrainingStepCalc.mnist_n_ops_str` launches, $T_{\text{overhead}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
 
 The training step is overhead-bound.\index{Overhead-Bound!small model training} For small models, Python dispatch and kernel launch dominate, which drives three common production practices:
 
-- `torch.compile` provides 2--3$\times$ speedup by fusing operations and reducing kernel launches
+- `torch.compile` can provide 2--3$\times$ speedup in favorable small-model cases by fusing operations and reducing kernel launches
 - Batch size increases help amortize per-batch overhead
 - Production training uses much larger models where compute dominates
 

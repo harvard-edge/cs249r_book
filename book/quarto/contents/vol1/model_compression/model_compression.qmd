@@ -348,7 +348,7 @@ As @tbl-model-vs-device makes concrete, even aggressively optimized models like 
 ### Balancing trade-offs {#sec-model-compression-balancing-tradeoffs-6ae3}
 The **accuracy-efficiency trade-off**\index{Model Compression!accuracy-efficiency trade-off}\index{Accuracy!compression trade-offs} drives every optimization decision. Increasing model capacity generally enhances predictive performance while increasing computational cost, resulting in slower, more resource-intensive inference. The improvements introduce challenges related to memory footprint\index{Memory Footprint!deployment constraint}, inference latency, power consumption, and training efficiency.
 
-| **Model**              |                **Memory** **(Runtime)**                |               **Storage** **(Weights)**                | **Cloud** **(`{python} ModelDeviceComparison.cloud_cap_gb_str`)** | **Mobile** **(`{python} ModelDeviceComparison.mobile_cap_gb_str`)** |    **TinyML** **(`{python} ModelDeviceComparison.tiny_cap_kb_str`)**     |
+| **Model**              |                   **Loaded Weights**                   |               **Storage** **(Weights)**                | **Cloud** **(`{python} ModelDeviceComparison.cloud_cap_gb_str`)** | **Mobile** **(`{python} ModelDeviceComparison.mobile_cap_gb_str`)** |    **TinyML** **(`{python} ModelDeviceComparison.tiny_cap_kb_str`)**     |
 |:-----------------------|:------------------------------------------------------:|:------------------------------------------------------:|:-----------------------------------------------------------------:|:-------------------------------------------------------------------:|:------------------------------------------------------------------------:|
 | **DLRM**               |      `{python} ModelDeviceComparison.dlrm_gb_str`      |      `{python} ModelDeviceComparison.dlrm_gb_str`      |                                 ok                                | no (`{python} ModelDeviceComparison.dlrm_mobile_overflow_mult_str`) |    no (`{python} ModelDeviceComparison.dlrm_tiny_overflow_mult_str`)     |
 | **GPT-2 XL**           |      `{python} ModelDeviceComparison.gpt2_gb_str`      |      `{python} ModelDeviceComparison.gpt2_gb_str`      |                                 ok                                |                                  ok                                 |    no (`{python} ModelDeviceComparison.gpt2_tiny_overflow_mult_str`)     |
@@ -1820,7 +1820,7 @@ This artifact boundary separates the pruning strategies. Unstructured pruning re
 
 These trade-offs become concrete when examining real-world deployments. Some model families reduce deployment cost through architecture rather than post-hoc pruning: MobileNet uses depthwise separable convolutions for mobile and embedded vision [@howard2017mobilenets], while EfficientNet uses compound scaling to improve the accuracy-efficiency trade-off under resource constraints [@tan2019efficientnet]. Pruning remains a separate optimization lever. BERT-style transformers[^fn-bert-pruning-scale] have been pruned by removing redundant attention heads or intermediate dimensions, while separate distillation methods such as DistilBERT and TinyBERT train smaller dense student models that retain much of BERT's performance [@sanh2019distilbert].
 
-[^fn-bert-pruning-scale]: **BERT Pruning**\index{BERT!compression techniques}: Structured pruning succeeds here because BERT's 12 attention heads per layer exhibit massive redundancy—@michel2019are showed that removing 40 percent of heads changes GLUE scores by only 1.2 percent. This redundancy is architectural, not accidental: overparameterization aids pretraining optimization, but at deployment, each unnecessary head consumes memory bandwidth for zero accuracy gain. \index{BERT!pruning redundancy}
+[^fn-bert-pruning-scale]: **BERT Pruning**\index{BERT!compression techniques}: BERT's 12 attention heads per layer can contain substantial redundancy—@michel2019are found on MultiNLI that many heads could be removed without a statistically significant performance change. The removable fraction depends on the layer and task, so deployment pruning must measure both task quality and whether the resulting structure reduces runtime work. \index{BERT!pruning redundancy}
 
 Pruning has an inherent limitation: it starts with an existing architecture and carves away pieces. The pruned model inherits its structure from the original—same layer types, same connectivity patterns, just fewer parameters. The original architecture itself may be inefficient for deployment. A practitioner may need a model with a completely different structure, such as a six-layer transformer instead of a 12-layer one, that still captures the original model's capabilities.
 
@@ -2009,7 +2009,7 @@ Here $\mathbf{p}_{\text{teacher}}^{(T_{\text{distill}})}$ and $\mathbf{p}_{\text
 
 Distillation's primary advantage over pruning is that it produces a *dense* model, not a *sparse* one. A distilled student runs efficiently on commodity hardware (accelerators, edge AI chips) without requiring specialized sparse execution kernels. Models such as DistilBERT\index{DistilBERT}\index{Knowledge Distillation!DistilBERT}[^fn-distilbert-deployment] retain up to 97 percent of the teacher's accuracy with 40 percent fewer parameters and 60 percent faster inference, a compression level difficult to achieve through pruning alone [@sanh2019distilbert]. The same dense-student principle can be paired with compact computer-vision architectures: MobileNet supplies a dense mobile-friendly architecture [@howard2017mobilenets], while distillation supplies the teacher-supervision method [@hinton2015distilling]. The student may also inherit useful teacher behavior\index{Knowledge Distillation!memory efficiency}, but that inheritance has to be validated on the deployment distribution because it can transfer teacher errors as well as teacher knowledge.
 
-[^fn-distilbert-deployment]: **DistilBERT**: Achieves 97 percent of BERT-Base performance with 40 percent fewer parameters (66M vs. 110M) and 60 percent faster inference. The concrete deployment impact: memory drops from 1.35 GB to 0.81 GB (proportional to the 60 percent parameter scale) and latency from 85 ms to 34 ms, crossing the threshold for real-time NLP on mobile devices where BERT-Base cannot fit alongside the operating system. \index{DistilBERT!deployment metrics}
+[^fn-distilbert-deployment]: **DistilBERT**: The reported model has 66 million parameters versus BERT-Base's 110 million, is 40 percent smaller and 60 percent faster, and retains 97 percent of its language-understanding performance. Absolute memory and latency still depend on numerical format, batch size, sequence length, runtime, and hardware [@sanh2019distilbert]. \index{DistilBERT!deployment metrics}
 
 Distillation can also be combined with other compression techniques, but the evidence should be tied to the specific technique being used. For pruning, @gordon2020 show that BERT can be pruned during pretraining and then transferred to downstream tasks, rather than requiring a separate pruning pass for each task. Distilled students can also be paired with pruning or quantization in deployment pipelines, but those combinations need to be validated for the target task and hardware.
 
@@ -3074,12 +3074,12 @@ Together, the two lighthouses separate the two reasons quantization matters. DLR
 # │ Goal: Show that the purpose-built DS-CNN keyword spotter does NOT fit the
 # │       tiny-tier SRAM budget at FP32 and DOES fit at INT8 — the misfit IS
 # │       the quantization imperative the callout teaches.
-# │ Show: FP32 footprint (800 KB), INT8 footprint (200 KB), 512 KiB budget.
+# │ Show: FP32 footprint (800 KB), INT8 footprint (200 KB), 512 KB budget.
 # │ How: Models.Tiny.DS_CNN.size_in_bytes at 4 B and 1 B per parameter,
 # │      compared against Platforms.Tiny.ram.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_qty, check
+from mlsysim.fmt import fmt_qty, fmt_memory_capacity, check
 from mlsysim.core.units import byte, KB, KiB
 
 class KwsQuantImperative:
@@ -3098,12 +3098,12 @@ class KwsQuantImperative:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     fp32_kb_str = fmt_qty(fp32_size, KB, precision=0, commas=False)
     int8_kb_str = fmt_qty(int8_size, KB, precision=0, commas=False)
-    budget_kib_str = fmt_qty(tiny_ram, KiB, precision=0, commas=False)
+    budget_kb_str = fmt_memory_capacity(tiny_ram, unit=KiB, precision=0, commas=False)
 ```
 
 ::: {#lhs-model-compression-tinyml-quantization-imperative .callout-lighthouse title="The TinyML quantization imperative"}
 
-The KWS (DS-CNN) lighthouse\index{Keyword Spotting!quantization}\index{DS-CNN!quantization} operates at the opposite extreme of the iron law from DLRM [@zhang2017hello]. A typical TinyML budget is roughly `{python} KwsQuantImperative.budget_kib_str` of SRAM, and even the purpose-built DS-CNN keyword spotter overshoots it in FP32: its weights occupy `{python} KwsQuantImperative.fp32_kb_str`. Quantized to INT8, the same network shrinks to `{python} KwsQuantImperative.int8_kb_str` and fits with room for runtime buffers. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
+The KWS (DS-CNN) lighthouse\index{Keyword Spotting!quantization}\index{DS-CNN!quantization} operates at the opposite extreme of the iron law from DLRM [@zhang2017hello]. A typical TinyML budget is roughly `{python} KwsQuantImperative.budget_kb_str` of SRAM, and even the purpose-built DS-CNN keyword spotter overshoots it in FP32: its weights occupy `{python} KwsQuantImperative.fp32_kb_str`. Quantized to INT8, the same network shrinks to `{python} KwsQuantImperative.int8_kb_str` and fits with room for runtime buffers. A stricter smart-doorbell microcontroller with 256 KB SRAM leaves closer to 100 KB for model weights after runtime buffers, audio windows, and feature extraction state, motivating more aggressive INT4 or binary compression.
 
 In FP32, even the compact DS-CNN architecture moves 4$\times$ more weight bytes than in INT8, and the arithmetic path is also more expensive on hardware with efficient integer units. For an always-on device running on a coin cell battery, that first-order byte reduction can translate directly into longer battery life, but the measured gain still depends on sensor, wake-up, feature-extraction, and idle-power costs. Here, quantization reduces both the data-movement term and the compute term $(O / (R_{\text{peak}} \cdot \eta_{\text{hw}}))$ of the iron law.
 
@@ -3349,9 +3349,9 @@ $\text{Throughput Gain} = \text{INT8 elements/inst} / \text{FP32 elements/inst}$
 
 :::
 
-Reducing numerical precision introduces trade-offs, however. Lower-precision formats can cause numerical instability and quantization noise, potentially affecting model accuracy. @Fig-quantization-error-dist makes that risk concrete: most quantization error stays near zero, but tail errors can still perturb predictions when sensitive weights or activations land in the wrong bins. Some architectures, such as large transformer-based NLP models, tolerate quantization well, whereas others may experience significant degradation. Selecting the appropriate numerical precision therefore requires balancing accuracy constraints, hardware support, and efficiency gains.
+Reducing numerical precision introduces trade-offs, however. Lower-precision formats can cause numerical instability and quantization noise, potentially affecting model accuracy. @Fig-quantization-error-dist shows an illustrative residual distribution aggregated across values with heterogeneous scales and possible clipping. For an ideal uniform quantizer, within-range rounding error is instead bounded by $[-\Delta/2, \Delta/2]$; errors outside that interval arise from clipping or from aggregating different step sizes. Some architectures, such as large transformer-based NLP models, tolerate quantization well, whereas others may experience significant degradation. Selecting the appropriate numerical precision therefore requires balancing accuracy constraints, hardware support, and efficiency gains.
 
-::: {#fig-quantization-error-dist fig-env="figure" fig-pos="htb" fig-cap="**Quantization Error Distribution**: Histogram of quantization error weighted by probability density $p(x)$, showing a bell-shaped curve centered near zero with tails that introduce quantization noise affecting model accuracy." fig-alt="Histogram showing quantization error distribution weighted by probability density. Bell-shaped curve centered near zero with tails extending to positive and negative errors, illustrating typical quantization noise pattern."}
+::: {#fig-quantization-error-dist fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Aggregate Quantization Residuals**: Illustrative aggregate residual distribution across heterogeneous scales and clipped values. Within one unclipped uniform quantizer, rounding error is bounded by $[-\Delta/2, \Delta/2]$; the displayed tails represent clipping or aggregation across different step sizes." fig-alt="Illustrative histogram of aggregate quantization residuals centered near zero, with tails representing clipping or aggregation across values that use different quantization step sizes."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -3465,7 +3465,7 @@ accuracy};
 
 :::
 
-To appreciate how precision loss manifests in practice, examine the representative quantization error distribution in @fig-quantization-error-dist: the bell-shaped curve centered near zero shows that most values quantize with minimal error, but the tails reveal outlier errors that can accumulate and influence model accuracy. Understanding this noise is essential, but practitioners ultimately care about end-to-end speedup, and the magnitude of the quantization speedup depends on whether a workload is compute bound or memory bound.
+To appreciate how precision loss manifests in practice, examine the representative residual distribution in @fig-quantization-error-dist: most values quantize with small error, while clipping or heterogeneous scale choices can create larger residuals that influence model accuracy. Understanding this noise is essential, but practitioners ultimately care about end-to-end speedup, and the magnitude of the quantization speedup depends on whether a workload is compute bound or memory bound.
 
 ```{python}
 #| echo: false
@@ -3530,7 +3530,7 @@ The complementary case is bandwidth bound, where the speedup tracks the reductio
 # │ Context: Callout "The Quantization Speedup"
 # │
 # │ Goal: Demonstrate the bandwidth-driven speedup from quantization.
-# │ Show: That INT4 yields a 4× speedup for bandwidth-bound LLM generation.
+# │ Show: How INT4 weight compression changes total traffic when the FP16 KV cache remains.
 # │ How: Calculate attainable throughput for FP16 vs. INT4 on a 7-billion-parameter model.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -3572,10 +3572,12 @@ class QuantizationSpeedup:
 
     int4_size = memory_from_params(params_b * Bparam, bytes_int4 * byte / param)
     int4_size_gb = int4_size.to(GB).magnitude
+    int4_total_gb = int4_size_gb + kv_cache_gb
+    int4_total = int4_total_gb * GB
 
     # Step 2: Latency (Bandwidth Bound)
-    fp16_latency = fp16_size / mem_bw
-    int4_latency = int4_size / mem_bw
+    fp16_latency = fp16_total / mem_bw
+    int4_latency = int4_total / mem_bw
 
     # Step 3: Throughput (tokens/s)
     fp16_toks = token_throughput(1 * count, fp16_latency).to(count / second).magnitude
@@ -3584,9 +3586,10 @@ class QuantizationSpeedup:
     speedup = int4_toks / fp16_toks
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(3.5 <= speedup <= 4.5, f"INT4 should yield ~4x speedup vs FP16, got {speedup:.1f}x")
+    check(2.7 <= speedup <= 3.0, f"INT4 weights with an FP16 KV cache should yield about 2.9x here, got {speedup:.1f}x")
     check(bytes_fp16 / bytes_int4 == 4, "FP16-to-INT4 weight traffic should fall by 4x.")
     check(kv_cache_gb > 2, "Llama2-7B 4K FP16 KV cache should exceed 2 GB under the full-head cache model.")
+    check(fp16_total > device_ram, "FP16 weights plus KV cache should exceed the 16 GB device capacity.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
@@ -3608,9 +3611,10 @@ class QuantizationSpeedup:
     fp16_tokens_per_s_str = fmt_rate(fp16_toks, 'tokens/s', precision=1, commas=False)
 
     int4_size_gb_str = fmt_qty(int4_size, GB, precision=1, commas=False)
+    int4_total_gb_str = fmt_memory(int4_total, unit=GB, precision=1, commas=False)
     int4_latency_ms_str = fmt_time(round(int4_latency.to(ms).magnitude), 'millisecond', precision=0, commas=False)
     int4_tokens_per_s_str = fmt_rate(round(int4_toks), 'tokens/s', precision=0, commas=False)
-    speedup_mult_str = fmt_multiple(speedup, commas=False, precision=0)
+    speedup_mult_str = fmt_multiple(speedup, commas=False, precision=1)
 ```
 
 The result is a bandwidth-driven speedup: fewer bits moved per token means more tokens/s.
@@ -3623,16 +3627,16 @@ The result is a bandwidth-driven speedup: fewer bits moved per token means more 
 
 1.  **Model size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_fp16_value_str` bytes = `{python} QuantizationSpeedup.fp16_size_gb_str`.
 2.  **KV cache**: A `{python} QuantizationSpeedup.context_tokens_str`-token FP16 KV cache uses two tensors (keys and values) across `{python} QuantizationSpeedup.kv_layers_str` layers, `{python} QuantizationSpeedup.kv_heads_str` KV heads, `{python} QuantizationSpeedup.kv_head_dim_str` dimensions per head, and `{python} QuantizationSpeedup.kv_bytes_str` bytes per value, requiring approximately `{python} QuantizationSpeedup.kv_cache_gb_str`.
-3.  **Total memory**: `{python} QuantizationSpeedup.fp16_size_gb_str` + `{python} QuantizationSpeedup.kv_cache_gb_str` = `{python} QuantizationSpeedup.fp16_total_gb_str`. This barely fits, leaving no room for OS or buffers.
-4.  **Bandwidth cost**: Loading `{python} QuantizationSpeedup.fp16_size_gb_str` at `{python} QuantizationSpeedup.mem_bw_gb_per_s_str` takes `{python} QuantizationSpeedup.fp16_latency_ms_str` per token. That is `{python} QuantizationSpeedup.fp16_tokens_per_s_str`, too slow for chat.
+3.  **Total memory**: `{python} QuantizationSpeedup.fp16_size_gb_str` + `{python} QuantizationSpeedup.kv_cache_gb_str` = `{python} QuantizationSpeedup.fp16_total_gb_str`. This exceeds the device capacity before OS and workspace memory.
+4.  **Bandwidth cost**: In this simplified full-cache-traffic model, loading weights plus the KV cache at `{python} QuantizationSpeedup.mem_bw_gb_per_s_str` takes `{python} QuantizationSpeedup.fp16_latency_ms_str` per token. That is `{python} QuantizationSpeedup.fp16_tokens_per_s_str`, too slow for chat.
 
 **Fix (INT4)**:
 
 1.  **Quantization**: Convert weights to INT4 (`{python} QuantizationSpeedup.bytes_int4_value_str` bytes).
-2.  **New size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_int4_value_str` bytes = `{python} QuantizationSpeedup.int4_size_gb_str`.
-3.  **New speed**: Loading `{python} QuantizationSpeedup.int4_size_gb_str` takes `{python} QuantizationSpeedup.int4_latency_ms_str`. Speed jumps to `{python} QuantizationSpeedup.int4_tokens_per_s_str`.
+2.  **New size**: `{python} QuantizationSpeedup.params_b_value_str` $\times 10^9 \times$ `{python} QuantizationSpeedup.bytes_int4_value_str` bytes = `{python} QuantizationSpeedup.int4_size_gb_str` of weights, or `{python} QuantizationSpeedup.int4_total_gb_str` including the unchanged FP16 KV cache.
+3.  **New speed**: Loading that total takes `{python} QuantizationSpeedup.int4_latency_ms_str`. Speed rises to `{python} QuantizationSpeedup.int4_tokens_per_s_str`.
 
-**Systems insight**: Quantization makes the model fit and provides a `{python} QuantizationSpeedup.speedup_mult_str` linear speedup because LLM generation is bandwidth bound.
+**Systems insight**: Weight quantization makes this configuration fit and yields a `{python} QuantizationSpeedup.speedup_mult_str` speedup in the stated traffic model, below 4$\times$ because FP16 KV-cache traffic is unchanged.
 
 :::
 
@@ -5061,7 +5065,7 @@ $$
 
 DenseNet changes the growth pattern by making previously computed features available to later layers. The gain is not automatic compression; the architecture spends connectivity and bookkeeping to avoid recomputing or relearning information that is already present. Crucially, the benefit extends to memory traffic, not just parameter count: when a feature map produced by an earlier layer is reused by a later layer in the same forward pass, it may remain resident in the accelerator's L2 cache or on-chip SRAM rather than being evicted and re-fetched from HBM. Each such cache hit avoids a round-trip to high-bandwidth memory, which—given the four-order-of-magnitude gap between on-chip and DRAM access energy summarized in @tbl-model-compression-energy-hierarchy—can reduce both inference latency and energy consumption beyond what the parameter savings alone would suggest.
 
-Activation checkpointing\index{Activation Checkpointing}\index{Memory Optimization!activation checkpointing} complements feature reuse by trading computation for memory during training. As established in @sec-model-training-activation-checkpointing-2ee1, this technique stores only a subset of forward-pass activations and recomputes the rest during backpropagation, reducing peak memory from $\mathcal{O}(A_{\text{total}})$ to $\mathcal{O}\big(\sqrt{A_{\text{total}}}\big)$. In the compression context, checkpointing enables training of larger models within fixed memory budgets, which in turn provides more capacity for subsequent pruning or distillation to exploit.
+Activation checkpointing\index{Activation Checkpointing}\index{Memory Optimization!activation checkpointing} complements feature reuse by trading computation for memory during training. For $N_L$ comparable layers with activation footprint $A_{\text{layer}}$ per layer, evenly spaced checkpointing reduces the saved-activation term from $\mathcal{O}(N_L A_{\text{layer}})$ to $\mathcal{O}(\sqrt{N_L}\,A_{\text{layer}})$ while recomputing omitted activations during backpropagation. In the compression context, checkpointing enables training of larger models within fixed memory budgets, which in turn provides more capacity for subsequent pruning or distillation to exploit.
 
 Parameter reduction applies the same reasoning to storage. SqueezeNet uses $1{\times}1$ convolutions to reduce the number of input channels before applying standard convolutions, making the expensive layer operate on a smaller representation [@iandola2016squeezenet]. The number of parameters in a standard convolutional layer is:
 $$
