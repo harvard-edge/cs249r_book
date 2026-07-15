@@ -138,6 +138,16 @@ def run_decode(
         else nullcontext()
     )
     with warning_filter:
+        # Warm-up forward pass (untimed): trigger lazy init, kernel/JIT warmup, and
+        # cache allocation before any measurement. Without it the standalone prefill
+        # below runs cold and its latency can exceed generate()'s warm internal
+        # prefill, making the `generation_latency - prefill_latency` subtraction
+        # clamp to ~0 and zero out the decode metrics on short-context/smoke runs.
+        # Greedy decoding (do_sample=False) is unaffected: the warm-up consumes no
+        # RNG, so output tokens and the quality gate stay identical.
+        with torch.inference_mode():
+            model(input_ids=input_ids, attention_mask=attention_mask, use_cache=True)
+
         start_prefill = time.perf_counter()
         with torch.inference_mode():
             prefill = model(input_ids=input_ids, attention_mask=attention_mask, use_cache=True)
