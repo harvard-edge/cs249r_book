@@ -14,8 +14,8 @@ def test_selection_ledger_records_every_portfolio_decision():
     statuses = [entry["status"] for entry in data["workloads"].values()]
 
     assert len(statuses) == 17
-    assert statuses.count("candidate") == 11
-    assert statuses.count("deferred") == 3
+    assert statuses.count("candidate") == 10
+    assert statuses.count("deferred") == 4
     assert statuses.count("rejected") == 3
 
 
