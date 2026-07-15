@@ -33,12 +33,12 @@
             "question_type": "MCQ",
             "question": "A 7-billion-parameter model uses 14 GB of FP16 weights for inference and fits comfortably on a single 40 GB accelerator. Switching the same model to Adam-based training causes immediate out-of-memory failures even before activations are accounted for. Using the section's memory decomposition, which factor is most directly responsible?",
             "choices": [
-              "Adam adds 14 GB of FP16 gradients and 56 GB of FP32 first- and second-moment estimates, pushing the per-step training state to roughly 84 GB before activations.",
+              "Adam adds 14 GB of FP16 gradients, 28 GB of FP32 master weights, and 56 GB of FP32 first- and second-moment estimates, pushing the standard mixed-precision training state to roughly 112 GB before activations.",
               "Adam internally re-runs the forward pass three times per step, tripling the working set of weights held in memory.",
               "Adam requires the entire training dataset to be cached in accelerator memory, which exceeds the 40 GB budget even for moderately sized corpora.",
               "Adam disables Tensor Core execution and forces FP64 storage for every weight matrix during the backward pass."
             ],
-            "answer": "The correct answer is A. The section's training-systems definition decomposes the per-step footprint as 14 GB FP16 weights + 14 GB FP16 gradients + 56 GB FP32 Adam first and second moments — about 84 GB on a 40 GB accelerator before any activation storage. The dataset-caching answer confuses pipeline data-loading memory with model-internal state; the dataset streams through host memory and never needs to be resident on the accelerator. The 'three forward passes' claim invents a mechanism Adam does not use; Adam runs one forward and one backward pass per step.",
+            "answer": "The correct answer is A. A standard mixed-precision decomposition is 14 GB FP16 weights + 14 GB FP16 gradients + 28 GB FP32 master weights + 56 GB FP32 Adam first and second moments — about 112 GB before activation storage. The dataset-caching answer confuses pipeline data-loading memory with model-internal state; the dataset streams through host memory and never needs to be resident on the accelerator. The 'three forward passes' claim invents a mechanism Adam does not use; Adam runs one forward and one backward pass per step.",
             "learning_objective": "Calculate the per-step training memory footprint of an Adam-trained model from weights, gradients, and optimizer state, and identify which component dominates."
           },
           {
@@ -263,15 +263,15 @@
           },
           {
             "question_type": "MCQ",
-            "question": "A team measures iteration time for two configurations of the same training run on the same hardware: batch size 32 yields 92 percent GPU utilization, while batch size 33 yields 71 percent utilization. Based on the pipeline architecture section's discussion of hardware execution granularity, what is the most likely cause?",
+            "question": "A team measures iteration time for two configurations of the same training run on the same hardware: batch size 32 yields 92 percent GPU utilization, while batch size 33 yields 71 percent utilization. What can the chapter's discussion of hardware execution granularity establish from these measurements alone?",
             "choices": [
               "Batch size 33 exceeded the L2 cache capacity, forcing every operation to spill activations to HBM.",
               "The optimizer automatically switched to FP32 accumulation at the larger batch, halving effective compute throughput.",
-              "Crossing a fixed warp or wave boundary at batch 33 launches a partially filled additional execution unit, leaving GPU lanes idle and lowering effective utilization.",
+              "Batch size alone is insufficient to establish the cause; the team must inspect kernel launch, tensor-tile, and working-set behavior with a profiler.",
               "Larger batches always reduce gradient accuracy enough that the framework inserts extra synchronization barriers."
             ],
-            "answer": "The correct answer is C. The chapter's wave-quantization discussion explains that GPU execution is quantized into fixed-size warps or waves, so a batch one element past a multiple of that boundary launches an additional partially filled wave whose unused lanes dilute realized throughput — exactly the 92 → 71 percent pattern observed. The 'optimizer switched to FP32' explanation invents a mechanism PyTorch and TensorFlow do not implement at batch boundaries. The 'L2 cache spill' answer would manifest as a sustained drop tied to working-set size, not a one-element step change. The 'extra synchronization barriers' claim contradicts the framework's actual behavior, which does not insert barriers based on gradient-accuracy heuristics.",
-            "learning_objective": "Diagnose hardware-execution-granularity effects (wave quantization) on training utilization from a paired batch-size measurement."
+            "answer": "The correct answer is C. Warps operate on threads, and neural-network kernels generally map each sample to many threads or tiles; a batch-size change does not by itself prove that one partially filled warp caused the utilization drop. A profiler must distinguish launch-tail effects from cache, algorithm-selection, and tensor-shape changes. The optimizer and gradient-accuracy explanations invent mechanisms that frameworks do not trigger at this boundary.",
+            "learning_objective": "Determine when paired batch-size utilization measurements require profiling rather than attribution to wave quantization."
           },
           {
             "question_type": "MCQ",

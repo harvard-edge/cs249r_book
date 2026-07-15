@@ -71,10 +71,10 @@
             "choices": [
               "Drive average utilization toward 95 percent so the accelerator stays saturated and no cycles are wasted.",
               "Move health checks out of the load balancer and into the model code so the model owns its own liveness signal.",
-              "Pin inference threads to dedicated cores, lock model weights and KV state in memory, and steer OS interrupts away from the inference cores.",
+              "Pin inference threads to dedicated cores, lock host-resident weights, staging buffers, or offloaded KV state in memory, and steer OS interrupts away from the inference cores.",
               "Replace gRPC with JSON over HTTP/1.1 so payloads are easier to inspect during incidents."
             ],
-            "answer": "The correct answer is C. Pinning eliminates cache-warmth loss from thread migration, memory locking prevents page-fault stalls during DMA, and interrupt steering prevents the kernel from preempting inference cores for network or disk work. Pushing utilization toward 95 percent worsens queueing and makes p99 explode under bursts, and the JSON switch adds parsing overhead without addressing any of the real jitter sources.",
+            "answer": "The correct answer is C. Pinning reduces cache-locality loss from thread migration, locking eligible host pages prevents page-fault stalls during CPU access or DMA, and interrupt steering prevents the kernel from preempting inference cores for network or disk work. The host-memory qualifier matters because mlock does not lock GPU HBM. Pushing utilization toward 95 percent worsens queueing, and the JSON switch adds parsing overhead without addressing these jitter sources.",
             "learning_objective": "Select the node-level isolation mechanisms that reduce p99 jitter on a latency-critical serving node."
           }
         ]
@@ -234,15 +234,15 @@
         "questions": [
           {
             "question_type": "MCQ",
-            "question": "A serving replica must sustain 1,000 QPS with a p99 end-to-end latency SLO of 50 ms. Each replica's unloaded service time is 20 ms. A capacity planner uses Little's Law at the SLO bound to estimate the minimum standing concurrency the fleet must support. Which interpretation is correct?",
+            "question": "A serving fleet targets 1,000 QPS with a p99 end-to-end latency SLO of 50 ms. A planner multiplies 1,000 QPS by the 50 ms SLO and obtains 50 requests. Which interpretation is correct?",
             "choices": [
-              "Required concurrency is 20, because 1,000 QPS times 20 ms of service time gives the number of requests simultaneously executing.",
-              "Required concurrency is 50, because 1,000 QPS times 50 ms ($\\lambda T_{\\text{lat}}$ at the SLO bound) gives the standing population in the system, and real provisioning must exceed this because bursts push the realized $T_{\\text{lat}}$ above the mean.",
+              "Required concurrency is 20, because unloaded service time always equals mean time in system.",
+              "The value 50 is a planning proxy obtained by substituting a tail budget for the mean in Little's Law; it is not the measured average population, a minimum GPU batch size, or a device-memory floor.",
               "Required concurrency is 1,000, because one QPS equals one concurrent request under any SLO.",
               "Required concurrency is 5, because throughput divided by service time is the number of replicas needed."
             ],
-            "answer": "The correct answer is B. Little's Law applied at the SLO bound gives $N_{\\text{req}} = \\lambda T_{\\text{lat}} = 1,000 \\times 0.050 = 50$ requests standing in the system across the fleet. That is the arithmetic floor; in practice the planner provisions above 50 because p99 is not the mean, arrival processes are bursty, and headroom is what keeps queueing delay from collapsing the SLO. The service-time-based framing confuses 'in service' with 'in system' (it ignores queue wait), and both the 1,000 and 5 answers misapply the law to unrelated quantities.",
-            "learning_objective": "Apply Little's Law at a tail-latency SLO bound to compute minimum standing concurrency for a serving fleet, and explain why the arithmetic floor is not the provisioned capacity."
+            "answer": "The correct answer is B. Little's Law uses mean time in system: $E[N] = \\lambda E[T]$. Multiplying by a p99 SLO instead produces the numerical proxy $1,000 \\times 0.050 = 50$, but does not establish the actual mean population or how many requests must execute simultaneously on a GPU. Capacity planning still needs measured mean and tail latency, service rate, queue placement, and per-request memory.",
+            "learning_objective": "Distinguish a tail-budget planning proxy from a valid mean-value application of Little's Law."
           },
           {
             "question_type": "MCQ",
@@ -271,7 +271,7 @@
               "p99 measures only preprocessing and ignores queueing, so it is a cleaner signal of raw compute speed.",
               "Mean latency applies only to offline inference systems and is undefined in an online serving context."
             ],
-            "answer": "The correct answer is B. Tail latency captures the unlucky requests users remember, and in a service where a response depends on N parallel sub-requests the probability that at least one falls in the tail grows with N, so a 1-in-100 tail per hop becomes visible to most users in a 10-hop fan-out. The mean-equals-p99 framing ignores the long-tail distributions serving systems actually produce, and the other options misdescribe what p99 measures.",
+            "answer": "The correct answer is B. Tail latency captures the unlucky requests users remember, and in a service where a response depends on N parallel sub-requests the probability that at least one falls in the tail grows with N. With ten independent sub-requests that each have a 1 percent chance of falling in the tail, that probability is $1-0.99^{10} \\approx 9.6$ percent, or about one request in ten—not most users. The mean-equals-p99 framing ignores the long-tail distributions serving systems actually produce, and the other options misdescribe what p99 measures.",
             "learning_objective": "Analyze why percentile latency rather than mean latency governs production-serving risk, including the fan-out amplification effect."
           },
           {
