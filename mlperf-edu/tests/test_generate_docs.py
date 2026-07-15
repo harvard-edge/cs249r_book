@@ -85,6 +85,26 @@ def test_generated_workload_pages_render_structured_provenance(generated_outputs
         assert "[open source](https://" in content
 
 
+def test_generated_workload_pages_disclose_indexed_reference_evidence(
+    generated_outputs,
+):
+    workload_pages = [
+        content
+        for path, content in generated_outputs.items()
+        if "benchmarks" in path.parts and path.name != "index.qmd"
+    ]
+
+    assert len(generate_docs.load_provisional_reference_results()) == 9
+    assert all("## Draft Reference Results" in page for page in workload_pages)
+    combined = "\n".join(workload_pages)
+    assert "Five-run verified" in combined
+    assert "One-run provisional" in combined
+    assert "Two-run provisional" in combined
+    assert "None are MLCommons-verified results" in combined
+    assert "do not establish repeatability" in combined
+    assert "CV 5.19%; **diagnostic fail**" in combined
+
+
 def test_canonical_pages_do_not_expose_retired_synthetic_max_boundaries():
     workloads = load_registry(ROOT / "registry")
     systems_only = [

@@ -9,6 +9,7 @@ Generated benchmark and reference facts come from these project contracts:
   * ``registry/suites.yaml``    - suite-level titles and summaries
   * ``datasets.yaml``           - dataset catalog
   * ``src/mlperf/assets.py``    - structured public-asset dossiers
+  * ``provisional_results/``    - verified draft reference-result records
   * the live ``mlperf`` CLI     - ``--help`` text for the command reference
 
 Nothing on these pages is hand-written. To change a page, change the
@@ -28,6 +29,8 @@ Generated outputs (the generator owns these paths entirely):
 from __future__ import annotations
 
 import argparse
+import hashlib
+import json
 import os
 import subprocess
 import sys
@@ -54,7 +57,8 @@ CHECKOUT_COMMAND = "uv run mlperf"
 
 GENERATED_NOTE = (
     "<!-- GENERATED FILE - do not edit by hand.\n"
-    "     Sources: registry/ + datasets.yaml + asset dossiers + the mlperf CLI.\n"
+    "     Sources: registry/ + datasets.yaml + asset dossiers + draft reference results "
+    "+ the mlperf CLI.\n"
     "     Regenerate with: python3 tools/generate_docs.py -->\n"
 )
 
@@ -137,6 +141,55 @@ def mapping_table(mapping: Any) -> str:
             value = ", ".join(str(item) for item in value)
         rows.append((key.replace("_", " ").capitalize(), value))
     return kv_table(rows)
+
+
+def _sha256(path: Path) -> str:
+    return "sha256:" + hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def load_provisional_reference_results() -> dict[str, list[dict[str, Any]]]:
+    """Load and verify the draft reference-result index used by the site."""
+    result_root = ROOT / "provisional_results"
+    index_path = result_root / "index.json"
+    index = json.loads(index_path.read_text())
+    if index.get("schema") != "mlperf-edu-provisional-reference-index/0.1":
+        raise ValueError("unsupported provisional reference-result index schema")
+
+    cases = index.get("cases")
+    if not isinstance(cases, list) or len(cases) != index.get("case_count"):
+        raise ValueError("provisional reference-result case count is inconsistent")
+
+    by_workload: dict[str, list[dict[str, Any]]] = {}
+    seen: set[str] = set()
+    for entry in cases:
+        relative = entry.get("path")
+        if not isinstance(relative, str) or not relative.startswith(
+            "provisional_results/"
+        ):
+            raise ValueError("invalid provisional reference-result path")
+        path = (ROOT / relative).resolve()
+        if result_root.resolve() not in path.parents:
+            raise ValueError("provisional reference-result path escapes its root")
+        if _sha256(path) != entry.get("sha256"):
+            raise ValueError(
+                f"provisional reference-result digest mismatch: {relative}"
+            )
+
+        record = json.loads(path.read_text())
+        case_id = record.get("case_id")
+        if (
+            record.get("schema") != "mlperf-edu-provisional-reference-result/0.1"
+            or case_id != entry.get("case_id")
+            or record.get("workload") != entry.get("workload")
+            or case_id in seen
+        ):
+            raise ValueError(f"invalid provisional reference-result record: {relative}")
+        seen.add(case_id)
+        by_workload.setdefault(record["workload"], []).append(record)
+
+    if len(by_workload) != index.get("workload_count"):
+        raise ValueError("provisional reference-result workload count is inconsistent")
+    return by_workload
 
 
 def provenance_value(key: str, value: Any) -> Any:
@@ -516,6 +569,89 @@ def section_verified_baseline(w: Workload) -> str:
     return f"## {title}\n\n{body}"
 
 
+def _result_number(value: Any) -> str:
+    if not isinstance(value, (int, float)):
+        return "—"
+    magnitude = abs(float(value))
+    if magnitude >= 1000:
+        return f"{value:,.1f}"
+    if magnitude >= 10:
+        return f"{value:.3f}"
+    return f"{value:.4f}"
+
+
+def _quality_result(record: dict[str, Any]) -> str:
+    quality = record.get("quality")
+    if not isinstance(quality, dict):
+        return "Performance-only case"
+    gate = quality.get("gate") or {}
+    direction = gate.get("direction")
+    comparison = "≥" if direction == "higher" else "≤" if direction == "lower" else "="
+    mean = (quality.get("aggregate") or {}).get("mean")
+    target = gate.get("target")
+    status = "pass" if quality.get("all_runs_pass") else "fail"
+    return (
+        f"`{quality.get('metric')}` {_result_number(mean)} mean; "
+        f"target {comparison} {_result_number(target)}; **{status}**"
+    )
+
+
+def _repeatability_result(record: dict[str, Any]) -> str:
+    repeatability = record.get("repeatability") or {}
+    cv = repeatability.get("coefficient_of_variation")
+    if cv is None:
+        return "Not established"
+    status = "pass" if repeatability.get("passed") else "diagnostic fail"
+    return f"CV {float(cv):.2%}; **{status}**"
+
+
+def section_reference_results(records: list[dict[str, Any]]) -> str:
+    if not records:
+        return ""
+    evidence_labels = {
+        "five-run-verified": "Five-run verified",
+        "single-run-provisional": "One-run provisional",
+        "two-run-provisional": "Two-run provisional",
+    }
+    lines = [
+        "## Draft Reference Results",
+        "",
+        "These project-generated measurements demonstrate the current `max` paths on "
+        "the disclosed reference system. Five-run records passed the project quality "
+        "and repeatability checks. Provisional records establish execution and quality "
+        "only; they do not establish repeatability. None are MLCommons-verified results.",
+        "",
+        "| **Case** | **Evidence** | **Runs** | **Reference measurement** | **Quality** | **Repeatability** | **System** |",
+        "|:---|:---|---:|:---|:---|:---|:---|",
+    ]
+    for record in records:
+        phase = record.get("phase")
+        case = str(record.get("mode")) + (f" / {phase}" if phase else "")
+        measurement = record.get("measurement") or {}
+        metric = measurement.get("primary_metric")
+        mean = (measurement.get("aggregate") or {}).get("mean")
+        reference = f"`{metric}` {_result_number(mean)} mean"
+        execution = record.get("execution") or {}
+        devices = ", ".join(execution.get("executed_devices") or [])
+        chips = ", ".join(execution.get("hardware_chips") or [])
+        system = f"{chips}; {devices}" if devices else chips
+        evidence = evidence_labels.get(
+            record.get("evidence_class"), esc(record.get("evidence_class"))
+        )
+        lines.append(
+            f"| {esc(case)} | {evidence} | {measurement.get('run_count', '—')} "
+            f"| {reference} | {_quality_result(record)} "
+            f"| {_repeatability_result(record)} | {esc(system)} |"
+        )
+    lines += [
+        "",
+        "> Five-run verified means eligible for the project's future promotion import. "
+        "One-run and two-run provisional records are not review eligible and make no "
+        "repeatability claim.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 def section_calibration_observation(w: Workload) -> str:
     calibration = w.raw.get("calibration_observation")
     if not isinstance(calibration, dict) or not calibration:
@@ -585,7 +721,10 @@ def section_runner(w: Workload, source_paths: dict[str, str]) -> str:
 
 
 def render_workload_body(
-    w: Workload, source_paths: dict[str, str], heading_shift: bool
+    w: Workload,
+    source_paths: dict[str, str],
+    reference_results: dict[str, list[dict[str, Any]]],
+    heading_shift: bool,
 ) -> str:
     sections = [
         section_at_a_glance(w),
@@ -594,6 +733,7 @@ def render_workload_body(
         section_how_to_run(w),
         section_quality_target(w),
         section_performance_contract(w),
+        section_reference_results(reference_results.get(w.id, [])),
         section_verified_baseline(w),
         section_calibration_observation(w),
         section_regime(w),
@@ -608,14 +748,18 @@ def render_workload_body(
 
 def public_line(w: Workload) -> str:
     return (
-        f"{badge(w.public_status)}\n\n> {esc(w.public_rationale)}\n"
+        f"{badge(w.public_status)}\n\n> **Source-locked promotion rationale.** "
+        f"{esc(w.public_rationale)} Current draft evidence is listed below.\n"
         if w.public_rationale
         else badge(w.public_status) + "\n"
     )
 
 
 def family_page(
-    family: str, members: list[Workload], source_paths: dict[str, str]
+    family: str,
+    members: list[Workload],
+    source_paths: dict[str, str],
+    reference_results: dict[str, list[dict[str, Any]]],
 ) -> str:
     lead = family_lead(members)
     suite = lead.suite
@@ -631,7 +775,11 @@ def family_page(
     if len(members) == 1:
         w = members[0]
         lines.append(public_line(w))
-        lines.append(render_workload_body(w, source_paths, heading_shift=False))
+        lines.append(
+            render_workload_body(
+                w, source_paths, reference_results, heading_shift=False
+            )
+        )
         return "\n".join(lines) + "\n"
 
     lines.append(
@@ -659,7 +807,11 @@ def family_page(
         lines.append(f"## Variant: {member.variant} {{#variant-{member.variant}}}")
         lines.append("")
         lines.append(public_line(member))
-        lines.append(render_workload_body(member, source_paths, heading_shift=True))
+        lines.append(
+            render_workload_body(
+                member, source_paths, reference_results, heading_shift=True
+            )
+        )
         lines.append("")
     return "\n".join(lines) + "\n"
 
@@ -1013,7 +1165,14 @@ def build_outputs() -> dict[Path, str]:
     workloads = load_registry(ROOT / "registry")
     suite_meta = load_suite_meta()
     source_paths = index_source_paths()
+    reference_results = load_provisional_reference_results()
     families = group_families(workloads)
+
+    unknown_results = set(reference_results) - set(workloads)
+    if unknown_results:
+        raise ValueError(
+            f"reference results name unknown workloads: {sorted(unknown_results)}"
+        )
 
     unknown = {family_lead(members).suite for members in families.values()} - set(
         suite_meta
@@ -1035,7 +1194,7 @@ def build_outputs() -> dict[Path, str]:
         )
         for family, members in suite_families:
             outputs[site / "benchmarks" / suite / f"{family}.qmd"] = family_page(
-                family, members, source_paths
+                family, members, source_paths, reference_results
             )
     outputs[site / "reference" / "datasets.qmd"] = datasets_page(workloads)
     outputs[site / "reference" / "cli.qmd"] = cli_page()

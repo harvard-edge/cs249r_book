@@ -42,16 +42,17 @@ uv run python tools/export_flat_registry.py --check
 uv run python tools/build_wheel.py
 ```
 
-The wheel must include the packaged registry, dataset catalog, and promoted
-reference-result index. Inspect and install it in a fresh environment outside
-the checkout.
+The review wheel must include the packaged registry, dataset catalog, and
+twelve-case draft-result index. A future promoted wheel will additionally
+include the strict promoted index. Inspect and install the wheel in a fresh
+environment outside the checkout.
 
 ```bash
 wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
 test -n "$wheel"
 unzip -l "$wheel" | grep -q 'mlperf_edu/workloads.yaml'
 unzip -l "$wheel" | grep -q 'mlperf_edu/datasets.yaml'
-unzip -l "$wheel" | grep -q 'mlperf_edu/reference_results/index.json'
+unzip -l "$wheel" | grep -q 'mlperf_edu/provisional_results/index.json'
 
 uv venv /tmp/mlperf-edu-wheel-smoke --python 3.12
 uv pip install --python /tmp/mlperf-edu-wheel-smoke/bin/python "$wheel"
@@ -59,7 +60,6 @@ uv pip install --python /tmp/mlperf-edu-wheel-smoke/bin/python "$wheel"
   cd /tmp
   /tmp/mlperf-edu-wheel-smoke/bin/mlperf list --format json \
     > /tmp/mlperf-edu-workloads.json
-  /tmp/mlperf-edu-wheel-smoke/bin/mlperf audit
 )
 python3 -c 'import json; assert json.load(open("/tmp/mlperf-edu-workloads.json"))["workloads"]'
 ```
@@ -136,10 +136,14 @@ uv run python tools/check_taxonomy.py
 uv run python tools/check_reference_claims.py --check
 uv run python tools/generate_review_packets.py --check
 uv run python tools/generate_docs.py --check
-uv run mlperf audit
+uv run mlperf audit --policy public  # expected to return 1 while all workloads are experimental
 uv run mlperf validate smoke --output-dir submissions/release-smoke
 uv run python tools/build_wheel.py
 ```
+
+The strict audit is a policy gate. The review draft intentionally returns
+status 1 because all nine workloads remain experimental; validation should
+record that expected block rather than relabeling draft evidence as public.
 
 Actual `max` and `release` validation remain separate evidence-bearing gates.
 Selection-only dry runs do not satisfy them.

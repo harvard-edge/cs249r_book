@@ -1,11 +1,31 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from pathlib import Path
+import sys
 
 from mlperf.registry import load_registry, public_contract_issues
 from tools import check_taxonomy
 from tools import import_reference_evidence as evidence
 from tools import sync_verified_baselines as sync
+
+
+def test_check_keeps_draft_results_out_of_verified_registry_baselines(
+    monkeypatch, capsys, tmp_path: Path
+):
+    monkeypatch.setattr(sync, "INDEX_PATH", tmp_path / "missing-index.json")
+    monkeypatch.setattr(sys, "argv", ["sync_verified_baselines.py", "--check"])
+
+    assert sync.main() == 0
+    assert "no draft result is exposed" in capsys.readouterr().out
+
+
+def test_sync_refuses_to_promote_draft_results(monkeypatch, capsys, tmp_path: Path):
+    monkeypatch.setattr(sync, "INDEX_PATH", tmp_path / "missing-index.json")
+    monkeypatch.setattr(sys, "argv", ["sync_verified_baselines.py"])
+
+    assert sync.main() == 1
+    assert "draft results must not be synchronized" in capsys.readouterr().err
 
 
 def _payload(case: evidence.EvidenceCase) -> dict:

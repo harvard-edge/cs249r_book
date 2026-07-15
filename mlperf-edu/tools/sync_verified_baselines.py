@@ -290,6 +290,32 @@ def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--check", action="store_true")
     args = parser.parse_args()
+    if not INDEX_PATH.is_file():
+        if not args.check:
+            print(
+                "FAIL: no promoted reference index exists; draft results must not "
+                "be synchronized as verified baselines",
+                file=sys.stderr,
+            )
+            return 1
+        stale = []
+        for _workload_id, relative_path in sorted(
+            reference_source_lock.PROMOTED_CONTRACT_PATHS.items()
+        ):
+            path = ROOT / relative_path
+            contract = yaml.safe_load(path.read_text(encoding="utf-8"))
+            if contract.get("verified_baseline") or contract.get("verified_baselines"):
+                stale.append(path)
+        if stale:
+            print("FAIL: registry contains baselines without a promoted index")
+            for path in stale:
+                print(f"  - {path.relative_to(ROOT)}")
+            return 1
+        print(
+            "PASS: no promoted index exists and no draft result is exposed as a "
+            "verified registry baseline"
+        )
+        return 0
     try:
         _index, records = load_index()
         writes: list[tuple[Path, bytes]] = []

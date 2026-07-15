@@ -43,12 +43,14 @@ quality-gated timing, portable provenance, and fail-closed public claims.
 
 ## Portfolio
 
-The proposed v0.1 portfolio contains seven workloads and ten evidence cases.
+The proposed v0.1 portfolio contains nine workloads and twelve evidence cases.
 
 | **Workload** | **Reason for Inclusion** | **Distinct Systems Value** |
 |:---|:---|:---|
 | `image-classification` | Directly inherits the MLPerf Tiny ResNet8 definition. | Dense convolution, input layout, and offline batching. |
 | `keyword-spotting` | Directly inherits the MLPerf Tiny DS-CNN definition. | Depthwise convolution and latency-sensitive small tensors. |
+| `anomaly-detection` | Directly inherits the MLPerf Tiny ToyCar autoencoder definition. | Spectrogram construction, dense reconstruction, and anomaly scoring. |
+| `visual-wake-words` | Directly inherits the MLPerf Tiny MobileNetV1 0.25 definition. | Depthwise convolution, image decoding, and compact vision dispatch. |
 | `causal-language-modeling` | Uses the established nanoGPT Shakespeare recipe without reducing it. | Transformer training, full inference, prefill, decode, and checkpoint lineage. |
 | `text-classification` | Uses a pinned published DistilBERT SST-2 checkpoint. | Encoder attention, tokenization, padding, and batching. |
 | `information-retrieval` | Reproduces the documented CrossEncoder NanoBEIR example. | Query-document pair scoring and ranking. |
@@ -56,8 +58,9 @@ The proposed v0.1 portfolio contains seven workloads and ten evidence cases.
 | `time-series-forecasting` | Uses the official PatchTST ETTm1 recipe and split. | Patch extraction, long-context attention, and multivariate sequence training. |
 
 One canonical `max` case is required for every workload. The causal workload
-adds full, prefill, and decode inference, producing ten evidence cases in
-total. Optimization choices are configurations, not additional workloads.
+adds full, prefill, and decode inference in addition to training, producing
+twelve evidence cases in total. Optimization choices are configurations, not
+additional workloads.
 
 ## Profiles
 
@@ -79,6 +82,12 @@ prevents phase comparisons from silently changing model weights.
 
 The committed index is the source for exact baseline values. Public documents
 should not copy mutable result tables by hand.
+
+The current draft index keeps evidence classes explicit. Six cases satisfy the
+five-run project quality and repeatability checks. Five cases have one verified
+measurement, and causal training has two quality-passing measurements with a
+5.19% diagnostic timing CV. Those six cases remain provisional and make no
+repeatability or promoted-baseline claim.
 
 ## Research Boundary
 
@@ -107,7 +116,7 @@ benchmark and weaken the admission rule.
 
 The first review should focus on five questions:
 
-1. Does the seven-workload portfolio cover enough distinct single-node behavior for a v0.1 classroom suite?
+1. Does the nine-workload portfolio cover enough distinct single-node behavior for a v0.1 classroom suite?
 2. Are the inherited quality targets and laptop execution boundaries defensible?
 3. Does the mode, phase, configuration, and profile taxonomy match mature benchmark practice?
 4. Are five-run repeatability, provenance, and disclosure rules sufficient for initial comparison?

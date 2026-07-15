@@ -28,6 +28,7 @@ def main() -> int:
                 f"page {number} has too little extractable text ({len(text)} chars)"
             )
     full_text = "\n".join(page_text)
+    search_text = re.sub(r"\s+", " ", full_text).replace("- ", "-")
     required = [
         "REVIEW DRAFT",
         "not an official MLCommons benchmark",
@@ -37,7 +38,7 @@ def main() -> int:
         "cross-platform replication",
     ]
     for phrase in required:
-        if phrase not in full_text:
+        if phrase not in search_text:
             raise SystemExit(f"required review disclosure missing from PDF: {phrase!r}")
     forbidden = [r"\bTODO\b", r"\bTBD\b", r"\bXXX\b", r"\?\?", r"Citation needed"]
     for pattern in forbidden:

@@ -7,9 +7,11 @@ not an MLCommons specification and does not create an official MLPerf result
 category. The normative words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY
 describe conformance within this repository.
 
-The portfolio contains seven workloads and ten evidence cases. Exact promoted
-measurements are content-addressed in `reference_results/index.json` and are
-rendered into the website and paper from that source.
+The portfolio contains nine workloads and twelve evidence cases. The current
+draft measurements are content-addressed in `provisional_results/index.json`
+and rendered into the website and paper from that source. Six records have
+complete five-run project evidence; six are explicitly provisional. No
+provisional record is a promoted baseline or an MLCommons-verified result.
 
 ## Purpose and Scope
 
@@ -56,6 +58,8 @@ ledger with explicit reasons.
 |:---|:---|:---|:---|:---|
 | `image-classification` | vision | MLCommons MLPerf Tiny | ResNet8 inference over the official accuracy set | dense convolution, layout, and batching |
 | `keyword-spotting` | tiny | MLCommons MLPerf Tiny and EEMBC | DS-CNN inference over the official accuracy set | depthwise convolution and small-tensor dispatch |
+| `anomaly-detection` | tiny | MLCommons MLPerf Tiny, ToyADMOS, and DCASE | autoencoder inference over the official ToyCar accuracy set | spectrogram preparation, dense reconstruction, and error scoring |
+| `visual-wake-words` | tiny | MLCommons MLPerf Tiny and EEMBC | MobileNetV1 0.25 inference over the official accuracy set | depthwise convolution, image decoding, and small-model dispatch |
 | `causal-language-modeling` | language | nanoGPT | training plus full, prefill, and decode inference | attention training, KV-cache execution, and phase transitions |
 | `text-classification` | language | DistilBERT and GLUE | pinned SST-2 checkpoint inference | encoder attention and variable-length batching |
 | `information-retrieval` | language | Sentence Transformers | CrossEncoder NanoBEIR reranking | pair tokenization, encoder scoring, and ranking |
@@ -130,6 +134,8 @@ The quality contracts are:
 |:---|:---|:---|
 | `image-classification` | top-1 accuracy at least 0.85 | MLPerf Tiny threshold |
 | `keyword-spotting` | top-1 accuracy at least 0.90 | MLPerf Tiny threshold |
+| `anomaly-detection` | ROC AUC at least 0.85 | MLPerf Tiny threshold |
+| `visual-wake-words` | top-1 accuracy at least 0.80 | MLPerf Tiny threshold |
 | `causal-language-modeling` | validation cross-entropy at most 1.4697 | nanoGPT published Shakespeare result |
 | `text-classification` | SST-2 accuracy at least 0.9105504587155964 | pinned checkpoint model-index metadata |
 | `information-retrieval` | mean nDCG@10 equal to the documented evaluator result | Sentence Transformers example |
@@ -159,10 +165,10 @@ attempt MUST be rejected and rerun in full.
 
 ## Evidence Closure
 
-The ten evidence cases are one canonical `max` case for every workload plus
+The twelve evidence cases are one canonical `max` case for every workload plus
 full, prefill, and decode inference for `causal-language-modeling`.
 
-Each retained case summary MUST contain:
+Each promoted case summary MUST contain:
 
 - Exactly five passing run records
 - Exact source SHA and clean-tree evidence
@@ -181,6 +187,15 @@ across phases.
 The importer independently verifies historical source code, registry
 contracts, raw reports, manifests, artifacts, package structure, digests,
 quality gates, repeatability, and lineage before writing the committed index.
+
+The draft index MAY retain a one-run or two-run provisional record to document
+execution and gate passage before promotion. Such a record MUST state its run
+count, MUST set promotion and public-baseline eligibility to false, MUST state
+that repeatability is not established, and MUST remain separate from
+`reference_results/`. The current draft contains six five-run verified records,
+five one-run provisional records, and one two-run provisional record. The
+two-run causal-training record passes its quality gate but has a diagnostic
+5.19% timing CV, so it is not repeatable under the 5% rule.
 
 ## Provenance and Packaging
 
@@ -232,9 +247,11 @@ case fingerprints and disclosures.
 A v0.1 review candidate is conformant only when:
 
 1. The native registry and packaged flat mirrors agree.
-2. Exactly seven workload definitions pass schema and taxonomy validation.
-3. All ten evidence cases pass import and case-level baseline synchronization.
-4. Every public claim is bound to the committed evidence index.
+2. Exactly nine workload definitions pass schema and taxonomy validation.
+3. All twelve draft evidence cases pass import, digest, source-lock, lineage,
+   and evidence-class validation.
+4. Every public claim is bound to the committed draft index and distinguishes
+   five-run verified evidence from provisional evidence.
 5. Every `min`, applicable `max`, and applicable `pro` path executes through the public CLI.
 6. CPU and Apple Silicon support claims have direct test evidence.
 7. Unit, integration, provenance, packaging, site, paper, and clean-install workflows pass.

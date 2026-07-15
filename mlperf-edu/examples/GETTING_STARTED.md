@@ -16,10 +16,12 @@ uv run mlperf list workloads
 uv run mlperf show image-classification
 ```
 
-The v0.1 registry contains seven stable workload identities.
+The v0.1 registry contains nine stable workload identities.
 
 - `image-classification`
 - `keyword-spotting`
+- `anomaly-detection`
+- `visual-wake-words`
 - `causal-language-modeling`
 - `text-classification`
 - `information-retrieval`

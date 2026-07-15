@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Generate paper tables from the promoted registry and evidence index."""
+"""Generate paper tables from the registry and draft reference-result index."""
 
 from __future__ import annotations
 
@@ -26,11 +26,15 @@ from tools import reference_source_lock  # noqa: E402
 
 REGISTRY = PROJECT / "registry"
 DATASETS = PROJECT / "datasets.yaml"
-REFERENCE_INDEX = PROJECT / "reference_results" / "index.json"
+REFERENCE_ROOT = PROJECT / "provisional_results"
+REFERENCE_INDEX = REFERENCE_ROOT / "index.json"
 SNAPSHOT = HERE / "evidence_snapshot.json"
 OUTPUT = HERE / "generated_registry.tex"
 
-SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.4"
+SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.5"
+INDEX_SCHEMA = "mlperf-edu-provisional-reference-index/0.1"
+RESULT_SCHEMA = "mlperf-edu-provisional-reference-result/0.1"
+SOURCE_LOCK_PATH = "provisional_results/source_lock.json"
 SHA256_RE = re.compile(r"^sha256:[0-9a-f]{64}$")
 GIT_SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -109,7 +113,7 @@ def format_number(value: float, metric: str) -> str:
 
 def format_gate(gate: dict[str, Any], *, role: str) -> str:
     if role == "performance-bearing":
-        return "5/5 functional passes"
+        return "functional pass"
     metric = str(gate.get("metric") or "quality")
     target = finite_number(gate.get("target"), label=f"{metric} target")
     direction = gate.get("direction")
@@ -177,7 +181,7 @@ def dataset_rows(workloads: dict[str, Workload]) -> str:
             " & ".join(
                 (
                     tex(entry.get("display_name") or identifier),
-                    tex(entry["split"]),
+                    rf"\nolinkurl{{{entry['split']}}}",
                     tex(entry["public_release_status"]),
                     str(usage[identifier]),
                 )
@@ -193,8 +197,8 @@ def safe_reference_path(value: object, *, label: str) -> Path:
     require(not relative.is_absolute() and ".." not in relative.parts, "unsafe path")
     path = (PROJECT / relative).resolve()
     require(
-        path.is_relative_to((PROJECT / "reference_results").resolve()),
-        f"evidence path escapes reference_results: {value}",
+        path.is_relative_to(REFERENCE_ROOT.resolve()),
+        f"evidence path escapes provisional_results: {value}",
     )
     return path
 
@@ -202,7 +206,7 @@ def safe_reference_path(value: object, *, label: str) -> Path:
 def load_evidence() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     index = read_json(REFERENCE_INDEX)
     require(
-        index.get("schema") == evidence.INDEX_SCHEMA,
+        index.get("schema") == INDEX_SCHEMA,
         "reference index schema mismatch",
     )
     source_git_sha = index.get("source_git_sha")
@@ -225,7 +229,7 @@ def load_evidence() -> tuple[dict[str, Any], list[dict[str, Any]]]:
     source_lock_entry = index.get("source_lock")
     require(isinstance(source_lock_entry, dict), "reference source lock is missing")
     require(
-        source_lock_entry.get("path") == evidence.SOURCE_LOCK_PATH,
+        source_lock_entry.get("path") == SOURCE_LOCK_PATH,
         "reference source-lock path drift",
     )
     source_lock_path = safe_reference_path(
@@ -260,26 +264,51 @@ def load_evidence() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         data = path.read_bytes()
         digest = sha256_bytes(data)
         require(SHA256_RE.fullmatch(digest) is not None, "invalid evidence digest")
-        require(digest == entry.get("evidence_sha256"), f"{case_id} digest drift")
+        require(digest == entry.get("sha256"), f"{case_id} digest drift")
         payload = json.loads(data)
         require(
-            payload.get("schema") == evidence.SUMMARY_SCHEMA,
+            payload.get("schema") == RESULT_SCHEMA,
             f"{case_id} schema drift",
         )
-        require(payload.get("status") == "valid", f"{case_id} is not valid")
+        require(payload.get("case_id") == case_id, f"{case_id} identity drift")
+        evidence_class = payload.get("evidence_class")
         require(
-            payload.get("eligible_for_promotion") is True, f"{case_id} not eligible"
+            evidence_class
+            in {"five-run-verified", "single-run-provisional", "two-run-provisional"},
+            f"{case_id} evidence class is invalid",
         )
+        measurement = payload.get("measurement") or {}
+        run_count = measurement.get("run_count")
+        require(run_count in {1, 2, 5}, f"{case_id} run count is invalid")
         require(
-            (payload.get("acceptance") or {}).get("passed") is True,
-            f"{case_id} acceptance failed",
+            len(measurement.get("values") or []) == run_count,
+            f"{case_id} measurement count drift",
         )
-        repeatability = payload.get("primary_metric_repeatability") or {}
-        require(repeatability.get("passed") is True, f"{case_id} repeatability failed")
-        require(len(payload.get("runs") or []) == 5, f"{case_id} needs five runs")
+        quality = payload.get("quality")
+        if isinstance(quality, dict):
+            require(quality.get("all_runs_pass") is True, f"{case_id} quality failed")
+        repeatability = payload.get("repeatability") or {}
+        if evidence_class == "five-run-verified":
+            require(run_count == 5, f"{case_id} verified evidence needs five runs")
+            require(
+                payload.get("eligible_for_promotion") is True,
+                f"{case_id} verified evidence is not promotion eligible",
+            )
+            require(
+                repeatability.get("passed") is True,
+                f"{case_id} verified repeatability failed",
+            )
+        else:
+            require(
+                payload.get("eligible_for_promotion") is False,
+                f"{case_id} provisional evidence cannot be promotion eligible",
+            )
+            require(
+                payload.get("review_eligible") is False,
+                f"{case_id} provisional evidence cannot be review eligible",
+            )
         expected_fields = {
             "workload": expected_case.workload.id,
-            "profile": expected_case.profile,
             "mode": expected_case.mode,
             "phase": expected_case.phase,
             "result_role": expected_case.result_role,
@@ -293,7 +322,11 @@ def load_evidence() -> tuple[dict[str, Any], list[dict[str, Any]]]:
                 payload.get(field) == expected_value,
                 f"{case_id} summary {field} drift",
             )
-        records.append({"entry": entry, "summary": payload})
+        require(
+            payload.get("profile") == expected_case.profile,
+            f"{case_id} summary profile drift",
+        )
+        records.append({"entry": entry, "result": payload})
     require(seen == set(expected), "reference case closure differs from the registry")
     return index, sorted(records, key=lambda item: item["entry"]["case_id"])
 
@@ -310,29 +343,52 @@ def evidence_rows(records: list[dict[str, Any]]) -> str:
     rows = []
     for record in records:
         entry = record["entry"]
-        payload = record["summary"]
+        payload = record["result"]
         role = str(entry["result_role"])
-        metric = str(entry["primary_metric"])
-        aggregate = payload["aggregate"]["primary_metric"]
+        measurement = payload["measurement"]
+        metric = str(measurement["primary_metric"])
+        aggregate = measurement["aggregate"]
         minimum = finite_number(aggregate["min"], label=f"{metric} min")
         median = finite_number(aggregate["median"], label=f"{metric} median")
         maximum = finite_number(aggregate["max"], label=f"{metric} max")
-        repeatability = payload["primary_metric_repeatability"]
-        cv = finite_number(
-            repeatability["coefficient_of_variation"], label=f"{metric} CV"
+        run_count = int(measurement["run_count"])
+        repeatability = payload["repeatability"]
+        cv_value = repeatability.get("coefficient_of_variation")
+        if cv_value is None:
+            repeatability_text = "not established"
+        else:
+            cv = finite_number(cv_value, label=f"{metric} CV")
+            repeatability_text = f"{100.0 * cv:.2f}\\%"
+            if repeatability.get("passed") is False:
+                repeatability_text += " diagnostic"
+        quality = payload.get("quality")
+        gate = quality.get("gate") if isinstance(quality, dict) else {}
+        gate_text = format_gate(gate or {}, role=role)
+        reference = format_number(median, metric)
+        if run_count > 1:
+            reference += (
+                f" [{format_number(minimum, metric)}, {format_number(maximum, metric)}]"
+            )
+        evidence_label = {
+            "five-run-verified": "verified",
+            "single-run-provisional": "provisional",
+            "two-run-provisional": "provisional",
+        }[str(payload["evidence_class"])]
+        evidence_label += f" ({run_count})"
+        devices = ", ".join(
+            (payload.get("execution") or {}).get("executed_devices") or []
         )
-        gate = payload.get("quality_gate") or payload.get("functional_gate") or {}
         rows.append(
             " & ".join(
                 (
                     case_display(entry),
                     "Score" if role == "score-bearing" else "Perf.",
+                    evidence_label,
                     tex(METRIC_LABELS.get(metric, metric)),
-                    format_gate(gate, role=role),
-                    format_number(median, metric),
-                    f"[{format_number(minimum, metric)}, {format_number(maximum, metric)}]",
-                    f"{100.0 * cv:.2f}\\%",
-                    tex(payload["device_requested"]),
+                    gate_text,
+                    reference,
+                    repeatability_text,
+                    tex(devices),
                 )
             )
             + r" \\"
@@ -343,9 +399,11 @@ def evidence_rows(records: list[dict[str, Any]]) -> str:
 def snapshot_date(records: list[dict[str, Any]]) -> str:
     timestamps = []
     for record in records:
-        match = re.search(r"_(\d{8})T", str(record["entry"]["evidence_id"]))
-        require(match is not None, "evidence ID lacks a date")
-        timestamps.append(datetime.strptime(match.group(1), "%Y%m%d"))
+        source_summary = record["result"].get("source_summary") or {}
+        match = re.search(r"_(\d{8})T", str(source_summary.get("evidence_id") or ""))
+        if match is not None:
+            timestamps.append(datetime.strptime(match.group(1), "%Y%m%d"))
+    require(timestamps, "reference results lack a source date")
     latest = max(timestamps)
     return f"{latest.strftime('%B')} {latest.day}, {latest.year}"
 
@@ -356,6 +414,7 @@ def render_tex(
     records: list[dict[str, Any]],
 ) -> str:
     roles = Counter(record["entry"]["result_role"] for record in records)
+    evidence_classes = Counter(record["result"]["evidence_class"] for record in records)
     lines = [
         "% Generated by generate_registry_snapshot.py. Do not edit by hand.",
         rf"\newcommand{{\PaperSnapshotDate}}{{{tex(snapshot_date(records))}}}",
@@ -365,6 +424,8 @@ def render_tex(
         rf"\newcommand{{\ScoreBearingCases}}{{{roles['score-bearing']}}}",
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
+        rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
+        rf"\newcommand{{\ProvisionalEvidenceCases}}{{{len(records) - evidence_classes['five-run-verified']}}}",
         r"\newcommand{\WorkloadContractRows}{%",
         workload_rows(workloads),
         "}",
@@ -394,8 +455,9 @@ def main() -> int:
         "case_count": len(records),
         "cases": [record["entry"] for record in records],
         "publication_boundary": (
-            "These are project reference measurements from one guarded laptop "
-            "campaign, not MLCommons-verified results."
+            "These are project reference measurements from one disclosed laptop. "
+            "Five-run records establish project repeatability; provisional records "
+            "establish execution and quality only. None are MLCommons-verified results."
         ),
     }
     SNAPSHOT.write_text(json.dumps(snapshot, indent=2, sort_keys=True) + "\n")

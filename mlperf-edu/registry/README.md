@@ -14,7 +14,9 @@ measurement sidecar and SHA-256 digest pass `tools/check_taxonomy.py`.
 | `language` | `information-retrieval` | `information-retrieval` | `experimental` |
 | `language` | `text-classification` | `text-classification` | `experimental` |
 | `timeseries` | `time-series-forecasting` | `time-series-forecasting` | `experimental` |
+| `tiny` | `anomaly-detection` | `anomaly-detection` | `experimental` |
 | `tiny` | `keyword-spotting` | `keyword-spotting` | `experimental` |
+| `tiny` | `visual-wake-words` | `visual-wake-words` | `experimental` |
 | `vision` | `image-classification` | `image-classification` | `experimental` |
 
 Promotion changes a workload's public status only after its canonical case is

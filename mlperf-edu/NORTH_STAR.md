@@ -72,10 +72,13 @@ An admitted workload must answer yes to every question:
 5. Does it add distinct classroom value?
 6. Does it expose distinct single-node systems behavior?
 7. Can all assets, versions, hashes, and adaptations be disclosed?
-8. Can five fresh processes meet quality and repeatability gates?
+8. Can the unchanged canonical `max` path pass its quality or functional gate
+   on laptop-class hardware?
 
-The seven admitted workloads satisfy this test. The ten evidence cases cover
-their canonical `max` paths plus three causal inference phases.
+The nine admitted workloads satisfy this test. The twelve evidence cases cover
+their canonical `max` paths plus three causal inference phases. Six cases also
+satisfy the five-run repeatability gate. The other six remain provisional and
+do not make a repeatability or promoted-baseline claim.
 
 ## Success Criteria
 

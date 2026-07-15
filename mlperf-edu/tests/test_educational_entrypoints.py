@@ -257,3 +257,38 @@ def test_wheel_guard_rejects_a_retired_module(tmp_path: Path) -> None:
 
     with pytest.raises(RuntimeError, match="retired module"):
         verify_wheel(wheel_path)
+
+
+def _write_minimal_indexed_wheel(
+    path: Path, *, stale_member: str | None = None
+) -> None:
+    mirror = PROJECT_ROOT / "src" / "mlperf_edu"
+    index = json.loads((mirror / "provisional_results" / "index.json").read_text())
+    members = {
+        "mlperf_edu/workloads.yaml": mirror / "workloads.yaml",
+        "mlperf_edu/datasets.yaml": mirror / "datasets.yaml",
+        "mlperf_edu/provisional_results/index.json": (
+            mirror / "provisional_results" / "index.json"
+        ),
+        "mlperf_edu/provisional_results/source_lock.json": (
+            mirror / "provisional_results" / "source_lock.json"
+        ),
+    }
+    for entry in index["cases"]:
+        members[f"mlperf_edu/{entry['path']}"] = mirror / entry["path"]
+    with zipfile.ZipFile(path, "w") as archive:
+        for member, source in members.items():
+            archive.writestr(member, source.read_bytes())
+        if stale_member:
+            archive.writestr(stale_member, "{}\n")
+
+
+def test_wheel_guard_rejects_unindexed_result_data(tmp_path: Path) -> None:
+    wheel_path = tmp_path / "stale-result.whl"
+    _write_minimal_indexed_wheel(
+        wheel_path,
+        stale_member="mlperf_edu/reference_results/unindexed.json",
+    )
+
+    with pytest.raises(RuntimeError, match="stale unindexed reference result"):
+        verify_wheel(wheel_path)

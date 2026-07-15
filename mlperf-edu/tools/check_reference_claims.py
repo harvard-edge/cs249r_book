@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail closed when public review claims drift from verified case evidence."""
+"""Fail closed when public review claims drift from indexed case evidence."""
 
 from __future__ import annotations
 
@@ -22,6 +22,7 @@ from tools import reference_source_lock  # noqa: E402
 
 
 INDEX_PATH = ROOT / "reference_results" / "index.json"
+PROVISIONAL_INDEX_PATH = ROOT / "provisional_results" / "index.json"
 PUBLIC_DOCUMENTS = (
     "README.md",
     "SPEC.md",
@@ -212,6 +213,112 @@ def load_cases() -> tuple[str, dict[str, tuple[dict[str, Any], dict[str, Any]]]]
     return source_sha, records
 
 
+def load_provisional_cases() -> tuple[
+    str, dict[str, tuple[dict[str, Any], dict[str, Any]]]
+]:
+    index = load_json(PROVISIONAL_INDEX_PATH)
+    expected_schema = "mlperf-edu-provisional-reference-index/0.1"
+    if index.get("schema") != expected_schema:
+        raise ClaimError(
+            f"draft index schema is {index.get('schema')!r}, expected "
+            f"{expected_schema!r}"
+        )
+    source_sha = index.get("source_git_sha")
+    if not isinstance(source_sha, str) or not SHA40_RE.fullmatch(source_sha):
+        raise ClaimError("draft index source_git_sha is invalid")
+    entries = index.get("cases")
+    if not isinstance(entries, list) or index.get("case_count") != len(entries):
+        raise ClaimError("draft index case_count does not match cases")
+
+    expected = evidence.expected_cases()
+    expected_workloads = {case.workload.id for case in expected.values()}
+    if index.get("workload_count") != len(expected_workloads):
+        raise ClaimError("draft index workload_count is invalid")
+
+    lock_entry = index.get("source_lock") or {}
+    lock_path = safe_repository_path(lock_entry.get("path"))
+    if evidence.sha256_file(lock_path) != lock_entry.get("sha256"):
+        raise ClaimError("draft source-lock digest does not match index")
+    reference_source_lock.load_source_lock(
+        lock_path,
+        project_root=ROOT,
+        expected_source_git_sha=source_sha,
+    )
+
+    records: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}
+    class_counts: dict[str, int] = {}
+    for entry in entries:
+        if not isinstance(entry, dict):
+            raise ClaimError("draft index cases must be objects")
+        case_id = entry.get("case_id")
+        if not isinstance(case_id, str) or case_id in records:
+            raise ClaimError(f"missing or duplicate draft case ID {case_id!r}")
+        expected_case = expected.get(case_id)
+        if expected_case is None:
+            raise ClaimError(f"unexpected draft case {case_id}")
+        path = safe_repository_path(entry.get("path"))
+        payload = load_json(path)
+        if evidence.sha256_file(path) != entry.get("sha256"):
+            raise ClaimError(f"{case_id}: draft result digest does not match index")
+        if payload.get("schema") != "mlperf-edu-provisional-reference-result/0.1":
+            raise ClaimError(f"{case_id}: draft result schema is invalid")
+        expected_fields = {
+            "case_id": case_id,
+            "workload": expected_case.workload.id,
+            "profile": expected_case.profile,
+            "mode": expected_case.mode,
+            "phase": expected_case.phase,
+            "result_role": expected_case.result_role,
+            "source_git_sha": source_sha,
+        }
+        for field, expected_value in expected_fields.items():
+            if payload.get(field) != expected_value:
+                raise ClaimError(
+                    f"{case_id}: draft {field} is {payload.get(field)!r}, "
+                    f"expected {expected_value!r}"
+                )
+        evidence_class = payload.get("evidence_class")
+        run_count = (payload.get("measurement") or {}).get("run_count")
+        expected_runs = {
+            "five-run-verified": 5,
+            "single-run-provisional": 1,
+            "two-run-provisional": 2,
+        }.get(evidence_class)
+        if run_count != expected_runs:
+            raise ClaimError(f"{case_id}: draft evidence class/run count mismatch")
+        quality = payload.get("quality")
+        if isinstance(quality, dict) and quality.get("all_runs_pass") is not True:
+            raise ClaimError(f"{case_id}: draft quality gate did not pass")
+        repeatability = payload.get("repeatability") or {}
+        if evidence_class == "five-run-verified":
+            if (
+                payload.get("eligible_for_promotion") is not True
+                or repeatability.get("passed") is not True
+            ):
+                raise ClaimError(f"{case_id}: five-run draft evidence is invalid")
+        elif (
+            payload.get("eligible_for_promotion") is not False
+            or payload.get("review_eligible") is not False
+        ):
+            raise ClaimError(f"{case_id}: provisional evidence eligibility is invalid")
+        class_counts[str(evidence_class)] = class_counts.get(str(evidence_class), 0) + 1
+        records[case_id] = (entry, payload)
+
+    if set(records) != set(expected):
+        raise ClaimError(
+            "draft case closure mismatch; "
+            f"missing={sorted(set(expected) - set(records))}, "
+            f"extra={sorted(set(records) - set(expected))}"
+        )
+    if class_counts.get("five-run-verified", 0) != index.get(
+        "five_run_verified_case_count"
+    ) or len(records) - class_counts.get("five-run-verified", 0) != index.get(
+        "provisional_case_count"
+    ):
+        raise ClaimError("draft evidence-class counts do not match index")
+    return source_sha, records
+
+
 def check_registry_baselines(
     records: Mapping[str, tuple[dict[str, Any], dict[str, Any]]],
 ) -> list[str]:
@@ -264,7 +371,13 @@ def check_documents(
     workload_claim = count_claim_pattern(len(workload_ids), "workload")
     case_claim = count_claim_pattern(len(records), "evidence case")
     known_evidence_ids = {
-        str(entry["evidence_id"]) for entry, _payload in records.values()
+        str(evidence_id)
+        for entry, payload in records.values()
+        for evidence_id in (
+            entry.get("evidence_id"),
+            (payload.get("source_summary") or {}).get("evidence_id"),
+        )
+        if evidence_id
     }
     for name in PUBLIC_DOCUMENTS:
         path = ROOT / name
@@ -311,8 +424,14 @@ def main() -> int:
     )
     parser.parse_args()
     try:
-        source_sha, records = load_cases()
-        errors = check_registry_baselines(records)
+        if INDEX_PATH.is_file():
+            source_sha, records = load_cases()
+            errors = check_registry_baselines(records)
+            evidence_label = "promoted"
+        else:
+            source_sha, records = load_provisional_cases()
+            errors = []
+            evidence_label = "draft"
         errors.extend(check_documents(source_sha, records))
     except (ClaimError, OSError, yaml.YAMLError) as exc:
         print(f"FAIL: reference claim inputs are invalid: {exc}")
@@ -323,7 +442,7 @@ def main() -> int:
             print(f"  - {error}")
         return 1
     print(
-        f"PASS: {len(records)} case claims across "
+        f"PASS: {len(records)} {evidence_label} case claims across "
         f"{len({payload['workload'] for _entry, payload in records.values()})} workloads"
     )
     return 0

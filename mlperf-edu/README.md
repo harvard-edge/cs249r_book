@@ -6,7 +6,7 @@ adapts the reproducibility, verification, disclosure, and comparability
 discipline of mature benchmark suites to classroom-scale PyTorch workloads.
 It is not an official MLCommons benchmark and is not endorsed by MLCommons.
 
-The v0.1 portfolio contains seven workloads and ten evidence cases. Every
+The v0.1 portfolio contains nine workloads and twelve evidence cases. Every
 score-bearing definition inherits an established upstream model, dataset
 split, evaluator, and quality reference. MLPerf EDU contributes the thin
 PyTorch adapter, execution harness, measurement controls, provenance, and
@@ -21,7 +21,6 @@ git clone https://github.com/harvard-edge/cs249r_book
 cd cs249r_book/mlperf-edu
 uv sync --locked --extra dev
 uv run mlperf doctor
-uv run mlperf audit
 ```
 
 Fetch assets before measurement so network transfer is outside the timed
@@ -39,6 +38,8 @@ uv run mlperf run --workload image-classification --profile max \
 |:---|:---|:---|:---|
 | `image-classification` | MLPerf Tiny float ResNet8 and its 200-sample CIFAR-10 accuracy set | inference | top-1 accuracy at least 0.85 |
 | `keyword-spotting` | MLPerf Tiny DS-CNN and the 1,000-example EEMBC accuracy set | inference | top-1 accuracy at least 0.90 |
+| `anomaly-detection` | MLPerf Tiny ToyADMOS autoencoder and the 248-recording ToyCar accuracy set | inference | ROC AUC at least 0.85 |
+| `visual-wake-words` | MLPerf Tiny MobileNetV1 0.25 and the 1,000-example EEMBC accuracy set | inference | top-1 accuracy at least 0.80 |
 | `causal-language-modeling` | nanoGPT Shakespeare character configuration and Tiny Shakespeare | training; full, prefill, and decode inference | validation cross-entropy at most 1.4697; every inference run passes its functional gate |
 | `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | inference | accuracy at least the exact verified model-index result of 0.9105504587155964 |
 | `information-retrieval` | Sentence Transformers CrossEncoder NanoBEIR example | inference | exact documented mean nDCG@10 |
@@ -82,15 +83,20 @@ outside v0.1.
 
 ## Evidence and Provenance
 
-The ten evidence cases consist of one canonical `max` case for each of the
-seven workloads plus full, prefill, and decode inference for
-`causal-language-modeling`. Each promoted case requires five fresh processes
-at the canonical seed. Every run must pass its quality or functional gate, and
-the primary timing coefficient of variation must not exceed 5%.
+The twelve evidence cases consist of one canonical `max` case for each of the
+nine workloads plus full, prefill, and decode inference for
+`causal-language-modeling`. The draft snapshot in
+`provisional_results/index.json` contains six five-run verified records and six
+explicitly provisional records. Provisional records establish execution and
+gate passage only; they do not establish repeatability or qualify as promoted
+baselines.
 
-`reference_results/index.json` is the authoritative case index. It binds each
-summary to its SHA-256 digest, exact source revision, mode, phase, result role,
-metric aggregate, repeatability decision, and optional training lineage. Raw
+Promotion still requires five fresh processes at the canonical seed. Every run
+must pass its quality or functional gate, and the primary timing coefficient
+of variation must not exceed 5%. A future complete promoted index will be
+written under `reference_results/`. Both index forms bind each result to its
+SHA-256 digest, exact source revision, mode, phase, result role, metric
+aggregate, repeatability decision, and optional training lineage. Raw
 checkpoints and dataset-derived files remain in the local review handoff. They
 are not committed to the repository.
 
@@ -126,7 +132,7 @@ uv run python tools/generate_docs.py --check
 uv run make -C paper clean all check
 quarto render site
 uv run python tools/check_site_layout.py --build-dir site/_build --report-dir site-layout-report
-uv build
+uv run python tools/build_wheel.py --out-dir /tmp/mlperf-edu-wheel
 ```
 
 The release workflow also installs the wheel in a clean Python environment,

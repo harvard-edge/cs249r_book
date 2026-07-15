@@ -16,7 +16,7 @@ provenance, and report surface needed to run that contract locally.
 
 A missing upstream component is not an invitation to create a convenient
 substitute. The task is deferred or rejected. This policy is why v0.1 contains
-seven workloads rather than a large coverage matrix, and why MiniGo is the RL
+nine workloads rather than a large coverage matrix, and why MiniGo is the RL
 reference without becoming a v0.1 workload.
 
 ## Design Backward From Classroom Use
@@ -28,11 +28,12 @@ instructor should be able to preflight the same path and grade the resulting
 artifacts. A researcher should be able to repeat a controlled single-node
 experiment without changing workload identity.
 
-The seven-workload portfolio deliberately spans dense convolution, compact
-audio convolution, autoregressive Transformer training and inference, encoder
-classification, cross-encoder reranking, sparse graph message passing, and
-long-horizon forecasting. Each workload earns its place through distinct
-learning value and distinct systems behavior.
+The nine-workload portfolio deliberately spans dense and depthwise vision
+convolution, compact audio convolution, autoencoder anomaly scoring,
+autoregressive Transformer training and inference, encoder classification,
+cross-encoder reranking, sparse graph message passing, and long-horizon
+forecasting. Each workload earns its place through distinct learning value and
+distinct systems behavior.
 
 ## Keep Identity Stable
 
@@ -109,6 +110,9 @@ of promising a universal duration.
 
 A green run cannot settle dataset rights, grant MLCommons endorsement, or
 authenticate a result producer. Technical release checks and external review
-decisions therefore remain separate. The project is ready for review when the
-seven workloads and ten evidence cases are internally complete and every open
-external decision is stated plainly.
+decisions therefore remain separate. The project is ready for design and
+implementation review when all nine workloads and twelve evidence cases
+execute, every gate result is verified, provisional measurements are
+distinguished from five-run evidence, and every open external decision is
+stated plainly. Promotion remains a separate five-run requirement for every
+case.

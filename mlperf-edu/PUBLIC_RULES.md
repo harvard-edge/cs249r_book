@@ -8,9 +8,12 @@ acceptance.
 
 ## Eligible Workloads and Cases
 
-Only registry-defined cases in `reference_results/index.json` can support a
-public reference claim. The v0.1 closure contains seven workloads and ten
-evidence cases. A local run outside that closure can be useful for teaching or
+Only registry-defined cases in a complete `reference_results/index.json` can
+support a promoted public reference claim. The v0.1 closure contains nine
+workloads and twelve evidence cases. The current
+`provisional_results/index.json` contains six five-run verified project records
+and six provisional records, but it is a draft-review surface and not a public
+baseline index. A local run outside the closure can be useful for teaching or
 research, but it is not a promoted reference result.
 
 ## Result Roles
@@ -81,9 +84,11 @@ performance values are measurements, not pass thresholds.
 ## Causal Lineage
 
 Full, prefill, and decode inference must use one portable package that selects
-exactly one committed training execution. The selected run must represent the
-five-run median quality. The package, checkpoint, source report, and source
-provenance digests must match across all three phases.
+exactly one committed training execution. For promotion, the selected run must
+represent the five-run median quality. The package, checkpoint, source report,
+and source provenance digests must match across all three phases. A provisional
+lineage package must remain labeled provisional even when every digest check
+passes.
 
 ## Required Disclosure
 
@@ -137,5 +142,7 @@ The following statements are not permitted:
 - Replacing an authoritative task with a smaller project-created proxy
 - Claiming distributed or datacenter relevance from the v0.1 suite
 
-Exact promoted values and evidence IDs come from the committed ten-case index.
-Hand-written documents must not maintain competing baseline tables.
+Exact promoted values and evidence IDs will come from the complete strict
+index. Draft values and evidence classes come from the committed twelve-case
+provisional index. Hand-written documents must not maintain competing baseline
+tables.

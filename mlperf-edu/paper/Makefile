@@ -7,7 +7,7 @@ BUILD_DIR := build
 OUTPUT_DIR := output/pdf
 OUTPUT_PDF := $(OUTPUT_DIR)/mlperf-edu-review-draft.pdf
 REGISTRY_INPUTS := $(shell find ../registry -type f -name '*.yaml' 2>/dev/null) ../datasets.yaml
-REFERENCE_INPUTS := ../reference_results/index.json $(shell find ../reference_results -type f -name '*.json' ! -name 'index.json' 2>/dev/null)
+REFERENCE_INPUTS := ../provisional_results/index.json $(shell find ../provisional_results -type f -name '*.json' ! -name 'index.json' 2>/dev/null)
 GENERATED := generated_registry.tex
 
 .PHONY: all check clean FORCE

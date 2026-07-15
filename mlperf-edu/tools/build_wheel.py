@@ -64,47 +64,67 @@ def verify_wheel(wheel_path: Path) -> None:
                 + ", ".join(forbidden)
             )
 
-        evidence_index_path = ROOT / "reference_results" / "index.json"
-        evidence_index_bytes = evidence_index_path.read_bytes()
-        evidence_index = json.loads(evidence_index_bytes)
         exact_assets = {
             "mlperf_edu/workloads.yaml": ROOT / "src" / "mlperf_edu" / "workloads.yaml",
             "mlperf_edu/datasets.yaml": ROOT / "src" / "mlperf_edu" / "datasets.yaml",
-            "mlperf_edu/reference_results/index.json": ROOT
-            / "src"
-            / "mlperf_edu"
-            / "reference_results"
-            / "index.json",
-            "mlperf_edu/reference_results/source_lock.json": ROOT
-            / "src"
-            / "mlperf_edu"
-            / "reference_results"
-            / "source_lock.json",
         }
-        expected_reference_members = {
-            "mlperf_edu/reference_results/index.json",
-            "mlperf_edu/reference_results/source_lock.json",
-            *{
-                f"mlperf_edu/{entry['path']}"
-                for entry in evidence_index.get("summaries") or []
-            },
-        }
-        required = {*exact_assets, *expected_reference_members}
+        result_bundles: list[tuple[str, dict, bytes, str]] = []
+        for directory, digest_field in (
+            ("reference_results", "evidence_sha256"),
+            ("provisional_results", "sha256"),
+        ):
+            source_index_path = ROOT / directory / "index.json"
+            if not source_index_path.is_file():
+                continue
+            index_bytes = source_index_path.read_bytes()
+            index = json.loads(index_bytes)
+            mirror_root = ROOT / "src" / "mlperf_edu" / directory
+            exact_assets[f"mlperf_edu/{directory}/index.json"] = (
+                mirror_root / "index.json"
+            )
+            exact_assets[f"mlperf_edu/{directory}/source_lock.json"] = (
+                mirror_root / "source_lock.json"
+            )
+            result_bundles.append((directory, index, index_bytes, digest_field))
+        if not result_bundles:
+            raise RuntimeError("wheel source tree has no indexed reference results")
+
+        expected_result_members: set[str] = set()
+        for directory, index, _index_bytes, _digest_field in result_bundles:
+            expected_result_members.update(
+                {
+                    f"mlperf_edu/{directory}/index.json",
+                    f"mlperf_edu/{directory}/source_lock.json",
+                }
+            )
+            entries = index.get("cases")
+            if not isinstance(entries, list) or not entries:
+                raise RuntimeError(f"{directory} index has no cases")
+            if index.get("case_count") != len(entries):
+                raise RuntimeError(f"{directory} index case count is inconsistent")
+            expected_result_members.update(
+                f"mlperf_edu/{entry['path']}" for entry in entries
+            )
+
+        required = {*exact_assets, *expected_result_members}
         missing = sorted(required.difference(members))
         if missing:
             raise RuntimeError(
                 "wheel is missing required packaged asset(s): " + ", ".join(missing)
             )
-        actual_reference_members = {
+        actual_result_members = {
             member
             for member in members
-            if member.startswith("mlperf_edu/reference_results/")
+            if any(
+                member.startswith(f"mlperf_edu/{directory}/")
+                for directory in ("reference_results", "provisional_results")
+            )
             and member.endswith(".json")
         }
-        extras = sorted(actual_reference_members.difference(expected_reference_members))
+        extras = sorted(actual_result_members.difference(expected_result_members))
         if extras:
             raise RuntimeError(
-                "wheel contains stale unindexed reference evidence: "
+                "wheel contains stale unindexed reference result data: "
                 + ", ".join(extras)
             )
 
@@ -118,29 +138,32 @@ def verify_wheel(wheel_path: Path) -> None:
             != (ROOT / "datasets.yaml").read_bytes()
         ):
             raise RuntimeError("packaged dataset catalog does not match datasets.yaml")
-        if (
-            archive.read("mlperf_edu/reference_results/index.json")
-            != evidence_index_bytes
-        ):
-            raise RuntimeError(
-                "wheel reference index does not match the canonical index"
-            )
-        lock_data = archive.read("mlperf_edu/reference_results/source_lock.json")
-        expected_lock_digest = (evidence_index.get("source_lock") or {}).get("sha256")
-        actual_lock_digest = "sha256:" + hashlib.sha256(lock_data).hexdigest()
-        if actual_lock_digest != expected_lock_digest:
-            raise RuntimeError("wheel reference source-lock digest mismatch")
-        for entry in evidence_index.get("summaries") or []:
-            member = f"mlperf_edu/{entry['path']}"
-            data = archive.read(member)
-            digest = hashlib.sha256(data).hexdigest()
-            if digest != entry.get("evidence_sha256"):
-                raise RuntimeError(f"wheel reference summary digest mismatch: {member}")
-            source = ROOT / "src" / "mlperf_edu" / str(entry["path"])
-            if data != source.read_bytes():
+        for directory, index, index_bytes, digest_field in result_bundles:
+            index_member = f"mlperf_edu/{directory}/index.json"
+            if archive.read(index_member) != index_bytes:
                 raise RuntimeError(
-                    f"wheel reference summary does not match source mirror: {member}"
+                    f"wheel {directory} index does not match the canonical index"
                 )
+            lock_member = f"mlperf_edu/{directory}/source_lock.json"
+            lock_data = archive.read(lock_member)
+            expected_lock_digest = (index.get("source_lock") or {}).get("sha256")
+            actual_lock_digest = "sha256:" + hashlib.sha256(lock_data).hexdigest()
+            if actual_lock_digest != expected_lock_digest:
+                raise RuntimeError(f"wheel {directory} source-lock digest mismatch")
+            for entry in index["cases"]:
+                member = f"mlperf_edu/{entry['path']}"
+                data = archive.read(member)
+                digest = "sha256:" + hashlib.sha256(data).hexdigest()
+                if digest != entry.get(digest_field):
+                    raise RuntimeError(
+                        f"wheel {directory} result digest mismatch: {member}"
+                    )
+                source = ROOT / "src" / "mlperf_edu" / str(entry["path"])
+                if data != source.read_bytes():
+                    raise RuntimeError(
+                        f"wheel {directory} result does not match source mirror: "
+                        f"{member}"
+                    )
 
 
 def build_wheel(out_dir: Path) -> Path:

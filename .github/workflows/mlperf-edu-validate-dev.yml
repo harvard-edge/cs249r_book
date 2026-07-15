@@ -89,6 +89,7 @@ jobs:
             tools/build_wheel.py
             tools/generate_docs.py
             tools/generate_review_packets.py
+            tools/import_provisional_reference_results.py
             tools/import_reference_evidence.py
             tools/reference_source_lock.py
             tools/run_reference_sweep.py
@@ -131,6 +132,7 @@ jobs:
             tools/build_wheel.py
             tools/generate_docs.py
             tools/generate_review_packets.py
+            tools/import_provisional_reference_results.py
             tools/import_reference_evidence.py
             tools/reference_source_lock.py
             tools/run_reference_sweep.py
@@ -150,9 +152,18 @@ jobs:
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
         run: uv run pytest tests/test_manifest.py tests/test_edu_cli.py -k 'manifest or package or portable'
 
-      - name: Audit the Local Registry Contract
+      - name: Confirm the Strict Public Audit Fails Closed
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
-        run: uv run mlperf audit
+        shell: bash
+        run: |
+          set +e
+          uv run mlperf audit --policy public
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected the experimental portfolio to return public-audit status 1, got $status" >&2
+            exit 1
+          fi
 
   generated-contracts:
     name: 'Registry, Taxonomy, Review Packets, and Docs Drift'
@@ -191,7 +202,10 @@ jobs:
 
       - name: Check Committed Reference Evidence Mirrors
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
-        run: uv run pytest tests/test_import_reference_evidence.py
+        run: >-
+          uv run pytest
+          tests/test_import_reference_evidence.py
+          tests/test_import_provisional_reference_results.py
 
       - name: Check Hand-Written Reference Claims
         working-directory: ${{ env.MLPERF_EDU_ROOT }}
@@ -353,12 +367,16 @@ jobs:
           test -n "$wheel"
           unzip -l "$wheel" | grep -q 'mlperf_edu/workloads.yaml'
           unzip -l "$wheel" | grep -q 'mlperf_edu/datasets.yaml'
-          unzip -l "$wheel" | grep -q 'mlperf_edu/reference_results/index.json'
+          unzip -l "$wheel" | grep -q 'mlperf_edu/provisional_results/index.json'
           uv venv /tmp/mlperf-edu-wheel-smoke --python 3.12
           uv pip install --python /tmp/mlperf-edu-wheel-smoke/bin/python "$wheel"
           cd /tmp
           /tmp/mlperf-edu-wheel-smoke/bin/mlperf list --format json > /tmp/mlperf-edu-list.json
-          /tmp/mlperf-edu-wheel-smoke/bin/mlperf audit
+          set +e
+          /tmp/mlperf-edu-wheel-smoke/bin/mlperf audit --policy public
+          audit_status=$?
+          set -e
+          test "$audit_status" -eq 1
           run_dir=/tmp/mlperf-edu-installed-run
           /tmp/mlperf-edu-wheel-smoke/bin/mlperf run \
             --workload time-series-forecasting \
@@ -403,11 +421,13 @@ jobs:
               for workload in registry.values()
           )
           index = json.loads(
-              files("mlperf_edu").joinpath("reference_results/index.json").read_text()
+              files("mlperf_edu").joinpath("provisional_results/index.json").read_text()
           )
           listed = json.load(open("/tmp/mlperf-edu-list.json"))
           assert index["case_count"] == expected_case_count, index
           assert index["workload_count"] == len(registry), index
+          assert index["five_run_verified_case_count"] == 6, index
+          assert index["provisional_case_count"] == 6, index
           assert len(listed["workloads"]) == len(registry), listed
           PY
 
