@@ -18,6 +18,7 @@ from mlperf.manifest import build_provd, verify_provd
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
     configured_seed,
+    select_torch_device,
     synchronize_device,
     training_measurement_protocol,
 )
@@ -56,7 +57,11 @@ def _dispatch_causal_language_modeling(
     phase: str | None,
 ) -> dict[str, Any]:
     if mode == "training":
-        report = run_min(workload, output_dir) if profile == "min" else run_max(workload, output_dir)
+        report = (
+            run_min(workload, output_dir)
+            if profile == "min"
+            else run_max(workload, output_dir)
+        )
         report["mode"] = "training"
         report["phase"] = None
         return report
@@ -76,13 +81,17 @@ def _dispatch_causal_language_modeling(
             else run_decode_max(workload, output_dir, phase=resolved_phase)
         )
     else:
-        raise ValueError(f"unsupported causal-language-modeling inference phase: {resolved_phase}")
+        raise ValueError(
+            f"unsupported causal-language-modeling inference phase: {resolved_phase}"
+        )
     report["mode"] = "inference"
     report["phase"] = resolved_phase
     phase_contract = (
-        (((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get("phases") or {}).get(resolved_phase)
+        ((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get(
+            "phases"
+        )
         or {}
-    )
+    ).get(resolved_phase) or {}
     if phase_contract.get("measurement_protocol"):
         report["measurement_protocol"] = {
             **phase_contract["measurement_protocol"],
@@ -288,7 +297,7 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
 
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = _select_device()
+    device = select_torch_device()
     context_len = _env_int("MLPERF_EDU_PREFILL_MAX_CONTEXT", 256)
     batch_size = _env_int("MLPERF_EDU_PREFILL_MAX_BATCH", 1)
     n_warmup = _env_int("MLPERF_EDU_PREFILL_MAX_WARMUP", 3)
@@ -304,9 +313,7 @@ def run_prefill_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     )
     n_params = sum(p.numel() for p in model.parameters())
     target_met = bool(result.get("prefill_tokens_per_sec", 0) > 0)
-    phase_contract = workload.raw["mode_contracts"]["inference"]["phases"][
-        "prefill"
-    ]
+    phase_contract = workload.raw["mode_contracts"]["inference"]["phases"]["prefill"]
 
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = _artifact_stem(workload, "inference", "prefill")
@@ -477,7 +484,7 @@ def run_decode_max(
 
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = _select_device()
+    device = select_torch_device()
     prefill_ctx = _env_int("MLPERF_EDU_DECODE_MAX_PREFILL_CTX", 192)
     decode_steps = _env_int("MLPERF_EDU_DECODE_MAX_STEPS", 64)
     batch_size = _env_int("MLPERF_EDU_DECODE_MAX_BATCH", 1)
@@ -634,7 +641,7 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     beta2 = _env_float("MLPERF_EDU_MAX_BETA2", 0.99)
     model_size = os.environ.get("MLPERF_EDU_MAX_MODEL_SIZE", "base")
 
-    device = _select_device()
+    device = select_torch_device()
     model_kwargs = _max_model_kwargs(model_size, seq_len)
     model = NanoGPTWhiteBox(**model_kwargs).to(device)
     n_params = sum(p.numel() for p in model.parameters())
@@ -950,17 +957,6 @@ def _load_max_nanogpt_model(
         "source_quality_target_met": True,
     }
     return model, checkpoint, lineage
-
-
-def _select_device() -> torch.device:
-    requested = os.environ.get("MLPERF_EDU_DEVICE")
-    if requested:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
 
 
 def _env_int(name: str, default: int) -> int:

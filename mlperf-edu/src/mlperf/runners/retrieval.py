@@ -14,7 +14,11 @@ from mlperf.assets import ensure_nanobeir_reranking, sha256_file
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed, synchronize_device
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
 MODEL_ID = "cross-encoder/ms-marco-MiniLM-L6-v2"
@@ -118,7 +122,7 @@ def run_information_retrieval_max(
     root = find_project_root()
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = _select_device()
+    device = select_torch_device()
     asset = ensure_nanobeir_reranking(download=True)
     snapshot = _snapshot_model(workload)
     model = CrossEncoder(str(snapshot), device=str(device))
@@ -358,14 +362,3 @@ def _snapshot_model(workload: Workload) -> Path:
     if model_source.get("revision") != MODEL_REVISION:
         raise ValueError("registry retrieval-model revision does not match the runner")
     return snapshot
-
-
-def _select_device() -> torch.device:
-    requested = os.environ.get("MLPERF_EDU_DEVICE")
-    if requested:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")

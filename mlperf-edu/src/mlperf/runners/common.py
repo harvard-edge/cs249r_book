@@ -13,6 +13,20 @@ def configured_seed(default: int = 42) -> int:
     return int(default)
 
 
+def select_torch_device():
+    """Select the requested device with one consistent auto-selection policy."""
+    import torch
+
+    requested = os.environ.get("MLPERF_EDU_DEVICE")
+    if requested:
+        return torch.device(requested)
+    if torch.cuda.is_available():
+        return torch.device("cuda")
+    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        return torch.device("mps")
+    return torch.device("cpu")
+
+
 def synchronize_device(device) -> None:
     """Synchronize supported accelerators at a measurement boundary."""
     import torch

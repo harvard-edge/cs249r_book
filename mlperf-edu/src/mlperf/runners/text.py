@@ -14,7 +14,11 @@ from mlperf.assets import ensure_sst2, sha256_file, sst2_paths
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed, synchronize_device
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
 DISTILBERT_REPO_ID = "distilbert/distilbert-base-uncased-finetuned-sst-2-english"
@@ -27,9 +31,7 @@ DISTILBERT_HASHES = {
 }
 
 
-def run_text_classification_min(
-    workload: Workload, output_dir: Path
-) -> dict[str, Any]:
+def run_text_classification_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a tiny DistilBERT configuration as a non-quality smoke test."""
     from transformers import DistilBertConfig, DistilBertForSequenceClassification
 
@@ -107,9 +109,7 @@ def run_text_classification_min(
     return report
 
 
-def run_text_classification_max(
-    workload: Workload, output_dir: Path
-) -> dict[str, Any]:
+def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Evaluate the pinned official DistilBERT checkpoint on GLUE SST-2 dev."""
     from huggingface_hub import snapshot_download
     from transformers import AutoModelForSequenceClassification, AutoTokenizer
@@ -117,14 +117,18 @@ def run_text_classification_max(
     root = find_project_root()
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = _select_device()
-    batch_size = int(os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_BATCH_SIZE", 32))
+    device = select_torch_device()
+    batch_size = int(
+        os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_BATCH_SIZE", 32)
+    )
     repetitions = int(
         os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_REPETITIONS", 5)
     )
     max_length = int(os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_LENGTH", 128))
     if batch_size < 1 or repetitions < 1 or max_length < 1:
-        raise ValueError("text classification requires positive batch, repetition, and length values")
+        raise ValueError(
+            "text classification requires positive batch, repetition, and length values"
+        )
 
     asset = ensure_sst2(download=True)
     snapshot = Path(
@@ -141,9 +145,13 @@ def run_text_classification_max(
             raise ValueError(f"pinned DistilBERT artifact mismatch: {filename}")
 
     tokenizer = AutoTokenizer.from_pretrained(snapshot, local_files_only=True)
-    model = AutoModelForSequenceClassification.from_pretrained(
-        snapshot, local_files_only=True
-    ).to(device).eval()
+    model = (
+        AutoModelForSequenceClassification.from_pretrained(
+            snapshot, local_files_only=True
+        )
+        .to(device)
+        .eval()
+    )
     sentences, labels = _load_sst2_validation(sst2_paths()["validation"])
     encoded = tokenizer(
         sentences,
@@ -175,7 +183,9 @@ def run_text_classification_max(
     synchronize_device(device)
     duration = time.perf_counter() - start
     if not math.isfinite(duration) or duration <= 0:
-        raise RuntimeError("text-classification inference duration must be finite and positive")
+        raise RuntimeError(
+            "text-classification inference duration must be finite and positive"
+        )
 
     predictions = torch.cat(first_outputs).argmax(dim=1).cpu()
     accuracy = float((predictions == labels_tensor).float().mean().item())
@@ -212,7 +222,9 @@ def run_text_classification_max(
         "model_source": {
             "repo_id": DISTILBERT_REPO_ID,
             "revision": DISTILBERT_REVISION,
-            "files": {name: f"sha256:{value}" for name, value in DISTILBERT_HASHES.items()},
+            "files": {
+                name: f"sha256:{value}" for name, value in DISTILBERT_HASHES.items()
+            },
             "snapshot": str(snapshot),
         },
         "seed": seed,
@@ -282,16 +294,7 @@ def _load_sst2_validation(path: Path) -> tuple[list[str], list[int]]:
             sentences.append(row["sentence"])
             labels.append(int(row["label"]))
     if len(sentences) != 872:
-        raise ValueError(f"GLUE SST-2 validation split expected 872 rows, found {len(sentences)}")
+        raise ValueError(
+            f"GLUE SST-2 validation split expected 872 rows, found {len(sentences)}"
+        )
     return sentences, labels
-
-
-def _select_device() -> torch.device:
-    requested = os.environ.get("MLPERF_EDU_DEVICE")
-    if requested:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")

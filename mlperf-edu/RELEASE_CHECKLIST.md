@@ -46,6 +46,68 @@ twelve-entry `reference_results/index.json` whose summaries all pass
 acceptance, repeatability, digest, source-lock, provenance, and lineage
 verification.
 
+## Current-Code Diagnostic Audit
+
+The following single-run audit was completed on 2026-07-15 against Git HEAD
+`8fd1032fc918938d9acc0a8094b10f8cef492250` plus the recorded working-tree
+patch. All twelve cases passed and every generated provenance manifest verified
+before this checklist update. These runs establish current-code functional and
+quality continuity. They are not promotion evidence because they did not start
+from a clean release commit and the long runs were executed on battery or
+crossed a battery-to-AC transition.
+
+| Evidence case | Device | Observed result | Canonical gate | Quality margin | Provenance | Promotion state |
+|---|---|---:|---:|---:|---|---|
+| `image-classification__max__inference` | CPU | 0.870000 top-1 | >= 0.850000 | +0.020000 | verified | Existing five-run draft; new clean sweep required after code changes |
+| `keyword-spotting__max__inference` | MPS | 0.902000 top-1 | >= 0.900000 | +0.002000 | verified | Existing five-run draft; adapter parity review remains open |
+| `anomaly-detection__max__inference` | MPS | 0.902910 ROC AUC | >= 0.850000 | +0.052910 | verified | Existing five-run draft; strongest converted-model metric reproduction |
+| `visual-wake-words__max__inference` | MPS | 0.851000 top-1 | >= 0.800000 | +0.051000 | verified | Existing five-run draft; adapter parity review remains open |
+| `causal-language-modeling__max__training` | MPS | 1.458786 loss | <= 1.469700 | +0.010914 | verified | Three diagnostic runs now pass; clean five-run timing campaign required |
+| `causal-language-modeling__max__inference__full` | CPU | 884.48 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean five-run campaign required |
+| `causal-language-modeling__max__inference__prefill` | CPU | 30,280.26 prefill tokens/s | functional gate | pass | verified with training lineage | Clean five-run campaign required |
+| `causal-language-modeling__max__inference__decode` | CPU | 879.88 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean five-run campaign required |
+| `text-classification__max__inference` | MPS | 0.910550475 accuracy | >= 0.910550459 | +0.000000016 | verified | Existing five-run draft; exact pinned-checkpoint conformance gate |
+| `information-retrieval__max__inference` | MPS | 0.607168410 nDCG@10 | >= 0.607168410 | 0.000000000 | verified | Existing five-run draft; exact published-example conformance gate |
+| `graph-node-classification__max__training` | MPS | 0.722342 accuracy | >= 0.717400 | +0.004942 before tolerance | verified | Clean five-run accuracy and timing distribution required |
+| `time-series-forecasting__max__training` | MPS | 0.292393 MSE | <= 0.292929 | +0.000536 | verified | Deterministic locally but narrow; clean five-run and domain review required |
+
+Diagnostic artifacts are under
+`/tmp/mlperf-edu-current-audit-20260715`. The strict two-runtime adapter audit
+is `tflite-adapter-parity.json` with SHA-256
+`9385d716ebf4c826064f0a19c7904ef158dc7020b60d5d5487e6060792066b56`.
+The long-run timings are intentionally
+excluded from baseline claims. PatchTST took 1,959.45 seconds on battery,
+graph training took 1,628.46 seconds on battery, and nanoGPT took 2,426.35
+seconds across a battery-to-AC transition.
+
+### Accuracy and Runtime Risks
+
+- [x] All twelve current-code cases pass one canonical measurement.
+- [x] The six fragile or converted fast workloads reproduce their draft quality values exactly.
+- [x] Current nanoGPT training produces a quality-approved checkpoint that all three inference phases verify and consume.
+- [x] Current graph training passes the nominal published target without using its tolerance.
+- [x] Current time-series training reproduces the draft MSE exactly.
+- [x] Independently compare full-set PyTorch and pinned TFLite outputs for ResNet8, DS-CNN, and MobileNetV1 under LiteRT 2.1.6 XNNPACK and builtin kernels.
+- [x] ResNet8 and MobileNetV1 produce identical top-1 predictions on every official sample under both audited LiteRT resolvers and reproduce the same 87.0% and 85.1% accuracy.
+- [x] The KWS divergence is measured rather than hidden: PyTorch is 90.2%; LiteRT XNNPACK is 90.0% with 7/1,000 prediction disagreements; LiteRT builtin is 90.5% with 5/1,000 disagreements. Every path passes the inherited 90% gate.
+- [ ] Resolve the KWS promotion choice: accept and disclose the quality-preserving PyTorch adaptation, obtain authoritative non-hybrid upstream weights, or make LiteRT the execution contract. Do not invent a disagreement tolerance.
+- [ ] Isolate PatchTST data-order RNG from data-loader worker lifecycle before changing worker persistence or count.
+- [ ] Obtain five clean externally powered runs for graph, time-series, nanoGPT training, and all nanoGPT inference phases.
+- [ ] Have domain reviewers approve the graph mean-plus-tolerance rule and the project-derived time-series MSE threshold.
+- [ ] Decide whether exact fixed-model scores should remain the sole conformance gate or be paired with a separately labeled task-quality floor.
+- [ ] Commit methodology-valid system-characterization sidecars for all nine workloads; working set, arithmetic intensity, and dispatch remain explicitly unmeasured today.
+
+### MLPerf Tiny Adapter Audit
+
+The strict command intentionally returns status 1 while the KWS prediction
+divergence remains unresolved.
+
+```bash
+uv run --extra parity python tools/audit_tflite_adapter_parity.py \
+  --resolver auto --resolver builtin \
+  --output /tmp/mlperf-edu-tflite-adapter-parity.json
+```
+
 ## Reference Campaign Command
 
 Run one complete case per attempt. Use AC power, disable Low Power Mode, prevent
@@ -114,6 +176,10 @@ not an execution failure. The workflow records and checks that distinction.
 - [x] Unsupported backends fail with an actionable message.
 - [x] Every report records `device_requested`, `device_executed`, and the
   executed backend.
+- [x] `run` and `validate` expose `--device auto|cpu|cuda|mps`, and every
+  PyTorch max runner shares the same CUDA-then-MPS-then-CPU auto policy.
+- [x] Source checkouts preserve their local asset layout, installed wheels use
+  a stable per-user cache, and `MLPERF_EDU_DATA_DIR` overrides both.
 - [x] Power source and Low Power Mode are disclosed for reference campaigns.
 - [x] Sleep or power-state changes invalidate affected attempts.
 
@@ -133,11 +199,16 @@ uv build
 ```
 
 - [x] Full Python test suite passes.
+- [x] The maintainer audit exposes draft evidence class, run count, evidence
+  hash integrity, quality margin, timing CV, and review eligibility.
 - [x] Provenance tamper and clean-extraction package tests pass.
 - [x] Registry, evidence, documentation, and paper drift checks pass.
 - [x] All MLPerf EDU GitHub workflows contain no retired workload assertions.
 - [x] Wheel includes registry, dataset, and twelve-case draft evidence resources.
-- [x] Wheel installs in a clean Python 3.12 environment outside the checkout.
+- [x] Wheel installs and runs outside the checkout with unlocked dependencies
+  under every declared Python version: 3.10, 3.11, and 3.12.
+- [x] CI repeats the clean-wheel list, evidence-audit, stable-cache, and CPU
+  workload checks across Python 3.10, 3.11, and 3.12.
 - [x] Installed CLI can list, audit, run a smoke path, report, and verify a package.
 - [x] Quarto site renders and internal links pass.
 - [x] Paper builds without missing references, placeholders, or layout overflows.

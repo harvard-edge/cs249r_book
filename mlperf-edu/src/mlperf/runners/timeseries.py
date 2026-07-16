@@ -18,7 +18,11 @@ from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.reference.timeseries.patchtst import PatchTST_backbone
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed, synchronize_device
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
 PATCHTST_COMMIT = "204c21efe0b39603ad6e2ca640ef5896646ab1a9"
@@ -70,12 +74,7 @@ class ETTm1WindowDataset(Dataset[tuple[torch.Tensor, torch.Tensor]]):
         self.prediction_length = prediction_length
 
     def __len__(self) -> int:
-        return (
-            len(self.values)
-            - self.context_length
-            - self.prediction_length
-            + 1
-        )
+        return len(self.values) - self.context_length - self.prediction_length + 1
 
     def __getitem__(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         context_end = index + self.context_length
@@ -90,7 +89,16 @@ def load_official_ettm1_splits(
     prediction_length: int,
 ) -> dict[str, ETTm1WindowDataset]:
     frame = pd.read_csv(csv_path)
-    if list(frame.columns) != ["date", "HUFL", "HULL", "MUFL", "MULL", "LUFL", "LULL", "OT"]:
+    if list(frame.columns) != [
+        "date",
+        "HUFL",
+        "HULL",
+        "MUFL",
+        "MULL",
+        "LUFL",
+        "LULL",
+        "OT",
+    ]:
         raise ValueError("pinned ETTm1 CSV does not have the canonical eight columns")
     raw = frame.iloc[:, 1:].to_numpy(dtype=np.float64)
     train_end = 12 * 30 * 24 * 4
@@ -245,7 +253,7 @@ def run_time_series_forecasting_max(
     np.random.seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    device = _select_device()
+    device = select_torch_device()
     config = {
         "context_length": 336,
         "prediction_length": int(os.environ.get("MLPERF_EDU_TIMESERIES_HORIZON", 96)),
@@ -313,9 +321,13 @@ def run_time_series_forecasting_max(
     ).to(device)
     n_params = sum(parameter.numel() for parameter in model.parameters())
     optimizer = torch.optim.Adam(model.parameters(), lr=config["learning_rate"])
-    train_batch_limit = _optional_positive_int("MLPERF_EDU_TIMESERIES_MAX_TRAIN_BATCHES")
+    train_batch_limit = _optional_positive_int(
+        "MLPERF_EDU_TIMESERIES_MAX_TRAIN_BATCHES"
+    )
     eval_batch_limit = _optional_positive_int("MLPERF_EDU_TIMESERIES_MAX_EVAL_BATCHES")
-    steps_per_epoch = min(len(loaders["train"]), train_batch_limit or len(loaders["train"]))
+    steps_per_epoch = min(
+        len(loaders["train"]), train_batch_limit or len(loaders["train"])
+    )
     scheduler = torch.optim.lr_scheduler.OneCycleLR(
         optimizer,
         steps_per_epoch=steps_per_epoch,
@@ -545,14 +557,3 @@ def _optional_positive_int(name: str) -> int | None:
     if parsed <= 0:
         raise ValueError(f"{name} must be positive")
     return parsed
-
-
-def _select_device() -> torch.device:
-    requested = os.environ.get("MLPERF_EDU_DEVICE")
-    if requested:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")

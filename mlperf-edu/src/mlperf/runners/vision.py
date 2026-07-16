@@ -22,7 +22,11 @@ from mlperf.assets import (
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed, synchronize_device
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
 def run_image_classification_min(
@@ -117,7 +121,7 @@ def run_image_classification_max(
 
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = _select_device()
+    device = select_torch_device()
     batch_size = int(
         os.environ.get("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE", "32")
     )
@@ -290,14 +294,3 @@ def _cifar10_raw_float_tensor(image: Any) -> torch.Tensor:
     """Convert a CIFAR image to the raw 0..255 float input used upstream."""
     array = np.asarray(image, dtype=np.float32).copy()
     return torch.from_numpy(array).permute(2, 0, 1)
-
-
-def _select_device() -> torch.device:
-    requested = os.environ.get("MLPERF_EDU_DEVICE")
-    if requested:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")

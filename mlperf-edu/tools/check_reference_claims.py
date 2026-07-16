@@ -243,6 +243,10 @@ def load_provisional_cases() -> tuple[
         lock_path,
         project_root=ROOT,
         expected_source_git_sha=source_sha,
+        # Draft evidence is an immutable historical snapshot. Validate its
+        # closure and source-lock structure without requiring the active
+        # development checkout to remain byte-identical to that old source.
+        verify_current=False,
     )
 
     records: dict[str, tuple[dict[str, Any], dict[str, Any]]] = {}

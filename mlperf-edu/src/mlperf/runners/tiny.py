@@ -31,7 +31,11 @@ from mlperf.assets import (
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed, synchronize_device
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
 def _canonical_config_int(
@@ -137,7 +141,7 @@ def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, 
 
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
+    device = select_torch_device()
     batch_size = _canonical_config_int(
         workload,
         "batch_size",
@@ -373,7 +377,7 @@ def run_anomaly_detection_max(workload: Workload, output_dir: Path) -> dict[str,
     root = find_project_root()
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
+    device = select_torch_device()
     batch_size = _canonical_config_int(
         workload,
         "batch_size",
@@ -634,7 +638,7 @@ def run_visual_wake_words_max(workload: Workload, output_dir: Path) -> dict[str,
 
     seed = configured_seed()
     torch.manual_seed(seed)
-    device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
+    device = select_torch_device()
     batch_size = _canonical_config_int(
         workload,
         "batch_size",

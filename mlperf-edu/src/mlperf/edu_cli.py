@@ -11,6 +11,7 @@ import platform
 import posixpath
 import re
 import shutil
+import subprocess
 import sys
 import tempfile
 import time
@@ -19,9 +20,9 @@ import zipfile
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from html import escape
-from importlib import import_module
+from importlib import import_module, resources
 from importlib.util import find_spec
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Any
 
 from rich.console import Console
@@ -39,9 +40,9 @@ from .assets import (
     ETTM1_URL,
     NANOBEIR_REPO_ID,
     NANOBEIR_REVISION,
+    asset_cache_root,
     asset_dossier,
     cifar10_paths,
-    data_root,
     ensure_cifar10,
     ensure_mlperf_tiny_anomaly,
     ensure_mlperf_tiny_image,
@@ -236,6 +237,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     add_selection(run)
     add_profile(run)
+    add_device(run)
     run.add_argument(
         "--variant", default=None, help="Variant under a canonical workload"
     )
@@ -481,6 +483,19 @@ def add_validate_arguments(parser: argparse.ArgumentParser) -> None:
         action="store_true",
         help="Open the generated validation HTML summary",
     )
+    add_device(parser)
+
+
+def add_device(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--device",
+        choices=("auto", "cpu", "cuda", "mps"),
+        default=None,
+        help=(
+            "Execution device. auto selects CUDA, then MPS, then CPU. "
+            "An explicit unavailable device fails before execution."
+        ),
+    )
 
 
 def add_profile(parser: argparse.ArgumentParser) -> None:
@@ -583,7 +598,7 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     add_check("mlperf suite", DEFAULT_MLPERF_SUITE, "ok")
     add_check("python", platform.python_version(), "ok")
     add_check("platform", platform.platform(), "ok")
-    add_check("data cache", str(data_root()), "ok")
+    add_check("data cache", str(asset_cache_root()), "ok")
     add_check("model cache", str(default_model_cache_dir()), "ok")
 
     try:
@@ -737,7 +752,7 @@ def print_init_locations(output_dir: Path) -> None:
     table = Table(title="MLPerf EDU Local Paths")
     table.add_column("Purpose", no_wrap=True)
     table.add_column("Path", overflow="fold")
-    table.add_row("data cache", str(data_root()))
+    table.add_row("data cache", str(asset_cache_root()))
     table.add_row("model cache", str(default_model_cache_dir()))
     table.add_row("reports", str(output_dir))
     console.print(table)
@@ -5409,6 +5424,205 @@ def cache_dataset_row(
     }
 
 
+def load_draft_evidence_by_workload() -> dict[str, list[dict[str, Any]]]:
+    """Load integrity-checked draft evidence for maintainer-facing audits."""
+    index, evidence_root = draft_evidence_store()
+    if index is None or evidence_root is None:
+        return {}
+    evidence: dict[str, list[dict[str, Any]]] = {}
+    for entry in index.get("cases", []):
+        if not isinstance(entry, dict):
+            continue
+        workload_id = str(entry.get("workload") or "")
+        declared_path = str(entry.get("path") or "")
+        if not workload_id or not declared_path:
+            continue
+        relative = PurePosixPath(declared_path)
+        safe_path = (
+            not relative.is_absolute()
+            and len(relative.parts) == 2
+            and relative.parts[0] == "provisional_results"
+            and ".." not in relative.parts
+        )
+        case_path = evidence_root.joinpath(relative.name) if safe_path else None
+        if case_path is None or not case_path.is_file():
+            case = {
+                **entry,
+                "integrity_ok": False,
+                "integrity_issue": "draft evidence file is missing or outside the project",
+            }
+        else:
+            case_bytes = case_path.read_bytes()
+            result = json.loads(case_bytes.decode("utf-8"))
+            expected_sha256 = str(entry.get("sha256") or "").removeprefix("sha256:")
+            observed_sha256 = hashlib.sha256(case_bytes).hexdigest()
+            case = {
+                **entry,
+                "integrity_ok": bool(expected_sha256)
+                and observed_sha256 == expected_sha256,
+                "integrity_issue": ""
+                if expected_sha256 and observed_sha256 == expected_sha256
+                else "draft evidence hash does not match its index",
+                "run_count": int((result.get("measurement") or {}).get("run_count", 0)),
+                "review_eligible": bool(result.get("review_eligible", False)),
+                "source_git_sha": result.get("source_git_sha"),
+                "execution": result.get("execution") or {},
+                "quality": draft_quality_summary(result),
+                "repeatability": result.get("repeatability") or {},
+            }
+        evidence.setdefault(workload_id, []).append(case)
+    return evidence
+
+
+def draft_evidence_store() -> tuple[dict[str, Any] | None, Any | None]:
+    """Return the draft index and its source-checkout or packaged resource root."""
+    root = find_project_root()
+    local_root = root / "provisional_results"
+    local_index = local_root / "index.json"
+    if local_index.is_file():
+        return json.loads(local_index.read_text()), local_root
+    try:
+        packaged_root = resources.files("mlperf_edu").joinpath("provisional_results")
+        packaged_index = packaged_root.joinpath("index.json")
+    except (ModuleNotFoundError, FileNotFoundError):
+        return None, None
+    if not packaged_index.is_file():
+        return None, None
+    return json.loads(packaged_index.read_text(encoding="utf-8")), packaged_root
+
+
+def draft_evidence_source_status() -> dict[str, Any]:
+    """Describe whether draft evidence matches the active Git revision."""
+    root = find_project_root()
+    index, _evidence_root = draft_evidence_store()
+    source_git_sha = index.get("source_git_sha") if index else None
+    source_checkout = (root / "workloads.yaml").is_file() and (
+        root / "provisional_results" / "index.json"
+    ).is_file()
+    if not source_checkout:
+        return {
+            "source_git_sha": source_git_sha,
+            "current_git_sha": None,
+            "current_git_dirty": None,
+            "current_revision_match": None,
+            "claim_scope": "unverified-installed-artifact",
+        }
+    try:
+        current_git_sha = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            cwd=root,
+            capture_output=True,
+            check=True,
+            text=True,
+            timeout=5,
+        ).stdout.strip()
+        current_git_dirty = bool(
+            subprocess.run(
+                ["git", "status", "--porcelain", "--untracked-files=normal"],
+                cwd=root,
+                capture_output=True,
+                check=True,
+                text=True,
+                timeout=5,
+            ).stdout.strip()
+        )
+    except (OSError, subprocess.SubprocessError):
+        current_git_sha = None
+        current_git_dirty = None
+    revision_match = (
+        source_git_sha == current_git_sha and current_git_dirty is False
+        if source_git_sha and current_git_sha
+        else None
+    )
+    return {
+        "source_git_sha": source_git_sha,
+        "current_git_sha": current_git_sha,
+        "current_git_dirty": current_git_dirty,
+        "current_revision_match": revision_match,
+        "claim_scope": "current-source"
+        if revision_match is True
+        else "historical-draft"
+        if revision_match is False
+        else "unverified-installed-artifact",
+    }
+
+
+def draft_quality_summary(result: dict[str, Any]) -> dict[str, Any] | None:
+    quality = result.get("quality") or {}
+    gate = quality.get("gate") or {}
+    aggregate = quality.get("aggregate") or {}
+    observed = aggregate.get("median")
+    target = gate.get("target")
+    direction = gate.get("direction")
+    if not isinstance(observed, (int, float)) or not isinstance(target, (int, float)):
+        return None
+    tolerance = gate.get("tolerance", 0.0)
+    if not isinstance(tolerance, (int, float)):
+        tolerance = 0.0
+    if direction == "higher":
+        nominal_headroom = float(observed) - float(target)
+    elif direction == "lower":
+        nominal_headroom = float(target) - float(observed)
+    else:
+        return None
+    denominator = abs(float(target))
+    return {
+        "metric": gate.get("metric") or quality.get("metric"),
+        "observed_median": float(observed),
+        "target": float(target),
+        "direction": direction,
+        "tolerance": float(tolerance),
+        "nominal_headroom": nominal_headroom,
+        "nominal_headroom_fraction": nominal_headroom / denominator
+        if denominator
+        else None,
+        "gate_headroom": nominal_headroom + float(tolerance),
+        "all_runs_pass": quality.get("all_runs_pass"),
+    }
+
+
+def summarize_draft_evidence(cases: list[dict[str, Any]]) -> str:
+    if not cases:
+        return "none"
+    counts: dict[str, int] = {}
+    for case in cases:
+        evidence_class = str(case.get("evidence_class") or "unknown")
+        counts[evidence_class] = counts.get(evidence_class, 0) + 1
+    return ", ".join(
+        f"{evidence_class}×{count}" for evidence_class, count in counts.items()
+    )
+
+
+def summarize_quality_headroom(cases: list[dict[str, Any]]) -> str:
+    values = []
+    for case in cases:
+        quality = case.get("quality")
+        if not isinstance(quality, dict):
+            continue
+        headroom = quality.get("nominal_headroom")
+        if not isinstance(headroom, (int, float)):
+            continue
+        label = str(case.get("mode") or "")
+        if case.get("phase"):
+            label += f"/{case['phase']}"
+        values.append(f"{label} {headroom:+.3g}")
+    return "; ".join(values) if values else "functional"
+
+
+def summarize_repeatability(cases: list[dict[str, Any]]) -> str:
+    summaries = []
+    for case in cases:
+        repeatability = case.get("repeatability") or {}
+        coefficient = repeatability.get("coefficient_of_variation")
+        limit = repeatability.get("limit")
+        if isinstance(coefficient, (int, float)) and isinstance(limit, (int, float)):
+            state = "pass" if repeatability.get("passed") is True else "FAIL"
+            summaries.append(f"{float(coefficient):.2%}/{float(limit):.0%} {state}")
+        else:
+            summaries.append("not established")
+    return "; ".join(summaries) if summaries else "none"
+
+
 def cmd_audit(args: argparse.Namespace) -> int:
     workloads = load_workloads(args)
     if args.variant and not args.workload:
@@ -5447,6 +5661,8 @@ def cmd_audit(args: argparse.Namespace) -> int:
             public_status=args.public_status,
         )
     selected_ids = {workload.id for workload in selected}
+    draft_evidence = load_draft_evidence_by_workload()
+    draft_source = draft_evidence_source_status()
     issues_by_workload = {
         workload_id: issues
         for workload_id, issues in public_contract_report(workloads).items()
@@ -5491,7 +5707,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
 
     if args.format == "json":
         payload = {
-            "schema": "mlperf-edu-public-contract-audit/0.1",
+            "schema": "mlperf-edu-public-contract-audit/0.2",
             "mlperf_suite": DEFAULT_MLPERF_SUITE,
             "status": "passed" if audit_passed else "failed",
             "policy": args.policy,
@@ -5506,6 +5722,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
             "blocker_count": len(issue_rows),
             "warning_blocked": warning_blocked,
             "warning_count": warning_count,
+            "draft_evidence_source": draft_source,
             "issues": issue_rows,
             "warnings": warning_rows,
             "workloads": [
@@ -5519,6 +5736,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     "suite": workload.suite,
                     "public_status": workload.public_status,
                     "scenario": workload.scenario,
+                    "draft_evidence": draft_evidence.get(workload.id, []),
                     "issues": issues_by_workload.get(workload.id, []),
                     "warnings": warnings_by_workload.get(workload.id, []),
                 }
@@ -5534,19 +5752,27 @@ def cmd_audit(args: argparse.Namespace) -> int:
     table.add_column("Suite", no_wrap=True)
     table.add_column("Public", no_wrap=True)
     table.add_column("Scenario", no_wrap=True)
+    table.add_column("Draft evidence")
+    table.add_column("Quality margin")
+    table.add_column("Timing CV")
     table.add_column("Result", no_wrap=True)
     table.add_column("Issues")
     table.add_column("Warnings")
     for workload in selected:
         issues = issues_by_workload.get(workload.id, [])
         warnings = warnings_by_workload.get(workload.id, [])
-        result = "[green]ready[/green]" if not issues else "[red]blocked[/red]"
+        evidence = draft_evidence.get(workload.id, [])
+        blocked = bool(issues) or (args.policy == "public" and bool(warnings))
+        result = "[red]blocked[/red]" if blocked else "[green]ready[/green]"
         table.add_row(
             workload.id,
             workload_run_selector(workload),
             workload.suite,
             workload.public_status,
             workload.scenario or "",
+            summarize_draft_evidence(evidence),
+            summarize_quality_headroom(evidence),
+            summarize_repeatability(evidence),
             result,
             "; ".join(issues),
             "; ".join(warnings),
@@ -5565,6 +5791,12 @@ def cmd_audit(args: argparse.Namespace) -> int:
         + ", ".join(
             f"{status}={count}" for status, count in status_counts.items() if count
         )
+    )
+    console.print(
+        "draft evidence source: "
+        f"{draft_source.get('source_git_sha') or 'unavailable'}; "
+        f"current HEAD: {draft_source.get('current_git_sha') or 'unavailable'}; "
+        f"scope: {draft_source['claim_scope']}"
     )
     console.print(f"public warnings: {warning_count}")
     return 0 if audit_passed else 1
@@ -5647,11 +5879,23 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(normalized_argv)
     if hasattr(args, "profile"):
         args.profile = normalize_profile(args.profile)
+    requested_device = getattr(args, "device", None)
+    previous_device = os.environ.get("MLPERF_EDU_DEVICE")
+    if requested_device == "auto":
+        os.environ.pop("MLPERF_EDU_DEVICE", None)
+    elif requested_device is not None:
+        os.environ["MLPERF_EDU_DEVICE"] = requested_device
     try:
         return int(args.func(args) or 0)
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         return 1
+    finally:
+        if requested_device is not None:
+            if previous_device is None:
+                os.environ.pop("MLPERF_EDU_DEVICE", None)
+            else:
+                os.environ["MLPERF_EDU_DEVICE"] = previous_device
 
 
 if __name__ == "__main__":

@@ -15,6 +15,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from platformdirs import user_cache_path
+
 
 TINY_SHAKESPEARE_UPSTREAM_COMMIT = "6f9487a6fe5b420b7ca9afb0d7c078e37c1d1b4e"
 TINY_SHAKESPEARE_URL = (
@@ -518,13 +520,37 @@ def huggingface_model_dossier(
     return data
 
 
-def data_root() -> Path:
+def _source_project_root() -> Path | None:
+    from .registry import find_project_root
+
+    root = find_project_root()
+    return root if (root / "workloads.yaml").is_file() else None
+
+
+def asset_cache_root() -> Path:
+    """Return the stable root for benchmark-managed dataset assets."""
     override = os.environ.get("MLPERF_EDU_DATA_DIR")
     if override:
         return Path(override).expanduser().resolve()
-    from .registry import find_project_root
+    source_root = _source_project_root()
+    if source_root is not None:
+        return source_root / "data"
+    return user_cache_path("mlperf-edu").resolve()
 
-    return find_project_root() / "datasets" / "local_tensors"
+
+def data_root() -> Path:
+    """Return the Tiny Shakespeare cache while preserving source-tree layout."""
+    override = os.environ.get("MLPERF_EDU_DATA_DIR")
+    if override:
+        return Path(override).expanduser().resolve()
+    source_root = _source_project_root()
+    if source_root is not None:
+        return source_root / "datasets" / "local_tensors"
+    return asset_cache_root() / "tinyshakespeare"
+
+
+def _asset_path_root(root: Path | None, name: str) -> Path:
+    return root.resolve() if root is not None else asset_cache_root() / name
 
 
 def sha256_file(path: Path) -> str:
@@ -599,17 +625,7 @@ def tinyshakespeare_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def cifar10_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "cifar10")
-            if override
-            else find_project_root() / "data" / "cifar10"
-        )
+    base = _asset_path_root(root, "cifar10")
     return {
         "root": base,
         "dataset": base / "cifar-10-batches-py",
@@ -618,17 +634,7 @@ def cifar10_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def fashion_mnist_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "fashion-mnist")
-            if override
-            else find_project_root() / "data" / "fashion-mnist"
-        )
+    base = _asset_path_root(root, "fashion-mnist")
     return {
         "root": base,
         "raw": base / "FashionMNIST" / "raw",
@@ -637,17 +643,7 @@ def fashion_mnist_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def mlperf_tiny_kws_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "mlperf-tiny-kws")
-            if override
-            else find_project_root() / "data" / "mlperf-tiny-kws"
-        )
+    base = _asset_path_root(root, "mlperf-tiny-kws")
     return {
         "root": base,
         "dataset": base / "kws01",
@@ -658,17 +654,7 @@ def mlperf_tiny_kws_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def mlperf_tiny_vww_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "mlperf-tiny-vww")
-            if override
-            else find_project_root() / "data" / "mlperf-tiny-vww"
-        )
+    base = _asset_path_root(root, "mlperf-tiny-vww")
     return {
         "root": base,
         "dataset": base / "vww01",
@@ -682,17 +668,7 @@ def mlperf_tiny_vww_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def mlperf_tiny_anomaly_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "mlperf-tiny-anomaly")
-            if override
-            else find_project_root() / "data" / "mlperf-tiny-anomaly"
-        )
+    base = _asset_path_root(root, "mlperf-tiny-anomaly")
     return {
         "root": base,
         "dataset": base / "ad01",
@@ -703,17 +679,7 @@ def mlperf_tiny_anomaly_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def mlperf_tiny_image_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "mlperf-tiny-image")
-            if override
-            else find_project_root() / "data" / "mlperf-tiny-image"
-        )
+    base = _asset_path_root(root, "mlperf-tiny-image")
     return {
         "root": base,
         "float_model": base / "pretrainedResnet.tflite",
@@ -722,17 +688,7 @@ def mlperf_tiny_image_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def sst2_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "sst2")
-            if override
-            else find_project_root() / "data" / "sst2"
-        )
+    base = _asset_path_root(root, "sst2")
     return {
         "root": base,
         "dataset": base / "SST-2",
@@ -743,17 +699,7 @@ def sst2_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def ogbn_arxiv_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "ogb")
-            if override
-            else find_project_root() / "data" / "ogb"
-        )
+    base = _asset_path_root(root, "ogb")
     return {
         "root": base,
         "dataset": base / "ogbn_arxiv",
@@ -762,32 +708,12 @@ def ogbn_arxiv_paths(root: Path | None = None) -> dict[str, Path]:
 
 
 def ettm1_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "ettm1")
-            if override
-            else find_project_root() / "data" / "ettm1"
-        )
+    base = _asset_path_root(root, "ettm1")
     return {"root": base, "csv": base / "ETTm1.csv"}
 
 
 def nanobeir_reranking_paths(root: Path | None = None) -> dict[str, Path]:
-    if root is not None:
-        base = root.resolve()
-    else:
-        override = os.environ.get("MLPERF_EDU_DATA_DIR")
-        from .registry import find_project_root
-
-        base = (
-            (Path(override).expanduser().resolve() / "nanobeir-reranking")
-            if override
-            else find_project_root() / "data" / "nanobeir-reranking"
-        )
+    base = _asset_path_root(root, "nanobeir-reranking")
     return {"root": base}
 
 

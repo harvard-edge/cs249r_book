@@ -15,7 +15,11 @@ from mlperf.assets import ensure_ogbn_arxiv
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
-from mlperf.runners.common import configured_seed, synchronize_device
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
 OGB_COMMIT = "61e9784ca76edeaa6e259ba0f836099608ff0586"
@@ -146,7 +150,7 @@ def run_graph_node_classification_max(
     torch.manual_seed(seed)
     if torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
-    device = _select_device()
+    device = select_torch_device()
     epochs = int(os.environ.get("MLPERF_EDU_GRAPH_MAX_EPOCHS", 500))
     hidden_channels = int(os.environ.get("MLPERF_EDU_GRAPH_MAX_HIDDEN_CHANNELS", 256))
     num_layers = int(os.environ.get("MLPERF_EDU_GRAPH_MAX_LAYERS", 3))
@@ -324,14 +328,3 @@ def run_graph_node_classification_max(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
     )
     return report
-
-
-def _select_device() -> torch.device:
-    requested = os.environ.get("MLPERF_EDU_DEVICE")
-    if requested:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")

@@ -71,11 +71,60 @@ def test_execution_commands_do_not_advertise_unimplemented_model_override():
     assert "--model" in info.stdout
 
 
+def test_run_and_validate_advertise_device_selection():
+    for command in ("run", "validate"):
+        result = run_cli(command, "--help")
+        assert result.returncode == 0, result.stderr
+        assert "--device {auto,cpu,cuda,mps}" in result.stdout
+
+
 def test_doctor_passes():
     result = run_cli("doctor")
     assert result.returncode == 0
     assert "mlperf-edu" in result.stdout
     assert "registry" in result.stdout
+
+
+def test_audit_json_exposes_draft_evidence_and_quality_margin():
+    result = run_cli("audit", "--workload", "keyword-spotting", "--format", "json")
+    payload = json.loads(result.stdout)
+
+    assert payload["schema"] == "mlperf-edu-public-contract-audit/0.2"
+    source = payload["draft_evidence_source"]
+    assert source["source_git_sha"] == "163d42ee3df54ab122543469ccf2b6b3bd119455"
+    assert source["claim_scope"] in {
+        "current-source",
+        "historical-draft",
+        "unverified-installed-artifact",
+    }
+    evidence = payload["workloads"][0]["draft_evidence"]
+    assert len(evidence) == 1
+    assert evidence[0]["integrity_ok"] is True
+    assert evidence[0]["evidence_class"] == "five-run-verified"
+    assert evidence[0]["run_count"] == 5
+    assert evidence[0]["quality"]["nominal_headroom"] == pytest.approx(0.002, abs=1e-7)
+    assert evidence[0]["repeatability"]["passed"] is True
+
+
+def test_installed_draft_evidence_is_not_compared_with_unrelated_git_checkout(
+    tmp_path, monkeypatch
+):
+    monkeypatch.setattr(edu_cli, "find_project_root", lambda: tmp_path)
+
+    def reject_git_probe(*args, **kwargs):
+        raise AssertionError(
+            "an installed artifact must not probe the current Git tree"
+        )
+
+    monkeypatch.setattr(edu_cli.subprocess, "run", reject_git_probe)
+
+    source = edu_cli.draft_evidence_source_status()
+
+    assert source["source_git_sha"] == "163d42ee3df54ab122543469ccf2b6b3bd119455"
+    assert source["current_git_sha"] is None
+    assert source["current_git_dirty"] is None
+    assert source["current_revision_match"] is None
+    assert source["claim_scope"] == "unverified-installed-artifact"
 
 
 def test_verify_rejects_a_report_without_a_traceback(tmp_path):
@@ -1252,6 +1301,46 @@ def test_image_classification_min_run_writes_verifiable_artifacts(tmp_path):
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
+
+
+def test_run_device_option_overrides_environment(tmp_path):
+    result = run_cli(
+        "run",
+        "--workload",
+        "image-classification",
+        "--profile",
+        "min",
+        "--device",
+        "cpu",
+        "--output-dir",
+        str(tmp_path),
+        env_extra={"MLPERF_EDU_DEVICE": "not-a-device"},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads((tmp_path / "image-classification_min_report.json").read_text())
+    assert report["device_requested"] == "cpu"
+    assert report["device_executed"] == "cpu"
+
+
+def test_run_auto_device_option_clears_environment_override(tmp_path):
+    result = run_cli(
+        "run",
+        "--workload",
+        "image-classification",
+        "--profile",
+        "min",
+        "--device",
+        "auto",
+        "--output-dir",
+        str(tmp_path),
+        env_extra={"MLPERF_EDU_DEVICE": "not-a-device"},
+    )
+
+    assert result.returncode == 0, result.stdout + result.stderr
+    report = json.loads((tmp_path / "image-classification_min_report.json").read_text())
+    assert report["device_requested"] == "auto"
+    assert report["device_executed"] == "cpu"
 
 
 def test_run_rejects_unsupported_device_without_traceback(tmp_path):
