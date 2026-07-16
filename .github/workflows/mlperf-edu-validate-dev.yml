@@ -165,6 +165,86 @@ jobs:
             exit 1
           fi
 
+  python-compatibility:
+    name: 'Clean Wheel · Python ${{ matrix.python-version }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Build and Install an Unlocked Wheel
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_dir="/tmp/mlperf-edu-wheel-${{ matrix.python-version }}"
+          venv_dir="/tmp/mlperf-edu-python-${{ matrix.python-version }}"
+          uv build --wheel --out-dir "$wheel_dir"
+          uv venv "$venv_dir" --python "${{ matrix.python-version }}"
+          wheel=$(find "$wheel_dir" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          uv pip install --python "$venv_dir/bin/python" "$wheel"
+
+      - name: Exercise the Installed CLI and Packaged Evidence
+        working-directory: /tmp
+        shell: bash
+        run: |
+          set -euo pipefail
+          venv_dir="/tmp/mlperf-edu-python-${{ matrix.python-version }}"
+          "$venv_dir/bin/mlperf" list --format json > mlperf-edu-list.json
+          set +e
+          "$venv_dir/bin/mlperf" audit --policy public --format json > mlperf-edu-audit.json
+          audit_status=$?
+          set -e
+          test "$audit_status" -eq 1
+          "$venv_dir/bin/mlperf" run \
+            --workload image-classification \
+            --profile min \
+            --device cpu \
+            --output-dir mlperf-edu-python-smoke
+          "$venv_dir/bin/python" - <<'PY'
+          import json
+          from pathlib import Path
+
+          from mlperf.assets import asset_cache_root
+          from platformdirs import user_cache_path
+
+          audit = json.load(open("mlperf-edu-audit.json", encoding="utf-8"))
+          listed = json.load(open("mlperf-edu-list.json", encoding="utf-8"))
+          report = json.load(
+              open(
+                  "mlperf-edu-python-smoke/image-classification_min_report.json",
+                  encoding="utf-8",
+              )
+          )
+          assert len(listed["workloads"]) == 9, listed
+          assert audit["draft_evidence_source"]["claim_scope"] == (
+              "unverified-installed-artifact"
+          ), audit["draft_evidence_source"]
+          assert sum(
+              len(workload["draft_evidence"])
+              for workload in audit["workloads"]
+          ) == 12, audit
+          assert report["status"] == "passed", report
+          assert report["device_requested"] == "cpu", report
+          assert report["device_executed"] == "cpu", report
+          assert asset_cache_root() == user_cache_path("mlperf-edu").resolve()
+          assert asset_cache_root() != Path.cwd()
+          PY
+
   generated-contracts:
     name: 'Registry, Taxonomy, Review Packets, and Docs Drift'
     runs-on: ubuntu-latest
