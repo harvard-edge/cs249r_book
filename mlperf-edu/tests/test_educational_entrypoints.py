@@ -228,6 +228,7 @@ def test_publication_gates_derive_portfolio_closure_from_registry() -> None:
     for stale_constant in ("EXPECTED_WORKLOADS", "EXPECTED_CASES", "SOURCE_SHA"):
         assert stale_constant not in paper_generator
     assert "evidence.expected_cases()" in paper_generator
+    assert "verify_current=False" in paper_generator
     assert "set(workloads) ==" in paper_generator
     assert "count_claim_pattern(len(workload_ids)" in claim_checker
     assert "count_claim_pattern(len(records)" in claim_checker

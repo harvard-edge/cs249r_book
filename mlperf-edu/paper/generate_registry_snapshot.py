@@ -46,10 +46,65 @@ METRIC_LABELS = {
     "mean_ndcg_at_10": "mean nDCG@10",
     "output_tokens_per_sec": "output tok/s",
     "prefill_tokens_per_sec": "prefill tok/s",
+    "roc_auc": "ROC AUC",
     "test_accuracy": "test accuracy",
     "test_mse": "test MSE",
     "top1_accuracy": "top-1 accuracy",
     "train_and_eval_seconds": "train + eval s",
+}
+
+GATE_METRIC_LABELS = {
+    "accuracy": "accuracy",
+    "cross_entropy_loss": "loss",
+    "mean_ndcg_at_10": "mean nDCG@10",
+    "roc_auc": "ROC AUC",
+    "test_accuracy": "test acc.",
+    "test_mse": "test MSE",
+    "top1_accuracy": "top-1",
+}
+
+WORKLOAD_PAPER_LABELS = {
+    "anomaly-detection": "Anomaly detection",
+    "causal-language-modeling": "Causal LM",
+    "graph-node-classification": "Graph classification",
+    "image-classification": "Image classification",
+    "information-retrieval": "Retrieval",
+    "keyword-spotting": "KWS",
+    "text-classification": "Text classification",
+    "time-series-forecasting": "Time-series forecasting",
+    "visual-wake-words": "Visual wake words",
+}
+
+DATASET_PAPER_LABELS = {
+    "cifar10": "CIFAR-10",
+    "ettm1": "ETTm1",
+    "mlperf-tiny-anomaly-eval": "ToyCar (MLPerf Tiny)",
+    "mlperf-tiny-kws-eval": "Keyword spotting (MLPerf Tiny)",
+    "mlperf-tiny-vww-eval": "Visual wake words (MLPerf Tiny)",
+    "nanobeir-reranking": "NanoBEIR",
+    "ogbn-arxiv": "ogbn-arxiv",
+    "prompt-suite-local": "Deterministic prompt suite",
+    "sst2": "SST-2",
+    "tinyshakespeare": "Tiny Shakespeare",
+}
+
+DATASET_SPLIT_LABELS = {
+    "cifar10": "Tiny 200-example set",
+    "ettm1": "official 12/4/4-month split",
+    "mlperf-tiny-anomaly-eval": "Tiny 248-recording set",
+    "mlperf-tiny-kws-eval": "Tiny 1,000-example set",
+    "mlperf-tiny-vww-eval": "Tiny 1,000-example set",
+    "nanobeir-reranking": "three English subsets",
+    "ogbn-arxiv": "official time split",
+    "prompt-suite-local": "deterministic prompts",
+    "sst2": "train and validation",
+    "tinyshakespeare": "90/10 train and validation",
+}
+
+DATASET_ACCESS_LABELS = {
+    "needs-release-decision": "fetch; review",
+    "public-ok-bundled": "bundled",
+    "public-ok-fetch-only": "fetch",
 }
 
 
@@ -118,7 +173,10 @@ def format_gate(gate: dict[str, Any], *, role: str) -> str:
     target = finite_number(gate.get("target"), label=f"{metric} target")
     direction = gate.get("direction")
     operator = r"$\leq$" if direction == "lower" else r"$\geq$"
-    return f"{tex(METRIC_LABELS.get(metric, metric))} {operator} {format_number(target, metric)}"
+    return (
+        f"{tex(GATE_METRIC_LABELS.get(metric, metric))} "
+        f"{operator} {format_number(target, metric)}"
+    )
 
 
 def canonical_gate(workload: Workload) -> dict[str, Any]:
@@ -177,13 +235,24 @@ def dataset_rows(workloads: dict[str, Workload]) -> str:
     require(set(catalog) == set(usage), "dataset catalog and registry usage differ")
     rows = []
     for identifier, entry in sorted(catalog.items()):
+        release_status = str(entry["public_release_status"])
+        size_mb = finite_number(
+            entry.get("estimated_size_mb"),
+            label=f"{identifier} estimated size",
+        )
+        size_text = "bundled" if size_mb == 0.0 else f"{size_mb:.1f} MB"
         rows.append(
             " & ".join(
                 (
-                    tex(entry.get("display_name") or identifier),
-                    rf"\nolinkurl{{{entry['split']}}}",
-                    tex(entry["public_release_status"]),
-                    str(usage[identifier]),
+                    tex(
+                        DATASET_PAPER_LABELS.get(
+                            identifier,
+                            entry.get("display_name") or identifier,
+                        )
+                    ),
+                    tex(DATASET_SPLIT_LABELS.get(identifier, entry["split"])),
+                    tex(size_text),
+                    tex(DATASET_ACCESS_LABELS.get(release_status, release_status)),
                 )
             )
             + r" \\"
@@ -244,6 +313,9 @@ def load_evidence() -> tuple[dict[str, Any], list[dict[str, Any]]]:
         source_lock_path,
         project_root=PROJECT,
         expected_source_git_sha=source_git_sha,
+        # Draft evidence is an immutable historical snapshot. Validate the
+        # lock's closure without requiring today's checkout to match old code.
+        verify_current=False,
     )
     for field in ("schema", "file_count", "contract_count"):
         require(
@@ -336,7 +408,7 @@ def case_display(entry: dict[str, Any]) -> str:
     mode = str(entry["mode"])
     phase = entry.get("phase")
     suffix = str(phase) if phase else mode
-    return rf"\texttt{{{tex(workload)}}} ({tex(suffix)})"
+    return f"{tex(WORKLOAD_PAPER_LABELS.get(workload, workload))} ({tex(suffix)})"
 
 
 def evidence_rows(records: list[dict[str, Any]]) -> str:
@@ -364,11 +436,21 @@ def evidence_rows(records: list[dict[str, Any]]) -> str:
         quality = payload.get("quality")
         gate = quality.get("gate") if isinstance(quality, dict) else {}
         gate_text = format_gate(gate or {}, role=role)
+        if isinstance(quality, dict):
+            quality_metric = str(quality["metric"])
+            quality_median = finite_number(
+                quality["aggregate"]["median"],
+                label=f"{quality_metric} median",
+            )
+            observed_text = format_number(quality_median, quality_metric)
+        else:
+            observed_text = "pass"
         reference = format_number(median, metric)
         if run_count > 1:
             reference += (
                 f" [{format_number(minimum, metric)}, {format_number(maximum, metric)}]"
             )
+        measurement_text = f"{tex(METRIC_LABELS.get(metric, metric))} {reference}"
         evidence_label = {
             "five-run-verified": "verified",
             "single-run-provisional": "provisional",
@@ -384,9 +466,9 @@ def evidence_rows(records: list[dict[str, Any]]) -> str:
                     case_display(entry),
                     "Score" if role == "score-bearing" else "Perf.",
                     evidence_label,
-                    tex(METRIC_LABELS.get(metric, metric)),
                     gate_text,
-                    reference,
+                    observed_text,
+                    measurement_text,
                     repeatability_text,
                     tex(devices),
                 )
@@ -415,6 +497,22 @@ def render_tex(
 ) -> str:
     roles = Counter(record["entry"]["result_role"] for record in records)
     evidence_classes = Counter(record["result"]["evidence_class"] for record in records)
+    score_medians = [
+        finite_number(
+            record["result"]["measurement"]["aggregate"]["median"],
+            label=f"{record['entry']['case_id']} median",
+        )
+        for record in records
+        if record["entry"]["result_role"] == "score-bearing"
+    ]
+    verified_cvs = [
+        finite_number(
+            record["result"]["repeatability"]["coefficient_of_variation"],
+            label=f"{record['entry']['case_id']} CV",
+        )
+        for record in records
+        if record["result"]["evidence_class"] == "five-run-verified"
+    ]
     lines = [
         "% Generated by generate_registry_snapshot.py. Do not edit by hand.",
         rf"\newcommand{{\PaperSnapshotDate}}{{{tex(snapshot_date(records))}}}",
@@ -426,6 +524,11 @@ def render_tex(
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
         rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
         rf"\newcommand{{\ProvisionalEvidenceCases}}{{{len(records) - evidence_classes['five-run-verified']}}}",
+        rf"\newcommand{{\ScoreReferenceTotalMinutes}}{{{sum(score_medians) / 60.0:.1f}}}",
+        rf"\newcommand{{\ScoreReferenceMinSeconds}}{{{min(score_medians):.3f}}}",
+        rf"\newcommand{{\ScoreReferenceMaxMinutes}}{{{max(score_medians) / 60.0:.1f}}}",
+        rf"\newcommand{{\FiveRunMinCV}}{{{100.0 * min(verified_cvs):.2f}\%}}",
+        rf"\newcommand{{\FiveRunMaxCV}}{{{100.0 * max(verified_cvs):.2f}\%}}",
         r"\newcommand{\WorkloadContractRows}{%",
         workload_rows(workloads),
         "}",
