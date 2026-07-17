@@ -81,7 +81,7 @@ pretrained model as locally trained.
 
 ## Student Journey
 
-1. Install the locked environment and run `uv run mlperf doctor`.
+1. Install the locked environment and run `uv run mlperf health`.
 2. Inspect available work with `uv run mlperf list` and `uv run mlperf show`.
 3. Run a quick `min` probe to confirm the machine and code path work.
 4. Check the workload's declared execution envelope, then fetch and verify the
@@ -103,6 +103,7 @@ not available.
 
 ```bash
 uv run mlperf doctor
+uv run mlperf health
 uv run mlperf run --workload image-classification --profile min
 uv run mlperf fetch --workload image-classification --profile max
 uv run mlperf run --workload image-classification --profile max \
@@ -124,6 +125,8 @@ behavior for automation.
 - [x] Pin or fail closed on every model, dataset, evaluator, and source input.
 - [x] Emit JSON, CSV, an HTML dashboard, and provenance for each run.
 - [x] Open the dashboard after `mlperf run` by default.
+- [x] Provide one `mlperf health` command that checks all fourteen min paths,
+  verifies their manifests, writes the suite report, and opens it by default.
 - [x] Preserve pro subrun configuration and artifacts in the aggregate report.
 - [x] Generate a benchmark page for every workload from the registry.
 - [x] Pass desktop and mobile layout checks for all 32 website pages.

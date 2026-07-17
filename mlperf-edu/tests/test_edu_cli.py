@@ -52,7 +52,8 @@ def test_cli_help():
     assert "usage: mlperf" in result.stdout
     assert "MLPerf EDU" in result.stdout
     assert "Defaults to the mlperf-edu suite" in result.stdout
-    assert "Common user path: init, list, fetch, audit, run, report." in result.stdout
+    assert "Common user path: init, health, list, fetch, run, report." in result.stdout
+    assert "health" in result.stdout
     assert "validate" in result.stdout
     assert "--maturity" not in result.stdout
 
@@ -87,8 +88,8 @@ def test_execution_commands_do_not_advertise_unimplemented_model_override():
     assert "--model" in info.stdout
 
 
-def test_run_and_validate_advertise_device_selection():
-    for command in ("run", "validate"):
+def test_run_validate_and_health_advertise_device_selection():
+    for command in ("run", "validate", "health"):
         result = run_cli(command, "--help")
         assert result.returncode == 0, result.stderr
         assert "--device {auto,cpu,cuda,mps}" in result.stdout
@@ -116,6 +117,17 @@ def test_run_dashboard_opens_by_default_and_can_be_disabled():
     help_result = run_cli("run", "--help")
     assert "Open the generated HTML dashboard (default)." in help_result.stdout
     assert "--no-open-report" in help_result.stdout
+
+
+def test_health_dashboard_opens_by_default_and_can_be_disabled():
+    parser = edu_cli.build_parser()
+
+    default_args = parser.parse_args(["health"])
+    disabled_args = parser.parse_args(["health", "--no-open-report"])
+
+    assert default_args.open_report is True
+    assert disabled_args.open_report is False
+    assert default_args.output_dir == "submissions/health"
 
 
 def test_browser_opening_can_be_suppressed_for_automation(
@@ -430,6 +442,25 @@ def test_doctor_json_marks_bad_selection_as_failure():
     assert data["selected_workloads"] == []
 
 
+def test_doctor_fails_closed_on_missing_recommendation_max_environment():
+    result = run_cli(
+        "doctor",
+        "--workload",
+        "recommendation",
+        "--profile",
+        "max",
+        env_extra={
+            "MLPERF_EDU_CRITEO_TERMS_ACCEPTED": "",
+            "MLPERF_EDU_DLRM_DATA_DIR": "",
+            "MLPERF_EDU_DLRM_CHECKPOINT": "",
+        },
+    )
+
+    assert result.returncode == 1
+    assert "research environment is gated" in result.stdout
+    assert "MLPERF_EDU_DLRM_DATA_DIR" in result.stdout
+
+
 def test_list_default_contains_canonical_language_modeling():
     result = run_cli("list")
     assert result.returncode == 0
@@ -526,10 +557,7 @@ def test_report_enrichment_defaults_quality_required_from_public_contract():
     enrich_report_for_display(report, workloads)
     assert report["quality"]["quality_required"] is False
     assert report["quality"]["target_basis"] == "literature"
-    assert (
-        report["quality"]["target_kind"]
-        == "published_reference_reproduction"
-    )
+    assert report["quality"]["target_kind"] == "published_reference_reproduction"
     assert "reference_protocol" not in report["quality"]
     assert "gated" not in report["quality"]
 
@@ -665,13 +693,46 @@ def test_dashboard_uses_separate_meters_for_mixed_results():
     assert "Functional paths passed" in html
 
 
+def test_functional_result_table_does_not_pair_diagnostic_with_quality_target(
+    tmp_path,
+):
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "profile": "min",
+        "workloads": [
+            {
+                "workload": "code-generation",
+                "suite": "language",
+                "profile": "min",
+                "status": "passed",
+                "metrics": {"generated_tokens": 8},
+                "quality": {
+                    "quality_required": False,
+                    "metric": "humaneval_plus_pass_at_1",
+                    "metric_key": "generated_tokens",
+                    "target": 0.573,
+                    "direction": "higher",
+                },
+            }
+        ],
+    }
+    output = tmp_path / "functional.html"
+
+    edu_cli.write_html_report(report, output, source_path=tmp_path / "report.json")
+
+    detail_table = output.read_text().split("<h2>Detailed Results</h2>", 1)[1]
+    assert "generated tokens: 8" in detail_table
+    assert "Not evaluated in this run" in detail_table
+    assert "0.573" not in detail_table
+
+
 def test_quality_target_attainment_is_direction_and_tolerance_aware():
     assert edu_cli.quality_target_attainment(
         0.7145, 0.7174, "higher", 0.0029
     ) == pytest.approx(100.0)
-    assert edu_cli.quality_target_attainment(
-        1.801554, 1.79, "lower"
-    ) == pytest.approx(99.3586, rel=1e-4)
+    assert edu_cli.quality_target_attainment(1.801554, 1.79, "lower") == pytest.approx(
+        99.3586, rel=1e-4
+    )
     assert edu_cli.quality_target_attainment("0.9", 0.8, "higher") is None
 
 
@@ -1011,8 +1072,9 @@ def test_init_min_runs_smoke_validation_and_reports(tmp_path):
     assert "data cache" in result.stdout
     assert "model cache" in result.stdout
     assert "Next commands" in result.stdout
-    assert "mlperf fetch --profile min --dry-run" in result.stdout
-    assert f"mlperf report {output_dir.resolve()} --format html --open" in result.stdout
+    assert "mlperf health" in result.stdout
+    assert "mlperf show image-classification" in result.stdout
+    assert "mlperf fetch --workload image-classification --profile max" in result.stdout
     assert "Running min-profile smoke validation" in result.stdout
     assert "min run complete" in result.stdout
 
@@ -1043,6 +1105,70 @@ def test_validate_coverage_dry_run_lists_all_min_suites(tmp_path):
     assert "min-all" in result.stdout
     assert "dry-run complete" in result.stdout
     assert not any(tmp_path.iterdir())
+
+
+def test_health_dry_run_uses_all_registered_min_paths(tmp_path):
+    result = run_cli(
+        "health",
+        "--dry-run",
+        "--no-open-report",
+        "--output-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "min-all" in result.stdout
+    assert "all workloads" in result.stdout
+    assert not any(tmp_path.iterdir())
+
+
+def test_suite_filtered_health_uses_the_selected_suite(tmp_path):
+    result = run_cli(
+        "health",
+        "--suite",
+        "recommendation",
+        "--dry-run",
+        "--no-open-report",
+        "--output-dir",
+        str(tmp_path),
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "min-recommendation" in result.stdout
+    assert "suite:recommendation" in result.stdout
+
+
+def test_validation_runner_exception_still_writes_failure_report(tmp_path, monkeypatch):
+    def fail_run(_args):
+        raise RuntimeError("missing licensed benchmark environment")
+
+    monkeypatch.setattr(edu_cli, "cmd_run", fail_run)
+    args = Namespace(
+        registry=None,
+        preset="coverage",
+        preset_option=None,
+        legacy_level=None,
+        suite=["recommendation"],
+        output_dir=str(tmp_path),
+        skip_doctor=True,
+        skip_grade=False,
+        keep_going=True,
+        dry_run=False,
+        open_report=False,
+        device="cpu",
+    )
+
+    assert edu_cli.cmd_validate(args) == 1
+    reports = list(tmp_path.glob("mlperf_validate_coverage_*.json"))
+    assert len(reports) == 1
+    payload = json.loads(reports[0].read_text())
+    assert payload["status"] == "failed"
+    assert payload["validations"][0]["status"] == "run_failed"
+    assert payload["validations"][0]["error_type"] == "RuntimeError"
+    assert (
+        "missing licensed benchmark environment" in payload["validations"][0]["error"]
+    )
+    html = reports[0].with_suffix(".html").read_text()
+    assert "Needs attention" in html
+    assert "missing licensed benchmark environment" in html
 
 
 def test_validate_release_dry_run_includes_min_max_and_research_pro(tmp_path):
@@ -1240,15 +1366,10 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert report["dataset_asset"]["public_release_status"] == "public-ok-fetch-only"
     assert "score-bearing candidate" in report["dataset_asset"]["public_result_use"]
     assert report["quality"]["target_basis"] == "literature"
-    assert (
-        report["quality"]["target_kind"]
-        == "published_reference_reproduction"
-    )
+    assert report["quality"]["target_kind"] == "published_reference_reproduction"
     assert "reference_protocol" not in report["quality"]
     assert report["quality"]["quality_required"] is False
-    assert report["execution_lineage"]["training"]["status"] == (
-        "executed-in-this-run"
-    )
+    assert report["execution_lineage"]["training"]["status"] == ("executed-in-this-run")
     assert report["execution_lineage"]["checkpoint"]["role"] == "runtime-model"
     assert report["run_fingerprint"]["schema"] == "mlperf-edu-run-fingerprint/0.1"
     assert report["run_fingerprint"]["hardware"]["fingerprint_hash"]
@@ -1332,7 +1453,8 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert "literature" in html
     assert "fingerprint_hash" in html
     assert "Assets and Provenance" in html
-    assert "Quality Required" in html
+    assert "Quality Decision" in html
+    assert "Not evaluated in this run" in html
     assert "Gated" not in html
     assert "mit-repository-public-domain-text" in html
     assert "public-ok-fetch-only" in html

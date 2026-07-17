@@ -156,13 +156,14 @@ def build_parser() -> argparse.ArgumentParser:
         prog="mlperf",
         description=(
             "MLPerf EDU command harness. Defaults to the mlperf-edu suite. "
-            "Common user path: init, list, fetch, audit, run, report. "
+            "Common user path: init, health, list, fetch, run, report. "
             "Instructor/maintainer path: audit, validate, grade."
         ),
         epilog=(
             "Common user commands:\n"
             "  doctor   check this machine\n"
             "  init     prepare caches and optionally smoke-test the setup\n"
+            "  health   verify every min path and open the suite health report\n"
             "  list     discover workloads\n"
             "  fetch    download or verify needed assets\n"
             "  audit    check source, license, dataset, model, and quality metadata\n"
@@ -242,6 +243,48 @@ def build_parser() -> argparse.ArgumentParser:
         help="Directory for init smoke-validation artifacts.",
     )
     init.set_defaults(func=cmd_init)
+
+    health = subparsers.add_parser(
+        "health",
+        help="Verify every min path and open the suite health report",
+        description=(
+            "Run the complete classroom health check. This checks the environment, "
+            "executes every registered min path, verifies the provenance manifests, "
+            "and writes JSON, CSV, and HTML summaries."
+        ),
+    )
+    health.add_argument(
+        "--suite",
+        choices=PRODUCT_SUITES,
+        action="append",
+        default=None,
+        help="Restrict health checks to one or more suites. Can be passed multiple times.",
+    )
+    health.add_argument(
+        "--output-dir",
+        default="submissions/health",
+        help="Root directory for health-check artifacts.",
+    )
+    health.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the planned health check without running it.",
+    )
+    health_opening = health.add_mutually_exclusive_group()
+    health_opening.add_argument(
+        "--open-report",
+        dest="open_report",
+        action="store_true",
+        help="Open the generated HTML health report (default).",
+    )
+    health_opening.add_argument(
+        "--no-open-report",
+        dest="open_report",
+        action="store_false",
+        help="Generate the HTML health report without opening a browser.",
+    )
+    add_device(health)
+    health.set_defaults(func=cmd_health, open_report=True)
 
     fetch = subparsers.add_parser("fetch", help="Fetch or verify assets for workloads")
     add_selection(fetch)
@@ -580,41 +623,180 @@ def select_cli_workloads(
 ) -> list[Workload]:
     workload = getattr(args, "workload", None)
     variant = getattr(args, "variant", None)
+    suite_value = getattr(args, "suite", None)
+    suites = (
+        tuple(str(suite) for suite in suite_value)
+        if isinstance(suite_value, (list, tuple))
+        else (str(suite_value),)
+        if suite_value
+        else ()
+    )
     if workload and not variant and workload not in workloads:
         selected_ids = resolve_workload_ids(workloads, workload)
         if not selected_ids:
             raise ValueError(f"unknown workload or canonical workload '{workload}'")
         selected = [workloads[workload_id] for workload_id in selected_ids]
-        suite = getattr(args, "suite", None)
-        if suite:
-            selected = [item for item in selected if item.suite == suite]
+        if suites:
+            selected = [item for item in selected if item.suite in suites]
         return selected
 
     resolved_workload = resolve_cli_workload_id(workloads, workload, variant)
-    return select_workloads(
+    selected = select_workloads(
         workloads,
-        suite=getattr(args, "suite", None),
+        suite=suites[0] if len(suites) == 1 else None,
         collection=default_collection_for(args),
         workload_id=resolved_workload,
     )
+    if len(suites) > 1:
+        selected = [item for item in selected if item.suite in suites]
+    return selected
 
 
 def selection_label(
     *,
-    suite: str | None,
+    suite: str | list[str] | tuple[str, ...] | None,
     workload: str | None = None,
     collection: str | None = None,
 ) -> str:
     if workload:
         return workload
     if suite:
+        if isinstance(suite, (list, tuple)):
+            return "suites:" + ",".join(str(item) for item in suite)
         return suite
     if collection:
         return f"collection:{collection}"
     return "default"
 
 
-def cmd_doctor(args: argparse.Namespace) -> int:
+def workload_profile_readiness_checks(
+    workload: Workload, profile: str
+) -> list[dict[str, str]]:
+    """Return lightweight, non-mutating readiness checks for a selected profile."""
+    checks: list[dict[str, str]] = []
+    runners = workload.raw.get("runner") or {}
+    runner_profile = profile if profile != "pro" else "max"
+    if not runners.get(runner_profile):
+        return [
+            {
+                "name": f"{workload.id} {profile}",
+                "detail": f"no {runner_profile} runner is registered",
+                "status": "fail",
+            }
+        ]
+    if profile == "min":
+        return checks
+
+    if workload.id == "recommendation":
+        missing = [
+            name
+            for name, ready in (
+                (
+                    "MLPERF_EDU_CRITEO_TERMS_ACCEPTED",
+                    os.environ.get("MLPERF_EDU_CRITEO_TERMS_ACCEPTED") == "1",
+                ),
+                (
+                    "MLPERF_EDU_DLRM_DATA_DIR",
+                    bool(os.environ.get("MLPERF_EDU_DLRM_DATA_DIR")),
+                ),
+                (
+                    "MLPERF_EDU_DLRM_CHECKPOINT",
+                    bool(os.environ.get("MLPERF_EDU_DLRM_CHECKPOINT")),
+                ),
+            )
+            if not ready
+        ]
+        if missing:
+            checks.append(
+                {
+                    "name": f"{workload.id} {profile}",
+                    "detail": (
+                        "research environment is gated; set " + ", ".join(missing)
+                    ),
+                    "status": "fail",
+                }
+            )
+            return checks
+        data_dir = Path(os.environ["MLPERF_EDU_DLRM_DATA_DIR"]).expanduser()
+        checkpoint = Path(os.environ["MLPERF_EDU_DLRM_CHECKPOINT"]).expanduser()
+        missing_paths = [
+            label
+            for label, present in (
+                ("Criteo data directory", data_dir.is_dir()),
+                ("DLRM checkpoint", checkpoint.is_file()),
+            )
+            if not present
+        ]
+        checks.append(
+            {
+                "name": f"{workload.id} {profile}",
+                "detail": (
+                    "prepared licensed data and checkpoint found"
+                    if not missing_paths
+                    else "missing " + ", ".join(missing_paths)
+                ),
+                "status": "ok" if not missing_paths else "fail",
+            }
+        )
+        return checks
+
+    if workload.id == "reinforcement-learning":
+        missing = [
+            name
+            for name, ready in (
+                (
+                    "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED",
+                    os.environ.get("MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED") == "1",
+                ),
+                (
+                    "MLPERF_EDU_MINIGO_IMAGE",
+                    bool(os.environ.get("MLPERF_EDU_MINIGO_IMAGE")),
+                ),
+            )
+            if not ready
+        ]
+        runtime = os.environ.get("MLPERF_EDU_MINIGO_CONTAINER_RUNTIME", "docker")
+        runtime_path = (
+            str(Path(runtime).expanduser())
+            if Path(runtime).expanduser().is_file()
+            else shutil.which(runtime)
+        )
+        if not runtime_path:
+            missing.append("MLPERF_EDU_MINIGO_CONTAINER_RUNTIME")
+        checks.append(
+            {
+                "name": f"{workload.id} {profile}",
+                "detail": (
+                    "immutable MiniGo image and container runtime declared"
+                    if not missing
+                    else "research environment is gated; set " + ", ".join(missing)
+                ),
+                "status": "ok" if not missing else "fail",
+            }
+        )
+        return checks
+
+    missing_assets = [
+        row["asset"]
+        for row in cache_asset_rows(workload)
+        if row.get("status") == "missing"
+    ]
+    if missing_assets:
+        checks.append(
+            {
+                "name": f"{workload.id} {profile}",
+                "detail": (
+                    "missing cached "
+                    + ", ".join(sorted(set(missing_assets)))
+                    + "; run mlperf fetch first"
+                ),
+                "status": "fail",
+            }
+        )
+    return checks
+
+
+def collect_doctor_report(args: argparse.Namespace) -> dict[str, Any]:
     checks: list[dict[str, str]] = []
     selected: list[Workload] = []
     workloads: dict[str, Workload] = {}
@@ -668,6 +850,8 @@ def cmd_doctor(args: argparse.Namespace) -> int:
                 f"{len(selected)} workload(s) for profile {profile} ({selector})",
                 "ok",
             )
+            for workload in selected:
+                checks.extend(workload_profile_readiness_checks(workload, profile))
         except Exception as exc:
             add_check("selection", str(exc), "fail")
 
@@ -677,21 +861,29 @@ def cmd_doctor(args: argparse.Namespace) -> int:
     except Exception as exc:
         add_check("hardware", str(exc), "warn")
 
-    if getattr(args, "format", "summary") == "json":
-        payload = {
-            "schema": "mlperf-edu-doctor/0.1",
-            "mlperf_suite": DEFAULT_MLPERF_SUITE,
-            "profile": profile,
-            "suite": getattr(args, "suite", None),
-            "workload": getattr(args, "workload", None),
-            "collection": getattr(args, "collection", None),
-            "variant": getattr(args, "variant", None),
-            "checks": checks,
-            "selected_workloads": [workload_summary(workload) for workload in selected],
-        }
-        print(json.dumps(payload, indent=2, sort_keys=True))
-        return 1 if any(check["status"] == "fail" for check in checks) else 0
+    return {
+        "schema": "mlperf-edu-doctor/0.1",
+        "mlperf_suite": DEFAULT_MLPERF_SUITE,
+        "profile": profile,
+        "suite": getattr(args, "suite", None),
+        "workload": getattr(args, "workload", None),
+        "collection": getattr(args, "collection", None),
+        "variant": getattr(args, "variant", None),
+        "checks": checks,
+        "selected_workloads": [workload_summary(workload) for workload in selected],
+    }
 
+
+def doctor_report_status(payload: dict[str, Any]) -> int:
+    return (
+        1
+        if any(check.get("status") == "fail" for check in payload.get("checks", []))
+        else 0
+    )
+
+
+def print_doctor_report(payload: dict[str, Any]) -> None:
+    checks = payload.get("checks", [])
     table = Table(title="MLPerf EDU Doctor")
     table.add_column("Check")
     table.add_column("Detail")
@@ -710,7 +902,14 @@ def cmd_doctor(args: argparse.Namespace) -> int:
         table.add_row(name, detail, f"[{style}]{status}[/{style}]")
     console.print(table)
 
-    return 1 if any(check["status"] == "fail" for check in checks) else 0
+
+def cmd_doctor(args: argparse.Namespace) -> int:
+    payload = collect_doctor_report(args)
+    if getattr(args, "format", "summary") == "json":
+        print(json.dumps(payload, indent=2, sort_keys=True))
+    else:
+        print_doctor_report(payload)
+    return doctor_report_status(payload)
 
 
 def cmd_init(args: argparse.Namespace) -> int:
@@ -805,11 +1004,39 @@ def print_next_commands(args: argparse.Namespace) -> None:
     selector_text = " ".join(selector)
     suffix = f" {selector_text}" if selector_text else ""
     console.print("[bold]Next commands[/bold]")
+    print("  mlperf health")
+    if args.profile == "min" and not selector:
+        print("  mlperf show image-classification")
+        print("  mlperf fetch --workload image-classification --profile max --dry-run")
+        print(
+            "  mlperf run --workload image-classification --profile max --output-dir submissions/image-classification"
+        )
+        return
     print(f"  mlperf fetch --profile {args.profile}{suffix} --dry-run")
     print(
         f"  mlperf run --profile {args.profile}{suffix} --output-dir {Path(args.output_dir).resolve()}"
     )
     print(f"  mlperf report {Path(args.output_dir).resolve()} --format html --open")
+
+
+def cmd_health(args: argparse.Namespace) -> int:
+    """Run the complete min-profile validation through a student-facing command."""
+    return cmd_validate(
+        argparse.Namespace(
+            registry=args.registry,
+            preset="coverage",
+            preset_option=None,
+            legacy_level=None,
+            suite=args.suite,
+            output_dir=args.output_dir,
+            skip_doctor=False,
+            skip_grade=False,
+            keep_going=True,
+            dry_run=args.dry_run,
+            open_report=args.open_report,
+            device=args.device,
+        )
+    )
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -1461,11 +1688,7 @@ def build_execution_lineage(
         "training_repository",
         "repository",
         "repo_id",
-    ) or str(
-        canonical.get("upstream_repository")
-        or provenance.get("repository")
-        or ""
-    )
+    ) or str(canonical.get("upstream_repository") or provenance.get("repository") or "")
     revision = first_lineage_value(
         model_source,
         "training_revision",
@@ -1497,9 +1720,7 @@ def build_execution_lineage(
             "status": "suite-checkpoint-source",
             "source_workload": source_workload,
             "source_run_selector": checkpoint_provenance.get("source_run_selector"),
-            "source_report_sha256": checkpoint_provenance.get(
-                "source_report_sha256"
-            ),
+            "source_report_sha256": checkpoint_provenance.get("source_report_sha256"),
             "source_manifest_sha256": checkpoint_provenance.get(
                 "source_manifest_sha256"
             ),
@@ -1572,9 +1793,7 @@ def build_execution_lineage(
             "status": "executed-in-this-run",
             "adapter": runner_spec,
             "entrypoint": inference_entrypoint,
-            "repository": str(
-                inference_source.get("repository") or repository or ""
-            ),
+            "repository": str(inference_source.get("repository") or repository or ""),
             "revision": str(inference_source.get("revision") or revision or ""),
             "phase": report.get("phase"),
         }
@@ -1582,9 +1801,7 @@ def build_execution_lineage(
         inference = {
             "status": "declared-for-checkpoint-evaluation",
             "entrypoint": inference_entrypoint,
-            "repository": str(
-                inference_source.get("repository") or repository or ""
-            ),
+            "repository": str(inference_source.get("repository") or repository or ""),
             "revision": str(inference_source.get("revision") or revision or ""),
         }
 
@@ -2495,8 +2712,7 @@ def pro_subrun_artifacts(reports: list[dict[str, Any]]) -> dict[str, str]:
             if not isinstance(value, str) or not value or not Path(value).is_file():
                 continue
             safe_role = "".join(
-                char if char.isalnum() or char in "-_" else "_"
-                for char in str(role)
+                char if char.isalnum() or char in "-_" else "_" for char in str(role)
             )
             artifacts[f"subrun_{run_index}_{safe_role}"] = value
     return artifacts
@@ -2935,6 +3151,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
         target = quality.get("target")
         direction = str(quality.get("direction") or "")
         target_kind = str(quality.get("target_kind") or "").replace("_", " ")
+        target_basis = str(quality.get("target_basis") or "").replace("_", " ")
         quality_required = quality_required_value(quality, False) is True
         target_met = quality.get("target_met")
         run_passed = str(item.get("status") or "").lower() == "passed"
@@ -2983,12 +3200,21 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
                 quality.get("tolerance", 0.0),
             )
             detail_html = raw_html + quality_attainment_meter_html(attainment)
-            target_html = (
-                f"<div class='metric-target'>{escape(target_text)}</div>"
-            )
+            target_html = f"<div class='metric-target'>{escape(target_text)}</div>"
             target_kind_html = (
-                f"<div class='metric-kind'>Target type: {escape(target_kind)}</div>"
-                if target_kind
+                "<div class='metric-kind'>"
+                + escape(
+                    " · ".join(
+                        part
+                        for part in (
+                            f"Target type: {target_kind}" if target_kind else "",
+                            f"Basis: {target_basis}" if target_basis else "",
+                        )
+                        if part
+                    )
+                )
+                + "</div>"
+                if target_kind or target_basis
                 else ""
             )
         else:
@@ -3015,6 +3241,8 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
                 future_target = f"Max target: {target_text}"
                 if target_kind:
                     future_target += f" · {target_kind}"
+                if target_basis:
+                    future_target += f" · {target_basis}"
                 target_kind_html = (
                     f"<div class='metric-kind'>{escape(future_target)}</div>"
                 )
@@ -3042,7 +3270,9 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
     elif quality_results:
         eyebrow = "Lead results"
         heading = "Quality Results"
-        summary = f"{targets_met} of {quality_results} authoritative quality targets met"
+        summary = (
+            f"{targets_met} of {quality_results} authoritative quality targets met"
+        )
     else:
         eyebrow = "Readiness check"
         heading = "Functional Readiness"
@@ -3079,7 +3309,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
     </div>
     {meters_html}
     {boundary_html}
-    <div class="quality-grid">{''.join(cards)}</div>
+    <div class="quality-grid">{"".join(cards)}</div>
   </section>
 """
 
@@ -3118,6 +3348,37 @@ def format_quality_target(metric: str, target: Any, direction: str) -> str:
     return label
 
 
+def dashboard_observation(row: dict[str, Any]) -> str:
+    """Describe a measured value without implying that it is the quality metric."""
+    metric = str(row.get("metric") or "").replace("_", " ")
+    value = row.get("value")
+    if metric and value not in (None, ""):
+        formatted, _ = format_dashboard_metric(metric, value)
+        return f"{metric}: {formatted}"
+    functional_check = row.get("functional_check")
+    if functional_check not in (None, ""):
+        return str(functional_check)
+    return "No diagnostic value reported"
+
+
+def dashboard_quality_decision(row: dict[str, Any]) -> str:
+    """Render the quality boundary without juxtaposing unrelated min metrics."""
+    if row.get("quality_required") is not True:
+        return "Not evaluated in this run"
+    metric = str(row.get("metric") or "quality metric")
+    target = format_quality_target(
+        metric,
+        row.get("target"),
+        str(row.get("direction") or ""),
+    )
+    target_met = row.get("target_met")
+    if target_met is True:
+        return f"Met · {target}"
+    if target_met is False:
+        return f"Not met · {target}"
+    return f"Pending · {target}"
+
+
 def run_configuration_section_html(report: dict[str, Any]) -> str:
     cards: list[str] = []
     for item in report_items(report):
@@ -3152,7 +3413,7 @@ def run_configuration_section_html(report: dict[str, Any]) -> str:
     return f"""
   <section class="section">
     <div class="section-heading"><div><div class="eyebrow">Reproducibility</div><h2>Run Configuration</h2></div></div>
-    <div class="detail-grid">{''.join(cards)}</div>
+    <div class="detail-grid">{"".join(cards)}</div>
   </section>
 """
 
@@ -3176,7 +3437,11 @@ def lineage_section_html(report: dict[str, Any]) -> str:
                 details = {}
             status = str(
                 details.get("status")
-                or ("not-executed-in-this-run" if key in {"training", "inference"} else "not-declared")
+                or (
+                    "not-executed-in-this-run"
+                    if key in {"training", "inference"}
+                    else "not-declared"
+                )
             )
             detail_rows = "".join(
                 f"<div><span>{escape(str(field).replace('_', ' ').title())}</span><code>{escape(format_hardware_value(value))}</code></div>"
@@ -3200,7 +3465,7 @@ def lineage_section_html(report: dict[str, Any]) -> str:
     return f"""
   <section class="section">
     <div class="section-heading"><div><div class="eyebrow">Artifact chain</div><h2>Model Lineage</h2></div></div>
-    {''.join(workloads_html)}
+    {"".join(workloads_html)}
   </section>
 """
 
@@ -3220,7 +3485,9 @@ def provenance_section_html(report: dict[str, Any]) -> str:
             or ""
         )
         lineage = item.get("execution_lineage") or {}
-        checkpoint = lineage.get("checkpoint") or {} if isinstance(lineage, dict) else {}
+        checkpoint = (
+            lineage.get("checkpoint") or {} if isinstance(lineage, dict) else {}
+        )
         checkpoint_digest = str(
             checkpoint.get("sha256") or checkpoint.get("merkle_root") or ""
         )
@@ -3240,7 +3507,7 @@ def provenance_section_html(report: dict[str, Any]) -> str:
     <div class="section-heading"><div><div class="eyebrow">Integrity evidence</div><h2>Provenance</h2></div></div>
     <div class="table-scroll"><table>
       <thead><tr><th>Workload</th><th>Manifest</th><th>JSON Report</th><th>Run Fingerprint</th><th>Checkpoint Digest</th></tr></thead>
-      <tbody>{''.join(rows)}</tbody>
+      <tbody>{"".join(rows)}</tbody>
     </table></div>
     <div class="note">Verify a manifest with <code>mlperf verify &lt;file.provd.json&gt;</code>. Digests establish content integrity; authenticated producer identity requires an external signature.</div>
   </section>
@@ -3287,22 +3554,11 @@ def write_html_report(
     body_rows = "\n".join(
         "<tr>"
         f"<td>{escape(str(row.get('workload', '')))}</td>"
-        f"<td>{escape(str(row.get('run_selector', '')))}</td>"
         f"<td>{escape(str(row.get('suite', '')))}</td>"
         f"<td>{escape(str(row.get('profile', '')))}</td>"
         f"<td><span class='badge {status_class(str(row.get('status', '')))}'>{escape(str(row.get('status', '')))}</span></td>"
-        f"<td>{escape(str(row.get('metric', '')))}</td>"
-        f"<td>{escape(format_cell(row.get('value')))}</td>"
-        f"<td>{escape(format_cell(row.get('target')))}</td>"
-        f"<td>{escape(format_cell(row.get('target_kind')))}</td>"
-        f"<td>{escape(format_cell(row.get('target_basis')))}</td>"
-        f"<td>{escape(format_cell(row.get('reference_runs')))}</td>"
-        f"<td>{escape(format_cell(row.get('acceptance_runs')))}</td>"
-        f"<td>{escape(format_cell(row.get('reference_statistic')))}</td>"
-        f"<td>{escape(format_cell(row.get('reference_protocol')))}</td>"
-        f"<td>{escape(format_cell(row.get('quality_required')))}</td>"
-        f"<td>{escape(format_cell(row.get('target_met')))}</td>"
-        f"<td>{escape(format_cell(row.get('functional_check')))}</td>"
+        f"<td>{escape(dashboard_observation(row))}</td>"
+        f"<td>{escape(dashboard_quality_decision(row))}</td>"
         f"<td>{escape(format_cell(row.get('duration_seconds')))}</td>"
         f"<td>{escape(format_cell(row.get('throughput')))}</td>"
         "</tr>"
@@ -3423,9 +3679,10 @@ def write_html_report(
   {serving_html}
   {assets_html}
   <section>
+    <div class="section-heading"><div><div class="eyebrow">Review table</div><h2>Detailed Results</h2></div><div class="section-summary">Complete target metadata remains in the paired JSON and CSV.</div></div>
     <div class="table-scroll"><table>
       <thead>
-        <tr><th>Workload</th><th>Run As</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Target Type</th><th>Basis</th><th>Reference Runs</th><th>Acceptance Runs</th><th>Reference Statistic</th><th>Reference Protocol</th><th>Quality Required</th><th>Met</th><th>Check</th><th>Duration</th><th>Throughput</th></tr>
+        <tr><th>Workload</th><th>Suite</th><th>Profile</th><th>Outcome</th><th>Observed Diagnostic</th><th>Quality Decision</th><th>Duration</th><th>Throughput</th></tr>
       </thead>
       <tbody>{body_rows}</tbody>
     </table></div>
@@ -4189,6 +4446,7 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
         "metric": metric_key or metric_name or "",
         "value": metrics.get(metric_key) if metric_key else "",
         "target": quality.get("target", ""),
+        "direction": quality.get("direction", ""),
         "quality_required": quality_required,
         "target_met": target_met,
         "warning_count": 0,
@@ -4666,11 +4924,8 @@ def cmd_grade(args: argparse.Namespace) -> int:
     table.add_column("Profile", no_wrap=True)
     table.add_column("Result", no_wrap=True)
     table.add_column("Verify", no_wrap=True)
-    table.add_column("Metric")
-    table.add_column("Value")
-    table.add_column("Target")
-    table.add_column("Quality Required", no_wrap=True)
-    table.add_column("Met", no_wrap=True)
+    table.add_column("Observed Diagnostic")
+    table.add_column("Quality Decision")
     table.add_column("Warnings", justify="right")
     for row in rows:
         style = "green" if row["passed"] else "red"
@@ -4679,11 +4934,8 @@ def cmd_grade(args: argparse.Namespace) -> int:
             str(row["profile"]),
             f"[{style}]{row['status']}[/{style}]",
             "ok" if row["verified"] else "fail",
-            str(row["metric"]),
-            format_cell(row["value"]),
-            format_cell(row["target"]),
-            format_cell(row["quality_required"]),
-            format_cell(row["target_met"]),
+            dashboard_observation(row),
+            dashboard_quality_decision(row),
             str(row.get("warning_count", 0)),
         )
     console.print(table)
@@ -4755,9 +5007,28 @@ def cmd_validate(args: argparse.Namespace) -> int:
     if not args.skip_doctor:
         console.print("[bold]Validation preflight: doctor[/bold]")
         doctor_start = time.perf_counter()
-        status = cmd_doctor(args)
+        item_profiles = {profile for _kind, _name, profile in items}
+        collection_names = {
+            name for kind, name, _profile in items if kind == "collection"
+        }
+        doctor_args = argparse.Namespace(
+            registry=args.registry,
+            profile=next(iter(item_profiles)) if len(item_profiles) == 1 else "max",
+            suite=args.suite,
+            workload=None,
+            collection=(
+                next(iter(collection_names)) if len(collection_names) == 1 else None
+            ),
+            variant=None,
+            format="summary",
+        )
+        doctor_report = collect_doctor_report(doctor_args)
+        print_doctor_report(doctor_report)
+        status = doctor_report_status(doctor_report)
         preflight["doctor_exit"] = status
         preflight["doctor_duration_seconds"] = float(time.perf_counter() - doctor_start)
+        preflight["checks"] = doctor_report.get("checks", [])
+        preflight["selected_workloads"] = doctor_report.get("selected_workloads", [])
         if status != 0:
             failures.append(("doctor", "-", f"exit {status}"))
             if not args.keep_going:
@@ -4817,6 +5088,13 @@ def cmd_validate(args: argparse.Namespace) -> int:
             os.environ["MLPERF_EDU_MAX_SEED"] = str(validation_seed["seed"])
         try:
             run_status = cmd_run(run_args)
+        except Exception as exc:
+            run_status = 1
+            record["error_type"] = type(exc).__name__
+            record["error"] = str(exc)
+            console.print(
+                f"[red]Validation run failed:[/red] {type(exc).__name__}: {exc}"
+            )
         finally:
             if validation_seed["set_max_seed"]:
                 if previous_max_seed is None:
@@ -4824,7 +5102,8 @@ def cmd_validate(args: argparse.Namespace) -> int:
                 else:
                     os.environ["MLPERF_EDU_MAX_SEED"] = previous_max_seed
         record["run_exit"] = run_status
-        record.update(latest_aggregate_exports(output_dir, profile))
+        if run_status == 0:
+            record.update(latest_aggregate_exports(output_dir, profile))
         contract_failures = validation_contract_failures(record.get("report"))
         record["review_contract_failures"] = contract_failures
         record["review_contract_failure_count"] = len(contract_failures)
@@ -5162,7 +5441,7 @@ def write_validation_summary_report(
     console.print(f"Validation CSV: {csv_path}")
     console.print(f"Validation Workloads CSV: {workload_csv_path}")
     if open_report:
-        webbrowser.open(html_path.as_uri())
+        open_report_path(html_path)
     return {"json": report_path, "csv": csv_path, "html": html_path}
 
 
@@ -5268,20 +5547,93 @@ def duration_sort_key(row: dict[str, Any]) -> float:
         return 0.0
 
 
+def validation_suite_summary_html(report: dict[str, Any]) -> str:
+    suites: dict[str, dict[str, int]] = {}
+    for row in report.get("workloads", []):
+        suite = str(row.get("suite") or "other")
+        counts = suites.setdefault(suite, {"passed": 0, "total": 0})
+        counts["total"] += 1
+        if str(row.get("status") or "").lower() == "passed":
+            counts["passed"] += 1
+    if not suites:
+        return ""
+    bars = []
+    for suite, counts in sorted(suites.items()):
+        total = counts["total"]
+        passed = counts["passed"]
+        percent = 100.0 * passed / total if total else 0.0
+        state = "pass" if passed == total and total else "warn" if passed else "fail"
+        bars.append(
+            "<div class='suite-row'>"
+            f"<div class='suite-label'><strong>{escape(suite)}</strong><span>{passed} / {total} paths</span></div>"
+            f"<div class='meter-track' role='progressbar' aria-label='{escape(suite)} paths passed' "
+            f"aria-valuemin='0' aria-valuemax='{total}' aria-valuenow='{passed}'>"
+            f"<div class='meter-fill {state}' style='width:{percent:.2f}%'></div></div>"
+            "</div>"
+        )
+    return f"""
+  <section class="section">
+    <div class="section-heading"><div><div class="eyebrow">Portfolio coverage</div><h2>Suite Health</h2></div><div class="section-summary">Every bar uses the same measure, passed paths out of registered paths.</div></div>
+    <div class="suite-bars">{"".join(bars)}</div>
+  </section>
+"""
+
+
 def write_validation_html(
     report: dict[str, Any], output: Path, *, source_path: Path
 ) -> None:
     totals = report.get("totals") or {}
     base_dir = output.parent
+    workload_rows_data = report.get("workloads", [])
+    profiles = {
+        str(row.get("profile")) for row in workload_rows_data if row.get("profile")
+    }
+    functional_only = bool(workload_rows_data) and all(
+        row.get("quality_required") is not True for row in workload_rows_data
+    )
+    health_report = functional_only and profiles == {"min"}
+    if health_report and report.get("preset") == "coverage":
+        title = "MLPerf EDU Suite Health"
+    elif health_report:
+        title = "MLPerf EDU Setup Health"
+    else:
+        title = f"MLPerf EDU Validation: {report.get('preset', 'unknown')}"
+    passed_paths = sum(
+        1
+        for row in workload_rows_data
+        if str(row.get("status") or "").lower() == "passed"
+    )
+    quality_rows = [
+        row for row in workload_rows_data if row.get("quality_required") is True
+    ]
+    targets_met = sum(row.get("target_met") is True for row in quality_rows)
+    status_passed = report.get("status") == "passed"
+    lead = (
+        "Ready for classroom work"
+        if status_passed and health_report
+        else "Validation passed"
+        if status_passed
+        else "Needs attention"
+    )
+    doctor_exit = (report.get("preflight") or {}).get("doctor_exit")
+    doctor_label = (
+        "Skipped"
+        if (report.get("preflight") or {}).get("doctor_skipped")
+        else "Passed"
+        if doctor_exit == 0
+        else "Failed"
+    )
     cards = "\n".join(
         f"<div class='card'><div class='label'>{escape(label)}</div><div class='value'>{escape(str(value))}</div></div>"
         for label, value in (
-            ("Status", report.get("status", "unknown")),
-            ("Validation Runs", totals.get("validations", 0)),
-            ("Passed Manifests", totals.get("passed_manifests", 0)),
-            ("Failed Manifests", totals.get("failed_manifests", 0)),
+            ("Overall", lead),
+            ("Environment", doctor_label),
+            ("Paths Passed", f"{passed_paths} / {len(workload_rows_data)}"),
+            (
+                "Manifests Verified",
+                f"{totals.get('passed_manifests', 0)} / {len(workload_rows_data)}",
+            ),
             ("Warnings", totals.get("warning_count", 0)),
-            ("Workloads", totals.get("workloads", 0)),
             ("Duration", f"{float(report.get('duration_seconds', 0.0)):.1f}s"),
         )
     )
@@ -5295,21 +5647,19 @@ def write_validation_html(
         f"<td>{escape(format_cell(record.get('failed', '')))}</td>"
         f"<td>{escape(format_cell(record.get('warning_count', '')))}</td>"
         f"<td>{escape(format_cell(record.get('duration_seconds', '')))}</td>"
+        f"<td>{escape(str(record.get('error') or ''))}</td>"
         f"<td>{validation_artifact_links(record, base_dir=base_dir)}</td>"
         "</tr>"
         for record in report.get("validations", [])
     )
     workload_rows = "\n".join(
         "<tr>"
-        f"<td>{escape(str(row.get('validation', '')))}</td>"
         f"<td>{escape(str(row.get('workload', '')))}</td>"
         f"<td>{escape(str(row.get('suite', '')))}</td>"
         f"<td>{escape(str(row.get('profile', '')))}</td>"
         f"<td><span class='badge {status_class(str(row.get('status', '')))}'>{escape(str(row.get('status', '')))}</span></td>"
-        f"<td>{escape(str(row.get('metric', '')))}</td>"
-        f"<td>{escape(format_cell(row.get('value')))}</td>"
-        f"<td>{escape(format_cell(row.get('target')))}</td>"
-        f"<td>{escape(format_cell(row.get('quality_required')))}</td>"
+        f"<td>{escape(dashboard_observation(row))}</td>"
+        f"<td>{escape(dashboard_quality_decision(row))}</td>"
         f"<td>{escape(format_cell(row.get('duration_seconds')))}</td>"
         f"<td>{escape(format_cell(row.get('throughput')))}</td>"
         "</tr>"
@@ -5320,31 +5670,81 @@ def write_validation_html(
     workload_section = ""
     if workload_rows:
         workload_section = f"""
-  <h2>Workload Breakdown</h2>
-  <table>
-    <thead><tr><th>Validation</th><th>Workload</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Quality Required</th><th>Duration</th><th>Throughput</th></tr></thead>
-    <tbody>{workload_rows}</tbody>
-  </table>
+  <section class="section">
+    <div class="section-heading"><div><div class="eyebrow">Per-workload evidence</div><h2>Workload Health</h2></div><div class="section-summary">A min diagnostic is never compared with a max quality target.</div></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Workload</th><th>Suite</th><th>Profile</th><th>Outcome</th><th>Observed Diagnostic</th><th>Quality Decision</th><th>Duration</th><th>Throughput</th></tr></thead>
+      <tbody>{workload_rows}</tbody>
+    </table></div>
+  </section>
 """
+    if health_report:
+        interpretation = (
+            f"All {passed_paths} registered min paths completed and "
+            f"{totals.get('passed_manifests', 0)} provenance manifests verified. "
+            "This establishes setup and execution health only. It does not claim "
+            "that any max quality target was evaluated."
+            if status_passed
+            else "One or more setup, execution, or provenance checks failed. Review the failing workload rows and linked run artifacts before starting benchmark work."
+        )
+        comparison = (
+            "Baseline comparison is not applicable to a min health check. The min "
+            "profile uses small functional probes and does not produce a comparable "
+            "quality or performance score. Run a workload with the max profile to "
+            "compare its result with the declared quality target."
+        )
+        next_step = (
+            "Choose one workload, inspect its benchmark page, fetch its max assets, "
+            "and run the authoritative quality contract."
+            if status_passed
+            else "Open the linked run report for the first failing path and resolve its diagnostic before rerunning mlperf health."
+        )
+    else:
+        interpretation = (
+            f"{targets_met} of {len(quality_rows)} authoritative quality targets met. "
+            "Interpret timing only for rows whose quality decision passed."
+        )
+        comparison = (
+            "Each quality-bearing row is compared with its declared target. A machine "
+            "performance baseline is a separate artifact and is comparable only when "
+            "the workload contract and comparison fingerprint match."
+        )
+        next_step = "Open the linked run reports to review configuration, model lineage, and provenance."
+    suite_summary = validation_suite_summary_html(report)
     html = f"""<!doctype html>
 <html lang="en">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>MLPerf EDU Validation: {escape(str(report.get("preset", "unknown")))}</title>
+  <title>{escape(title)}</title>
   <style>
-    :root {{ --bg:#f6f7f9; --ink:#1f2937; --muted:#667085; --line:#d0d5dd; --surface:#fff; --pass:#067647; --fail:#b42318; --warn:#b54708; }}
+    :root {{ --bg:#f3f5f8; --ink:#182230; --muted:#667085; --line:#d8dee8; --surface:#fff; --accent:#175cd3; --pass:#067647; --fail:#b42318; --warn:#b54708; }}
+    * {{ box-sizing:border-box; }}
     body {{ margin:0; background:var(--bg); color:var(--ink); font:14px/1.45 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }}
-    main {{ max-width:1180px; margin:0 auto; padding:32px 24px 48px; }}
+    main {{ max-width:1180px; margin:0 auto; padding:40px 24px 56px; }}
     header {{ display:flex; justify-content:space-between; gap:24px; align-items:flex-start; margin-bottom:24px; }}
-    h1 {{ margin:0 0 6px; font-size:28px; letter-spacing:0; }}
+    h1 {{ margin:0 0 6px; font-size:clamp(28px,4vw,38px); line-height:1.15; letter-spacing:-.03em; }}
+    h2 {{ margin:0; font-size:20px; }}
     .meta,.note {{ color:var(--muted); font-size:12px; }}
     .meta {{ text-align:right; }}
     .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:18px 0 24px; }}
-    .card {{ background:var(--surface); border:1px solid var(--line); border-radius:8px; padding:14px 16px; }}
-    .label {{ color:var(--muted); font-size:12px; text-transform:uppercase; }}
-    .value {{ font-size:24px; font-weight:700; margin-top:4px; }}
-    h2 {{ margin:28px 0 12px; font-size:18px; letter-spacing:0; }}
+    .card,.panel,.suite-bars {{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }}
+    .label,.eyebrow {{ color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }}
+    .value {{ font-size:21px; font-weight:700; margin-top:5px; }}
+    .section {{ margin:0 0 28px; }}
+    .section-heading {{ display:flex; justify-content:space-between; align-items:end; gap:20px; margin-bottom:12px; }}
+    .section-heading h2 {{ margin-top:3px; }}
+    .section-summary {{ color:var(--muted); font-size:12px; text-align:right; }}
+    .panel-grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(260px,1fr)); gap:12px; margin-bottom:28px; }}
+    .panel h2 {{ margin:3px 0 8px; font-size:17px; }}
+    .panel p {{ margin:0; color:var(--muted); }}
+    .suite-row {{ display:grid; grid-template-columns:minmax(150px,220px) 1fr; gap:18px; align-items:center; padding:10px 0; border-bottom:1px solid #eaecf0; }}
+    .suite-row:last-child {{ border-bottom:0; }}
+    .suite-label {{ display:flex; justify-content:space-between; gap:12px; }}
+    .suite-label span {{ color:var(--muted); font-size:12px; }}
+    .meter-track {{ height:9px; overflow:hidden; background:#eaecf0; border-radius:999px; }}
+    .meter-fill {{ height:100%; border-radius:inherit; }}
+    .meter-fill.pass {{ background:var(--pass); }} .meter-fill.warn {{ background:var(--warn); }} .meter-fill.fail {{ background:var(--fail); }}
     table {{ width:100%; border-collapse:collapse; background:var(--surface); border:1px solid var(--line); border-radius:8px; overflow:hidden; }}
     th,td {{ text-align:left; padding:10px 12px; border-bottom:1px solid var(--line); vertical-align:top; }}
     th {{ color:var(--muted); font-size:12px; text-transform:uppercase; background:#eef2f6; }}
@@ -5355,13 +5755,16 @@ def write_validation_html(
     .warn {{ color:var(--warn); background:#fef0c7; }}
     a {{ color:#175cd3; text-decoration:none; }}
     a:hover {{ text-decoration:underline; }}
+    .table-scroll {{ overflow-x:auto; }}
+    .table-scroll table {{ min-width:900px; }}
+    @media (max-width:760px) {{ header,.section-heading {{ flex-direction:column; align-items:flex-start; }} .meta,.section-summary {{ text-align:left; }} .suite-row {{ grid-template-columns:1fr; gap:7px; }} }}
   </style>
 </head>
 <body>
 <main>
   <header>
     <div>
-      <h1>MLPerf EDU Validation: {escape(str(report.get("preset", "unknown")))}</h1>
+      <h1>{escape(title)}</h1>
       <div class="note">Schema: {escape(str(report.get("schema", "unknown")))} · Suite: {escape(str(report.get("mlperf_suite", "unknown")))}</div>
     </div>
     <div class="meta">
@@ -5370,12 +5773,21 @@ def write_validation_html(
     </div>
   </header>
   <section class="grid">{cards}</section>
-  <table>
-    <thead><tr><th>Validation</th><th>Suite</th><th>Profile</th><th>Status</th><th>Passed</th><th>Failed</th><th>Warnings</th><th>Duration</th><th>Artifacts</th></tr></thead>
-    <tbody>{rows}</tbody>
-  </table>
+  <section class="panel-grid">
+    <article class="panel"><div class="eyebrow">What This Means</div><h2>{escape(lead)}</h2><p>{escape(interpretation)}</p></article>
+    <article class="panel"><div class="eyebrow">Comparison Boundary</div><h2>{"Quality Target Comparison" if not health_report else "No Baseline Claim"}</h2><p>{escape(comparison)}</p></article>
+    <article class="panel"><div class="eyebrow">Next Step</div><h2>Continue the Workflow</h2><p>{escape(next_step)}</p></article>
+  </section>
+  {suite_summary}
   {workload_section}
-  <div class="note" style="margin-top:18px">Generated by mlperf validate. Open per-suite reports for workload-level metrics.</div>
+  <section class="section">
+    <div class="section-heading"><div><div class="eyebrow">Run artifacts</div><h2>Validation Outputs</h2></div></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Validation</th><th>Suite</th><th>Profile</th><th>Status</th><th>Passed</th><th>Failed</th><th>Warnings</th><th>Duration</th><th>Failure</th><th>Artifacts</th></tr></thead>
+      <tbody>{rows}</tbody>
+    </table></div>
+  </section>
+  <div class="note">Generated by MLPerf EDU. The paired JSON and CSV retain machine-readable results; linked run dashboards contain configuration, lineage, and provenance.</div>
 </main>
 </body>
 </html>

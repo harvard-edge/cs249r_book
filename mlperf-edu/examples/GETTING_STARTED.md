@@ -11,12 +11,17 @@ Install the locked development environment from the project directory.
 
 ```bash
 uv sync --locked --extra dev
-uv run mlperf doctor
+uv run mlperf health
 uv run mlperf list workloads
 uv run mlperf show image-classification
 ```
 
-The v0.1 registry contains nine stable workload identities.
+`mlperf health` checks the environment, runs all fourteen min paths, verifies
+their provenance manifests, and opens the suite health report. A passing health
+report establishes functional readiness only. It does not evaluate any max
+quality target.
+
+The v0.1 registry contains fourteen workload identities.
 
 - `image-classification`
 - `keyword-spotting`
@@ -27,6 +32,11 @@ The v0.1 registry contains nine stable workload identities.
 - `information-retrieval`
 - `graph-node-classification`
 - `time-series-forecasting`
+- `code-generation`
+- `function-calling`
+- `recommendation`
+- `image-generation`
+- `reinforcement-learning`
 
 Training and inference are modes. Full, prefill, and decode are phases of
 causal-language-modeling inference. They are not separate workload IDs.
