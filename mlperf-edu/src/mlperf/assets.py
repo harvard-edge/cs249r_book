@@ -262,6 +262,30 @@ DLRM_CHECKPOINT_URL = "https://dlrm.s3-us-west-1.amazonaws.com/models/tb00_40M.p
 DLRM_CHECKPOINT_MD5 = "2d49a5288cddb37c3c64860a06d79bb9"
 DLRM_TRAINING_SUBMODULE_COMMIT = "8e7ad54541aeda54a8e5152732b9fb293a22b10c"
 MINIGO_COMMIT = "0badcd1786fcb007725ed05f1c44e9d80bbeac52"
+MINIGO_ARCHIVE_URL = (
+    f"https://github.com/mlcommons/training/archive/{MINIGO_COMMIT}.tar.gz"
+)
+MINIGO_ARCHIVE_SHA256 = (
+    "d91b694f06adcfb67085c9d9aff44a8c6df728c6bdbae75bfb187dd010adcfd9"
+)
+MINIGO_ARCHIVE_BYTES = 4_679_016
+MINIGO_SOURCE_FILES = {
+    "reinforcement/README.md": "ab25b2b06f012b5804c1750f1077411fb95e8356dc23de91ff0ab49dab982bf4",
+    "reinforcement/tensorflow/Dockerfile": "609419190d6c513b674da8520c6eb637ad125e56d01daaf3f893b84cba389247",
+    "reinforcement/tensorflow/minigo/benchmark_sgf/9x9_pro_IYHN.sgf": "486a6c67885354dfa31bcc16fc4a17e83ada40b9fd43600b4245b04e3df09314",
+    "reinforcement/tensorflow/minigo/benchmark_sgf/9x9_pro_IYMD.sgf": "654fd67a1cfc0ed7278eed8e766ba8b90b232f418173523c26dc7efffdb7adc9",
+    "reinforcement/tensorflow/minigo/benchmark_sgf/9x9_pro_YKSH.sgf": "5cb52058e21284b7b0306f29462b9ca09d4da729c7eebf25b88ce9291fbcb571",
+    "reinforcement/tensorflow/minigo/benchmark_sgf/9x9_pro_YSIY.sgf": "80077ea05c80f8f21208a1dc7bfc563753344ece65ea43fbb9e20a2d6cd09965",
+    "reinforcement/tensorflow/minigo/dual_net.py": "15b096eca61e96831c4df7e3bd5fd849fc9fe15a8c1d80dee68c4565be747ddb",
+    "reinforcement/tensorflow/minigo/loop_init.py": "7b204a7a73b2472c2ff7691abdf7c7a7fb8df029bc1dafdacaf426b5b0a8caa1",
+    "reinforcement/tensorflow/minigo/loop_main.sh": "a57ca8f8dc915817dbcb975875bd76f63d35c64d4f4e47776839dedb36d022bd",
+    "reinforcement/tensorflow/minigo/loop_selfplay.py": "7e6a417fc9da4f132500535e4a3c8315eda43603859eaaa2dec8a38425415782",
+    "reinforcement/tensorflow/minigo/loop_train_eval.py": "b97a30269fc120a5e410bf2126add99a8b0f80d9f356b8900bfdb4962c266b0a",
+    "reinforcement/tensorflow/minigo/params/final.json": "ba76de9fdf3e2bb261537b04e730fa4214ca92e08a2677e64d3bf1994841acc0",
+    "reinforcement/tensorflow/minigo/predict_games.py": "e94b146eb66b1de63debf10f601e8c861bf77b0738efbbced70627844cde5e47",
+    "reinforcement/tensorflow/run.sh": "57c4573eea407502c3c42d3e224a70cf5332d5bd538b48d5f6d348dda656ea86",
+    "reinforcement/tensorflow/run_and_time.sh": "f778c840cc0d7581ced23fbb265cd8f15d804f0d385a167f729d8d62bd51a51f",
+}
 
 
 @dataclass(frozen=True)
@@ -611,7 +635,7 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
         license="Apache-2.0 reference code; generated games and professional-move inputs require release review",
         license_spdx=None,
         license_status="generated-and-upstream-input-review-required",
-        terms_summary="Self-play games are generated during the run. The pinned contract also requires professional-move evaluation and a 100-game promotion playoff.",
+        terms_summary="Self-play games are generated during the run. The pinned source contains the four professional 9-by-9 SGF games used for move prediction and the 100-game promotion playoff.",
         public_result_use="historical MLPerf Training quality candidate after local feasibility review",
         public_release_status="needs-release-decision",
         public_release_policy="Fetch the pinned reference code and required inputs, retain generated games locally, and preserve the complete run recipe and hashes.",
@@ -619,7 +643,7 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
         license_evidence_url="https://github.com/mlcommons/training/blob/master/LICENSE.md",
         attribution="MLCommons and MiniGo contributors.",
         version=f"mlperf-training-{MINIGO_COMMIT}",
-        expected_download_bytes=0,
+        expected_download_bytes=MINIGO_ARCHIVE_BYTES,
         hash_policy="Hash the pinned reference source, professional-move inputs, generated self-play stream, checkpoints, and playoff records.",
     ),
 }
@@ -960,6 +984,24 @@ def dlrm_reference_paths(root: Path | None = None) -> dict[str, Path]:
         "inference_source": base / f"inference-{DLRM_INFERENCE_COMMIT}",
         "implementation_archive": base / f"dlrm-{DLRM_IMPLEMENTATION_COMMIT}.tar.gz",
         "implementation_source": base / f"dlrm-{DLRM_IMPLEMENTATION_COMMIT}",
+    }
+
+
+def minigo_reference_paths(root: Path | None = None) -> dict[str, Path]:
+    base = _asset_path_root(root, "minigo-v0.5-reference")
+    return {
+        "root": base,
+        "archive": base / f"training-{MINIGO_COMMIT}.tar.gz",
+        "source": base / f"training-{MINIGO_COMMIT}",
+        "tensorflow": base
+        / f"training-{MINIGO_COMMIT}"
+        / "reinforcement"
+        / "tensorflow",
+        "minigo": base
+        / f"training-{MINIGO_COMMIT}"
+        / "reinforcement"
+        / "tensorflow"
+        / "minigo",
     }
 
 
@@ -2195,6 +2237,64 @@ def ensure_dlrm_reference(
         source=(
             f"https://github.com/mlcommons/inference/tree/{DLRM_INFERENCE_COMMIT}/"
             "recommendation/dlrm/pytorch"
+        ),
+    )
+
+
+def ensure_minigo_reference(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
+    """Fetch the exact historical MiniGo source and professional SGF inputs."""
+    paths = minigo_reference_paths(root)
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    archive = paths["archive"]
+    if (
+        not archive.is_file()
+        or archive.stat().st_size != MINIGO_ARCHIVE_BYTES
+        or sha256_file(archive) != MINIGO_ARCHIVE_SHA256
+    ):
+        if not download:
+            raise FileNotFoundError(
+                f"MiniGo v0.5 reference source is missing at {archive}. Run "
+                "`mlperf fetch --workload reinforcement-learning --profile max`."
+            )
+        archive.unlink(missing_ok=True)
+        _download(MINIGO_ARCHIVE_URL, archive)
+    if (
+        archive.stat().st_size != MINIGO_ARCHIVE_BYTES
+        or sha256_file(archive) != MINIGO_ARCHIVE_SHA256
+    ):
+        archive.unlink(missing_ok=True)
+        raise ValueError("MiniGo source archive does not match its pinned bytes")
+
+    source_files = _extract_pinned_source_archive(
+        archive=archive,
+        source_root=paths["source"],
+        prefix=f"training-{MINIGO_COMMIT}/",
+        expected_files=MINIGO_SOURCE_FILES,
+    )
+    professional_games = tuple(
+        path
+        for path in source_files
+        if "benchmark_sgf" in path.parts and path.suffix == ".sgf"
+    )
+    if len(professional_games) != 4:
+        raise ValueError("MiniGo quality contract requires exactly four SGF games")
+
+    digest = hashlib.sha256()
+    files = (archive, *source_files)
+    for path in files:
+        digest.update(path.name.encode("utf-8") + b"\0")
+        digest.update(sha256_file(path).encode("ascii") + b"\n")
+    return DatasetAsset(
+        name="mlperf-training-v0.5-minigo-reference",
+        root=paths["source"],
+        files=files,
+        sha256=f"sha256:{digest.hexdigest()}",
+        n_bytes=sum(path.stat().st_size for path in files),
+        source=(
+            f"https://github.com/mlcommons/training/tree/{MINIGO_COMMIT}/"
+            "reinforcement/tensorflow"
         ),
     )
 

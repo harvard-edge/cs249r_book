@@ -42,6 +42,7 @@ from .assets import (
     HUMANEVAL_PLUS_URL,
     MLPERF_TINY_ANOMALY_ARCHIVE_URL,
     MLPERF_TINY_VWW_ARCHIVE_URL,
+    MINIGO_ARCHIVE_URL,
     TINY_SHAKESPEARE_URL,
     GLUE_SST2_URL,
     OGBN_ARXIV_URL,
@@ -76,6 +77,7 @@ from .assets import (
     mlperf_tiny_anomaly_paths,
     mlperf_tiny_kws_paths,
     mlperf_tiny_vww_paths,
+    minigo_reference_paths,
     sst2_paths,
     ogbn_arxiv_paths,
     ettm1_paths,
@@ -1038,9 +1040,19 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             f"Inference v1.0.1 40M checkpoint; {terms}"
         )
     if dataset == "minigo-self-play":
+        paths = minigo_reference_paths()
+        source_detail = (
+            f"reference={paths['source']} ({MINIGO_ARCHIVE_URL})"
+            if dry_run
+            else (
+                f"pinned reference source configured at {paths['root']} "
+                "(fetched and hash-validated by the max runner)"
+            )
+        )
         return (
-            f"- {workload.id}: MANUAL ACTION REQUIRED; prepare the pinned MiniGo "
-            "professional-move inputs and authoritative self-play environment; "
+            f"- {workload.id}: MANUAL ACTION REQUIRED; {source_detail}; prepare "
+            "an immutable MiniGo GPU runtime image for the included professional-move "
+            "inputs and authoritative self-play loop; "
             f"{terms}"
         )
     return f"- {workload.id}: {dataset}; {terms}"

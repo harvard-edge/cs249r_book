@@ -278,3 +278,39 @@ def test_dlrm_fetch_pins_inference_and_implementation_sources(monkeypatch, tmp_p
     assert result.name == "mlperf-inference-v1.0.1-dlrm-reference"
     assert len(result.files) == 4
     assert all(path.is_file() for path in result.files)
+
+
+def test_minigo_fetch_pins_professional_games_and_quality_source(monkeypatch, tmp_path):
+    source_root = tmp_path / "training-tree"
+    games_root = (
+        source_root / "reinforcement" / "tensorflow" / "minigo" / "benchmark_sgf"
+    )
+    games_root.mkdir(parents=True)
+    source_files = {}
+    for index in range(4):
+        path = games_root / f"game-{index}.sgf"
+        path.write_text(f"(;GM[1]SZ[9]C[game-{index}])\n")
+        source_files[str(path.relative_to(source_root))] = hashlib.sha256(
+            path.read_bytes()
+        ).hexdigest()
+    archive = tmp_path / "training.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        bundle.add(source_root, arcname=f"training-{assets.MINIGO_COMMIT}")
+
+    monkeypatch.setattr(
+        assets,
+        "MINIGO_ARCHIVE_SHA256",
+        hashlib.sha256(archive.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(assets, "MINIGO_ARCHIVE_BYTES", archive.stat().st_size)
+    monkeypatch.setattr(assets, "MINIGO_SOURCE_FILES", source_files)
+    monkeypatch.setattr(
+        assets,
+        "_download",
+        lambda _url, destination: shutil.copyfile(archive, destination),
+    )
+
+    result = assets.ensure_minigo_reference(root=tmp_path / "cache")
+
+    assert result.name == "mlperf-training-v0.5-minigo-reference"
+    assert len([path for path in result.files if path.suffix == ".sgf"]) == 4

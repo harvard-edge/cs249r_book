@@ -148,7 +148,7 @@ def test_functional_stage_workloads_separate_probe_from_quality_contract():
         "function-calling": "runnable-quality-conformance",
         "recommendation": "environment-gated-quality-conformance",
         "image-generation": "quality-audited-target-not-met",
-        "reinforcement-learning": "pending-quality-conformance",
+        "reinforcement-learning": "environment-gated-quality-conformance",
     }
 
     for workload_id, status in expected_status.items():
@@ -498,7 +498,7 @@ def test_canonical_workloads_declare_exact_runners():
         "reinforcement-learning": (
             "reinforcement",
             "mlperf.runners.functional_setup:run_reinforcement_learning_min",
-            "mlperf.runners.functional_setup:run_reinforcement_learning_max",
+            "mlperf.runners.reinforcement:run_reinforcement_learning_max",
         ),
     }
 
@@ -532,6 +532,7 @@ def test_functional_spiral_workloads_fail_closed_for_promotion():
                 "function-calling",
                 "image-generation",
                 "recommendation",
+                "reinforcement-learning",
             }
             else "functional"
         )
