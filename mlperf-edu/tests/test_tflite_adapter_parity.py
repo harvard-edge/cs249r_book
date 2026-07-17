@@ -1,6 +1,10 @@
 import numpy as np
 
-from tools.audit_tflite_adapter_parity import comparison_summary
+from tools.audit_tflite_adapter_parity import AUDIT_SCHEMA, comparison_summary
+
+
+def test_adapter_audit_schema_is_portable_version():
+    assert AUDIT_SCHEMA == "mlperf-edu-tflite-adapter-audit/0.2"
 
 
 def test_adapter_comparison_requires_exact_predictions_and_quality():

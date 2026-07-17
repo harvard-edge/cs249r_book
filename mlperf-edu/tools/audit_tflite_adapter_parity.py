@@ -40,6 +40,7 @@ from mlperf.runners.vision import _cifar10_raw_float_tensor
 
 
 ROOT = Path(__file__).resolve().parents[1]
+AUDIT_SCHEMA = "mlperf-edu-tflite-adapter-audit/0.2"
 WORKLOADS = (
     "image-classification",
     "keyword-spotting",
@@ -288,7 +289,8 @@ def audit_workload(
         "status": "passed" if strict_pass else "failed",
         "strict_policy": "exact top-1 prediction parity and quality pass on every selected LiteRT resolver",
         "batch_size": batch_size,
-        "model_path": str(model_path),
+        # Keep committed audit summaries portable and free of workstation paths.
+        "model_file": model_path.name,
         "model_sha256": f"sha256:{sha256_file(model_path)}",
         "provenance": provenance,
         "runtime_results": runtime_results,
@@ -330,7 +332,7 @@ def main() -> int:
     except (FileNotFoundError, RuntimeError, ValueError) as exc:
         raise SystemExit(str(exc)) from exc
     payload = {
-        "schema": "mlperf-edu-tflite-adapter-audit/0.1",
+        "schema": AUDIT_SCHEMA,
         "created_at": datetime.now(timezone.utc).isoformat(),
         "status": "passed"
         if all(result["status"] == "passed" for result in results.values())
