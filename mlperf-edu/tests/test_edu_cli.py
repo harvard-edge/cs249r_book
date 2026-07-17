@@ -624,6 +624,63 @@ def test_fetch_anomaly_detection_dry_run_discloses_selective_source():
     assert "cc-by-4.0-mlcommons-attribution" in result.stdout
 
 
+def test_fetch_new_quality_assets_dry_run_discloses_authoritative_sources():
+    code = run_cli(
+        "fetch",
+        "--workload",
+        "code-generation",
+        "--profile",
+        "max",
+        "--dry-run",
+    )
+    assert code.returncode == 0, code.stdout + code.stderr
+    assert "Qwen2.5-Coder-0.5B-Instruct@ea3f2471" in code.stdout
+    assert "HumanEvalPlus.jsonl.gz" in code.stdout
+    assert "public-ok-fetch-only" in code.stdout
+
+    functions = run_cli(
+        "fetch",
+        "--workload",
+        "function-calling",
+        "--profile",
+        "max",
+        "--dry-run",
+    )
+    assert functions.returncode == 0, functions.stdout + functions.stderr
+    assert "Qwen3-1.7B@70d244cc" in functions.stdout
+    assert "gorilla/archive/6ea57973" in functions.stdout
+    assert "upstream-terms-review-required" in functions.stdout
+
+    images = run_cli(
+        "fetch",
+        "--workload",
+        "image-generation",
+        "--profile",
+        "max",
+        "--dry-run",
+    )
+    assert images.returncode == 0, images.stdout + images.stderr
+    assert "edm-cifar10-32x32-cond-vp.pkl" in images.stdout
+    assert "cifar10-32x32.npz" in images.stdout
+    assert "MLPerf Tiny model/index" not in images.stdout
+
+
+def test_fetch_manual_quality_assets_returns_actionable_nonzero_status():
+    recommendation = run_cli(
+        "fetch", "--workload", "recommendation", "--profile", "max"
+    )
+    assert recommendation.returncode == 2
+    assert "MANUAL ACTION REQUIRED" in recommendation.stdout
+    assert "unshuffled day 23" in recommendation.stdout
+
+    reinforcement = run_cli(
+        "fetch", "--workload", "reinforcement-learning", "--profile", "max"
+    )
+    assert reinforcement.returncode == 2
+    assert "MANUAL ACTION REQUIRED" in reinforcement.stdout
+    assert "professional-move inputs" in reinforcement.stdout
+
+
 def test_fetch_min_profile_uses_consolidated_workload_identity():
     result = run_cli("fetch", "--profile", "min", "--dry-run")
     assert result.returncode == 0, result.stdout + result.stderr

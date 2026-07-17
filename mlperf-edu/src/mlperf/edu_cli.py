@@ -29,9 +29,14 @@ from rich.console import Console
 from rich.table import Table
 
 from .assets import (
+    BFCL_ARCHIVE_URL,
+    BFCL_DATA_FILES,
     CIFAR10_HF_REPO_ID,
     CIFAR10_HF_REVISION,
+    EDM_CIFAR10_CHECKPOINT_URL,
+    EDM_CIFAR10_FID_REFERENCE_URL,
     EEMBC_RUNNER_ARCHIVE_URL,
+    HUMANEVAL_PLUS_URL,
     MLPERF_TINY_ANOMALY_ARCHIVE_URL,
     MLPERF_TINY_VWW_ARCHIVE_URL,
     TINY_SHAKESPEARE_URL,
@@ -42,8 +47,13 @@ from .assets import (
     NANOBEIR_REVISION,
     asset_cache_root,
     asset_dossier,
+    bfcl_non_live_ast_paths,
     cifar10_paths,
+    edm_cifar10_paths,
+    ensure_bfcl_non_live_ast,
     ensure_cifar10,
+    ensure_edm_cifar10,
+    ensure_humaneval_plus,
     ensure_mlperf_tiny_anomaly,
     ensure_mlperf_tiny_image,
     ensure_mlperf_tiny_kws,
@@ -55,6 +65,7 @@ from .assets import (
     ensure_tinyshakespeare,
     huggingface_model_dossier,
     has_asset_dossier,
+    humaneval_plus_paths,
     mlperf_tiny_image_paths,
     mlperf_tiny_anomaly_paths,
     mlperf_tiny_kws_paths,
@@ -797,9 +808,15 @@ def cmd_fetch(args: argparse.Namespace) -> int:
         variant=args.variant,
     )
     console.print(f"{action} {len(selected)} workload(s) for profile {args.profile}.")
+    manual_setup_required = False
     for workload in selected:
         console.print(fetch_workload_asset(workload, dry_run=args.dry_run))
-    return 0
+        if not args.dry_run and workload.dataset in {
+            "criteo-terabyte",
+            "minigo-self-play",
+        }:
+            manual_setup_required = True
+    return 2 if manual_setup_required else 0
 
 
 def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
@@ -815,9 +832,18 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             asset_terms_summary(dossier) if dossier else "no structured asset dossier"
         )
         if dry_run:
+            dataset_detail = dataset
+            if dataset == "humaneval-plus":
+                dataset_detail = (
+                    f"{humaneval_plus_paths()['dataset']} ({HUMANEVAL_PLUS_URL})"
+                )
+            elif dataset == "bfcl-v4-non-live-ast":
+                dataset_detail = (
+                    f"{bfcl_non_live_ast_paths()['data']} ({BFCL_ARCHIVE_URL})"
+                )
             return (
                 f"- {workload.id}: huggingface model -> {repo_id}@{revision}; "
-                f"dataset={dataset}; {terms}"
+                f"dataset={dataset_detail}; {terms}"
             )
         from huggingface_hub import snapshot_download
 
@@ -838,6 +864,20 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             return (
                 f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; "
                 f"{dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+            )
+        if dataset == "humaneval-plus":
+            asset = ensure_humaneval_plus(download=True)
+            return (
+                f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; "
+                f"{dataset} at {asset.root} ({asset.sha256[:19]}, "
+                f"{asset.n_bytes} bytes); {terms}"
+            )
+        if dataset == "bfcl-v4-non-live-ast":
+            asset = ensure_bfcl_non_live_ast(download=True)
+            return (
+                f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; "
+                f"{dataset} at {asset.root} ({asset.sha256[:19]}, "
+                f"{asset.n_bytes} bytes); {terms}"
             )
         return f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; dataset={dataset}; {terms}"
     shared_checkpoint = workload.raw.get("shared_checkpoint")
@@ -872,6 +912,21 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
         asset = ensure_tinyshakespeare(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     if dataset == "cifar10":
+        if workload.id == "image-generation":
+            paths = edm_cifar10_paths()
+            if dry_run:
+                return (
+                    f"- {workload.id}: EDM checkpoint -> {paths['checkpoint']} "
+                    f"({EDM_CIFAR10_CHECKPOINT_URL}); FID reference -> "
+                    f"{paths['fid_reference']} ({EDM_CIFAR10_FID_REFERENCE_URL}); "
+                    f"{terms}"
+                )
+            asset = ensure_edm_cifar10(download=True)
+            return (
+                f"- {workload.id}: EDM checkpoint and FID reference at "
+                f"{asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); "
+                f"{terms}"
+            )
         if dry_run:
             paths = cifar10_paths()
             evaluation_paths = mlperf_tiny_image_paths()
@@ -940,6 +995,30 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             return f"- {workload.id}: {dataset} -> {paths['root']} ({source}); {terms}"
         asset = ensure_nanobeir_reranking(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "humaneval-plus":
+        paths = humaneval_plus_paths()
+        if dry_run:
+            return f"- {workload.id}: {dataset} -> {paths['dataset']} ({HUMANEVAL_PLUS_URL}); {terms}"
+        asset = ensure_humaneval_plus(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "bfcl-v4-non-live-ast":
+        paths = bfcl_non_live_ast_paths()
+        if dry_run:
+            return f"- {workload.id}: {dataset} -> {paths['data']} ({BFCL_ARCHIVE_URL}); {terms}"
+        asset = ensure_bfcl_non_live_ast(download=True)
+        return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
+    if dataset == "criteo-terabyte":
+        return (
+            f"- {workload.id}: MANUAL ACTION REQUIRED; accept the Criteo terms, "
+            "prepare unshuffled day 23, and provide the official MLPerf "
+            f"Inference v1.0.1 40M checkpoint; {terms}"
+        )
+    if dataset == "minigo-self-play":
+        return (
+            f"- {workload.id}: MANUAL ACTION REQUIRED; prepare the pinned MiniGo "
+            "professional-move inputs and authoritative self-play environment; "
+            f"{terms}"
+        )
     return f"- {workload.id}: {dataset}; {terms}"
 
 
@@ -5434,8 +5513,23 @@ def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
             tinyshakespeare_paths()["train"],
             tinyshakespeare_paths()["val"],
         ],
+        "humaneval-plus": [
+            humaneval_plus_paths()["archive"],
+            humaneval_plus_paths()["dataset"],
+        ],
+        "bfcl-v4-non-live-ast": [
+            bfcl_non_live_ast_paths()["data"] / relative
+            for relative in BFCL_DATA_FILES
+        ],
     }
-    paths = known_paths.get(dataset)
+    paths = (
+        [
+            edm_cifar10_paths()["checkpoint"],
+            edm_cifar10_paths()["fid_reference"],
+        ]
+        if workload.id == "image-generation"
+        else known_paths.get(dataset)
+    )
     if not paths:
         rows.append(
             cache_dataset_row(

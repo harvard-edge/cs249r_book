@@ -355,6 +355,10 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     prompt = asset_dossier("prompt-suite-local")
     anomaly = asset_dossier("mlperf-tiny-anomaly-eval")
     vww = asset_dossier("mlperf-tiny-vww-eval")
+    humaneval = asset_dossier("humaneval-plus")
+    bfcl = asset_dossier("bfcl-v4-non-live-ast")
+    criteo = asset_dossier("criteo-terabyte")
+    minigo = asset_dossier("minigo-self-play")
 
     assert tiny["expected_download_bytes"] == 5_600_000
     assert tiny["expected_unpacked_bytes"] == 1_115_394
@@ -379,6 +383,18 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     assert vww["expected_download_bytes"] == 234_810_765
     assert vww["expected_unpacked_bytes"] == 2_747_212
     assert vww["public_release_status"] == "needs-release-decision"
+    assert humaneval["expected_unpacked_bytes"] == 7_714_666
+    assert humaneval["public_release_status"] == "public-ok-fetch-only"
+    assert bfcl["version"].startswith("bfcl-")
+    assert bfcl["public_release_status"] == "needs-release-decision"
+    assert criteo["public_release_status"] == "fetch-instructions-only"
+    assert minigo["type"] == "generated-dataset"
+
+
+def test_every_workload_dataset_has_a_structured_asset_dossier():
+    workloads = load_registry()
+
+    assert all(has_asset_dossier(workload.dataset) for workload in workloads.values())
 
 
 def test_retired_dataset_adapters_are_not_public_assets():
