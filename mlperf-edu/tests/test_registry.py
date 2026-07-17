@@ -167,8 +167,12 @@ def test_new_quality_contracts_pin_complete_evaluation_boundaries():
     code = workloads["code-generation"].raw["canonical_max_contract"]
     assert code["config"]["evaluation_tasks"] == 164
     assert code["config"]["minimum_passing_tasks"] == 94
+    assert code["config"]["prompt_format"] == "qwen2.5-coder-official-chatml"
+    assert code["config"]["max_new_tokens"] == 2048
+    assert "HumanEval-32" in code["config"]["evaluator_reference_self_check"]
     assert len(code["model_revision"]) == 40
     assert len(code["evaluator_revision"]) == 40
+    assert len(code["generation_recipe_revision"]) == 40
 
     functions = workloads["function-calling"].raw["canonical_max_contract"]
     assert functions["config"]["evaluation_examples"] == 1150
@@ -478,7 +482,7 @@ def test_canonical_workloads_declare_exact_runners():
         "code-generation": (
             "language",
             "mlperf.runners.functional_setup:run_code_generation_min",
-            "mlperf.runners.functional_setup:run_code_generation_max",
+            "mlperf.runners.code_generation:run_code_generation_max",
         ),
         "function-calling": (
             "language",

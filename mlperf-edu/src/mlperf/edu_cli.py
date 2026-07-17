@@ -36,6 +36,7 @@ from .assets import (
     EDM_CIFAR10_CHECKPOINT_URL,
     EDM_CIFAR10_FID_REFERENCE_URL,
     EEMBC_RUNNER_ARCHIVE_URL,
+    EVALPLUS_ARCHIVE_URL,
     HUMANEVAL_PLUS_URL,
     MLPERF_TINY_ANOMALY_ARCHIVE_URL,
     MLPERF_TINY_VWW_ARCHIVE_URL,
@@ -53,6 +54,7 @@ from .assets import (
     ensure_bfcl_non_live_ast,
     ensure_cifar10,
     ensure_edm_cifar10,
+    ensure_evalplus_evaluator,
     ensure_humaneval_plus,
     ensure_mlperf_tiny_anomaly,
     ensure_mlperf_tiny_image,
@@ -66,6 +68,7 @@ from .assets import (
     huggingface_model_dossier,
     has_asset_dossier,
     humaneval_plus_paths,
+    evalplus_evaluator_paths,
     mlperf_tiny_image_paths,
     mlperf_tiny_anomaly_paths,
     mlperf_tiny_kws_paths,
@@ -835,7 +838,9 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             dataset_detail = dataset
             if dataset == "humaneval-plus":
                 dataset_detail = (
-                    f"{humaneval_plus_paths()['dataset']} ({HUMANEVAL_PLUS_URL})"
+                    f"{humaneval_plus_paths()['dataset']} ({HUMANEVAL_PLUS_URL}); "
+                    f"evaluator={evalplus_evaluator_paths()['source']} "
+                    f"({EVALPLUS_ARCHIVE_URL})"
                 )
             elif dataset == "bfcl-v4-non-live-ast":
                 dataset_detail = (
@@ -867,10 +872,12 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             )
         if dataset == "humaneval-plus":
             asset = ensure_humaneval_plus(download=True)
+            evaluator = ensure_evalplus_evaluator(download=True)
             return (
                 f"- {workload.id}: model {repo_id}@{revision} at {snapshot}; "
                 f"{dataset} at {asset.root} ({asset.sha256[:19]}, "
-                f"{asset.n_bytes} bytes); {terms}"
+                f"{asset.n_bytes} bytes); evaluator at {evaluator.root} "
+                f"({evaluator.sha256[:19]}); {terms}"
             )
         if dataset == "bfcl-v4-non-live-ast":
             asset = ensure_bfcl_non_live_ast(download=True)
@@ -5516,6 +5523,9 @@ def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
         "humaneval-plus": [
             humaneval_plus_paths()["archive"],
             humaneval_plus_paths()["dataset"],
+            evalplus_evaluator_paths()["archive"],
+            evalplus_evaluator_paths()["source"] / "Dockerfile",
+            evalplus_evaluator_paths()["source"] / "evalplus" / "evaluate.py",
         ],
         "bfcl-v4-non-live-ast": [
             bfcl_non_live_ast_paths()["data"] / relative

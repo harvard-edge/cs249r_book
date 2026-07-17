@@ -68,15 +68,17 @@ ledger with explicit reasons.
 | `information-retrieval` | language | Sentence Transformers | CrossEncoder NanoBEIR reranking | pair tokenization, encoder scoring, and ranking |
 | `graph-node-classification` | graph | Open Graph Benchmark | official GCN training on `ogbn-arxiv` | sparse gather, scatter, and irregular memory access |
 | `time-series-forecasting` | timeseries | PatchTST | official ETTm1 training and evaluation | long-context attention and patch-based sequence processing |
-| `code-generation` | language | Qwen and EvalPlus | bounded autoregressive functional probe; full HumanEval+ conformance pending | variable-length autoregressive decode and sandboxed evaluation |
+| `code-generation` | language | Qwen and EvalPlus | complete pinned HumanEval+ generation and sandboxed evaluation; one local result pending | variable-length autoregressive decode and sandboxed evaluation |
 | `function-calling` | language | BFCL and Qwen | bounded grammar-constrained generation and AST-evaluator probe; full BFCL conformance pending | schema-heavy prefill and structured decode |
 | `recommendation` | recommendation | Meta DLRM | bounded dense-sparse functional probe; full Criteo conformance pending | embedding lookup and dense-sparse interaction |
 | `image-generation` | vision | NVIDIA EDM | bounded iterative-denoising probe; full 50,000-image FID conformance pending | repeated denoiser execution and scheduler overhead |
 | `reinforcement-learning` | reinforcement | MLPerf Training MiniGo | bounded policy-value self-play and training probe; full MiniGo conformance pending | search-coupled inference and dynamic training data |
 
-The five functional-stage probes MUST retain `experimental` status, MUST set
-`promotion_scope` to false, and MUST state that the authoritative quality
-contract was not executed. They MUST NOT be treated as canonical `max` results.
+The five new workloads MUST retain `experimental` status and MUST set
+`promotion_scope` to false until their quality evidence is accepted. The four
+remaining functional probes MUST state that the authoritative quality contract
+was not executed. Code generation MAY emit a canonical `max` quality result,
+but it MUST remain ineligible for promotion during this readiness stage.
 MiniGo remains the reinforcement-learning identity; a small control task MUST
 NOT be substituted under that label.
 

@@ -48,7 +48,7 @@ uv run mlperf run --workload image-classification --profile max \
 | `information-retrieval` | Sentence Transformers CrossEncoder NanoBEIR example | inference | exact documented mean nDCG@10 |
 | `graph-node-classification` | Official OGB GCN recipe on `ogbn-arxiv` | training | test accuracy within the published GCN reference tolerance |
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | test MSE at most 0.29292929292929293, the direction-aware 99%-of-reference gate |
-| `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; functional integration only today |
+| `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; authoritative runner ready, complete local result pending |
 | `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; functional integration only today |
 | `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; functional integration only today |
 | `image-generation` | NVIDIA EDM and the CIFAR-10 50,000-image FID protocol | inference | published 1.79 FID; functional integration only today |
@@ -56,9 +56,9 @@ uv run mlperf run --workload image-classification --profile max \
 
 The [selection ledger](registry/selection-ledger.yaml) records the authority,
 rationale, laptop evidence, and quality-conformance blocker for every audited
-task. The five functional-stage candidates preserve their authoritative task
-identity and published target. Their bounded probes are integration evidence,
-not substitutes or benchmark results.
+task. Four candidates remain at the bounded functional stage. Code generation
+now has a complete score-bearing runner, but it remains outside promotion until
+one authoritative local run establishes its quality result.
 
 For the current quality-readiness milestone, one complete authoritative run is
 enough to accept or reject a quality target. The complete required evaluation

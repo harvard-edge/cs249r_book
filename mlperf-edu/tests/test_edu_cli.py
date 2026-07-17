@@ -636,6 +636,7 @@ def test_fetch_new_quality_assets_dry_run_discloses_authoritative_sources():
     assert code.returncode == 0, code.stdout + code.stderr
     assert "Qwen2.5-Coder-0.5B-Instruct@ea3f2471" in code.stdout
     assert "HumanEvalPlus.jsonl.gz" in code.stdout
+    assert "evalplus/archive/899b2b31" in code.stdout
     assert "public-ok-fetch-only" in code.stdout
 
     functions = run_cli(

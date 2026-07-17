@@ -57,7 +57,7 @@ scope covers nine workloads and twelve evidence cases.
 | `information-retrieval` | Reproduces the documented CrossEncoder NanoBEIR example. | Query-document pair scoring and ranking. |
 | `graph-node-classification` | Uses the official OGB GCN recipe and evaluator. | Sparse gather, scatter, and irregular memory access. |
 | `time-series-forecasting` | Uses the official PatchTST ETTm1 recipe and split. | Patch extraction, long-context attention, and multivariate sequence training. |
-| `code-generation` | Preserves Qwen2.5-Coder and HumanEval+ while quality reproduction remains pending. | Variable-length autoregressive decode and sandboxed correctness evaluation. |
+| `code-generation` | Preserves Qwen2.5-Coder and the complete HumanEval+ contract; one authoritative local result remains pending. | Variable-length autoregressive decode and sandboxed correctness evaluation. |
 | `function-calling` | Preserves Qwen3-1.7B and BFCL V4 Non-Live AST while quality reproduction remains pending. | Schema-heavy prefill and short structured decode. |
 | `recommendation` | Preserves Meta DLRM and the Criteo contract while a practical quality boundary remains pending. | Sparse embeddings, memory capacity, and dense-sparse interaction. |
 | `image-generation` | Preserves NVIDIA EDM and its official 50,000-image FID contract while exact reproduction remains pending. | Iterative denoising, scheduler overhead, and repeated UNet execution. |

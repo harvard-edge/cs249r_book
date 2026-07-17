@@ -163,6 +163,13 @@ HUMANEVAL_PLUS_SHA256 = (
     "42526ec0e7d5f3ee0b06d6ced98f8c8bae3d76519151bfb3d36f79010645bd7f"
 )
 HUMANEVAL_PLUS_BYTES = 7_714_666
+EVALPLUS_COMMIT = "899b2b31bbe8d6e12337b865a8aa03fcd57c1121"
+EVALPLUS_ARCHIVE_URL = (
+    f"https://github.com/evalplus/evalplus/archive/{EVALPLUS_COMMIT}.tar.gz"
+)
+EVALPLUS_ARCHIVE_SHA256 = (
+    "d3a5ce49566224a054debc2b51f9290e070734841044b0bb6764f92c376e8149"
+)
 BFCL_COMMIT = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
 BFCL_ARCHIVE_URL = f"https://github.com/ShishirPatil/gorilla/archive/{BFCL_COMMIT}.tar.gz"
 BFCL_ARCHIVE_SHA256 = (
@@ -854,6 +861,15 @@ def humaneval_plus_paths(root: Path | None = None) -> dict[str, Path]:
         "root": base,
         "archive": base / "HumanEvalPlus-v0.1.10.jsonl.gz",
         "dataset": base / "HumanEvalPlus-v0.1.10.jsonl",
+    }
+
+
+def evalplus_evaluator_paths(root: Path | None = None) -> dict[str, Path]:
+    base = _asset_path_root(root, "evalplus-evaluator")
+    return {
+        "root": base,
+        "archive": base / f"evalplus-{EVALPLUS_COMMIT}.tar.gz",
+        "source": base / f"evalplus-{EVALPLUS_COMMIT}",
     }
 
 
@@ -1742,6 +1758,66 @@ def ensure_humaneval_plus(
         sha256=f"sha256:{HUMANEVAL_PLUS_SHA256}",
         n_bytes=archive.stat().st_size + dataset.stat().st_size,
         source=HUMANEVAL_PLUS_URL,
+    )
+
+
+def ensure_evalplus_evaluator(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
+    paths = evalplus_evaluator_paths(root)
+    base = paths["root"]
+    archive = paths["archive"]
+    source_root = paths["source"]
+    base.mkdir(parents=True, exist_ok=True)
+
+    archive_valid = (
+        archive.is_file() and sha256_file(archive) == EVALPLUS_ARCHIVE_SHA256
+    )
+    required = (source_root / "Dockerfile", source_root / "evalplus" / "evaluate.py")
+    if not archive_valid or not all(path.is_file() for path in required):
+        if not download:
+            raise FileNotFoundError(
+                f"EvalPlus evaluator source is missing at {source_root}. Run `mlperf "
+                "fetch --workload code-generation --profile max`."
+            )
+        if not archive_valid:
+            archive.unlink(missing_ok=True)
+            _download(EVALPLUS_ARCHIVE_URL, archive)
+        if sha256_file(archive) != EVALPLUS_ARCHIVE_SHA256:
+            archive.unlink(missing_ok=True)
+            raise ValueError("EvalPlus source archive SHA-256 does not match the pin")
+        staging = base / f"evalplus-{EVALPLUS_COMMIT}.staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        prefix = f"evalplus-{EVALPLUS_COMMIT}/"
+        with tarfile.open(archive, "r:gz") as bundle:
+            for member in bundle.getmembers():
+                if not member.isfile() or not member.name.startswith(prefix):
+                    continue
+                relative = Path(member.name.removeprefix(prefix))
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError(f"unsafe EvalPlus archive member: {member.name}")
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise FileNotFoundError(
+                        f"could not read EvalPlus archive member: {member.name}"
+                    )
+                destination = staging / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with source, destination.open("wb") as handle:
+                    shutil.copyfileobj(source, handle)
+        shutil.rmtree(source_root, ignore_errors=True)
+        staging.replace(source_root)
+
+    if not all(path.is_file() for path in required):
+        raise FileNotFoundError("EvalPlus pinned evaluator source is incomplete")
+    return DatasetAsset(
+        name="evalplus-evaluator",
+        root=source_root,
+        files=(archive, *required),
+        sha256=f"sha256:{EVALPLUS_ARCHIVE_SHA256}",
+        n_bytes=archive.stat().st_size,
+        source=EVALPLUS_ARCHIVE_URL,
     )
 
 

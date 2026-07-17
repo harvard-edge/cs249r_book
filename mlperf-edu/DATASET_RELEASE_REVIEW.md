@@ -58,8 +58,9 @@ but technical readiness does not erase those external obligations.
 
 HumanEval+, BFCL, Criteo Terabyte, CIFAR-10 EDM inputs, and MiniGo self-play are
 registered because their workload identities and upstream contracts are known.
-Their current bounded probes do not consume the complete canonical assets and
-therefore cannot support quality or timing claims. End-to-end RAG and ReAct
+The code-generation max runner now consumes the complete HumanEval+ asset. The
+other four bounded probes do not yet consume their complete canonical assets
+and therefore cannot support quality or timing claims. End-to-end RAG and ReAct
 agent datasets remain outside the portfolio because no stable upstream tuple
 fixes the complete task and evaluator without project choices.
 

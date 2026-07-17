@@ -83,6 +83,33 @@ def test_humaneval_plus_fetch_validates_complete_release(monkeypatch, tmp_path):
     assert len(result.files[1].read_text().splitlines()) == 164
 
 
+def test_evalplus_fetch_extracts_pinned_evaluator_source(monkeypatch, tmp_path):
+    source_root = tmp_path / "source"
+    (source_root / "evalplus").mkdir(parents=True)
+    (source_root / "Dockerfile").write_text("FROM python:3.10-slim\n")
+    (source_root / "evalplus" / "evaluate.py").write_text("print('evaluate')\n")
+    archive = tmp_path / "evalplus.tar.gz"
+    with tarfile.open(archive, "w:gz") as bundle:
+        bundle.add(
+            source_root,
+            arcname=f"evalplus-{assets.EVALPLUS_COMMIT}",
+        )
+    monkeypatch.setattr(
+        assets, "EVALPLUS_ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
+    )
+    monkeypatch.setattr(
+        assets,
+        "_download",
+        lambda _url, destination: shutil.copyfile(archive, destination),
+    )
+
+    result = assets.ensure_evalplus_evaluator(root=tmp_path / "cache")
+
+    assert result.name == "evalplus-evaluator"
+    assert (result.root / "Dockerfile").is_file()
+    assert (result.root / "evalplus" / "evaluate.py").is_file()
+
+
 def test_bfcl_fetch_validates_all_non_live_ast_examples(monkeypatch, tmp_path):
     source_root = tmp_path / "source"
     data_root = source_root / "bfcl_eval" / "data"

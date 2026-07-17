@@ -41,15 +41,16 @@ later phase.
 | `graph-node-classification` | Official OGB GCN recipe and `ogbn-arxiv` split | test accuracy within 0.0029 of 0.7174 | The correct OGB GCN reference is 71.74% with a published 0.29-point standard deviation. The previously quoted 72.51% belongs to a different leaderboard section and is not used. |
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at most 0.29292929292929293 | PatchTST publishes the 0.290 result. The gate divides that lower-is-better reference by the MLPerf 0.99 quality fraction, an explicit direction-aware MLPerf EDU policy inference. |
 
-## Functional-Stage Quality Backlog
+## New-Workload Quality Backlog
 
-These five workloads run bounded functional probes but remain outside the
-promotion importer. Their published targets are retained as future conformance
-gates rather than weakened to match local observations.
+These five workloads remain outside the promotion importer. Their published
+targets are retained as conformance gates rather than weakened to match local
+observations. Code generation now has its authoritative runner; the other four
+still expose bounded functional probes while their full runners are built.
 
 | **Workload** | **Authoritative Target** | **Current Boundary** |
 |:---|:---|:---|
-| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | Autoregressive CLI integration works; complete EvalPlus reproduction remains pending. |
+| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | The pinned 164-task Qwen/EvalPlus runner and sandbox self-check work; one complete local result remains pending. |
 | `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | Grammar-constrained generation and AST-evaluator integration works; the complete local audit reached 0.7852. |
 | `recommendation` | MLPerf Inference v1.0.1 DLRM Criteo Terabyte ROC AUC of 0.8025 | Dense-sparse execution works; the official 100 GB checkpoint and roughly 343 GB compressed dataset remain outside the practical laptop boundary. |
 | `image-generation` | NVIDIA EDM CIFAR-10 FID of 1.79 | Iterative denoising works; three official 50,000-image trials reached a best FID of 1.8015540749984766. |
