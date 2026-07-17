@@ -265,10 +265,18 @@ def build_parser() -> argparse.ArgumentParser:
         default="submissions",
         help="Directory for report artifacts.",
     )
-    run.add_argument(
+    report_opening = run.add_mutually_exclusive_group()
+    report_opening.add_argument(
         "--open-report",
+        dest="open_report",
         action="store_true",
-        help="Open the generated HTML report in the default browser.",
+        help="Open the generated HTML dashboard (default).",
+    )
+    report_opening.add_argument(
+        "--no-open-report",
+        dest="open_report",
+        action="store_false",
+        help="Generate the HTML dashboard without opening a browser.",
     )
     run.add_argument(
         "--dry-run",
@@ -292,7 +300,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Add estimated aggregate power and energy telemetry to the run report",
     )
-    run.set_defaults(func=cmd_run)
+    run.set_defaults(func=cmd_run, open_report=True)
 
     verify = subparsers.add_parser("verify", help="Verify a provenance manifest")
     verify.add_argument("manifest", type=str)
@@ -1396,8 +1404,236 @@ def enrich_report_for_display(
         report.setdefault("variant", workload_variant_name(workload))
         report.setdefault("run_selector", workload_run_selector(workload))
 
+    report["execution_lineage"] = build_execution_lineage(report, workload)
     report["review_contract"] = evaluate_report_contract(workload, report)
     strip_promoted_baseline_metadata(report)
+
+
+def build_execution_lineage(
+    report: dict[str, Any], workload: Workload
+) -> dict[str, Any]:
+    """Normalize training, checkpoint, inference, and evaluation provenance."""
+    raw = workload.raw
+    model_source = report.get("model_source") or raw.get("model_source") or {}
+    if not isinstance(model_source, dict):
+        model_source = {}
+    inference_source = report.get("inference_source") or {}
+    if not isinstance(inference_source, dict):
+        inference_source = {}
+    evaluator = report.get("evaluator") or {}
+    if not isinstance(evaluator, dict):
+        evaluator = {}
+    checkpoint_provenance = report.get("checkpoint_provenance") or {}
+    if not isinstance(checkpoint_provenance, dict):
+        checkpoint_provenance = {}
+    artifacts = report.get("artifacts") or {}
+    if not isinstance(artifacts, dict):
+        artifacts = {}
+    provenance = raw.get("provenance") or {}
+    if not isinstance(provenance, dict):
+        provenance = {}
+    canonical = raw.get("canonical_max_contract") or {}
+    if not isinstance(canonical, dict):
+        canonical = {}
+
+    implemented_modes = tuple(raw.get("implemented_modes") or raw.get("modes") or ())
+    mode = str(
+        report.get("mode")
+        or raw.get("default_mode")
+        or canonical.get("mode")
+        or (implemented_modes[0] if len(implemented_modes) == 1 else "")
+    )
+    profile = str(report.get("profile") or "")
+    runners = raw.get("runner") or {}
+    runner_spec = ""
+    if isinstance(runners, dict):
+        runner_spec = str(
+            runners.get(profile)
+            or (runners.get("max") if profile == "pro" else "")
+            or ""
+        )
+
+    repository = first_lineage_value(
+        model_source,
+        "training_repository",
+        "repository",
+        "repo_id",
+    ) or str(
+        canonical.get("upstream_repository")
+        or provenance.get("repository")
+        or ""
+    )
+    revision = first_lineage_value(
+        model_source,
+        "training_revision",
+        "revision",
+    ) or str(
+        canonical.get("upstream_commit")
+        or canonical.get("upstream_revision")
+        or provenance.get("commit")
+        or ""
+    )
+    training_entrypoint = first_lineage_value(model_source, "training_entrypoint")
+    source_workload = str(
+        checkpoint_provenance.get("source_workload")
+        or raw.get("shared_checkpoint")
+        or ""
+    )
+
+    training: dict[str, Any] = {}
+    if mode == "training":
+        training = {
+            "status": "executed-in-this-run",
+            "adapter": runner_spec,
+            "entrypoint": training_entrypoint,
+            "repository": repository,
+            "revision": revision,
+        }
+    elif source_workload:
+        training = {
+            "status": "suite-checkpoint-source",
+            "source_workload": source_workload,
+            "source_run_selector": checkpoint_provenance.get("source_run_selector"),
+            "source_report_sha256": checkpoint_provenance.get(
+                "source_report_sha256"
+            ),
+            "source_manifest_sha256": checkpoint_provenance.get(
+                "source_manifest_sha256"
+            ),
+            "repository": repository,
+            "revision": revision,
+        }
+    elif training_entrypoint or model_source.get("training_repository"):
+        training = {
+            "status": "upstream-checkpoint-producer",
+            "entrypoint": training_entrypoint,
+            "repository": repository,
+            "revision": revision,
+        }
+    elif model_source.get("repo_id") or model_source.get("checkpoint_uri"):
+        training = {
+            "status": "upstream-pretrained-checkpoint",
+            "repository": repository,
+            "revision": revision,
+            "note": "Training was not executed by this benchmark run.",
+        }
+
+    checkpoint_path = str(
+        model_source.get("checkpoint")
+        or artifacts.get("checkpoint")
+        or artifacts.get("weights")
+        or ""
+    )
+    checkpoint_hash = str(
+        model_source.get("checkpoint_sha256")
+        or checkpoint_provenance.get("checkpoint_sha256")
+        or ""
+    )
+    model = report.get("model") or {}
+    if isinstance(model, dict):
+        checkpoint_identifier = str(
+            model.get("id") or model.get("name") or workload.model or ""
+        )
+        checkpoint_merkle_root = str(model.get("checkpoint_merkle_root") or "")
+    else:
+        checkpoint_identifier = str(model or workload.model or "")
+        checkpoint_merkle_root = ""
+    checkpoint = {
+        "role": (
+            "produced-by-this-run"
+            if mode == "training" and checkpoint_path
+            else "suite-trained-checkpoint"
+            if source_workload
+            else "upstream-pretrained-checkpoint"
+            if model_source.get("repo_id")
+            or model_source.get("checkpoint_uri")
+            or model_source.get("training_repository")
+            else "runtime-model"
+        ),
+        "identifier": checkpoint_identifier,
+        "path": checkpoint_path,
+        "repository": str(model_source.get("repo_id") or repository or ""),
+        "revision": str(model_source.get("revision") or revision or ""),
+        "source_uri": model_source.get("checkpoint_uri"),
+        "sha256": checkpoint_hash,
+        "merkle_root": checkpoint_merkle_root,
+        "source_workload": source_workload,
+    }
+
+    inference_entrypoint = first_lineage_value(
+        inference_source, "entrypoint"
+    ) or first_lineage_value(model_source, "inference_entrypoint")
+    inference: dict[str, Any] = {}
+    if mode == "inference":
+        inference = {
+            "status": "executed-in-this-run",
+            "adapter": runner_spec,
+            "entrypoint": inference_entrypoint,
+            "repository": str(
+                inference_source.get("repository") or repository or ""
+            ),
+            "revision": str(inference_source.get("revision") or revision or ""),
+            "phase": report.get("phase"),
+        }
+    elif inference_entrypoint:
+        inference = {
+            "status": "declared-for-checkpoint-evaluation",
+            "entrypoint": inference_entrypoint,
+            "repository": str(
+                inference_source.get("repository") or repository or ""
+            ),
+            "revision": str(inference_source.get("revision") or revision or ""),
+        }
+
+    evaluation_entrypoint = first_lineage_value(
+        evaluator,
+        "entrypoint",
+        "professional_move_evaluator",
+        "accuracy_script",
+        "evaluator",
+    )
+    evaluation = {
+        "status": "executed-in-this-run" if evaluator else "reported-by-adapter",
+        "entrypoint": evaluation_entrypoint,
+        "repository": evaluator.get("repository"),
+        "revision": evaluator.get("revision"),
+    }
+
+    return compact_lineage_value(
+        {
+            "schema": "mlperf-edu-execution-lineage/0.1",
+            "mode": mode,
+            "profile": profile,
+            "training": training,
+            "checkpoint": checkpoint,
+            "inference": inference,
+            "evaluation": evaluation,
+        }
+    )
+
+
+def first_lineage_value(record: dict[str, Any], *keys: str) -> str:
+    for key in keys:
+        value = record.get(key)
+        if value not in (None, ""):
+            return str(value)
+    return ""
+
+
+def compact_lineage_value(value: Any) -> Any:
+    if isinstance(value, dict):
+        return {
+            key: compacted
+            for key, item in value.items()
+            if (compacted := compact_lineage_value(item)) not in (None, "", {}, [])
+        }
+    if isinstance(value, list):
+        return [
+            compacted
+            for item in value
+            if (compacted := compact_lineage_value(item)) not in (None, "", {}, [])
+        ]
+    return value
 
 
 def strip_promoted_baseline_metadata(value: Any) -> None:
@@ -1930,8 +2166,8 @@ def print_run_summary(
         f"{definition_only} definition-only, {unsupported} unsupported, "
         f"{quality_failed} quality-failed"
     )
-    console.print(f"Report: {report_path}")
-    console.print(f"HTML: {exports['html']}")
+    console.print(f"Dashboard: {exports['html']}")
+    console.print(f"JSON: {report_path}")
     console.print(f"CSV: {exports['csv']}")
     for item in workload_reports:
         artifacts = item.get("artifacts") or {}
@@ -2485,6 +2721,9 @@ def write_report_exports(
 
 
 def open_report_path(path: Path) -> bool:
+    if os.environ.get("MLPERF_EDU_NO_BROWSER") == "1" or os.environ.get("CI"):
+        console.print(f"Dashboard: {path} (browser opening suppressed)")
+        return False
     try:
         return bool(webbrowser.open(path.as_uri()))
     except Exception as exc:
@@ -2562,6 +2801,243 @@ def aggregate_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def quality_dashboard_html(report: dict[str, Any]) -> str:
+    cards: list[str] = []
+    quality_results = 0
+    targets_met = 0
+    items = report_items(report)
+    for item in items:
+        quality = item.get("quality") or {}
+        metrics = item.get("metrics") or {}
+        if not isinstance(quality, dict) or not isinstance(metrics, dict):
+            continue
+        metric_name = quality_metric_name(quality)
+        metric_key = str(quality.get("metric_key") or "")
+        if not metric_key or metric_key not in metrics:
+            metric_key = metric_key_for_quality(metric_name, metrics) or ""
+        value = metrics.get(metric_key) if metric_key else None
+        target = quality.get("target")
+        direction = str(quality.get("direction") or "")
+        quality_required = quality_required_value(quality, False) is True
+        target_met = quality.get("target_met")
+        if quality_required:
+            quality_results += 1
+            if target_met is True:
+                targets_met += 1
+                result_label = "Target met"
+                result_class = "pass"
+            elif target_met is False:
+                result_label = "Target not met"
+                result_class = "fail"
+            else:
+                result_label = "Target pending"
+                result_class = "warn"
+        else:
+            result_label = "Functional probe"
+            result_class = "warn"
+
+        workload_name = str(item.get("workload") or item.get("id") or "unknown")
+        displayed_metric = str(metric_key or metric_name or "quality metric")
+        formatted_value, raw_value = format_dashboard_metric(displayed_metric, value)
+        target_text = format_quality_target(displayed_metric, target, direction)
+        if not quality_required and target not in (None, ""):
+            target_text = f"Reference {target_text.lower()} (not evaluated by this profile)"
+        raw_html = (
+            f"<div class='metric-raw'>Raw value: {escape(raw_value)}</div>"
+            if raw_value
+            else ""
+        )
+        cards.append(
+            "<article class='quality-card'>"
+            f"<div class='quality-card-top'><div><div class='eyebrow'>{escape(workload_name)}</div>"
+            f"<h3>{escape(displayed_metric)}</h3></div>"
+            f"<span class='badge {result_class}'>{escape(result_label)}</span></div>"
+            f"<div class='metric-value'>{escape(formatted_value)}</div>"
+            f"{raw_html}"
+            f"<div class='metric-target'>{escape(target_text)}</div>"
+            "</article>"
+        )
+    if not cards:
+        return ""
+
+    if quality_results:
+        summary = f"{targets_met} of {quality_results} authoritative quality targets met"
+    else:
+        summary = "Functional results only; this profile does not make a quality claim"
+    return f"""
+  <section class="section" aria-labelledby="quality-results-heading">
+    <div class="section-heading">
+      <div><div class="eyebrow">Lead results</div><h2 id="quality-results-heading">Quality Results</h2></div>
+      <div class="section-summary">{escape(summary)}</div>
+    </div>
+    <div class="quality-grid">{''.join(cards)}</div>
+  </section>
+"""
+
+
+def format_dashboard_metric(metric: str, value: Any) -> tuple[str, str]:
+    if value in (None, ""):
+        return "Pending", ""
+    if (
+        isinstance(value, (int, float))
+        and not isinstance(value, bool)
+        and 0 <= float(value) <= 1
+        and any(
+            token in metric.lower()
+            for token in (
+                "accuracy",
+                "auc",
+                "f1",
+                "pass",
+                "precision",
+                "prediction",
+                "rate",
+                "recall",
+            )
+        )
+    ):
+        return f"{float(value) * 100:.2f}%", format_cell(value)
+    return format_cell(value), ""
+
+
+def format_quality_target(metric: str, target: Any, direction: str) -> str:
+    if target in (None, ""):
+        return "No numeric target declared"
+    comparator = {"higher": "≥", "lower": "≤", "equal": "="}.get(direction, "")
+    formatted, _ = format_dashboard_metric(metric, target)
+    label = f"Target {comparator} {formatted}".replace("  ", " ")
+    return label
+
+
+def run_configuration_section_html(report: dict[str, Any]) -> str:
+    cards: list[str] = []
+    for item in report_items(report):
+        config = item.get("config") or {}
+        if not isinstance(config, dict):
+            config = {}
+        fields: list[tuple[str, Any]] = [
+            ("Profile", item.get("profile") or report.get("profile")),
+            ("Mode", item.get("mode")),
+            ("Phase", item.get("phase")),
+            ("Scenario", item.get("scenario")),
+            ("Backend", item.get("backend")),
+            ("Data mode", item.get("data_mode")),
+            ("Seed", item.get("seed")),
+            ("Device requested", item.get("device_requested")),
+            ("Device executed", item.get("device_executed")),
+        ]
+        fields.extend((str(key), value) for key, value in config.items())
+        rows = "".join(
+            f"<div class='definition-row'><dt>{escape(label)}</dt><dd>{escape(format_hardware_value(value))}</dd></div>"
+            for label, value in fields
+            if value not in (None, "", [], {})
+        )
+        if not rows:
+            continue
+        workload_name = str(item.get("workload") or item.get("id") or "Run")
+        cards.append(
+            f"<article class='detail-card'><h3>{escape(workload_name)}</h3><dl>{rows}</dl></article>"
+        )
+    if not cards:
+        return ""
+    return f"""
+  <section class="section">
+    <div class="section-heading"><div><div class="eyebrow">Reproducibility</div><h2>Run Configuration</h2></div></div>
+    <div class="detail-grid">{''.join(cards)}</div>
+  </section>
+"""
+
+
+def lineage_section_html(report: dict[str, Any]) -> str:
+    workloads_html: list[str] = []
+    stage_specs = (
+        ("training", "Training"),
+        ("checkpoint", "Checkpoint"),
+        ("inference", "Inference"),
+        ("evaluation", "Evaluation"),
+    )
+    for item in report_items(report):
+        lineage = item.get("execution_lineage") or {}
+        if not isinstance(lineage, dict):
+            continue
+        stages = []
+        for key, label in stage_specs:
+            details = lineage.get(key) or {}
+            if not isinstance(details, dict):
+                details = {}
+            status = str(
+                details.get("status")
+                or ("not-executed-in-this-run" if key in {"training", "inference"} else "not-declared")
+            )
+            detail_rows = "".join(
+                f"<div><span>{escape(str(field).replace('_', ' ').title())}</span><code>{escape(format_hardware_value(value))}</code></div>"
+                for field, value in details.items()
+                if field != "status" and value not in (None, "", [], {})
+            )
+            stages.append(
+                "<article class='lineage-stage'>"
+                f"<div class='lineage-index'>{len(stages) + 1}</div>"
+                f"<h3>{escape(label)}</h3><div class='lineage-status'>{escape(status.replace('-', ' '))}</div>"
+                f"<div class='lineage-details'>{detail_rows}</div>"
+                "</article>"
+            )
+        workload_name = str(item.get("workload") or item.get("id") or "Run")
+        workloads_html.append(
+            f"<article class='lineage-workload'><h3>{escape(workload_name)}</h3>"
+            f"<div class='lineage-flow'>{''.join(stages)}</div></article>"
+        )
+    if not workloads_html:
+        return ""
+    return f"""
+  <section class="section">
+    <div class="section-heading"><div><div class="eyebrow">Artifact chain</div><h2>Model Lineage</h2></div></div>
+    {''.join(workloads_html)}
+  </section>
+"""
+
+
+def provenance_section_html(report: dict[str, Any]) -> str:
+    rows: list[str] = []
+    for item in report_items(report):
+        artifacts = item.get("artifacts") or {}
+        if not isinstance(artifacts, dict):
+            artifacts = {}
+        fingerprint = item.get("run_fingerprint") or {}
+        if not isinstance(fingerprint, dict):
+            fingerprint = {}
+        digest = str(
+            fingerprint.get("comparison_fingerprint_sha256")
+            or (fingerprint.get("hardware") or {}).get("fingerprint_hash")
+            or ""
+        )
+        lineage = item.get("execution_lineage") or {}
+        checkpoint = lineage.get("checkpoint") or {} if isinstance(lineage, dict) else {}
+        checkpoint_digest = str(
+            checkpoint.get("sha256") or checkpoint.get("merkle_root") or ""
+        )
+        rows.append(
+            "<tr>"
+            f"<td>{escape(str(item.get('workload') or item.get('id') or ''))}</td>"
+            f"<td><code>{escape(str(artifacts.get('provenance') or 'Not emitted'))}</code></td>"
+            f"<td><code>{escape(str(artifacts.get('report') or ''))}</code></td>"
+            f"<td><code>{escape(digest)}</code></td>"
+            f"<td><code>{escape(checkpoint_digest)}</code></td>"
+            "</tr>"
+        )
+    if not rows:
+        return ""
+    return f"""
+  <section class="section">
+    <div class="section-heading"><div><div class="eyebrow">Integrity evidence</div><h2>Provenance</h2></div></div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Workload</th><th>Manifest</th><th>JSON Report</th><th>Run Fingerprint</th><th>Checkpoint Digest</th></tr></thead>
+      <tbody>{''.join(rows)}</tbody>
+    </table></div>
+    <div class="note">Verify a manifest with <code>mlperf verify &lt;file.provd.json&gt;</code>. Digests establish content integrity; authenticated producer identity requires an external signature.</div>
+  </section>
+"""
+
+
 def write_html_report(
     report: dict[str, Any], output: Path, *, source_path: Path
 ) -> None:
@@ -2595,6 +3071,10 @@ def write_html_report(
     hardware_html = hardware_section_html(report)
     serving_html = serving_metrics_section_html(report)
     assets_html = assets_section_html(report)
+    quality_html = quality_dashboard_html(report)
+    configuration_html = run_configuration_section_html(report)
+    lineage_html = lineage_section_html(report)
+    provenance_html = provenance_section_html(report)
     body_rows = "\n".join(
         "<tr>"
         f"<td>{escape(str(row.get('workload', '')))}</td>"
@@ -2626,27 +3106,59 @@ def write_html_report(
   <title>{escape(title)}</title>
   <style>
     :root {{
-      --bg: #f6f7f9;
-      --ink: #1f2937;
+      --bg: #f3f5f8;
+      --ink: #182230;
       --muted: #667085;
-      --line: #d0d5dd;
+      --line: #d8dee8;
       --surface: #ffffff;
+      --accent: #175cd3;
+      --accent-soft: #eff8ff;
       --pass: #067647;
       --fail: #b42318;
       --warn: #b54708;
     }}
-    body {{ margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.45 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
-    main {{ max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }}
-    header {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 24px; }}
-    h1 {{ margin: 0 0 6px; font-size: 28px; letter-spacing: 0; }}
+    * {{ box-sizing: border-box; }}
+    body {{ margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }}
+    main {{ max-width: 1240px; margin: 0 auto; padding: 40px 24px 64px; }}
+    header {{ display: flex; justify-content: space-between; gap: 24px; align-items: flex-start; margin-bottom: 32px; }}
+    h1 {{ margin: 0 0 6px; font-size: clamp(28px, 4vw, 38px); line-height: 1.15; letter-spacing: -0.03em; }}
     h2 {{ margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }}
+    h3 {{ margin: 0; font-size: 14px; }}
     .meta {{ color: var(--muted); font-size: 13px; text-align: right; }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 18px 0 24px; }}
-    .section {{ margin: 0 0 24px; }}
-    .card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px; }}
+    .section {{ margin: 0 0 32px; }}
+    .section-heading {{ display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 12px; }}
+    .section-heading h2 {{ margin: 2px 0 0; font-size: 21px; }}
+    .section-summary {{ color: var(--muted); font-size: 13px; text-align: right; }}
+    .eyebrow, .label {{ color: var(--muted); font-size: 11px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }}
+    .card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; box-shadow: 0 1px 2px rgb(16 24 40 / 4%); }}
     .label {{ color: var(--muted); font-size: 12px; text-transform: uppercase; }}
     .value {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
-    table {{ width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 8px; overflow: hidden; }}
+    .quality-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }}
+    .quality-card {{ min-height: 190px; background: linear-gradient(145deg, #fff 55%, var(--accent-soft)); border: 1px solid #b2ddff; border-radius: 16px; padding: 20px; box-shadow: 0 8px 20px rgb(16 24 40 / 5%); }}
+    .quality-card-top {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }}
+    .quality-card h3 {{ margin-top: 4px; font-size: 15px; overflow-wrap: anywhere; }}
+    .metric-value {{ margin-top: 26px; color: var(--accent); font-size: 38px; font-weight: 760; letter-spacing: -.04em; }}
+    .metric-raw {{ margin-top: -5px; color: var(--muted); font-size: 11px; }}
+    .metric-target {{ margin-top: 8px; color: var(--muted); font-weight: 600; }}
+    .detail-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }}
+    .detail-card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }}
+    .detail-card h3, .lineage-workload > h3 {{ margin-bottom: 12px; font-size: 15px; }}
+    dl {{ margin: 0; }}
+    .definition-row {{ display: grid; grid-template-columns: minmax(110px, .8fr) minmax(0, 1.5fr); gap: 16px; padding: 8px 0; border-bottom: 1px solid #eaecf0; }}
+    .definition-row:last-child {{ border-bottom: 0; }}
+    dt {{ color: var(--muted); }}
+    dd {{ margin: 0; overflow-wrap: anywhere; }}
+    .lineage-workload {{ margin-bottom: 16px; background: var(--surface); border: 1px solid var(--line); border-radius: 14px; padding: 18px; }}
+    .lineage-flow {{ display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; }}
+    .lineage-stage {{ position: relative; min-width: 0; border-top: 3px solid #84adff; padding-top: 12px; }}
+    .lineage-stage:not(:last-child)::after {{ content: "→"; position: absolute; right: -18px; top: 6px; color: #98a2b3; font-size: 18px; }}
+    .lineage-index {{ display: inline-grid; place-items: center; width: 22px; height: 22px; margin-bottom: 8px; color: #fff; background: var(--accent); border-radius: 50%; font-size: 11px; font-weight: 700; }}
+    .lineage-status {{ margin: 4px 0 10px; color: var(--muted); font-size: 12px; }}
+    .lineage-details div {{ margin-top: 8px; }}
+    .lineage-details span {{ display: block; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }}
+    code {{ font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; white-space: normal; }}
+    table {{ width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }}
     th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }}
     th {{ color: var(--muted); font-size: 12px; text-transform: uppercase; background: #eef2f6; }}
     tr:last-child td {{ border-bottom: 0; }}
@@ -2657,6 +3169,12 @@ def write_html_report(
     .note {{ color: var(--muted); margin-top: 18px; font-size: 12px; }}
     .table-scroll {{ overflow-x: auto; }}
     .table-scroll table {{ min-width: 980px; }}
+    @media (max-width: 820px) {{
+      header, .section-heading {{ align-items: flex-start; flex-direction: column; }}
+      .meta, .section-summary {{ text-align: left; }}
+      .lineage-flow {{ grid-template-columns: 1fr; }}
+      .lineage-stage:not(:last-child)::after {{ content: "↓"; right: auto; left: 4px; top: calc(100% + 1px); }}
+    }}
   </style>
 </head>
 <body>
@@ -2671,7 +3189,11 @@ def write_html_report(
       <div>{escape(str(source_path))}</div>
     </div>
   </header>
-  <section class="grid">{status_cards}</section>
+  {quality_html}
+  <section class="grid" aria-label="Run status summary">{status_cards}</section>
+  {configuration_html}
+  {lineage_html}
+  {provenance_html}
   {hardware_html}
   {serving_html}
   {assets_html}
@@ -2683,7 +3205,7 @@ def write_html_report(
       <tbody>{body_rows}</tbody>
     </table></div>
   </section>
-  <div class="note">Generated by mlperf report. Use the paired .provd.json manifests for integrity verification.</div>
+  <div class="note">Generated by MLPerf EDU. The paired JSON and CSV retain machine-readable results; the .provd.json manifests support integrity verification.</div>
 </main>
 </body>
 </html>

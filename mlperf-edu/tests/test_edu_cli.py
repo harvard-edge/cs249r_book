@@ -25,7 +25,11 @@ PROJECT_ROOT = Path(__file__).resolve().parents[1]
 
 
 def run_cli(*args, cwd=None, env_extra=None):
-    env = {**os.environ, "PYTHONPATH": "src"}
+    env = {
+        **os.environ,
+        "PYTHONPATH": "src",
+        "MLPERF_EDU_NO_BROWSER": "1",
+    }
     if env_extra:
         env.update(env_extra)
     return subprocess.run(
@@ -76,6 +80,46 @@ def test_run_and_validate_advertise_device_selection():
         result = run_cli(command, "--help")
         assert result.returncode == 0, result.stderr
         assert "--device {auto,cpu,cuda,mps}" in result.stdout
+
+
+def test_run_dashboard_opens_by_default_and_can_be_disabled():
+    parser = edu_cli.build_parser()
+
+    default_args = parser.parse_args(
+        ["run", "--workload", "causal-language-modeling", "--profile", "min"]
+    )
+    disabled_args = parser.parse_args(
+        [
+            "run",
+            "--workload",
+            "causal-language-modeling",
+            "--profile",
+            "min",
+            "--no-open-report",
+        ]
+    )
+
+    assert default_args.open_report is True
+    assert disabled_args.open_report is False
+    help_result = run_cli("run", "--help")
+    assert "Open the generated HTML dashboard (default)." in help_result.stdout
+    assert "--no-open-report" in help_result.stdout
+
+
+def test_browser_opening_can_be_suppressed_for_automation(
+    tmp_path, monkeypatch, capsys
+):
+    dashboard = tmp_path / "dashboard.html"
+    dashboard.write_text("<!doctype html>")
+    monkeypatch.setenv("MLPERF_EDU_NO_BROWSER", "1")
+
+    def unexpected_open(_uri):
+        raise AssertionError("webbrowser.open must not run in automation")
+
+    monkeypatch.setattr(edu_cli.webbrowser, "open", unexpected_open)
+
+    assert edu_cli.open_report_path(dashboard) is False
+    assert "browser opening suppressed" in capsys.readouterr().out
 
 
 def test_doctor_passes():
@@ -520,6 +564,50 @@ def test_nanogpt_inference_lineage_excludes_source_promoted_results():
     assert "source_git_sha" not in serialized
 
 
+def test_execution_lineage_distinguishes_pretrained_and_run_trained_models():
+    workloads = load_registry()
+    pretrained = {
+        "workload": "code-generation",
+        "profile": "max",
+        "mode": "inference",
+        "model_source": {
+            "type": "huggingface-pinned",
+            "repo_id": "Qwen/Qwen2.5-Coder-0.5B-Instruct",
+            "revision": "ea3f2471cf1b1f0db85067f1ef93848e38e88c25",
+        },
+        "quality": {},
+    }
+    enrich_report_for_display(pretrained, workloads)
+
+    pretrained_lineage = pretrained["execution_lineage"]
+    assert pretrained_lineage["training"]["status"] == (
+        "upstream-pretrained-checkpoint"
+    )
+    assert pretrained_lineage["checkpoint"]["role"] == (
+        "upstream-pretrained-checkpoint"
+    )
+    assert pretrained_lineage["inference"]["status"] == "executed-in-this-run"
+    assert pretrained_lineage["inference"]["adapter"].endswith(
+        ":run_code_generation_max"
+    )
+
+    trained = {
+        "workload": "causal-language-modeling",
+        "profile": "max",
+        "mode": "training",
+        "artifacts": {"checkpoint": "/tmp/nanogpt.pt"},
+        "quality": {},
+    }
+    enrich_report_for_display(trained, workloads)
+
+    trained_lineage = trained["execution_lineage"]
+    assert trained_lineage["training"]["status"] == "executed-in-this-run"
+    assert trained_lineage["training"]["adapter"].endswith(
+        ":run_causal_language_modeling_max"
+    )
+    assert trained_lineage["checkpoint"]["role"] == "produced-by-this-run"
+
+
 def test_show_workload():
     result = run_cli("show", "causal-language-modeling")
     assert result.returncode == 0
@@ -946,6 +1034,8 @@ def test_report_command_exports_json_csv_html(tmp_path):
         str(tmp_path),
     )
     assert result.returncode == 0, result.stdout + result.stderr
+    assert "Dashboard:" in result.stdout
+    assert "browser opening suppressed" in result.stdout
 
     report_path = tmp_path / "causal-language-modeling_training_min_report.json"
     manifest_path = tmp_path / "causal-language-modeling_training_min.provd.json"
@@ -964,6 +1054,10 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert report["quality"]["target_basis"] == "literature"
     assert "reference_protocol" not in report["quality"]
     assert report["quality"]["quality_required"] is False
+    assert report["execution_lineage"]["training"]["status"] == (
+        "executed-in-this-run"
+    )
+    assert report["execution_lineage"]["checkpoint"]["role"] == "runtime-model"
     assert report["run_fingerprint"]["schema"] == "mlperf-edu-run-fingerprint/0.1"
     assert report["run_fingerprint"]["hardware"]["fingerprint_hash"]
     assert report["run_fingerprint"]["software"]["python"]
@@ -1031,6 +1125,15 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert html_result.returncode == 0, html_result.stdout + html_result.stderr
     html = html_path.read_text()
     assert "MLPerf EDU Report: causal-language-modeling" in html
+    assert "Quality Results" in html
+    assert "Run Configuration" in html
+    assert "Model Lineage" in html
+    assert "Provenance" in html
+    assert "Training" in html
+    assert "Checkpoint" in html
+    assert "Inference" in html
+    assert "Evaluation" in html
+    assert "Functional probe" in html
     assert "loss" in html
     assert "literature" in html
     assert "fingerprint_hash" in html
