@@ -71,12 +71,23 @@ STOP_STRINGS = (
     "\n```",
 )
 EVALPLUS_DOCKERFILE = f"""FROM {EVALPLUS_BASE_IMAGE}
-RUN pip install --no-cache-dir {' '.join(EVALPLUS_RUNTIME_PACKAGES)}
+RUN pip install --no-cache-dir {" ".join(EVALPLUS_RUNTIME_PACKAGES)}
 COPY . /evalplus
 ENV PYTHONPATH=/evalplus PYTHONHASHSEED=0 HOME=/tmp/evalplus-home
 WORKDIR /workspace
 ENTRYPOINT [\"python3\", \"-m\", \"evalplus.evaluate\"]
 """
+
+
+def _model_file_records(snapshot: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": snapshot / filename,
+            "logical_path": filename,
+            "role": "weights" if filename == "model.safetensors" else "model-config",
+        }
+        for filename in MODEL_FILES
+    ]
 
 
 def official_qwen_chatml_prompt(prompt: str) -> str:
@@ -107,7 +118,9 @@ def load_humaneval_plus_tasks(path: Path) -> list[dict[str, Any]]:
     tasks = [json.loads(line) for line in path.read_text().splitlines() if line]
     task_ids = [task.get("task_id") for task in tasks]
     if len(tasks) != 164 or len(set(task_ids)) != 164 or None in task_ids:
-        raise ValueError("HumanEval+ must contain exactly 164 uniquely identified tasks")
+        raise ValueError(
+            "HumanEval+ must contain exactly 164 uniquely identified tasks"
+        )
     if any(not isinstance(task.get("prompt"), str) for task in tasks):
         raise ValueError("every HumanEval+ task must contain a string prompt")
     return tasks
@@ -356,7 +369,9 @@ def _generate_samples(
 ) -> tuple[float, int]:
     from transformers import StoppingCriteriaList, StopStringCriteria
 
-    stop_criteria = StoppingCriteriaList([StopStringCriteria(tokenizer, list(STOP_STRINGS))])
+    stop_criteria = StoppingCriteriaList(
+        [StopStringCriteria(tokenizer, list(STOP_STRINGS))]
+    )
     generated_tokens = 0
     synchronize_device(device)
     start = time.perf_counter()
@@ -402,7 +417,9 @@ def run_code_generation_max(workload: Workload, output_dir: Path) -> dict[str, A
         int(config.get("evaluation_tasks", 0)) != 164
         or int(config.get("minimum_passing_tasks", 0)) != MINIMUM_PASSING_TASKS
     ):
-        raise ValueError("registry HumanEval+ task-count contract does not match the runner")
+        raise ValueError(
+            "registry HumanEval+ task-count contract does not match the runner"
+        )
 
     root = find_project_root()
     seed = configured_seed()
@@ -549,7 +566,7 @@ def run_code_generation_max(workload: Workload, output_dir: Path) -> dict[str, A
         "artifacts": {
             "report": str(report_path),
             "provenance": str(manifest_path),
-            "weights": str(snapshot / "model.safetensors"),
+            "weights": str(snapshot),
             "samples": str(samples_path),
             "evaluation_results": str(results_path.resolve()),
         },
@@ -562,7 +579,9 @@ def run_code_generation_max(workload: Workload, output_dir: Path) -> dict[str, A
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        weights_path=snapshot / "model.safetensors",
+        weights_files=_model_file_records(snapshot),
+        weights_name=MODEL_ID,
+        weights_revision=MODEL_REVISION,
         weights_n_params=n_params,
         weights_dtype="bfloat16-source/float32-execution",
         dataset_name="humaneval-plus-and-pinned-evaluator",

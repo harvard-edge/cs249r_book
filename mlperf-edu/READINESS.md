@@ -8,8 +8,9 @@ target. It does not require five timing repetitions, a promoted performance
 baseline, or production publication.
 
 The existing provisional importer contains twelve evidence cases across the
-original nine-workload quality scope. The five quality-conformance workloads
-remain outside that importer until their result gates close deliberately.
+original quality scope. That evidence scope contains nine workloads. The five
+quality-conformance workloads remain outside that importer until their result
+gates close deliberately.
 
 A workload is initially usable when its CLI path, exact assets, quality target,
 evaluator, report, and provenance boundary are explicit. A functional `min`
@@ -18,10 +19,9 @@ probe establishes setup only. It never counts as quality evidence.
 ## Portfolio Status
 
 Every workload has a `min` runner, an authoritative `max` runner, a target with
-an upstream or policy basis, and a one-run acceptance contract. Nine workloads
-have at least one complete target-passing result. The remaining five preserve
-their targets while the current runner either records a gap or awaits the
-required execution environment.
+an upstream basis, and a one-result acceptance contract. Eight workloads have
+at least one complete target-passing result. Four record an honest quality gap,
+and two await the required research execution environment.
 
 | **Workload** | **Quality Target** | **Initial Quality Status** | **Next Work** |
 |:---|:---|:---|:---|
@@ -33,10 +33,10 @@ required execution environment.
 | `text-classification` | accuracy ≥ 0.9105504587 | Pass at 0.9105504751 | Keep the current result. Stability is later work. |
 | `information-retrieval` | mean nDCG@10 ≥ 0.6071684099 | Pass at 0.6071684099 | Keep the current result. Stability is later work. |
 | `graph-node-classification` | test accuracy ≥ 0.7174 with 0.0029 tolerance | Pass at 0.720964 | Keep the current result. Domain review of the tolerance remains a publication gate. |
-| `time-series-forecasting` | test MSE ≤ 0.2929292929 | Pass at 0.292393 | Keep the current result. Domain review of the derived target remains a publication gate. |
+| `time-series-forecasting` | test MSE ≤ 0.290 | Complete result missed at 0.292393 | Investigate the gap without transferring an unrelated MLPerf Inference tolerance to the published PatchTST result. |
 | `code-generation` | HumanEval+ pass@1 ≥ 0.573, or at least 94 of 164 tasks | Complete result missed at 91 of 164, or 0.554878 | Investigate the three-task gap without weakening the target. |
 | `function-calling` | BFCL V4 Non-Live AST accuracy ≥ 0.8292 | Authoritative runner ready; earlier full audit reached 0.7852 and the current runner has a 50-case resumable prefix | Resume at case 51 when a current full artifact is needed. |
-| `image-generation` | CIFAR-10 FID ≤ 1.79 | Measured best FID is 1.801554 | Produce one artifact with the current 50,000-image runner and review the narrow gap without weakening the target. |
+| `image-generation` | minimum CIFAR-10 FID ≤ 1.79 across three trials | Measured three-trial minimum FID is 1.801554 | Produce one provenance-bound three-trial artifact and review the narrow gap without weakening the target. |
 | `recommendation` | Criteo Terabyte ROC AUC ≥ 0.8025 | Runner ready; execution is environment-gated | Run on a 256-GB-class system with the licensed data, official checkpoint, and pinned legacy runtime. |
 | `reinforcement-learning` | professional-move prediction ≥ 0.40 plus the 0.55 playoff gate | Runner ready; execution is environment-gated | Run the resumable loop on a suitable NVIDIA system with a reviewed immutable TensorFlow 1.x image. |
 
@@ -66,9 +66,10 @@ questions. A release-policy review does not mean the selected dataset is wrong.
 
 - Tiny Shakespeare, HumanEval+, the ToyADMOS anomaly set, and the local prompt
   suite are approved for fetch-only or bundled use under their current policy.
-- CIFAR-10, SST-2, NanoBEIR, `ogbn-arxiv`, ETTm1, KWS, visual wake words, BFCL,
-  and the MiniGo inputs are pinned and runnable, but their public redistribution
-  or release wording still needs review.
+- OGB `ogbn-arxiv` is approved for attributed ODC-By 1.0 fetch-only use.
+- CIFAR-10, SST-2, NanoBEIR, ETTm1, KWS, visual wake words, BFCL, and the MiniGo
+  inputs are pinned and runnable, but their public redistribution or release
+  wording still needs review.
 - Criteo Terabyte requires manual upstream terms acceptance. The CLI does not
   download or redistribute it and fails closed until the user supplies the
   complete preprocessed accuracy set.
@@ -133,7 +134,7 @@ behavior for automation.
 - [x] Verify the current BFCL runner through a 50-case resumable prefix and
   preserve the earlier complete quality observation.
 - [ ] Produce the current complete BFCL artifact.
-- [ ] Produce the current complete EDM artifact.
+- [ ] Produce the current complete three-trial EDM artifact.
 - [ ] Execute the DLRM quality contract in its required environment.
 - [ ] Execute the MiniGo quality contract in its required environment.
 - [ ] Populate measured working-set, arithmetic-intensity, and dispatch evidence

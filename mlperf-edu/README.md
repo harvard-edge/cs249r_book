@@ -7,11 +7,11 @@ discipline of mature benchmark suites to classroom-scale PyTorch workloads.
 It is not an official MLCommons benchmark and is not endorsed by MLCommons.
 
 The v0.1 portfolio contains fourteen workloads. The current quality-evidence
-scope covers nine workloads, all with at least one complete target-passing
-result. Five additional workloads now have complete,
-fail-closed authoritative runners in the quality-conformance spiral. Their
-current state is either a measured target gap or an external execution-environment
-gate. MLPerf EDU contributes the thin PyTorch adapter, execution harness,
+scope covers nine workloads and twelve historical evidence cases. Eight
+workloads have at least one complete target-passing result. The other six have
+complete, fail-closed authoritative runners and either a measured target gap or
+an external execution-environment gate. MLPerf EDU contributes the thin
+PyTorch adapter, execution harness,
 measurement controls, provenance, and reports needed to move each definition
 through functional, quality-conformant, repeatability-verified, and
 promotion-ready stages.
@@ -48,11 +48,11 @@ uv run mlperf run --workload image-classification --profile max \
 | `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | inference | accuracy at least the exact verified model-index result of 0.9105504587155964 |
 | `information-retrieval` | Sentence Transformers CrossEncoder NanoBEIR example | inference | exact documented mean nDCG@10 |
 | `graph-node-classification` | Official OGB GCN recipe on `ogbn-arxiv` | training | test accuracy within the published GCN reference tolerance |
-| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | test MSE at most 0.29292929292929293, the direction-aware 99%-of-reference gate |
+| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | reproduce the published test MSE of 0.290; the current 0.292393 result misses |
 | `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; first complete result reached 0.554878 and did not meet the unchanged target |
 | `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; complete authoritative runner ready, current full artifact pending |
 | `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; complete runner ready, execution gated on licensed data and a 256-GB-class environment |
-| `image-generation` | NVIDIA EDM and the CIFAR-10 50,000-image FID protocol | inference | published 1.79 FID; measured best result 1.801554, with a current-run artifact still needed |
+| `image-generation` | NVIDIA EDM and the three-trial CIFAR-10 FID protocol | inference | published 1.79 minimum FID across three 50,000-image trials; measured minimum 1.801554, with a current packet still needed |
 | `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; complete resumable runner gated on a reviewed legacy GPU environment |
 
 The [selection ledger](registry/selection-ledger.yaml) records the authority,
@@ -163,7 +163,9 @@ and builds the site and paper.
 - [Proposal](PROPOSAL.md)
 - [Public result rules](PUBLIC_RULES.md)
 - [Quality target review](QUALITY_TARGET_REVIEW.md)
+- [Independent audit](INDEPENDENT_AUDIT.md)
 - [Initial usability readiness](READINESS.md)
+- [Product readiness plan](PRODUCT_READINESS_PLAN.md)
 - [Dataset release review](DATASET_RELEASE_REVIEW.md)
 - [Release checklist](RELEASE_CHECKLIST.md)
 - [Generated benchmark site](site/benchmarks/index.qmd)

@@ -151,7 +151,7 @@ The quality contracts are:
 | `text-classification` | SST-2 accuracy at least 0.9105504587155964 | pinned checkpoint model-index metadata |
 | `information-retrieval` | mean nDCG@10 equal to the documented evaluator result | Sentence Transformers example |
 | `graph-node-classification` | test accuracy within the published GCN tolerance | official OGB GCN reference |
-| `time-series-forecasting` | test MSE at most 0.29292929292929293 | PatchTST 0.290 result divided by the MLPerf 0.99 quality fraction |
+| `time-series-forecasting` | test MSE at most 0.290 | Strict reproduction point from the published PatchTST result |
 
 `QUALITY_TARGET_REVIEW.md` records the numerical details and rationale.
 

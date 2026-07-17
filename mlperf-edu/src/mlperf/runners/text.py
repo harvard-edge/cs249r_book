@@ -31,6 +31,17 @@ DISTILBERT_HASHES = {
 }
 
 
+def _model_file_records(snapshot: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": snapshot / filename,
+            "logical_path": filename,
+            "role": "weights" if filename == "model.safetensors" else "model-config",
+        }
+        for filename in DISTILBERT_HASHES
+    ]
+
+
 def run_text_classification_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     """Run a tiny DistilBERT configuration as a non-quality smoke test."""
     from transformers import DistilBertConfig, DistilBertForSequenceClassification
@@ -260,7 +271,7 @@ def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[st
         "artifacts": {
             "report": str(report_path),
             "provenance": str(manifest_path),
-            "source_weights": str(snapshot / "model.safetensors"),
+            "source_weights": str(snapshot),
         },
     }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -271,7 +282,9 @@ def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[st
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        weights_path=snapshot / "model.safetensors",
+        weights_files=_model_file_records(snapshot),
+        weights_name=DISTILBERT_REPO_ID,
+        weights_revision=DISTILBERT_REVISION,
         weights_n_params=n_params,
         weights_dtype="float32",
         dataset_name=asset.name,

@@ -3,9 +3,9 @@
 ## Review Boundary
 
 The v0.1 portfolio contains fourteen workloads. The current evidence scope
-contains nine workloads and twelve evidence cases. Every target below comes
-from an authoritative upstream result or rule. None was invented to make a
-local implementation pass.
+contains nine workloads and twelve evidence cases. Every target below is bound
+to an upstream rule, published result, or predeclared interpretation. None is
+fitted to make a local implementation pass.
 
 The draft evidence campaign is bound to clean source revision
 `163d42ee3df54ab122543469ccf2b6b3bd119455`. Exact run counts, values, evidence
@@ -36,19 +36,20 @@ miss that target, but it cannot define or relax it. Discrete targets also record
 their task-count interpretation when rounding would otherwise hide the actual
 gate.
 
-The registry distinguishes four target kinds so that a student can tell what a
+The registry distinguishes three target kinds so that a student can tell what a
 number means.
 
 | **Target Kind** | **Workloads** | **Interpretation** |
 |:---|:---|:---|
 | **Inherited acceptance gate** | Image classification, keyword spotting, anomaly detection, visual wake words, recommendation, and reinforcement learning | An upstream benchmark already defines the pass threshold. These are the strongest targets because MLPerf EDU does not choose the boundary. |
-| **Published reference reproduction** | Causal language modeling, text classification, information retrieval, code generation, function calling, and image generation | The target is a published point result for the exact pinned recipe. It is a strict conformance target rather than a claim that the upstream project defined a universal pass threshold. |
+| **Published reference reproduction** | Causal language modeling, text classification, information retrieval, time-series forecasting, code generation, function calling, and image generation | The target is a published point result for the exact pinned recipe. It is a strict conformance target rather than a claim that the upstream project defined a universal pass threshold. |
 | **Published mean with tolerance** | Graph node classification | The official OGB GCN mean is paired with its published standard deviation. The one-sided tolerance remains a domain-review item rather than a locally fitted margin. |
-| **Policy-derived gate** | Time-series forecasting | The published PatchTST MSE is converted with the pinned MLPerf 99% quality fraction for a lower-is-better metric. The derivation is explicit and remains a publication-review item. |
 
-This distinction is important for the three current near-misses. HumanEval+,
-BFCL, and EDM remain below strict published-reference targets. Their results do
-not justify lowering the gates.
+This distinction is important for the four current near-misses. PatchTST,
+HumanEval+, BFCL, and EDM remain below strict published-reference points. Their
+results do not justify lowering the gates. The causal-language-modeling point,
+graph tolerance, and mutable BFCL leaderboard snapshot remain conditional until
+their interpretation or frozen source is independently approved.
 
 ## Score-Bearing Targets
 
@@ -62,7 +63,7 @@ not justify lowering the gates.
 | `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | accuracy at least 0.9105504587155964 | The pinned model-index metadata publishes this exact verified accuracy for the GLUE SST-2 validation split. The complete split is evaluated. |
 | `information-retrieval` | Pinned MiniLM cross-encoder and the documented three-dataset NanoBEIR subset | mean nDCG@10 equal to 0.60716840988382 within the registry tolerance | Sentence Transformers publishes the exact evaluator example and score. |
 | `graph-node-classification` | Official OGB GCN recipe and `ogbn-arxiv` split | test accuracy within 0.0029 of 0.7174 | The correct OGB GCN reference is 71.74% with a published 0.29-point standard deviation. The previously quoted 72.51% belongs to a different leaderboard section and is not used. |
-| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at most 0.29292929292929293 | PatchTST publishes the 0.290 result. The gate divides that lower-is-better reference by the MLPerf 0.99 quality fraction, an explicit direction-aware MLPerf EDU policy inference. |
+| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at most 0.290 | PatchTST publishes the 0.290 result. MLPerf EDU treats it as a strict reproduction point and does not transfer an unrelated MLPerf Inference tolerance to this training-paper metric. |
 
 ## New-Workload Quality Backlog
 
@@ -77,13 +78,8 @@ required external execution environment is unavailable.
 | `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | The complete 164-task run passed 91 tasks, or 0.554878. The unchanged gate requires at least 94. |
 | `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | The pinned 1,150-case runner and official evaluator are ready. A complete artifact from the current runner remains pending; the earlier full audit reached 0.7852. |
 | `recommendation` | MLPerf Inference v1.0.1 DLRM Criteo Terabyte ROC AUC of 0.8025 | The complete historical accuracy adapter is ready. Execution requires licensed Criteo data, the roughly 90 GB checkpoint, a legacy runtime, and a 256-GB-class system. |
-| `image-generation` | NVIDIA EDM CIFAR-10 FID of 1.79 | The complete 50,000-image runner is ready. Prior official trials reached a best FID of 1.8015540749984766, and a current-run artifact remains pending. |
+| `image-generation` | NVIDIA EDM CIFAR-10 minimum FID of 1.79 across three trials | One acceptance result now contains three independent 50,000-image trials, matching the upstream score definition. Prior trials reached a minimum FID of 1.8015540749984766, and a current three-trial artifact remains pending. |
 | `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | The complete resumable self-play, training, and evaluation loop is ready. Execution requires a reviewed immutable legacy GPU image and a suitable NVIDIA system. |
-
-The MLPerf policy input is pinned to inference-policies commit
-`c547732b539cb3a14cc5680597714c8c1df4cad0`. The referenced
-`inference_rules.adoc` bytes have SHA-256
-`4a42bec8ab869b78b41dc00e94da18113ab4fffa32aa19a8dccc814c5d12897e`.
 
 ## Performance-Bearing Phase Gates
 

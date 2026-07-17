@@ -24,7 +24,7 @@ the decision is resolved.
 | Deterministic prompt suite | `causal-language-modeling` inference | Bundled project prompt asset | Bundling depends on the final component license. |
 | GLUE SST-2 | `text-classification` | Official development split and pinned archive | Fetch-only pending redistribution review. |
 | NanoBEIR English subset | `information-retrieval` | Twelve pinned corpus, query, candidate, and relevance files | Fetch-only; component source licenses remain applicable. |
-| OGB `ogbn-arxiv` | `graph-node-classification` | Official archive, time split, and evaluator | Fetch-only pending OGB and source-data terms review. |
+| OGB `ogbn-arxiv` | `graph-node-classification` | Official archive, time split, and evaluator | ODC-By 1.0 fetch-only with OGB and Microsoft Academic Graph attribution. |
 | ETTm1 | `time-series-forecasting` | Pinned CSV and official 12/4/4-month split | Fetch-only pending dataset-specific review under the source repository terms. |
 | HumanEval+ | `code-generation` | Complete 164-task EvalPlus release | Fetch-only; code execution must remain sandboxed. |
 | BFCL V4 Non-Live AST | `function-calling` | Complete 1,150-example six-category split | Fetch-only pending BFCL component review. |
@@ -58,11 +58,12 @@ but technical readiness does not erase those external obligations.
 
 HumanEval+, BFCL, Criteo Terabyte, CIFAR-10 EDM inputs, and MiniGo self-play are
 registered because their workload identities and upstream contracts are known.
-The code-generation max runner now consumes the complete HumanEval+ asset. The
-other four bounded probes do not yet consume their complete canonical assets
-and therefore cannot support quality or timing claims. End-to-end RAG and ReAct
-agent datasets remain outside the portfolio because no stable upstream tuple
-fixes the complete task and evaluator without project choices.
+Every workload now has a fail-closed max runner for its complete canonical
+contract. HumanEval+, BFCL, and EDM consume their complete local evaluation
+assets. DLRM and MiniGo require external research environments and do not fall
+back to reduced substitutes. End-to-end RAG and ReAct agent datasets remain
+outside the portfolio because no stable upstream tuple fixes the complete task
+and evaluator without project choices.
 
 ## Reviewer Checklist
 

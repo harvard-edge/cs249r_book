@@ -78,12 +78,13 @@ only after every question is answered.
    on laptop-class hardware?
 
 The registered portfolio contains fourteen workloads. All fourteen have a
-functional public CLI path with reports and provenance. Nine workloads satisfy
-the current quality-contract boundary, and twelve evidence cases cover their
-canonical `max` paths plus three causal inference phases. Six cases satisfy the
-five-run repeatability gate; the other six remain provisional. Code generation,
-function calling, recommendation, image generation, and reinforcement learning
-remain functional-stage candidates without quality or repeatability claims.
+functional public CLI path with reports and provenance. Eight workloads have a
+complete target-passing result. Twelve historical evidence cases cover the
+original nine-workload scope and three causal inference phases. Six cases
+satisfy the five-run repeatability gate; the other six remain provisional.
+Time-series forecasting, code generation, function calling, and image
+generation record quality gaps. Recommendation and reinforcement learning are
+gated on their required research environments.
 
 ## Delivery Spirals
 

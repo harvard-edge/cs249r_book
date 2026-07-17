@@ -79,7 +79,7 @@ crossed a battery-to-AC transition.
 | `text-classification__max__inference` | MPS | 0.910550475 accuracy | >= 0.910550459 | +0.000000016 | verified | Clean current-source five-run sweep retained; exact pinned-checkpoint conformance gate |
 | `information-retrieval__max__inference` | MPS | 0.607168410 nDCG@10 | >= 0.607168410 | 0.000000000 | verified | Clean current-source five-run sweep retained; exact published-example conformance gate |
 | `graph-node-classification__max__training` | MPS | 0.722342 accuracy | >= 0.717400 | +0.004942 before tolerance | verified | Clean five-run accuracy and timing distribution required |
-| `time-series-forecasting__max__training` | MPS | 0.292393 MSE | <= 0.292929 | +0.000536 | verified | Deterministic locally but narrow; clean five-run and domain review required |
+| `time-series-forecasting__max__training` | MPS | 0.292393 MSE | <= 0.290000 | -0.002393 | verified | Historical artifact no longer passes after removing the unsupported derived gate; investigate the quality gap before rerunning |
 
 Diagnostic artifacts are under
 `/tmp/mlperf-edu-current-audit-20260715`. The strict two-runtime adapter audit
@@ -120,14 +120,14 @@ resolved.
 - [x] The six fragile or converted fast workloads reproduce their draft quality values exactly.
 - [x] Current nanoGPT training produces a quality-approved checkpoint that all three inference phases verify and consume.
 - [x] Current graph training passes the nominal published target without using its tolerance.
-- [x] Current time-series training reproduces the draft MSE exactly.
+- [x] Current time-series training records a reproducible 0.292393 MSE gap against the published 0.290 point.
 - [x] Independently compare full-set PyTorch and pinned TFLite outputs for ResNet8, DS-CNN, and MobileNetV1 under LiteRT 2.1.6 XNNPACK and builtin kernels.
 - [x] ResNet8 and MobileNetV1 produce identical top-1 predictions on every official sample under both audited LiteRT resolvers and reproduce the same 87.0% and 85.1% accuracy.
 - [x] The KWS divergence is measured rather than hidden: PyTorch is 90.2%; LiteRT XNNPACK is 90.0% with 7/1,000 prediction disagreements; LiteRT builtin is 90.5% with 5/1,000 disagreements. Every path passes the inherited 90% gate.
 - [x] Resolve the KWS promotion choice. Retain and disclose the quality-preserving PyTorch adaptation for education, classify it as nonidentical, and block promotion until exact-source execution or authoritative unquantized weights establish exact parity. Do not invent a disagreement tolerance.
 - [ ] Isolate PatchTST data-order RNG from data-loader worker lifecycle before changing worker persistence or count.
 - [ ] Obtain five clean externally powered runs for graph, time-series, nanoGPT training, and all nanoGPT inference phases.
-- [ ] Have domain reviewers approve the graph mean-plus-tolerance rule and the project-derived time-series MSE threshold.
+- [ ] Have domain reviewers approve the graph mean-plus-tolerance rule and decide whether PatchTST needs a predeclared conformance tolerance.
 - [ ] Decide whether exact fixed-model scores should remain the sole conformance gate or be paired with a separately labeled task-quality floor.
 - [ ] Commit methodology-valid system-characterization sidecars for all fourteen workloads; working set, arithmetic intensity, and dispatch remain explicitly unmeasured today.
 

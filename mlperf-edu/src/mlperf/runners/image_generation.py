@@ -34,6 +34,7 @@ from mlperf.runners.common import (
 
 
 EXPECTED_IMAGES = 50_000
+QUALITY_TRIAL_SEED_STARTS = (0, 50_000, 100_000)
 NUM_STEPS = 18
 NETWORK_EVALUATIONS_PER_IMAGE = 35
 TARGET_FID = 1.79
@@ -179,6 +180,7 @@ def _generate_images(
     images_root: Path,
     progress_path: Path,
     batch_size: int,
+    seed_start: int = 0,
 ) -> tuple[float, int]:
     progress = _load_progress(progress_path, batch_size=batch_size)
     for start_seed, record in sorted(progress.items()):
@@ -187,8 +189,9 @@ def _generate_images(
         )
     mode = "a" if progress else "w"
     with progress_path.open(mode, encoding="utf-8") as progress_handle:
-        for start_seed in range(0, EXPECTED_IMAGES, batch_size):
-            end_seed = min(start_seed + batch_size, EXPECTED_IMAGES)
+        seed_end = seed_start + EXPECTED_IMAGES
+        for start_seed in range(seed_start, seed_end, batch_size):
+            end_seed = min(start_seed + batch_size, seed_end)
             if start_seed in progress:
                 if int(progress[start_seed]["end_seed"]) != end_seed:
                     raise ValueError("EDM resumed batch boundary changed")
@@ -240,12 +243,14 @@ def _generate_images(
     )
 
 
-def build_image_manifest(images_root: Path, manifest_path: Path) -> dict[str, Any]:
+def build_image_manifest(
+    images_root: Path, manifest_path: Path, *, seed_start: int = 0
+) -> dict[str, Any]:
     """Hash all 50,000 seed-addressed PNGs into a portable image-set root."""
     root_hash = hashlib.sha256()
     total_bytes = 0
     with manifest_path.open("w", encoding="utf-8") as handle:
-        for seed in range(EXPECTED_IMAGES):
+        for seed in range(seed_start, seed_start + EXPECTED_IMAGES):
             path = _seed_image_path(images_root, seed)
             if not path.is_file():
                 raise FileNotFoundError(f"EDM image set is incomplete: {path}")
@@ -268,6 +273,8 @@ def build_image_manifest(images_root: Path, manifest_path: Path) -> dict[str, An
             total_bytes += size
     return {
         "images": EXPECTED_IMAGES,
+        "seed_start": seed_start,
+        "seed_end": seed_start + EXPECTED_IMAGES - 1,
         "n_bytes": total_bytes,
         "merkle_root": f"sha256:{root_hash.hexdigest()}",
         "manifest_sha256": f"sha256:{sha256_file(manifest_path)}",
@@ -291,6 +298,7 @@ def calculate_fid(
     reference_path: Path,
     device: torch.device,
     batch_size: int,
+    seed_start: int = 0,
 ) -> tuple[float, float]:
     """Apply NVIDIA EDM's Inception features and float64 FID statistics."""
     from scipy import linalg
@@ -302,12 +310,11 @@ def calculate_fid(
     synchronize_device(device)
     start = time.perf_counter()
     with torch.inference_mode():
-        for batch_start in range(0, EXPECTED_IMAGES, batch_size):
+        seed_end = seed_start + EXPECTED_IMAGES
+        for batch_start in range(seed_start, seed_end, batch_size):
             paths = [
                 _seed_image_path(images_root, seed)
-                for seed in range(
-                    batch_start, min(batch_start + batch_size, EXPECTED_IMAGES)
-                )
+                for seed in range(batch_start, min(batch_start + batch_size, seed_end))
             ]
             images = _image_batch(paths).to(device)
             features = detector(images, return_features=True).to(torch.float64).cpu()
@@ -331,12 +338,28 @@ def calculate_fid(
     return float(np.real(fid)), evaluation_seconds
 
 
+def quality_score_from_trials(fids: list[float]) -> float:
+    """Return NVIDIA EDM's reported minimum across exactly three trials."""
+    if len(fids) != len(QUALITY_TRIAL_SEED_STARTS):
+        raise ValueError("EDM quality requires exactly three FID trials")
+    if not all(np.isfinite(fid) and fid > 0 for fid in fids):
+        raise ValueError("EDM FID trials must be finite positive values")
+    return min(fids)
+
+
 def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Generate the official 50,000-image EDM set and calculate CIFAR-10 FID."""
+    """Generate the official three-trial EDM packet and calculate CIFAR-10 FID."""
     contract = workload.raw.get("canonical_max_contract") or {}
     config = contract.get("config") or {}
+    expected_seed_ranges = [
+        f"{start}-{start + EXPECTED_IMAGES - 1}" for start in QUALITY_TRIAL_SEED_STARTS
+    ]
     if (
-        int(config.get("generated_images", 0)) != EXPECTED_IMAGES
+        int(config.get("quality_trials", 0)) != len(QUALITY_TRIAL_SEED_STARTS)
+        or int(config.get("generated_images_per_trial", 0)) != EXPECTED_IMAGES
+        or int(config.get("total_generated_images", 0))
+        != EXPECTED_IMAGES * len(QUALITY_TRIAL_SEED_STARTS)
+        or list(config.get("trial_seeds") or []) != expected_seed_ranges
         or int(config.get("sampler_steps", 0)) != NUM_STEPS
         or int(config.get("network_evaluations_per_image", 0))
         != NETWORK_EVALUATIONS_PER_IMAGE
@@ -352,10 +375,6 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
     net = _load_pickle(paths["checkpoint"], device, key="ema")
     n_params = sum(parameter.numel() for parameter in net.parameters())
     output_dir.mkdir(parents=True, exist_ok=True)
-    images_root = (output_dir / "edm-cifar10-images").resolve()
-    images_root.mkdir(parents=True, exist_ok=True)
-    progress_path = (output_dir / "image-generation_max_progress.jsonl").resolve()
-    image_manifest_path = (output_dir / "image-generation_max_images.jsonl").resolve()
     results_path = (output_dir / "image-generation_max_evaluation.json").resolve()
     report_path = (output_dir / "image-generation_max_report.json").resolve()
     provenance_path = (output_dir / "image-generation_max.provd.json").resolve()
@@ -363,29 +382,80 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
     if batch_size < 1 or batch_size > 256:
         raise ValueError("MLPERF_EDU_EDM_BATCH_SIZE must be between 1 and 256")
 
-    generation_seconds, generated_images = _generate_images(
-        net=net,
-        device=device,
-        official_sampler=official_sampler,
-        images_root=images_root,
-        progress_path=progress_path,
-        batch_size=batch_size,
-    )
-    if generated_images != EXPECTED_IMAGES:
-        raise RuntimeError("EDM generation did not cover exactly 50,000 seeds")
-    image_set = build_image_manifest(images_root, image_manifest_path)
     detector = _load_pickle(paths["inception"], device)
-    fid, evaluation_seconds = calculate_fid(
-        detector=detector,
-        images_root=images_root,
-        reference_path=paths["fid_reference"],
-        device=device,
-        batch_size=batch_size,
+    trial_records: list[dict[str, Any]] = []
+    trial_artifacts: list[Path] = []
+    for trial_index, seed_start in enumerate(QUALITY_TRIAL_SEED_STARTS, start=1):
+        trial_root = (output_dir / f"edm-cifar10-trial-{trial_index}").resolve()
+        images_root = trial_root / "images"
+        images_root.mkdir(parents=True, exist_ok=True)
+        progress_path = trial_root / "progress.jsonl"
+        image_manifest_path = trial_root / "images.jsonl"
+        trial_results_path = trial_root / "evaluation.json"
+        generation_seconds, generated_images = _generate_images(
+            net=net,
+            device=device,
+            official_sampler=official_sampler,
+            images_root=images_root,
+            progress_path=progress_path,
+            batch_size=batch_size,
+            seed_start=seed_start,
+        )
+        if generated_images != EXPECTED_IMAGES:
+            raise RuntimeError(
+                f"EDM trial {trial_index} did not cover exactly 50,000 seeds"
+            )
+        image_set = build_image_manifest(
+            images_root, image_manifest_path, seed_start=seed_start
+        )
+        trial_fid, evaluation_seconds = calculate_fid(
+            detector=detector,
+            images_root=images_root,
+            reference_path=paths["fid_reference"],
+            device=device,
+            batch_size=batch_size,
+            seed_start=seed_start,
+        )
+        trial_result = {
+            "trial": trial_index,
+            "seed_start": seed_start,
+            "seed_end": seed_start + EXPECTED_IMAGES - 1,
+            "fid": trial_fid,
+            "generation_seconds": generation_seconds,
+            "evaluation_seconds": evaluation_seconds,
+            "image_set": image_set,
+            "reference_statistics_sha256": f"sha256:{EDM_CIFAR10_FID_REFERENCE_SHA256}",
+        }
+        trial_results_path.write_text(
+            json.dumps(trial_result, indent=2, sort_keys=True) + "\n"
+        )
+        trial_result["evaluation_sha256"] = f"sha256:{sha256_file(trial_results_path)}"
+        trial_result["artifacts"] = {
+            "images": str(images_root),
+            "progress": str(progress_path),
+            "image_manifest": str(image_manifest_path),
+            "evaluation": str(trial_results_path),
+        }
+        trial_records.append(trial_result)
+        trial_artifacts.extend([progress_path, image_manifest_path, trial_results_path])
+
+    fids = [float(record["fid"]) for record in trial_records]
+    fid = quality_score_from_trials(fids)
+    generation_seconds = sum(
+        float(record["generation_seconds"]) for record in trial_records
+    )
+    evaluation_seconds = sum(
+        float(record["evaluation_seconds"]) for record in trial_records
     )
     results = {
         "fid": fid,
+        "score_statistic": "minimum_of_three_trials",
+        "trial_fids": fids,
+        "trials": [
+            {key: value for key, value in record.items() if key != "artifacts"}
+            for record in trial_records
+        ],
         "reference_statistics_sha256": f"sha256:{EDM_CIFAR10_FID_REFERENCE_SHA256}",
-        "image_set": image_set,
     }
     results_path.write_text(json.dumps(results, indent=2, sort_keys=True) + "\n")
     target = float(workload.quality_value or TARGET_FID)
@@ -418,7 +488,9 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
             "root": str(asset.root),
             "sha256": asset.sha256,
             "n_bytes": asset.n_bytes,
-            "generated_images": EXPECTED_IMAGES,
+            "quality_trials": len(QUALITY_TRIAL_SEED_STARTS),
+            "generated_images_per_trial": EXPECTED_IMAGES,
+            "total_generated_images": EXPECTED_IMAGES * len(QUALITY_TRIAL_SEED_STARTS),
         },
         "evaluator": {
             "repository": "https://github.com/NVlabs/edm",
@@ -433,7 +505,8 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
         "seed": configured_seed(),
         "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
-            "seeds": "0-49999",
+            "quality_trials": len(QUALITY_TRIAL_SEED_STARTS),
+            "trial_seeds": expected_seed_ranges,
             "class_conditional": True,
             "sampler": "edm-algorithm-2",
             "sampler_steps": NUM_STEPS,
@@ -445,11 +518,16 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
         },
         "metrics": {
             "fid": fid,
-            "generated_images": EXPECTED_IMAGES,
+            "fid_trials": fids,
+            "score_statistic": "minimum_of_three_trials",
+            "quality_trials": len(QUALITY_TRIAL_SEED_STARTS),
+            "generated_images_per_trial": EXPECTED_IMAGES,
+            "total_generated_images": EXPECTED_IMAGES * len(QUALITY_TRIAL_SEED_STARTS),
             "generation_seconds": generation_seconds,
             "evaluation_seconds": evaluation_seconds,
             "duration_seconds": generation_seconds + evaluation_seconds,
-            "images_per_second": EXPECTED_IMAGES / generation_seconds,
+            "images_per_second": (EXPECTED_IMAGES * len(QUALITY_TRIAL_SEED_STARTS))
+            / generation_seconds,
             "n_params": n_params,
         },
         "quality": {
@@ -475,9 +553,7 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
             "report": str(report_path),
             "provenance": str(provenance_path),
             "weights": str(paths["checkpoint"]),
-            "generated_images": str(images_root),
-            "image_manifest": str(image_manifest_path),
-            "progress": str(progress_path),
+            "trials": [record["artifacts"] for record in trial_records],
             "evaluation_results": str(results_path),
         },
     }
@@ -493,7 +569,7 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
         weights_n_params=n_params,
         weights_dtype="float32",
         dataset_name="edm-cifar10-generated-images-and-evaluator",
-        dataset_files=[*asset.files, progress_path, image_manifest_path, results_path],
+        dataset_files=[*asset.files, *trial_artifacts, results_path],
         rng_seed=configured_seed(),
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,

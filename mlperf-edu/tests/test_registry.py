@@ -145,13 +145,10 @@ def test_all_quality_contracts_classify_the_target_kind():
     workloads = load_registry()
     expected_counts = {
         "inherited_acceptance_gate": 6,
-        "published_reference_reproduction": 6,
+        "published_reference_reproduction": 7,
         "published_mean_with_tolerance": 1,
-        "policy_derived_gate": 1,
     }
-    counts = Counter(
-        workload.quality_target_kind for workload in workloads.values()
-    )
+    counts = Counter(workload.quality_target_kind for workload in workloads.values())
 
     assert counts == expected_counts
 
@@ -204,8 +201,14 @@ def test_new_quality_contracts_pin_complete_evaluation_boundaries():
     )
 
     images = workloads["image-generation"].raw["canonical_max_contract"]
-    assert images["config"]["generated_images"] == 50_000
-    assert images["config"]["seeds"] == "0-49999"
+    assert images["config"]["quality_trials"] == 3
+    assert images["config"]["generated_images_per_trial"] == 50_000
+    assert images["config"]["total_generated_images"] == 150_000
+    assert images["config"]["trial_seeds"] == [
+        "0-49999",
+        "50000-99999",
+        "100000-149999",
+    ]
     assert images["config"]["network_evaluations_per_image"] == 35
 
     reinforcement = workloads["reinforcement-learning"].raw["canonical_max_contract"]

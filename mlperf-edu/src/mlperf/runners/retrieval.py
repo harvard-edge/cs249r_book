@@ -36,6 +36,17 @@ DATASET_NAMES = ("MSMARCO", "NFCorpus", "NQ")
 PUBLISHED_MEAN_NDCG_AT_10 = 0.60716840988382
 
 
+def _model_file_records(snapshot: Path) -> list[dict[str, Any]]:
+    return [
+        {
+            "path": snapshot / filename,
+            "logical_path": filename,
+            "role": "weights" if filename == "model.safetensors" else "model-config",
+        }
+        for filename in MODEL_FILES
+    ]
+
+
 def run_information_retrieval_min(
     workload: Workload, output_dir: Path
 ) -> dict[str, Any]:
@@ -271,7 +282,7 @@ def run_information_retrieval_max(
         "artifacts": {
             "report": str(report_path),
             "provenance": str(manifest_path),
-            "weights": str(snapshot / "model.safetensors"),
+            "weights": str(snapshot),
         },
     }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -282,7 +293,9 @@ def run_information_retrieval_max(
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        weights_path=snapshot / "model.safetensors",
+        weights_files=_model_file_records(snapshot),
+        weights_name=MODEL_ID,
+        weights_revision=MODEL_REVISION,
         weights_n_params=n_params,
         weights_dtype="float32",
         dataset_name=asset.name,
