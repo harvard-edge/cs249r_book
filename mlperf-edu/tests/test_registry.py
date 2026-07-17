@@ -147,7 +147,7 @@ def test_functional_stage_workloads_separate_probe_from_quality_contract():
         "code-generation": "quality-audited-target-not-met",
         "function-calling": "runnable-quality-conformance",
         "recommendation": "pending-quality-conformance",
-        "image-generation": "pending-quality-conformance",
+        "image-generation": "quality-audited-target-not-met",
         "reinforcement-learning": "pending-quality-conformance",
     }
 
@@ -493,7 +493,7 @@ def test_canonical_workloads_declare_exact_runners():
         "image-generation": (
             "vision",
             "mlperf.runners.functional_setup:run_image_generation_min",
-            "mlperf.runners.functional_setup:run_image_generation_max",
+            "mlperf.runners.image_generation:run_image_generation_max",
         ),
         "reinforcement-learning": (
             "reinforcement",
@@ -526,7 +526,8 @@ def test_functional_spiral_workloads_fail_closed_for_promotion():
         spiral = workload.raw["spiral"]
         expected_stage = (
             "quality-conformance"
-            if workload_id in {"code-generation", "function-calling"}
+            if workload_id
+            in {"code-generation", "function-calling", "image-generation"}
             else "functional"
         )
         assert spiral["stage"] == expected_stage

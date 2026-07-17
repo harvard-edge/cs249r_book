@@ -158,11 +158,17 @@ def test_bfcl_fetch_validates_all_non_live_ast_examples(monkeypatch, tmp_path):
 def test_edm_fetch_validates_checkpoint_and_fid_reference(monkeypatch, tmp_path):
     checkpoint = tmp_path / "checkpoint.pkl"
     reference = tmp_path / "reference.npz"
+    inception = tmp_path / "inception.pkl"
+    archive = tmp_path / "edm.tar.gz"
     checkpoint.write_bytes(b"checkpoint")
     reference.write_bytes(b"fid-reference")
+    inception.write_bytes(b"inception")
+    archive.write_bytes(b"source-archive")
     sources = {
         assets.EDM_CIFAR10_CHECKPOINT_URL: checkpoint,
         assets.EDM_CIFAR10_FID_REFERENCE_URL: reference,
+        assets.EDM_INCEPTION_URL: inception,
+        assets.EDM_ARCHIVE_URL: archive,
     }
     monkeypatch.setattr(
         assets,
@@ -179,6 +185,18 @@ def test_edm_fetch_validates_checkpoint_and_fid_reference(monkeypatch, tmp_path)
     )
     monkeypatch.setattr(
         assets,
+        "EDM_INCEPTION_SHA256",
+        hashlib.sha256(inception.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(assets, "EDM_INCEPTION_BYTES", inception.stat().st_size)
+    monkeypatch.setattr(
+        assets,
+        "EDM_ARCHIVE_SHA256",
+        hashlib.sha256(archive.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(assets, "EDM_SOURCE_FILES", {})
+    monkeypatch.setattr(
+        assets,
         "_download",
         lambda url, destination: shutil.copyfile(sources[url], destination),
     )
@@ -189,4 +207,6 @@ def test_edm_fetch_validates_checkpoint_and_fid_reference(monkeypatch, tmp_path)
     assert result.files == (
         tmp_path / "cache" / "edm-cifar10-32x32-cond-vp.pkl",
         tmp_path / "cache" / "cifar10-32x32.npz",
+        tmp_path / "cache" / "inception-2015-12-05.pkl",
+        tmp_path / "cache" / f"edm-{assets.EDM_COMMIT}.tar.gz",
     )

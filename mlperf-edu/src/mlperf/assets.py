@@ -212,6 +212,25 @@ EDM_CIFAR10_FID_REFERENCE_URL = (
 EDM_CIFAR10_FID_REFERENCE_SHA256 = (
     "4ada108cdfd8e43409ed427f5f76631beac9b9617cdcaf416d41b1e161d85969"
 )
+EDM_ARCHIVE_URL = f"https://github.com/NVlabs/edm/archive/{EDM_COMMIT}.tar.gz"
+EDM_ARCHIVE_SHA256 = "9ddd0bddaf75a9e066c526f13a882958b0c0b7a1332df2d32f6a1c46646fa746"
+EDM_INCEPTION_URL = (
+    "https://api.ngc.nvidia.com/v2/models/nvidia/research/stylegan3/versions/1/"
+    "files/metrics/inception-2015-12-05.pkl"
+)
+EDM_INCEPTION_SHA256 = (
+    "a31bd1d4522101109044ec28621a5fcb591ed6115e0d58104fc013fa01ef94f7"
+)
+EDM_INCEPTION_BYTES = 95_617_399
+EDM_SOURCE_FILES = {
+    "dnnlib/util.py": "00a0e339dc8eca358c9053ae6d93ab87b8d3f4df1e5dd30d3185558721986e1c",
+    "fid.py": "704be0de2c77c0090fdb9787268360ef9d438ca83c6aca14aa6d4f51dcff364d",
+    "generate.py": "1af4e135d3a17f7cba1e022f22260d4e7534ea525e6162783e00805c53204c2a",
+    "torch_utils/misc.py": "d1b9ccfa41cbb0e232675d49d1875179cb010dbbd2a021584aa5d1614348ac83",
+    "torch_utils/persistence.py": "71589e7a4b5175047a48a4bc58e30438b58bea87e415e6873d13d7d438c44b38",
+    "training/dataset.py": "f46fe15ecd66206819e416ffca6ea22a06610405d6954ccc0fffc53092ab81c2",
+    "training/networks.py": "5db27dcd96674b95c72d5e6491b879cdc35e24039ada3411b4b46a28ed1fe284",
+}
 MINIGO_COMMIT = "0badcd1786fcb007725ed05f1c44e9d80bbeac52"
 
 
@@ -897,6 +916,9 @@ def edm_cifar10_paths(root: Path | None = None) -> dict[str, Path]:
         "root": base,
         "checkpoint": base / "edm-cifar10-32x32-cond-vp.pkl",
         "fid_reference": base / "cifar10-32x32.npz",
+        "inception": base / "inception-2015-12-05.pkl",
+        "archive": base / f"edm-{EDM_COMMIT}.tar.gz",
+        "source": base / f"edm-{EDM_COMMIT}",
     }
 
 
@@ -1943,6 +1965,16 @@ def ensure_edm_cifar10(
             EDM_CIFAR10_FID_REFERENCE_URL,
             EDM_CIFAR10_FID_REFERENCE_SHA256,
         ),
+        (
+            paths["inception"],
+            EDM_INCEPTION_URL,
+            EDM_INCEPTION_SHA256,
+        ),
+        (
+            paths["archive"],
+            EDM_ARCHIVE_URL,
+            EDM_ARCHIVE_SHA256,
+        ),
     )
     for path, url, expected_sha256 in assets:
         if not path.is_file() or sha256_file(path) != expected_sha256:
@@ -1958,8 +1990,51 @@ def ensure_edm_cifar10(
             raise ValueError(f"EDM CIFAR-10 SHA-256 mismatch: {path.name}")
     if paths["checkpoint"].stat().st_size != EDM_CIFAR10_CHECKPOINT_BYTES:
         raise ValueError("EDM CIFAR-10 checkpoint size does not match the pin")
+    if paths["inception"].stat().st_size != EDM_INCEPTION_BYTES:
+        raise ValueError("EDM Inception detector size does not match the pin")
 
-    files = (paths["checkpoint"], paths["fid_reference"])
+    source_root = paths["source"]
+    source_files = tuple(source_root / relative for relative in EDM_SOURCE_FILES)
+    if not all(
+        path.is_file()
+        and sha256_file(path) == EDM_SOURCE_FILES[str(path.relative_to(source_root))]
+        for path in source_files
+    ):
+        staging = base / f"edm-{EDM_COMMIT}.staging"
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        prefix = f"edm-{EDM_COMMIT}/"
+        with tarfile.open(paths["archive"], "r:gz") as bundle:
+            for member in bundle.getmembers():
+                if not member.isfile() or not member.name.startswith(prefix):
+                    continue
+                relative = Path(member.name.removeprefix(prefix))
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError(f"unsafe EDM archive member: {member.name}")
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise FileNotFoundError(
+                        f"could not read EDM archive member: {member.name}"
+                    )
+                destination = staging / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with source, destination.open("wb") as handle:
+                    shutil.copyfileobj(source, handle)
+        shutil.rmtree(source_root, ignore_errors=True)
+        staging.replace(source_root)
+    source_files = tuple(source_root / relative for relative in EDM_SOURCE_FILES)
+    for path in source_files:
+        relative = str(path.relative_to(source_root))
+        if not path.is_file() or sha256_file(path) != EDM_SOURCE_FILES[relative]:
+            raise ValueError(f"EDM source file does not match the pin: {relative}")
+
+    files = (
+        paths["checkpoint"],
+        paths["fid_reference"],
+        paths["inception"],
+        paths["archive"],
+        *source_files,
+    )
     digest = hashlib.sha256()
     for path in files:
         digest.update(path.name.encode("utf-8") + b"\0")
