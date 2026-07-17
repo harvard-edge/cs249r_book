@@ -135,6 +135,70 @@ def test_all_measurement_contracts_pin_outer_execution_stabilization():
             assert 0 <= protocol["outer_inter_execution_cooldown_seconds"] <= 300
 
 
+def test_all_quality_contracts_require_one_authoritative_acceptance_run():
+    workloads = load_registry()
+
+    assert all(
+        workload.quality_acceptance_runs == 1 for workload in workloads.values()
+    )
+
+
+def test_functional_stage_workloads_separate_probe_from_quality_contract():
+    workloads = load_registry()
+    workload_ids = (
+        "code-generation",
+        "function-calling",
+        "recommendation",
+        "image-generation",
+        "reinforcement-learning",
+    )
+
+    for workload_id in workload_ids:
+        contract = workloads[workload_id].raw["canonical_max_contract"]
+        assert contract["data_mode"] != "functional-setup-probe"
+        assert contract["config"]
+        assert contract["functional_probe"]
+        assert contract["execution_status"] == "pending-quality-conformance"
+
+
+def test_new_quality_contracts_pin_complete_evaluation_boundaries():
+    workloads = load_registry()
+
+    code = workloads["code-generation"].raw["canonical_max_contract"]
+    assert code["config"]["evaluation_tasks"] == 164
+    assert code["config"]["minimum_passing_tasks"] == 94
+    assert len(code["model_revision"]) == 40
+    assert len(code["evaluator_revision"]) == 40
+
+    functions = workloads["function-calling"].raw["canonical_max_contract"]
+    assert functions["config"]["evaluation_examples"] == 1150
+    assert len(functions["config"]["categories"]) == 6
+    assert len(functions["model_revision"]) == 40
+    assert len(functions["dataset_revision"]) == 40
+    assert len(functions["evaluator_revision"]) == 40
+
+    recommendation = workloads["recommendation"].raw["canonical_max_contract"]
+    assert recommendation["split"] == "unshuffled-day-23-accuracy-set"
+    assert recommendation["config"]["max_ind_range"] == 40_000_000
+    assert recommendation["config"]["accuracy_mode"] is True
+    assert (
+        workloads["recommendation"].raw["provenance"]["authority"]
+        == "MLCommons MLPerf Inference v1.0.1 DLRM"
+    )
+
+    images = workloads["image-generation"].raw["canonical_max_contract"]
+    assert images["config"]["generated_images"] == 50_000
+    assert images["config"]["seeds"] == "0-49999"
+    assert images["config"]["network_evaluations_per_image"] == 35
+
+    reinforcement = workloads["reinforcement-learning"].raw[
+        "canonical_max_contract"
+    ]
+    assert reinforcement["config"]["self_play_games_per_generation"] == 2_000
+    assert reinforcement["config"]["playoff_games"] == 100
+    assert reinforcement["quality_gates"]["model_promotion_playoff"]["target"] == 0.55
+
+
 def test_public_result_workloads_use_educational_mlcommons_scenarios():
     workloads = load_registry()
 

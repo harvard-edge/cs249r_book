@@ -140,6 +140,7 @@ class Workload:
     quality_target_basis: str | None
     quality_tolerance: Any
     quality_reference_runs: Any
+    quality_acceptance_runs: Any
     quality_variance_summary: Any
     quality_reference_protocol: Any
     quality_reviewer_notes: tuple[str, ...]
@@ -281,6 +282,7 @@ def normalize_registry_data(
                 quality_target_basis=quality.get("target_basis"),
                 quality_tolerance=quality.get("tolerance"),
                 quality_reference_runs=quality.get("reference_runs"),
+                quality_acceptance_runs=quality.get("acceptance_runs"),
                 quality_variance_summary=quality.get("variance_summary"),
                 quality_reference_protocol=quality.get("reference_protocol"),
                 quality_reviewer_notes=tuple(str(note) for note in reviewer_notes),
@@ -438,6 +440,17 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
     )
     if invalid_public_statuses:
         raise ValueError(f"invalid public statuses: {invalid_public_statuses}")
+
+    invalid_quality_acceptance = sorted(
+        workload.id
+        for workload in workloads.values()
+        if workload.quality_acceptance_runs != 1
+    )
+    if invalid_quality_acceptance:
+        raise ValueError(
+            "quality_target.acceptance_runs must be 1 for the current quality "
+            f"milestone: {invalid_quality_acceptance}"
+        )
 
     canonical_metadata_issues: list[str] = []
     variants_by_canonical: dict[str, set[str]] = {}

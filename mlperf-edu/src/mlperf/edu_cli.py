@@ -1213,6 +1213,8 @@ def enrich_report_for_display(
             quality.setdefault("tolerance", workload.quality_tolerance)
         if workload.quality_reference_runs:
             quality.setdefault("reference_runs", workload.quality_reference_runs)
+        if workload.quality_acceptance_runs:
+            quality.setdefault("acceptance_runs", workload.quality_acceptance_runs)
         if workload.quality_reference_protocol:
             quality.setdefault(
                 "reference_protocol", copy.deepcopy(workload.quality_reference_protocol)
@@ -2409,6 +2411,7 @@ def write_csv_report(report: dict[str, Any], output: Path) -> None:
         "target",
         "target_basis",
         "reference_runs",
+        "acceptance_runs",
         "reference_statistic",
         "reference_protocol",
         "direction",
@@ -2490,6 +2493,7 @@ def write_html_report(
         f"<td>{escape(format_cell(row.get('target')))}</td>"
         f"<td>{escape(format_cell(row.get('target_basis')))}</td>"
         f"<td>{escape(format_cell(row.get('reference_runs')))}</td>"
+        f"<td>{escape(format_cell(row.get('acceptance_runs')))}</td>"
         f"<td>{escape(format_cell(row.get('reference_statistic')))}</td>"
         f"<td>{escape(format_cell(row.get('reference_protocol')))}</td>"
         f"<td>{escape(format_cell(row.get('quality_required')))}</td>"
@@ -2560,7 +2564,7 @@ def write_html_report(
   <section>
     <div class="table-scroll"><table>
       <thead>
-        <tr><th>Workload</th><th>Run As</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Basis</th><th>Reference Runs</th><th>Reference Statistic</th><th>Reference Protocol</th><th>Quality Required</th><th>Met</th><th>Check</th><th>Duration</th><th>Throughput</th></tr>
+        <tr><th>Workload</th><th>Run As</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Basis</th><th>Reference Runs</th><th>Acceptance Runs</th><th>Reference Statistic</th><th>Reference Protocol</th><th>Quality Required</th><th>Met</th><th>Check</th><th>Duration</th><th>Throughput</th></tr>
       </thead>
       <tbody>{body_rows}</tbody>
     </table></div>
@@ -2857,6 +2861,7 @@ def report_row(
         "target": quality.get("target", ""),
         "target_basis": quality.get("target_basis", ""),
         "reference_runs": quality.get("reference_runs", ""),
+        "acceptance_runs": quality.get("acceptance_runs", ""),
         "reference_statistic": reference_statistic_summary(quality),
         "reference_protocol": reference_protocol_summary(
             quality.get("reference_protocol")
@@ -4349,6 +4354,7 @@ def write_validation_workload_csv(report: dict[str, Any], output: Path) -> None:
         "target",
         "target_basis",
         "reference_runs",
+        "acceptance_runs",
         "reference_statistic",
         "reference_protocol",
         "quality_required",

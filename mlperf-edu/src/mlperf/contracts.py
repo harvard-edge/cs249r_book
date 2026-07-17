@@ -626,6 +626,12 @@ def evaluate_promotion_contract(
         candidate = replace(workload, public_status="score-bearing")
 
     result = evaluate_report_contract(candidate, report)
+    if workload.raw.get("promotion_scope", True) is not True:
+        result.setdefault("issues", []).append(
+            f"workload {workload.id!r} is not eligible for score-bearing review "
+            "until its authoritative quality runner is integrated"
+        )
+        result["status"] = "failed"
     result["schema"] = "mlperf-edu-promotion-contract/0.1"
     result["promotion_eligible"] = result.get("status") == "passed"
     result["result_role"] = result_role

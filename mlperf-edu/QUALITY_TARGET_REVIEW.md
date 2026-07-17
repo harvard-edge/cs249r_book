@@ -14,6 +14,19 @@ classes, and SHA-256 digests are generated from
 six remain explicitly provisional. This document reviews the target basis and
 acceptance logic rather than duplicating mutable result tables.
 
+## Current One-Run Acceptance
+
+The current milestone evaluates quality separately from stability. One complete
+authoritative run is sufficient to decide whether a workload meets its quality
+target. The run must use the pinned model or training recipe, the complete
+required evaluation set, the authoritative evaluator, and every declared
+quality gate. A functional probe cannot satisfy this milestone.
+
+Repeated fresh-process runs, timing variation, and promotion evidence remain a
+later stabilization phase. The registry records `acceptance_runs: 1` for all
+fourteen workloads while retaining the five-run measurement protocol for that
+later phase.
+
 ## Score-Bearing Targets
 
 | **Workload** | **Model and Data** | **Quality Gate** | **Authority and Rationale** |
@@ -38,7 +51,7 @@ gates rather than weakened to match local observations.
 |:---|:---|:---|
 | `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | Autoregressive CLI integration works; complete EvalPlus reproduction remains pending. |
 | `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | Grammar-constrained generation and AST-evaluator integration works; the complete local audit reached 0.7852. |
-| `recommendation` | Meta DLRM Criteo Terabyte ROC AUC of 0.8025 | Dense-sparse execution works; the unchanged Criteo contract remains outside the practical laptop boundary. |
+| `recommendation` | MLPerf Inference v1.0.1 DLRM Criteo Terabyte ROC AUC of 0.8025 | Dense-sparse execution works; the official 100 GB checkpoint and roughly 343 GB compressed dataset remain outside the practical laptop boundary. |
 | `image-generation` | NVIDIA EDM CIFAR-10 FID of 1.79 | Iterative denoising works; three official 50,000-image trials reached a best FID of 1.8015540749984766. |
 | `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | Policy-value self-play and a training step work; the unchanged self-play volume remains impractical locally. |
 
@@ -97,7 +110,9 @@ Domain reviewers should confirm:
 - The target remains appropriate when upstream dependencies change.
 
 A source, preprocessing, evaluator, model, optimizer, schedule, or target
-change invalidates the relevant evidence and requires a fresh five-run packet.
+change invalidates the relevant evidence and requires a fresh authoritative
+quality run. A promoted timing baseline additionally requires a new stability
+packet.
 
 ## Functional and Rejected Coverage
 

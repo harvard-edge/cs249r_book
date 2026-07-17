@@ -60,6 +60,11 @@ task. The five functional-stage candidates preserve their authoritative task
 identity and published target. Their bounded probes are integration evidence,
 not substitutes or benchmark results.
 
+For the current quality-readiness milestone, one complete authoritative run is
+enough to accept or reject a quality target. The complete required evaluation
+set and every declared quality gate still apply. Repeated runs and timing
+variation remain part of the later promotion and stability phase.
+
 ## Workload Identity
 
 A workload ID names the stable learning task. Training and inference are

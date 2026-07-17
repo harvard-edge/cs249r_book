@@ -957,6 +957,7 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert rows[0]["target"] == "1.4697"
     assert rows[0]["target_basis"] == "literature"
     assert rows[0]["reference_runs"] == ""
+    assert rows[0]["acceptance_runs"] == "1"
     assert rows[0]["reference_statistic"] == ""
     assert rows[0]["reference_protocol"] == ""
     assert rows[0]["direction"] == "lower"
