@@ -56,6 +56,7 @@ MODEL_WEIGHT_FILES = {
 }
 MODEL_REGISTRY_NAME = f"{MODEL_ID}-FC"
 MAX_NEW_TOKENS = 4096
+PROGRESS_INTERVAL = 10
 TARGET_ACCURACY = 0.8292
 EXPECTED_EXAMPLES = 1150
 BFCL_REFERENCE_FAILING_TASKS = (
@@ -543,7 +544,34 @@ def _generate_samples(
             handle.write(json.dumps(sample, ensure_ascii=False) + "\n")
             handle.flush()
             existing.append(sample)
+            completed = len(existing)
+            if (
+                completed == 1
+                or completed % PROGRESS_INTERVAL == 0
+                or completed == len(tasks)
+            ):
+                print(
+                    bfcl_progress_message(completed, len(tasks), existing),
+                    flush=True,
+                )
     return existing
+
+
+def bfcl_progress_message(
+    completed: int, total: int, samples: list[dict[str, Any]]
+) -> str:
+    generation_seconds = sum(
+        float(sample.get("latency_seconds") or 0.0) for sample in samples
+    )
+    mean_seconds = generation_seconds / completed if completed else 0.0
+    remaining_seconds = mean_seconds * max(total - completed, 0)
+    remaining_minutes = int(round(remaining_seconds / 60.0))
+    hours, minutes = divmod(remaining_minutes, 60)
+    eta = f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+    return (
+        f"BFCL progress: {completed}/{total} | "
+        f"mean {mean_seconds:.1f}s/example | estimated remaining {eta}"
+    )
 
 
 def _model_file_records(snapshot: Path) -> list[dict[str, Any]]:

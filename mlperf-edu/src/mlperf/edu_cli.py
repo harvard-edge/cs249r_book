@@ -6657,6 +6657,12 @@ def main(argv: list[str] | None = None) -> int:
         os.environ["MLPERF_EDU_DEVICE"] = requested_device
     try:
         return int(args.func(args) or 0)
+    except KeyboardInterrupt:
+        console.print(
+            "[yellow]Interrupted.[/yellow] Any runner-managed resumable progress "
+            "has been retained; rerun the same command and output directory to resume."
+        )
+        return 130
     except (FileNotFoundError, ValueError) as exc:
         console.print(f"[red]{exc}[/red]")
         return 1

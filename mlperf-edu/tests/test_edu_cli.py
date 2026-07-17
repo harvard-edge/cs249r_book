@@ -57,6 +57,18 @@ def test_cli_help():
     assert "--maturity" not in result.stdout
 
 
+def test_keyboard_interrupt_returns_shell_interrupt_status(monkeypatch, capsys):
+    def interrupted(_args):
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr(edu_cli, "cmd_doctor", interrupted)
+
+    assert edu_cli.main(["doctor"]) == 130
+    output = capsys.readouterr().out
+    assert "Interrupted" in output
+    assert "resumable progress" in output
+
+
 def test_list_help_explains_workload_filter():
     result = run_cli("list", "--help")
     assert result.returncode == 0

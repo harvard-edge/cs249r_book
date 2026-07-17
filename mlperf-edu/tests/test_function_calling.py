@@ -75,3 +75,17 @@ def test_reference_self_check_pins_known_java_representation_exceptions():
     )
     assert function_calling.MODEL_PARAMETER_COUNT == 1_720_574_976
     assert len(function_calling.MODEL_FILES) == 9
+
+
+def test_bfcl_progress_message_reports_durable_prefix_and_eta():
+    samples = [
+        {"latency_seconds": 6.0},
+        {"latency_seconds": 10.0},
+    ]
+
+    message = function_calling.bfcl_progress_message(2, 1_150, samples)
+
+    assert message == (
+        "BFCL progress: 2/1150 | mean 8.0s/example | "
+        "estimated remaining 2h 33m"
+    )
