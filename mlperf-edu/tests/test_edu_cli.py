@@ -197,6 +197,12 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
             "data_mode": "real",
             "mode": "inference",
             "metrics": {"inference_seconds": 1.0, "top1_accuracy": 0.87},
+            "quality": {
+                "metric": "top1_accuracy",
+                "target": 0.85,
+                "quality_required": True,
+                "target_met": True,
+            },
             "artifacts": {},
         }
 
@@ -225,6 +231,9 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
     assert report["pro_policy"]["repetitions"] == 2
     assert report["metrics"]["repetitions"] == 2
     assert report["metrics"]["inference_seconds_mean"] == 1.0
+    assert report["readiness_stage"] == "quality"
+    assert report["quality"]["quality_required"] is True
+    assert report["quality"]["target_met"] is True
     assert len(report["subruns"]) == 2
     report_path = tmp_path / "image-classification_pro_report.json"
     manifest_path = tmp_path / "image-classification_pro.provd.json"
@@ -236,6 +245,83 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
     grade = edu_cli.grade_manifest(manifest_path)
     assert grade["verified"] is True
     assert grade["passed"] is True
+    assert grade["quality_ready"] is True
+
+
+def test_pro_profile_preserves_functional_only_max_readiness(tmp_path, monkeypatch):
+    workload = load_registry()["image-generation"]
+
+    def functional_max_runner(_workload, _output_dir):
+        return {
+            "status": "passed",
+            "backend": "cpu",
+            "data_mode": "synthetic-deterministic-functional-probe",
+            "metrics": {"duration_seconds": 0.1},
+            "quality": {
+                "metric": "fid",
+                "target": 1.79,
+                "quality_required": False,
+                "target_met": None,
+            },
+            "functional_readiness": {
+                "stage": "functional",
+                "authoritative_quality_contract_executed": False,
+                "promotion_eligible": False,
+                "next_stage": "quality-conformance",
+            },
+            "artifacts": {},
+        }
+
+    monkeypatch.setattr(
+        edu_cli,
+        "load_runner",
+        lambda _workload, profile: functional_max_runner if profile == "max" else None,
+    )
+
+    report = edu_cli.run_workload(workload, "pro", tmp_path)
+
+    assert report["status"] == "passed"
+    assert report["readiness_stage"] == "functional"
+    assert report["quality"]["quality_required"] is False
+    assert report["quality"]["target_met"] is None
+    assert report["functional_readiness"] == {
+        "schema": "mlperf-edu-functional-readiness/0.1",
+        "stage": "functional",
+        "end_to_end_execution": True,
+        "authoritative_quality_contract_executed": False,
+        "repeatability_verified": False,
+        "promotion_eligible": False,
+        "next_stage": "quality-conformance",
+    }
+    assert report["subruns"][0]["quality_required"] is False
+    assert report["subruns"][0]["target_met"] is None
+
+    grade = edu_cli.grade_manifest(tmp_path / "image-generation_pro.provd.json")
+    assert grade["verified"] is True
+    assert grade["passed"] is True
+    assert grade["quality_ready"] is False
+
+
+def test_run_summary_distinguishes_quality_and_functional_passes(tmp_path, capsys):
+    report_path = tmp_path / "aggregate.json"
+    exports = {"html": tmp_path / "aggregate.html", "csv": tmp_path / "aggregate.csv"}
+    reports = [
+        {
+            "status": "passed",
+            "quality": {"quality_required": True, "target_met": True},
+        },
+        {
+            "status": "passed",
+            "quality": {"quality_required": False, "target_met": None},
+        },
+    ]
+
+    status = edu_cli.print_run_summary("max", reports, report_path, exports)
+
+    assert status == 0
+    output = capsys.readouterr().out
+    assert "1 quality-passed" in output
+    assert "1 functional-passed" in output
 
 
 def test_doctor_json_marks_bad_selection_as_failure():

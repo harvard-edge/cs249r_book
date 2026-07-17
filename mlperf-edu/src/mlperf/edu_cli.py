@@ -1778,7 +1778,19 @@ def print_run_summary(
     report_path: Path,
     exports: dict[str, Path],
 ) -> int:
-    executed = sum(1 for item in workload_reports if item.get("status") == "passed")
+    quality_passed = sum(
+        1
+        for item in workload_reports
+        if item.get("status") == "passed"
+        and quality_required_value(item.get("quality") or {}, False) is True
+        and (item.get("quality") or {}).get("target_met") is True
+    )
+    functional_passed = sum(
+        1
+        for item in workload_reports
+        if item.get("status") == "passed"
+        and quality_required_value(item.get("quality") or {}, False) is not True
+    )
     definition_only = sum(
         1 for item in workload_reports if item.get("status") == "definition_valid"
     )
@@ -1786,11 +1798,20 @@ def print_run_summary(
         1 for item in workload_reports if item.get("status") == "not_implemented"
     )
     quality_failed = sum(
-        1 for item in workload_reports if item.get("status") == "quality_failed"
+        1
+        for item in workload_reports
+        if item.get("status") == "quality_failed"
+        or (
+            item.get("status") == "passed"
+            and quality_required_value(item.get("quality") or {}, False) is True
+            and (item.get("quality") or {}).get("target_met") is not True
+        )
     )
     console.print(
         f"[green]{profile} run complete[/green]: "
-        f"{executed} passed, {definition_only} definition-only, {unsupported} unsupported, {quality_failed} quality-failed"
+        f"{quality_passed} quality-passed, {functional_passed} functional-passed, "
+        f"{definition_only} definition-only, {unsupported} unsupported, "
+        f"{quality_failed} quality-failed"
     )
     console.print(f"Report: {report_path}")
     console.print(f"HTML: {exports['html']}")
@@ -1991,12 +2012,23 @@ def run_pro_profile(
     output_dir.mkdir(parents=True, exist_ok=True)
     report_path = (output_dir / f"{workload.id}_pro_report.json").resolve()
     manifest_path = (output_dir / f"{workload.id}_pro.provd.json").resolve()
+    execution_passed = all(item.get("status") == "passed" for item in subreports)
+    subrun_qualities = [item.get("quality") or {} for item in subreports]
+    quality_required = all(
+        quality_required_value(quality, False) is True
+        for quality in subrun_qualities
+    )
+    target_met = (
+        all(quality.get("target_met") is True for quality in subrun_qualities)
+        if quality_required
+        else None
+    )
     status = (
         "passed"
-        if all(item.get("status") == "passed" for item in subreports)
+        if execution_passed and (not quality_required or target_met is True)
         else "quality_failed"
     )
-    target_met = status == "passed"
+    readiness_stage = "quality" if quality_required else "functional"
     metrics = aggregate_pro_metrics(subreports)
     metrics["repetitions"] = repetitions
     metrics["wall_time_seconds"] = float(wall_time)
@@ -2014,22 +2046,39 @@ def run_pro_profile(
         "pro_policy": {
             "mode": "max-repetition",
             "repetitions": repetitions,
-            "note": "Default pro profile repeats the verified max runner and records comparable evidence. Increase MLPERF_EDU_PRO_REPETITIONS for research sweeps.",
+            "note": "The pro profile runs the max runner once by default. Optional repetitions are reserved for later stability studies.",
         },
         "metrics": metrics,
         "quality": {
             "metric": workload.quality_metric,
             "target": workload.quality_value,
-            "quality_required": True,
+            "quality_required": quality_required,
             "target_met": target_met,
-            "note": "All max sub-runs must pass for the pro aggregate to pass.",
+            "note": (
+                "Every max subrun executed the authoritative quality contract and met its target."
+                if quality_required and target_met
+                else "The max subruns completed, but they did not execute an authoritative quality contract."
+                if not quality_required
+                else "At least one authoritative max subrun did not meet its quality target."
+            ),
         },
+        "readiness_stage": readiness_stage,
         "subruns": [subrun_evidence(item) for item in subreports],
         "artifacts": {
             "report": str(report_path),
             "provenance": str(manifest_path),
         },
     }
+    if not quality_required:
+        report["functional_readiness"] = {
+            "schema": "mlperf-edu-functional-readiness/0.1",
+            "stage": "functional",
+            "end_to_end_execution": True,
+            "authoritative_quality_contract_executed": False,
+            "repeatability_verified": repetitions > 1,
+            "promotion_eligible": False,
+            "next_stage": "quality-conformance",
+        }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
 
     manifest = build_provd(
@@ -2129,6 +2178,11 @@ def subrun_evidence(report: dict[str, Any]) -> dict[str, Any]:
         "status": report.get("status"),
         "artifacts": artifacts,
     }
+    quality = report.get("quality") or {}
+    evidence["quality_required"] = quality_required_value(quality, False)
+    evidence["target_met"] = quality.get("target_met")
+    if report.get("functional_readiness"):
+        evidence["functional_readiness"] = report["functional_readiness"]
     for name, path in artifacts.items():
         file_path = Path(path)
         if file_path.exists() and file_path.is_file():
@@ -3228,6 +3282,12 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
         and status == "passed"
         and (not quality_required or target_met is True)
     )
+    quality_ready = bool(
+        result.all_ok
+        and status == "passed"
+        and quality_required
+        and target_met is True
+    )
     workload_id = report.get("workload") or manifest.get("workload", "unknown")
     canonical = (
         report.get("canonical_workload")
@@ -3253,6 +3313,7 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
         "status": status,
         "verified": result.all_ok,
         "passed": passed,
+        "quality_ready": quality_ready,
         "metric": metric_key or metric_name or "",
         "value": metrics.get(metric_key) if metric_key else "",
         "target": quality.get("target", ""),
