@@ -104,6 +104,12 @@ def test_audit_json_exposes_draft_evidence_and_quality_margin():
     assert evidence[0]["run_count"] == 5
     assert evidence[0]["quality"]["nominal_headroom"] == pytest.approx(0.002, abs=1e-7)
     assert evidence[0]["repeatability"]["passed"] is True
+    conformance = payload["workloads"][0]["adapter_conformance"]
+    assert conformance["status"] == "quality-preserving-nonidentical"
+    assert conformance["promotion_eligible"] is False
+    assert any(
+        "public promotion is blocked" in issue["issue"] for issue in payload["issues"]
+    )
 
 
 def test_installed_draft_evidence_is_not_compared_with_unrelated_git_checkout(

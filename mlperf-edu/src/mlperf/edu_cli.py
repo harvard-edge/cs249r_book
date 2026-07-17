@@ -5736,6 +5736,7 @@ def cmd_audit(args: argparse.Namespace) -> int:
                     "suite": workload.suite,
                     "public_status": workload.public_status,
                     "scenario": workload.scenario,
+                    "adapter_conformance": workload.raw.get("adapter_conformance"),
                     "draft_evidence": draft_evidence.get(workload.id, []),
                     "issues": issues_by_workload.get(workload.id, []),
                     "warnings": warnings_by_workload.get(workload.id, []),

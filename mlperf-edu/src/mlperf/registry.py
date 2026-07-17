@@ -27,6 +27,11 @@ PUBLIC_RELEASE_STATUSES = (
     "systems-only",
 )
 
+ADAPTER_CONFORMANCE_STATUSES = (
+    "exact",
+    "quality-preserving-nonidentical",
+)
+
 QUALITY_TARGET_BASES = (
     "reference_runs",
     "literature",
@@ -534,6 +539,70 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
     if max_execution_issues:
         raise ValueError(f"invalid max execution boundaries: {max_execution_issues}")
 
+    adapter_conformance_issues: list[str] = []
+    for workload in workloads.values():
+        conformance = workload.raw.get("adapter_conformance")
+        if conformance is None:
+            continue
+        if not isinstance(conformance, dict):
+            adapter_conformance_issues.append(
+                f"{workload.id}: adapter_conformance must be a mapping"
+            )
+            continue
+        status = conformance.get("status")
+        if status not in ADAPTER_CONFORMANCE_STATUSES:
+            adapter_conformance_issues.append(
+                f"{workload.id}: adapter_conformance.status must be one of "
+                f"{list(ADAPTER_CONFORMANCE_STATUSES)}"
+            )
+        promotion_eligible = conformance.get("promotion_eligible")
+        if not isinstance(promotion_eligible, bool):
+            adapter_conformance_issues.append(
+                f"{workload.id}: adapter_conformance.promotion_eligible must be boolean"
+            )
+        if status == "quality-preserving-nonidentical":
+            if promotion_eligible is not False:
+                adapter_conformance_issues.append(
+                    f"{workload.id}: a nonidentical adapter cannot be promotion eligible"
+                )
+            if workload.public_status != "experimental":
+                adapter_conformance_issues.append(
+                    f"{workload.id}: a nonidentical adapter must remain experimental"
+                )
+        if not str(conformance.get("policy") or "").strip():
+            adapter_conformance_issues.append(
+                f"{workload.id}: adapter_conformance.policy is required"
+            )
+        if not str(conformance.get("resolution") or "").strip():
+            adapter_conformance_issues.append(
+                f"{workload.id}: adapter_conformance.resolution is required"
+            )
+        audit = conformance.get("audit")
+        if not isinstance(audit, dict):
+            adapter_conformance_issues.append(
+                f"{workload.id}: adapter_conformance.audit must be a mapping"
+            )
+            continue
+        for field in ("artifact", "sha256", "schema", "source_git_sha", "runtime"):
+            if not str(audit.get(field) or "").strip():
+                adapter_conformance_issues.append(
+                    f"{workload.id}: adapter_conformance.audit.{field} is required"
+                )
+        resolvers = audit.get("resolvers")
+        if (
+            not isinstance(resolvers, list)
+            or not resolvers
+            or not all(isinstance(resolver, str) and resolver for resolver in resolvers)
+        ):
+            adapter_conformance_issues.append(
+                f"{workload.id}: adapter_conformance.audit.resolvers must be a "
+                "nonempty string list"
+            )
+    if adapter_conformance_issues:
+        raise ValueError(
+            f"invalid adapter conformance metadata: {adapter_conformance_issues}"
+        )
+
     execution_role_issues: list[str] = []
     result_roles = {"score-bearing", "performance-bearing"}
     for workload in workloads.values():
@@ -858,6 +927,12 @@ def public_contract_issues(workload: Workload) -> list[str]:
         issues.append(f"invalid public status '{workload.public_status}'")
     if workload.public_status not in PUBLIC_RELEASE_STATUSES:
         issues.append("experimental workloads are not public-release-ready")
+    adapter_conformance = workload.raw.get("adapter_conformance") or {}
+    if adapter_conformance.get("status") == "quality-preserving-nonidentical":
+        issues.append(
+            "adapter conformance is quality-preserving but nonidentical; public "
+            "promotion is blocked"
+        )
     if not workload.public_rationale.strip():
         issues.append("missing public rationale")
     if not workload.scenario:

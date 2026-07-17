@@ -1,5 +1,12 @@
+import hashlib
+import json
 from collections import Counter
+from copy import deepcopy
+from dataclasses import replace
+from importlib import resources
 from pathlib import Path
+
+import pytest
 
 from mlperf.assets import asset_dossier, has_asset_dossier
 from mlperf.registry import (
@@ -17,6 +24,7 @@ from mlperf.registry import (
     load_registry,
     public_contract_report,
     select_workloads,
+    validate_registry,
 )
 from mlperf.runners.tiny import _canonical_config_int
 
@@ -184,9 +192,52 @@ def test_public_contract_report_withholds_experimental_candidates():
     }
     assert experimental
     for workload_id in experimental:
-        assert issues[workload_id] == [
-            "experimental workloads are not public-release-ready"
-        ]
+        expected = ["experimental workloads are not public-release-ready"]
+        if workload_id == "keyword-spotting":
+            expected.append(
+                "adapter conformance is quality-preserving but nonidentical; "
+                "public promotion is blocked"
+            )
+        assert issues[workload_id] == expected
+
+
+def test_keyword_spotting_conformance_is_audited_and_fails_closed():
+    workload = load_registry()["keyword-spotting"]
+    conformance = workload.raw["adapter_conformance"]
+    audit = conformance["audit"]
+    root = Path(__file__).resolve().parents[1]
+    artifact = root / audit["artifact"]
+    artifact_bytes = artifact.read_bytes()
+    payload = json.loads(artifact_bytes)
+
+    assert conformance["status"] == "quality-preserving-nonidentical"
+    assert conformance["promotion_eligible"] is False
+    assert hashlib.sha256(artifact_bytes).hexdigest() == audit["sha256"].removeprefix(
+        "sha256:"
+    )
+    assert payload["schema"] == audit["schema"]
+    assert payload["source"]["git_sha"] == audit["source_git_sha"]
+    assert payload["source"]["git_dirty"] is False
+    assert payload["status"] == "failed"
+    assert payload["workloads"]["image-classification"]["status"] == "passed"
+    assert payload["workloads"]["keyword-spotting"]["status"] == "failed"
+    assert payload["workloads"]["visual-wake-words"]["status"] == "passed"
+    assert "model_path" not in artifact.read_text()
+    packaged = root / "src" / "mlperf_edu" / audit["artifact"]
+    assert packaged.read_bytes() == artifact_bytes
+    packaged_resource = resources.files("mlperf_edu").joinpath(audit["artifact"])
+    assert packaged_resource.is_file()
+
+
+def test_nonidentical_adapter_cannot_be_marked_promotion_eligible():
+    workloads = load_registry()
+    keyword_spotting = workloads["keyword-spotting"]
+    raw = deepcopy(keyword_spotting.raw)
+    raw["adapter_conformance"]["promotion_eligible"] = True
+    workloads["keyword-spotting"] = replace(keyword_spotting, raw=raw)
+
+    with pytest.raises(ValueError, match="nonidentical adapter cannot be promotion"):
+        validate_registry(workloads)
 
 
 def test_verified_baseline_lifecycle_state_machine_fails_closed():

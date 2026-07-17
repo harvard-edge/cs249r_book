@@ -59,9 +59,9 @@ crossed a battery-to-AC transition.
 | Evidence case | Device | Observed result | Canonical gate | Quality margin | Provenance | Promotion state |
 |---|---|---:|---:|---:|---|---|
 | `image-classification__max__inference` | CPU | 0.870000 top-1 | >= 0.850000 | +0.020000 | verified | Existing five-run draft; new clean sweep required after code changes |
-| `keyword-spotting__max__inference` | MPS | 0.902000 top-1 | >= 0.900000 | +0.002000 | verified | Existing five-run draft; adapter parity review remains open |
+| `keyword-spotting__max__inference` | MPS | 0.902000 top-1 | >= 0.900000 | +0.002000 | verified | Adapter is quality-preserving but nonidentical; promotion is blocked |
 | `anomaly-detection__max__inference` | MPS | 0.902910 ROC AUC | >= 0.850000 | +0.052910 | verified | Existing five-run draft; strongest converted-model metric reproduction |
-| `visual-wake-words__max__inference` | MPS | 0.851000 top-1 | >= 0.800000 | +0.051000 | verified | Existing five-run draft; adapter parity review remains open |
+| `visual-wake-words__max__inference` | MPS | 0.851000 top-1 | >= 0.800000 | +0.051000 | verified | Exact top-1 parity passes all three audited LiteRT resolvers |
 | `causal-language-modeling__max__training` | MPS | 1.458786 loss | <= 1.469700 | +0.010914 | verified | Three diagnostic runs now pass; clean five-run timing campaign required |
 | `causal-language-modeling__max__inference__full` | CPU | 884.48 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean five-run campaign required |
 | `causal-language-modeling__max__inference__prefill` | CPU | 30,280.26 prefill tokens/s | functional gate | pass | verified with training lineage | Clean five-run campaign required |
@@ -90,7 +90,7 @@ seconds across a battery-to-AC transition.
 - [x] Independently compare full-set PyTorch and pinned TFLite outputs for ResNet8, DS-CNN, and MobileNetV1 under LiteRT 2.1.6 XNNPACK and builtin kernels.
 - [x] ResNet8 and MobileNetV1 produce identical top-1 predictions on every official sample under both audited LiteRT resolvers and reproduce the same 87.0% and 85.1% accuracy.
 - [x] The KWS divergence is measured rather than hidden: PyTorch is 90.2%; LiteRT XNNPACK is 90.0% with 7/1,000 prediction disagreements; LiteRT builtin is 90.5% with 5/1,000 disagreements. Every path passes the inherited 90% gate.
-- [ ] Resolve the KWS promotion choice: accept and disclose the quality-preserving PyTorch adaptation, obtain authoritative non-hybrid upstream weights, or make LiteRT the execution contract. Do not invent a disagreement tolerance.
+- [x] Resolve the KWS promotion choice. Retain and disclose the quality-preserving PyTorch adaptation for education, classify it as nonidentical, and block promotion until exact-source execution or authoritative unquantized weights establish exact parity. Do not invent a disagreement tolerance.
 - [ ] Isolate PatchTST data-order RNG from data-loader worker lifecycle before changing worker persistence or count.
 - [ ] Obtain five clean externally powered runs for graph, time-series, nanoGPT training, and all nanoGPT inference phases.
 - [ ] Have domain reviewers approve the graph mean-plus-tolerance rule and the project-derived time-series MSE threshold.
@@ -99,8 +99,13 @@ seconds across a battery-to-AC transition.
 
 ### MLPerf Tiny Adapter Audit
 
-The strict command intentionally returns status 1 while the KWS prediction
-divergence remains unresolved.
+The strict command intentionally returns status 1 because the KWS adapter is
+classified as quality-preserving but nonidentical. The committed audit is
+`conformance_results/tflite-adapter-parity-20260717.json` with SHA-256
+`524d183cc858cb3c7911e55f9187df40d67bd5bc546a7972ef131fc76192adb7`.
+It covers XNNPACK, builtin, and builtin-reference execution from clean source
+commit `b408be80350e248eed25c11966c4844bfccc15d8`. A new KWS timing campaign is
+not warranted until the conformance blocker changes.
 
 ```bash
 uv run --extra parity python tools/audit_tflite_adapter_parity.py \
