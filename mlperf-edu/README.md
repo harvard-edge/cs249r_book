@@ -124,7 +124,7 @@ Every run writes these review artifacts:
 |:---|:---|
 | `*_report.json` | Complete metrics, quality status, configuration, and environment |
 | `*_report.csv` | Flat metrics for analysis |
-| `*_report.html` | Human-readable dashboard with the lead quality result, configuration, model lineage, and provenance |
+| `*_report.html` | Adaptive dashboard with functional readiness or quality-target results, configuration, model lineage, and provenance |
 | `*.provd.json` | Content-addressed provenance manifest |
 
 ```bash

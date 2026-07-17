@@ -315,6 +315,10 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
     edu_cli.export_workload_reports([report], {workload.id: workload})
     assert report_path.with_suffix(".html").is_file()
     assert report_path.with_suffix(".csv").is_file()
+    pro_html = report_path.with_suffix(".html").read_text()
+    assert "Quality Results" in pro_html
+    assert "Target attainment" in pro_html
+    assert "102.4%" in pro_html
     grade = edu_cli.grade_manifest(manifest_path)
     assert grade["verified"] is True
     assert grade["passed"] is True
@@ -368,6 +372,11 @@ def test_pro_profile_preserves_functional_only_max_readiness(tmp_path, monkeypat
     }
     assert report["subruns"][0]["quality_required"] is False
     assert report["subruns"][0]["target_met"] is None
+
+    edu_cli.export_workload_reports([report], {workload.id: workload})
+    pro_html = (tmp_path / "image-generation_pro_report.html").read_text()
+    assert "Functional Readiness" in pro_html
+    assert "Any max target shown is context only" in pro_html
 
     grade = edu_cli.grade_manifest(tmp_path / "image-generation_pro.provd.json")
     assert grade["verified"] is True
@@ -531,6 +540,139 @@ def test_report_enrichment_defaults_quality_required_from_public_contract():
     enrich_report_for_display(explicit_not_required, workloads)
     assert explicit_not_required["quality"]["quality_required"] is False
     assert "gated" not in explicit_not_required["quality"]
+
+
+def test_dashboard_derives_functional_readiness_from_report_semantics():
+    report = {
+        "workloads": [
+            {
+                "workload": "setup-a",
+                "status": "passed",
+                "quality": {
+                    "quality_required": False,
+                    "metric": "accuracy",
+                    "metric_key": "accuracy",
+                    "target": 0.8,
+                    "direction": "higher",
+                    "target_kind": "inherited_acceptance_gate",
+                },
+                "metrics": {"accuracy": 0.5},
+            },
+            {
+                "workload": "setup-b",
+                "status": "passed",
+                "quality": {
+                    "quality_required": False,
+                    "metric": "loss",
+                    "metric_key": "loss",
+                    "target": 1.0,
+                    "direction": "lower",
+                    "target_kind": "published_reference_reproduction",
+                },
+                "metrics": {"loss": 4.0},
+            },
+        ]
+    }
+
+    html = edu_cli.quality_dashboard_html(report)
+
+    assert "Functional Readiness" in html
+    assert "2 of 2 functional paths passed; no quality claim" in html
+    assert "Functional paths passed" in html
+    assert "2 / 2" in html
+    assert html.count("Path passed") == 2
+    assert html.count("Setup and execution") == 2
+    assert "Diagnostic: accuracy 50.00%" in html
+    assert "Any max target shown is context only" in html
+    assert "Max target: Target ≥ 80.00% · inherited acceptance gate" in html
+    assert "Target met" not in html
+
+
+def test_dashboard_derives_quality_results_and_target_attainment():
+    report = {
+        "workloads": [
+            {
+                "workload": "quality-pass",
+                "status": "passed",
+                "quality": {
+                    "quality_required": True,
+                    "metric": "accuracy",
+                    "metric_key": "accuracy",
+                    "target": 0.8,
+                    "direction": "higher",
+                    "target_met": True,
+                },
+                "metrics": {"accuracy": 0.9},
+            },
+            {
+                "workload": "quality-fail",
+                "status": "passed",
+                "quality": {
+                    "quality_required": True,
+                    "metric": "fid",
+                    "metric_key": "fid",
+                    "target": 1.79,
+                    "direction": "lower",
+                    "target_met": False,
+                },
+                "metrics": {"fid": 1.801554},
+            },
+        ]
+    }
+
+    html = edu_cli.quality_dashboard_html(report)
+
+    assert "Quality Results" in html
+    assert "1 of 2 authoritative quality targets met" in html
+    assert "Quality targets met" in html
+    assert "1 / 2" in html
+    assert "Target attainment" in html
+    assert "112.5%" in html
+    assert "99.4%" in html
+    assert "Functional Readiness" not in html
+
+
+def test_dashboard_uses_separate_meters_for_mixed_results():
+    report = {
+        "workloads": [
+            {
+                "workload": "functional",
+                "status": "passed",
+                "quality": {"quality_required": False},
+                "metrics": {"duration_seconds": 0.1},
+            },
+            {
+                "workload": "quality",
+                "status": "passed",
+                "quality": {
+                    "quality_required": True,
+                    "metric": "accuracy",
+                    "metric_key": "accuracy",
+                    "target": 0.8,
+                    "direction": "higher",
+                    "target_met": True,
+                },
+                "metrics": {"accuracy": 0.9},
+            },
+        ]
+    }
+
+    html = edu_cli.quality_dashboard_html(report)
+
+    assert "Benchmark Results" in html
+    assert "1 of 1 quality targets met · 1 of 1 functional paths passed" in html
+    assert "Quality targets met" in html
+    assert "Functional paths passed" in html
+
+
+def test_quality_target_attainment_is_direction_and_tolerance_aware():
+    assert edu_cli.quality_target_attainment(
+        0.7145, 0.7174, "higher", 0.0029
+    ) == pytest.approx(100.0)
+    assert edu_cli.quality_target_attainment(
+        1.801554, 1.79, "lower"
+    ) == pytest.approx(99.3586, rel=1e-4)
+    assert edu_cli.quality_target_attainment("0.9", 0.8, "higher") is None
 
 
 def test_nanogpt_training_enrichment_excludes_prior_promoted_results():
@@ -1176,7 +1318,7 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert html_result.returncode == 0, html_result.stdout + html_result.stderr
     html = html_path.read_text()
     assert "MLPerf EDU Report: causal-language-modeling" in html
-    assert "Quality Results" in html
+    assert "Functional Readiness" in html
     assert "Run Configuration" in html
     assert "Model Lineage" in html
     assert "Provenance" in html
@@ -1184,8 +1326,8 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert "Checkpoint" in html
     assert "Inference" in html
     assert "Evaluation" in html
-    assert "Functional probe" in html
-    assert "Target type: published reference reproduction" in html
+    assert "Path passed" in html
+    assert "Max target: Target ≤ 1.4697 · published reference reproduction" in html
     assert "loss" in html
     assert "literature" in html
     assert "fingerprint_hash" in html

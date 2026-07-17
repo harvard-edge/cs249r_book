@@ -6,6 +6,7 @@ import csv
 import hashlib
 import inspect
 import json
+import math
 import os
 import platform
 import posixpath
@@ -2852,10 +2853,74 @@ def aggregate_csv_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
     ]
 
 
+def dashboard_progress_meter_html(label: str, passed: int, total: int) -> str:
+    """Render one categorical progress meter without assuming a profile."""
+    percent = 100.0 * passed / total if total else 0.0
+    state = "pass" if passed == total and total else "fail" if passed == 0 else "warn"
+    return (
+        "<div class='summary-meter'>"
+        f"<div class='summary-meter-label'><span>{escape(label)}</span>"
+        f"<strong>{passed} / {total}</strong></div>"
+        f"<div class='meter-track' role='progressbar' aria-label='{escape(label)}' "
+        f"aria-valuemin='0' aria-valuemax='{total}' aria-valuenow='{passed}'>"
+        f"<div class='meter-fill {state}' style='width:{percent:.2f}%'></div></div>"
+        "</div>"
+    )
+
+
+def quality_target_attainment(
+    value: Any, target: Any, direction: str, tolerance: Any = 0.0
+) -> float | None:
+    """Return direction-aware target attainment where 100 percent is the gate."""
+    if isinstance(value, bool) or isinstance(target, bool):
+        return None
+    if not isinstance(value, (int, float)) or not isinstance(target, (int, float)):
+        return None
+    numeric_value = float(value)
+    numeric_target = float(target)
+    numeric_tolerance = (
+        float(tolerance)
+        if isinstance(tolerance, (int, float)) and not isinstance(tolerance, bool)
+        else 0.0
+    )
+    if not all(
+        math.isfinite(number)
+        for number in (numeric_value, numeric_target, numeric_tolerance)
+    ):
+        return None
+    if numeric_value <= 0 or numeric_target <= 0 or numeric_tolerance < 0:
+        return None
+    if direction == "higher":
+        ratio = (numeric_value + numeric_tolerance) / numeric_target
+    elif direction == "lower":
+        ratio = (numeric_target + numeric_tolerance) / numeric_value
+    else:
+        return None
+    return max(0.0, ratio * 100.0)
+
+
+def quality_attainment_meter_html(attainment: float | None) -> str:
+    if attainment is None:
+        return ""
+    fill = min(attainment, 100.0)
+    state = "pass" if attainment >= 100.0 else "fail"
+    return (
+        "<div class='attainment'>"
+        "<div class='attainment-label'><span>Target attainment</span>"
+        f"<strong>{attainment:.1f}%</strong></div>"
+        "<div class='meter-track' role='progressbar' aria-label='Target attainment' "
+        f"aria-valuemin='0' aria-valuemax='100' aria-valuenow='{fill:.1f}'>"
+        f"<div class='meter-fill {state}' style='width:{fill:.2f}%'></div></div>"
+        "</div>"
+    )
+
+
 def quality_dashboard_html(report: dict[str, Any]) -> str:
     cards: list[str] = []
     quality_results = 0
     targets_met = 0
+    functional_results = 0
+    functional_passed = 0
     items = report_items(report)
     for item in items:
         quality = item.get("quality") or {}
@@ -2872,9 +2937,13 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
         target_kind = str(quality.get("target_kind") or "").replace("_", " ")
         quality_required = quality_required_value(quality, False) is True
         target_met = quality.get("target_met")
+        run_passed = str(item.get("status") or "").lower() == "passed"
         if quality_required:
             quality_results += 1
-            if target_met is True:
+            if not run_passed:
+                result_label = "Run failed"
+                result_class = "fail"
+            elif target_met is True:
                 targets_met += 1
                 result_label = "Target met"
                 result_class = "pass"
@@ -2885,49 +2954,131 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
                 result_label = "Target pending"
                 result_class = "warn"
         else:
-            result_label = "Functional probe"
-            result_class = "warn"
+            functional_results += 1
+            if run_passed:
+                functional_passed += 1
+                result_label = "Path passed"
+                result_class = "pass"
+            else:
+                result_label = "Path failed"
+                result_class = "fail"
 
         workload_name = str(item.get("workload") or item.get("id") or "unknown")
         displayed_metric = str(metric_key or metric_name or "quality metric")
         formatted_value, raw_value = format_dashboard_metric(displayed_metric, value)
         target_text = format_quality_target(displayed_metric, target, direction)
-        if not quality_required and target not in (None, ""):
-            target_text = f"Reference {target_text.lower()} (not evaluated by this profile)"
         raw_html = (
             f"<div class='metric-raw'>Raw value: {escape(raw_value)}</div>"
             if raw_value
             else ""
         )
-        target_kind_html = (
-            f"<div class='metric-kind'>Target type: {escape(target_kind)}</div>"
-            if target_kind
-            else ""
-        )
+        if quality_required:
+            card_title = displayed_metric
+            card_value = formatted_value
+            value_class = "metric-value"
+            attainment = quality_target_attainment(
+                value,
+                target,
+                direction,
+                quality.get("tolerance", 0.0),
+            )
+            detail_html = raw_html + quality_attainment_meter_html(attainment)
+            target_html = (
+                f"<div class='metric-target'>{escape(target_text)}</div>"
+            )
+            target_kind_html = (
+                f"<div class='metric-kind'>Target type: {escape(target_kind)}</div>"
+                if target_kind
+                else ""
+            )
+        else:
+            card_title = "Setup and execution"
+            card_value = "Passed" if run_passed else "Failed"
+            value_class = (
+                "metric-value metric-value-pass"
+                if run_passed
+                else "metric-value metric-value-fail"
+            )
+            diagnostic = (
+                f"Diagnostic: {displayed_metric} {formatted_value}"
+                if value not in (None, "")
+                else ""
+            )
+            detail_html = (
+                f"<div class='metric-observation'>{escape(diagnostic)}</div>"
+                if diagnostic
+                else ""
+            )
+            target_html = ""
+            target_kind_html = ""
+            if target not in (None, ""):
+                future_target = f"Max target: {target_text}"
+                if target_kind:
+                    future_target += f" · {target_kind}"
+                target_kind_html = (
+                    f"<div class='metric-kind'>{escape(future_target)}</div>"
+                )
         cards.append(
             "<article class='quality-card'>"
             f"<div class='quality-card-top'><div><div class='eyebrow'>{escape(workload_name)}</div>"
-            f"<h3>{escape(displayed_metric)}</h3></div>"
+            f"<h3>{escape(card_title)}</h3></div>"
             f"<span class='badge {result_class}'>{escape(result_label)}</span></div>"
-            f"<div class='metric-value'>{escape(formatted_value)}</div>"
-            f"{raw_html}"
-            f"<div class='metric-target'>{escape(target_text)}</div>"
+            f"<div class='{value_class}'>{escape(card_value)}</div>"
+            f"{detail_html}"
+            f"{target_html}"
             f"{target_kind_html}"
             "</article>"
         )
     if not cards:
         return ""
 
-    if quality_results:
+    if quality_results and functional_results:
+        eyebrow = "Run outcomes"
+        heading = "Benchmark Results"
+        summary = (
+            f"{targets_met} of {quality_results} quality targets met · "
+            f"{functional_passed} of {functional_results} functional paths passed"
+        )
+    elif quality_results:
+        eyebrow = "Lead results"
+        heading = "Quality Results"
         summary = f"{targets_met} of {quality_results} authoritative quality targets met"
     else:
-        summary = "Functional results only; this profile does not make a quality claim"
+        eyebrow = "Readiness check"
+        heading = "Functional Readiness"
+        summary = (
+            f"{functional_passed} of {functional_results} functional paths passed; "
+            "no quality claim"
+        )
+    meters: list[str] = []
+    if quality_results:
+        meters.append(
+            dashboard_progress_meter_html(
+                "Quality targets met", targets_met, quality_results
+            )
+        )
+    if functional_results:
+        meters.append(
+            dashboard_progress_meter_html(
+                "Functional paths passed", functional_passed, functional_results
+            )
+        )
+    meters_html = f"<div class='summary-meters'>{''.join(meters)}</div>"
+    boundary_html = ""
+    if functional_results:
+        boundary_html = (
+            "<div class='lead-note'>Functional cards confirm setup and execution. "
+            "Any max target shown is context only and was not evaluated in this "
+            "run.</div>"
+        )
     return f"""
   <section class="section" aria-labelledby="quality-results-heading">
     <div class="section-heading">
-      <div><div class="eyebrow">Lead results</div><h2 id="quality-results-heading">Quality Results</h2></div>
+      <div><div class="eyebrow">{escape(eyebrow)}</div><h2 id="quality-results-heading">{escape(heading)}</h2></div>
       <div class="section-summary">{escape(summary)}</div>
     </div>
+    {meters_html}
+    {boundary_html}
     <div class="quality-grid">{''.join(cards)}</div>
   </section>
 """
@@ -3194,13 +3345,27 @@ def write_html_report(
     .label {{ color: var(--muted); font-size: 12px; text-transform: uppercase; }}
     .value {{ font-size: 24px; font-weight: 700; margin-top: 4px; }}
     .quality-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; }}
+    .summary-meters {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 14px; margin-bottom: 14px; }}
+    .summary-meter {{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 14px 16px; }}
+    .summary-meter-label, .attainment-label {{ display: flex; justify-content: space-between; gap: 16px; margin-bottom: 8px; color: var(--muted); font-size: 12px; }}
+    .summary-meter-label strong, .attainment-label strong {{ color: var(--ink); }}
+    .lead-note {{ margin: -2px 0 14px; color: var(--muted); font-size: 12px; }}
+    .meter-track {{ height: 9px; overflow: hidden; background: #eaecf0; border-radius: 999px; }}
+    .meter-fill {{ height: 100%; border-radius: inherit; transition: width .2s ease; }}
+    .meter-fill.pass {{ background: var(--pass); }}
+    .meter-fill.warn {{ background: var(--warn); }}
+    .meter-fill.fail {{ background: var(--fail); }}
     .quality-card {{ min-height: 190px; background: linear-gradient(145deg, #fff 55%, var(--accent-soft)); border: 1px solid #b2ddff; border-radius: 16px; padding: 20px; box-shadow: 0 8px 20px rgb(16 24 40 / 5%); }}
     .quality-card-top {{ display: flex; justify-content: space-between; align-items: flex-start; gap: 16px; }}
     .quality-card h3 {{ margin-top: 4px; font-size: 15px; overflow-wrap: anywhere; }}
     .metric-value {{ margin-top: 26px; color: var(--accent); font-size: 38px; font-weight: 760; letter-spacing: -.04em; }}
+    .metric-value-pass {{ color: var(--pass); }}
+    .metric-value-fail {{ color: var(--fail); }}
     .metric-raw {{ margin-top: -5px; color: var(--muted); font-size: 11px; }}
+    .metric-observation {{ margin-top: -5px; color: var(--muted); font-size: 12px; }}
     .metric-target {{ margin-top: 8px; color: var(--muted); font-weight: 600; }}
     .metric-kind {{ margin-top: 3px; color: var(--muted); font-size: 12px; text-transform: capitalize; }}
+    .attainment {{ margin-top: 12px; }}
     .detail-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }}
     .detail-card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }}
     .detail-card h3, .lineage-workload > h3 {{ margin-bottom: 12px; font-size: 15px; }}
