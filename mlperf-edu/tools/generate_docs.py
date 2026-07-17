@@ -7,6 +7,7 @@ Generated benchmark and reference facts come from these project contracts:
 
   * ``registry/suites/**``      - per-workload / per-variant benchmark metadata
   * ``registry/suites.yaml``    - suite-level titles and summaries
+  * ``registry/selection-ledger.yaml`` - portfolio admission and rationale
   * ``datasets.yaml``           - dataset catalog
   * ``src/mlperf/assets.py``    - structured public-asset dossiers
   * ``provisional_results/``    - verified draft reference-result records
@@ -57,8 +58,8 @@ CHECKOUT_COMMAND = "uv run mlperf"
 
 GENERATED_NOTE = (
     "<!-- GENERATED FILE - do not edit by hand.\n"
-    "     Sources: registry/ + datasets.yaml + asset dossiers + draft reference results "
-    "+ the mlperf CLI.\n"
+    "     Sources: registry/ + selection ledger + datasets.yaml + asset dossiers + "
+    "draft reference results + the mlperf CLI.\n"
     "     Regenerate with: python3 tools/generate_docs.py -->\n"
 )
 
@@ -225,6 +226,35 @@ def load_suite_meta() -> dict[str, dict[str, str]]:
     return suites
 
 
+def load_selection_ledger(
+    workloads: dict[str, Workload],
+) -> dict[str, Any]:
+    """Load the portfolio decision record and require exact registry coverage."""
+    path = ROOT / "registry" / "selection-ledger.yaml"
+    with path.open("r") as handle:
+        data = yaml.safe_load(handle) or {}
+    if data.get("schema") != "mlperf-edu-workload-selection/0.1":
+        raise ValueError("unsupported selection-ledger schema")
+    entries = data.get("workloads")
+    if not isinstance(entries, dict):
+        raise ValueError("selection ledger must define a 'workloads' mapping")
+
+    selected = {
+        name
+        for name, entry in entries.items()
+        if isinstance(entry, dict) and entry.get("status") in {"admitted", "candidate"}
+    }
+    registered = set(workloads)
+    if selected != registered:
+        missing = sorted(registered - selected)
+        stale = sorted(selected - registered)
+        raise ValueError(
+            "selection ledger and workload registry disagree: "
+            f"missing={missing}, stale={stale}"
+        )
+    return data
+
+
 def index_source_paths() -> dict[str, str]:
     """Map workload id -> registry source path (repo-relative)."""
     paths: dict[str, str] = {}
@@ -366,6 +396,32 @@ def section_spiral_status(w: Workload) -> str:
     return f"## Readiness Spiral Status\n\n{body}\n"
 
 
+def section_selection_rationale(w: Workload, selection: dict[str, Any]) -> str:
+    """Explain why a workload belongs in the portfolio."""
+    entry = (selection.get("workloads") or {}).get(w.id)
+    if not isinstance(entry, dict):
+        raise ValueError(f"selection ledger is missing workload '{w.id}'")
+    rationale = entry.get("rationale")
+    upstream = entry.get("upstream")
+    if not isinstance(rationale, dict) or not isinstance(upstream, dict):
+        raise ValueError(f"selection rationale is incomplete for '{w.id}'")
+
+    body = esc(rationale.get("task_significance", "")) + "\n\n"
+    body += kv_table(
+        [
+            ("Classroom value", rationale.get("classroom_value")),
+            ("Systems behavior", rationale.get("systems_behavior")),
+            ("Benchmark lineage", rationale.get("benchmark_lineage")),
+            ("Model choice", rationale.get("reason_for_model")),
+            ("Dataset choice", rationale.get("reason_for_dataset")),
+            ("Quality metric", rationale.get("reason_for_metric")),
+            ("Published baseline", upstream.get("published_baseline")),
+            ("Alternative rejected", rationale.get("alternatives_rejected")),
+        ]
+    )
+    return f"## Why This Benchmark Is Included\n\n{body}"
+
+
 def section_provenance(w: Workload) -> str:
     provenance = w.raw.get("provenance")
     if not isinstance(provenance, dict) or not provenance:
@@ -495,6 +551,10 @@ def section_quality_target(w: Workload) -> str:
         ("Metric", w.quality_metric),
         ("Target", w.quality_value),
         ("Direction", w.quality_direction),
+        (
+            "Target kind",
+            str(w.quality_target_kind or "").replace("_", " "),
+        ),
         ("Target basis", w.quality_target_basis),
         ("Tolerance", w.quality_tolerance),
         ("Reference runs", w.quality_reference_runs),
@@ -756,11 +816,13 @@ def render_workload_body(
     w: Workload,
     source_paths: dict[str, str],
     reference_results: dict[str, list[dict[str, Any]]],
+    selection: dict[str, Any],
     heading_shift: bool,
 ) -> str:
     sections = [
         section_at_a_glance(w),
         section_spiral_status(w),
+        section_selection_rationale(w, selection),
         section_provenance(w),
         section_execution_boundary(w),
         section_how_to_run(w),
@@ -799,6 +861,7 @@ def family_page(
     members: list[Workload],
     source_paths: dict[str, str],
     reference_results: dict[str, list[dict[str, Any]]],
+    selection: dict[str, Any],
 ) -> str:
     lead = family_lead(members)
     suite = lead.suite
@@ -816,7 +879,11 @@ def family_page(
         lines.append(public_line(w))
         lines.append(
             render_workload_body(
-                w, source_paths, reference_results, heading_shift=False
+                w,
+                source_paths,
+                reference_results,
+                selection,
+                heading_shift=False,
             )
         )
         return "\n".join(lines) + "\n"
@@ -848,7 +915,11 @@ def family_page(
         lines.append(public_line(member))
         lines.append(
             render_workload_body(
-                member, source_paths, reference_results, heading_shift=True
+                member,
+                source_paths,
+                reference_results,
+                selection,
+                heading_shift=True,
             )
         )
         lines.append("")
@@ -891,6 +962,7 @@ def benchmarks_index(
     families: "OrderedDict[str, list[Workload]]",
     suite_meta: dict[str, dict[str, str]],
     workloads: dict[str, Workload],
+    selection: dict[str, Any],
 ) -> str:
     by_suite: OrderedDict[str, list[str]] = OrderedDict()
     for suite in sorted(suite_meta):
@@ -913,7 +985,49 @@ def benchmarks_index(
         "single source of truth for models, datasets, quality targets, and "
         "public-result status.",
         "",
+        "## Portfolio Design",
+        "",
+        esc(selection.get("admission_rule", "")),
+        "",
+        "The portfolio covers distinct learning tasks and systems behaviors rather "
+        "than collecting interchangeable model examples. Each quality contract comes "
+        "from the named upstream authority and remains unchanged when a local result "
+        "misses it.",
+        "",
+        "| **Workload** | **Why It Is Included** | **Systems Behavior** | **Quality Authority** |",
+        "|:---|:---|:---|:---|",
     ]
+    entries = selection.get("workloads") or {}
+    for family, members in families.items():
+        lead = family_lead(members)
+        entry = entries.get(lead.id) or {}
+        rationale = entry.get("rationale") or {}
+        upstream = entry.get("upstream") or {}
+        href = workload_href(lead.suite, family, depth=1)
+        authority = (
+            f"{upstream.get('authority', '')}. "
+            f"{upstream.get('published_baseline', '')}"
+        )
+        lines.append(
+            f"| [`{esc(family)}`]({href}) "
+            f"| {esc(rationale.get('classroom_value', ''))} "
+            f"| {esc(rationale.get('systems_behavior', ''))} "
+            f"| {esc(authority)} |"
+        )
+    lines += [
+        "",
+        "## Deliberate Exclusions",
+        "",
+        "The selection ledger also records attractive ideas that do not yet meet the "
+        "suite's stable, authoritative, single-node contract.",
+        "",
+        "| **Proposal** | **Reason Excluded** |",
+        "|:---|:---|",
+    ]
+    for name, entry in entries.items():
+        if isinstance(entry, dict) and entry.get("status") == "rejected":
+            lines.append(f"| `{esc(name)}` | {esc(entry.get('reason', ''))} |")
+    lines.append("")
     for suite, suite_families in by_suite.items():
         if not suite_families:
             continue
@@ -1203,6 +1317,7 @@ def normalize(content: str) -> str:
 def build_outputs() -> dict[Path, str]:
     workloads = load_registry(ROOT / "registry")
     suite_meta = load_suite_meta()
+    selection = load_selection_ledger(workloads)
     source_paths = index_source_paths()
     reference_results = load_provisional_reference_results()
     families = group_families(workloads)
@@ -1222,7 +1337,7 @@ def build_outputs() -> dict[Path, str]:
     site = ROOT / "site"
     outputs: dict[Path, str] = {}
     outputs[site / "benchmarks" / "index.qmd"] = benchmarks_index(
-        families, suite_meta, workloads
+        families, suite_meta, workloads, selection
     )
     per_suite: OrderedDict[str, list[tuple[str, list[Workload]]]] = OrderedDict()
     for family, members in families.items():
@@ -1233,7 +1348,7 @@ def build_outputs() -> dict[Path, str]:
         )
         for family, members in suite_families:
             outputs[site / "benchmarks" / suite / f"{family}.qmd"] = family_page(
-                family, members, source_paths, reference_results
+                family, members, source_paths, reference_results, selection
             )
     outputs[site / "reference" / "datasets.qmd"] = datasets_page(workloads)
     outputs[site / "reference" / "cli.qmd"] = cli_page()

@@ -27,6 +27,29 @@ later stabilization phase. The registry records `acceptance_runs: 1` for all
 fourteen workloads while retaining the five-run measurement protocol for that
 later phase.
 
+## Target Design Standard
+
+A quality target is acceptable for this milestone only when the model or
+training recipe, evaluation data, evaluator, metric direction, and source value
+all refer to the same upstream contract. A local observation may confirm or
+miss that target, but it cannot define or relax it. Discrete targets also record
+their task-count interpretation when rounding would otherwise hide the actual
+gate.
+
+The registry distinguishes four target kinds so that a student can tell what a
+number means.
+
+| **Target Kind** | **Workloads** | **Interpretation** |
+|:---|:---|:---|
+| **Inherited acceptance gate** | Image classification, keyword spotting, anomaly detection, visual wake words, recommendation, and reinforcement learning | An upstream benchmark already defines the pass threshold. These are the strongest targets because MLPerf EDU does not choose the boundary. |
+| **Published reference reproduction** | Causal language modeling, text classification, information retrieval, code generation, function calling, and image generation | The target is a published point result for the exact pinned recipe. It is a strict conformance target rather than a claim that the upstream project defined a universal pass threshold. |
+| **Published mean with tolerance** | Graph node classification | The official OGB GCN mean is paired with its published standard deviation. The one-sided tolerance remains a domain-review item rather than a locally fitted margin. |
+| **Policy-derived gate** | Time-series forecasting | The published PatchTST MSE is converted with the pinned MLPerf 99% quality fraction for a lower-is-better metric. The derivation is explicit and remains a publication-review item. |
+
+This distinction is important for the three current near-misses. HumanEval+,
+BFCL, and EDM remain below strict published-reference targets. Their results do
+not justify lowering the gates.
+
 ## Score-Bearing Targets
 
 | **Workload** | **Model and Data** | **Quality Gate** | **Authority and Rationale** |

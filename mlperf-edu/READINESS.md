@@ -84,7 +84,8 @@ pretrained model as locally trained.
 1. Install the locked environment and run `uv run mlperf doctor`.
 2. Inspect available work with `uv run mlperf list` and `uv run mlperf show`.
 3. Run a quick `min` probe to confirm the machine and code path work.
-4. Fetch and verify the exact `max` assets before measurement.
+4. Check the workload's declared execution envelope, then fetch and verify the
+   exact `max` assets before measurement.
 5. Run one `max` workload. The HTML dashboard opens automatically and keeps
    JSON and CSV siblings for analysis.
 6. Read the lead quality card, target decision, run configuration, hardware,
@@ -94,6 +95,11 @@ pretrained model as locally trained.
 8. Use `pro` for the research collection or select an individual workload.
    The default is one max-contract execution. Optional repetition belongs to
    the later stability phase.
+
+Every `min` path is intended for classroom hardware. Most `max` paths are
+laptop-capable. DLRM and MiniGo are research-environment exceptions, and their
+CLI paths fail closed when the required data, memory, legacy runtime, or GPU is
+not available.
 
 ```bash
 uv run mlperf doctor
@@ -127,6 +133,8 @@ behavior for automation.
 - [ ] Produce the current complete EDM artifact.
 - [ ] Execute the DLRM quality contract in its required environment.
 - [ ] Execute the MiniGo quality contract in its required environment.
+- [ ] Populate measured working-set, arithmetic-intensity, and dispatch evidence
+  for research interpretation after the authoritative max contracts settle.
 - [ ] Complete an interactive visual browser review of the standalone run dashboard.
 - [ ] Resolve any target gap without lowering a target to fit a local result.
 

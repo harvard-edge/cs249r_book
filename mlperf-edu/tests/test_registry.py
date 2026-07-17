@@ -141,6 +141,21 @@ def test_all_quality_contracts_require_one_authoritative_acceptance_run():
     assert all(workload.quality_acceptance_runs == 1 for workload in workloads.values())
 
 
+def test_all_quality_contracts_classify_the_target_kind():
+    workloads = load_registry()
+    expected_counts = {
+        "inherited_acceptance_gate": 6,
+        "published_reference_reproduction": 6,
+        "published_mean_with_tolerance": 1,
+        "policy_derived_gate": 1,
+    }
+    counts = Counter(
+        workload.quality_target_kind for workload in workloads.values()
+    )
+
+    assert counts == expected_counts
+
+
 def test_functional_stage_workloads_separate_probe_from_quality_contract():
     workloads = load_registry()
     expected_status = {

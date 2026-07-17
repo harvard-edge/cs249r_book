@@ -87,12 +87,13 @@ uv run mlperf run --workload causal-language-modeling --profile max \
 | **Profile** | **Purpose** | **Result Boundary** |
 |:---|:---|:---|
 | `min` | Fast installation, teaching, and CI check | Functional only; never a public score or performance baseline |
-| `max` | Canonical classroom and comparison scale | Uses the real-data quality contract after conformance; functional-stage candidates remain bounded, nonpromotable probes |
-| `pro` | Extended single-node research envelope | Changes controlled configurations without changing workload identity |
+| `max` | Authoritative quality contract | Usually laptop-capable; DLRM and MiniGo require their declared single-node research environments |
+| `pro` | Extended single-node research envelope | Adds controlled configurations without changing workload identity or the quality target |
 
 The research envelope supports processors, memory systems, runtimes,
 compilers, and model execution. Distributed and datacenter-scale claims are
-outside v0.1.
+outside v0.1. A profile describes contract depth rather than promising that
+every workload fits every student's machine.
 
 ## Evidence and Provenance
 
@@ -104,7 +105,7 @@ explicitly provisional records. Provisional records establish execution and
 gate passage only; they do not establish repeatability or qualify as promoted
 baselines.
 
-The five functional-stage workloads are outside this importer by construction.
+The five quality-conformance workloads are outside this importer by construction.
 Once each passes its authoritative quality contract, the full fourteen-workload
 portfolio will contain seventeen evidence cases.
 

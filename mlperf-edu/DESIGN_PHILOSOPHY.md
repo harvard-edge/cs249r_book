@@ -3,29 +3,32 @@
 MLPerf EDU asks whether mature benchmark discipline can fit inside a machine
 learning systems course and remain useful for single-node research. It borrows
 the reproducibility and comparability posture of SPEC and MLPerf while keeping
-the execution boundary practical on a laptop. It is an independent preview,
-not an official MLCommons benchmark.
+the classroom entry path practical on a laptop and the extended boundary within
+one research node. It is an independent preview, not an official MLCommons
+benchmark.
 
 ## Curate Rather Than Invent
 
 The suite begins with an authoritative upstream workload. The upstream source
 must supply the task, model or reference implementation, dataset and split,
 evaluator, quality contract, and credible baseline. MLPerf EDU adds only the
-PyTorch execution adapter, laptop measurement protocol, quality gate,
-provenance, and report surface needed to run that contract locally.
+execution adapter, declared single-node measurement protocol, quality gate,
+provenance, and report surface needed to run that contract.
 
 A missing upstream component is not an invitation to create a convenient
 substitute. A bounded functional probe may establish integration plumbing, but
 it remains experimental and outside promotion until the authoritative quality
-contract executes unchanged. This policy is why MiniGo remains the
-reinforcement-learning identity instead of being replaced by a control task.
+contract executes unchanged in its declared environment. This policy is why
+MiniGo remains the reinforcement-learning identity instead of being replaced
+by a control task.
 
 ## Design Backward From Classroom Use
 
 A student should be able to install the project, inspect a workload, fetch its
-pinned assets, execute a functional `min` run, perform a canonical `max` run,
-and explain the resulting quality, timing, configuration, and provenance. An
-instructor should be able to preflight the same path and grade the resulting
+pinned assets, execute a functional `min` run, and perform a canonical `max`
+run when the declared environment is available. The student should be able to
+explain the resulting quality, timing, configuration, and provenance. An
+instructor should be able to preflight the selected path and grade its
 artifacts. A researcher should be able to repeat a controlled single-node
 experiment without changing workload identity.
 
@@ -53,8 +56,24 @@ batching, context length, scheduling, and other optimization choices are
 configurations recorded in reports. They do not create new workload IDs.
 
 The three profiles express execution intent without changing the workload.
-`min` is the fast functional path, `max` is the canonical classroom comparison,
-and `pro` is the extended single-node research envelope.
+`min` is the fast functional path, `max` is the authoritative quality path for
+the workload's declared environment, and `pro` is the extended single-node
+research envelope.
+
+## Separate Profile Intent From Hardware Envelope
+
+A profile defines the depth of the benchmark contract, not a universal machine
+size. Every `min` path must run on classroom hardware and must preserve enough of
+the workload identity to verify setup, execution, reporting, and provenance. A
+`max` path runs the unchanged authoritative quality contract. Most max paths fit
+the laptop envelope, while DLRM and MiniGo require their declared single-node
+research environments. The `pro` profile adds research controls without
+silently changing the task, data, evaluator, or quality target.
+
+This separation keeps all fourteen workloads teachable without pretending that
+a bounded classroom probe is a benchmark-quality result. It also keeps the
+research-only environment requirements visible before a student starts a long
+run.
 
 ## Gate Performance With Quality
 

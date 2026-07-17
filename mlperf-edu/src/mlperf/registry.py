@@ -39,6 +39,13 @@ QUALITY_TARGET_BASES = (
     "pedagogical_baseline",
 )
 
+QUALITY_TARGET_KINDS = (
+    "inherited_acceptance_gate",
+    "published_reference_reproduction",
+    "published_mean_with_tolerance",
+    "policy_derived_gate",
+)
+
 REFERENCE_PROTOCOL_FIELDS = (
     "profile",
     "backend",
@@ -138,6 +145,7 @@ class Workload:
     quality_value: Any
     quality_direction: str | None
     quality_target_basis: str | None
+    quality_target_kind: str | None
     quality_tolerance: Any
     quality_reference_runs: Any
     quality_acceptance_runs: Any
@@ -280,6 +288,7 @@ def normalize_registry_data(
                 quality_value=quality.get("target", quality.get("value")),
                 quality_direction=quality.get("direction"),
                 quality_target_basis=quality.get("target_basis"),
+                quality_target_kind=quality.get("target_kind"),
                 quality_tolerance=quality.get("tolerance"),
                 quality_reference_runs=quality.get("reference_runs"),
                 quality_acceptance_runs=quality.get("acceptance_runs"),
@@ -450,6 +459,18 @@ def validate_registry(workloads: dict[str, Workload]) -> None:
         raise ValueError(
             "quality_target.acceptance_runs must be 1 for the current quality "
             f"milestone: {invalid_quality_acceptance}"
+        )
+
+    invalid_quality_target_kinds = sorted(
+        workload.id
+        for workload in workloads.values()
+        if workload.quality_target_kind not in QUALITY_TARGET_KINDS
+    )
+    if invalid_quality_target_kinds:
+        raise ValueError(
+            "quality_target.target_kind must distinguish inherited gates, "
+            "published reproduction targets, published means with tolerance, "
+            f"and policy-derived gates: {invalid_quality_target_kinds}"
         )
 
     canonical_metadata_issues: list[str] = []

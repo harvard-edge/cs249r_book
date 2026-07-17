@@ -48,8 +48,9 @@ uv run mlperf verify "$OUTPUT_DIR/time-series-forecasting_min.provd.json"
 ```
 
 The run emits JSON, CSV, HTML, and provenance outputs. Use `max` for the
-canonical classroom contract and `pro` for repeated single-node research
-experiments under the same workload identity.
+authoritative quality contract when its declared environment is available. Use
+`pro` for controlled single-node research experiments under the same workload
+identity. Repetition is optional until the later stability phase.
 
 ## Causal Language Modeling
 

@@ -1332,6 +1332,8 @@ def enrich_report_for_display(
             quality.setdefault("direction", workload.quality_direction)
         if workload.quality_target_basis:
             quality.setdefault("target_basis", workload.quality_target_basis)
+        if workload.quality_target_kind:
+            quality.setdefault("target_kind", workload.quality_target_kind)
         if workload.quality_tolerance is not None:
             quality.setdefault("tolerance", workload.quality_tolerance)
         if workload.quality_reference_runs:
@@ -1679,6 +1681,7 @@ def checkpoint_provenance_for(
                 "source_quality_metric": source.quality_metric,
                 "source_quality_target": source.quality_value,
                 "source_quality_direction": source.quality_direction,
+                "source_target_kind": source.quality_target_kind,
                 "source_target_basis": source.quality_target_basis,
                 "source_reference_runs": source.quality_reference_runs,
             }
@@ -2809,6 +2812,7 @@ def write_csv_report(report: dict[str, Any], output: Path) -> None:
         "metric",
         "value",
         "target",
+        "target_kind",
         "target_basis",
         "reference_runs",
         "acceptance_runs",
@@ -2865,6 +2869,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
         value = metrics.get(metric_key) if metric_key else None
         target = quality.get("target")
         direction = str(quality.get("direction") or "")
+        target_kind = str(quality.get("target_kind") or "").replace("_", " ")
         quality_required = quality_required_value(quality, False) is True
         target_met = quality.get("target_met")
         if quality_required:
@@ -2894,6 +2899,11 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
             if raw_value
             else ""
         )
+        target_kind_html = (
+            f"<div class='metric-kind'>Target type: {escape(target_kind)}</div>"
+            if target_kind
+            else ""
+        )
         cards.append(
             "<article class='quality-card'>"
             f"<div class='quality-card-top'><div><div class='eyebrow'>{escape(workload_name)}</div>"
@@ -2902,6 +2912,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
             f"<div class='metric-value'>{escape(formatted_value)}</div>"
             f"{raw_html}"
             f"<div class='metric-target'>{escape(target_text)}</div>"
+            f"{target_kind_html}"
             "</article>"
         )
     if not cards:
@@ -3132,6 +3143,7 @@ def write_html_report(
         f"<td>{escape(str(row.get('metric', '')))}</td>"
         f"<td>{escape(format_cell(row.get('value')))}</td>"
         f"<td>{escape(format_cell(row.get('target')))}</td>"
+        f"<td>{escape(format_cell(row.get('target_kind')))}</td>"
         f"<td>{escape(format_cell(row.get('target_basis')))}</td>"
         f"<td>{escape(format_cell(row.get('reference_runs')))}</td>"
         f"<td>{escape(format_cell(row.get('acceptance_runs')))}</td>"
@@ -3188,6 +3200,7 @@ def write_html_report(
     .metric-value {{ margin-top: 26px; color: var(--accent); font-size: 38px; font-weight: 760; letter-spacing: -.04em; }}
     .metric-raw {{ margin-top: -5px; color: var(--muted); font-size: 11px; }}
     .metric-target {{ margin-top: 8px; color: var(--muted); font-weight: 600; }}
+    .metric-kind {{ margin-top: 3px; color: var(--muted); font-size: 12px; text-transform: capitalize; }}
     .detail-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }}
     .detail-card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }}
     .detail-card h3, .lineage-workload > h3 {{ margin-bottom: 12px; font-size: 15px; }}
@@ -3247,7 +3260,7 @@ def write_html_report(
   <section>
     <div class="table-scroll"><table>
       <thead>
-        <tr><th>Workload</th><th>Run As</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Basis</th><th>Reference Runs</th><th>Acceptance Runs</th><th>Reference Statistic</th><th>Reference Protocol</th><th>Quality Required</th><th>Met</th><th>Check</th><th>Duration</th><th>Throughput</th></tr>
+        <tr><th>Workload</th><th>Run As</th><th>Suite</th><th>Profile</th><th>Status</th><th>Metric</th><th>Value</th><th>Target</th><th>Target Type</th><th>Basis</th><th>Reference Runs</th><th>Acceptance Runs</th><th>Reference Statistic</th><th>Reference Protocol</th><th>Quality Required</th><th>Met</th><th>Check</th><th>Duration</th><th>Throughput</th></tr>
       </thead>
       <tbody>{body_rows}</tbody>
     </table></div>
@@ -3542,6 +3555,7 @@ def report_row(
         "metric": metric_key or metric_name or "",
         "value": metrics.get(metric_key) if metric_key else "",
         "target": quality.get("target", ""),
+        "target_kind": quality.get("target_kind", ""),
         "target_basis": quality.get("target_basis", ""),
         "reference_runs": quality.get("reference_runs", ""),
         "acceptance_runs": quality.get("acceptance_runs", ""),
@@ -3635,6 +3649,7 @@ def checkpoint_source_quality_summary(provenance: dict[str, Any]) -> str:
     metric = provenance.get("source_quality_metric")
     target = provenance.get("source_quality_target")
     direction = provenance.get("source_quality_direction")
+    kind = provenance.get("source_target_kind")
     basis = provenance.get("source_target_basis")
     if not metric:
         return ""
@@ -3643,6 +3658,8 @@ def checkpoint_source_quality_summary(provenance: dict[str, Any]) -> str:
         parts.append(str(direction))
     if target not in (None, ""):
         parts.append(str(target))
+    if kind:
+        parts.append(f"kind={kind}")
     if basis:
         parts.append(f"basis={basis}")
     return " ".join(parts)
@@ -5037,6 +5054,7 @@ def write_validation_workload_csv(report: dict[str, Any], output: Path) -> None:
         "metric",
         "value",
         "target",
+        "target_kind",
         "target_basis",
         "reference_runs",
         "acceptance_runs",
@@ -5752,6 +5770,7 @@ def workload_summary(workload: Workload) -> dict[str, Any]:
         "dataset": workload.dataset,
         "quality_metric": workload.quality_metric,
         "quality_value": workload.quality_value,
+        "quality_target_kind": workload.quality_target_kind,
         "quality_target_basis": workload.quality_target_basis,
         "functional_check": functional_check_summary(
             workload.raw.get("functional_check")

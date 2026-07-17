@@ -517,6 +517,10 @@ def test_report_enrichment_defaults_quality_required_from_public_contract():
     enrich_report_for_display(report, workloads)
     assert report["quality"]["quality_required"] is False
     assert report["quality"]["target_basis"] == "literature"
+    assert (
+        report["quality"]["target_kind"]
+        == "published_reference_reproduction"
+    )
     assert "reference_protocol" not in report["quality"]
     assert "gated" not in report["quality"]
 
@@ -1094,6 +1098,10 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert report["dataset_asset"]["public_release_status"] == "public-ok-fetch-only"
     assert "score-bearing candidate" in report["dataset_asset"]["public_result_use"]
     assert report["quality"]["target_basis"] == "literature"
+    assert (
+        report["quality"]["target_kind"]
+        == "published_reference_reproduction"
+    )
     assert "reference_protocol" not in report["quality"]
     assert report["quality"]["quality_required"] is False
     assert report["execution_lineage"]["training"]["status"] == (
@@ -1149,6 +1157,7 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert rows[0]["dataset_release_next_step"].startswith("Keep the pinned commit")
     assert rows[0]["metric"] == "loss"
     assert rows[0]["target"] == "1.4697"
+    assert rows[0]["target_kind"] == "published_reference_reproduction"
     assert rows[0]["target_basis"] == "literature"
     assert rows[0]["reference_runs"] == ""
     assert rows[0]["acceptance_runs"] == "1"
@@ -1176,6 +1185,7 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert "Inference" in html
     assert "Evaluation" in html
     assert "Functional probe" in html
+    assert "Target type: published reference reproduction" in html
     assert "loss" in html
     assert "literature" in html
     assert "fingerprint_hash" in html

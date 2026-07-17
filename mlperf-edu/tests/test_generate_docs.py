@@ -85,6 +85,43 @@ def test_generated_workload_pages_render_structured_provenance(generated_outputs
         assert "[open source](https://" in content
 
 
+def test_generated_pages_surface_portfolio_selection_reasoning(generated_outputs):
+    workload_pages = [
+        content
+        for path, content in generated_outputs.items()
+        if "benchmarks" in path.parts and path.name != "index.qmd"
+    ]
+    assert len(workload_pages) == 14
+    for content in workload_pages:
+        assert "## Why This Benchmark Is Included" in content
+        assert "**Classroom value**" in content
+        assert "**Systems behavior**" in content
+        assert "**Benchmark lineage**" in content
+        assert "**Quality metric**" in content
+        assert "**Alternative rejected**" in content
+        assert "**Target kind**" in content
+
+    index = generated_outputs[ROOT / "site" / "benchmarks" / "index.qmd"]
+    assert "## Portfolio Design" in index
+    assert "## Deliberate Exclusions" in index
+    assert "`end-to-end-rag`" in index
+    assert "`react-agent`" in index
+    assert "`distributed-training`" in index
+
+
+def test_selection_ledger_exactly_covers_registered_workloads():
+    workloads = load_registry(ROOT / "registry")
+    selection = generate_docs.load_selection_ledger(workloads)
+    entries = selection["workloads"]
+    selected = {
+        name
+        for name, entry in entries.items()
+        if entry["status"] in {"admitted", "candidate"}
+    }
+
+    assert selected == set(workloads)
+
+
 def test_generated_workload_pages_disclose_indexed_reference_evidence(
     generated_outputs,
 ):
