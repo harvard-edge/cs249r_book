@@ -31,7 +31,7 @@ REFERENCE_INDEX = REFERENCE_ROOT / "index.json"
 SNAPSHOT = HERE / "evidence_snapshot.json"
 OUTPUT = HERE / "generated_registry.tex"
 
-SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.5"
+SNAPSHOT_SCHEMA = "mlperf-edu-paper-evidence-snapshot/0.6"
 INDEX_SCHEMA = "mlperf-edu-provisional-reference-index/0.1"
 RESULT_SCHEMA = "mlperf-edu-provisional-reference-result/0.1"
 SOURCE_LOCK_PATH = "provisional_results/source_lock.json"
@@ -56,7 +56,11 @@ METRIC_LABELS = {
 GATE_METRIC_LABELS = {
     "accuracy": "accuracy",
     "cross_entropy_loss": "loss",
+    "fid": "FID",
+    "humaneval_plus_pass_at_1": "HumanEval+ pass@1",
     "mean_ndcg_at_10": "mean nDCG@10",
+    "non_live_ast_accuracy": "AST accuracy",
+    "professional_move_prediction": "move prediction",
     "roc_auc": "ROC AUC",
     "test_accuracy": "test acc.",
     "test_mse": "test MSE",
@@ -66,21 +70,30 @@ GATE_METRIC_LABELS = {
 WORKLOAD_PAPER_LABELS = {
     "anomaly-detection": "Anomaly detection",
     "causal-language-modeling": "Causal LM",
+    "code-generation": "Code generation",
+    "function-calling": "Function calling",
     "graph-node-classification": "Graph classification",
     "image-classification": "Image classification",
+    "image-generation": "Image generation",
     "information-retrieval": "Retrieval",
     "keyword-spotting": "KWS",
+    "recommendation": "Recommendation",
+    "reinforcement-learning": "Reinforcement learning",
     "text-classification": "Text classification",
     "time-series-forecasting": "Time-series forecasting",
     "visual-wake-words": "Visual wake words",
 }
 
 DATASET_PAPER_LABELS = {
+    "bfcl-v4-non-live-ast": "BFCL v4 non-live AST",
     "cifar10": "CIFAR-10",
+    "criteo-terabyte": "Criteo Terabyte",
     "ettm1": "ETTm1",
+    "humaneval-plus": "HumanEval+",
     "mlperf-tiny-anomaly-eval": "ToyCar (MLPerf Tiny)",
     "mlperf-tiny-kws-eval": "Keyword spotting (MLPerf Tiny)",
     "mlperf-tiny-vww-eval": "Visual wake words (MLPerf Tiny)",
+    "minigo-self-play": "MiniGo self-play",
     "nanobeir-reranking": "NanoBEIR",
     "ogbn-arxiv": "ogbn-arxiv",
     "prompt-suite-local": "Deterministic prompt suite",
@@ -89,11 +102,15 @@ DATASET_PAPER_LABELS = {
 }
 
 DATASET_SPLIT_LABELS = {
+    "bfcl-v4-non-live-ast": "official non-live AST split",
     "cifar10": "Tiny 200-example set",
+    "criteo-terabyte": "official day split",
     "ettm1": "official 12/4/4-month split",
+    "humaneval-plus": "official 164-task set",
     "mlperf-tiny-anomaly-eval": "Tiny 248-recording set",
     "mlperf-tiny-kws-eval": "Tiny 1,000-example set",
     "mlperf-tiny-vww-eval": "Tiny 1,000-example set",
+    "minigo-self-play": "self-play trajectories",
     "nanobeir-reranking": "three English subsets",
     "ogbn-arxiv": "official time split",
     "prompt-suite-local": "deterministic prompts",
@@ -102,6 +119,7 @@ DATASET_SPLIT_LABELS = {
 }
 
 DATASET_ACCESS_LABELS = {
+    "fetch-instructions-only": "guide",
     "needs-release-decision": "fetch; review",
     "public-ok-bundled": "bundled",
     "public-ok-fetch-only": "fetch",
@@ -240,7 +258,16 @@ def dataset_rows(workloads: dict[str, Workload]) -> str:
             entry.get("estimated_size_mb"),
             label=f"{identifier} estimated size",
         )
-        size_text = "bundled" if size_mb == 0.0 else f"{size_mb:.1f} MB"
+        if size_mb == 0.0:
+            size_text = (
+                "bundled" if release_status == "public-ok-bundled" else "generated"
+            )
+        elif size_mb >= 1_000_000:
+            size_text = f"{size_mb / 1_000_000:.1f} TB"
+        elif size_mb >= 1_000:
+            size_text = f"{size_mb / 1_000:.1f} GB"
+        else:
+            size_text = f"{size_mb:.1f} MB"
         rows.append(
             " & ".join(
                 (
@@ -495,6 +522,11 @@ def render_tex(
     index: dict[str, Any],
     records: list[dict[str, Any]],
 ) -> str:
+    promotion_workloads = {
+        workload.id
+        for workload in workloads.values()
+        if workload.raw.get("promotion_scope", True)
+    }
     roles = Counter(record["entry"]["result_role"] for record in records)
     evidence_classes = Counter(record["result"]["evidence_class"] for record in records)
     score_medians = [
@@ -519,6 +551,8 @@ def render_tex(
         rf"\newcommand{{\EvidenceSourceCommit}}{{{tex(index['source_git_sha'][:10])}}}",
         rf"\newcommand{{\RegistryRows}}{{{len(workloads)}}}",
         rf"\newcommand{{\RegistrySuites}}{{{len({w.suite for w in workloads.values()})}}}",
+        rf"\newcommand{{\EvidenceWorkloads}}{{{len(promotion_workloads)}}}",
+        rf"\newcommand{{\FunctionalSetupWorkloads}}{{{len(workloads) - len(promotion_workloads)}}}",
         rf"\newcommand{{\ScoreBearingCases}}{{{roles['score-bearing']}}}",
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
@@ -546,15 +580,21 @@ def render_tex(
 def main() -> int:
     workloads = load_registry(REGISTRY)
     index, records = load_evidence()
+    promotion_workloads = {
+        workload.id
+        for workload in workloads.values()
+        if workload.raw.get("promotion_scope", True)
+    }
     require(
-        set(workloads) == {record["entry"]["workload"] for record in records},
-        "paper workload rows differ from the evidence closure",
+        promotion_workloads == {record["entry"]["workload"] for record in records},
+        "paper promotion-scope workloads differ from the evidence closure",
     )
     snapshot = {
         "schema": SNAPSHOT_SCHEMA,
         "snapshot_date": snapshot_date(records),
         "source_git_sha": index["source_git_sha"],
         "workload_count": len(workloads),
+        "evidence_workload_count": len(promotion_workloads),
         "case_count": len(records),
         "cases": [record["entry"] for record in records],
         "publication_boundary": (

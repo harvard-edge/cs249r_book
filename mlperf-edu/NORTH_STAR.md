@@ -61,9 +61,11 @@ distributed training or datacenter serving.
 These profiles describe execution scale and research intent. They do not
 replace result roles or quality gates.
 
-## v0.1 Portfolio Test
+## Spiral Portfolio Test
 
-An admitted workload must answer yes to every question:
+A workload may enter the functional spiral after questions 1, 2, 5, 6, and 7
+are answered. It may enter quality conformance and the promotion evidence scope
+only after every question is answered.
 
 1. Is the task significant and established?
 2. Is the upstream model or implementation authoritative?
@@ -75,10 +77,24 @@ An admitted workload must answer yes to every question:
 8. Can the unchanged canonical `max` path pass its quality or functional gate
    on laptop-class hardware?
 
-The nine admitted workloads satisfy this test. The twelve evidence cases cover
-their canonical `max` paths plus three causal inference phases. Six cases also
-satisfy the five-run repeatability gate. The other six remain provisional and
-do not make a repeatability or promoted-baseline claim.
+The registered portfolio contains fourteen workloads. All fourteen have a
+functional public CLI path with reports and provenance. Nine workloads satisfy
+the current quality-contract boundary, and twelve evidence cases cover their
+canonical `max` paths plus three causal inference phases. Six cases satisfy the
+five-run repeatability gate; the other six remain provisional. Code generation,
+function calling, recommendation, image generation, and reinforcement learning
+remain functional-stage candidates without quality or repeatability claims.
+
+## Delivery Spirals
+
+1. Functional integration establishes execution, reporting, and provenance.
+2. Quality conformance reproduces the authoritative model, data, evaluator,
+   and published target.
+3. Stabilization establishes fresh-process timing repeatability.
+4. Promotion imports one complete, source-locked evidence set after review.
+
+Each stage is monotonic. A later stage adds evidence; it does not relabel an
+earlier probe as if it had already satisfied the stronger contract.
 
 ## Success Criteria
 

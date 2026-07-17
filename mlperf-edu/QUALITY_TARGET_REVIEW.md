@@ -2,9 +2,10 @@
 
 ## Review Boundary
 
-The v0.1 portfolio contains nine workloads and twelve evidence cases. Every
-target below comes from an authoritative upstream result or rule. None was
-invented to make a local implementation pass.
+The v0.1 portfolio contains fourteen workloads. The current evidence scope
+contains nine workloads and twelve evidence cases. Every target below comes
+from an authoritative upstream result or rule. None was invented to make a
+local implementation pass.
 
 The draft evidence campaign is bound to clean source revision
 `163d42ee3df54ab122543469ccf2b6b3bd119455`. Exact run counts, values, evidence
@@ -26,6 +27,20 @@ acceptance logic rather than duplicating mutable result tables.
 | `information-retrieval` | Pinned MiniLM cross-encoder and the documented three-dataset NanoBEIR subset | mean nDCG@10 equal to 0.60716840988382 within the registry tolerance | Sentence Transformers publishes the exact evaluator example and score. |
 | `graph-node-classification` | Official OGB GCN recipe and `ogbn-arxiv` split | test accuracy within 0.0029 of 0.7174 | The correct OGB GCN reference is 71.74% with a published 0.29-point standard deviation. The previously quoted 72.51% belongs to a different leaderboard section and is not used. |
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at most 0.29292929292929293 | PatchTST publishes the 0.290 result. The gate divides that lower-is-better reference by the MLPerf 0.99 quality fraction, an explicit direction-aware MLPerf EDU policy inference. |
+
+## Functional-Stage Quality Backlog
+
+These five workloads run bounded functional probes but remain outside the
+promotion importer. Their published targets are retained as future conformance
+gates rather than weakened to match local observations.
+
+| **Workload** | **Authoritative Target** | **Current Boundary** |
+|:---|:---|:---|
+| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | Autoregressive CLI integration works; complete EvalPlus reproduction remains pending. |
+| `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | Grammar-constrained generation and AST-evaluator integration works; the complete local audit reached 0.7852. |
+| `recommendation` | Meta DLRM Criteo Terabyte ROC AUC of 0.8025 | Dense-sparse execution works; the unchanged Criteo contract remains outside the practical laptop boundary. |
+| `image-generation` | NVIDIA EDM CIFAR-10 FID of 1.79 | Iterative denoising works; three official 50,000-image trials reached a best FID of 1.8015540749984766. |
+| `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | Policy-value self-play and a training step work; the unchanged self-play volume remains impractical locally. |
 
 The MLPerf policy input is pinned to inference-policies commit
 `c547732b539cb3a14cc5680597714c8c1df4cad0`. The referenced
@@ -84,12 +99,11 @@ Domain reviewers should confirm:
 A source, preprocessing, evaluator, model, optimizer, schedule, or target
 change invalidates the relevant evidence and requires a fresh five-run packet.
 
-## Deferred and Rejected Coverage
+## Functional and Rejected Coverage
 
-Reinforcement learning remains deferred to a future MiniGo contract.
-Recommendation, diffusion, function calling, retrieval-augmented generation,
-and code-generation proposals are rejected or deferred when the authoritative
-contract cannot be reproduced unchanged on a laptop or would require
-project-created tasks, judges, datasets, or quality targets.
+The five functional-stage candidates remain experimental until their
+authoritative quality contracts pass. End-to-end RAG, ReAct agents, and
+distributed training remain rejected because they require unstable project
+choices or fall outside the single-node boundary.
 
 The selection ledger is the authoritative record of those decisions.

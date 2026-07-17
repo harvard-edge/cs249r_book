@@ -276,7 +276,7 @@ def test_list_discovery_subjects():
         row["profile"]: row["workloads"]
         for row in json.loads(profiles_json.stdout)["profiles"]
     }
-    assert profile_counts == {"min": 4, "max": 9, "pro": 4}
+    assert profile_counts == {"min": 4, "max": 14, "pro": 9}
 
 
 def test_info_profile_shows_default_selection():
@@ -331,16 +331,11 @@ def test_explicit_collection_overrides_profile_default():
     )
 
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "Selected 9 workload(s) for profile min (collection:all)." in result.stdout
-    assert "image-classification" in result.stdout
-    assert "keyword-spotting" in result.stdout
-    assert "anomaly-detection" in result.stdout
-    assert "visual-wake-words" in result.stdout
-    assert "causal-language-modeling" in result.stdout
-    assert "text-classification" in result.stdout
-    assert "information-retrieval" in result.stdout
-    assert "graph-node-classification" in result.stdout
-    assert "time-series-forecasting" in result.stdout
+    assert "Selected 14 workload(s) for profile min (collection:all)." in result.stdout
+    assert (
+        "Suite coverage: graph=1, language=5, recommendation=1, reinforcement=1, "
+        "timeseries=1, tiny=3, vision=2"
+    ) in result.stdout
 
 
 def test_report_enrichment_defaults_quality_required_from_public_contract():

@@ -9,12 +9,18 @@ acceptance.
 ## Eligible Workloads and Cases
 
 Only registry-defined cases in a complete `reference_results/index.json` can
-support a promoted public reference claim. The v0.1 closure contains nine
-workloads and twelve evidence cases. The current
+support a promoted public reference claim. The registered portfolio contains
+fourteen workloads, while the current promotion scope contains nine workloads
+and twelve evidence cases. The current
 `provisional_results/index.json` contains six five-run verified project records
 and six provisional records, but it is a draft-review surface and not a public
 baseline index. A local run outside the closure can be useful for teaching or
 research, but it is not a promoted reference result.
+
+Code generation, function calling, recommendation, image generation, and
+reinforcement learning are functional-stage integrations. Their current
+bounded probes set `promotion_scope` to false, do not execute the authoritative
+quality contract, and cannot enter `reference_results/`.
 
 ## Result Roles
 

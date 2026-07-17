@@ -7,11 +7,14 @@ not an MLCommons specification and does not create an official MLPerf result
 category. The normative words MUST, MUST NOT, SHOULD, SHOULD NOT, and MAY
 describe conformance within this repository.
 
-The portfolio contains nine workloads and twelve evidence cases. The current
-draft measurements are content-addressed in `provisional_results/index.json`
-and rendered into the website and paper from that source. Six records have
-complete five-run project evidence; six are explicitly provisional. No
-provisional record is a promoted baseline or an MLCommons-verified result.
+The registered portfolio contains fourteen workloads. The current evidence
+scope covers nine workloads and twelve evidence cases. Those draft
+measurements are content-addressed in `provisional_results/index.json` and
+rendered into the website and paper from that source. Six records have complete
+five-run project evidence; six are explicitly provisional. The five remaining
+workloads are functional-stage integrations and have no draft quality result.
+No provisional or functional-stage record is a promoted baseline or an
+MLCommons-verified result.
 
 ## Purpose and Scope
 
@@ -65,11 +68,17 @@ ledger with explicit reasons.
 | `information-retrieval` | language | Sentence Transformers | CrossEncoder NanoBEIR reranking | pair tokenization, encoder scoring, and ranking |
 | `graph-node-classification` | graph | Open Graph Benchmark | official GCN training on `ogbn-arxiv` | sparse gather, scatter, and irregular memory access |
 | `time-series-forecasting` | timeseries | PatchTST | official ETTm1 training and evaluation | long-context attention and patch-based sequence processing |
+| `code-generation` | language | Qwen and EvalPlus | bounded autoregressive functional probe; full HumanEval+ conformance pending | variable-length autoregressive decode and sandboxed evaluation |
+| `function-calling` | language | BFCL and Qwen | bounded grammar-constrained generation and AST-evaluator probe; full BFCL conformance pending | schema-heavy prefill and structured decode |
+| `recommendation` | recommendation | Meta DLRM | bounded dense-sparse functional probe; full Criteo conformance pending | embedding lookup and dense-sparse interaction |
+| `image-generation` | vision | NVIDIA EDM | bounded iterative-denoising probe; full 50,000-image FID conformance pending | repeated denoiser execution and scheduler overhead |
+| `reinforcement-learning` | reinforcement | MLPerf Training MiniGo | bounded policy-value self-play and training probe; full MiniGo conformance pending | search-coupled inference and dynamic training data |
 
-MiniGo is the canonical historical MLPerf reinforcement-learning reference.
-It is deferred because no authoritative laptop-scale configuration preserves
-its self-play and checkpoint-based quality contract. A small control task MUST
-NOT be substituted under the reinforcement-learning label.
+The five functional-stage probes MUST retain `experimental` status, MUST set
+`promotion_scope` to false, and MUST state that the authoritative quality
+contract was not executed. They MUST NOT be treated as canonical `max` results.
+MiniGo remains the reinforcement-learning identity; a small control task MUST
+NOT be substituted under that label.
 
 ## Identity and Taxonomy
 
@@ -111,7 +120,7 @@ them. They MUST NOT appear as workload IDs.
 | **Profile** | **Required Use** | **Data and Quality Boundary** |
 |:---|:---|:---|
 | `min` | Fast setup, teaching, and CI check | MAY use a deterministic reduced input; MUST NOT be promoted. |
-| `max` | Canonical classroom and comparison run | MUST use the admitted real-data contract and quality gate. |
+| `max` | Canonical classroom and comparison run | MUST use the real-data contract before promotion; a functional-stage `max` probe MUST remain explicitly nonconformant and nonpromotable. |
 | `pro` | Extended single-node research study | MAY expose controlled configurations while retaining workload identity. |
 
 The `pro` profile is not a larger workload collection. It is the research
@@ -165,8 +174,11 @@ attempt MUST be rejected and rerun in full.
 
 ## Evidence Closure
 
-The twelve evidence cases are one canonical `max` case for every workload plus
-full, prefill, and decode inference for `causal-language-modeling`.
+The current twelve evidence cases are one canonical `max` case for each of the
+nine workloads in `promotion_scope` plus full, prefill, and decode inference
+for `causal-language-modeling`. The five functional-stage workloads are
+excluded until quality conformance replaces their bounded probes. The eventual
+fourteen-workload closure contains seventeen cases.
 
 Each promoted case summary MUST contain:
 

@@ -42,10 +42,12 @@ uv run python tools/export_flat_registry.py --check
 uv run python tools/build_wheel.py
 ```
 
-The review wheel must include the packaged registry, dataset catalog, and
-twelve-case draft-result index. A future promoted wheel will additionally
-include the strict promoted index. Inspect and install the wheel in a fresh
-environment outside the checkout.
+The review wheel must include the fourteen-workload packaged registry, dataset
+catalog, and twelve-case draft-result index for the current nine-workload
+evidence scope. The five functional-stage workloads do not have draft quality
+results. A future promoted wheel will additionally include the strict promoted
+index. Inspect and install the wheel in a fresh environment outside the
+checkout.
 
 ```bash
 wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
@@ -142,7 +144,7 @@ uv run python tools/build_wheel.py
 ```
 
 The strict audit is a policy gate. The review draft intentionally returns
-status 1 because all nine workloads remain experimental; validation should
+status 1 because all fourteen workloads remain experimental; validation should
 record that expected block rather than relabeling draft evidence as public.
 
 Actual `max` and `release` validation remain separate evidence-bearing gates.

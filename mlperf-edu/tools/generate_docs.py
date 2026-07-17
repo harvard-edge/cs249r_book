@@ -334,6 +334,31 @@ def section_at_a_glance(w: Workload) -> str:
     return f"## At a Glance\n\n{body}"
 
 
+def section_spiral_status(w: Workload) -> str:
+    spiral = w.raw.get("spiral")
+    if not isinstance(spiral, dict) or not spiral:
+        return ""
+    body = mapping_table(
+        {
+            "stage": spiral.get("stage"),
+            "functional_ready": spiral.get("functional_ready"),
+            "quality_conformant": spiral.get("quality_conformant"),
+            "repeatability_verified": spiral.get("repeatability_verified"),
+            "promotion_ready": spiral.get("promotion_ready"),
+            "next_gate": spiral.get("next_gate"),
+        }
+    )
+    body += (
+        "\n::: {.callout-caution}\n"
+        "**Functional-stage boundary.** The current `min` and `max` runners are "
+        "bounded integration probes. They validate execution, reporting, and "
+        "provenance, but they do not run the complete authoritative quality contract "
+        "and must not be used as benchmark baselines.\n"
+        ":::"
+    )
+    return f"## Functional Spiral Status\n\n{body}\n"
+
+
 def section_provenance(w: Workload) -> str:
     provenance = w.raw.get("provenance")
     if not isinstance(provenance, dict) or not provenance:
@@ -728,6 +753,7 @@ def render_workload_body(
 ) -> str:
     sections = [
         section_at_a_glance(w),
+        section_spiral_status(w),
         section_provenance(w),
         section_execution_boundary(w),
         section_how_to_run(w),
@@ -747,6 +773,12 @@ def render_workload_body(
 
 
 def public_line(w: Workload) -> str:
+    if w.raw.get("promotion_scope", True) is not True:
+        return (
+            f"{badge(w.public_status)}\n\n> **Functional-stage integration.** "
+            f"{esc(w.public_rationale)} No draft reference result or public baseline "
+            "is claimed for this workload.\n"
+        )
     return (
         f"{badge(w.public_status)}\n\n> **Source-locked promotion rationale.** "
         f"{esc(w.public_rationale)} Current draft evidence is listed below.\n"

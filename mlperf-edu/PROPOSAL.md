@@ -43,7 +43,8 @@ quality-gated timing, portable provenance, and fail-closed public claims.
 
 ## Portfolio
 
-The proposed v0.1 portfolio contains nine workloads and twelve evidence cases.
+The proposed v0.1 portfolio contains fourteen workloads. The current evidence
+scope covers nine workloads and twelve evidence cases.
 
 | **Workload** | **Reason for Inclusion** | **Distinct Systems Value** |
 |:---|:---|:---|
@@ -56,11 +57,29 @@ The proposed v0.1 portfolio contains nine workloads and twelve evidence cases.
 | `information-retrieval` | Reproduces the documented CrossEncoder NanoBEIR example. | Query-document pair scoring and ranking. |
 | `graph-node-classification` | Uses the official OGB GCN recipe and evaluator. | Sparse gather, scatter, and irregular memory access. |
 | `time-series-forecasting` | Uses the official PatchTST ETTm1 recipe and split. | Patch extraction, long-context attention, and multivariate sequence training. |
+| `code-generation` | Preserves Qwen2.5-Coder and HumanEval+ while quality reproduction remains pending. | Variable-length autoregressive decode and sandboxed correctness evaluation. |
+| `function-calling` | Preserves Qwen3-1.7B and BFCL V4 Non-Live AST while quality reproduction remains pending. | Schema-heavy prefill and short structured decode. |
+| `recommendation` | Preserves Meta DLRM and the Criteo contract while a practical quality boundary remains pending. | Sparse embeddings, memory capacity, and dense-sparse interaction. |
+| `image-generation` | Preserves NVIDIA EDM and its official 50,000-image FID contract while exact reproduction remains pending. | Iterative denoising, scheduler overhead, and repeated UNet execution. |
+| `reinforcement-learning` | Preserves historical MLPerf MiniGo while the full self-play contract remains impractical locally. | Search-coupled inference, dynamic data generation, and iterative training. |
 
-One canonical `max` case is required for every workload. The causal workload
-adds full, prefill, and decode inference in addition to training, producing
-twelve evidence cases in total. Optimization choices are configurations, not
-additional workloads.
+The first spiral makes every workload runnable through one CLI with reports and
+provenance. The current quality-evidence spiral retains twelve cases for the
+original nine workloads. Once all fourteen workloads pass their authoritative
+quality contracts, one canonical `max` case per workload plus the three extra
+causal inference phases will produce seventeen evidence cases. Optimization
+choices are configurations, not additional workloads.
+
+## Spiral Delivery Model
+
+1. Functional integration proves that the execution path, report, and
+   provenance work without making a quality or timing claim.
+2. Quality conformance binds the authoritative model, dataset, evaluator, and
+   published target.
+3. Stabilization establishes fresh-process repeatability and controls runtime
+   variance.
+4. Promotion imports one complete source-locked evidence set and enables a
+   public baseline only after review.
 
 ## Profiles
 
@@ -104,19 +123,20 @@ The suite can support controlled research on:
 Distributed scaling, datacenter serving claims, agent capability evaluation,
 and large-model system claims remain outside v0.1.
 
-## Deferred Reinforcement Learning
+## Functional-Stage Reinforcement Learning
 
 MiniGo is the historically correct MLPerf reinforcement-learning workload.
-The project defers it because its self-play and checkpoint quality contract is
-not preserved by any authoritative laptop-scale configuration we could adopt
-unchanged. A control-environment substitute would create a different
-benchmark and weaken the admission rule.
+The public CLI now exercises a bounded policy-value self-play and training
+path, but the workload remains outside promotion because no authoritative
+laptop-scale configuration preserves its complete self-play and checkpoint
+quality contract unchanged. A control-environment substitute would create a
+different benchmark and weaken the admission rule.
 
 ## Requested Review
 
 The first review should focus on five questions:
 
-1. Does the nine-workload portfolio cover enough distinct single-node behavior for a v0.1 classroom suite?
+1. Does the fourteen-workload portfolio, including its nine-workload promotion scope and five functional-stage additions, cover enough distinct single-node behavior for a v0.1 classroom suite?
 2. Are the inherited quality targets and laptop execution boundaries defensible?
 3. Does the mode, phase, configuration, and profile taxonomy match mature benchmark practice?
 4. Are five-run repeatability, provenance, and disclosure rules sufficient for initial comparison?

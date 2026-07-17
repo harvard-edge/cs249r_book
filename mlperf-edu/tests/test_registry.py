@@ -35,7 +35,7 @@ def test_profiles_are_min_max_pro():
 
 def test_registry_loads_current_workloads():
     workloads = load_registry()
-    assert len(workloads) == 9
+    assert len(workloads) == 14
     assert STARTER_WORKLOADS.issubset(workloads)
     assert STANDARD_WORKLOADS.issubset(workloads)
     assert RESEARCH_WORKLOADS.issubset(workloads)
@@ -97,7 +97,7 @@ def test_all_workloads_declare_public_contract_metadata():
     counts = Counter(workload.public_status for workload in workloads.values())
 
     assert set(counts).issubset(PUBLIC_STATUSES)
-    assert counts == {"experimental": 9}
+    assert counts == {"experimental": 14}
     assert all(workload.public_rationale for workload in workloads.values())
 
 
@@ -395,6 +395,31 @@ def test_canonical_workloads_declare_exact_runners():
             "mlperf.runners.timeseries:run_time_series_forecasting_min",
             "mlperf.runners.timeseries:run_time_series_forecasting_max",
         ),
+        "code-generation": (
+            "language",
+            "mlperf.runners.functional_setup:run_code_generation_min",
+            "mlperf.runners.functional_setup:run_code_generation_max",
+        ),
+        "function-calling": (
+            "language",
+            "mlperf.runners.functional_setup:run_function_calling_min",
+            "mlperf.runners.functional_setup:run_function_calling_max",
+        ),
+        "recommendation": (
+            "recommendation",
+            "mlperf.runners.functional_setup:run_recommendation_min",
+            "mlperf.runners.functional_setup:run_recommendation_max",
+        ),
+        "image-generation": (
+            "vision",
+            "mlperf.runners.functional_setup:run_image_generation_min",
+            "mlperf.runners.functional_setup:run_image_generation_max",
+        ),
+        "reinforcement-learning": (
+            "reinforcement",
+            "mlperf.runners.functional_setup:run_reinforcement_learning_min",
+            "mlperf.runners.functional_setup:run_reinforcement_learning_max",
+        ),
     }
 
     assert set(workloads) == set(expected)
@@ -402,6 +427,32 @@ def test_canonical_workloads_declare_exact_runners():
         workload = workloads[workload_id]
         assert workload.suite == suite
         assert workload.raw["runner"] == {"min": min_runner, "max": max_runner}
+
+
+def test_functional_spiral_workloads_fail_closed_for_promotion():
+    workloads = load_registry()
+    functional = {
+        "code-generation",
+        "function-calling",
+        "recommendation",
+        "image-generation",
+        "reinforcement-learning",
+    }
+
+    for workload_id in functional:
+        workload = workloads[workload_id]
+        assert workload.public_status == "experimental"
+        assert workload.raw["promotion_scope"] is False
+        spiral = workload.raw["spiral"]
+        assert spiral["stage"] == "functional"
+        assert spiral["functional_ready"] is True
+        assert spiral["quality_conformant"] is False
+        assert spiral["repeatability_verified"] is False
+        assert spiral["promotion_ready"] is False
+        assert spiral["next_gate"]
+        assert workload.raw["canonical_max_contract"]["execution_status"] == (
+            "pending-quality-conformance"
+        )
 
 
 def test_retrieval_declares_one_complete_evaluation_protocol():

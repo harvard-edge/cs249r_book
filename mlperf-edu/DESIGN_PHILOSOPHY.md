@@ -15,9 +15,10 @@ PyTorch execution adapter, laptop measurement protocol, quality gate,
 provenance, and report surface needed to run that contract locally.
 
 A missing upstream component is not an invitation to create a convenient
-substitute. The task is deferred or rejected. This policy is why v0.1 contains
-nine workloads rather than a large coverage matrix, and why MiniGo is the RL
-reference without becoming a v0.1 workload.
+substitute. A bounded functional probe may establish integration plumbing, but
+it remains experimental and outside promotion until the authoritative quality
+contract executes unchanged. This policy is why MiniGo remains the
+reinforcement-learning identity instead of being replaced by a control task.
 
 ## Design Backward From Classroom Use
 
@@ -28,12 +29,21 @@ instructor should be able to preflight the same path and grade the resulting
 artifacts. A researcher should be able to repeat a controlled single-node
 experiment without changing workload identity.
 
-The nine-workload portfolio deliberately spans dense and depthwise vision
-convolution, compact audio convolution, autoencoder anomaly scoring,
-autoregressive Transformer training and inference, encoder classification,
-cross-encoder reranking, sparse graph message passing, and long-horizon
-forecasting. Each workload earns its place through distinct learning value and
-distinct systems behavior.
+The fourteen-workload portfolio spans dense and depthwise vision convolution,
+compact audio convolution, autoencoder anomaly scoring, autoregressive
+Transformer training and inference, encoder classification, cross-encoder
+reranking, structured decoding, sparse embeddings, iterative denoising, sparse
+graph message passing, long-horizon forecasting, and self-play learning. Each
+workload earns its place through distinct learning value and systems behavior.
+
+## Build in Evidence Spirals
+
+Functional integration comes first. It proves that selection, execution,
+reporting, and provenance work while explicitly withholding quality and timing
+claims. Quality conformance then replaces the bounded probe with the pinned
+model, complete dataset, authoritative evaluator, and published target.
+Stabilization follows only after correctness is settled. Promotion is the last
+step and requires one complete source-locked evidence set.
 
 ## Keep Identity Stable
 
@@ -110,9 +120,8 @@ of promising a universal duration.
 
 A green run cannot settle dataset rights, grant MLCommons endorsement, or
 authenticate a result producer. Technical release checks and external review
-decisions therefore remain separate. The project is ready for design and
-implementation review when all nine workloads and twelve evidence cases
-execute, every gate result is verified, provisional measurements are
-distinguished from five-run evidence, and every open external decision is
-stated plainly. Promotion remains a separate five-run requirement for every
-case.
+decisions therefore remain separate. The project is ready for functional
+design review when all fourteen workloads execute through the public CLI and
+their current evidence stage is explicit. The existing twelve evidence cases
+across nine workloads remain the separate quality and repeatability review
+surface. Promotion remains a five-run requirement for every eventual case.

@@ -26,7 +26,7 @@ def test_dataset_catalog_exactly_covers_registry_datasets():
 
     generate_docs.validate_dataset_catalog(catalog, usage)
     assert set(catalog) == set(usage)
-    assert len(catalog) == 10
+    assert len(catalog) == 14
 
 
 def test_generated_stats_report_exact_candidate_status_counts(generated_outputs):
@@ -34,9 +34,9 @@ def test_generated_stats_report_exact_candidate_status_counts(generated_outputs)
     counts = Counter(workload.public_status for workload in workloads.values())
     stats = generated_outputs[ROOT / "site" / "_stats.qmd"]
 
-    assert counts == {"experimental": 9}
-    assert "**9 workloads**" in stats
-    assert "9 experimental" in stats
+    assert counts == {"experimental": 14}
+    assert "**14 workloads**" in stats
+    assert "14 experimental" in stats
 
 
 def test_tinyshakespeare_catalog_uses_pinned_upstream_corpus():
@@ -95,7 +95,8 @@ def test_generated_workload_pages_disclose_indexed_reference_evidence(
     ]
 
     assert len(generate_docs.load_provisional_reference_results()) == 9
-    assert all("## Draft Reference Results" in page for page in workload_pages)
+    assert sum("## Draft Reference Results" in page for page in workload_pages) == 9
+    assert sum("## Draft Reference Results" not in page for page in workload_pages) == 5
     combined = "\n".join(workload_pages)
     assert "Five-run verified" in combined
     assert "One-run provisional" in combined
@@ -103,6 +104,20 @@ def test_generated_workload_pages_disclose_indexed_reference_evidence(
     assert "None are MLCommons-verified results" in combined
     assert "do not establish repeatability" in combined
     assert "CV 5.19%; **diagnostic fail**" in combined
+
+
+def test_functional_spiral_pages_disclose_probe_boundary(generated_outputs):
+    workload_pages = [
+        content
+        for path, content in generated_outputs.items()
+        if "benchmarks" in path.parts and path.name != "index.qmd"
+    ]
+
+    assert sum("## Functional Spiral Status" in page for page in workload_pages) == 5
+    combined = "\n".join(workload_pages)
+    assert "bounded integration probes" in combined
+    assert "must not be used as benchmark baselines" in combined
+    assert "No draft reference result or public baseline is claimed" in combined
 
 
 def test_canonical_pages_do_not_expose_retired_synthetic_max_boundaries():

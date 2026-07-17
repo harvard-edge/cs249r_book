@@ -262,6 +262,13 @@ def test_expected_case_closure_has_nine_workloads_and_twelve_cases():
 
     assert len(cases) == 12
     assert len({case.workload.id for case in cases.values()}) == 9
+    assert {
+        "code-generation",
+        "function-calling",
+        "recommendation",
+        "image-generation",
+        "reinforcement-learning",
+    }.isdisjoint(case.workload.id for case in cases.values())
     assert cases["causal-language-modeling__max__training"].result_role == (
         "score-bearing"
     )

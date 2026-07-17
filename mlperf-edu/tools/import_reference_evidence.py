@@ -123,6 +123,8 @@ def expected_cases() -> dict[str, EvidenceCase]:
     """Derive the complete score and phase-level evidence closure."""
     cases: dict[str, EvidenceCase] = {}
     for workload in load_registry(ROOT / "registry").values():
+        if workload.raw.get("promotion_scope", True) is not True:
+            continue
         canonical = workload.raw.get("canonical_max_contract") or {}
         mode = canonical.get("mode")
         role = canonical.get("result_role")

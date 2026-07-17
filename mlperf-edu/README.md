@@ -6,11 +6,14 @@ adapts the reproducibility, verification, disclosure, and comparability
 discipline of mature benchmark suites to classroom-scale PyTorch workloads.
 It is not an official MLCommons benchmark and is not endorsed by MLCommons.
 
-The v0.1 portfolio contains nine workloads and twelve evidence cases. Every
-score-bearing definition inherits an established upstream model, dataset
-split, evaluator, and quality reference. MLPerf EDU contributes the thin
-PyTorch adapter, execution harness, measurement controls, provenance, and
-reports needed to run those definitions on laptop-class hardware.
+The v0.1 portfolio contains fourteen workloads. The current quality-evidence
+scope covers nine workloads and twelve evidence cases. Five additional
+workloads are in the functional spiral, where the public CLI validates bounded
+execution, reporting, and provenance without claiming the authoritative
+quality result. MLPerf EDU contributes the thin PyTorch adapter, execution
+harness, measurement controls, provenance, and reports needed to move each
+definition through functional, quality-conformant, repeatability-verified, and
+promotion-ready stages.
 
 ## Install From the Checkout
 
@@ -45,13 +48,17 @@ uv run mlperf run --workload image-classification --profile max \
 | `information-retrieval` | Sentence Transformers CrossEncoder NanoBEIR example | inference | exact documented mean nDCG@10 |
 | `graph-node-classification` | Official OGB GCN recipe on `ogbn-arxiv` | training | test accuracy within the published GCN reference tolerance |
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | test MSE at most 0.29292929292929293, the direction-aware 99%-of-reference gate |
+| `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; functional integration only today |
+| `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; functional integration only today |
+| `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; functional integration only today |
+| `image-generation` | NVIDIA EDM and the CIFAR-10 50,000-image FID protocol | inference | published 1.79 FID; functional integration only today |
+| `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; functional integration only today |
 
 The [selection ledger](registry/selection-ledger.yaml) records the authority,
-rationale, laptop evidence, and rejection or deferral reason for every audited
-task. Reinforcement learning remains deferred. MiniGo is the historically
-correct MLPerf reference, but no authoritative laptop-scale configuration
-preserves its self-play and checkpoint quality contract. CartPole and Pendulum
-are not substitutes.
+rationale, laptop evidence, and quality-conformance blocker for every audited
+task. The five functional-stage candidates preserve their authoritative task
+identity and published target. Their bounded probes are integration evidence,
+not substitutes or benchmark results.
 
 ## Workload Identity
 
@@ -74,7 +81,7 @@ uv run mlperf run --workload causal-language-modeling --profile max \
 | **Profile** | **Purpose** | **Result Boundary** |
 |:---|:---|:---|
 | `min` | Fast installation, teaching, and CI check | Functional only; never a public score or performance baseline |
-| `max` | Canonical classroom and comparison scale | Uses the admitted real-data contract and applicable quality gate |
+| `max` | Canonical classroom and comparison scale | Uses the real-data quality contract after conformance; functional-stage candidates remain bounded, nonpromotable probes |
 | `pro` | Extended single-node research envelope | Changes controlled configurations without changing workload identity |
 
 The research envelope supports processors, memory systems, runtimes,
@@ -83,13 +90,17 @@ outside v0.1.
 
 ## Evidence and Provenance
 
-The twelve evidence cases consist of one canonical `max` case for each of the
-nine workloads plus full, prefill, and decode inference for
+The current twelve evidence cases consist of one canonical `max` case for each
+of the nine quality-evidence workloads plus full, prefill, and decode inference for
 `causal-language-modeling`. The draft snapshot in
 `provisional_results/index.json` contains six five-run verified records and six
 explicitly provisional records. Provisional records establish execution and
 gate passage only; they do not establish repeatability or qualify as promoted
 baselines.
+
+The five functional-stage workloads are outside this importer by construction.
+Once each passes its authoritative quality contract, the full fourteen-workload
+portfolio will contain seventeen evidence cases.
 
 Promotion still requires five fresh processes at the canonical seed. Every run
 must pass its quality or functional gate, and the primary timing coefficient

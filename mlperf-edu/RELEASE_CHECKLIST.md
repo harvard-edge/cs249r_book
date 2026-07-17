@@ -2,8 +2,8 @@
 
 ## Release Definition
 
-The review candidate contains nine workloads and twelve evidence cases. Evidence
-is bound to clean source revision
+The review candidate registers fourteen workloads. The current quality-evidence
+scope covers nine workloads and twelve evidence cases. Evidence is bound to clean source revision
 `163d42ee3df54ab122543469ccf2b6b3bd119455`. A checked box requires direct
 command output or a committed content-addressed artifact. Intent, partial runs,
 and narrow smoke checks do not prove a broad release claim.
@@ -19,11 +19,21 @@ and narrow smoke checks do not prove a broad release claim.
 - [x] `information-retrieval` reproduces the documented CrossEncoder NanoBEIR example.
 - [x] `graph-node-classification` uses the official OGB GCN recipe and evaluator.
 - [x] `time-series-forecasting` uses the official PatchTST ETTm1 recipe and split.
+- [x] `code-generation` has a fail-closed autoregressive functional runner; HumanEval+ conformance remains pending.
+- [x] `function-calling` has a fail-closed grammar-constrained generation and AST-evaluator runner; BFCL conformance remains pending.
+- [x] `recommendation` has a fail-closed DLRM-style functional runner; Criteo conformance remains pending.
+- [x] `image-generation` has a fail-closed iterative-denoising functional runner; official FID conformance remains pending.
+- [x] `reinforcement-learning` has a fail-closed MiniGo-style functional runner; full self-play conformance remains pending.
 - [x] Modes, phases, configurations, scenarios, and profiles are separate taxonomy axes.
-- [x] MiniGo is the RL reference, and RL is deferred without a substitute.
-- [x] Rejected and deferred tasks have explicit reasons in the selection ledger.
+- [x] MiniGo remains the RL reference without substituting a control task.
+- [x] Functional-stage candidates retain their published targets and explicit conformance blockers in the selection ledger.
 
 ## Evidence Cases
+
+The current importer remains scoped to the original nine quality-evidence
+workloads and the following twelve evidence cases. The five functional-stage
+workloads cannot enter this closure until their authoritative quality paths
+replace the bounded setup probes.
 
 - [x] `image-classification__max__inference` — five-run verified
 - [x] `keyword-spotting__max__inference` — five-run verified
@@ -119,7 +129,7 @@ resolved.
 - [ ] Obtain five clean externally powered runs for graph, time-series, nanoGPT training, and all nanoGPT inference phases.
 - [ ] Have domain reviewers approve the graph mean-plus-tolerance rule and the project-derived time-series MSE threshold.
 - [ ] Decide whether exact fixed-model scores should remain the sole conformance gate or be paired with a separately labeled task-quality floor.
-- [ ] Commit methodology-valid system-characterization sidecars for all nine workloads; working set, arithmetic intensity, and dispatch remain explicitly unmeasured today.
+- [ ] Commit methodology-valid system-characterization sidecars for all fourteen workloads; working set, arithmetic intensity, and dispatch remain explicitly unmeasured today.
 
 ### MLPerf Tiny Adapter Audit
 
@@ -246,7 +256,7 @@ uv build
 
 ## Documentation and Cleanup
 
-- [x] Generated benchmark pages expose exactly nine workload pages and five suite indexes.
+- [x] Generated benchmark pages expose exactly fourteen workload pages and seven suite indexes.
 - [x] Retired generated workload pages are removed.
 - [x] README, specification, proposal, public rules, target review, dataset review, and paper agree.
 - [x] Website and paper display exact committed evidence values from generated sources.
@@ -284,7 +294,7 @@ The handoff report must include:
 5. Exact validation commands and exit status
 6. Clean-install and package-verification evidence
 7. Website and paper build evidence
-8. Deferred and rejected workloads with reasons
+8. Functional-stage, deferred, and rejected workloads with reasons
 9. Remaining external decisions
 
 Do not mark v0.1 complete until every implementation box has direct evidence

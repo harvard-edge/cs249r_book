@@ -229,16 +229,18 @@ def test_publication_gates_derive_portfolio_closure_from_registry() -> None:
         assert stale_constant not in paper_generator
     assert "evidence.expected_cases()" in paper_generator
     assert "verify_current=False" in paper_generator
-    assert "set(workloads) ==" in paper_generator
-    assert "count_claim_pattern(len(workload_ids)" in claim_checker
+    assert "promotion_workloads" in paper_generator
+    assert '{record["entry"]["workload"] for record in records}' in paper_generator
+    assert "count_claim_pattern(len(registry_workload_ids)" in claim_checker
+    assert 'len(evidence_workload_ids), "workload"' in claim_checker
     assert "count_claim_pattern(len(records)" in claim_checker
 
 
 @pytest.mark.parametrize(
     ("count", "noun", "claim"),
     (
-        (9, "workload", "nine workloads"),
-        (9, "workload", "9 workloads"),
+        (14, "workload", "fourteen workloads"),
+        (14, "workload", "14 workloads"),
         (12, "evidence case", "twelve evidence cases"),
         (12, "evidence case", "12 evidence cases"),
     ),

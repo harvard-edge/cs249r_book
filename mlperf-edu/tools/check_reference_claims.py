@@ -19,6 +19,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from tools import import_reference_evidence as evidence  # noqa: E402
 from tools import reference_source_lock  # noqa: E402
+from mlperf.registry import load_registry  # noqa: E402
 
 
 INDEX_PATH = ROOT / "reference_results" / "index.json"
@@ -369,10 +370,14 @@ def check_documents(
     records: Mapping[str, tuple[dict[str, Any], dict[str, Any]]],
 ) -> list[str]:
     errors: list[str] = []
-    workload_ids = sorted(
+    evidence_workload_ids = sorted(
         {str(payload["workload"]) for _entry, payload in records.values()}
     )
-    workload_claim = count_claim_pattern(len(workload_ids), "workload")
+    registry_workload_ids = sorted(load_registry(ROOT / "registry"))
+    portfolio_claim = count_claim_pattern(len(registry_workload_ids), "workload")
+    evidence_workload_claim = count_claim_pattern(
+        len(evidence_workload_ids), "workload"
+    )
     case_claim = count_claim_pattern(len(records), "evidence case")
     known_evidence_ids = {
         str(evidence_id)
@@ -398,12 +403,16 @@ def check_documents(
             if evidence_id not in known_evidence_ids:
                 errors.append(f"{name}: unbound evidence ID remains: {evidence_id}")
         if name in WORKLOAD_DOCUMENTS:
-            for workload in workload_ids:
+            for workload in registry_workload_ids:
                 if workload not in text:
-                    errors.append(f"{name}: admitted workload is missing: {workload}")
-            if workload_claim.search(lowered) is None:
+                    errors.append(f"{name}: registered workload is missing: {workload}")
+            if portfolio_claim.search(lowered) is None:
                 errors.append(
-                    f"{name}: missing the {len(workload_ids)}-workload portfolio claim"
+                    f"{name}: missing the {len(registry_workload_ids)}-workload portfolio claim"
+                )
+            if evidence_workload_claim.search(lowered) is None:
+                errors.append(
+                    f"{name}: missing the {len(evidence_workload_ids)}-workload evidence-scope claim"
                 )
             if case_claim.search(lowered) is None:
                 errors.append(

@@ -121,8 +121,13 @@ def test_promoted_reference_local_dependencies_are_locked():
 
 def test_source_lock_contracts_exactly_cover_registered_workloads():
     workloads = load_registry(ROOT / "registry")
+    promotion_scope = {
+        workload_id
+        for workload_id, workload in workloads.items()
+        if workload.raw.get("promotion_scope", True)
+    }
 
-    assert set(reference_source_lock.PROMOTED_CONTRACT_PATHS) == set(workloads)
+    assert set(reference_source_lock.PROMOTED_CONTRACT_PATHS) == promotion_scope
     for (
         workload_id,
         relative_path,

@@ -74,8 +74,15 @@ def _canonical_report(workload: Workload, tmp_path: Path) -> dict[str, object]:
     }
 
 
-@pytest.mark.parametrize("workload_id", sorted(load_registry()))
-def test_every_admitted_max_contract_is_promotion_eligible(
+@pytest.mark.parametrize(
+    "workload_id",
+    sorted(
+        workload_id
+        for workload_id, workload in load_registry().items()
+        if workload.raw.get("promotion_scope", True)
+    ),
+)
+def test_every_promotion_scope_max_contract_is_promotion_eligible(
     workload_id: str, tmp_path: Path
 ) -> None:
     workload = load_registry()[workload_id]
@@ -86,6 +93,29 @@ def test_every_admitted_max_contract_is_promotion_eligible(
     assert result["status"] == "passed", result["issues"]
     assert result["promotion_eligible"] is True
     assert result["result_role"] == "score-bearing"
+
+
+@pytest.mark.parametrize(
+    "workload_id",
+    sorted(
+        workload_id
+        for workload_id, workload in load_registry().items()
+        if not workload.raw.get("promotion_scope", True)
+    ),
+)
+def test_functional_setup_max_contract_is_not_promotion_eligible(
+    workload_id: str, tmp_path: Path
+) -> None:
+    workload = load_registry()[workload_id]
+    result = evaluate_promotion_contract(
+        workload, _canonical_report(workload, tmp_path)
+    )
+
+    assert result["status"] == "failed"
+    assert result["promotion_eligible"] is False
+    assert any(
+        "not eligible for score-bearing review" in issue for issue in result["issues"]
+    )
 
 
 def test_graph_contract_applies_declared_accuracy_tolerance(tmp_path: Path) -> None:

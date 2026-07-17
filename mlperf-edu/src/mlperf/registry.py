@@ -71,6 +71,8 @@ PRODUCT_SUITES = (
     "tiny",
     "graph",
     "timeseries",
+    "recommendation",
+    "reinforcement",
 )
 
 WORKLOAD_COLLECTIONS = (
@@ -110,6 +112,11 @@ RESEARCH_WORKLOAD_ORDER = (
     "information-retrieval",
     "graph-node-classification",
     "time-series-forecasting",
+    "code-generation",
+    "function-calling",
+    "recommendation",
+    "image-generation",
+    "reinforcement-learning",
 )
 
 RESEARCH_WORKLOADS = set(RESEARCH_WORKLOAD_ORDER)
