@@ -1540,6 +1540,199 @@ def test_package_and_grade_verified_manifest(tmp_path):
     assert summary["results"][0]["warning_count"] == 0
     assert summary["results"][0]["warnings"] == []
 
+    assignment_path = tmp_path / "assignment.yaml"
+    package_grade_path = tmp_path / "package-grade.json"
+    assignment_path.write_text(
+        """\
+schema: mlperf-edu-assignment/0.1
+id: nanogpt-setup-lab
+requirements:
+  - workload: causal-language-modeling
+    profile: min
+    mode: training
+    count: 1
+    quality:
+      required: false
+"""
+    )
+    package_grade = run_cli(
+        "grade",
+        str(package_path),
+        "--assignment",
+        str(assignment_path),
+        "--output",
+        str(package_grade_path),
+    )
+    assert package_grade.returncode == 0, package_grade.stdout + package_grade.stderr
+    assert "Assignment nanogpt-setup-lab: passed" in package_grade.stdout
+    package_summary = json.loads(package_grade_path.read_text())
+    assert package_summary["assignment"]["passed"] is True
+    assert package_summary["results"][0]["package_verified"] is True
+    assert package_summary["results"][0]["manifest"].startswith(str(package_path))
+
+
+def test_report_baseline_comparison_separates_quality_and_performance(tmp_path):
+    baseline_path = tmp_path / "baseline.json"
+    current_path = tmp_path / "current.json"
+    output_path = tmp_path / "comparison.json"
+    base_report = {
+        "schema": "mlperf-edu-report/0.1",
+        "workload": "image-classification",
+        "suite": "vision",
+        "profile": "max",
+        "mode": "inference",
+        "phase": None,
+        "scenario": "offline",
+        "status": "passed",
+        "backend": "pytorch-cpu",
+        "data_mode": "real",
+        "dataset": {
+            "name": "cifar10",
+            "split": "MLPerf-Tiny-200-sample-accuracy-set",
+            "sha256": "sha256:dataset",
+        },
+        "evaluator": {
+            "repository": "https://github.com/mlcommons/tiny",
+            "revision": "pinned",
+        },
+        "execution_lineage": {
+            "mode": "inference",
+            "checkpoint": {"revision": "pinned", "sha256": "sha256:model"},
+        },
+        "config": {"batch_size": 32, "repetitions": 50},
+        "metrics": {"top1_accuracy": 0.87, "samples_per_second": 100.0},
+        "quality": {
+            "metric": "top1_accuracy",
+            "target": 0.85,
+            "tolerance": 0.0,
+            "direction": "higher",
+            "target_kind": "inherited_acceptance_gate",
+            "quality_required": True,
+            "target_met": True,
+        },
+    }
+    current_report = json.loads(json.dumps(base_report))
+    current_report["metrics"]["top1_accuracy"] = 0.88
+    current_report["metrics"]["samples_per_second"] = 120.0
+    baseline_path.write_text(json.dumps(base_report))
+    current_path.write_text(json.dumps(current_report))
+
+    compare = run_cli(
+        "report",
+        str(current_path),
+        "--baseline",
+        str(baseline_path),
+        "--format",
+        "json",
+        "--output",
+        str(output_path),
+    )
+    assert compare.returncode == 0, compare.stdout + compare.stderr
+    comparison = json.loads(output_path.read_text())["baseline_comparison"]
+    result = comparison["results"][0]
+    assert result["quality_compatible"] is True
+    assert result["performance_compatible"] is True
+    assert result["quality"]["current_margin"] == pytest.approx(0.03)
+    assert result["performance"]["improvement_percent"] == pytest.approx(20.0)
+
+    html_path = tmp_path / "comparison.html"
+    html_compare = run_cli(
+        "report",
+        str(current_path),
+        "--baseline",
+        str(baseline_path),
+        "--format",
+        "html",
+        "--output",
+        str(html_path),
+    )
+    assert html_compare.returncode == 0, html_compare.stdout + html_compare.stderr
+    html = html_path.read_text()
+    assert "Baseline Comparison" in html
+    assert "Quality Comparable" in html
+    assert "comparison-bars" in html
+
+    current_report["config"]["batch_size"] = 64
+    current_path.write_text(json.dumps(current_report))
+    incompatible = run_cli(
+        "report",
+        str(current_path),
+        "--baseline",
+        str(baseline_path),
+        "--format",
+        "json",
+        "--output",
+        str(output_path),
+    )
+    assert incompatible.returncode == 0, incompatible.stdout + incompatible.stderr
+    result = json.loads(output_path.read_text())["baseline_comparison"]["results"][0]
+    assert result["quality_compatible"] is True
+    assert result["performance_compatible"] is False
+    assert "performance comparison fingerprint differs" in result["reasons"]
+
+
+def test_package_verification_rejects_traversal_before_extraction(tmp_path):
+    package_path = tmp_path / "unsafe.zip"
+    payload = b"escape"
+    index = {
+        "schema": "mlperf-edu-package/0.2",
+        "manifest": "../escape.provd.json",
+        "included_files": [
+            {
+                "role": "manifest",
+                "path": "../escape.provd.json",
+                "sha256": "sha256:" + hashlib.sha256(payload).hexdigest(),
+                "n_bytes": len(payload),
+            }
+        ],
+    }
+    with zipfile.ZipFile(package_path, "w") as zf:
+        zf.writestr("package_index.json", json.dumps(index))
+        zf.writestr("../escape.provd.json", payload)
+
+    checks = edu_cli.verify_package_archive(package_path, repo_root=PROJECT_ROOT)
+
+    assert not all(ok for _, ok, _ in checks)
+    assert any(
+        name == "archive.path:../escape.provd.json" and not ok for name, ok, _ in checks
+    )
+
+
+def test_package_verification_rejects_manifest_path_escape(tmp_path):
+    package_path = tmp_path / "unsafe-manifest.zip"
+    manifest_name = "manifest/submission.provd.json"
+    manifest_payload = json.dumps(
+        {
+            "leaves": {
+                "measurement": {"report_path": "../../../escape.json"},
+                "weights": {},
+                "dataset": {"files": []},
+            }
+        }
+    ).encode()
+    index = {
+        "schema": "mlperf-edu-package/0.2",
+        "manifest": manifest_name,
+        "included_files": [
+            {
+                "role": "manifest",
+                "path": manifest_name,
+                "sha256": "sha256:" + hashlib.sha256(manifest_payload).hexdigest(),
+                "n_bytes": len(manifest_payload),
+            }
+        ],
+    }
+    with zipfile.ZipFile(package_path, "w") as zf:
+        zf.writestr("package_index.json", json.dumps(index))
+        zf.writestr(manifest_name, manifest_payload)
+
+    checks = edu_cli.verify_package_archive(package_path, repo_root=PROJECT_ROOT)
+
+    assert not all(ok for _, ok, _ in checks)
+    assert any(
+        name == "clean_extraction.manifest_paths" and not ok for name, ok, _ in checks
+    )
+
 
 def test_package_policy_refuses_unresolved_canonical_dataset_bytes():
     manifest = {

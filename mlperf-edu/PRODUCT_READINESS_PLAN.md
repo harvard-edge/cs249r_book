@@ -118,11 +118,11 @@ research-environment workloads.
 
 ### Assignment layer
 
-- [ ] Define a versioned assignment contract schema.
-- [ ] Add safe grading of portable result packages.
-- [ ] Validate expected workload, profile, phase, configuration, and result
+- [x] Define a versioned assignment contract schema.
+- [x] Add safe grading of portable result packages.
+- [x] Validate expected workload, profile, phase, configuration, and result
   cardinality.
-- [ ] Add compatibility-checked baseline comparison to the CLI and dashboard.
+- [x] Add compatibility-checked baseline comparison to the CLI and dashboard.
 - [ ] Create the five classroom examples and instructor rubrics.
 - [ ] Repeat simulated student and instructor review with the rendered pages.
 

@@ -12,6 +12,7 @@ import platform
 import posixpath
 import re
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -363,6 +364,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--output", type=str, default=None, help="Output path for json/csv/html formats"
     )
     report.add_argument(
+        "--baseline",
+        type=str,
+        default=None,
+        help="Compatible prior report to compare with the selected result",
+    )
+    report.add_argument(
         "--open", action="store_true", help="Open generated HTML in the default browser"
     )
     report.set_defaults(func=cmd_report)
@@ -374,8 +381,16 @@ def build_parser() -> argparse.ArgumentParser:
     )
     package.set_defaults(func=cmd_package)
 
-    grade = subparsers.add_parser("grade", help="Grade a directory of submissions")
+    grade = subparsers.add_parser(
+        "grade", help="Grade a submission directory, manifest, or package"
+    )
     grade.add_argument("submissions_dir", nargs="?", default="submissions")
+    grade.add_argument(
+        "--assignment",
+        type=str,
+        default=None,
+        help="Versioned assignment YAML that fixes expected results and configuration",
+    )
     grade.add_argument(
         "--output", type=str, default=None, help="Write grading summary JSON"
     )
@@ -2145,6 +2160,16 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
             for item in workloads
             if isinstance(item, dict)
         )
+        configurations = [
+            {
+                "workload": item.get("workload") or item.get("id"),
+                "mode": item.get("mode"),
+                "phase": item.get("phase"),
+                "config": strip_path_fields(copy.deepcopy(item.get("config") or {})),
+            }
+            for item in workloads
+            if isinstance(item, dict)
+        ]
     else:
         backends = [str(report.get("backend"))] if report.get("backend") else []
         data_modes = [str(report.get("data_mode"))] if report.get("data_mode") else []
@@ -2159,11 +2184,21 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
         compilation_records = unique_fingerprint_records(
             [report_compilation_summary(report)]
         )
+        configurations = [
+            {
+                "workload": report.get("workload") or report.get("id"),
+                "mode": report.get("mode"),
+                "phase": report.get("phase"),
+                "config": strip_path_fields(copy.deepcopy(report.get("config") or {})),
+            }
+        ]
     summary = {
         "profile": report.get("profile"),
         "suite": report.get("suite"),
         "workload": report.get("workload") or report.get("id"),
         "variant": report.get("variant"),
+        "mode": report.get("mode"),
+        "phase": report.get("phase"),
         "seed": report.get("seed"),
         "status": report.get("status"),
         "scenario": scenarios[0] if len(scenarios) == 1 else None,
@@ -2177,6 +2212,7 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
         "data_modes": data_modes,
         "report_selected_precision": precision_records,
         "report_selected_compilation": compilation_records,
+        "configurations": configurations,
     }
     return {key: value for key, value in summary.items() if value not in (None, [], "")}
 
@@ -2869,6 +2905,290 @@ def cmd_verify(args: argparse.Namespace) -> int:
     return 1
 
 
+def _comparison_mode(item: dict[str, Any]) -> str | None:
+    lineage = item.get("execution_lineage") or {}
+    fingerprint = item.get("run_fingerprint") or {}
+    execution = fingerprint.get("execution") or {}
+    return (
+        item.get("mode")
+        or (lineage.get("mode") if isinstance(lineage, dict) else None)
+        or execution.get("mode")
+    )
+
+
+def _comparison_key(item: dict[str, Any]) -> tuple[str, str, str, str]:
+    return (
+        str(item.get("workload") or item.get("id") or ""),
+        str(item.get("profile") or ""),
+        str(_comparison_mode(item) or ""),
+        str(item.get("phase") or ""),
+    )
+
+
+def _comparison_dataset(item: dict[str, Any]) -> dict[str, Any]:
+    dataset = item.get("dataset") or {}
+    if isinstance(dataset, str):
+        dataset = {"name": dataset}
+    if not isinstance(dataset, dict):
+        dataset = {}
+    selected = {
+        key: dataset.get(key)
+        for key in (
+            "id",
+            "name",
+            "source",
+            "revision",
+            "sha256",
+            "split",
+            "performance_indices_sha256",
+        )
+        if dataset.get(key) not in (None, "")
+    }
+    fingerprint = item.get("run_fingerprint") or {}
+    asset_hashes = fingerprint.get("asset_hashes") or {}
+    if isinstance(asset_hashes, dict) and asset_hashes.get("dataset"):
+        selected["asset_hashes"] = strip_path_fields(
+            copy.deepcopy(asset_hashes["dataset"])
+        )
+    return selected
+
+
+def _comparison_evaluator(item: dict[str, Any]) -> dict[str, Any]:
+    evaluator = item.get("evaluator") or {}
+    if isinstance(evaluator, str):
+        return {"name": evaluator}
+    if not isinstance(evaluator, dict):
+        return {}
+    return {
+        key: strip_path_fields(copy.deepcopy(value))
+        for key, value in evaluator.items()
+        if value not in (None, "")
+        and "result" not in key.lower()
+        and "duration" not in key.lower()
+    }
+
+
+def _comparison_quality_contract(item: dict[str, Any]) -> dict[str, Any]:
+    quality = item.get("quality") or {}
+    if not isinstance(quality, dict):
+        return {}
+    return {
+        key: quality.get(key)
+        for key in (
+            "metric",
+            "metric_key",
+            "target",
+            "tolerance",
+            "direction",
+            "target_basis",
+            "target_kind",
+            "quality_required",
+        )
+        if quality.get(key) not in (None, "")
+    }
+
+
+def _comparison_checkpoint(item: dict[str, Any]) -> dict[str, Any]:
+    lineage = item.get("execution_lineage") or {}
+    checkpoint = lineage.get("checkpoint") if isinstance(lineage, dict) else {}
+    if not isinstance(checkpoint, dict):
+        checkpoint = {}
+    return {
+        key: checkpoint.get(key)
+        for key in (
+            "id",
+            "model_id",
+            "source",
+            "revision",
+            "sha256",
+            "merkle_root",
+            "source_run_selector",
+        )
+        if checkpoint.get(key) not in (None, "")
+    }
+
+
+def _comparison_fingerprint(item: dict[str, Any]) -> str:
+    fingerprint = item.get("run_fingerprint") or {}
+    if not isinstance(fingerprint, dict):
+        return ""
+    return str(fingerprint.get("comparison_fingerprint_sha256") or "")
+
+
+def _comparison_metric(item: dict[str, Any], *, quality: bool) -> dict[str, Any]:
+    metrics = item.get("metrics") or {}
+    if not isinstance(metrics, dict):
+        return {}
+    if quality:
+        quality_record = item.get("quality") or {}
+        metric_name = quality_metric_name(quality_record)
+        metric_key = metric_key_for_quality(metric_name, metrics)
+        direction = str(quality_record.get("direction") or "")
+    else:
+        metric_key = metric_key_for_throughput(metrics)
+        direction = "higher"
+        if metric_key is None and metrics.get("duration_seconds") not in (None, ""):
+            metric_key = "duration_seconds"
+            direction = "lower"
+    value = metrics.get(metric_key) if metric_key else None
+    if not isinstance(value, (int, float)) or isinstance(value, bool):
+        return {}
+    return {"metric": metric_key, "value": float(value), "direction": direction}
+
+
+def _quality_margin(value: float, target: Any, direction: str) -> float | None:
+    if not isinstance(target, (int, float)) or isinstance(target, bool):
+        return None
+    if direction == "higher":
+        return value - float(target)
+    if direction == "lower":
+        return float(target) - value
+    if direction == "equal":
+        return -abs(value - float(target))
+    return None
+
+
+def build_baseline_comparison(
+    report: dict[str, Any],
+    baseline: dict[str, Any],
+    *,
+    baseline_source: Path,
+) -> dict[str, Any]:
+    """Compare quality broadly and performance only under an exact fingerprint."""
+    baseline_by_key: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    for item in report_items(baseline):
+        baseline_by_key.setdefault(_comparison_key(item), []).append(item)
+
+    results: list[dict[str, Any]] = []
+    for item in report_items(report):
+        key = _comparison_key(item)
+        matches = baseline_by_key.get(key, [])
+        result: dict[str, Any] = {
+            "workload": key[0],
+            "profile": key[1],
+            "mode": key[2] or None,
+            "phase": key[3] or None,
+            "quality_compatible": False,
+            "performance_compatible": False,
+            "reasons": [],
+        }
+        if len(matches) != 1:
+            result["reasons"].append(
+                "no unique baseline result has the same workload, profile, mode, and phase"
+            )
+            results.append(result)
+            continue
+        baseline_item = matches[0]
+        quality_reasons: list[str] = []
+        if (item.get("quality") or {}).get("quality_required") is not True or (
+            baseline_item.get("quality") or {}
+        ).get("quality_required") is not True:
+            quality_reasons.append("quality was not evaluated in one or both runs")
+        for label, current_value, baseline_value in (
+            (
+                "dataset revision and hashes",
+                _comparison_dataset(item),
+                _comparison_dataset(baseline_item),
+            ),
+            (
+                "evaluator contract",
+                _comparison_evaluator(item),
+                _comparison_evaluator(baseline_item),
+            ),
+            (
+                "quality contract",
+                _comparison_quality_contract(item),
+                _comparison_quality_contract(baseline_item),
+            ),
+        ):
+            if current_value != baseline_value:
+                quality_reasons.append(f"{label} differs")
+        current_quality = _comparison_metric(item, quality=True)
+        baseline_quality = _comparison_metric(baseline_item, quality=True)
+        if current_quality.get("metric") != baseline_quality.get("metric"):
+            quality_reasons.append("quality metric differs or is unavailable")
+        result["quality_compatible"] = not quality_reasons
+        result["reasons"].extend(quality_reasons)
+        if result["quality_compatible"] and current_quality:
+            target = (item.get("quality") or {}).get("target")
+            direction = str((item.get("quality") or {}).get("direction") or "")
+            result["quality"] = {
+                "metric": current_quality["metric"],
+                "direction": direction,
+                "target": target,
+                "baseline_value": baseline_quality["value"],
+                "current_value": current_quality["value"],
+                "baseline_target_met": (baseline_item.get("quality") or {}).get(
+                    "target_met"
+                ),
+                "current_target_met": (item.get("quality") or {}).get("target_met"),
+                "baseline_margin": _quality_margin(
+                    baseline_quality["value"], target, direction
+                ),
+                "current_margin": _quality_margin(
+                    current_quality["value"], target, direction
+                ),
+            }
+
+        performance_reasons = list(quality_reasons)
+        if key[1] == "min":
+            performance_reasons.append(
+                "min is a functional profile and does not support baseline claims"
+            )
+        if _comparison_checkpoint(item) != _comparison_checkpoint(baseline_item):
+            performance_reasons.append("checkpoint lineage differs")
+        current_fingerprint = _comparison_fingerprint(item)
+        baseline_fingerprint = _comparison_fingerprint(baseline_item)
+        if (
+            not current_fingerprint
+            or not baseline_fingerprint
+            or current_fingerprint != baseline_fingerprint
+        ):
+            performance_reasons.append("performance comparison fingerprint differs")
+        current_performance = _comparison_metric(item, quality=False)
+        baseline_performance = _comparison_metric(baseline_item, quality=False)
+        if current_performance.get("metric") != baseline_performance.get("metric"):
+            performance_reasons.append("performance metric differs or is unavailable")
+        result["performance_compatible"] = not performance_reasons
+        for reason in performance_reasons:
+            if reason not in result["reasons"]:
+                result["reasons"].append(reason)
+        if result["performance_compatible"] and current_performance:
+            baseline_value = baseline_performance["value"]
+            current_value = current_performance["value"]
+            direction = current_performance["direction"]
+            improvement = None
+            if baseline_value != 0 and current_value != 0:
+                improvement = (
+                    (current_value / baseline_value - 1.0) * 100.0
+                    if direction == "higher"
+                    else (baseline_value / current_value - 1.0) * 100.0
+                )
+            result["performance"] = {
+                "metric": current_performance["metric"],
+                "direction": direction,
+                "baseline_value": baseline_value,
+                "current_value": current_value,
+                "improvement_percent": improvement,
+            }
+        results.append(result)
+
+    return {
+        "schema": "mlperf-edu-baseline-comparison/0.1",
+        "baseline_source": str(baseline_source),
+        "quality_compatible": sum(
+            1 for result in results if result["quality_compatible"]
+        ),
+        "performance_compatible": sum(
+            1 for result in results if result["performance_compatible"]
+        ),
+        "incompatible": sum(
+            1 for result in results if not result["quality_compatible"]
+        ),
+        "results": results,
+    }
+
+
 def cmd_report(args: argparse.Namespace) -> int:
     path = resolve_report_input(Path(args.report))
     if not path.exists():
@@ -2880,6 +3200,21 @@ def cmd_report(args: argparse.Namespace) -> int:
     except (FileNotFoundError, ValueError):
         pass
     attach_run_fingerprints(data)
+    baseline_arg = getattr(args, "baseline", None)
+    if baseline_arg:
+        baseline_path = resolve_report_input(Path(baseline_arg))
+        if not baseline_path.is_file():
+            console.print(f"[red]Baseline report not found:[/red] {baseline_path}")
+            return 1
+        baseline = json.loads(baseline_path.read_text())
+        try:
+            enrich_report_for_display(baseline, load_workloads(args))
+        except (FileNotFoundError, ValueError):
+            pass
+        attach_run_fingerprints(baseline)
+        data["baseline_comparison"] = build_baseline_comparison(
+            data, baseline, baseline_source=baseline_path.resolve()
+        )
     if args.format == "json":
         text = json.dumps(data, indent=2, sort_keys=True) + "\n"
         if args.output:
@@ -2909,6 +3244,14 @@ def cmd_report(args: argparse.Namespace) -> int:
     console.print(f"schema: {data.get('schema', 'unknown')}")
     console.print(f"mlperf_suite: {data.get('mlperf_suite', DEFAULT_MLPERF_SUITE)}")
     console.print(f"profile: {data.get('profile', 'unknown')}")
+    baseline_comparison = data.get("baseline_comparison") or {}
+    if baseline_comparison:
+        console.print(
+            "baseline_comparison: "
+            f"quality={baseline_comparison.get('quality_compatible', 0)}, "
+            f"performance={baseline_comparison.get('performance_compatible', 0)}, "
+            f"incompatible={baseline_comparison.get('incompatible', 0)}"
+        )
     if data.get("power"):
         power = data["power"]
         console.print(f"power_average_watts: {power.get('average_watts')}")
@@ -3510,6 +3853,81 @@ def provenance_section_html(report: dict[str, Any]) -> str:
       <tbody>{"".join(rows)}</tbody>
     </table></div>
     <div class="note">Verify a manifest with <code>mlperf verify &lt;file.provd.json&gt;</code>. Digests establish content integrity; authenticated producer identity requires an external signature.</div>
+</section>
+"""
+
+
+def baseline_comparison_section_html(report: dict[str, Any]) -> str:
+    comparison = report.get("baseline_comparison") or {}
+    if not isinstance(comparison, dict) or not comparison.get("results"):
+        return ""
+    rows: list[str] = []
+    for result in comparison["results"]:
+        quality = result.get("quality") or {}
+        performance = result.get("performance") or {}
+        if quality:
+            quality_text = (
+                f"Baseline {format_cell(quality.get('baseline_value'))}; "
+                f"current {format_cell(quality.get('current_value'))}; "
+                f"target {format_cell(quality.get('target'))}"
+            )
+        else:
+            quality_text = "Not comparable"
+
+        performance_html = "Not comparable"
+        if performance:
+            baseline_value = float(performance["baseline_value"])
+            current_value = float(performance["current_value"])
+            scale = max(abs(baseline_value), abs(current_value), 1e-12)
+            baseline_width = max(2.0, abs(baseline_value) / scale * 100.0)
+            current_width = max(2.0, abs(current_value) / scale * 100.0)
+            improvement = performance.get("improvement_percent")
+            improvement_text = (
+                f"{float(improvement):+.2f}%"
+                if isinstance(improvement, (int, float))
+                else "n/a"
+            )
+            performance_html = (
+                "<div class='comparison-bars'>"
+                f"<div><span>Baseline</span><i style='width:{baseline_width:.2f}%'></i>"
+                f"<code>{escape(format_cell(baseline_value))}</code></div>"
+                f"<div><span>Current</span><i class='current' style='width:{current_width:.2f}%'></i>"
+                f"<code>{escape(format_cell(current_value))}</code></div>"
+                f"<small>{escape(str(performance.get('metric')))} · "
+                f"{escape(improvement_text)} improvement</small></div>"
+            )
+        reasons = "; ".join(result.get("reasons") or []) or "Compatible"
+        quality_badge = "pass" if result.get("quality_compatible") else "fail"
+        performance_badge = "pass" if result.get("performance_compatible") else "warn"
+        run_label = str(result.get("workload") or "")
+        if result.get("phase"):
+            run_label += f" / {result['phase']}"
+        rows.append(
+            "<tr>"
+            f"<td>{escape(run_label)}</td>"
+            f"<td><span class='badge {quality_badge}'>"
+            f"{'compatible' if result.get('quality_compatible') else 'blocked'}</span>"
+            f"<div>{escape(quality_text)}</div></td>"
+            f"<td><span class='badge {performance_badge}'>"
+            f"{'compatible' if result.get('performance_compatible') else 'blocked'}</span>"
+            f"{performance_html}</td>"
+            f"<td>{escape(reasons)}</td>"
+            "</tr>"
+        )
+    cards = (
+        f"<div class='card'><div class='label'>Quality Comparable</div><div class='value'>{int(comparison.get('quality_compatible', 0))}</div></div>"
+        f"<div class='card'><div class='label'>Performance Comparable</div><div class='value'>{int(comparison.get('performance_compatible', 0))}</div></div>"
+        f"<div class='card'><div class='label'>Incompatible</div><div class='value'>{int(comparison.get('incompatible', 0))}</div></div>"
+    )
+    return f"""
+  <section class="section" aria-labelledby="baseline-comparison-heading">
+    <div class="section-heading"><div><div class="eyebrow">Interpretation</div><h2 id="baseline-comparison-heading">Baseline Comparison</h2></div><div class="section-summary">Quality and performance compatibility are evaluated separately.</div></div>
+    <section class="grid" aria-label="Baseline comparison summary">{cards}</section>
+    <div class="table-scroll"><table>
+      <thead><tr><th>Workload</th><th>Quality</th><th>Performance</th><th>Boundary</th></tr></thead>
+      <tbody>{"".join(rows)}</tbody>
+    </table></div>
+    <div class="note">Quality comparison requires the same task, data, evaluator, and target contract. Performance comparison additionally requires matching checkpoint lineage and the complete comparison fingerprint. A blocked comparison is not a negative result; it means the runs answer different questions.</div>
   </section>
 """
 
@@ -3548,6 +3966,7 @@ def write_html_report(
     serving_html = serving_metrics_section_html(report)
     assets_html = assets_section_html(report)
     quality_html = quality_dashboard_html(report)
+    baseline_html = baseline_comparison_section_html(report)
     configuration_html = run_configuration_section_html(report)
     lineage_html = lineage_section_html(report)
     provenance_html = provenance_section_html(report)
@@ -3638,6 +4057,11 @@ def write_html_report(
     .lineage-status {{ margin: 4px 0 10px; color: var(--muted); font-size: 12px; }}
     .lineage-details div {{ margin-top: 8px; }}
     .lineage-details span {{ display: block; color: var(--muted); font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; }}
+    .comparison-bars {{ min-width: 220px; margin-top: 8px; }}
+    .comparison-bars div {{ display: grid; grid-template-columns: 52px minmax(80px, 1fr) 68px; gap: 8px; align-items: center; margin: 5px 0; }}
+    .comparison-bars span, .comparison-bars small {{ color: var(--muted); font-size: 11px; }}
+    .comparison-bars i {{ display: block; height: 8px; background: #84adff; border-radius: 999px; }}
+    .comparison-bars i.current {{ background: var(--accent); }}
     code {{ font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; white-space: normal; }}
     table {{ width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }}
     th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }}
@@ -3671,6 +4095,7 @@ def write_html_report(
     </div>
   </header>
   {quality_html}
+  {baseline_html}
   <section class="grid" aria-label="Run status summary">{status_cards}</section>
   {configuration_html}
   {lineage_html}
@@ -4418,6 +4843,11 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
         result.all_ok and status == "passed" and quality_required and target_met is True
     )
     workload_id = report.get("workload") or manifest.get("workload", "unknown")
+    registry_workload = registry_workload_for_id(str(workload_id))
+    mode = report.get("mode")
+    if mode is None and registry_workload:
+        modes = list(registry_workload.raw.get("modes") or [])
+        mode = modes[0] if len(modes) == 1 else None
     canonical = (
         report.get("canonical_workload")
         or canonical_workload_for_id(str(workload_id))
@@ -4439,6 +4869,9 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
         "variant": variant,
         "run_selector": run_selector,
         "profile": report.get("profile", ""),
+        "mode": mode,
+        "phase": report.get("phase"),
+        "config": report.get("config") or {},
         "status": status,
         "verified": result.all_ok,
         "passed": passed,
@@ -4634,147 +5067,280 @@ def build_portable_package_files(
     return archive_bytes, manifest_archive
 
 
+MAX_PACKAGE_MEMBERS = 100_000
+MAX_PACKAGE_UNCOMPRESSED_BYTES = 20 * 1024**3
+
+
+def _safe_zip_member(info: zipfile.ZipInfo) -> tuple[bool, str]:
+    name = info.filename
+    path = PurePosixPath(name)
+    mode = info.external_attr >> 16
+    file_type = stat.S_IFMT(mode)
+    if not name or "\\" in name or any(ord(char) < 32 for char in name):
+        return False, "archive member has an invalid name"
+    if path.is_absolute() or any(part in {"", ".", ".."} for part in path.parts):
+        return False, "archive member must remain within the extraction root"
+    if path.as_posix() != name:
+        return False, "archive member path must be normalized POSIX text"
+    if info.flag_bits & 0x1:
+        return False, "encrypted archive members are not accepted"
+    if file_type == stat.S_IFLNK:
+        return False, "symbolic links are not accepted"
+    if file_type not in {0, stat.S_IFREG}:
+        return False, "only regular files are accepted"
+    return True, "safe regular archive member"
+
+
+def _zip_member_digest(zf: zipfile.ZipFile, info: zipfile.ZipInfo) -> tuple[str, int]:
+    digest = hashlib.sha256()
+    n_bytes = 0
+    with zf.open(info, "r") as handle:
+        while chunk := handle.read(1024 * 1024):
+            digest.update(chunk)
+            n_bytes += len(chunk)
+    return "sha256:" + digest.hexdigest(), n_bytes
+
+
+def _safe_extract_package(zf: zipfile.ZipFile, extraction_root: Path) -> None:
+    for info in zf.infolist():
+        safe, detail = _safe_zip_member(info)
+        if not safe:
+            raise ValueError(f"unsafe archive member {info.filename!r}: {detail}")
+        destination = extraction_root.joinpath(*PurePosixPath(info.filename).parts)
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        with zf.open(info, "r") as source, destination.open("wb") as target:
+            shutil.copyfileobj(source, target, length=1024 * 1024)
+
+
+def _package_index(zf: zipfile.ZipFile) -> dict[str, Any]:
+    value = json.loads(zf.read("package_index.json"))
+    if not isinstance(value, dict):
+        raise ValueError("package_index.json must contain an object")
+    return value
+
+
 def verify_package_archive(
     package_path: Path,
     *,
     repo_root: Path,
 ) -> list[tuple[str, bool, str]]:
-    """Verify index coverage and provenance after extraction to a clean directory."""
+    """Verify index coverage and provenance after safe, clean extraction."""
     checks: list[tuple[str, bool, str]] = []
-    with tempfile.TemporaryDirectory(prefix="mlperf-edu-package-verify-") as tmp:
-        extraction_root = Path(tmp)
-        with zipfile.ZipFile(package_path) as zf:
-            names = set(zf.namelist())
-            if "package_index.json" not in names:
-                return [("package_index", False, "package_index.json is missing")]
-            index = json.loads(zf.read("package_index.json"))
-            included = index.get("included_files") or []
-            indexed_names = [str(item.get("path", "")) for item in included]
-            checks.append(
-                (
-                    "index.unique_paths",
-                    len(indexed_names) == len(set(indexed_names)),
-                    "every archive path must appear exactly once in the index",
-                )
-            )
-            unindexed = sorted(names - {"package_index.json"} - set(indexed_names))
-            checks.append(
-                (
-                    "index.complete_coverage",
-                    not unindexed,
-                    f"unindexed archive members: {unindexed}",
-                )
-            )
-            for item in included:
-                archive_name = str(item.get("path", ""))
-                archive_path = Path(archive_name)
-                safe = (
-                    bool(archive_name)
-                    and not archive_path.is_absolute()
-                    and ".." not in archive_path.parts
+    try:
+        with tempfile.TemporaryDirectory(prefix="mlperf-edu-package-verify-") as tmp:
+            extraction_root = Path(tmp)
+            with zipfile.ZipFile(package_path) as zf:
+                infos = zf.infolist()
+                names = [info.filename for info in infos]
+                checks.append(
+                    (
+                        "archive.member_count",
+                        len(infos) <= MAX_PACKAGE_MEMBERS,
+                        f"archive has {len(infos)} member(s); limit is {MAX_PACKAGE_MEMBERS}",
+                    )
                 )
                 checks.append(
                     (
-                        f"index.path:{archive_name}",
-                        safe,
-                        "archive-relative path required",
+                        "archive.unique_paths",
+                        len(names) == len(set(names)),
+                        "archive member paths must be unique",
                     )
                 )
-                if not safe or archive_name not in names:
+                total_bytes = sum(info.file_size for info in infos)
+                checks.append(
+                    (
+                        "archive.uncompressed_size",
+                        total_bytes <= MAX_PACKAGE_UNCOMPRESSED_BYTES,
+                        f"archive expands to {total_bytes} byte(s); limit is "
+                        f"{MAX_PACKAGE_UNCOMPRESSED_BYTES}",
+                    )
+                )
+                for info in infos:
+                    safe, detail = _safe_zip_member(info)
+                    checks.append((f"archive.path:{info.filename}", safe, detail))
+                if "package_index.json" not in names:
                     checks.append(
-                        (f"index.file:{archive_name}", False, "indexed file is missing")
+                        ("package_index", False, "package_index.json is missing")
                     )
-                    continue
-                payload = zf.read(archive_name)
-                actual_digest = "sha256:" + hashlib.sha256(payload).hexdigest()
-                checks.append(
-                    (
-                        f"index.sha256:{archive_name}",
-                        actual_digest == item.get("sha256"),
-                        f"claimed {item.get('sha256')}, recomputed {actual_digest}",
-                    )
-                )
-                checks.append(
-                    (
-                        f"index.n_bytes:{archive_name}",
-                        len(payload) == item.get("n_bytes"),
-                        f"claimed {item.get('n_bytes')}, recomputed {len(payload)}",
-                    )
-                )
-            zf.extractall(extraction_root)
+                    return checks
+                if not all(ok for _, ok, _ in checks):
+                    return checks
 
-        manifest_name = str(index.get("manifest") or index.get("source_manifest") or "")
-        manifest_path = extraction_root / manifest_name
-        if not manifest_name or not manifest_path.is_file():
+                index = _package_index(zf)
+                included = index.get("included_files") or []
+                if not isinstance(included, list) or any(
+                    not isinstance(item, dict) for item in included
+                ):
+                    checks.append(
+                        (
+                            "index.included_files",
+                            False,
+                            "included_files must be a list of objects",
+                        )
+                    )
+                    return checks
+                indexed_names = [str(item.get("path", "")) for item in included]
+                checks.append(
+                    (
+                        "index.unique_paths",
+                        len(indexed_names) == len(set(indexed_names)),
+                        "every archive path must appear exactly once in the index",
+                    )
+                )
+                unindexed = sorted(
+                    set(names) - {"package_index.json"} - set(indexed_names)
+                )
+                checks.append(
+                    (
+                        "index.complete_coverage",
+                        not unindexed,
+                        f"unindexed archive members: {unindexed}",
+                    )
+                )
+                info_by_name = {info.filename: info for info in infos}
+                for item in included:
+                    archive_name = str(item.get("path", ""))
+                    info = info_by_name.get(archive_name)
+                    if info is None:
+                        checks.append(
+                            (
+                                f"index.file:{archive_name}",
+                                False,
+                                "indexed file is missing",
+                            )
+                        )
+                        continue
+                    actual_digest, actual_bytes = _zip_member_digest(zf, info)
+                    checks.append(
+                        (
+                            f"index.sha256:{archive_name}",
+                            actual_digest == item.get("sha256"),
+                            f"claimed {item.get('sha256')}, recomputed {actual_digest}",
+                        )
+                    )
+                    checks.append(
+                        (
+                            f"index.n_bytes:{archive_name}",
+                            actual_bytes == item.get("n_bytes"),
+                            f"claimed {item.get('n_bytes')}, recomputed {actual_bytes}",
+                        )
+                    )
+                if not all(ok for _, ok, _ in checks):
+                    return checks
+                _safe_extract_package(zf, extraction_root)
+
+            manifest_name = str(
+                index.get("manifest") or index.get("source_manifest") or ""
+            )
+            try:
+                manifest_name = safe_logical_asset_path(manifest_name)
+            except ValueError as exc:
+                checks.append(("clean_extraction.manifest", False, str(exc)))
+                return checks
+            if manifest_name not in indexed_names:
+                checks.append(
+                    (
+                        "clean_extraction.manifest",
+                        False,
+                        "packaged manifest is not covered by included_files",
+                    )
+                )
+                return checks
+            manifest_path = extraction_root.joinpath(
+                *PurePosixPath(manifest_name).parts
+            )
+            if not manifest_name or not manifest_path.is_file():
+                checks.append(
+                    ("clean_extraction.manifest", False, "packaged manifest is missing")
+                )
+                return checks
+
+            packaged_manifest = json.loads(manifest_path.read_text())
+            leaves = packaged_manifest.get("leaves") or {}
+            path_values = [
+                ((leaves.get("measurement") or {}).get("report_path")),
+                ((leaves.get("weights") or {}).get("path")),
+                *[
+                    item.get("path")
+                    for item in ((leaves.get("weights") or {}).get("files") or [])
+                    if isinstance(item, dict)
+                ],
+                ((leaves.get("roofline_sidecar") or {}).get("path")),
+                *[
+                    item.get("path")
+                    for item in ((leaves.get("dataset") or {}).get("files") or [])
+                    if isinstance(item, dict)
+                ],
+            ]
+            extraction_resolved = extraction_root.resolve()
+
+            def safe_owned_path(owner: Path, value: Any) -> bool:
+                if not isinstance(value, str) or not value or "\\" in value:
+                    return False
+                path = Path(value)
+                if path.is_absolute():
+                    return False
+                return (
+                    (owner.parent / path).resolve().is_relative_to(extraction_resolved)
+                )
+
+            relative_paths = all(
+                safe_owned_path(manifest_path, value) for value in path_values if value
+            )
             checks.append(
-                ("clean_extraction.manifest", False, "packaged manifest is missing")
+                (
+                    "clean_extraction.manifest_paths",
+                    relative_paths,
+                    "all packaged manifest artifact paths must stay within the archive root",
+                )
             )
-            return checks
-
-        packaged_manifest = json.loads(manifest_path.read_text())
-        leaves = packaged_manifest.get("leaves") or {}
-        path_values = [
-            ((leaves.get("measurement") or {}).get("report_path")),
-            ((leaves.get("weights") or {}).get("path")),
-            *[
-                item.get("path")
-                for item in ((leaves.get("weights") or {}).get("files") or [])
-                if isinstance(item, dict)
-            ],
-            ((leaves.get("roofline_sidecar") or {}).get("path")),
-            *[
-                item.get("path")
-                for item in ((leaves.get("dataset") or {}).get("files") or [])
-                if isinstance(item, dict)
-            ],
-        ]
-        relative_paths = all(
-            not Path(value).is_absolute() for value in path_values if value
-        )
-        checks.append(
-            (
-                "clean_extraction.manifest_paths",
-                relative_paths,
-                "all packaged manifest artifact paths must be relative",
+            if not relative_paths:
+                return checks
+            measurement = leaves.get("measurement") or {}
+            report_path = resolve_artifact_path(
+                manifest_path, measurement.get("report_path", "")
             )
-        )
-        measurement = leaves.get("measurement") or {}
-        report_path = resolve_artifact_path(
-            manifest_path, measurement.get("report_path", "")
-        )
-        packaged_report = (
-            json.loads(report_path.read_text()) if report_path.is_file() else {}
-        )
-        absolute_report_paths = _absolute_path_values(packaged_report)
-        checks.append(
-            (
-                "clean_extraction.report_paths",
-                not absolute_report_paths,
-                f"absolute path values remain at: {absolute_report_paths}",
+            packaged_report = (
+                json.loads(report_path.read_text()) if report_path.is_file() else {}
             )
-        )
-        report_artifacts = packaged_report.get("artifacts") or {}
-        report_paths_relative = (
-            all(
-                not Path(value).is_absolute()
-                for value in report_artifacts.values()
-                if isinstance(value, str) and value
+            absolute_report_paths = _absolute_path_values(packaged_report)
+            checks.append(
+                (
+                    "clean_extraction.report_paths",
+                    not absolute_report_paths,
+                    f"absolute path values remain at: {absolute_report_paths}",
+                )
             )
-            if isinstance(report_artifacts, dict)
-            else False
-        )
-        checks.append(
-            (
-                "clean_extraction.report_artifact_paths",
-                report_paths_relative,
-                "all packaged report artifact paths must be relative",
+            report_artifacts = packaged_report.get("artifacts") or {}
+            report_paths_relative = (
+                all(
+                    safe_owned_path(report_path, value)
+                    for value in report_artifacts.values()
+                    if isinstance(value, str) and value
+                )
+                if isinstance(report_artifacts, dict)
+                else False
             )
-        )
-        provenance = verify_provd(manifest_path, repo_root=repo_root)
-        checks.extend(
-            (f"clean_extraction.{name}", ok, detail)
-            for name, ok, detail in provenance.checks
-        )
+            checks.append(
+                (
+                    "clean_extraction.report_artifact_paths",
+                    report_paths_relative,
+                    "all packaged report artifact paths must stay within the archive root",
+                )
+            )
+            provenance = verify_provd(manifest_path, repo_root=repo_root)
+            checks.extend(
+                (f"clean_extraction.{name}", ok, detail)
+                for name, ok, detail in provenance.checks
+            )
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        json.JSONDecodeError,
+        zipfile.BadZipFile,
+    ) as exc:
+        checks.append(("archive.read", False, str(exc)))
     return checks
 
 
@@ -4901,25 +5467,128 @@ def package_dataset_policy_issue(manifest: dict[str, Any]) -> str | None:
     return f"{dataset_name} has release status {release_status}. {policy}"
 
 
+def _failed_package_grade_row(
+    package_path: Path, checks: list[tuple[str, bool, str]]
+) -> dict[str, Any]:
+    errors = [f"{name}: {detail}" for name, ok, detail in checks if not ok]
+    return {
+        "manifest": None,
+        "report": None,
+        "package": str(package_path),
+        "package_verified": False,
+        "workload": package_path.stem,
+        "canonical_workload": "",
+        "variant": "",
+        "run_selector": package_path.stem,
+        "profile": "",
+        "mode": None,
+        "phase": None,
+        "config": {},
+        "status": "package_failed",
+        "verified": False,
+        "passed": False,
+        "quality_ready": False,
+        "metric": "",
+        "value": "",
+        "target": "",
+        "direction": "",
+        "quality_required": False,
+        "target_met": "",
+        "warning_count": 0,
+        "warnings": [],
+        "verification_errors": errors,
+    }
+
+
+def grade_package_archive(package_path: Path) -> dict[str, Any]:
+    """Verify and grade one portable package without trusting archive paths."""
+    checks = verify_package_archive(package_path, repo_root=find_project_root())
+    if not all(ok for _, ok, _ in checks):
+        return _failed_package_grade_row(package_path, checks)
+
+    try:
+        with tempfile.TemporaryDirectory(prefix="mlperf-edu-package-grade-") as tmp:
+            extraction_root = Path(tmp)
+            with zipfile.ZipFile(package_path) as zf:
+                index = _package_index(zf)
+                _safe_extract_package(zf, extraction_root)
+            manifest_name = safe_logical_asset_path(
+                str(index.get("manifest") or index.get("source_manifest") or "")
+            )
+            manifest_path = extraction_root.joinpath(
+                *PurePosixPath(manifest_name).parts
+            )
+            row = grade_manifest(manifest_path)
+            report_path = Path(row["report"]) if row.get("report") else None
+            row["manifest"] = f"{package_path}!/{manifest_name}"
+            if report_path:
+                report_name = (
+                    report_path.resolve()
+                    .relative_to(extraction_root.resolve())
+                    .as_posix()
+                )
+                row["report"] = f"{package_path}!/{report_name}"
+    except (
+        OSError,
+        ValueError,
+        KeyError,
+        json.JSONDecodeError,
+        zipfile.BadZipFile,
+    ) as exc:
+        return _failed_package_grade_row(
+            package_path, [("package.grade", False, str(exc))]
+        )
+    row["package"] = str(package_path)
+    row["package_verified"] = True
+    row["verification_errors"] = []
+    return row
+
+
 def cmd_grade(args: argparse.Namespace) -> int:
-    submissions_dir = Path(args.submissions_dir).resolve()
-    if not submissions_dir.exists():
-        console.print(f"[red]Submissions directory not found:[/red] {submissions_dir}")
+    submissions_path = Path(args.submissions_dir).resolve()
+    if not submissions_path.exists():
+        console.print(f"[red]Submission path not found:[/red] {submissions_path}")
         return 1
 
-    manifests = sorted(
-        path
-        for path in submissions_dir.rglob("*.provd.json")
-        if ".pro_evidence" not in path.parts and ".max_evidence" not in path.parts
-    )
-    if not manifests:
+    manifests: list[Path] = []
+    packages: list[Path] = []
+    if submissions_path.is_file():
+        if submissions_path.name.endswith(".provd.json"):
+            manifests = [submissions_path]
+        elif submissions_path.suffix.lower() == ".zip":
+            packages = [submissions_path]
+    else:
+        manifests = sorted(
+            path
+            for path in submissions_path.rglob("*.provd.json")
+            if ".pro_evidence" not in path.parts and ".max_evidence" not in path.parts
+        )
+        if not manifests:
+            packages = sorted(submissions_path.rglob("*.zip"))
+    if not manifests and not packages:
         console.print(
-            f"[red]No .provd.json manifests found in:[/red] {submissions_dir}"
+            f"[red]No manifests or packages found in:[/red] {submissions_path}"
         )
         return 1
 
+    assignment = None
+    assignment_api = None
+    assignment_path = getattr(args, "assignment", None)
+    if assignment_path:
+        try:
+            # Assignment grading is a product-layer extension, not part of the
+            # protected benchmark measurement dependency graph.
+            assignment_api = import_module("mlperf.assignment")
+            assignment = assignment_api.load_assignment_contract(
+                Path(assignment_path).resolve()
+            )
+        except (OSError, ValueError) as exc:
+            console.print(f"[red]Invalid assignment contract:[/red] {exc}")
+            return 1
+
     rows = [grade_manifest(path) for path in manifests]
-    table = Table(title=f"MLPerf EDU Grade: {submissions_dir}")
+    rows.extend(grade_package_archive(path) for path in packages)
+    table = Table(title=f"MLPerf EDU Grade: {submissions_path}")
     table.add_column("Workload", no_wrap=True)
     table.add_column("Profile", no_wrap=True)
     table.add_column("Result", no_wrap=True)
@@ -4943,13 +5612,20 @@ def cmd_grade(args: argparse.Namespace) -> int:
     passed = sum(1 for row in rows if row["passed"])
     failed = len(rows) - passed
     warning_count = sum(int(row.get("warning_count", 0)) for row in rows)
+    assignment_grade = (
+        assignment_api.evaluate_assignment_contract(assignment, rows)
+        if assignment and assignment_api
+        else None
+    )
     summary = {
         "schema": "mlperf-edu-grade/0.1",
-        "submissions_dir": str(submissions_dir),
+        "submissions_dir": str(submissions_path),
+        "submission_path": str(submissions_path),
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "passed": passed,
         "failed": failed,
         "warning_count": warning_count,
+        "assignment": assignment_grade,
         "results": rows,
     }
     if args.output:
@@ -4961,7 +5637,18 @@ def cmd_grade(args: argparse.Namespace) -> int:
     console.print(
         f"Grade summary: {passed} passed, {failed} failed, {warning_count} warning(s)"
     )
-    return 0 if failed == 0 else 1
+    if assignment_grade:
+        assignment_style = "green" if assignment_grade["passed"] else "red"
+        assignment_status = "passed" if assignment_grade["passed"] else "failed"
+        console.print(
+            f"Assignment {assignment_grade['assignment_id']}: "
+            f"[{assignment_style}]{assignment_status}[/{assignment_style}]"
+        )
+        for error in assignment_grade["errors"]:
+            console.print(f"  [red]{error}[/red]")
+    return (
+        0 if failed == 0 and (not assignment_grade or assignment_grade["passed"]) else 1
+    )
 
 
 def cmd_validate(args: argparse.Namespace) -> int:
