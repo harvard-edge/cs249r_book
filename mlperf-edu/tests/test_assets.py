@@ -210,3 +210,71 @@ def test_edm_fetch_validates_checkpoint_and_fid_reference(monkeypatch, tmp_path)
         tmp_path / "cache" / "inception-2015-12-05.pkl",
         tmp_path / "cache" / f"edm-{assets.EDM_COMMIT}.tar.gz",
     )
+
+
+def test_dlrm_fetch_pins_inference_and_implementation_sources(monkeypatch, tmp_path):
+    inference_tree = tmp_path / "inference-tree"
+    implementation_tree = tmp_path / "implementation-tree"
+    (inference_tree / "recommendation").mkdir(parents=True)
+    implementation_tree.mkdir()
+    inference_file = inference_tree / "recommendation" / "main.py"
+    implementation_file = implementation_tree / "dlrm_s_pytorch.py"
+    inference_file.write_text("print('inference')\n")
+    implementation_file.write_text("print('dlrm')\n")
+
+    inference_archive = tmp_path / "inference.tar.gz"
+    implementation_archive = tmp_path / "implementation.tar.gz"
+    with tarfile.open(inference_archive, "w:gz") as bundle:
+        bundle.add(
+            inference_tree,
+            arcname=f"inference-{assets.DLRM_INFERENCE_COMMIT}",
+        )
+    with tarfile.open(implementation_archive, "w:gz") as bundle:
+        bundle.add(
+            implementation_tree,
+            arcname=f"dlrm-{assets.DLRM_IMPLEMENTATION_COMMIT}",
+        )
+
+    sources = {
+        assets.DLRM_INFERENCE_ARCHIVE_URL: inference_archive,
+        assets.DLRM_IMPLEMENTATION_ARCHIVE_URL: implementation_archive,
+    }
+    monkeypatch.setattr(
+        assets,
+        "DLRM_INFERENCE_ARCHIVE_SHA256",
+        hashlib.sha256(inference_archive.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        assets,
+        "DLRM_IMPLEMENTATION_ARCHIVE_SHA256",
+        hashlib.sha256(implementation_archive.read_bytes()).hexdigest(),
+    )
+    monkeypatch.setattr(
+        assets,
+        "DLRM_INFERENCE_FILES",
+        {
+            "recommendation/main.py": hashlib.sha256(
+                inference_file.read_bytes()
+            ).hexdigest()
+        },
+    )
+    monkeypatch.setattr(
+        assets,
+        "DLRM_IMPLEMENTATION_FILES",
+        {
+            "dlrm_s_pytorch.py": hashlib.sha256(
+                implementation_file.read_bytes()
+            ).hexdigest()
+        },
+    )
+    monkeypatch.setattr(
+        assets,
+        "_download",
+        lambda url, destination: shutil.copyfile(sources[url], destination),
+    )
+
+    result = assets.ensure_dlrm_reference(root=tmp_path / "cache")
+
+    assert result.name == "mlperf-inference-v1.0.1-dlrm-reference"
+    assert len(result.files) == 4
+    assert all(path.is_file() for path in result.files)

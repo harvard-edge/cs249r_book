@@ -231,6 +231,36 @@ EDM_SOURCE_FILES = {
     "training/dataset.py": "f46fe15ecd66206819e416ffca6ea22a06610405d6954ccc0fffc53092ab81c2",
     "training/networks.py": "5db27dcd96674b95c72d5e6491b879cdc35e24039ada3411b4b46a28ed1fe284",
 }
+DLRM_INFERENCE_COMMIT = "8b58587c93af2a5ee67722064f2540a2db15d42f"
+DLRM_INFERENCE_ARCHIVE_URL = (
+    f"https://github.com/mlcommons/inference/archive/{DLRM_INFERENCE_COMMIT}.tar.gz"
+)
+DLRM_INFERENCE_ARCHIVE_SHA256 = (
+    "9a0f82844cc48a05face9384d200d260da1120aa86f0f4bb140677daaf84b6d2"
+)
+DLRM_IMPLEMENTATION_COMMIT = "6d75c84d834380a365e2f03d4838bee464157516"
+DLRM_IMPLEMENTATION_ARCHIVE_URL = f"https://github.com/facebookresearch/dlrm/archive/{DLRM_IMPLEMENTATION_COMMIT}.tar.gz"
+DLRM_IMPLEMENTATION_ARCHIVE_SHA256 = (
+    "748b2f5e62231dbe5965f30b85caaefcb66e8dffeda394f68e74770beb73b5af"
+)
+DLRM_INFERENCE_FILES = {
+    "mlperf.conf": "4e84d49c30915386e7d5c9b02ee06c166d997dbf3883ee479c17dbeefe68a81c",
+    "recommendation/dlrm/pytorch/python/backend_pytorch_native.py": "c88931a6f050208d50b116ca8bc16b85818f5d7bc8b5f0c8ee3285da65e625f7",
+    "recommendation/dlrm/pytorch/python/criteo.py": "ff304bb29baead0f0990050785b2aa92c45c5a4e2b63bb52bcdcac6e746c1883",
+    "recommendation/dlrm/pytorch/python/main.py": "258a2cb45aa61ee758f37abd6affb6b0ede3709460a7751d2cce861680eae82d",
+    "recommendation/dlrm/pytorch/tools/accuracy-dlrm.py": "304fa14c4b47aceaa651a135d01fa71798640ee09aa1ce01e468558021403919",
+    "recommendation/dlrm/pytorch/tools/dist_quantile.txt": "76454af11405bcfa9e375c79a17738b6fcb7633a8467da2ce785eb3fab8ec80b",
+    "recommendation/dlrm/pytorch/user.conf": "8e3771762aaeccf2e29cdae92a7af2f27ffe0923dfe32675080ead72585b01c9",
+}
+DLRM_IMPLEMENTATION_FILES = {
+    "data_loader_terabyte.py": "867ef30aaa68b67c29f01f5da5ef81b9d5a0b4aa39795d35678e47d3d75049b1",
+    "data_utils.py": "a4285cc250152491fcad182f1c01806a0b0260cd0f2f57b86e4f44743f5c3aea",
+    "dlrm_data_pytorch.py": "5dd70d7322aa91fdf8b00fe3dcb3f8a380c28cd499498828fa9cff5bfd72d61e",
+    "dlrm_s_pytorch.py": "8d78c9ca22ef365d3884e868b2efb3ebef9e7bb9042d3c661fb55b7117c58c11",
+}
+DLRM_CHECKPOINT_URL = "https://dlrm.s3-us-west-1.amazonaws.com/models/tb00_40M.pt"
+DLRM_CHECKPOINT_MD5 = "2d49a5288cddb37c3c64860a06d79bb9"
+DLRM_TRAINING_SUBMODULE_COMMIT = "8e7ad54541aeda54a8e5152732b9fb293a22b10c"
 MINIGO_COMMIT = "0badcd1786fcb007725ed05f1c44e9d80bbeac52"
 
 
@@ -919,6 +949,17 @@ def edm_cifar10_paths(root: Path | None = None) -> dict[str, Path]:
         "inception": base / "inception-2015-12-05.pkl",
         "archive": base / f"edm-{EDM_COMMIT}.tar.gz",
         "source": base / f"edm-{EDM_COMMIT}",
+    }
+
+
+def dlrm_reference_paths(root: Path | None = None) -> dict[str, Path]:
+    base = _asset_path_root(root, "dlrm-v1.0.1-reference")
+    return {
+        "root": base,
+        "inference_archive": base / f"inference-{DLRM_INFERENCE_COMMIT}.tar.gz",
+        "inference_source": base / f"inference-{DLRM_INFERENCE_COMMIT}",
+        "implementation_archive": base / f"dlrm-{DLRM_IMPLEMENTATION_COMMIT}.tar.gz",
+        "implementation_source": base / f"dlrm-{DLRM_IMPLEMENTATION_COMMIT}",
     }
 
 
@@ -2046,6 +2087,115 @@ def ensure_edm_cifar10(
         sha256=f"sha256:{digest.hexdigest()}",
         n_bytes=sum(path.stat().st_size for path in files),
         source=f"https://github.com/NVlabs/edm/tree/{EDM_COMMIT}",
+    )
+
+
+def _extract_pinned_source_archive(
+    *,
+    archive: Path,
+    source_root: Path,
+    prefix: str,
+    expected_files: dict[str, str],
+) -> tuple[Path, ...]:
+    source_files = tuple(source_root / relative for relative in expected_files)
+    if not all(
+        path.is_file()
+        and sha256_file(path) == expected_files[str(path.relative_to(source_root))]
+        for path in source_files
+    ):
+        staging = source_root.with_name(f"{source_root.name}.staging")
+        shutil.rmtree(staging, ignore_errors=True)
+        staging.mkdir(parents=True)
+        with tarfile.open(archive, "r:gz") as bundle:
+            for member in bundle.getmembers():
+                if not member.isfile() or not member.name.startswith(prefix):
+                    continue
+                relative = Path(member.name.removeprefix(prefix))
+                if relative.is_absolute() or ".." in relative.parts:
+                    raise ValueError(f"unsafe source archive member: {member.name}")
+                source = bundle.extractfile(member)
+                if source is None:
+                    raise FileNotFoundError(
+                        f"could not read source archive member: {member.name}"
+                    )
+                destination = staging / relative
+                destination.parent.mkdir(parents=True, exist_ok=True)
+                with source, destination.open("wb") as handle:
+                    shutil.copyfileobj(source, handle)
+        shutil.rmtree(source_root, ignore_errors=True)
+        staging.replace(source_root)
+
+    source_files = tuple(source_root / relative for relative in expected_files)
+    for path in source_files:
+        relative = str(path.relative_to(source_root))
+        if not path.is_file() or sha256_file(path) != expected_files[relative]:
+            raise ValueError(f"pinned source file does not match: {relative}")
+    return source_files
+
+
+def ensure_dlrm_reference(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
+    """Fetch the exact MLPerf Inference and DLRM implementation sources."""
+    paths = dlrm_reference_paths(root)
+    paths["root"].mkdir(parents=True, exist_ok=True)
+    archives = (
+        (
+            paths["inference_archive"],
+            DLRM_INFERENCE_ARCHIVE_URL,
+            DLRM_INFERENCE_ARCHIVE_SHA256,
+        ),
+        (
+            paths["implementation_archive"],
+            DLRM_IMPLEMENTATION_ARCHIVE_URL,
+            DLRM_IMPLEMENTATION_ARCHIVE_SHA256,
+        ),
+    )
+    for archive, url, expected_sha256 in archives:
+        if not archive.is_file() or sha256_file(archive) != expected_sha256:
+            if not download:
+                raise FileNotFoundError(
+                    f"DLRM v1.0.1 reference source is missing at {archive}. Run "
+                    "`mlperf fetch --workload recommendation --profile max`."
+                )
+            archive.unlink(missing_ok=True)
+            _download(url, archive)
+        if sha256_file(archive) != expected_sha256:
+            archive.unlink(missing_ok=True)
+            raise ValueError(f"DLRM reference SHA-256 mismatch: {archive.name}")
+
+    inference_files = _extract_pinned_source_archive(
+        archive=paths["inference_archive"],
+        source_root=paths["inference_source"],
+        prefix=f"inference-{DLRM_INFERENCE_COMMIT}/",
+        expected_files=DLRM_INFERENCE_FILES,
+    )
+    implementation_files = _extract_pinned_source_archive(
+        archive=paths["implementation_archive"],
+        source_root=paths["implementation_source"],
+        prefix=f"dlrm-{DLRM_IMPLEMENTATION_COMMIT}/",
+        expected_files=DLRM_IMPLEMENTATION_FILES,
+    )
+    files = (
+        paths["inference_archive"],
+        paths["implementation_archive"],
+        *inference_files,
+        *implementation_files,
+    )
+    digest = hashlib.sha256()
+    for path in files:
+        digest.update(path.name.encode("utf-8") + b"\0")
+        digest.update(sha256_file(path).encode("ascii") + b"\n")
+    return DatasetAsset(
+        name="mlperf-inference-v1.0.1-dlrm-reference",
+        root=paths["root"],
+        files=files,
+        sha256=f"sha256:{digest.hexdigest()}",
+        n_bytes=sum(path.stat().st_size for path in files),
+        source=(
+            f"https://github.com/mlcommons/inference/tree/{DLRM_INFERENCE_COMMIT}/"
+            "recommendation/dlrm/pytorch"
+        ),
     )
 
 

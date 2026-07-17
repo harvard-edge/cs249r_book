@@ -35,6 +35,8 @@ from .assets import (
     CIFAR10_HF_REVISION,
     EDM_CIFAR10_CHECKPOINT_URL,
     EDM_CIFAR10_FID_REFERENCE_URL,
+    DLRM_IMPLEMENTATION_ARCHIVE_URL,
+    DLRM_INFERENCE_ARCHIVE_URL,
     EEMBC_RUNNER_ARCHIVE_URL,
     EVALPLUS_ARCHIVE_URL,
     HUMANEVAL_PLUS_URL,
@@ -51,6 +53,7 @@ from .assets import (
     bfcl_non_live_ast_paths,
     cifar10_paths,
     edm_cifar10_paths,
+    dlrm_reference_paths,
     ensure_bfcl_non_live_ast,
     ensure_cifar10,
     ensure_edm_cifar10,
@@ -1015,8 +1018,22 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
         asset = ensure_bfcl_non_live_ast(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
     if dataset == "criteo-terabyte":
+        paths = dlrm_reference_paths()
+        if dry_run:
+            source_detail = (
+                f"reference={paths['inference_source']} "
+                f"({DLRM_INFERENCE_ARCHIVE_URL}); "
+                f"implementation={paths['implementation_source']} "
+                f"({DLRM_IMPLEMENTATION_ARCHIVE_URL})"
+            )
+        else:
+            source_detail = (
+                f"pinned reference sources configured at {paths['root']} "
+                "(fetched and hash-validated by the max runner)"
+            )
         return (
-            f"- {workload.id}: MANUAL ACTION REQUIRED; accept the Criteo terms, "
+            f"- {workload.id}: {source_detail}; MANUAL ACTION REQUIRED; "
+            "accept the Criteo terms, "
             "prepare unshuffled day 23, and provide the official MLPerf "
             f"Inference v1.0.1 40M checkpoint; {terms}"
         )
@@ -2103,8 +2120,7 @@ def run_pro_profile(
     execution_passed = all(item.get("status") == "passed" for item in subreports)
     subrun_qualities = [item.get("quality") or {} for item in subreports]
     quality_required = all(
-        quality_required_value(quality, False) is True
-        for quality in subrun_qualities
+        quality_required_value(quality, False) is True for quality in subrun_qualities
     )
     target_met = (
         all(quality.get("target_met") is True for quality in subrun_qualities)
@@ -3374,10 +3390,7 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
         and (not quality_required or target_met is True)
     )
     quality_ready = bool(
-        result.all_ok
-        and status == "passed"
-        and quality_required
-        and target_met is True
+        result.all_ok and status == "passed" and quality_required and target_met is True
     )
     workload_id = report.get("workload") or manifest.get("workload", "unknown")
     canonical = (
@@ -5528,8 +5541,7 @@ def cache_asset_rows(workload: Workload) -> list[dict[str, str]]:
             evalplus_evaluator_paths()["source"] / "evalplus" / "evaluate.py",
         ],
         "bfcl-v4-non-live-ast": [
-            bfcl_non_live_ast_paths()["data"] / relative
-            for relative in BFCL_DATA_FILES
+            bfcl_non_live_ast_paths()["data"] / relative for relative in BFCL_DATA_FILES
         ],
     }
     paths = (
