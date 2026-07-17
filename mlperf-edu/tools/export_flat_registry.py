@@ -10,26 +10,59 @@ from mlperf.registry import PRODUCT_SUITES, Workload, load_registry
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Export the native registry layout into legacy workloads.yaml.")
-    parser.add_argument("--source", default="registry", help="Native registry directory to export.")
-    parser.add_argument("--output", default="workloads.yaml", help="Compatibility flat registry YAML path.")
+    parser = argparse.ArgumentParser(
+        description="Export the native registry and packaged data catalogs."
+    )
+    parser.add_argument(
+        "--source", default="registry", help="Native registry directory to export."
+    )
+    parser.add_argument(
+        "--output",
+        default="workloads.yaml",
+        help="Compatibility flat registry YAML path.",
+    )
     parser.add_argument(
         "--package-output",
         default="src/mlperf_edu/workloads.yaml",
         help="Packaged flat registry YAML copy included in wheels.",
     )
-    parser.add_argument("--check", action="store_true", help="Verify workloads.yaml is current without writing.")
+    parser.add_argument(
+        "--dataset-source",
+        default="datasets.yaml",
+        help="Authored dataset catalog included with the package.",
+    )
+    parser.add_argument(
+        "--dataset-package-output",
+        default="src/mlperf_edu/datasets.yaml",
+        help="Packaged dataset catalog copy included in wheels.",
+    )
+    parser.add_argument(
+        "--check",
+        action="store_true",
+        help="Verify the flat registry and packaged catalogs without writing.",
+    )
     args = parser.parse_args()
 
     workloads = load_registry(args.source)
     content = dump_yaml(native_to_flat(workloads))
     output = Path(args.output)
     package_output = Path(args.package_output) if args.package_output else None
+    dataset_source = Path(args.dataset_source) if args.dataset_source else None
+    dataset_package_output = (
+        Path(args.dataset_package_output) if args.dataset_package_output else None
+    )
+    dataset_content = (
+        dataset_source.read_text(encoding="utf-8")
+        if dataset_source is not None
+        else None
+    )
 
     if args.check:
         problems = check_output(output, content)
         if package_output is not None:
             problems.extend(check_output(package_output, content))
+        if dataset_package_output is not None and dataset_content is not None:
+            problems.extend(check_output(dataset_package_output, dataset_content))
         if problems:
             for problem in problems:
                 print(problem)
@@ -38,6 +71,8 @@ def main() -> int:
         checked = f"{output}"
         if package_output is not None:
             checked += f" and {package_output}"
+        if dataset_package_output is not None:
+            checked += f" and {dataset_package_output}"
         print(f"{checked} are current ({len(workloads)} workload(s))")
         return 0
 
@@ -47,6 +82,10 @@ def main() -> int:
         package_output.parent.mkdir(parents=True, exist_ok=True)
         package_output.write_text(content, encoding="utf-8")
         written.append(str(package_output))
+    if dataset_package_output is not None and dataset_content is not None:
+        dataset_package_output.parent.mkdir(parents=True, exist_ok=True)
+        dataset_package_output.write_text(dataset_content, encoding="utf-8")
+        written.append(str(dataset_package_output))
     print(f"wrote {len(workloads)} workload(s) to {', '.join(written)}")
     return 0
 

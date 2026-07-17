@@ -7,15 +7,27 @@ from typing import Any
 
 from mlperf.assets import asset_dossier, huggingface_model_dossier
 from mlperf.edu_cli import public_audit_warnings, workload_run_selector
-from mlperf.registry import Workload, load_registry, select_workloads
+from mlperf.registry import (
+    Workload,
+    baseline_is_current_review_evidence,
+    baseline_is_protocol_superseded,
+    load_registry,
+    select_workloads,
+)
 
 
 PUBLIC_REVIEW_STATUSES = ("score-bearing", "performance-bearing")
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate MLPerf EDU workload review packets.")
-    parser.add_argument("--output-dir", default="review_packets", help="Directory for generated Markdown packets.")
+    parser = argparse.ArgumentParser(
+        description="Generate MLPerf EDU workload review packets."
+    )
+    parser.add_argument(
+        "--output-dir",
+        default="review_packets",
+        help="Directory for generated Markdown packets.",
+    )
     parser.add_argument(
         "--status",
         choices=PUBLIC_REVIEW_STATUSES,
@@ -45,11 +57,16 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     for path, content in expected.items():
         path.write_text(content, encoding="utf-8")
+    for path in output_dir.glob("*.md"):
+        if path not in expected:
+            path.unlink()
     print(f"wrote {len(expected) - 1} packet(s) to {output_dir}")
     return 0
 
 
-def expected_packets(selected: list[Workload], output_dir: Path, workloads: dict[str, Workload]) -> dict[Path, str]:
+def expected_packets(
+    selected: list[Workload], output_dir: Path, workloads: dict[str, Workload]
+) -> dict[Path, str]:
     paths = [output_dir / f"{packet_slug(workload)}.md" for workload in selected]
     expected = {
         path: render_packet(workload, workloads)
@@ -102,8 +119,9 @@ def render_index(workloads: list[Workload], paths: list[Path]) -> str:
         [
             "# MLPerf EDU Review Packets",
             "",
-            "These packets are generated from `workloads.yaml` and structured asset dossiers.",
+            "These packets are generated from the native registry and structured asset dossiers.",
             "They are intended for MLCommons, instructor, and artifact-review feedback.",
+            "A committed evidence summary can pass repository CI while the packet continues to flag a raw-package publication blocker.",
             "",
             *rows,
             "",
@@ -126,13 +144,17 @@ def render_packet(workload: Workload, workloads: dict[str, Workload]) -> str:
         "",
         quality_section(workload),
         "",
+        evidence_contract_section(workload),
+        "",
+        taxonomy_section(workload),
+        "",
         asset_section(workload),
         "",
         checkpoint_section(workload, workloads),
         "",
         "## Public Review Notes",
         "",
-        bullet_list(public_review_notes(workload)),
+        bullet_list(public_review_notes(workload, workloads)),
         "",
         "## Source Provenance",
         "",
@@ -165,6 +187,7 @@ def summary_table(workload: Workload) -> str:
                 ("Variant", workload.variant or ""),
             ]
         )
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
     return markdown_table(("Field", "Value"), rows)
 
 
@@ -175,14 +198,29 @@ def command_block(workload: Workload) -> str:
         args = f"--workload {workload_name} --variant {variant}"
     else:
         args = f"--workload {selector}"
-    return "\n".join(
+    slug = packet_slug(workload)
+    commands = [
+        "```bash",
+        f'OUTPUT_DIR="submissions/review-{slug}"',
+    ]
+    shared_checkpoint = workload.raw.get("shared_checkpoint")
+    if shared_checkpoint:
+        commands.extend(
+            [
+                f"mlperf fetch --workload {shared_checkpoint} --profile max",
+                f'mlperf run --workload {shared_checkpoint} --profile max --output-dir "$OUTPUT_DIR"',
+            ]
+        )
+    commands.extend(
         [
-            "```bash",
-            f"mlperf fetch {args} --profile max --dry-run",
-            f"mlperf run {args} --profile max",
+            f"mlperf fetch {args} --profile max",
+            f'mlperf run {args} --profile max --output-dir "$OUTPUT_DIR"',
+            'for manifest in "$OUTPUT_DIR"/*.provd.json; do mlperf verify "$manifest"; done',
+            'mlperf grade "$OUTPUT_DIR" --output "$OUTPUT_DIR/grade.json"',
             "```",
         ]
     )
+    return "\n".join(commands)
 
 
 def quality_section(workload: Workload) -> str:
@@ -194,24 +232,114 @@ def quality_section(workload: Workload) -> str:
             ("Direction", quality.get("direction", "")),
             ("Target basis", quality.get("target_basis", "")),
             ("Reference runs", quality.get("reference_runs", "")),
-            ("Acceptance rule", (quality.get("variance_summary") or {}).get("acceptance_rule", "")),
+            (
+                "Acceptance rule",
+                (quality.get("variance_summary") or {}).get("acceptance_rule", ""),
+            ),
             ("Reference protocol", compact_dict(quality.get("reference_protocol"))),
-            ("Verified baseline", compact_dict(workload.raw.get("verified_baseline"))),
         ]
-        return "\n".join(["## Quality Contract", "", markdown_table(("Field", "Value"), rows)])
+        rows = [(field, value) for field, value in rows if value not in (None, "")]
+        return "\n".join(
+            ["## Quality Contract", "", markdown_table(("Field", "Value"), rows)]
+        )
 
     functional = workload.raw.get("functional_check") or {}
+    reference_protocol = workload.raw.get("performance_reference_protocol") or {}
     rows = [
         ("Functional metric", functional.get("metric", "")),
         ("Condition", functional.get("condition", "")),
-        ("Reference runs", functional.get("reference_runs", "")),
-        ("Reviewer notes", "; ".join(str(note) for note in functional.get("reviewer_notes", []))),
+        ("Independent reference runs", reference_protocol.get("reference_runs", "")),
+        (
+            "Reviewer notes",
+            "; ".join(str(note) for note in functional.get("reviewer_notes", [])),
+        ),
     ]
-    return "\n".join(["## Functional Contract", "", markdown_table(("Field", "Value"), rows)])
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
+    return "\n".join(
+        ["## Functional Contract", "", markdown_table(("Field", "Value"), rows)]
+    )
+
+
+def evidence_contract_section(workload: Workload) -> str:
+    raw = workload.raw
+    baseline = raw.get("verified_baseline") or {}
+    calibration = raw.get("calibration_observation") or {}
+    if baseline_is_protocol_superseded(baseline):
+        baseline_role = "historical-protocol-superseded"
+        baseline_disclosure = (
+            "Retained for historical traceability only; it does not validate the current "
+            "contract and is not an MLCommons-verified result."
+        )
+    elif baseline_is_current_review_evidence(baseline):
+        baseline_role = "current-review-evidence"
+        baseline_disclosure = (
+            "Project reference evidence; not an MLCommons-verified result."
+        )
+    else:
+        baseline_role = "development-only"
+        baseline_disclosure = (
+            "Development evidence only; not an MLCommons-verified result."
+        )
+    rows = [
+        ("Reference protocol", compact_dict(raw.get("performance_reference_protocol"))),
+        ("Measurement protocol", compact_dict(raw.get("measurement_protocol"))),
+        ("Checkpoint contract", compact_dict(raw.get("checkpoint_contract"))),
+        ("Task-quality evaluation", compact_dict(raw.get("quality_evaluation"))),
+        ("Baseline record", compact_dict(baseline)),
+        ("Baseline record role", baseline_role),
+        ("Baseline disclosure", baseline_disclosure),
+        ("Baseline evidence status", baseline.get("evidence_status", "not declared")),
+        ("Baseline review eligible", baseline.get("review_eligible", "not declared")),
+        ("Baseline evidence file", baseline.get("evidence_file", "not declared")),
+        (
+            "Reference package availability",
+            baseline.get("reference_package_availability", "not declared"),
+        ),
+        (
+            "External publication status",
+            baseline.get("external_publication_status", "not declared"),
+        ),
+        (
+            "External publication URL",
+            baseline.get("external_publication_url", "not declared"),
+        ),
+        ("Calibration observation", compact_dict(calibration)),
+    ]
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
+    return "\n".join(
+        [
+            "## Measurement and Evidence Contract",
+            "",
+            markdown_table(("Field", "Value"), rows),
+        ]
+    )
+
+
+def taxonomy_section(workload: Workload) -> str:
+    regime = workload.raw.get("regime") or {}
+    rows = []
+    for axis in ("working_set", "arithmetic_intensity", "dispatch"):
+        block = regime.get(axis) or {}
+        value = block.get("value", "missing")
+        sidecar = block.get("evidence_sidecar", "none")
+        digest = block.get("evidence_sha256", "none")
+        note = block.get("note", "")
+        rows.append(
+            (axis, f"value={value}; evidence={sidecar}; sha256={digest}; note={note}")
+        )
+    return "\n".join(
+        [
+            "## Taxonomy Evidence",
+            "",
+            markdown_table(("Axis", "Claim and evidence"), rows),
+        ]
+    )
 
 
 def asset_section(workload: Workload) -> str:
-    dataset = asset_dossier(workload.dataset, declared_source=workload.raw.get("dataset_source"))
+    dataset = asset_dossier(
+        workload.dataset, declared_source=workload.raw.get("dataset_source")
+    )
     rows = [
         ("Dataset asset", dataset.get("id", "")),
         ("Dataset source", dataset.get("source_url", "")),
@@ -221,8 +349,15 @@ def asset_section(workload: Workload) -> str:
         ("Dataset citation", dataset.get("citation", "")),
     ]
     model_source = workload.raw.get("model_source")
-    if isinstance(model_source, dict) and model_source.get("type") == "huggingface":
-        model = huggingface_model_dossier(model_source, model_name=workload.model)
+    if (
+        isinstance(model_source, dict)
+        and model_source.get("type") == "huggingface-pinned"
+    ):
+        model = huggingface_model_dossier(
+            model_source,
+            model_name=workload.model,
+            model_id=str(model_source.get("repo_id") or workload.model),
+        )
         rows.extend(
             [
                 ("Model source", model.get("source_url", "")),
@@ -230,6 +365,7 @@ def asset_section(workload: Workload) -> str:
                 ("Model rationale", model.get("selection_rationale", "")),
             ]
         )
+    rows = [(field, value) for field, value in rows if value not in (None, "")]
     return "\n".join(["## Assets", "", markdown_table(("Field", "Value"), rows)])
 
 
@@ -240,12 +376,25 @@ def checkpoint_section(workload: Workload, workloads: dict[str, Workload]) -> st
     rows = [
         ("Shared checkpoint", workload.raw.get("shared_checkpoint", "")),
         ("Quality dependency", workload.raw.get("quality_dependency", "")),
-        ("Source run selector", workload_run_selector(source) if source else workload.raw.get("shared_checkpoint", "")),
+        (
+            "Source run selector",
+            workload_run_selector(source)
+            if source
+            else workload.raw.get("shared_checkpoint", ""),
+        ),
         ("Source quality", source_quality_summary(source) if source else ""),
-        ("Source verified baseline", compact_dict(source.raw.get("verified_baseline")) if source else ""),
-        ("Policy", "Preserve the source training report and .provd.json alongside checkpoint-backed inference results."),
+        (
+            "Source baseline record",
+            compact_dict(source.raw.get("verified_baseline")) if source else "",
+        ),
+        (
+            "Policy",
+            "Preserve the source training report and .provd.json alongside checkpoint-backed inference results.",
+        ),
     ]
-    return "\n".join(["## Checkpoint Lineage", "", markdown_table(("Field", "Value"), rows)])
+    return "\n".join(
+        ["## Checkpoint Lineage", "", markdown_table(("Field", "Value"), rows)]
+    )
 
 
 def source_quality_summary(workload: Workload | None) -> str:
@@ -261,8 +410,66 @@ def source_quality_summary(workload: Workload | None) -> str:
     return " ".join(parts)
 
 
-def public_review_notes(workload: Workload) -> list[str]:
+def public_review_notes(
+    workload: Workload, workloads: dict[str, Workload]
+) -> list[str]:
     warnings = public_audit_warnings(workload)
+    baseline = workload.raw.get("verified_baseline")
+    if workload.public_status in {"score-bearing", "performance-bearing"}:
+        evidence_status = (
+            baseline.get("evidence_status") if isinstance(baseline, dict) else None
+        )
+        if evidence_status != "committed-reference-summary":
+            warnings.append(
+                f"{workload.public_status} baseline is not backed by a committed reference summary; "
+                f"evidence status is {evidence_status or 'not declared'}"
+            )
+        if baseline_is_protocol_superseded(baseline):
+            reason = str(baseline.get("superseded_reason") or "").strip()
+            detail = f" Reason: {reason}" if reason else ""
+            warnings.append(
+                "replacement blocker: the committed packet is historical and uses a "
+                "protocol superseded by the current benchmark contract; a clean reference "
+                f"sweep is required before promotion.{detail}"
+            )
+    calibration = workload.raw.get("calibration_observation")
+    if (
+        workload.public_status == "performance-bearing"
+        and isinstance(calibration, dict)
+        and not (
+            isinstance(baseline, dict)
+            and baseline.get("evidence_status") == "committed-reference-summary"
+        )
+    ):
+        warnings.append(
+            "calibration values are informational and are not a review baseline; "
+            f"evidence status is {calibration.get('evidence_status', 'not declared')}"
+        )
+    checkpoint_id = workload.raw.get("shared_checkpoint")
+    checkpoint_source = workloads.get(str(checkpoint_id)) if checkpoint_id else None
+    if checkpoint_source is not None:
+        source_baseline = checkpoint_source.raw.get("verified_baseline") or {}
+        source_status = (
+            source_baseline.get("evidence_status")
+            if isinstance(source_baseline, dict)
+            else None
+        )
+        if source_status != "committed-reference-summary":
+            warnings.append(
+                f"shared checkpoint source {checkpoint_source.id} is not backed by a committed "
+                f"reference summary; evidence status is {source_status or 'not declared'}"
+            )
+        else:
+            if baseline_is_protocol_superseded(source_baseline):
+                warnings.append(
+                    f"replacement blocker: shared checkpoint source {checkpoint_source.id} "
+                    "has only protocol-superseded historical evidence"
+                )
+            if source_baseline.get("reference_package_availability") != "published":
+                warnings.append(
+                    f"external-publication blocker: the raw reference package for shared checkpoint "
+                    f"source {checkpoint_source.id} is not yet publicly retrievable"
+                )
     if warnings:
         return warnings
     return ["No public-release warning from the current structured audit."]
@@ -271,7 +478,9 @@ def public_review_notes(workload: Workload) -> list[str]:
 def markdown_table(headers: tuple[str, str], rows: list[tuple[str, Any]]) -> str:
     output = [f"| {headers[0]} | {headers[1]} |", "|---|---|"]
     for key, value in rows:
-        output.append(f"| {escape_cell(str(key))} | {escape_cell(format_value(value))} |")
+        output.append(
+            f"| {escape_cell(str(key))} | {escape_cell(format_value(value))} |"
+        )
     return "\n".join(output)
 
 

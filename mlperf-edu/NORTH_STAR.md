@@ -1,125 +1,107 @@
 # MLPerf EDU North Star
 
-## Two-Year Goal
+> MLPerf EDU is a locally executable, quality-gated benchmark specification for
+> teaching and studying single-node ML systems. It transfers the
+> reproducibility, verification, disclosure, and comparability discipline of
+> mature benchmark suites to classroom-scale PyTorch workloads. It supports
+> controlled research on processors, memory systems, runtimes, compilers, and
+> model execution while explicitly excluding distributed and datacenter-scale
+> claims.
 
-Two years from now, an ML systems, architecture, compiler, edge AI, or efficient
-LLM paper should be expected to answer:
+## Design Commitments
 
-> Did you run MLPerf EDU, and if not, why not?
+### Start From Authoritative Workloads
 
-MLPerf EDU should become the practical academic benchmark substrate that MLPerf
-never became for most papers: SPEC-like in usability and citation value, but
-MLPerf-like in discipline around workloads, scenarios, quality targets,
-measurement, provenance, and reviewable artifacts.
+The project curates and packages established definitions. It does not invent
+models, datasets, metrics, reduced tasks, or quality targets to fill a matrix.
+The value is disciplined selection, local execution, measurement, provenance,
+and reporting.
 
-The suite should be easy enough to run in a course and serious enough to anchor
-research claims in ISCA, MICRO, HPCA, ASPLOS, MLSys, NeurIPS Systems, and related
-venues.
+### Design Backward From Use
 
-## Core Thesis
+A student should be able to install the suite, inspect a workload, fetch its
+assets, run it on a laptop, verify task quality, analyze system behavior, and
+hand an instructor a reviewable artifact. A researcher should be able to alter
+a controlled single-node configuration without losing task identity or
+lineage.
 
-MLPerf EDU is not just "MLPerf but smaller" and not just a classroom demo.
+### Keep Workload Identity Stable
 
-It is a runnable academic research suite for ML systems. Classroom usability is
-the forcing function that keeps the benchmark from becoming too complicated for
-students, reviewers, artifact evaluators, and researchers to use.
+Training and inference are modes. Full, prefill, and decode are phases.
+Precision, quantization, compilation, batching, context length, scheduling,
+and serving behavior are configurations. They appear in reports, not in
+workload IDs.
 
-The project exists because official MLPerf is too hard for most academic groups
-to run, modify, cite, and compare against. MLPerf EDU should preserve the useful
-parts of MLPerf methodology while removing enough operational friction that it
-can become common in academic papers.
+### Make Quality a Gate
 
-## Profile Semantics
+Timing without task quality is not a benchmark result. Every score-bearing run
+must pass its inherited quality contract. Every performance-bearing phase must
+pass a functional contract. No aggregate can hide a failed individual run.
 
-Profiles express how much of the benchmark and research surface is exercised.
-They are not marketing tiers.
+### Make Evidence Reviewable
 
-| Profile | North-star meaning | Primary use |
-|---|---|---|
-| `min` | Minimum representative run, likely one small path from each major suite | install check, smoke test, classroom demo, CI |
-| `max` | Full MLPerf EDU benchmark suite at the standard comparable scale | course assignments, artifact evaluation, paper baselines |
-| `pro` | Research envelope exposing controlled variants and optimization knobs | architecture, systems, compiler, backend, pruning, quantization, and serving studies |
+Every promoted case retains five fresh-process results, source and comparison
+fingerprints, artifact hashes, acceptance decisions, and timing repeatability.
+Training-to-inference dependencies use portable content-addressed lineage.
 
-The implementation may use internal validation shortcuts, but the public mental
-model should stay this simple: `min` proves it runs, `max` runs the suite, and
-`pro` opens the research space.
+### Keep the Scale Local
 
-## What `pro` Means
+The suite targets CPU and laptop accelerators. It can support architecture,
+memory, compiler, runtime, and execution studies. It does not claim to model
+distributed training or datacenter serving.
 
-`pro` is not merely a longer version of `max`. It should expose the dimensions
-that researchers actually study:
+## Profiles
 
-- Precision and quantization: fp32, fp16, bf16, int8, int4, weight-only, KV-cache quantization.
-- Sparsity and pruning: unstructured, structured, 2:4, channel pruning, block sparsity.
-- SLM serving: prefill, decode, long context, batching, KV cache, speculative decode.
-- Fine-tuning: LoRA, QLoRA-style paths where feasible, adapter rank sweeps.
-- Backend comparison: PyTorch, ONNX Runtime, MLX, llama.cpp, TVM/IREE where feasible.
-- Memory behavior: embedding tables, KV cache size, sequence length, batch size, activation memory.
-- Distributed/local parallelism: DDP, tensor/model sharding stand-ins, communication/computation tradeoffs.
-- Edge and TinyML behavior: compression, on-device memory, small-batch latency, sensor-style inputs.
-- Agentic workloads: RAG, tool calls, ReAct loops, code generation, retrieval/generation balance.
-- Power and energy: aggregate estimates first, hardware counters where available.
+| **Profile** | **Design Intent** |
+|:---|:---|
+| `min` | Fast setup, teaching, and CI confidence. |
+| `max` | Canonical classroom and comparison contract. |
+| `pro` | Extended single-node research envelope under the same workload identity. |
 
-Every `pro` variant should be controlled enough that another group can reproduce
-the comparison and understand what changed.
+These profiles describe execution scale and research intent. They do not
+replace result roles or quality gates.
 
-## Full Suite Meaning
+## Spiral Portfolio Test
 
-A full MLPerf EDU suite is not a clone of every official MLPerf workload. It is
-coverage of the major educational and research regimes that ML systems papers
-need:
+A workload may enter the functional spiral after questions 1, 2, 5, 6, and 7
+are answered. It may enter quality conformance and the promotion evidence scope
+only after every question is answered.
 
-- Language model training and serving.
-- Small language model inference and optimization.
-- Vision training, inference, compression, and mobile models.
-- Recommender and sparse-memory behavior.
-- TinyML and edge-style models.
-- Agent and retrieval/tool-use systems.
-- Distributed/local communication behavior.
-- Graph, time-series, and reinforcement-learning control-flow workloads.
+1. Is the task significant and established?
+2. Is the upstream model or implementation authoritative?
+3. Are the dataset, split, evaluator, metric, and target fixed upstream?
+4. Can the unchanged contract run credibly on laptop-class hardware?
+5. Does it add distinct classroom value?
+6. Does it expose distinct single-node systems behavior?
+7. Can all assets, versions, hashes, and adaptations be disclosed?
+8. Can the unchanged canonical `max` path pass its quality or functional gate
+   on laptop-class hardware?
 
-The current registry is a strong starting point, but the SLM suite is too thin
-for the north-star research goal. Its top-level workloads should use names that
-researchers recognize, such as SmolLM2, Qwen, and LLaMA-family inference or
-fine-tuning benchmarks. Internal serving phases such as prefill, decode,
-batched decode, long context, KV-cache behavior, quantized serving, LoRA,
-RAG/tool-use integration, and speculative decode should be exposed as measured
-phases, variants, or `pro` knobs inside those recognizable workloads.
+The registered portfolio contains fourteen workloads. All fourteen have a
+functional public CLI path with reports and provenance. Nine workloads satisfy
+the current quality-contract boundary, and twelve evidence cases cover their
+canonical `max` paths plus three causal inference phases. Six cases satisfy the
+five-run repeatability gate; the other six remain provisional. Code generation,
+function calling, recommendation, image generation, and reinforcement learning
+remain functional-stage candidates without quality or repeatability claims.
 
-## Usability Principle
+## Delivery Spirals
 
-"Runs out of the box" does not mean the benchmark is trivial. It means:
+1. Functional integration establishes execution, reporting, and provenance.
+2. Quality conformance reproduces the authoritative model, data, evaluator,
+   and published target.
+3. Stabilization establishes fresh-process timing repeatability.
+4. Promotion imports one complete, source-locked evidence set after review.
 
-- A new user can install it and get a valid first result.
-- A reviewer can reproduce a paper baseline without becoming a benchmark expert.
-- A student can run it without a cluster.
-- A researcher can scale from a smoke run to a full-suite run to a controlled
-  research sweep.
-- Reports are usable in a browser, spreadsheet, and artifact package.
+Each stage is monotonic. A later stage adds evidence; it does not relabel an
+earlier probe as if it had already satisfied the stronger contract.
 
-If a benchmark cannot be run by a typical academic group, it will not become the
-default benchmark for academic papers.
+## Success Criteria
 
-## Public Vocabulary
+MLPerf EDU v0.1 succeeds when a machine-learning systems instructor can use it
+without explaining away synthetic scores, arbitrary targets, broken setup, or
+opaque provenance, and when a systems researcher can reproduce a local result
+without guessing which task or weights were measured.
 
-Keep the user-facing vocabulary small:
-
-- `suite`: workload domain, such as `slm`, `vision`, `language`, or `tiny`.
-- `profile`: run scale and research surface: `min`, `max`, `pro`.
-- `workload`: one benchmark ID.
-
-Avoid extra public concepts unless they clearly earn their complexity.
-
-## Planning Implication
-
-Implementation should proceed in this order:
-
-1. Make the current registry run cleanly from a fresh clone.
-2. Align default `min`, `max`, and `pro` behavior with the profile semantics above.
-3. Expand SLM into a serious research suite.
-4. Harden quality targets, data policy, reports, provenance, and grading.
-5. Add `pro` optimization variants one controlled dimension at a time.
-6. Produce MLCommons review materials and academic artifact-evaluation examples.
-7. Run pilot papers or course projects that use MLPerf EDU as the baseline.
-
-The work is done when MLPerf EDU is not merely runnable, but expected.
+Initial MLCommons review is the governance milestone. It is not assumed in
+advance and is never implied by the project name alone.

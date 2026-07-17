@@ -18,8 +18,9 @@ name: '🌐 All · 🚀 Publish (Live)'
 #   5. LABS        — labs-publish-live.yml
 #   6. STAFFML     — staffml-publish-live.yml     (Next.js + D1 + worker)
 #   7. SLIDES      — slides-publish-live.yml      (lecture-deck PDFs)
-#   8. SITE        — site-publish-live.yml        (landing + about + community)
-#   9. INSTRUCTORS — instructors-publish-live.yml
+#   8. MLPERF EDU  — mlperf-edu-publish-live.yml  (independent preview docs)
+#   9. SITE        — site-publish-live.yml        (landing + about + community)
+#  10. INSTRUCTORS — instructors-publish-live.yml
 #
 # Triggers:
 #   - workflow_dispatch: Manual with per-site toggles + shared release knobs
@@ -82,6 +83,10 @@ on:
         description: 'Deploy Slides?'
         type: boolean
         default: true
+      deploy_mlperf_edu:
+        description: 'Deploy MLPerf EDU independent preview? Off by default.'
+        type: boolean
+        default: false
       deploy_site:
         description: 'Deploy Site (landing + about + community + newsletter)?'
         type: boolean
@@ -238,11 +243,33 @@ jobs:
       confirm: PUBLISH
 
   # ==========================================================================
-  # Step 8: Landing Site (landing + about + community + newsletter)
+  # Step 8: MLPerf EDU independent preview. Off by default until explicitly selected.
+  # ==========================================================================
+  deploy-mlperf-edu:
+    name: '🎓 Deploy MLPerf EDU Preview'
+    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-slides]
+    if: |
+      always()
+      && inputs.deploy_mlperf_edu
+      && (!inputs.deploy_book || needs.deploy-book.result == 'success')
+      && (!inputs.deploy_kits || needs.deploy-kits.result == 'success')
+      && (!inputs.deploy_tinytorch || needs.deploy-tinytorch.result == 'success')
+      && (!inputs.deploy_mlsysim || needs.deploy-mlsysim.result == 'success')
+      && (!inputs.deploy_labs || needs.deploy-labs.result == 'success')
+      && (!inputs.deploy_staffml || needs.deploy-staffml.result == 'success')
+      && (!inputs.deploy_slides || needs.deploy-slides.result == 'success')
+    uses: ./.github/workflows/mlperf-edu-publish-live.yml
+    secrets: inherit
+    with:
+      description: ${{ inputs.description }}
+      confirm: PUBLISH
+
+  # ==========================================================================
+  # Step 9: Landing Site (landing + about + community + newsletter)
   # ==========================================================================
   deploy-site:
     name: '🌐 Deploy Landing Site'
-    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-slides]
+    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-slides, deploy-mlperf-edu]
     if: |
       always()
       && inputs.deploy_site
@@ -253,15 +280,16 @@ jobs:
       && (!inputs.deploy_labs || needs.deploy-labs.result == 'success')
       && (!inputs.deploy_staffml || needs.deploy-staffml.result == 'success')
       && (!inputs.deploy_slides || needs.deploy-slides.result == 'success')
+      && (!inputs.deploy_mlperf_edu || needs.deploy-mlperf-edu.result == 'success')
     uses: ./.github/workflows/site-publish-live.yml
     secrets: inherit
 
   # ==========================================================================
-  # Step 9: Instructors
+  # Step 10: Instructors
   # ==========================================================================
   deploy-instructors:
     name: '🎓 Deploy Instructors'
-    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-slides, deploy-site]
+    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-slides, deploy-mlperf-edu, deploy-site]
     if: |
       always()
       && inputs.deploy_instructors
@@ -272,6 +300,7 @@ jobs:
       && (!inputs.deploy_labs || needs.deploy-labs.result == 'success')
       && (!inputs.deploy_staffml || needs.deploy-staffml.result == 'success')
       && (!inputs.deploy_slides || needs.deploy-slides.result == 'success')
+      && (!inputs.deploy_mlperf_edu || needs.deploy-mlperf-edu.result == 'success')
       && (!inputs.deploy_site || needs.deploy-site.result == 'success')
     uses: ./.github/workflows/instructors-publish-live.yml
     secrets: inherit
@@ -286,41 +315,45 @@ jobs:
   # ==========================================================================
   summary:
     name: '📋 Deployment Summary'
-    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-slides, deploy-site, deploy-instructors]
+    needs: [deploy-book, deploy-kits, deploy-tinytorch, deploy-mlsysim, deploy-labs, deploy-staffml, deploy-slides, deploy-mlperf-edu, deploy-site, deploy-instructors]
     if: always()
     runs-on: ubuntu-latest
     steps:
       - name: Generate Summary
         run: |
-          echo "## 🚀 Publish All Complete" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "**Description**: ${{ inputs.description }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Site only**: ${{ inputs.site_only }}" >> $GITHUB_STEP_SUMMARY
-          echo "**Release type**: ${{ inputs.release_type }}" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Site | Status |" >> $GITHUB_STEP_SUMMARY
-          echo "|------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📚 Book | ${{ needs.deploy-book.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 📦 Kits | ${{ needs.deploy-kits.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔥 TinyTorch | ${{ needs.deploy-tinytorch.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🧮 MLSYSIM | ${{ needs.deploy-mlsysim.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🔬 Labs | ${{ needs.deploy-labs.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🎯 StaffML | ${{ needs.deploy-staffml.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 📊 Slides | ${{ needs.deploy-slides.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🌐 Landing Site | ${{ needs.deploy-site.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🎓 Instructors | ${{ needs.deploy-instructors.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### 🌐 Live URLs" >> $GITHUB_STEP_SUMMARY
-          echo "- 📖 [Volume I](https://mlsysbook.ai/${{ vars.VOL1_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📘 [Volume II](https://mlsysbook.ai/${{ vars.VOL2_DEPLOY_PATH }}/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📦 [Kits](https://mlsysbook.ai/kits/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔥 [TinyTorch](https://mlsysbook.ai/tinytorch/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🧮 [MLSYSIM](https://mlsysbook.ai/mlsysim/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🔬 [Labs](https://mlsysbook.ai/labs/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🎯 [StaffML](https://mlsysbook.ai/staffml/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📊 [Slides](https://mlsysbook.ai/slides/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🏠 [Landing](https://mlsysbook.ai/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📋 [About](https://mlsysbook.ai/about/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🌍 [Community](https://mlsysbook.ai/community/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 📬 [Newsletter](https://mlsysbook.ai/newsletter/)" >> $GITHUB_STEP_SUMMARY
-          echo "- 🎓 [Instructors](https://mlsysbook.ai/instructors/)" >> $GITHUB_STEP_SUMMARY
+          {
+            echo "## 🚀 Publish All Complete"
+            echo ""
+            echo "**Description**: ${{ inputs.description }}"
+            echo "**Site only**: ${{ inputs.site_only }}"
+            echo "**Release type**: ${{ inputs.release_type }}"
+            echo ""
+            echo "| Site | Status |"
+            echo "|------|--------|"
+            echo "| 📚 Book | ${{ needs.deploy-book.result }} |"
+            echo "| 📦 Kits | ${{ needs.deploy-kits.result }} |"
+            echo "| 🔥 TinyTorch | ${{ needs.deploy-tinytorch.result }} |"
+            echo "| 🧮 MLSYSIM | ${{ needs.deploy-mlsysim.result }} |"
+            echo "| 🔬 Labs | ${{ needs.deploy-labs.result }} |"
+            echo "| 🎯 StaffML | ${{ needs.deploy-staffml.result }} |"
+            echo "| 📊 Slides | ${{ needs.deploy-slides.result }} |"
+            echo "| 🎓 MLPerf EDU Preview | ${{ needs.deploy-mlperf-edu.result }} |"
+            echo "| 🌐 Landing Site | ${{ needs.deploy-site.result }} |"
+            echo "| 🎓 Instructors | ${{ needs.deploy-instructors.result }} |"
+            echo ""
+            echo "### 🌐 Live URLs"
+            echo "- 📖 [Volume I](https://mlsysbook.ai/${{ vars.VOL1_DEPLOY_PATH }}/)"
+            echo "- 📘 [Volume II](https://mlsysbook.ai/${{ vars.VOL2_DEPLOY_PATH }}/)"
+            echo "- 📦 [Kits](https://mlsysbook.ai/kits/)"
+            echo "- 🔥 [TinyTorch](https://mlsysbook.ai/tinytorch/)"
+            echo "- 🧮 [MLSYSIM](https://mlsysbook.ai/mlsysim/)"
+            echo "- 🔬 [Labs](https://mlsysbook.ai/labs/)"
+            echo "- 🎯 [StaffML](https://mlsysbook.ai/staffml/)"
+            echo "- 📊 [Slides](https://mlsysbook.ai/slides/)"
+            echo "- 🎓 [MLPerf EDU Preview](https://mlsysbook.ai/mlperf-edu/)"
+            echo "- 🏠 [Landing](https://mlsysbook.ai/)"
+            echo "- 📋 [About](https://mlsysbook.ai/about/)"
+            echo "- 🌍 [Community](https://mlsysbook.ai/community/)"
+            echo "- 📬 [Newsletter](https://mlsysbook.ai/newsletter/)"
+            echo "- 🎓 [Instructors](https://mlsysbook.ai/instructors/)"
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,258 +1,85 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Subset
 
-from mlperf.assets import DatasetAsset, ensure_fashion_mnist, load_fashion_mnist_dataset, sha256_file
+from mlperf.assets import (
+    ensure_cifar10,
+    ensure_mlperf_tiny_image,
+    load_cifar10_dataset,
+    mlperf_tiny_image_paths,
+    sha256_file,
+)
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
-def run_resnet18_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run a deterministic one-step ResNet-18 training smoke."""
+def run_image_classification_min(
+    workload: Workload, output_dir: Path
+) -> dict[str, Any]:
+    """Run a deterministic smoke test of the MLPerf Tiny fused graph."""
     root = find_project_root()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.edge.resnet_train import ResNet18WhiteBox
+    from mlperf.reference.tiny.mlperf_tiny_resnet import MLPerfTinyFusedResNet8
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 2
-
-    model = ResNet18WhiteBox(num_classes=100).to(device)
-    model.train()
+    model = MLPerfTinyFusedResNet8().to(device).eval()
     images = torch.randn(batch_size, 3, 32, 32, device=device)
-    labels = torch.randint(0, 100, (batch_size,), dtype=torch.long, device=device)
 
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    start = time.perf_counter()
-    logits = model(images)
-    loss = F.cross_entropy(logits, labels)
-    loss.backward()
-    optimizer.step()
-    duration = time.perf_counter() - start
-
-    accuracy = float((logits.detach().argmax(dim=1) == labels).float().mean().item())
-    n_params = sum(p.numel() for p in model.parameters())
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "resnet18-train_min_report.json").resolve()
-    manifest_path = (output_dir / "resnet18-train_min.provd.json").resolve()
-    report = {
-        "schema": "mlperf-edu-report/0.1",
-        "id": workload.id,
-        "workload": workload.id,
-        "suite": workload.suite,
-        "profile": "min",
-        "status": "passed",
-        "backend": "pytorch-cpu",
-        "data_mode": "synthetic-deterministic",
-        "seed": seed,
-        "metrics": {
-            "loss": float(loss.item()),
-            "accuracy": accuracy,
-            "duration_seconds": float(duration),
-            "samples": batch_size,
-            "samples_per_second": float(batch_size / duration),
-            "n_params": int(n_params),
-            "logits_shape": list(logits.shape),
-        },
-        "quality": {
-            "metric": workload.quality_metric,
-            "target": workload.quality_value,
-            "quality_required": False,
-            "note": "min profile validates ResNet execution only; max profile owns Fashion-MNIST quality checks.",
-        },
-        "artifacts": {
-            "report": str(report_path),
-            "provenance": str(manifest_path),
-        },
-    }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    manifest = build_provd(
-        workload=workload.id,
-        scenario="train",
-        division="open",
-        hardware_fingerprint=detect_hardware(),
-        report=report,
-        report_path=report_path,
-        dataset_name="synthetic-deterministic-images",
-        dataset_files=[],
-        rng_seed=seed,
-        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
-        repo_root=root,
-    )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
-    return report
-
-
-def run_mobilenetv2_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run a deterministic one-step MobileNetV2 training smoke."""
-    root = find_project_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from reference.mobile.mobilenet_core import MobileNetV2Local
-
-    seed = 42
-    torch.manual_seed(seed)
-    device = torch.device("cpu")
-    batch_size = 2
-
-    model = MobileNetV2Local(num_classes=100).to(device)
-    model.train()
-    images = torch.randn(batch_size, 3, 32, 32, device=device)
-    labels = torch.randint(0, 100, (batch_size,), dtype=torch.long, device=device)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    start = time.perf_counter()
-    logits = model(images)
-    loss = F.cross_entropy(logits, labels)
-    loss.backward()
-    optimizer.step()
-    duration = time.perf_counter() - start
-
-    accuracy = float((logits.detach().argmax(dim=1) == labels).float().mean().item())
-    n_params = sum(p.numel() for p in model.parameters())
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "mobilenetv2-train_min_report.json").resolve()
-    manifest_path = (output_dir / "mobilenetv2-train_min.provd.json").resolve()
-    report = {
-        "schema": "mlperf-edu-report/0.1",
-        "id": workload.id,
-        "workload": workload.id,
-        "suite": workload.suite,
-        "profile": "min",
-        "status": "passed",
-        "backend": "pytorch-cpu",
-        "data_mode": "synthetic-deterministic",
-        "seed": seed,
-        "metrics": {
-            "loss": float(loss.item()),
-            "accuracy": accuracy,
-            "duration_seconds": float(duration),
-            "samples": batch_size,
-            "samples_per_second": float(batch_size / duration),
-            "n_params": int(n_params),
-            "logits_shape": list(logits.shape),
-        },
-        "quality": {
-            "metric": workload.quality_metric,
-            "target": workload.quality_value,
-            "quality_required": False,
-            "note": "min profile validates MobileNetV2 execution only; max profile will own Fashion-MNIST quality checks.",
-        },
-        "artifacts": {
-            "report": str(report_path),
-            "provenance": str(manifest_path),
-        },
-    }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    manifest = build_provd(
-        workload=workload.id,
-        scenario="train",
-        division="open",
-        hardware_fingerprint=detect_hardware(),
-        report=report,
-        report_path=report_path,
-        dataset_name="synthetic-deterministic-images",
-        dataset_files=[],
-        rng_seed=seed,
-        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
-        repo_root=root,
-    )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
-    return report
-
-
-def run_mobilenet_composed_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    return run_mobilenet_composed(workload, output_dir, profile="min", repetitions=1)
-
-
-def run_mobilenet_composed_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    repetitions = int(os.environ.get("MLPERF_EDU_MOBILENET_COMP_REPETITIONS", "5"))
-    return run_mobilenet_composed(workload, output_dir, profile="max", repetitions=repetitions)
-
-
-def run_mobilenet_composed(workload: Workload, output_dir: Path, *, profile: str, repetitions: int) -> dict[str, Any]:
-    """Run MobileNetV2 with composed pruning and fake quantization primitives."""
-    root = find_project_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from reference.mobile.mobilenet_compress import effective_param_bytes, fake_quantize_int8, prune_2of4
-    from reference.mobile.mobilenet_core import MobileNetV2Local
-
-    seed = 42
-    torch.manual_seed(seed)
-    device = torch.device("cpu")
-    batch_size = int(os.environ.get("MLPERF_EDU_MOBILENET_COMP_BATCH_SIZE", "2"))
-
-    model = MobileNetV2Local(num_classes=100).to(device)
-    model.eval()
-    baseline_param_bytes = sum(p.numel() * p.element_size() for p in model.parameters())
-    sparsity = prune_2of4(model)
-    quant = fake_quantize_int8(model)
-    effective_bytes = effective_param_bytes(model)
-
-    images = torch.randn(batch_size, 3, 32, 32, device=device)
     start = time.perf_counter()
     with torch.inference_mode():
-        logits = None
-        for _ in range(repetitions):
-            logits = model(images)
+        logits = model(images)
     duration = time.perf_counter() - start
-    assert logits is not None
+    n_params = sum(parameter.numel() for parameter in model.parameters())
 
-    n_params = sum(p.numel() for p in model.parameters())
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / f"{workload.id}_{profile}_report.json").resolve()
-    manifest_path = (output_dir / f"{workload.id}_{profile}.provd.json").resolve()
+    report_path = (output_dir / f"{workload.id}_min_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_min.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
-        "profile": profile,
+        "profile": "min",
         "status": "passed",
         "backend": "pytorch-cpu",
         "data_mode": "synthetic-deterministic",
         "seed": seed,
-        "compression": {
-            "structured_sparsity": "2:4",
-            "quantization": "fake-int8",
-            "runtime_note": "Algorithmic compression only; PyTorch CPU/MPS does not use fused 2:4 or int8 kernels here.",
-        },
         "metrics": {
             "duration_seconds": float(duration),
-            "samples": int(batch_size * repetitions),
-            "samples_per_second": float((batch_size * repetitions) / duration) if duration > 0 else 0.0,
+            "samples": batch_size,
+            "samples_per_second": float(batch_size / duration),
             "n_params": int(n_params),
-            "baseline_param_bytes": int(baseline_param_bytes),
-            "effective_param_bytes": int(effective_bytes),
-            "effective_compression_ratio": float(baseline_param_bytes / effective_bytes) if effective_bytes else 0.0,
-            "sparsity_actual": float(sparsity["sparsity_actual"]),
-            "n_quantized_params": int(quant["n_quantized_params"]),
             "logits_shape": list(logits.shape),
-            "repetitions": repetitions,
         },
         "quality": {
             "metric": workload.quality_metric,
             "target": workload.quality_value,
             "quality_required": False,
-            "note": "Compression-composition workload validates inference and byte accounting; task quality requires a trained checkpoint.",
+            "note": (
+                "The min profile validates the fused ResNet8 graph only. It does "
+                "not support a quality claim."
+            ),
         },
         "artifacts": {
             "report": str(report_path),
@@ -262,7 +89,7 @@ def run_mobilenet_composed(workload: Workload, output_dir: Path, *, profile: str
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="single_stream",
+        scenario=workload.scenario or "offline",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -273,385 +100,197 @@ def run_mobilenet_composed(workload: Workload, output_dir: Path, *, profile: str
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
-def run_resnet18_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run ResNet-18 on Fashion-MNIST or an explicit local tensor shard."""
+def run_image_classification_max(
+    workload: Workload, output_dir: Path
+) -> dict[str, Any]:
+    """Evaluate the official MLPerf Tiny float ResNet8 on its accuracy set."""
     root = find_project_root()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.edge.resnet_train import ResNet18WhiteBox
+    from mlperf.reference.tiny.mlperf_tiny_resnet import (
+        MLPERF_TINY_FLOAT_MODEL_SHA256,
+        load_mlperf_tiny_float_resnet,
+    )
 
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
+    seed = configured_seed()
     torch.manual_seed(seed)
-    device = _select_device()
-    batch_size = int(os.environ.get("MLPERF_EDU_RESNET_MAX_BATCH_SIZE", 64))
-    epochs = int(os.environ.get("MLPERF_EDU_RESNET_MAX_EPOCHS", 3))
-    batches_per_epoch = int(os.environ.get("MLPERF_EDU_RESNET_MAX_BATCHES_PER_EPOCH", 20))
-    val_batches = int(os.environ.get("MLPERF_EDU_RESNET_MAX_VAL_BATCHES", 20))
-    lr = float(os.environ.get("MLPERF_EDU_RESNET_MAX_LR", 1e-3))
-
-    shard_path = os.environ.get("MLPERF_EDU_RESNET_MAX_TENSOR_PATH")
-    if shard_path:
-        asset, train_loader, val_loader = _load_tensor_shard(Path(shard_path), batch_size)
-        num_classes = 100
-    else:
-        asset, train_loader, val_loader = _fashion_mnist_loaders(batch_size=batch_size)
-        num_classes = 10
-
-    model = ResNet18WhiteBox(num_classes=num_classes).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-
-    train_losses: list[float] = []
-    val_losses: list[float] = []
-    val_accuracies: list[float] = []
-    epoch_times: list[float] = []
-    samples_seen = 0
-    start = time.perf_counter()
-    for _epoch in range(epochs):
-        t0 = time.perf_counter()
-        train_loss, train_samples = _train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            max_batches=batches_per_epoch,
+    device = select_torch_device()
+    batch_size = int(
+        os.environ.get("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE", "32")
+    )
+    repetitions = int(
+        os.environ.get("MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_REPETITIONS", "50")
+    )
+    if batch_size <= 0 or repetitions <= 0:
+        raise ValueError(
+            "image-classification batch size and repetitions must be positive"
         )
-        val_loss, val_acc = _validate(model, val_loader, device, max_batches=val_batches)
-        samples_seen += train_samples
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        val_accuracies.append(val_acc)
-        epoch_times.append(time.perf_counter() - t0)
-    duration = time.perf_counter() - start
 
-    final_accuracy = val_accuracies[-1]
-    target = float(os.environ.get("MLPERF_EDU_RESNET_MAX_ACCURACY_TARGET", workload.quality_value or 0.36))
-    target_met = final_accuracy >= target
-    n_params = sum(p.numel() for p in model.parameters())
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "resnet18-train_max_report.json").resolve()
-    manifest_path = (output_dir / "resnet18-train_max.provd.json").resolve()
-    checkpoint_path = (output_dir / "resnet18-train_max_checkpoint.pt").resolve()
-    torch.save(model.state_dict(), checkpoint_path)
-
-    report = {
-        "schema": "mlperf-edu-report/0.1",
-        "id": workload.id,
-        "workload": workload.id,
-        "suite": workload.suite,
-        "profile": "max",
-        "status": "passed" if target_met else "quality_failed",
-        "backend": f"pytorch-{device.type}",
-        "data_mode": "real" if not shard_path else "local-tensor-shard",
-        "dataset": {
-            "name": asset.name,
-            "source": asset.source,
-            "root": str(asset.root),
-            "sha256": asset.sha256,
-            "n_bytes": asset.n_bytes,
-        },
-        "seed": seed,
-        "config": {
-            "batch_size": batch_size,
-            "epochs": epochs,
-            "batches_per_epoch": batches_per_epoch,
-            "val_batches": val_batches,
-            "lr": lr,
-        },
-        "metrics": {
-            "final_train_loss": float(train_losses[-1]),
-            "final_val_loss": float(val_losses[-1]),
-            "final_accuracy": float(final_accuracy),
-            "duration_seconds": float(duration),
-            "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
-            "n_params": int(n_params),
-            "epoch_times": epoch_times,
-            "train_losses": train_losses,
-            "val_losses": val_losses,
-            "val_accuracies": val_accuracies,
-        },
-        "quality": {
-            "metric": workload.quality_metric,
-            "target": target,
-            "direction": "higher",
-            "target_met": target_met,
-            "quality_required": True,
-            "override": "MLPERF_EDU_RESNET_MAX_ACCURACY_TARGET" in os.environ,
-        },
-        "artifacts": {
-            "report": str(report_path),
-            "provenance": str(manifest_path),
-            "checkpoint": str(checkpoint_path),
-        },
-    }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    manifest = build_provd(
-        workload=workload.id,
-        scenario="train",
-        division="open",
-        hardware_fingerprint=detect_hardware(),
-        report=report,
-        report_path=report_path,
-        weights_path=checkpoint_path,
-        weights_n_params=n_params,
-        weights_dtype="float32",
-        dataset_name=asset.name,
-        dataset_files=list(asset.files),
-        rng_seed=seed,
-        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
-        repo_root=root,
-    )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
-    return report
-
-
-def run_mobilenetv2_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run MobileNetV2 on Fashion-MNIST or an explicit local tensor shard."""
-    root = find_project_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from reference.mobile.mobilenet_core import MobileNetV2Local
-
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
-    torch.manual_seed(seed)
-    device = _select_device()
-    batch_size = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_BATCH_SIZE", 64))
-    epochs = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_EPOCHS", 5))
-    batches_per_epoch = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_BATCHES_PER_EPOCH", 50))
-    val_batches = int(os.environ.get("MLPERF_EDU_MOBILENET_MAX_VAL_BATCHES", 50))
-    lr = float(os.environ.get("MLPERF_EDU_MOBILENET_MAX_LR", 1e-4))
-
-    shard_path = os.environ.get("MLPERF_EDU_MOBILENET_MAX_TENSOR_PATH")
-    if shard_path:
-        asset, train_loader, val_loader = _load_tensor_shard(Path(shard_path), batch_size)
-        num_classes = 100
-    else:
-        asset, train_loader, val_loader = _fashion_mnist_loaders(batch_size=batch_size)
-        num_classes = 10
-
-    model = MobileNetV2Local(num_classes=num_classes).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=1e-4)
-
-    train_losses: list[float] = []
-    val_losses: list[float] = []
-    val_accuracies: list[float] = []
-    epoch_times: list[float] = []
-    samples_seen = 0
-    start = time.perf_counter()
-    for _epoch in range(epochs):
-        t0 = time.perf_counter()
-        train_loss, train_samples = _train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            max_batches=batches_per_epoch,
+    dataset_asset = ensure_cifar10(download=True)
+    evaluation_asset = ensure_mlperf_tiny_image(download=True)
+    evaluation_paths = mlperf_tiny_image_paths()
+    indices = np.load(evaluation_paths["performance_indices"], allow_pickle=False)
+    if indices.shape != (200,) or len(np.unique(indices)) != 200:
+        raise ValueError(
+            "MLPerf Tiny image accuracy set must contain 200 unique indices"
         )
-        val_loss, val_acc = _validate(model, val_loader, device, max_batches=val_batches)
-        samples_seen += train_samples
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        val_accuracies.append(val_acc)
-        epoch_times.append(time.perf_counter() - t0)
-    duration = time.perf_counter() - start
-
-    final_accuracy = val_accuracies[-1]
-    target = float(os.environ.get("MLPERF_EDU_MOBILENET_MAX_ACCURACY_TARGET", workload.quality_value or 0.4))
-    target_met = final_accuracy >= target
-    n_params = sum(p.numel() for p in model.parameters())
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "mobilenetv2-train_max_report.json").resolve()
-    manifest_path = (output_dir / "mobilenetv2-train_max.provd.json").resolve()
-    checkpoint_path = (output_dir / "mobilenetv2-train_max_checkpoint.pt").resolve()
-    torch.save(model.state_dict(), checkpoint_path)
-
-    report = {
-        "schema": "mlperf-edu-report/0.1",
-        "id": workload.id,
-        "workload": workload.id,
-        "suite": workload.suite,
-        "profile": "max",
-        "status": "passed" if target_met else "quality_failed",
-        "backend": f"pytorch-{device.type}",
-        "data_mode": "real" if not shard_path else "local-tensor-shard",
-        "dataset": {
-            "name": asset.name,
-            "source": asset.source,
-            "root": str(asset.root),
-            "sha256": asset.sha256,
-            "n_bytes": asset.n_bytes,
-        },
-        "seed": seed,
-        "config": {
-            "batch_size": batch_size,
-            "epochs": epochs,
-            "batches_per_epoch": batches_per_epoch,
-            "val_batches": val_batches,
-            "lr": lr,
-        },
-        "metrics": {
-            "final_train_loss": float(train_losses[-1]),
-            "final_val_loss": float(val_losses[-1]),
-            "final_accuracy": float(final_accuracy),
-            "duration_seconds": float(duration),
-            "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
-            "n_params": int(n_params),
-            "epoch_times": epoch_times,
-            "train_losses": train_losses,
-            "val_losses": val_losses,
-            "val_accuracies": val_accuracies,
-        },
-        "quality": {
-            "metric": workload.quality_metric,
-            "target": target,
-            "direction": "higher",
-            "target_met": target_met,
-            "quality_required": True,
-            "override": "MLPERF_EDU_MOBILENET_MAX_ACCURACY_TARGET" in os.environ,
-        },
-        "artifacts": {
-            "report": str(report_path),
-            "provenance": str(manifest_path),
-            "checkpoint": str(checkpoint_path),
-        },
-    }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    manifest = build_provd(
-        workload=workload.id,
-        scenario="train",
-        division="open",
-        hardware_fingerprint=detect_hardware(),
-        report=report,
-        report_path=report_path,
-        weights_path=checkpoint_path,
-        weights_n_params=n_params,
-        weights_dtype="float32",
-        dataset_name=asset.name,
-        dataset_files=list(asset.files),
-        rng_seed=seed,
-        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
-        repo_root=root,
+    test_dataset = load_cifar10_dataset(
+        root=dataset_asset.root,
+        train=False,
+        download=False,
+        transform=_cifar10_raw_float_tensor,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
-    return report
-
-
-def _select_device() -> torch.device:
-    requested = os.environ.get("MLPERF_EDU_DEVICE")
-    if requested:
-        return torch.device(requested)
-    if torch.cuda.is_available():
-        return torch.device("cuda")
-    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        return torch.device("mps")
-    return torch.device("cpu")
-
-
-def _fashion_mnist_loaders(batch_size: int) -> tuple[DatasetAsset, DataLoader, DataLoader]:
-    asset = ensure_fashion_mnist(download=True)
-    import torchvision.transforms as transforms
-
-    train_transform = transforms.Compose(
-        [
-            transforms.Resize(32),
-            transforms.Grayscale(num_output_channels=3),
-            transforms.ToTensor(),
-            transforms.Normalize((0.2860, 0.2860, 0.2860), (0.3530, 0.3530, 0.3530)),
-        ]
+    if int(indices.min()) < 0 or int(indices.max()) >= len(test_dataset):
+        raise ValueError("MLPerf Tiny image accuracy indices are outside CIFAR-10")
+    accuracy_dataset = Subset(test_dataset, indices.astype(np.int64).tolist())
+    loader = DataLoader(
+        accuracy_dataset,
+        batch_size=batch_size,
+        shuffle=False,
+        drop_last=False,
+        num_workers=0,
     )
-    val_transform = transforms.Compose(
-        [
-            transforms.Resize(32),
-            transforms.Grayscale(num_output_channels=3),
-            transforms.ToTensor(),
-            transforms.Normalize((0.2860, 0.2860, 0.2860), (0.3530, 0.3530, 0.3530)),
-        ]
-    )
-    train_ds = load_fashion_mnist_dataset(root=asset.root, train=True, download=False, transform=train_transform)
-    val_ds = load_fashion_mnist_dataset(root=asset.root, train=False, download=False, transform=val_transform)
-    return (
-        asset,
-        DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True, num_workers=0),
-        DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=True, num_workers=0),
-    )
+    model = load_mlperf_tiny_float_resnet(evaluation_paths["float_model"]).to(device)
+    n_params = sum(parameter.numel() for parameter in model.parameters())
 
-
-def _load_tensor_shard(path: Path, batch_size: int) -> tuple[DatasetAsset, DataLoader, DataLoader]:
-    data = torch.load(path, map_location="cpu")
-    train_ds = TensorDataset(data["train_images"].float(), data["train_labels"].long())
-    val_ds = TensorDataset(data["val_images"].float(), data["val_labels"].long())
-    asset = DatasetAsset(
-        name="cifar100-local-tensor-shard",
-        root=path.parent.resolve(),
-        files=(path.resolve(),),
-        sha256=f"sha256:{sha256_file(path)}",
-        n_bytes=path.stat().st_size,
-        source="local-tensor-shard",
-    )
-    return (
-        asset,
-        DataLoader(train_ds, batch_size=batch_size, shuffle=True, drop_last=True),
-        DataLoader(val_ds, batch_size=batch_size, shuffle=False, drop_last=True),
-    )
-
-
-def _train_epoch(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-    *,
-    max_batches: int,
-) -> tuple[float, int]:
-    model.train()
-    losses: list[float] = []
-    samples = 0
-    for batch_idx, (images, labels) in enumerate(loader):
-        if batch_idx >= max_batches:
-            break
-        images = images.to(device)
-        labels = labels.to(device)
-        optimizer.zero_grad(set_to_none=True)
-        logits = model(images)
-        loss = F.cross_entropy(logits, labels)
-        loss.backward()
-        optimizer.step()
-        losses.append(float(loss.item()))
-        samples += int(labels.numel())
-    return (sum(losses) / len(losses), samples) if losses else (float("inf"), 0)
-
-
-@torch.no_grad()
-def _validate(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    *,
-    max_batches: int,
-) -> tuple[float, float]:
-    model.eval()
-    losses: list[float] = []
+    with torch.inference_mode():
+        warmed_batch_sizes: set[int] = set()
+        for images, _ in loader:
+            current_batch_size = int(images.shape[0])
+            if current_batch_size in warmed_batch_sizes:
+                continue
+            model(images.to(device))
+            warmed_batch_sizes.add(current_batch_size)
+    synchronize_device(device)
+    start = time.perf_counter()
     correct = 0
-    total = 0
-    for batch_idx, (images, labels) in enumerate(loader):
-        if batch_idx >= max_batches:
-            break
-        images = images.to(device)
-        labels = labels.to(device)
-        logits = model(images)
-        loss = F.cross_entropy(logits, labels)
-        losses.append(float(loss.item()))
-        correct += int((logits.argmax(dim=1) == labels).sum().item())
-        total += int(labels.numel())
-    avg_loss = sum(losses) / len(losses) if losses else float("inf")
-    accuracy = correct / total if total else 0.0
-    return avg_loss, accuracy
+    evaluated_samples = 0
+    with torch.inference_mode():
+        for repetition in range(repetitions):
+            for images, labels in loader:
+                predictions = model(images.to(device)).argmax(dim=1).cpu()
+                if repetition == 0:
+                    correct += int((predictions == labels).sum().item())
+                    evaluated_samples += int(labels.numel())
+    synchronize_device(device)
+    duration = time.perf_counter() - start
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError("MLPerf Tiny ResNet8 inference duration must be positive")
+    if evaluated_samples != 200:
+        raise RuntimeError(
+            f"MLPerf Tiny image evaluation expected 200 samples, got {evaluated_samples}"
+        )
+
+    top1_accuracy = correct / evaluated_samples
+    total_samples = evaluated_samples * repetitions
+    target = float(workload.quality_value or 0.85)
+    target_met = top1_accuracy >= target
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = (output_dir / f"{workload.id}_max_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_max.provd.json").resolve()
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "id": workload.id,
+        "workload": workload.id,
+        "suite": workload.suite,
+        "profile": "max",
+        "status": "passed" if target_met else "quality_failed",
+        "backend": f"pytorch-{device.type}",
+        "model": "mlperf-tiny-pretrained-resnet8-float",
+        "data_mode": "real",
+        "dataset": {
+            "name": dataset_asset.name,
+            "source": dataset_asset.source,
+            "root": str(dataset_asset.root),
+            "sha256": dataset_asset.sha256,
+            "n_bytes": dataset_asset.n_bytes,
+            "split": "MLPerf-Tiny-200-sample-accuracy-set",
+            "performance_indices_sha256": (
+                f"sha256:{sha256_file(evaluation_paths['performance_indices'])}"
+            ),
+        },
+        "model_source": {
+            "repository": "https://github.com/mlcommons/tiny",
+            "commit": "1afd2c9820f795965a6134facd0b4dfae41ef23f",
+            "path": "benchmark/training/image_classification/trained_models/pretrainedResnet.tflite",
+            "sha256": f"sha256:{MLPERF_TINY_FLOAT_MODEL_SHA256}",
+            "format": "official-float32-tflite-weights-loaded-into-exact-pytorch-graph",
+        },
+        "evaluation_bundle": {
+            "name": evaluation_asset.name,
+            "source": evaluation_asset.source,
+            "root": str(evaluation_asset.root),
+            "sha256": evaluation_asset.sha256,
+            "n_bytes": evaluation_asset.n_bytes,
+        },
+        "seed": seed,
+        "measurement_protocol": workload.raw.get("measurement_protocol", {}),
+        "config": {
+            "batch_size": batch_size,
+            "repetitions": repetitions,
+            "evaluation_samples": 200,
+            "input_dtype": "float32",
+            "input_range": "0..255",
+            "input_layout": "NCHW",
+            "scenario": "offline",
+        },
+        "metrics": {
+            "top1_accuracy": float(top1_accuracy),
+            "correct": correct,
+            "evaluation_samples": int(evaluated_samples),
+            "duration_seconds": float(duration),
+            "inference_and_evaluation_seconds": float(duration),
+            "samples": int(total_samples),
+            "samples_per_second": float(total_samples / duration),
+            "n_params": int(n_params),
+        },
+        "quality": {
+            "metric": workload.quality_metric,
+            "metric_key": "top1_accuracy",
+            "target": target,
+            "direction": "higher",
+            "target_met": target_met,
+            "quality_required": True,
+            "override": False,
+        },
+        "artifacts": {
+            "report": str(report_path),
+            "provenance": str(manifest_path),
+            "weights": str(evaluation_paths["float_model"]),
+            "performance_indices": str(evaluation_paths["performance_indices"]),
+        },
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    manifest = build_provd(
+        workload=workload.id,
+        scenario=workload.scenario or "offline",
+        division="open",
+        hardware_fingerprint=detect_hardware(),
+        report=report,
+        report_path=report_path,
+        weights_path=evaluation_paths["float_model"],
+        weights_n_params=n_params,
+        weights_dtype="float32",
+        dataset_name=dataset_asset.name,
+        dataset_files=[*dataset_asset.files, evaluation_paths["performance_indices"]],
+        rng_seed=seed,
+        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
+        repo_root=root,
+    )
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
+    return report
+
+
+def _cifar10_raw_float_tensor(image: Any) -> torch.Tensor:
+    """Convert a CIFAR image to the raw 0..255 float input used upstream."""
+    array = np.asarray(image, dtype=np.float32).copy()
+    return torch.from_numpy(array).permute(2, 0, 1)

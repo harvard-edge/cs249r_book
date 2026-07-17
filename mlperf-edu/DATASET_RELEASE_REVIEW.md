@@ -1,58 +1,74 @@
-# MLPerf EDU Dataset Release Review
+# MLPerf EDU v0.1 Dataset Release Review
 
-Last checked: 2026-06-28.
+## Policy
 
-This document tracks dataset decisions needed before MLPerf EDU claims a public
-score-bearing release. The suite is runnable today, but public-result status
-requires clean source, license, redistribution, and attribution decisions.
+Canonical runs fetch pinned assets from their authoritative upstream source.
+The repository records versions, file hashes, splits, licenses, and release
+status. It does not redistribute dataset bytes unless the applicable policy
+permits packaging.
 
-## Current Public Warnings
+A missing redistribution decision does not allow a synthetic or reduced
+substitute. The workload remains fetch-only, deferred, or unpublished until
+the decision is resolved.
 
-| Dataset | Workloads | Current status | Why it is not closed |
-|---|---|---|---|
-| MovieLens-100K | `micro-dlrm-train` | `restricted-needs-approval` | GroupLens documents research-use conditions, citation requirements, no redistribution without separate permission, and noncommercial restrictions. |
+## Active Dataset Catalog
 
-## Closed Dataset Decisions
+| **Dataset** | **Workload** | **Pinned Boundary** | **Current Release Treatment** |
+|:---|:---|:---|:---|
+| CIFAR-10 | `image-classification` | Pinned test Parquet plus the MLPerf Tiny 200-sample accuracy index | Fetch-only pending dataset-specific redistribution review. |
+| CIFAR-10 | `image-generation` | Official EDM 50,000-image generation and FID reference-statistics boundary | Fetch-only inputs; generated image retention remains local-review material. |
+| MLPerf Tiny keyword-spotting accuracy set | `keyword-spotting` | Pinned EEMBC MFCC files and labels | Fetch-only pending MLCommons and EEMBC release review. |
+| MLPerf Tiny ToyCar accuracy set | `anomaly-detection` | Exact 248-recording index reconstructed from the pinned ToyADMOS archive | Fetch-only with CC BY 4.0 attribution. |
+| MLPerf Tiny visual-wake-words accuracy set | `visual-wake-words` | Balanced 1,000-example EEMBC selection from the pinned COCO-derived archive | Fetch-only pending COCO and MLCommons release review. |
+| Tiny Shakespeare | `causal-language-modeling` | Exact corpus bytes and upstream 90/10 split | Fetch-only; char-rnn repository is MIT and the underlying text is public domain in the United States. |
+| Deterministic prompt suite | `causal-language-modeling` inference | Bundled project prompt asset | Bundling depends on the final component license. |
+| GLUE SST-2 | `text-classification` | Official development split and pinned archive | Fetch-only pending redistribution review. |
+| NanoBEIR English subset | `information-retrieval` | Twelve pinned corpus, query, candidate, and relevance files | Fetch-only; component source licenses remain applicable. |
+| OGB `ogbn-arxiv` | `graph-node-classification` | Official archive, time split, and evaluator | Fetch-only pending OGB and source-data terms review. |
+| ETTm1 | `time-series-forecasting` | Pinned CSV and official 12/4/4-month split | Fetch-only pending dataset-specific review under the source repository terms. |
+| HumanEval+ | `code-generation` | Complete 164-task EvalPlus release | Fetch-only; code execution must remain sandboxed. |
+| BFCL V4 Non-Live AST | `function-calling` | Complete 1,150-example six-category split | Fetch-only pending BFCL component review. |
+| Criteo Terabyte | `recommendation` | Canonical Meta DLRM preprocessing and split | External terms acceptance and fetch instructions only. |
+| MiniGo self-play stream | `reinforcement-learning` | Run-generated self-play plus upstream professional-move and playoff evaluation | Generated data remains local; upstream inputs require release review. |
 
-| Dataset | Workloads | Status | Decision |
-|---|---|---|---|
-| TinyShakespeare | `nanogpt-train` | `public-ok-fetch-only` | Replaced the prior unlicensed hosted corpus with a deterministic MLPerf EDU tiny excerpt generated from Project Gutenberg eBook 100. |
-| Fashion-MNIST | `resnet18-train`, `mobilenetv2-train` | `public-ok-with-attribution` | Replaces CIFAR-100 as the default score-bearing public vision-training dataset because the upstream project carries an MIT license. |
-| CIFAR-100 | none score-bearing by default | moved out of public default | CIFAR-backed experiments can remain useful for systems-only or optional variants, but public score-bearing vision rows now use Fashion-MNIST. |
+`datasets.yaml` is the structured public catalog. Asset dossiers in
+`src/mlperf/assets.py` add file-level provenance and packaging policy.
 
-## Source Evidence
+## Required Controls
 
-- TinyShakespeare source recipe: <https://www.gutenberg.org/files/100/100-0.txt>
-- Project Gutenberg license/terms: <https://www.gutenberg.org/policy/license.html>
-- MovieLens-100K page: <https://grouplens.org/datasets/movielens/100k/>
-- MovieLens-100K README/license text: <https://files.grouplens.org/datasets/movielens/ml-100k-README.txt>
-- CIFAR-10/100 official page: <https://www.cs.toronto.edu/~kriz/cifar.html>
-- Fashion-MNIST project and MIT license: <https://github.com/zalandoresearch/fashion-mnist>
-- MNIST Keras loader page: <https://keras.io/api/datasets/mnist/>
+- Fetch verifies pinned revisions and file digests before measurement.
+- A canonical `max` run fails if the required real asset is unavailable.
+- No canonical runner silently falls back to synthetic data.
+- Reports name the dataset, split, data mode, and file hashes.
+- Provenance manifests bind every consumed dataset file.
+- Portable packages reject bytes whose dossier is not approved for redistribution.
+- Raw promotion packets remain outside Git because they may include dataset-derived artifacts.
 
-## Decision Paths
+## Release Decisions
 
-| Dataset | Preferred release path | Fallback |
-|---|---|---|
-| MovieLens-100K | Keep score-bearing only with explicit permission or an MLCommons-approved fetch-only policy that does not redistribute data. | Move `micro-dlrm-train` to systems-only and add a clearly open recommender dataset for public scoring. |
-| CIFAR-100 | Keep out of default score-bearing public rows unless explicit terms are resolved. | Use Fashion-MNIST for public vision training. |
+The project needs a recorded decision for each asset whose status is
+`needs-release-decision` or equivalent. An accepted decision may authorize
+fetch-only use, attribution, or redistribution. Until then, documentation must
+describe the asset conservatively and packages must fail closed.
 
-## Review Questions
+The user may resolve licenses and permissions separately from implementation,
+but technical readiness does not erase those external obligations.
 
-1. Can public MLPerf EDU score-bearing workloads use fetch-only datasets whose
-   upstream terms restrict redistribution?
-2. Do MLCommons reviewers accept Fashion-MNIST as the public score-bearing
-   vision-training dataset for the first MLPerf EDU release?
-3. For teaching releases, should restricted datasets remain available only under
-   `pro`/systems-only paths with clear warnings?
+## Functional-Stage Dataset Coverage
 
-## Implementation Checklist
+HumanEval+, BFCL, Criteo Terabyte, CIFAR-10 EDM inputs, and MiniGo self-play are
+registered because their workload identities and upstream contracts are known.
+Their current bounded probes do not consume the complete canonical assets and
+therefore cannot support quality or timing claims. End-to-end RAG and ReAct
+agent datasets remain outside the portfolio because no stable upstream tuple
+fixes the complete task and evaluator without project choices.
 
-| Status | Action |
-|---|---|
-| Done | Structured asset dossiers expose `public_release_status`, public policy, and next steps. |
-| Done | `mlperf audit --policy public` can treat unresolved dataset release warnings as blockers. |
-| Done | Reports surface dataset release status in JSON, HTML, and CSV. |
-| Done | TinyShakespeare replaced by a deterministic Project Gutenberg source recipe. |
-| Done | Public score-bearing vision training moved from CIFAR-100 to MIT-licensed Fashion-MNIST. |
-| Open | Get MLCommons reviewer decision on MovieLens-100K fetch-only score-bearing use. |
+## Reviewer Checklist
+
+- [ ] Every active dataset has an authoritative upstream source.
+- [ ] Every revision, file, and split is pinned and verified.
+- [ ] License and attribution text is accurate.
+- [ ] Fetch-only and redistribution rules are explicit.
+- [ ] Generated reports disclose data mode and asset hashes.
+- [ ] Package tests reject restricted bytes.
+- [ ] No removed workload dataset remains on the public benchmark site.

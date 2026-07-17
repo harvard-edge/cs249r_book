@@ -1,141 +1,160 @@
-# MLPerf EDU — Getting Started Guide
+# MLPerf EDU Classroom Guide
+
+MLPerf EDU has two deliberately separate teaching surfaces. Registered
+workloads create benchmark reports and provenance artifacts. The three scripts
+in this directory are standalone classroom experiments that demonstrate
+optimization ideas but never claim canonical benchmark status.
 
 ## Setup
 
-```bash
-# Clone the repository
-git clone https://github.com/harvard-edge/mlperf-edu.git
-cd mlperf-edu
-
-# Create virtual environment and install
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e .
-```
-
-## Quick Start: Your First Benchmark
-
-### 1. Train NanoGPT (5 minutes)
+Install the locked development environment from the project directory.
 
 ```bash
-mlperf run cloud --task nanogpt-12m
+uv sync --locked --extra dev
+uv run mlperf doctor
+uv run mlperf list workloads
+uv run mlperf show image-classification
 ```
 
-This trains an 85.9M-parameter GPT-2 variant on TinyShakespeare. You'll see:
-- Training loss converging from ~4.3 to ~2.25
-- Inference latency measured at the end
-- A JSON submission file saved to `submissions/`
+The v0.1 registry contains nine stable workload identities.
 
-### 2. Generate a Report
+- `image-classification`
+- `keyword-spotting`
+- `anomaly-detection`
+- `visual-wake-words`
+- `causal-language-modeling`
+- `text-classification`
+- `information-retrieval`
+- `graph-node-classification`
+- `time-series-forecasting`
+
+Training and inference are modes. Full, prefill, and decode are phases of
+causal-language-modeling inference. They are not separate workload IDs.
+
+## First Registered Run
+
+The `min` profile is the fast functional path for setup, instruction, and CI.
+It exercises real model code and the artifact pipeline, but it is not a
+canonical quality or performance baseline.
 
 ```bash
-mlperf report --submission submissions/<your_file>.json
+OUTPUT_DIR="submissions/first-run"
+uv run mlperf run \
+  --workload time-series-forecasting \
+  --profile min \
+  --output-dir "$OUTPUT_DIR"
+uv run mlperf report "$OUTPUT_DIR/time-series-forecasting_min_report.json"
+uv run mlperf verify "$OUTPUT_DIR/time-series-forecasting_min.provd.json"
 ```
 
-Open the generated HTML report in your browser. It shows:
-- Metrics summary (loss, latency, throughput)
-- Hardware fingerprint (for auditability)
-- Convergence behavior
-- SHA-256 hashes (anti-tampering)
+The run emits JSON, CSV, HTML, and provenance outputs. Use `max` for the
+canonical classroom contract and `pro` for repeated single-node research
+experiments under the same workload identity.
 
-### 3. Run All Workloads
+## Causal Language Modeling
+
+The canonical training path creates the quality-approved checkpoint required
+by full, prefill, and decode inference. Keep every phase in the same output
+directory so the harness can verify training lineage.
 
 ```bash
-mlperf train --all          # Train all 16 workloads
-mlperf train --division cloud   # Just the cloud suite
+OUTPUT_DIR="submissions/causal-max"
+uv run mlperf fetch \
+  --workload causal-language-modeling \
+  --mode training \
+  --profile max
+uv run mlperf run \
+  --workload causal-language-modeling \
+  --mode training \
+  --profile max \
+  --output-dir "$OUTPUT_DIR"
+uv run mlperf run \
+  --workload causal-language-modeling \
+  --mode inference \
+  --phase decode \
+  --profile max \
+  --output-dir "$OUTPUT_DIR"
 ```
 
-## Lab Structure
+Run `uv run mlperf info --workload causal-language-modeling` or `uv run mlperf
+list matrix` to inspect valid mode and phase combinations.
 
-### Lab 1: Training Optimization (Closed Division)
+## Standalone Lab Preflight
 
-**Goal**: Reduce ResNet-18 training time by 20% without dropping below the quality target.
+Each lab has a deterministic, CPU-only, network-free smoke path. The smoke
+executes real PyTorch operations and fails on a broken functional contract.
 
 ```bash
-# Baseline run
-mlperf run edge --task resnet18
-
-# Your optimized run
-python examples/lab1_optimization.py
+uv run python examples/lab1_optimization.py --smoke
+uv run python examples/lab2_inference_sut.py --smoke
+uv run python examples/lab3_arch_comparison.py --smoke
 ```
 
-**What you'll learn**:
-- Batch size vs. convergence tradeoffs
-- Data loading bottlenecks (num_workers)
-- Learning rate scheduling
+Lab JSON records `canonical_result` as `false`. These files are classroom
+measurements and cannot be submitted as MLPerf EDU reference evidence.
 
-### Lab 2: Inference Architecture (Open Division)
+## Lab 1. Training-Loop Optimization
 
-**Goal**: Build a System Under Test (SUT) that handles the load generator's query stream.
+Lab 1 compares two ResNet-18 training-loop configurations on Fashion-MNIST.
+It demonstrates batching, data loading, augmentation, optimizer, and schedule
+effects. This model and dataset pair is not the registered MLPerf Tiny
+image-classification contract.
 
 ```bash
-python examples/lab2_inference_sut.py
+uv run python examples/lab1_optimization.py \
+  --preset baseline \
+  --epochs 1 \
+  --max-train-batches 100 \
+  --max-validation-batches 50 \
+  --output submissions/lab1-baseline.json
 ```
 
-**What you'll learn**:
-- Latency percentiles (p50/p90/p99)
-- Throughput vs. latency tradeoffs
-- Batching strategies
+Instructors may set a course-specific `--target-accuracy`. The lab does not
+invent a universal quality threshold for a bounded exercise.
 
-### Lab 3: Architecture Comparison
+## Lab 2. KV-Cache Inference
 
-**Goal**: Compare dense (NanoGPT) vs. sparse (Nano-MoE) architectures.
+Lab 2 implements `mlperf.sut.SUT_Interface` and compares naïve autoregressive
+decode with KV-cache decode. It passes only when the two paths emit identical
+tokens for every measured query.
 
 ```bash
-python examples/lab3_arch_comparison.py
+uv run python examples/lab2_inference_sut.py \
+  --mode compare \
+  --queries 3 \
+  --prompt-length 32 \
+  --generated-tokens 8 \
+  --repeats 3 \
+  --output submissions/lab2-kv-cache.json
 ```
 
-**What you'll learn**:
-- Expert specialization in MoE
-- Routing overhead vs. quality improvement
-- Parameter efficiency
+The registered benchmark counterpart is
+`causal-language-modeling --mode inference --phase decode`. The product CLI
+does not load arbitrary SUT plugins.
 
-## Declarative Interface (YAML)
+## Lab 3. Dense and Sparse Architectures
 
-```yaml
-# experiment.yaml
-workload: nanogpt-12m      # S.Model
-dataset: tinyshakespeare    # S.Data
-target_quality: 2.3         # S.Constraints
-epochs: 25                  # S.Constraints
-```
+Lab 3 compares dense and mixture-of-experts language-model training on the
+same fixed Tiny Shakespeare batches. It reports total parameters, active
+parameters per token, loss, and token throughput. It is an architecture lesson
+rather than an admitted benchmark workload.
 
 ```bash
-mlperf config experiment.yaml
+uv run python examples/lab3_arch_comparison.py \
+  --epochs 1 \
+  --max-batches 20 \
+  --top-k 2 \
+  --output submissions/lab3-dense-sparse.json
 ```
 
-## Available Workloads
+Use multiple seeds and a declared quality protocol before drawing a
+model-quality conclusion from any bounded classroom comparison.
 
-| Division | Workload | Time | Key Concept |
-|----------|----------|------|-------------|
-| Cloud | NanoGPT | 89s | O(N²) attention scaling |
-| Cloud | Nano-MoE | 158s | Conditional compute |
-| Cloud | DLRM | 5s | Sparse vs. dense memory |
-| Cloud | Diffusion | 41s | Denoising step count |
-| Cloud | GCN | 2s | Message passing |
-| Cloud | BERT | 45s | Bidirectional attention |
-| Cloud | LSTM | 20s | Sequential bottleneck |
-| Cloud | RL | 1s | Policy gradient variance |
-| Edge | ResNet-18 | 64s | Skip connections + batch norm |
-| Edge | MobileNetV2 | 60s | Depthwise-sep. convolutions |
-| Tiny | DS-CNN | 51s | Spectrogram features |
-| Tiny | Anomaly AE | 6s | Reconstruction error |
-| Tiny | VWW | 10s | Sub-10K model compression |
+## Interpretation Rules
 
-## Submission & Grading
-
-After each run, the harness produces a JSON submission:
-
-```bash
-# Verify your submission
-mlperf verify --submission submissions/your_run.json
-
-# Generate a grading artifact (for TAs)
-mlperf submit
-```
-
-## Need Help?
-
-- `mlperf about` — Architecture overview
-- `mlperf list` — All available workloads
-- `mlperf --help` — Full CLI reference
+- Compare timing only after the applicable quality or functional gate passes.
+- Keep workload identity separate from precision, compilation, batching, and
+  other configurations.
+- Treat `min` output as functional evidence only.
+- Preserve the JSON report and provenance manifest together.
+- Use the registry and generated site as the source of current workload names.

@@ -1,0 +1,128 @@
+name: 'MLPerf EDU · Publish Independent Preview (Live)'
+
+# Publishes only the documentation preview. It does not publish a Python
+# package, create a benchmark release, or imply MLCommons endorsement.
+
+on:
+  workflow_dispatch:
+    inputs:
+      description:
+        description: 'Description of the documentation update'
+        required: false
+        default: 'MLPerf EDU preview documentation update'
+      confirm:
+        description: 'Type PUBLISH to confirm the public site update'
+        required: true
+        default: ''
+  workflow_call:
+    inputs:
+      description:
+        type: string
+        required: false
+        default: 'MLPerf EDU preview documentation update'
+      confirm:
+        type: string
+        required: true
+
+permissions:
+  contents: write
+  actions: read
+
+env:
+  MLPERF_EDU_ROOT: mlperf-edu
+  MLPERF_EDU_DEPLOY_PATH: mlperf-edu
+
+jobs:
+  dev-validation-guard:
+    name: 'Recent Dev Validation Gate'
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: mlperf-edu-validate-dev.yml
+
+  benchmark-validation-guard:
+    name: 'Recent Full Benchmark Gate'
+    if: inputs.confirm == 'PUBLISH'
+    uses: ./.github/workflows/infra-publish-guard.yml
+    with:
+      validate_workflow: mlperf-edu-release-validation.yml
+      max_age_minutes: 10080
+
+  build-and-deploy:
+    name: 'Build and Deploy the Independent Preview'
+    runs-on: ubuntu-latest
+    needs: [dev-validation-guard, benchmark-validation-guard]
+    if: inputs.confirm == 'PUBLISH'
+    timeout-minutes: 25
+    concurrency:
+      group: gh-pages-deploy
+      cancel-in-progress: false
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Set Up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Install the Locked Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Build the Site
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          uv run python tools/generate_docs.py --check
+          quarto render site
+          touch site/_build/.nojekyll
+
+      - name: Deploy to GitHub Pages
+        shell: bash
+        env:
+          GH_PAGES_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git clone --depth=1 --branch=gh-pages \
+            "https://x-access-token:${GH_PAGES_TOKEN}@github.com/${{ github.repository }}.git" \
+            gh-pages-repo
+          cd gh-pages-repo
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          rm -rf "$MLPERF_EDU_DEPLOY_PATH"
+          mkdir -p "$MLPERF_EDU_DEPLOY_PATH"
+          cp -r "$GITHUB_WORKSPACE/$MLPERF_EDU_ROOT/site/_build/." "$MLPERF_EDU_DEPLOY_PATH/"
+          test -f "$MLPERF_EDU_DEPLOY_PATH/index.html"
+          git add "$MLPERF_EDU_DEPLOY_PATH"
+          git commit -m "Deploy MLPerf EDU preview - ${{ github.sha }}" --allow-empty
+          for attempt in 1 2 3; do
+            if git push origin gh-pages; then
+              exit 0
+            fi
+            echo "Push attempt $attempt failed. Rebasing before retry."
+            git pull --rebase origin gh-pages
+          done
+          echo 'Live preview deployment failed after three attempts.'
+          exit 1
+
+      - name: Publish Summary
+        env:
+          PUBLISH_DESCRIPTION: ${{ inputs.description }}
+          PUBLISH_SHA: ${{ github.sha }}
+        run: |
+          {
+            echo '## MLPerf EDU Independent Preview Published'
+            echo ''
+            echo '- URL: https://mlsysbook.ai/mlperf-edu/'
+            echo "- Description: $PUBLISH_DESCRIPTION"
+            echo "- Commit: \`$PUBLISH_SHA\`"
+            echo ''
+            echo 'This deployment is documentation for an independent preview. It is not a package release or an MLCommons endorsement.'
+          } >> "$GITHUB_STEP_SUMMARY"

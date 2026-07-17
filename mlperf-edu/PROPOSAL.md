@@ -1,261 +1,146 @@
-# Proposal: MLPerf EDU
+# MLPerf EDU v0.1 Review Proposal
 
-## Executive Summary
+## Proposed North Star
 
-MLPerf EDU is a laptop-scale educational benchmark suite for teaching and
-researching ML systems evaluation. The goal is not to replace MLPerf Training,
-Inference, Tiny, or Client. The goal is to provide a runnable, inspectable
-on-ramp that lets students and researchers learn MLPerf-style methodology on a
-local machine before they move to production-scale submissions.
+MLPerf EDU is a locally executable, quality-gated benchmark specification for
+teaching and studying single-node ML systems. It transfers the
+reproducibility, verification, disclosure, and comparability discipline of
+mature benchmark suites to classroom-scale PyTorch workloads. It supports
+controlled research on processors, memory systems, runtimes, compilers, and
+model execution while explicitly excluding distributed and datacenter-scale
+claims.
 
-The current harness installs as `mlperf`, defaults to the `mlperf-edu` suite,
-and provides three benchmark profiles:
+This is an independent proposal for discussion. It is not an official
+MLCommons benchmark and is not endorsed by MLCommons.
 
-| Profile | Purpose |
-|---|---|
-| `min` | Fast setup and artifact validation for every registered workload |
-| `max` | Course-scale benchmark runs with comparable metrics and reports |
-| `pro` | User-configured research envelope for repetitions, larger models, backend studies, pruning, quantization, and ablations |
+## Problem
 
-It also provides four validation presets:
+Machine-learning systems courses need workloads that are small enough to run
+locally, transparent enough to teach, and disciplined enough to support
+reproducible comparison. Small teaching examples often omit quality gates,
+measurement boundaries, provenance, and stable task definitions. Production
+benchmark suites provide stronger governance but are often too operationally
+heavy for a notebook or a single class period.
 
-| Validation | Purpose | Current Fresh-Install Result |
-|---|---|---:|
-| `smoke` | Doctor plus default `min` run | 12 manifests, 12.3 s |
-| `coverage` | All registered `min` workloads | 30 manifests, 26.5 s |
-| `max` | Course-scale `max` validation | 30 manifests, 93.4 s |
-| `release` | All registered `min` and `max` workloads | 60 manifests, 278.3 s |
+MLPerf EDU occupies the space between those extremes. The project packages
+established task definitions behind one PyTorch CLI and one artifact contract.
+It does not create new learning tasks merely to expand coverage.
 
-Each validation run writes JSON, HTML, and CSV artifacts, including per-suite and
-per-workload timing. This makes the suite usable in courses, CI, and
-research workflows without requiring cluster hardware, gated datasets, or a
-production MLPerf submission environment.
+## Backward Design
 
-## Why MLPerf EDU Should Exist
+The intended classroom experience determines the architecture:
 
-MLPerf is the industry standard for fair, representative, reproducible ML
-systems benchmarking. That strength also makes it difficult to use as a first
-teaching tool: official submissions require careful rules compliance, large
-assets, review, and domain-specific harness knowledge. MLPerf EDU fills the
-gap between toy assignments and full MLPerf participation.
+1. A student installs one locked environment and inspects the registry.
+2. The student fetches pinned assets before measurement.
+3. A `min` run confirms that the path works.
+4. A `max` run executes the canonical real-data task and quality gate.
+5. The report exposes timing, quality, configuration, and provenance.
+6. A `pro` study changes a controlled system configuration without renaming the workload.
+7. An instructor or researcher verifies and packages the resulting artifact.
 
-MLPerf EDU gives students and researchers:
+That workflow requires stable workload identity, explicit modes and phases,
+quality-gated timing, portable provenance, and fail-closed public claims.
 
-- A working `mlperf` command that runs from a fresh clone.
-- A standard benchmark vocabulary: suites, profiles, validation, reports,
-  provenance, verification, and grading.
-- Small but representative workloads for training, inference, TinyML,
-  recommender systems, SLM serving, agents, quantization, pruning, LoRA,
-  distributed training, and backend comparisons.
-- Report artifacts that are easy to inspect in a browser or spreadsheet.
-- A safe path for course setup checks and autograding.
-- A research path for architecture-style studies in pruning, quantization,
-  memory systems, accelerators, serving, compiler backends, and workload
-  characterization.
+## Portfolio
 
-The intended outcome is benchmarking literacy: students learn to reason from
-model, data, hardware, scenario, constraints, metrics, and artifacts rather
-than treating performance numbers as ad hoc script output.
+The proposed v0.1 portfolio contains fourteen workloads. The current evidence
+scope covers nine workloads and twelve evidence cases.
 
-## Relationship to Existing MLCommons Work
+| **Workload** | **Reason for Inclusion** | **Distinct Systems Value** |
+|:---|:---|:---|
+| `image-classification` | Directly inherits the MLPerf Tiny ResNet8 definition. | Dense convolution, input layout, and offline batching. |
+| `keyword-spotting` | Directly inherits the MLPerf Tiny DS-CNN definition. | Depthwise convolution and latency-sensitive small tensors. |
+| `anomaly-detection` | Directly inherits the MLPerf Tiny ToyCar autoencoder definition. | Spectrogram construction, dense reconstruction, and anomaly scoring. |
+| `visual-wake-words` | Directly inherits the MLPerf Tiny MobileNetV1 0.25 definition. | Depthwise convolution, image decoding, and compact vision dispatch. |
+| `causal-language-modeling` | Uses the established nanoGPT Shakespeare recipe without reducing it. | Transformer training, full inference, prefill, decode, and checkpoint lineage. |
+| `text-classification` | Uses a pinned published DistilBERT SST-2 checkpoint. | Encoder attention, tokenization, padding, and batching. |
+| `information-retrieval` | Reproduces the documented CrossEncoder NanoBEIR example. | Query-document pair scoring and ranking. |
+| `graph-node-classification` | Uses the official OGB GCN recipe and evaluator. | Sparse gather, scatter, and irregular memory access. |
+| `time-series-forecasting` | Uses the official PatchTST ETTm1 recipe and split. | Patch extraction, long-context attention, and multivariate sequence training. |
+| `code-generation` | Preserves Qwen2.5-Coder and HumanEval+ while quality reproduction remains pending. | Variable-length autoregressive decode and sandboxed correctness evaluation. |
+| `function-calling` | Preserves Qwen3-1.7B and BFCL V4 Non-Live AST while quality reproduction remains pending. | Schema-heavy prefill and short structured decode. |
+| `recommendation` | Preserves Meta DLRM and the Criteo contract while a practical quality boundary remains pending. | Sparse embeddings, memory capacity, and dense-sparse interaction. |
+| `image-generation` | Preserves NVIDIA EDM and its official 50,000-image FID contract while exact reproduction remains pending. | Iterative denoising, scheduler overhead, and repeated UNet execution. |
+| `reinforcement-learning` | Preserves historical MLPerf MiniGo while the full self-play contract remains impractical locally. | Search-coupled inference, dynamic data generation, and iterative training. |
 
-MLCommons already organizes benchmark development through working groups that
-define, develop, and conduct MLPerf benchmarks and research projects. MLPerf EDU
-should follow that model: start as an educational/community suite, define a
-clear rules document, and graduate only the portions that meet MLCommons review
-expectations.
+The first spiral makes every workload runnable through one CLI with reports and
+provenance. The current quality-evidence spiral retains twelve cases for the
+original nine workloads. Once all fourteen workloads pass their authoritative
+quality contracts, one canonical `max` case per workload plus the three extra
+causal inference phases will produce seventeen evidence cases. Optimization
+choices are configurations, not additional workloads.
 
-Relevant precedents:
+## Spiral Delivery Model
 
-- MLCommons working groups coordinate benchmark definition and execution.
-- MLPerf submission and publication are governed by review rules and
-  suite-specific policies.
-- MLPerf Client demonstrates the value of local client-system benchmarking for
-  laptops, desktops, and workstations.
-- MLPerf Tiny demonstrates that constrained-device benchmarking can be part of
-  the MLPerf ecosystem while using its own appropriate rules and scale.
+1. Functional integration proves that the execution path, report, and
+   provenance work without making a quality or timing claim.
+2. Quality conformance binds the authoritative model, dataset, evaluator, and
+   published target.
+3. Stabilization establishes fresh-process repeatability and controls runtime
+   variance.
+4. Promotion imports one complete source-locked evidence set and enables a
+   public baseline only after review.
 
-MLPerf EDU should be careful about naming and messaging. Early releases should
-say "aligned with MLPerf methodology" or "candidate MLCommons educational
-suite" until MLCommons explicitly approves stronger wording.
+## Profiles
 
-## Scope
+`min` is the fast functional path. `max` is the canonical classroom and
+comparison path. `pro` is the single-node research envelope. The research
+profile exists so architecture, runtime, compiler, memory, precision, and
+scheduling studies can remain comparable to the same task contract.
 
-The proposed suite has domain workload families, individual workload IDs, and
-three run profiles:
+## Evidence Discipline
 
-| Suite | Scope |
-|---|---|
-| `language` | NanoGPT, BERT, MoE, LoRA, and white-box language workloads |
-| `slm` | Off-the-shelf small language model decode, quantized decode, LoRA, and serving studies |
-| `vision` | CNN/mobile vision training, compression, quantization, and backend comparisons |
-| `recommender` | DLRM-style sparse lookup and memory-system behavior |
-| `tiny` | TinyML keyword spotting, anomaly detection, and visual wake-word studies |
-| `agent` | RAG, code generation, ReAct, and tool-call systems measurements |
-| `distributed` | Local multi-process training and communication/computation studies |
-| `graph` | Sparse graph and message-passing workloads |
-| `timeseries` | Sequence and forecasting workloads |
-| `rl` | Reinforcement-learning control-flow workloads |
+Every promoted case uses five fresh processes at the canonical seed. Every
+quality or functional gate must pass, and timing CV must remain within 5%.
+The case summary records the complete run set, source revision, comparison
+fingerprint, metrics, acceptance decision, and artifact index.
 
-The registry currently contains 30 workload rows with complete `min` and `max`
-coverage. The release validation checks 60 manifests across those two standardized
-profiles, while `pro` provides an opt-in research envelope.
+Causal inference phases add a stronger lineage rule. All phases must use one
+verified package selecting the median-quality committed training run. This
+prevents phase comparisons from silently changing model weights.
 
-MLPerf EDU separates workload usefulness from public score claims:
+The committed index is the source for exact baseline values. Public documents
+should not copy mutable result tables by hand.
 
-| Public status | Current count | Meaning |
-|---|---:|---|
-| `score-bearing` | 5 | Real-data quality target plus comparable performance metrics |
-| `performance-bearing` | 4 | Comparable performance metrics with a functional check, but no public task-quality score |
-| `systems-only` | 21 | Runnable systems and research workloads for architecture, backend, pruning, quantization, distributed, or agent studies |
+The current draft index keeps evidence classes explicit. Six cases satisfy the
+five-run project quality and repeatability checks. Five cases have one verified
+measurement, and causal training has two quality-passing measurements with a
+5.19% diagnostic timing CV. Those six cases remain provisional and make no
+repeatability or promoted-baseline claim.
 
-This separation is essential for credibility. A workload can support an
-excellent class or architecture paper without being advertised as a public
-MLPerf EDU score.
+## Research Boundary
 
-## Out-of-the-Box Contract
+The suite can support controlled research on:
 
-A fresh local install should support:
+- Processor and accelerator behavior
+- Memory hierarchy and sparse access
+- Compiler and graph transformations
+- Runtime and kernel selection
+- Precision and quantization
+- Batch, context, and scheduling configurations
+- Training-to-inference lineage
 
-```bash
-pip install -e ".[dev]"
-mlperf doctor
-mlperf audit
-mlperf validate smoke
-mlperf validate coverage
-mlperf validate max
-mlperf validate release --output-dir submissions/validation
-pytest
-```
+Distributed scaling, datacenter serving claims, agent capability evaluation,
+and large-model system claims remain outside v0.1.
 
-The harness should produce:
+## Functional-Stage Reinforcement Learning
 
-- Report JSON for every workload and suite.
-- HTML reports by default for browser inspection.
-- CSV exports by default for spreadsheet analysis.
-- Provenance manifests with artifact hashes and machine metadata.
-- Local verification and grading results.
-- Validation summaries with pass/fail totals, per-suite artifacts, per-workload
-  timing, and a stable `mlperf_suite: "mlperf-edu"` identifier.
+MiniGo is the historically correct MLPerf reinforcement-learning workload.
+The public CLI now exercises a bounded policy-value self-play and training
+path, but the workload remains outside promotion because no authoritative
+laptop-scale configuration preserves its complete self-play and checkpoint
+quality contract unchanged. A control-environment substitute would create a
+different benchmark and weaken the admission rule.
 
-## Proposed MLCommons Endorsement Path
+## Requested Review
 
-### Phase 0: Community Preview
+The first review should focus on five questions:
 
-Publish MLPerf EDU as an explicitly unofficial educational preview. The goal is
-to gather feedback on workload scope, CLI vocabulary, report schema, and
-course usability.
+1. Does the fourteen-workload portfolio, including its nine-workload promotion scope and five functional-stage additions, cover enough distinct single-node behavior for a v0.1 classroom suite?
+2. Are the inherited quality targets and laptop execution boundaries defensible?
+3. Does the mode, phase, configuration, and profile taxonomy match mature benchmark practice?
+4. Are five-run repeatability, provenance, and disclosure rules sufficient for initial comparison?
+5. Which naming, governance, licensing, and publication steps are required before any MLCommons association?
 
-Exit criteria:
-
-- Fresh clone passes `mlperf validate release`.
-- `mlperf audit` passes.
-- All examples in `README.md` are runnable or clearly marked optional.
-- Every workload has `min` coverage and provenance.
-- Every public score-bearing workload has a documented `max` target, data
-  policy, scenario, and verified baseline.
-
-### Phase 1: MLCommons Working-Group Review
-
-Bring the proposal to the relevant MLCommons benchmark/education stakeholders.
-The ask is review and sponsorship, not immediate publication of official
-competitive results.
-
-Review topics:
-
-- Whether `MLPerf EDU` is an acceptable name.
-- Which existing working group should sponsor the effort.
-- Which workloads should be in the first endorsed course-scale validation path.
-- What rules, disclaimers, and result-messaging language are required.
-- Whether the reports need a formal schema version and validator.
-
-### Phase 2: Rules and Reference Release
-
-Define a lightweight rules package:
-
-- Valid system configurations for laptop and course runs.
-- Required commands for `smoke`, `coverage`, `max`, and `release`.
-- Rules for synthetic data in `min` and real or micro-sharded data in `max`.
-- Allowed off-the-shelf SLMs and license requirements.
-- Required report/provenance fields.
-- Accuracy, quality, and pass/fail semantics.
-- Score-bearing, performance-bearing, systems-only, and experimental result
-  categories.
-- The educational scenario subset: `single_stream`, `offline`, and `server`
-  for public score/performance results.
-- Result messaging that distinguishes educational validation from official
-  competitive MLPerf results.
-
-Exit criteria:
-
-- Rules document reviewed by MLCommons stakeholders.
-- Reference release passes on macOS and Linux.
-- CI runs unit tests plus `mlperf validate smoke`.
-- Longer validation suites are reproducible locally and available as manual or scheduled CI.
-
-### Phase 3: Endorsed Educational Suite
-
-If MLCommons approves, label the suite as an endorsed educational benchmark or
-MLCommons educational project. The initial endorsed scope should be
-methodology, tooling, and course reproducibility, not competitive ranking.
-
-Exit criteria:
-
-- Public release artifacts are versioned.
-- Results messaging is approved.
-- A small set of pilot courses run the suite and report setup friction.
-- Workloads have stable IDs, schemas, and regression tests.
-
-### Phase 4: Optional Official Track
-
-Only after the educational suite is stable should MLPerf EDU consider an
-official submission-style track. That track could use a subset of workloads,
-stricter data requirements, and stronger review rules. It should not block the
-course-first release.
-
-## What We Need from MLCommons
-
-1. Guidance on naming: whether `MLPerf EDU` is acceptable or should be
-   positioned as `MLCommons EDU Benchmark` until formal endorsement.
-2. A sponsoring working group or review group.
-3. Feedback on the profile/validation vocabulary: `min`, `max`, `pro` and
-   `smoke`, `coverage`, `max`, `release`.
-4. Agreement on result-messaging boundaries so educational reports are not
-   confused with official MLPerf benchmark submissions.
-5. Review of the first course-scale workload list and SLM model policy.
-
-## Near-Term Engineering Plan
-
-The work should follow the stakeholder iteration loop in
-[`ITERATION_LOOP.md`](ITERATION_LOOP.md): start with a specific audience
-question, create a small review packet, use parallel private reviews when
-helpful, synthesize findings into one bounded implementation slice, validate,
-and then record the decision.
-
-The implementation loop is:
-
-1. Select one workload.
-2. Confirm registry metadata, data policy, backend policy, metric, target, and
-   runtime budget.
-3. Implement or harden `min`.
-4. Implement or harden `max`.
-5. Add or harden `pro` sweeps when a research use case needs repetitions,
-   backend comparisons, larger models, pruning, or quantization.
-6. Emit report, provenance, verifier, package, and grade artifacts.
-7. Add tests for registry, fetch, run, report, verify, package, and grade.
-8. Run `mlperf validate smoke`, targeted suite validation, and finally
-   `mlperf validate release`.
-9. Update docs and runtime budgets from measured results.
-
-This loop keeps the suite from becoming a catalog of aspirational benchmarks.
-A workload is not done until it runs, reports, verifies, grades, and passes the
-appropriate validation suite.
-
-## References
-
-- [MLCommons Working Groups](https://mlcommons.org/working-groups/)
-- [MLCommons benchmark submission overview](https://mlcommons.org/benchmarks/)
-- [MLPerf submission rules](https://github.com/mlcommons/policies/blob/master/submission_rules.adoc)
-- [MLPerf Inference submission guide](https://docs.mlcommons.org/inference/submission/)
-- [MLPerf Client](https://mlcommons.org/benchmarks/client/)
-- [MLPerf Tiny](https://mlcommons.org/working-groups/benchmarks/tiny/)
+Implementation readiness and external governance are separate. The release
+checklist reports both without treating pending governance as a technical pass.

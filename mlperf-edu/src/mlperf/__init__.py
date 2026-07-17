@@ -1,8 +1,5 @@
-"""
-MLPerf EDU: The Tamper-Proof Referee Harness.
-"""
+"""MLPerf EDU's independent educational benchmark package."""
 
-from .core import Referee, TrainingResult, IntrospectionEngine
-from .power import PowerProfiler, PowerMeter
+from .power import PowerMeter
 
-__all__ = ["Referee", "TrainingResult", "PowerProfiler", "PowerMeter", "IntrospectionEngine"]
+__all__ = ["PowerMeter"]

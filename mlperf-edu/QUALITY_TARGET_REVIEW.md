@@ -1,60 +1,109 @@
-# MLPerf EDU Quality Target Review
+# MLPerf EDU v0.1 Quality Target Review
 
-This matrix is the expert-review queue for deciding which workloads can carry
-public MLPerf EDU scores and which should remain systems-only teaching or
-research workloads.
+## Review Boundary
 
-## Review Rule
+The v0.1 portfolio contains fourteen workloads. The current evidence scope
+contains nine workloads and twelve evidence cases. Every target below comes
+from an authoritative upstream result or rule. None was invented to make a
+local implementation pass.
 
-- `score-bearing`: target must be backed by real data, a reference protocol,
-  reproducible reports, and reviewer approval.
-- `performance-bearing`: functional check must prevent empty work while keeping
-  the row comparable for systems studies.
-- `systems-only`: workload may be excellent for architecture, kernel, backend,
-  quantization, pruning, distributed, or agent studies without claiming task
-  score comparability.
+The draft evidence campaign is bound to clean source revision
+`163d42ee3df54ab122543469ccf2b6b3bd119455`. Exact run counts, values, evidence
+classes, and SHA-256 digests are generated from
+`provisional_results/index.json`. Six cases have complete five-run evidence;
+six remain explicitly provisional. This document reviews the target basis and
+acceptance logic rather than duplicating mutable result tables.
 
-## Current Matrix
+## Score-Bearing Targets
 
-| Suite | Workload | Public status | Metric/check | Target or condition | Review state |
-|---|---|---|---|---|---|
-| language | `micro-bert-train` | systems-only | `val_accuracy` | 0.78 | Keep systems-only until baseline reaches target on a public dataset path |
-| language | `nano-lora-finetune` | systems-only | `base_grad_norm` | frozen base gradients remain zero while LoRA gradients are nonzero | Systems check is acceptable; task-quality promotion deferred |
-| language | `nano-moe-train` | systems-only | `cross_entropy_loss` | 0.05 | Target is not currently a public quality claim; needs review before promotion |
-| language | `nanogpt-inference --variant fp32-b16` | systems-only | `output_tokens_per_sec` | positive throughput | Optimization row; no public quality claim |
-| language | `nanogpt-inference --variant fp16-b16` | systems-only | `output_tokens_per_sec` | positive throughput | Optimization row; no public quality claim |
-| language | `nanogpt-inference --variant speculative` | systems-only | `acceptance_rate` | emits configured tokens and records acceptance | TTC row; needs stronger comparability policy before public result use |
-| language | `nanogpt-inference --variant prefill` | performance-bearing | `prefill_tokens_per_sec` | checkpoint-backed positive throughput | Review checkpoint lineage and serving scenario |
-| language | `nanogpt-inference --variant decode` | performance-bearing | `decode_steps` | configured decode steps complete | Review checkpoint lineage and serving scenario |
-| language | `nanogpt-train` | score-bearing | `cross_entropy_loss` | 2.3 | Candidate public row; review Project Gutenberg recipe and reference protocol |
-| slm | `smollm2-chat-inference --variant baseline` | performance-bearing | `generated_tokens` | 8 | Candidate public row; review model choice and prompt fixture |
-| slm | `smollm2-chat-inference --variant quantized-int8` | performance-bearing | `generated_tokens` | 8 | Candidate public row; review quantization comparability |
-| slm | `smollm2-chat-inference --variant batched-b4` | systems-only | `generated_tokens` | 8 | Serving optimization row; public promotion deferred |
-| slm | `smollm2-chat-inference --variant long-context` | systems-only | `generated_tokens` | 8 | Long-context systems row; public promotion deferred |
-| vision | `micro-diffusion-train` | systems-only | `mse_loss` | 0.002 | Teaching scaffold; public quality target deferred |
-| vision | `mobilenet-cifar100-composed-fp16` | systems-only | `effective_compression_ratio` | compressed inference emits logits and ratio > 1 | Optimization row; no public quality claim |
-| vision | `mobilenetv2-train` | score-bearing | `top1_accuracy` | 0.7 | Candidate public row; review Fashion-MNIST target and baseline evidence |
-| vision | `resnet18-train` | score-bearing | `top1_accuracy` | 0.75 | Candidate public row; review Fashion-MNIST target and baseline evidence |
-| recommender | `micro-dlrm-dram-train` | systems-only | `accuracy` | 0.65 | Memory-pressure row; public promotion deferred |
-| recommender | `micro-dlrm-train` | score-bearing | `accuracy` | 0.7 | Blocked for public endorsement until MovieLens policy is resolved or dataset is replaced |
-| tiny | `anomaly-ae-train` | score-bearing | `reconstruction_mse` | 0.04 | Candidate public row; review MNIST attribution and threshold protocol |
-| tiny | `dscnn-kws-train` | systems-only | `top1_accuracy` | 0.9 | Keep systems-only until Speech Commands path and target are reviewed |
-| tiny | `wake-vision-vww` | systems-only | `binary_accuracy` | 0.85 | Keep systems-only until Wake Vision/proxy policy is reviewed |
-| agent | `nano-codegen-agent` | systems-only | `pass_at_1` | 0.15 | Agent systems row; public quality methodology deferred |
-| agent | `nano-rag-agent` | systems-only | `retrieval_accuracy` | 0.8 | Agent systems row; corpus and quality policy deferred |
-| agent | `nano-react-agent` | systems-only | `trace_accuracy` | 0.6 | Agent systems row; trace provenance and quality policy deferred |
-| agent | `nano-toolcall-agent` | systems-only | `valid_call_rate` | valid calls and positive throughput | Agent systems row; tool schema policy deferred |
-| distributed | `micro-dlrm-distributed` | systems-only | `relative_loss_delta` | 0.05 | Distributed systems row; no public quality claim |
-| graph | `micro-gnn-train` | systems-only | `test_accuracy` | 0.78 | Keep systems-only until dataset/source/target review |
-| timeseries | `micro-lstm-train` | systems-only | `val_mse` | 0.13 | Keep systems-only until dataset/source/target review |
-| rl | `micro-rl-train` | systems-only | `avg_episode_reward` | 195 | Keep systems-only until stochastic-run policy is defined |
+| **Workload** | **Model and Data** | **Quality Gate** | **Authority and Rationale** |
+|:---|:---|:---|:---|
+| `image-classification` | Official float ResNet8 and the 200-example MLPerf Tiny CIFAR-10 accuracy set | top-1 accuracy at least 0.85 | MLPerf Tiny fixes the model, accuracy set, metric, and threshold. The PyTorch adapter must reproduce that result without changing preprocessing. |
+| `keyword-spotting` | Official DS-CNN and the 1,000-example EEMBC MFCC accuracy set | top-1 accuracy at least 0.90 | MLPerf Tiny fixes the task and threshold. The adapter preserves the quantized input convention and model graph. |
+| `anomaly-detection` | Official MLPerf Tiny autoencoder and the 248-recording ToyCar accuracy set | ROC AUC at least 0.85 | MLPerf Tiny fixes the model, accuracy-set construction, reconstruction-error evaluator, metric, and threshold. The adapter preserves the fused network and feature pipeline. |
+| `visual-wake-words` | Official MLPerf Tiny MobileNetV1 0.25 and the 1,000-example EEMBC accuracy set | top-1 accuracy at least 0.80 | MLPerf Tiny fixes the model, labeled accuracy set, preprocessing contract, metric, and threshold. |
+| `causal-language-modeling` | nanoGPT Shakespeare character configuration and Tiny Shakespeare split | best validation cross-entropy at most 1.4697 | The threshold is nanoGPT's published result for the exact 5,000-iteration recipe. |
+| `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | accuracy at least 0.9105504587155964 | The pinned model-index metadata publishes this exact verified accuracy for the GLUE SST-2 validation split. The complete split is evaluated. |
+| `information-retrieval` | Pinned MiniLM cross-encoder and the documented three-dataset NanoBEIR subset | mean nDCG@10 equal to 0.60716840988382 within the registry tolerance | Sentence Transformers publishes the exact evaluator example and score. |
+| `graph-node-classification` | Official OGB GCN recipe and `ogbn-arxiv` split | test accuracy within 0.0029 of 0.7174 | The correct OGB GCN reference is 71.74% with a published 0.29-point standard deviation. The previously quoted 72.51% belongs to a different leaderboard section and is not used. |
+| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | test MSE at most 0.29292929292929293 | PatchTST publishes the 0.290 result. The gate divides that lower-is-better reference by the MLPerf 0.99 quality fraction, an explicit direction-aware MLPerf EDU policy inference. |
 
-## Reviewer Sign-Off Needed
+## Functional-Stage Quality Backlog
 
-| Area | Reviewers | Output |
-|---|---|---|
-| SLM serving | ML systems + MLCommons inference reviewers | approve model, prompts, decode token target, and quantized variant comparability |
-| Vision training | vision systems + education reviewers | approve Fashion-MNIST as the first public teaching dataset |
-| Recommender | recommender + policy reviewers | choose MovieLens approval path or replacement dataset |
-| Tiny/anomaly | embedded/tiny reviewers | approve MNIST anomaly threshold and public attribution |
-| Language training | language modeling reviewers | approve Project Gutenberg text recipe and NanoGPT target protocol |
+These five workloads run bounded functional probes but remain outside the
+promotion importer. Their published targets are retained as future conformance
+gates rather than weakened to match local observations.
+
+| **Workload** | **Authoritative Target** | **Current Boundary** |
+|:---|:---|:---|
+| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | Autoregressive CLI integration works; complete EvalPlus reproduction remains pending. |
+| `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | Grammar-constrained generation and AST-evaluator integration works; the complete local audit reached 0.7852. |
+| `recommendation` | Meta DLRM Criteo Terabyte ROC AUC of 0.8025 | Dense-sparse execution works; the unchanged Criteo contract remains outside the practical laptop boundary. |
+| `image-generation` | NVIDIA EDM CIFAR-10 FID of 1.79 | Iterative denoising works; three official 50,000-image trials reached a best FID of 1.8015540749984766. |
+| `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | Policy-value self-play and a training step work; the unchanged self-play volume remains impractical locally. |
+
+The MLPerf policy input is pinned to inference-policies commit
+`c547732b539cb3a14cc5680597714c8c1df4cad0`. The referenced
+`inference_rules.adoc` bytes have SHA-256
+`4a42bec8ab869b78b41dc00e94da18113ab4fffa32aa19a8dccc814c5d12897e`.
+
+## Performance-Bearing Phase Gates
+
+`causal-language-modeling` adds full, prefill, and decode inference. These
+three cases report timing only after every run passes its functional contract.
+They do not introduce a second language-quality benchmark. All phases must use
+one content-addressed training package. Promotion requires the package to
+select the median-quality execution from a passing five-run training campaign;
+the draft phases use the separately labeled provisional package.
+
+| **Phase** | **Primary Metric** | **Functional Requirement** |
+|:---|:---|:---|
+| full | output tokens per second | Complete the declared prompt and generation path with finite outputs and the expected token count. |
+| prefill | prefill tokens per second | Complete the declared prompt prefill with a valid cache and finite output. |
+| decode | output tokens per second | Complete cache-backed autoregressive decode with the expected token count and finite output. |
+
+## Twelve-Case Evidence Closure
+
+The required cases are:
+
+1. `image-classification__max__inference`
+2. `keyword-spotting__max__inference`
+3. `anomaly-detection__max__inference`
+4. `visual-wake-words__max__inference`
+5. `causal-language-modeling__max__training`
+6. `causal-language-modeling__max__inference__full`
+7. `causal-language-modeling__max__inference__prefill`
+8. `causal-language-modeling__max__inference__decode`
+9. `text-classification__max__inference`
+10. `information-retrieval__max__inference`
+11. `graph-node-classification__max__training`
+12. `time-series-forecasting__max__training`
+
+Promotion requires five passing fresh-process runs and timing CV no greater
+than 5%. Score-bearing cases require every individual quality value and the
+median to pass. Phase cases require five functional passes. The current draft
+has six cases that meet this standard and six provisional cases that establish
+execution and gate passage only.
+
+## Target Review Questions
+
+Domain reviewers should confirm:
+
+- The upstream artifact revision and data split remain the strongest practical authority.
+- The PyTorch adapter preserves preprocessing, model semantics, and evaluator behavior.
+- The tolerance reflects the upstream reference rather than observed local convenience.
+- The measured region is long enough for stable laptop timing.
+- CPU and accelerator numeric differences cannot silently weaken the quality gate.
+- The target remains appropriate when upstream dependencies change.
+
+A source, preprocessing, evaluator, model, optimizer, schedule, or target
+change invalidates the relevant evidence and requires a fresh five-run packet.
+
+## Functional and Rejected Coverage
+
+The five functional-stage candidates remain experimental until their
+authoritative quality contracts pass. End-to-end RAG, ReAct agents, and
+distributed training remain rejected because they require unstable project
+choices or fall outside the single-node boundary.
+
+The selection ledger is the authoritative record of those decisions.
