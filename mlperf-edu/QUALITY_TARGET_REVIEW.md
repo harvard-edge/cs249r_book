@@ -45,16 +45,17 @@ later phase.
 
 These five workloads remain outside the promotion importer. Their published
 targets are retained as conformance gates rather than weakened to match local
-observations. Code generation now has its authoritative runner; the other four
-still expose bounded functional probes while their full runners are built.
+observations. Every workload now has a complete authoritative `max` runner.
+Some runs remain pending because their current result misses the target or the
+required external execution environment is unavailable.
 
 | **Workload** | **Authoritative Target** | **Current Boundary** |
 |:---|:---|:---|
-| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | The pinned 164-task Qwen/EvalPlus runner and sandbox self-check work; one complete local result remains pending. |
-| `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | Grammar-constrained generation and AST-evaluator integration works; the complete local audit reached 0.7852. |
-| `recommendation` | MLPerf Inference v1.0.1 DLRM Criteo Terabyte ROC AUC of 0.8025 | Dense-sparse execution works; the official 100 GB checkpoint and roughly 343 GB compressed dataset remain outside the practical laptop boundary. |
-| `image-generation` | NVIDIA EDM CIFAR-10 FID of 1.79 | Iterative denoising works; three official 50,000-image trials reached a best FID of 1.8015540749984766. |
-| `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | Policy-value self-play and a training step work; the unchanged self-play volume remains impractical locally. |
+| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | The complete 164-task run passed 91 tasks, or 0.554878. The unchanged gate requires at least 94. |
+| `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | The pinned 1,150-case runner and official evaluator are ready. A complete artifact from the current runner remains pending; the earlier full audit reached 0.7852. |
+| `recommendation` | MLPerf Inference v1.0.1 DLRM Criteo Terabyte ROC AUC of 0.8025 | The complete historical accuracy adapter is ready. Execution requires licensed Criteo data, the roughly 90 GB checkpoint, a legacy runtime, and a 256-GB-class system. |
+| `image-generation` | NVIDIA EDM CIFAR-10 FID of 1.79 | The complete 50,000-image runner is ready. Prior official trials reached a best FID of 1.8015540749984766, and a current-run artifact remains pending. |
+| `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | The complete resumable self-play, training, and evaluation loop is ready. Execution requires a reviewed immutable legacy GPU image and a suitable NVIDIA system. |
 
 The MLPerf policy input is pinned to inference-policies commit
 `c547732b539cb3a14cc5680597714c8c1df4cad0`. The referenced
@@ -117,7 +118,7 @@ packet.
 
 ## Functional and Rejected Coverage
 
-The five functional-stage candidates remain experimental until their
+The five quality-conformance candidates remain experimental until their
 authoritative quality contracts pass. End-to-end RAG, ReAct agents, and
 distributed training remain rejected because they require unstable project
 choices or fall outside the single-node boundary.

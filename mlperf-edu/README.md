@@ -7,12 +7,13 @@ discipline of mature benchmark suites to classroom-scale PyTorch workloads.
 It is not an official MLCommons benchmark and is not endorsed by MLCommons.
 
 The v0.1 portfolio contains fourteen workloads. The current quality-evidence
-scope covers nine workloads and twelve evidence cases. Five additional
-workloads are in the functional spiral, where the public CLI validates bounded
-execution, reporting, and provenance without claiming the authoritative
-quality result. MLPerf EDU contributes the thin PyTorch adapter, execution
-harness, measurement controls, provenance, and reports needed to move each
-definition through functional, quality-conformant, repeatability-verified, and
+scope covers nine workloads, all with at least one complete target-passing
+result. Five additional workloads now have complete,
+fail-closed authoritative runners in the quality-conformance spiral. Their
+current state is either a measured target gap or an external execution-environment
+gate. MLPerf EDU contributes the thin PyTorch adapter, execution harness,
+measurement controls, provenance, and reports needed to move each definition
+through functional, quality-conformant, repeatability-verified, and
 promotion-ready stages.
 
 ## Install From the Checkout
@@ -32,7 +33,7 @@ region.
 ```bash
 uv run mlperf fetch --workload image-classification --profile max
 uv run mlperf run --workload image-classification --profile max \
-  --output-dir submissions/image-review --open-report
+  --output-dir submissions/image-review
 ```
 
 ## Workload Portfolio
@@ -48,17 +49,17 @@ uv run mlperf run --workload image-classification --profile max \
 | `information-retrieval` | Sentence Transformers CrossEncoder NanoBEIR example | inference | exact documented mean nDCG@10 |
 | `graph-node-classification` | Official OGB GCN recipe on `ogbn-arxiv` | training | test accuracy within the published GCN reference tolerance |
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | test MSE at most 0.29292929292929293, the direction-aware 99%-of-reference gate |
-| `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; authoritative runner ready, complete local result pending |
-| `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; functional integration only today |
-| `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; functional integration only today |
-| `image-generation` | NVIDIA EDM and the CIFAR-10 50,000-image FID protocol | inference | published 1.79 FID; functional integration only today |
-| `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; functional integration only today |
+| `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; first complete result reached 0.554878 and did not meet the unchanged target |
+| `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; complete authoritative runner ready, current full artifact pending |
+| `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; complete runner ready, execution gated on licensed data and a 256-GB-class environment |
+| `image-generation` | NVIDIA EDM and the CIFAR-10 50,000-image FID protocol | inference | published 1.79 FID; measured best result 1.801554, with a current-run artifact still needed |
+| `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; complete resumable runner gated on a reviewed legacy GPU environment |
 
 The [selection ledger](registry/selection-ledger.yaml) records the authority,
 rationale, laptop evidence, and quality-conformance blocker for every audited
-task. Four candidates remain at the bounded functional stage. Code generation
-now has a complete score-bearing runner, but it remains outside promotion until
-one authoritative local run establishes its quality result.
+task. The five new workloads are now at quality conformance rather than bounded
+functional integration. They remain outside promotion until their complete
+authoritative runs meet the unchanged gates and their provenance verifies.
 
 For the current quality-readiness milestone, one complete authoritative run is
 enough to accept or reject a quality target. The complete required evaluation
@@ -122,7 +123,7 @@ Every run writes these review artifacts:
 |:---|:---|
 | `*_report.json` | Complete metrics, quality status, configuration, and environment |
 | `*_report.csv` | Flat metrics for analysis |
-| `*_report.html` | Human-readable run report |
+| `*_report.html` | Human-readable dashboard with the lead quality result, configuration, model lineage, and provenance |
 | `*.provd.json` | Content-addressed provenance manifest |
 
 ```bash
@@ -161,6 +162,7 @@ and builds the site and paper.
 - [Proposal](PROPOSAL.md)
 - [Public result rules](PUBLIC_RULES.md)
 - [Quality target review](QUALITY_TARGET_REVIEW.md)
+- [Initial usability readiness](READINESS.md)
 - [Dataset release review](DATASET_RELEASE_REVIEW.md)
 - [Release checklist](RELEASE_CHECKLIST.md)
 - [Generated benchmark site](site/benchmarks/index.qmd)

@@ -348,15 +348,22 @@ def section_spiral_status(w: Workload) -> str:
             "next_gate": spiral.get("next_gate"),
         }
     )
-    body += (
-        "\n::: {.callout-caution}\n"
-        "**Functional-stage boundary.** The current `min` and `max` runners are "
-        "bounded integration probes. They validate execution, reporting, and "
-        "provenance, but they do not run the complete authoritative quality contract "
-        "and must not be used as benchmark baselines.\n"
-        ":::"
-    )
-    return f"## Functional Spiral Status\n\n{body}\n"
+    if spiral.get("stage") == "functional":
+        boundary = (
+            "**Functional-stage boundary.** The current `min` and `max` runners are "
+            "bounded integration probes. They validate execution, reporting, and "
+            "provenance, but they do not run the complete authoritative quality "
+            "contract and must not be used as benchmark baselines."
+        )
+    else:
+        boundary = (
+            "**Quality-conformance boundary.** The `max` runner implements the "
+            "authoritative quality contract. A result remains experimental until a "
+            "complete run meets the unchanged target and its provenance verifies. "
+            "The `min` path remains a functional probe."
+        )
+    body += f"\n::: {{.callout-caution}}\n{boundary}\n:::"
+    return f"## Readiness Spiral Status\n\n{body}\n"
 
 
 def section_provenance(w: Workload) -> str:
@@ -775,7 +782,7 @@ def render_workload_body(
 def public_line(w: Workload) -> str:
     if w.raw.get("promotion_scope", True) is not True:
         return (
-            f"{badge(w.public_status)}\n\n> **Functional-stage integration.** "
+            f"{badge(w.public_status)}\n\n> **Readiness status.** "
             f"{esc(w.public_rationale)} No draft reference result or public baseline "
             "is claimed for this workload.\n"
         )

@@ -106,17 +106,17 @@ def test_generated_workload_pages_disclose_indexed_reference_evidence(
     assert "CV 5.19%; **diagnostic fail**" in combined
 
 
-def test_functional_spiral_pages_disclose_probe_boundary(generated_outputs):
+def test_quality_conformance_pages_disclose_result_boundary(generated_outputs):
     workload_pages = [
         content
         for path, content in generated_outputs.items()
         if "benchmarks" in path.parts and path.name != "index.qmd"
     ]
 
-    assert sum("## Functional Spiral Status" in page for page in workload_pages) == 5
+    assert sum("## Readiness Spiral Status" in page for page in workload_pages) == 5
     combined = "\n".join(workload_pages)
-    assert "bounded integration probes" in combined
-    assert "must not be used as benchmark baselines" in combined
+    assert "The `max` runner implements the authoritative quality contract" in combined
+    assert "The `min` path remains a functional probe" in combined
     assert "No draft reference result or public baseline is claimed" in combined
 
 
@@ -149,6 +149,7 @@ def test_site_install_commands_use_the_source_checkout(generated_outputs):
     authored = [
         ROOT / "site" / "index.qmd",
         ROOT / "site" / "getting-started.qmd",
+        ROOT / "site" / "readiness.qmd",
         *(ROOT / "site" / "guide").glob("*.qmd"),
     ]
     content = "\n".join(path.read_text() for path in authored)
@@ -197,6 +198,7 @@ def test_authored_site_avoids_retired_fixed_portfolio_counts():
     authored = [
         ROOT / "site" / "index.qmd",
         ROOT / "site" / "getting-started.qmd",
+        ROOT / "site" / "readiness.qmd",
         ROOT / "site" / "about.qmd",
         *(ROOT / "site" / "guide").glob("*.qmd"),
     ]

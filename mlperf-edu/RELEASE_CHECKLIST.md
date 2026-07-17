@@ -19,11 +19,11 @@ and narrow smoke checks do not prove a broad release claim.
 - [x] `information-retrieval` reproduces the documented CrossEncoder NanoBEIR example.
 - [x] `graph-node-classification` uses the official OGB GCN recipe and evaluator.
 - [x] `time-series-forecasting` uses the official PatchTST ETTm1 recipe and split.
-- [x] `code-generation` has a fail-closed autoregressive functional runner; HumanEval+ conformance remains pending.
-- [x] `function-calling` has a fail-closed grammar-constrained generation and AST-evaluator runner; BFCL conformance remains pending.
-- [x] `recommendation` has a fail-closed DLRM-style functional runner; Criteo conformance remains pending.
-- [x] `image-generation` has a fail-closed iterative-denoising functional runner; official FID conformance remains pending.
-- [x] `reinforcement-learning` has a fail-closed MiniGo-style functional runner; full self-play conformance remains pending.
+- [x] `code-generation` has a complete HumanEval+ runner and a target-missing 91-of-164 result.
+- [x] `function-calling` has a complete 1,150-case BFCL runner; the current full artifact remains pending.
+- [x] `recommendation` has a complete historical DLRM accuracy adapter that fails closed without its licensed data, checkpoint, runtime, and memory envelope.
+- [x] `image-generation` has a complete 50,000-image EDM FID runner; the current full artifact remains pending.
+- [x] `reinforcement-learning` has a complete resumable MiniGo quality loop that fails closed without its reviewed legacy GPU environment.
 - [x] Modes, phases, configurations, scenarios, and profiles are separate taxonomy axes.
 - [x] MiniGo remains the RL reference without substituting a control task.
 - [x] Functional-stage candidates retain their published targets and explicit conformance blockers in the selection ledger.
@@ -31,9 +31,9 @@ and narrow smoke checks do not prove a broad release claim.
 ## Evidence Cases
 
 The current importer remains scoped to the original nine quality-evidence
-workloads and the following twelve evidence cases. The five functional-stage
-workloads cannot enter this closure until their authoritative quality paths
-replace the bounded setup probes.
+workloads and the following twelve evidence cases. The five quality-conformance
+workloads cannot enter this closure until complete results pass their
+authoritative gates and the importer is expanded deliberately.
 
 - [x] `image-classification__max__inference` — five-run verified
 - [x] `keyword-spotting__max__inference` — five-run verified
@@ -204,11 +204,12 @@ The audit's nonzero status is an expected policy block until promotion; it is
 not an execution failure. The workflow records and checks that distinction.
 
 - [x] Every registered `min` path passes from the public CLI.
-- [x] Every canonical `max` path passes through the public CLI.
+- [x] Every canonical `max` path resolves to its authoritative runner through the public CLI.
+- [x] Environment-gated `max` paths fail closed with actionable asset, terms, runtime, and hardware requirements.
 - [x] Every applicable `pro` path passes and retains workload identity with one canonical measurement by default.
 - [x] Explicit mode and phase selection works and invalid combinations fail early.
 - [x] Fetch runs before measurement and verifies pinned assets.
-- [x] JSON, CSV, HTML, and provenance files are emitted for every run.
+- [x] JSON, CSV, a default-opening HTML dashboard, and provenance files are emitted for every completed run.
 
 ## Platform Coverage
 

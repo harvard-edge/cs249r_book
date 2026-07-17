@@ -30,6 +30,7 @@ PUBLIC_DOCUMENTS = (
     "PROPOSAL.md",
     "PUBLIC_RULES.md",
     "QUALITY_TARGET_REVIEW.md",
+    "READINESS.md",
     "RELEASE_CHECKLIST.md",
 )
 WORKLOAD_DOCUMENTS = frozenset(
@@ -38,6 +39,7 @@ WORKLOAD_DOCUMENTS = frozenset(
         "SPEC.md",
         "PROPOSAL.md",
         "QUALITY_TARGET_REVIEW.md",
+        "READINESS.md",
         "RELEASE_CHECKLIST.md",
     }
 )
