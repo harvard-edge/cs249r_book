@@ -35,7 +35,7 @@ required execution environment.
 | `graph-node-classification` | test accuracy ≥ 0.7174 with 0.0029 tolerance | Pass at 0.720964 | Keep the current result. Domain review of the tolerance remains a publication gate. |
 | `time-series-forecasting` | test MSE ≤ 0.2929292929 | Pass at 0.292393 | Keep the current result. Domain review of the derived target remains a publication gate. |
 | `code-generation` | HumanEval+ pass@1 ≥ 0.573, or at least 94 of 164 tasks | Complete result missed at 91 of 164, or 0.554878 | Investigate the three-task gap without weakening the target. |
-| `function-calling` | BFCL V4 Non-Live AST accuracy ≥ 0.8292 | Authoritative runner ready; earlier full audit reached 0.7852 | Produce one complete artifact with the current 1,150-case runner. |
+| `function-calling` | BFCL V4 Non-Live AST accuracy ≥ 0.8292 | Authoritative runner ready; earlier full audit reached 0.7852 and the current runner has a 50-case resumable prefix | Resume at case 51 when a current full artifact is needed. |
 | `image-generation` | CIFAR-10 FID ≤ 1.79 | Measured best FID is 1.801554 | Produce one artifact with the current 50,000-image runner and review the narrow gap without weakening the target. |
 | `recommendation` | Criteo Terabyte ROC AUC ≥ 0.8025 | Runner ready; execution is environment-gated | Run on a 256-GB-class system with the licensed data, official checkpoint, and pinned legacy runtime. |
 | `reinforcement-learning` | professional-move prediction ≥ 0.40 plus the 0.55 playoff gate | Runner ready; execution is environment-gated | Run the resumable loop on a suitable NVIDIA system with a reviewed immutable TensorFlow 1.x image. |
@@ -120,11 +120,14 @@ behavior for automation.
 - [x] Open the dashboard after `mlperf run` by default.
 - [x] Preserve pro subrun configuration and artifacts in the aggregate report.
 - [x] Generate a benchmark page for every workload from the registry.
+- [x] Pass desktop and mobile layout checks for all 32 website pages.
+- [x] Verify the current BFCL runner through a 50-case resumable prefix and
+  preserve the earlier complete quality observation.
 - [ ] Produce the current complete BFCL artifact.
 - [ ] Produce the current complete EDM artifact.
 - [ ] Execute the DLRM quality contract in its required environment.
 - [ ] Execute the MiniGo quality contract in its required environment.
-- [ ] Complete a visual browser review of the dashboard and public website.
+- [ ] Complete an interactive visual browser review of the standalone run dashboard.
 - [ ] Resolve any target gap without lowering a target to fit a local result.
 
 ## Production Readiness
