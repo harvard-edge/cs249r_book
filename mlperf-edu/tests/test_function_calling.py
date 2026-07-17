@@ -73,5 +73,5 @@ def test_reference_self_check_pins_known_java_representation_exceptions():
         "simple_java_64",
         "simple_java_65",
     )
-    assert function_calling.MODEL_PARAMETER_COUNT == 2_031_739_904
+    assert function_calling.MODEL_PARAMETER_COUNT == 1_720_574_976
     assert len(function_calling.MODEL_FILES) == 9

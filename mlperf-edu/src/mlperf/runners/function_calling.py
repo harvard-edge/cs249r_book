@@ -35,7 +35,10 @@ from mlperf.runners.common import (
 
 MODEL_ID = "Qwen/Qwen3-1.7B"
 MODEL_REVISION = "70d244cc86ccca08cf5af4e1e306ecf908b1ad5e"
-MODEL_PARAMETER_COUNT = 2_031_739_904
+# The pinned checkpoint ties its input embedding and LM head. Count unique
+# parameter tensors, matching ``model.parameters()``, rather than double-counting
+# the shared 151,936 x 2,048 embedding matrix.
+MODEL_PARAMETER_COUNT = 1_720_574_976
 MODEL_FILES = {
     "config.json": "1ddb5b89ebc90dcb417a45c213d818577e65976454d29385c8f6140771d95197",
     "generation_config.json": "2325da0f15bb848e018c5ae071b7943332e9f871d6b60e2ed22ca97d4cb993d2",
