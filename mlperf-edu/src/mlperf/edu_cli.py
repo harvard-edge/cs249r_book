@@ -2419,8 +2419,28 @@ def run_pro_profile(
         "artifacts": {
             "report": str(report_path),
             "provenance": str(manifest_path),
+            **pro_subrun_artifacts(subreports),
         },
     }
+    for field in (
+        "model",
+        "model_source",
+        "inference_source",
+        "evaluator",
+        "dataset",
+        "dataset_asset",
+        "dataset_source",
+        "config",
+        "measurement_protocol",
+        "scenario",
+        "seed",
+        "checkpoint_provenance",
+        "shared_checkpoint",
+        "quality_dependency",
+    ):
+        value = common_report_value(subreports, field)
+        if value not in (None, "", {}, []):
+            report[field] = value
     if not quality_required:
         report["functional_readiness"] = {
             "schema": "mlperf-edu-functional-readiness/0.1",
@@ -2449,6 +2469,33 @@ def run_pro_profile(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
     )
     return report
+
+
+def common_report_value(reports: list[dict[str, Any]], field: str) -> Any:
+    values = [report.get(field) for report in reports]
+    if not values or any(value in (None, "", {}, []) for value in values):
+        return None
+    first = values[0]
+    if all(value == first for value in values[1:]):
+        return copy.deepcopy(first)
+    return None
+
+
+def pro_subrun_artifacts(reports: list[dict[str, Any]]) -> dict[str, str]:
+    artifacts: dict[str, str] = {}
+    for run_index, report in enumerate(reports, start=1):
+        subrun_artifacts = report.get("artifacts") or {}
+        if not isinstance(subrun_artifacts, dict):
+            continue
+        for role, value in subrun_artifacts.items():
+            if not isinstance(value, str) or not value or not Path(value).is_file():
+                continue
+            safe_role = "".join(
+                char if char.isalnum() or char in "-_" else "_"
+                for char in str(role)
+            )
+            artifacts[f"subrun_{run_index}_{safe_role}"] = value
+    return artifacts
 
 
 class TemporaryNanogptCheckpoint:
@@ -3648,6 +3695,11 @@ def metric_key_for_quality(
 ) -> str | None:
     if metric_name and metric_name in metrics:
         return metric_name
+    if metric_name:
+        for suffix in ("_mean", "_median", "_min", "_max"):
+            aggregate_key = f"{metric_name}{suffix}"
+            if aggregate_key in metrics:
+                return aggregate_key
     candidates_by_metric = {
         "accuracy": (
             "best_accuracy",

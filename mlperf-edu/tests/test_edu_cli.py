@@ -235,11 +235,20 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
 
     def max_runner(_workload, output_dir):
         calls.append(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
+        subrun_report = output_dir / "image-classification_max_report.json"
+        subrun_report.write_text('{"status": "passed"}\n')
         return {
             "status": "passed",
             "backend": "cpu",
             "data_mode": "real",
             "mode": "inference",
+            "model": {"id": "resnet8", "revision": "fixture-revision"},
+            "model_source": {
+                "repository": "https://example.test/model",
+                "revision": "fixture-revision",
+            },
+            "config": {"batch_size": 1, "precision": "float32"},
             "metrics": {"inference_seconds": 1.0, "top1_accuracy": 0.87},
             "quality": {
                 "metric": "top1_accuracy",
@@ -247,7 +256,7 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
                 "quality_required": True,
                 "target_met": True,
             },
-            "artifacts": {},
+            "artifacts": {"report": str(subrun_report)},
         }
 
     def fake_load_runner(_workload, profile):
@@ -275,6 +284,14 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
     assert report["pro_policy"]["repetitions"] == 2
     assert report["metrics"]["repetitions"] == 2
     assert report["metrics"]["inference_seconds_mean"] == 1.0
+    assert report["model"] == {"id": "resnet8", "revision": "fixture-revision"}
+    assert report["config"] == {"batch_size": 1, "precision": "float32"}
+    assert report["artifacts"]["subrun_1_report"] == str(
+        calls[0] / "image-classification_max_report.json"
+    )
+    assert report["artifacts"]["subrun_2_report"] == str(
+        calls[1] / "image-classification_max_report.json"
+    )
     assert report["readiness_stage"] == "quality"
     assert report["quality"]["quality_required"] is True
     assert report["quality"]["target_met"] is True
@@ -344,6 +361,19 @@ def test_pro_profile_preserves_functional_only_max_readiness(tmp_path, monkeypat
     assert grade["verified"] is True
     assert grade["passed"] is True
     assert grade["quality_ready"] is False
+
+
+def test_quality_metric_lookup_supports_generic_pro_aggregates():
+    metrics = {
+        "humaneval_plus_pass_at_1_mean": 0.573,
+        "humaneval_plus_pass_at_1_min": 0.573,
+        "humaneval_plus_pass_at_1_max": 0.573,
+    }
+
+    assert (
+        edu_cli.metric_key_for_quality("humaneval_plus_pass_at_1", metrics)
+        == "humaneval_plus_pass_at_1_mean"
+    )
 
 
 def test_run_summary_distinguishes_quality_and_functional_passes(tmp_path, capsys):
