@@ -58,16 +58,16 @@ crossed a battery-to-AC transition.
 
 | Evidence case | Device | Observed result | Canonical gate | Quality margin | Provenance | Promotion state |
 |---|---|---:|---:|---:|---|---|
-| `image-classification__max__inference` | CPU | 0.870000 top-1 | >= 0.850000 | +0.020000 | verified | Existing five-run draft; new clean sweep required after code changes |
+| `image-classification__max__inference` | CPU | 0.870000 top-1 | >= 0.850000 | +0.020000 | verified | Clean current-source five-run sweep retained; promotion import awaits portfolio closure |
 | `keyword-spotting__max__inference` | MPS | 0.902000 top-1 | >= 0.900000 | +0.002000 | verified | Adapter is quality-preserving but nonidentical; promotion is blocked |
-| `anomaly-detection__max__inference` | MPS | 0.902910 ROC AUC | >= 0.850000 | +0.052910 | verified | Existing five-run draft; strongest converted-model metric reproduction |
-| `visual-wake-words__max__inference` | MPS | 0.851000 top-1 | >= 0.800000 | +0.051000 | verified | Exact top-1 parity passes all three audited LiteRT resolvers |
+| `anomaly-detection__max__inference` | MPS | 0.902910 ROC AUC | >= 0.850000 | +0.052910 | verified | Clean current-source five-run sweep retained; strongest converted-model metric reproduction |
+| `visual-wake-words__max__inference` | MPS | 0.851000 top-1 | >= 0.800000 | +0.051000 | verified | Clean current-source five-run sweep retained; exact top-1 parity passes all three audited LiteRT resolvers |
 | `causal-language-modeling__max__training` | MPS | 1.458786 loss | <= 1.469700 | +0.010914 | verified | Three diagnostic runs now pass; clean five-run timing campaign required |
 | `causal-language-modeling__max__inference__full` | CPU | 884.48 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean five-run campaign required |
 | `causal-language-modeling__max__inference__prefill` | CPU | 30,280.26 prefill tokens/s | functional gate | pass | verified with training lineage | Clean five-run campaign required |
 | `causal-language-modeling__max__inference__decode` | CPU | 879.88 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean five-run campaign required |
-| `text-classification__max__inference` | MPS | 0.910550475 accuracy | >= 0.910550459 | +0.000000016 | verified | Existing five-run draft; exact pinned-checkpoint conformance gate |
-| `information-retrieval__max__inference` | MPS | 0.607168410 nDCG@10 | >= 0.607168410 | 0.000000000 | verified | Existing five-run draft; exact published-example conformance gate |
+| `text-classification__max__inference` | MPS | 0.910550475 accuracy | >= 0.910550459 | +0.000000016 | verified | Clean current-source five-run sweep retained; exact pinned-checkpoint conformance gate |
+| `information-retrieval__max__inference` | MPS | 0.607168410 nDCG@10 | >= 0.607168410 | 0.000000000 | verified | Clean current-source five-run sweep retained; exact published-example conformance gate |
 | `graph-node-classification__max__training` | MPS | 0.722342 accuracy | >= 0.717400 | +0.004942 before tolerance | verified | Clean five-run accuracy and timing distribution required |
 | `time-series-forecasting__max__training` | MPS | 0.292393 MSE | <= 0.292929 | +0.000536 | verified | Deterministic locally but narrow; clean five-run and domain review required |
 
@@ -79,6 +79,30 @@ The long-run timings are intentionally
 excluded from baseline claims. PatchTST took 1,959.45 seconds on battery,
 graph training took 1,628.46 seconds on battery, and nanoGPT took 2,426.35
 seconds across a battery-to-AC transition.
+
+### Clean Current-Source Campaign
+
+Five short cases completed methodology-valid promotion-candidate sweeps on
+2026-07-17 against clean Git revision
+`f9e0c61da296d3b92a4705503d4bc6988c16c01c`. Each case ran in five fresh
+processes on AC power with Low Power Mode disabled, the canonical seed of 42,
+and the registry-defined inter-execution cooldown. Every run passed its quality
+gate, and every timing coefficient of variation stayed below the 5% limit.
+
+| Evidence case | Device | Quality median | Timing CV | Summary SHA-256 |
+|---|---|---:|---:|---|
+| `image-classification__max__inference` | CPU | 0.870000000 top-1 | 2.402% | `6550866586b395d3b506dacac5774c4901ab39dbed3b08763adfaa19d8bbdc80` |
+| `anomaly-detection__max__inference` | MPS | 0.902910053 ROC AUC | 4.308% | `b2de2e91a6490f18588622cadbbedf4b611f2dce3acd2cac4e80003566ec1a16` |
+| `visual-wake-words__max__inference` | MPS | 0.851000011 top-1 | 0.864% | `bd90c6ba9b60728cf05c32b940b544567e01c3144a8aeed56860b775113e7e3d` |
+| `text-classification__max__inference` | MPS | 0.910550475 accuracy | 2.227% | `e96d897ab4c29f2b126348bf2bf044fea89b360a29063ead96c20bd49ef9114f` |
+| `information-retrieval__max__inference` | MPS | 0.607168410 nDCG@10 | 1.899% | `65e9f3ffdda10d0590a8ad0d9f97ddd15a5a982265fdc7f2cf185f4351760950` |
+
+The raw attempts are retained outside the repository under the local review
+handoff path `f9e0c61-20260717/promotion-evidence/`. This partial campaign does
+not satisfy the strict twelve-case promotion import and does not expose a
+public baseline. Keyword spotting was intentionally omitted because its
+nonidentical adapter blocks promotion until the execution-path issue is
+resolved.
 
 ### Accuracy and Runtime Risks
 
@@ -122,9 +146,11 @@ sleep, and avoid concurrent heavy workloads.
 uv run python tools/run_reference_sweep.py \
   --workload WORKLOAD --profile max --mode MODE [--phase PHASE] \
   --runs 5 --device DEVICE --evidence-tier promotion-candidate \
-  --inter-execution-cooldown-seconds 30 \
   --output-dir /tmp/mlperf-edu-promotion
 ```
+
+Use the registry-defined inter-execution cooldown. Do not shorten it for a
+promotion-candidate campaign.
 
 For causal inference, add the verified package selecting the median-quality
 training run.
