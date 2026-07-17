@@ -306,6 +306,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--variant", default=None, help="Variant under a canonical workload"
     )
     run.add_argument(
+        "--plan",
+        type=str,
+        default=None,
+        help="Versioned pro experiment-plan YAML; replaces workload selection",
+    )
+    run.add_argument(
         "--output-dir",
         default="submissions",
         help="Directory for report artifacts.",
@@ -1321,6 +1327,8 @@ def asset_terms_summary(dossier: dict[str, Any]) -> str:
 
 def cmd_run(args: argparse.Namespace) -> int:
     workloads = load_workloads(args)
+    if getattr(args, "plan", None):
+        return cmd_run_plan(args, workloads)
     selected = select_cli_workloads(workloads, args)
     if not selected:
         console.print("[red]No workloads selected.[/red]")
@@ -1387,6 +1395,157 @@ def cmd_run(args: argparse.Namespace) -> int:
     return print_run_summary(args.profile, workload_reports, report_path, exports)
 
 
+def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> int:
+    """Execute a versioned pro experiment plan and emit one suite report."""
+    conflicting = [
+        flag
+        for flag, value in (
+            ("--suite", getattr(args, "suite", None)),
+            ("--workload", getattr(args, "workload", None)),
+            ("--collection", getattr(args, "collection", None)),
+            ("--variant", getattr(args, "variant", None)),
+            ("--mode", getattr(args, "mode", None)),
+            ("--phase", getattr(args, "phase", None)),
+        )
+        if value is not None
+    ]
+    if conflicting:
+        raise ValueError(
+            "--plan replaces workload selection; remove " + ", ".join(conflicting)
+        )
+    if getattr(args, "profile_explicit", False) and args.profile != "pro":
+        raise ValueError("--plan requires --profile pro")
+
+    experiment_api = import_module("mlperf.experiment")
+    plan_path = Path(args.plan).expanduser().resolve()
+    plan = experiment_api.load_experiment_plan(plan_path)
+    resolved_runs: list[tuple[dict[str, Any], Workload, str | None, str | None]] = []
+    for run in plan["runs"]:
+        workload_id = resolve_cli_workload_id(
+            workloads, run["workload"], run.get("variant")
+        )
+        if not workload_id:
+            raise ValueError(f"experiment run {run['name']!r} has no workload")
+        workload = workloads[workload_id]
+        mode, phase = resolve_execution_selection(
+            workload, mode=run.get("mode"), phase=run.get("phase")
+        )
+        resolved_runs.append((run, workload, mode, phase))
+
+    console.print(
+        f"Selected {len(resolved_runs)} run(s) from pro experiment plan {plan['id']}."
+    )
+    for index, (run, workload, mode, phase) in enumerate(resolved_runs, start=1):
+        device = args.device if args.device is not None else run["device"]
+        selection = str(mode or "default")
+        if phase:
+            selection = f"{selection}/{phase}"
+        console.print(
+            f"  {index}. {run['name']} | {workload.id} | {selection} | "
+            f"device={device} | repetitions={run['repetitions']}"
+        )
+    if getattr(args, "dry_run", False):
+        console.print("[green]dry-run complete[/green]")
+        return 0
+
+    configured_output = str(plan["output"]["directory"])
+    output_override = getattr(
+        args, "output_dir_explicit", args.output_dir != "submissions"
+    )
+    output_value = args.output_dir if output_override else configured_output
+    output_dir = Path(output_value).expanduser().resolve()
+    open_override = getattr(args, "open_report_explicit", None)
+    open_report = (
+        bool(open_override)
+        if open_override is not None
+        else bool(args.open_report and plan["output"]["open_report"])
+    )
+    plan_power = bool(args.power or plan["power"])
+    power_meter = PowerMeter()
+    if plan_power:
+        power_meter.start()
+
+    workload_reports: list[dict[str, Any]] = []
+    for index, (run, workload, mode, phase) in enumerate(resolved_runs, start=1):
+        run_dir = output_dir / "runs" / f"{index:02d}-{run['name']}"
+        environment = dict(run["environment"])
+        environment["MLPERF_EDU_PRO_REPETITIONS"] = str(run["repetitions"])
+        device = args.device if args.device is not None else run["device"]
+        environment["MLPERF_EDU_DEVICE"] = "" if device == "auto" else device
+        previous = {key: os.environ.get(key) for key in environment}
+        try:
+            for key, value in environment.items():
+                if key == "MLPERF_EDU_DEVICE" and not value:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+            report = run_workload(workload, "pro", run_dir, mode=mode, phase=phase)
+            annotate_execution_device(report)
+            report["experiment_run"] = {
+                "plan_id": plan["id"],
+                "plan_source_sha256": plan["source_sha256"],
+                "index": index,
+                "name": run["name"],
+                "device": device,
+                "repetitions": run["repetitions"],
+                "environment": dict(run["environment"]),
+            }
+            enrich_report_for_display(report, workloads)
+            export_workload_reports([report], workloads)
+        except Exception as exc:
+            if not plan["keep_going"]:
+                raise
+            report = {
+                "schema": "mlperf-edu-report/0.1",
+                "id": workload.id,
+                "workload": workload.id,
+                "suite": workload.suite,
+                "profile": "pro",
+                "mode": mode,
+                "phase": phase,
+                "status": "execution_failed",
+                "note": str(exc),
+                "experiment_run": {
+                    "plan_id": plan["id"],
+                    "plan_source_sha256": plan["source_sha256"],
+                    "index": index,
+                    "name": run["name"],
+                    "device": device,
+                    "repetitions": run["repetitions"],
+                    "environment": dict(run["environment"]),
+                },
+            }
+            console.print(f"[red]{run['name']} failed:[/red] {exc}")
+        finally:
+            for key, value in previous.items():
+                if value is None:
+                    os.environ.pop(key, None)
+                else:
+                    os.environ[key] = value
+        workload_reports.append(report)
+
+    power_report = power_meter.stop_report() if plan_power else None
+    plan_record = copy.deepcopy(plan)
+    plan_record["source"] = str(plan_path)
+    plan_record["cli_overrides"] = {
+        "device": args.device,
+        "output_directory": str(output_dir),
+        "power": plan_power,
+        "open_report": open_report,
+    }
+    _, report_path, exports = write_aggregate_report(
+        profile="pro",
+        suite=None,
+        workload=None,
+        workload_reports=workload_reports,
+        output_dir=output_dir,
+        open_report=open_report,
+        power=power_report,
+        experiment_plan=plan_record,
+    )
+    return print_run_summary("pro", workload_reports, report_path, exports)
+
+
 def print_run_selection(
     profile: str,
     selected: list[Workload],
@@ -1436,6 +1595,7 @@ def write_aggregate_report(
     output_dir: Path,
     open_report: bool,
     power: dict[str, Any] | None = None,
+    experiment_plan: dict[str, Any] | None = None,
 ) -> tuple[dict[str, Any], Path, dict[str, Path]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -1451,7 +1611,9 @@ def write_aggregate_report(
         "variant": variant,
         "selection": {
             "kind": (
-                "workload"
+                "plan"
+                if experiment_plan
+                else "workload"
                 if workload
                 else "suite"
                 if suite
@@ -1459,7 +1621,9 @@ def write_aggregate_report(
                 if collection
                 else "default"
             ),
-            "name": f"{workload}:{variant}"
+            "name": str(experiment_plan.get("id"))
+            if experiment_plan
+            else f"{workload}:{variant}"
             if workload and variant
             else workload or suite or collection or "default",
         },
@@ -1469,6 +1633,8 @@ def write_aggregate_report(
     }
     if power:
         report["power"] = power
+    if experiment_plan:
+        report["experiment_plan"] = experiment_plan
     attach_run_fingerprints(report, hardware=hardware)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     exports = write_report_exports(report, report_path, open_report=open_report)
@@ -2166,6 +2332,15 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
                 "mode": item.get("mode"),
                 "phase": item.get("phase"),
                 "config": strip_path_fields(copy.deepcopy(item.get("config") or {})),
+                **(
+                    {
+                        "experiment_run": strip_path_fields(
+                            copy.deepcopy(item["experiment_run"])
+                        )
+                    }
+                    if item.get("experiment_run")
+                    else {}
+                ),
             }
             for item in workloads
             if isinstance(item, dict)
@@ -2190,6 +2365,15 @@ def execution_fingerprint_summary(report: dict[str, Any]) -> dict[str, Any]:
                 "mode": report.get("mode"),
                 "phase": report.get("phase"),
                 "config": strip_path_fields(copy.deepcopy(report.get("config") or {})),
+                **(
+                    {
+                        "experiment_run": strip_path_fields(
+                            copy.deepcopy(report["experiment_run"])
+                        )
+                    }
+                    if report.get("experiment_run")
+                    else {}
+                ),
             }
         ]
     summary = {
@@ -2417,11 +2601,17 @@ def print_run_summary(
             and (item.get("quality") or {}).get("target_met") is not True
         )
     )
+    execution_failed = sum(
+        1
+        for item in workload_reports
+        if str(item.get("status", "")).endswith("_failed")
+        and item.get("status") != "quality_failed"
+    )
     console.print(
         f"[green]{profile} run complete[/green]: "
         f"{quality_passed} quality-passed, {functional_passed} functional-passed, "
         f"{definition_only} definition-only, {unsupported} unsupported, "
-        f"{quality_failed} quality-failed"
+        f"{quality_failed} quality-failed, {execution_failed} execution-failed"
     )
     console.print(f"Dashboard: {exports['html']}")
     console.print(f"JSON: {report_path}")
@@ -2436,7 +2626,7 @@ def print_run_summary(
             console.print(f"Workload CSV: {artifacts['csv']}")
         if artifacts.get("provenance"):
             console.print(f"Provenance: {artifacts['provenance']}")
-    if quality_failed:
+    if quality_failed or execution_failed:
         return 1
     if unsupported:
         return 2
@@ -3351,6 +3541,13 @@ def write_csv_report(report: dict[str, Any], output: Path) -> None:
         "canonical_workload",
         "variant",
         "run_selector",
+        "experiment_id",
+        "experiment_run_name",
+        "experiment_run_index",
+        "plan_source_sha256",
+        "planned_device",
+        "planned_repetitions",
+        "planned_environment",
         "suite",
         "profile",
         "status",
@@ -3932,6 +4129,91 @@ def baseline_comparison_section_html(report: dict[str, Any]) -> str:
 """
 
 
+def experiment_plan_section_html(report: dict[str, Any]) -> str:
+    plan = report.get("experiment_plan") or {}
+    if not isinstance(plan, dict) or not plan:
+        return ""
+    study = plan.get("study") or {}
+    if not isinstance(study, dict):
+        study = {}
+    study_fields = (
+        ("Research question", study.get("question")),
+        ("Hypothesis", study.get("hypothesis")),
+        ("Independent variables", study.get("independent_variables")),
+        ("Controls", study.get("controls")),
+        ("Analysis metrics", study.get("analysis_metrics")),
+    )
+    study_rows = "".join(
+        f"<div class='definition-row'><dt>{escape(label)}</dt>"
+        f"<dd>{escape(format_hardware_value(value))}</dd></div>"
+        for label, value in study_fields
+        if value not in (None, "", [], {})
+    )
+    provenance_rows = "".join(
+        f"<div class='definition-row'><dt>{escape(label)}</dt>"
+        f"<dd><code>{escape(str(value))}</code></dd></div>"
+        for label, value in (
+            ("Plan ID", plan.get("id")),
+            ("Schema", plan.get("schema")),
+            ("Source SHA-256", plan.get("source_sha256")),
+            ("Source", plan.get("source")),
+        )
+        if value not in (None, "")
+    )
+    result_by_index = {
+        (item.get("experiment_run") or {}).get("index"): item
+        for item in report_items(report)
+        if isinstance(item.get("experiment_run"), dict)
+    }
+    condition_rows: list[str] = []
+    for index, run in enumerate(plan.get("runs") or [], start=1):
+        if not isinstance(run, dict):
+            continue
+        result = result_by_index.get(index) or {}
+        mode = str(run.get("mode") or result.get("mode") or "default")
+        if run.get("phase") or result.get("phase"):
+            mode += f" / {run.get('phase') or result.get('phase')}"
+        environment = run.get("environment") or {}
+        setting = ", ".join(
+            f"{key}={value}" for key, value in sorted(environment.items())
+        ) or "No condition-specific settings"
+        status = str(result.get("status") or "pending")
+        quality = result.get("quality") or {}
+        if quality_required_value(quality, False) is not True:
+            quality_text = "Not evaluated"
+        elif quality.get("target_met") is True:
+            quality_text = "Target met"
+        elif quality.get("target_met") is False:
+            quality_text = "Target not met"
+        else:
+            quality_text = "Pending"
+        condition_rows.append(
+            "<tr>"
+            f"<td>{index}</td><td>{escape(str(run.get('name') or ''))}</td>"
+            f"<td>{escape(str(run.get('workload') or ''))}</td>"
+            f"<td>{escape(mode)}</td><td>{escape(str(run.get('device') or 'auto'))}</td>"
+            f"<td>{escape(str(run.get('repetitions') or 1))}</td>"
+            f"<td><code>{escape(setting)}</code></td>"
+            f"<td><span class='badge {status_class(status)}'>{escape(status)}</span>"
+            f"<div>{escape(quality_text)}</div></td>"
+            "</tr>"
+        )
+    return f"""
+  <section class="section" aria-labelledby="experiment-plan-heading">
+    <div class="section-heading"><div><div class="eyebrow">Research contract</div><h2 id="experiment-plan-heading">Experiment Design</h2></div><div class="section-summary">{escape(str(plan.get("title") or plan.get("id") or "Versioned plan"))}</div></div>
+    <div class="detail-grid">
+      <article class="detail-card"><h3>Study</h3><dl>{study_rows or "<div class='note'>No study rationale declared.</div>"}</dl></article>
+      <article class="detail-card"><h3>Plan Provenance</h3><dl>{provenance_rows}</dl></article>
+    </div>
+    <div class="table-scroll"><table>
+      <thead><tr><th>#</th><th>Condition</th><th>Workload</th><th>Mode</th><th>Device</th><th>Outer Runs</th><th>Declared Settings</th><th>Outcome</th></tr></thead>
+      <tbody>{"".join(condition_rows)}</tbody>
+    </table></div>
+    <div class="note">Quality cards above are direction-aware small multiples. They share a 100% target-attainment boundary, not a raw metric axis. One outer run supports initial quality and workflow review; it does not establish a stable performance distribution.</div>
+  </section>
+"""
+
+
 def write_html_report(
     report: dict[str, Any], output: Path, *, source_path: Path
 ) -> None:
@@ -3942,7 +4224,9 @@ def write_html_report(
         status_counts[status] = status_counts.get(status, 0) + 1
 
     title = "MLPerf EDU Report"
-    if len(rows) == 1:
+    if (report.get("selection") or {}).get("kind") == "plan":
+        title = f"MLPerf EDU Research Report: {(report.get('selection') or {}).get('name')}"
+    elif len(rows) == 1:
         title = f"MLPerf EDU Report: {rows[0].get('workload', 'unknown')}"
     elif report.get("suite"):
         title = (
@@ -3967,6 +4251,7 @@ def write_html_report(
     assets_html = assets_section_html(report)
     quality_html = quality_dashboard_html(report)
     baseline_html = baseline_comparison_section_html(report)
+    experiment_html = experiment_plan_section_html(report)
     configuration_html = run_configuration_section_html(report)
     lineage_html = lineage_section_html(report)
     provenance_html = provenance_section_html(report)
@@ -4009,7 +4294,7 @@ def write_html_report(
     h1 {{ margin: 0 0 6px; font-size: clamp(28px, 4vw, 38px); line-height: 1.15; letter-spacing: -0.03em; }}
     h2 {{ margin: 0 0 12px; font-size: 18px; letter-spacing: 0; }}
     h3 {{ margin: 0; font-size: 14px; }}
-    .meta {{ color: var(--muted); font-size: 13px; text-align: right; }}
+    .meta {{ min-width: 0; color: var(--muted); font-size: 13px; text-align: right; overflow-wrap: anywhere; }}
     .grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 12px; margin: 18px 0 24px; }}
     .section {{ margin: 0 0 32px; }}
     .section-heading {{ display: flex; justify-content: space-between; align-items: end; gap: 20px; margin-bottom: 12px; }}
@@ -4072,7 +4357,7 @@ def write_html_report(
     .fail {{ color: var(--fail); background: #fee4e2; }}
     .warn {{ color: var(--warn); background: #fef0c7; }}
     .note {{ color: var(--muted); margin-top: 18px; font-size: 12px; }}
-    .table-scroll {{ overflow-x: auto; }}
+    .table-scroll {{ max-width: 100%; overflow-x: auto; }}
     .table-scroll table {{ min-width: 980px; }}
     @media (max-width: 820px) {{
       header, .section-heading {{ align-items: flex-start; flex-direction: column; }}
@@ -4095,6 +4380,7 @@ def write_html_report(
     </div>
   </header>
   {quality_html}
+  {experiment_html}
   {baseline_html}
   <section class="grid" aria-label="Run status summary">{status_cards}</section>
   {configuration_html}
@@ -4236,9 +4522,9 @@ def hardware_section_html(report: dict[str, Any]) -> str:
     return f"""
   <section class="section">
     <h2>Hardware and Backend</h2>
-    <table>
+    <div class="table-scroll"><table>
       <tbody>{body}</tbody>
-    </table>
+    </table></div>
   </section>
 """
 
@@ -4288,12 +4574,12 @@ def assets_section_html(report: dict[str, Any]) -> str:
     return f"""
   <section class="section">
     <h2>Assets and Provenance</h2>
-    <table>
+    <div class="table-scroll"><table>
       <thead>
         <tr><th>Workload</th><th>Dataset</th><th>Dataset Terms</th><th>Release Status</th><th>Public Use</th><th>Next Step</th><th>Model Source</th><th>Model License</th><th>Model Rationale</th><th>Checkpoint</th><th>Quality Dependency</th><th>Checkpoint Source</th><th>Source Quality</th><th>Checkpoint Policy</th></tr>
       </thead>
       <tbody>{body}</tbody>
-    </table>
+    </table></div>
   </section>
 """
 
@@ -4372,11 +4658,25 @@ def report_row(
         f"{canonical} --variant {variant}" if canonical and variant else workload_id
     )
     quality_required = quality_required_value(quality, "")
+    experiment_run = (
+        item.get("experiment_run")
+        if isinstance(item.get("experiment_run"), dict)
+        else {}
+    )
     return {
         "workload": workload_id,
         "canonical_workload": canonical,
         "variant": variant,
         "run_selector": run_selector,
+        "experiment_id": experiment_run.get("plan_id", ""),
+        "experiment_run_name": experiment_run.get("name", ""),
+        "experiment_run_index": experiment_run.get("index", ""),
+        "plan_source_sha256": experiment_run.get("plan_source_sha256", ""),
+        "planned_device": experiment_run.get("device", ""),
+        "planned_repetitions": experiment_run.get("repetitions", ""),
+        "planned_environment": json.dumps(
+            experiment_run.get("environment") or {}, sort_keys=True
+        ),
         "suite": item.get("suite", default_suite or ""),
         "profile": item.get("profile", default_profile or ""),
         "status": item.get("status", ""),
@@ -7930,6 +8230,21 @@ def main(argv: list[str] | None = None) -> int:
     parser = build_parser()
     normalized_argv = list(sys.argv[1:] if argv is None else argv)
     args = parser.parse_args(normalized_argv)
+    args.profile_explicit = any(
+        token == "--profile" or token.startswith("--profile=")
+        for token in normalized_argv
+    )
+    args.output_dir_explicit = any(
+        token == "--output-dir" or token.startswith("--output-dir=")
+        for token in normalized_argv
+    )
+    args.open_report_explicit = (
+        False
+        if "--no-open-report" in normalized_argv
+        else True
+        if "--open-report" in normalized_argv
+        else None
+    )
     if hasattr(args, "profile"):
         args.profile = normalize_profile(args.profile)
     requested_device = getattr(args, "device", None)
