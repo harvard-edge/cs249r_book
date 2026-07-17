@@ -52,8 +52,7 @@ def test_explicit_asset_root_takes_precedence(monkeypatch, tmp_path):
 
 def test_humaneval_plus_fetch_validates_complete_release(monkeypatch, tmp_path):
     records = [
-        {"task_id": f"HumanEval/{index}", "prompt": "pass"}
-        for index in range(164)
+        {"task_id": f"HumanEval/{index}", "prompt": "pass"} for index in range(164)
     ]
     payload = "".join(json.dumps(record) + "\n" for record in records).encode()
     source = tmp_path / "source.jsonl.gz"
@@ -95,7 +94,9 @@ def test_evalplus_fetch_extracts_pinned_evaluator_source(monkeypatch, tmp_path):
             arcname=f"evalplus-{assets.EVALPLUS_COMMIT}",
         )
     monkeypatch.setattr(
-        assets, "EVALPLUS_ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
+        assets,
+        "EVALPLUS_ARCHIVE_SHA256",
+        hashlib.sha256(archive.read_bytes()).hexdigest(),
     )
     monkeypatch.setattr(
         assets,
@@ -125,7 +126,9 @@ def test_bfcl_fetch_validates_all_non_live_ast_examples(monkeypatch, tmp_path):
     for relative, count in counts.items():
         for path in (data_root / relative, data_root / "possible_answer" / relative):
             path.parent.mkdir(parents=True, exist_ok=True)
-            path.write_text("".join(json.dumps({"id": index}) + "\n" for index in range(count)))
+            path.write_text(
+                "".join(json.dumps({"id": index}) + "\n" for index in range(count))
+            )
             expected_hashes[str(path.relative_to(data_root))] = hashlib.sha256(
                 path.read_bytes()
             ).hexdigest()
@@ -135,6 +138,7 @@ def test_bfcl_fetch_validates_all_non_live_ast_examples(monkeypatch, tmp_path):
     with tarfile.open(archive, "w:gz") as bundle:
         bundle.add(source_root, arcname=prefix)
     monkeypatch.setattr(assets, "BFCL_DATA_FILES", expected_hashes)
+    monkeypatch.setattr(assets, "BFCL_EVALUATOR_FILES", {})
     monkeypatch.setattr(
         assets, "BFCL_ARCHIVE_SHA256", hashlib.sha256(archive.read_bytes()).hexdigest()
     )
@@ -170,7 +174,9 @@ def test_edm_fetch_validates_checkpoint_and_fid_reference(monkeypatch, tmp_path)
         "EDM_CIFAR10_FID_REFERENCE_SHA256",
         hashlib.sha256(reference.read_bytes()).hexdigest(),
     )
-    monkeypatch.setattr(assets, "EDM_CIFAR10_CHECKPOINT_BYTES", checkpoint.stat().st_size)
+    monkeypatch.setattr(
+        assets, "EDM_CIFAR10_CHECKPOINT_BYTES", checkpoint.stat().st_size
+    )
     monkeypatch.setattr(
         assets,
         "_download",

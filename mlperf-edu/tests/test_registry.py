@@ -138,27 +138,25 @@ def test_all_measurement_contracts_pin_outer_execution_stabilization():
 def test_all_quality_contracts_require_one_authoritative_acceptance_run():
     workloads = load_registry()
 
-    assert all(
-        workload.quality_acceptance_runs == 1 for workload in workloads.values()
-    )
+    assert all(workload.quality_acceptance_runs == 1 for workload in workloads.values())
 
 
 def test_functional_stage_workloads_separate_probe_from_quality_contract():
     workloads = load_registry()
-    workload_ids = (
-        "code-generation",
-        "function-calling",
-        "recommendation",
-        "image-generation",
-        "reinforcement-learning",
-    )
+    expected_status = {
+        "code-generation": "quality-audited-target-not-met",
+        "function-calling": "runnable-quality-conformance",
+        "recommendation": "pending-quality-conformance",
+        "image-generation": "pending-quality-conformance",
+        "reinforcement-learning": "pending-quality-conformance",
+    }
 
-    for workload_id in workload_ids:
+    for workload_id, status in expected_status.items():
         contract = workloads[workload_id].raw["canonical_max_contract"]
         assert contract["data_mode"] != "functional-setup-probe"
         assert contract["config"]
         assert contract["functional_probe"]
-        assert contract["execution_status"] == "pending-quality-conformance"
+        assert contract["execution_status"] == status
 
 
 def test_new_quality_contracts_pin_complete_evaluation_boundaries():
@@ -195,9 +193,7 @@ def test_new_quality_contracts_pin_complete_evaluation_boundaries():
     assert images["config"]["seeds"] == "0-49999"
     assert images["config"]["network_evaluations_per_image"] == 35
 
-    reinforcement = workloads["reinforcement-learning"].raw[
-        "canonical_max_contract"
-    ]
+    reinforcement = workloads["reinforcement-learning"].raw["canonical_max_contract"]
     assert reinforcement["config"]["self_play_games_per_generation"] == 2_000
     assert reinforcement["config"]["playoff_games"] == 100
     assert reinforcement["quality_gates"]["model_promotion_playoff"]["target"] == 0.55
@@ -487,7 +483,7 @@ def test_canonical_workloads_declare_exact_runners():
         "function-calling": (
             "language",
             "mlperf.runners.functional_setup:run_function_calling_min",
-            "mlperf.runners.functional_setup:run_function_calling_max",
+            "mlperf.runners.function_calling:run_function_calling_max",
         ),
         "recommendation": (
             "recommendation",
@@ -528,15 +524,18 @@ def test_functional_spiral_workloads_fail_closed_for_promotion():
         assert workload.public_status == "experimental"
         assert workload.raw["promotion_scope"] is False
         spiral = workload.raw["spiral"]
-        assert spiral["stage"] == "functional"
+        expected_stage = (
+            "quality-conformance"
+            if workload_id in {"code-generation", "function-calling"}
+            else "functional"
+        )
+        assert spiral["stage"] == expected_stage
         assert spiral["functional_ready"] is True
         assert spiral["quality_conformant"] is False
         assert spiral["repeatability_verified"] is False
         assert spiral["promotion_ready"] is False
         assert spiral["next_gate"]
-        assert workload.raw["canonical_max_contract"]["execution_status"] == (
-            "pending-quality-conformance"
-        )
+        assert workload.raw["canonical_max_contract"]["execution_status"]
 
 
 def test_retrieval_declares_one_complete_evaluation_protocol():

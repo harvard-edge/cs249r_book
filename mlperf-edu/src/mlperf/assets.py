@@ -171,10 +171,19 @@ EVALPLUS_ARCHIVE_SHA256 = (
     "d3a5ce49566224a054debc2b51f9290e070734841044b0bb6764f92c376e8149"
 )
 BFCL_COMMIT = "6ea57973c7a6097fd7c5915698c54c17c5b1b6c8"
-BFCL_ARCHIVE_URL = f"https://github.com/ShishirPatil/gorilla/archive/{BFCL_COMMIT}.tar.gz"
-BFCL_ARCHIVE_SHA256 = (
-    "c6b5081337cabd317b56c6eead2ec735f7a3cb86ac4fd664e3f9c8c02d1f1f1e"
+BFCL_ARCHIVE_URL = (
+    f"https://github.com/ShishirPatil/gorilla/archive/{BFCL_COMMIT}.tar.gz"
 )
+BFCL_ARCHIVE_SHA256 = "c6b5081337cabd317b56c6eead2ec735f7a3cb86ac4fd664e3f9c8c02d1f1f1e"
+BFCL_EVALUATOR_COMMIT = "f7cf7359b7ac615a0b294831c5ba2bc95ee4a000"
+BFCL_EVALUATOR_FILES = {
+    "bfcl_eval/constants/enums.py": "2182becfa2a1d071ee1db30db593b4758c6bf866aa12d2d4b8daf09175ea518a",
+    "bfcl_eval/constants/type_mappings.py": "1702fb67afbe2c492608e58e2b7d02e46381f50166b47f3c952f76e34c7cd3bd",
+    "bfcl_eval/eval_checker/ast_eval/ast_checker.py": "2aae7a68461a8f76c0be3894c8901b66b56967a1989d3ab066051e3fb97f1538",
+    "bfcl_eval/eval_checker/ast_eval/type_convertor/java_type_converter.py": "2fd4f4b0443b3dd974a1723bb4e45c086d7b352631062da7807ad1ad40706604",
+    "bfcl_eval/eval_checker/ast_eval/type_convertor/js_type_converter.py": "a114e9ff75c025cb52787ac33d6c2fbaa390905c6125a2b3c6afebab232bb5e4",
+    "bfcl_eval/model_handler/local_inference/qwen_fc.py": "e6d0ac52783a595b6627323eef486e18790a7b1084658063a79dc45f0ddbf474",
+}
 BFCL_DATA_FILES = {
     "BFCL_v4_multiple.json": "aef168155ebd74b7ac2401198b201343bc7d16d7a3d7e0d4e6d8ee82c6969b2a",
     "BFCL_v4_parallel.json": "19f51a82eff42e5d62541aa500115a056eb78f437c2ba1f10415fd7c8e5dda84",
@@ -191,8 +200,7 @@ BFCL_DATA_FILES = {
 }
 EDM_COMMIT = "008a4e5316c8e3bfe61a62f874bddba254295afb"
 EDM_CIFAR10_CHECKPOINT_URL = (
-    "https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/"
-    "edm-cifar10-32x32-cond-vp.pkl"
+    "https://nvlabs-fi-cdn.nvidia.com/edm/pretrained/edm-cifar10-32x32-cond-vp.pkl"
 )
 EDM_CIFAR10_CHECKPOINT_SHA256 = (
     "b27385e4f2f8d4d1e2e2c03864c5a9574a0c58ba81eb11625ae6d15c401f4796"
@@ -1717,8 +1725,7 @@ def ensure_humaneval_plus(
     base.mkdir(parents=True, exist_ok=True)
 
     archive_valid = (
-        archive.is_file()
-        and sha256_file(archive) == HUMANEVAL_PLUS_ARCHIVE_SHA256
+        archive.is_file() and sha256_file(archive) == HUMANEVAL_PLUS_ARCHIVE_SHA256
     )
     dataset_valid = (
         dataset.is_file()
@@ -1832,11 +1839,19 @@ def ensure_bfcl_non_live_ast(
     base.mkdir(parents=True, exist_ok=True)
 
     selected = tuple(data_root / relative for relative in BFCL_DATA_FILES)
+    evaluator_files = tuple(source_root / relative for relative in BFCL_EVALUATOR_FILES)
     selected_valid = all(
-        path.is_file() and sha256_file(path) == BFCL_DATA_FILES[str(path.relative_to(data_root))]
+        path.is_file()
+        and sha256_file(path) == BFCL_DATA_FILES[str(path.relative_to(data_root))]
         for path in selected
     )
-    if not selected_valid:
+    evaluator_valid = all(
+        path.is_file()
+        and sha256_file(path)
+        == BFCL_EVALUATOR_FILES[str(path.relative_to(source_root))]
+        for path in evaluator_files
+    )
+    if not selected_valid or not evaluator_valid:
         if not download:
             raise FileNotFoundError(
                 f"BFCL V4 Non-Live AST is missing at {source_root}. Run `mlperf "
@@ -1849,9 +1864,7 @@ def ensure_bfcl_non_live_ast(
             archive.unlink(missing_ok=True)
             raise ValueError("BFCL source archive SHA-256 does not match the pin")
 
-        prefix = (
-            f"gorilla-{BFCL_COMMIT}/berkeley-function-call-leaderboard/"
-        )
+        prefix = f"gorilla-{BFCL_COMMIT}/berkeley-function-call-leaderboard/"
         staging = base / "berkeley-function-call-leaderboard.staging"
         shutil.rmtree(staging, ignore_errors=True)
         staging.mkdir(parents=True)
@@ -1880,14 +1893,24 @@ def ensure_bfcl_non_live_ast(
         if not path.is_file() or sha256_file(path) != BFCL_DATA_FILES[relative]:
             raise ValueError(f"BFCL data file does not match the pin: {relative}")
 
+    evaluator_files = tuple(source_root / relative for relative in BFCL_EVALUATOR_FILES)
+    for path in evaluator_files:
+        relative = str(path.relative_to(source_root))
+        if not path.is_file() or sha256_file(path) != BFCL_EVALUATOR_FILES[relative]:
+            raise ValueError(f"BFCL evaluator file does not match the pin: {relative}")
+
     question_files = tuple(
-        path for path in selected if "possible_answer" not in path.relative_to(data_root).parts
+        path
+        for path in selected
+        if "possible_answer" not in path.relative_to(data_root).parts
     )
     question_count = sum(
         1 for path in question_files for line in path.read_text().splitlines() if line
     )
     if question_count != 1150:
-        raise ValueError(f"BFCL Non-Live AST expected 1150 examples, found {question_count}")
+        raise ValueError(
+            f"BFCL Non-Live AST expected 1150 examples, found {question_count}"
+        )
 
     digest = hashlib.sha256()
     for path in selected:
@@ -1896,7 +1919,7 @@ def ensure_bfcl_non_live_ast(
     return DatasetAsset(
         name="bfcl-v4-non-live-ast",
         root=data_root,
-        files=selected,
+        files=(*selected, *evaluator_files),
         sha256=f"sha256:{digest.hexdigest()}",
         n_bytes=sum(path.stat().st_size for path in selected),
         source=BFCL_ARCHIVE_URL,
