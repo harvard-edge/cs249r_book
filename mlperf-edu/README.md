@@ -169,12 +169,21 @@ Every run writes these review artifacts:
 
 ```bash
 uv run mlperf verify submissions/image-review/image-classification_max.provd.json
-uv run mlperf package submissions/image-review/image-classification_max.provd.json
 uv run mlperf report submissions/image-review --format html --open
 ```
 
 Verification checks recorded bytes and provenance. It does not authenticate
 the producer or imply MLCommons acceptance.
+
+Portable packaging is demonstrated with the dataset-free functional result in
+Example 05. Many score-bearing `max` results bind fetch-only or release-review
+dataset bytes and are intentionally refused by `mlperf package`.
+
+```bash
+uv run mlperf package \
+  submissions/05-assignment/image-classification_min.provd.json \
+  --output submissions/05-assignment.zip
+```
 
 ## Validation
 

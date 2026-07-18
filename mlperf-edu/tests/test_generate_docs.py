@@ -143,6 +143,22 @@ def test_generated_workload_pages_disclose_indexed_reference_evidence(
     assert "CV 5.19%; **diagnostic fail**" in combined
 
 
+def test_generated_reference_results_use_current_registry_quality_contract(
+    generated_outputs,
+):
+    page = generated_outputs[
+        ROOT
+        / "site"
+        / "benchmarks"
+        / "timeseries"
+        / "time-series-forecasting.qmd"
+    ]
+
+    assert "target ≤ 0.2900; **fail**" in page
+    assert "recomputed with the current registry contract" in page
+    assert "target ≤ 0.2929; **pass**" not in page
+
+
 def test_quality_conformance_pages_disclose_result_boundary(generated_outputs):
     workload_pages = [
         content

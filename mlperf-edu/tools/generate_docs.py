@@ -50,6 +50,7 @@ from mlperf.registry import (  # noqa: E402
     baseline_is_current_review_evidence,
     baseline_is_protocol_superseded,
     load_registry,
+    quality_target_satisfied,
 )
 
 GITHUB_BLOB = "https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu"
@@ -672,19 +673,56 @@ def _result_number(value: Any) -> str:
     return f"{value:.4f}"
 
 
-def _quality_result(record: dict[str, Any]) -> str:
+def _quality_result(record: dict[str, Any], workload: Workload) -> str:
     quality = record.get("quality")
     if not isinstance(quality, dict):
         return "Performance-only case"
-    gate = quality.get("gate") or {}
-    direction = gate.get("direction")
+    source_gate = quality.get("gate") or {}
+    direction = workload.quality_direction
     comparison = "≥" if direction == "higher" else "≤" if direction == "lower" else "="
     mean = (quality.get("aggregate") or {}).get("mean")
-    target = gate.get("target")
-    status = "pass" if quality.get("all_runs_pass") else "fail"
+    target = workload.quality_value
+    tolerance = workload.quality_tolerance or 0.0
+    values = quality.get("values") or []
+    compatible_metric = quality.get("metric") == workload.quality_metric
+    status = "fail"
+    if (
+        compatible_metric
+        and isinstance(target, (int, float))
+        and direction in {"higher", "lower"}
+        and values
+    ):
+        status = (
+            "pass"
+            if all(
+                isinstance(value, (int, float))
+                and quality_target_satisfied(
+                    float(value),
+                    float(target),
+                    direction=direction,
+                    tolerance=float(tolerance),
+                )
+                for value in values
+            )
+            else "fail"
+        )
+    current_gate = {
+        "metric": workload.quality_metric,
+        "target": target,
+        "direction": direction,
+        "tolerance": tolerance,
+    }
+    source_gate_comparable = {
+        key: source_gate.get(key) for key in current_gate
+    }
+    disclosure = (
+        " *(recomputed with the current registry contract)*"
+        if source_gate_comparable != current_gate
+        else ""
+    )
     return (
-        f"`{quality.get('metric')}` {_result_number(mean)} mean; "
-        f"target {comparison} {_result_number(target)}; **{status}**"
+        f"`{workload.quality_metric}` {_result_number(mean)} mean; "
+        f"target {comparison} {_result_number(target)}; **{status}**{disclosure}"
     )
 
 
@@ -697,7 +735,9 @@ def _repeatability_result(record: dict[str, Any]) -> str:
     return f"CV {float(cv):.2%}; **{status}**"
 
 
-def section_reference_results(records: list[dict[str, Any]]) -> str:
+def section_reference_results(
+    workload: Workload, records: list[dict[str, Any]]
+) -> str:
     if not records:
         return ""
     evidence_labels = {
@@ -711,7 +751,9 @@ def section_reference_results(records: list[dict[str, Any]]) -> str:
         "These project-generated measurements demonstrate the current `max` paths on "
         "the disclosed reference system. Five-run records passed the project quality "
         "and repeatability checks. Provisional records establish execution and quality "
-        "only; they do not establish repeatability. None are MLCommons-verified results.",
+        "only; they do not establish repeatability. Quality decisions are recomputed "
+        "against the current registry contract so a preserved historical target cannot "
+        "make a stale pass claim. None are MLCommons-verified results.",
         "",
         "| **Case** | **Evidence** | **Runs** | **Reference measurement** | **Quality** | **Repeatability** | **System** |",
         "|:---|:---|---:|:---|:---|:---|:---|",
@@ -732,7 +774,7 @@ def section_reference_results(records: list[dict[str, Any]]) -> str:
         )
         lines.append(
             f"| {esc(case)} | {evidence} | {measurement.get('run_count', '—')} "
-            f"| {reference} | {_quality_result(record)} "
+            f"| {reference} | {_quality_result(record, workload)} "
             f"| {_repeatability_result(record)} | {esc(system)} |"
         )
     lines += [
@@ -828,7 +870,7 @@ def render_workload_body(
         section_how_to_run(w),
         section_quality_target(w),
         section_performance_contract(w),
-        section_reference_results(reference_results.get(w.id, [])),
+        section_reference_results(w, reference_results.get(w.id, [])),
         section_verified_baseline(w),
         section_calibration_observation(w),
         section_regime(w),
