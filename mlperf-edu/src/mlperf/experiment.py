@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import hashlib
 import json
 import re
@@ -11,7 +12,13 @@ import yaml
 from .fingerprint import PERFORMANCE_ENVIRONMENT_ALLOWLIST
 
 
-EXPERIMENT_PLAN_SCHEMA = "mlperf-edu-experiment-plan/0.1"
+EXPERIMENT_PLAN_SCHEMA = "mlperf-edu-experiment-plan/0.2"
+LEGACY_EXPERIMENT_PLAN_SCHEMA = "mlperf-edu-experiment-plan/0.1"
+SUPPORTED_EXPERIMENT_PLAN_SCHEMAS = {
+    EXPERIMENT_PLAN_SCHEMA,
+    LEGACY_EXPERIMENT_PLAN_SCHEMA,
+}
+INSTRUCTOR_BINDING_SCHEMA = "mlperf-edu-instructor-plan-binding/0.1"
 DEVICES = {"auto", "cpu", "cuda", "mps"}
 MODES = {"training", "inference"}
 PHASES = {"full", "prefill", "decode"}
@@ -86,10 +93,7 @@ def _string_list(value: Any, *, label: str) -> list[str]:
         return []
     if not isinstance(value, list):
         raise ValueError(f"{label} must be a list")
-    return [
-        _nonempty_string(item, label=f"{label} item")
-        for item in value
-    ]
+    return [_nonempty_string(item, label=f"{label} item") for item in value]
 
 
 def _environment(value: Any, *, label: str) -> dict[str, str]:
@@ -115,29 +119,182 @@ def _environment(value: Any, *, label: str) -> dict[str, str]:
     return normalized
 
 
+def _edit_policy(
+    value: Any,
+    *,
+    runs: list[dict[str, Any]],
+    independent_variables: list[str],
+) -> dict[str, dict[str, list[str]]]:
+    if value is None:
+        return {"allowed_candidate_environment": {}}
+    if not isinstance(value, dict):
+        raise ValueError("experiment plan edit_policy must be a mapping")
+    _known_keys(
+        value,
+        allowed={"allowed_candidate_environment"},
+        label="experiment plan edit_policy",
+    )
+    raw_allowed = value.get("allowed_candidate_environment") or {}
+    if not isinstance(raw_allowed, dict):
+        raise ValueError("edit_policy.allowed_candidate_environment must be a mapping")
+    runs_by_name = {str(run["name"]): run for run in runs}
+    normalized: dict[str, list[str]] = {}
+    for run_name, raw_keys in raw_allowed.items():
+        if not isinstance(run_name, str) or run_name not in runs_by_name:
+            raise ValueError(
+                "edit_policy.allowed_candidate_environment names an unknown run: "
+                f"{run_name!r}"
+            )
+        run = runs_by_name[run_name]
+        if run["role"] != "candidate":
+            raise ValueError(
+                "edit_policy may allow environment edits only for candidate runs: "
+                f"{run_name!r}"
+            )
+        keys = _string_list(
+            raw_keys,
+            label=f"edit_policy.allowed_candidate_environment.{run_name}",
+        )
+        if not keys or len(keys) != len(set(keys)):
+            raise ValueError(
+                f"edit policy for candidate run {run_name!r} must contain unique settings"
+            )
+        for key in keys:
+            if key not in PLAN_ENVIRONMENT_KEYS:
+                raise ValueError(
+                    f"edit policy setting {key!r} is not a supported plan setting"
+                )
+            if key not in run["environment"]:
+                raise ValueError(
+                    f"edit policy setting {key!r} is missing from candidate run "
+                    f"{run_name!r}"
+                )
+            if key not in independent_variables:
+                raise ValueError(
+                    f"edit policy setting {key!r} is not a declared independent variable"
+                )
+        normalized[run_name] = sorted(keys)
+    return {"allowed_candidate_environment": normalized}
+
+
+def _difference_paths(left: Any, right: Any, *, prefix: str = "plan") -> list[str]:
+    if isinstance(left, dict) and isinstance(right, dict):
+        differences: list[str] = []
+        for key in sorted(set(left) | set(right)):
+            path = f"{prefix}.{key}"
+            if key not in left or key not in right:
+                differences.append(path)
+            else:
+                differences.extend(
+                    _difference_paths(left[key], right[key], prefix=path)
+                )
+        return differences
+    if isinstance(left, list) and isinstance(right, list):
+        differences = []
+        if len(left) != len(right):
+            differences.append(f"{prefix}.length")
+        for index, (left_item, right_item) in enumerate(zip(left, right)):
+            differences.extend(
+                _difference_paths(left_item, right_item, prefix=f"{prefix}[{index}]")
+            )
+        return differences
+    return [] if left == right else [prefix]
+
+
+def bind_instructor_reference(
+    plan: dict[str, Any],
+    reference: dict[str, Any],
+    *,
+    reference_source: str,
+) -> dict[str, Any]:
+    """Validate a student plan against instructor-owned allowed edits."""
+    if plan["schema"] != reference["schema"]:
+        raise ValueError("student and instructor plans must use the same schema")
+    if reference["schema"] != EXPERIMENT_PLAN_SCHEMA:
+        raise ValueError(
+            f"instructor plan binding requires schema {EXPERIMENT_PLAN_SCHEMA!r}"
+        )
+
+    expected = copy.deepcopy(reference)
+    submitted = copy.deepcopy(plan)
+    expected.pop("source_sha256", None)
+    submitted.pop("source_sha256", None)
+    expected_runs = {run["name"]: run for run in expected["runs"]}
+    submitted_runs = {run["name"]: run for run in submitted["runs"]}
+    allowed = (reference.get("edit_policy") or {}).get(
+        "allowed_candidate_environment", {}
+    )
+    changes: list[dict[str, Any]] = []
+    for run_name, keys in allowed.items():
+        if run_name not in submitted_runs:
+            continue
+        reference_run = expected_runs[run_name]
+        submitted_run = submitted_runs[run_name]
+        for key in keys:
+            reference_environment = reference_run["environment"]
+            submitted_environment = submitted_run["environment"]
+            if key not in submitted_environment:
+                continue
+            reference_value = reference_environment[key]
+            submitted_value = submitted_environment[key]
+            if submitted_value != reference_value:
+                changes.append(
+                    {
+                        "run": run_name,
+                        "setting": key,
+                        "reference_value": reference_value,
+                        "submitted_value": submitted_value,
+                    }
+                )
+            submitted_environment[key] = reference_value
+
+    differences = _difference_paths(submitted, expected)
+    if differences:
+        raise ValueError(
+            "student plan differs from the instructor reference outside allowed "
+            "candidate settings: " + ", ".join(differences[:8])
+        )
+    return {
+        "schema": INSTRUCTOR_BINDING_SCHEMA,
+        "status": "passed",
+        "reference_source": reference_source,
+        "reference_source_sha256": reference["source_sha256"],
+        "submitted_source_sha256": plan["source_sha256"],
+        "allowed_candidate_environment": copy.deepcopy(allowed),
+        "accepted_changes": changes,
+    }
+
+
 def load_experiment_plan(path: Path) -> dict[str, Any]:
     """Load a versioned, fail-closed pro experiment plan."""
     source_bytes = path.read_bytes()
     payload = yaml.safe_load(source_bytes)
     if not isinstance(payload, dict):
         raise ValueError("experiment plan must be a mapping")
-    if payload.get("schema") != EXPERIMENT_PLAN_SCHEMA:
-        raise ValueError(f"experiment plan schema must be {EXPERIMENT_PLAN_SCHEMA!r}")
+    schema = payload.get("schema")
+    if schema not in SUPPORTED_EXPERIMENT_PLAN_SCHEMAS:
+        raise ValueError(
+            "experiment plan schema must be one of "
+            f"{sorted(SUPPORTED_EXPERIMENT_PLAN_SCHEMAS)}"
+        )
+    allowed_top_level = {
+        "schema",
+        "id",
+        "title",
+        "description",
+        "study",
+        "profile",
+        "power",
+        "keep_going",
+        "defaults",
+        "output",
+        "runs",
+    }
+    if schema == EXPERIMENT_PLAN_SCHEMA:
+        allowed_top_level.add("edit_policy")
     _known_keys(
         payload,
-        allowed={
-            "schema",
-            "id",
-            "title",
-            "description",
-            "study",
-            "profile",
-            "power",
-            "keep_going",
-            "defaults",
-            "output",
-            "runs",
-        },
+        allowed=allowed_top_level,
         label="experiment plan",
     )
     plan_id = _identifier(payload.get("id"), label="experiment plan id")
@@ -187,9 +344,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
         output.get("directory", f"submissions/research/{plan_id}"),
         label="experiment output directory",
     )
-    open_report = _boolean(
-        output.get("open_report", False), label="output.open_report"
-    )
+    open_report = _boolean(output.get("open_report", False), label="output.open_report")
     power = _boolean(payload.get("power", False), label="experiment power")
     keep_going = _boolean(
         payload.get("keep_going", True), label="experiment keep_going"
@@ -228,9 +383,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
             )
         variant = run.get("variant")
         if variant is not None:
-            variant = _nonempty_string(
-                variant, label=f"experiment run {index} variant"
-            )
+            variant = _nonempty_string(variant, label=f"experiment run {index} variant")
         mode = run.get("mode")
         if mode is not None and mode not in MODES:
             raise ValueError(
@@ -308,18 +461,28 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
                 "exactly one baseline run"
             )
 
+    independent_variables = _string_list(
+        study.get("independent_variables"),
+        label="study independent_variables",
+    )
+    edit_policy = (
+        _edit_policy(
+            payload.get("edit_policy"),
+            runs=normalized_runs,
+            independent_variables=independent_variables,
+        )
+        if schema == EXPERIMENT_PLAN_SCHEMA
+        else {"allowed_candidate_environment": {}}
+    )
     normalized = {
-        "schema": EXPERIMENT_PLAN_SCHEMA,
+        "schema": schema,
         "id": plan_id,
         "title": str(payload.get("title") or plan_id),
         "description": str(payload.get("description") or ""),
         "study": {
             "question": str(study.get("question") or ""),
             "hypothesis": str(study.get("hypothesis") or ""),
-            "independent_variables": _string_list(
-                study.get("independent_variables"),
-                label="study independent_variables",
-            ),
+            "independent_variables": independent_variables,
             "controls": _string_list(study.get("controls"), label="study controls"),
             "analysis_metrics": _string_list(
                 study.get("analysis_metrics"), label="study analysis_metrics"
@@ -329,6 +492,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
         "power": power,
         "keep_going": keep_going,
         "output": {"directory": output_dir, "open_report": open_report},
+        "edit_policy": edit_policy,
         "runs": normalized_runs,
         "source_sha256": "sha256:" + hashlib.sha256(source_bytes).hexdigest(),
     }

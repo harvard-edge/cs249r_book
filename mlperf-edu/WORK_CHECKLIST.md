@@ -73,7 +73,7 @@ lowering a target to fit one local result.
 
 ## Classroom and Research Follow-Up
 
-- [ ] Bind allowed experiment-plan edits automatically to the instructor's
+- [x] Bind allowed experiment-plan edits automatically to the instructor's
   reference contract.
 - [ ] Add a provenance-bound precomputed-baseline import for training labs that
   cannot produce the candidate checkpoint during class.

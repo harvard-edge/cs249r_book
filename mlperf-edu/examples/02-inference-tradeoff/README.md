@@ -15,9 +15,12 @@ varies by device, so instructors should trial the example on the course image.
 ## Inspect and Run
 
 ```bash
+cp examples/02-inference-tradeoff/plan.yaml student-inference-plan.yaml
+# Edit only the candidate batch size in student-inference-plan.yaml.
 uv run mlperf run --plan examples/02-inference-tradeoff/plan.yaml --dry-run
 uv run mlperf fetch --workload image-classification --profile max
-uv run mlperf run --plan examples/02-inference-tradeoff/plan.yaml
+uv run mlperf run --plan student-inference-plan.yaml \
+  --reference-plan examples/02-inference-tradeoff/plan.yaml
 ```
 
 The plan runs one baseline condition and one candidate condition. Each executes
@@ -31,18 +34,12 @@ accuracy subset, evaluator, target, device, input representation, and baseline
 condition remain fixed. The plan loader rejects attempts to override the
 quality target.
 
-The plan hash records the submitted design but does not by itself prove that it
-matches the instructor's handout. Instructors should diff the submitted plan
-against the reference and accept changes only to the candidate batch-size
-value. If device or another control differs between conditions, the dashboard
-blocks the throughput comparison.
-
-Students should include the repository diff with the submission:
-
-```bash
-git diff -- examples/02-inference-tradeoff/plan.yaml \
-  > submissions/02-inference-tradeoff/plan.diff
-```
+The instructor reference declares the candidate batch-size setting as the only
+allowed edit. The runner compares the normalized plans before execution and
+rejects any baseline, device, dataset, evaluator, target, or other control
+change. The aggregate report and provenance bind both source files, their
+SHA-256 digests, and the accepted edit. If a runtime control still differs
+between conditions, the dashboard blocks the throughput comparison.
 
 ## Read the Report
 
@@ -69,8 +66,8 @@ mean.
 | Systems interpretation | 2 | Correct throughput delta and plausible explanation |
 | Claim discipline | 2 | Explicit one-run limitation and proposed next measurement |
 
-Submit the plan YAML, `plan.diff`, `answers.md`, and the complete
+Submit the student plan YAML, `answers.md`, and the complete
 `submissions/02-inference-tradeoff/` evidence tree. The tree must include the
 aggregate JSON, HTML, CSV, aggregate manifest, child reports, and child
-manifests. The plan hash proves what ran; the written responses supply the
-reasoning evidence used by the rubric.
+manifests. The instructor binding proves that only the allowed edit ran; the
+written responses supply the reasoning evidence used by the rubric.

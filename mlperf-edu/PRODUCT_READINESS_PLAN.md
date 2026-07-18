@@ -125,7 +125,7 @@ research-environment workloads.
 - [x] Add compatibility-checked baseline comparison to the CLI and dashboard.
 - [x] Create the five classroom examples and instructor rubrics.
 - [x] Render the numbered sequence in the website navigation.
-- [ ] Bind allowed plan edits to an instructor reference automatically.
+- [x] Bind allowed plan edits to an instructor reference automatically.
 - [ ] Add a provenance-bound precomputed-baseline import for candidate-only
   training labs.
 - [ ] Publish CPU and accelerator runtime, download, disk, and peak-memory

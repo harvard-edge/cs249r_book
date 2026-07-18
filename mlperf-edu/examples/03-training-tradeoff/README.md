@@ -25,9 +25,12 @@ can accommodate it.
 ## Inspect and Run
 
 ```bash
+cp examples/03-training-tradeoff/plan.yaml student-training-plan.yaml
+# Edit only the candidate learning rate in student-training-plan.yaml.
 uv run mlperf fetch --workload causal-language-modeling --profile max
 uv run mlperf run --plan examples/03-training-tradeoff/plan.yaml --dry-run
-uv run mlperf run --plan examples/03-training-tradeoff/plan.yaml
+uv run mlperf run --plan student-training-plan.yaml \
+  --reference-plan examples/03-training-tradeoff/plan.yaml
 ```
 
 Run decode inference only from a condition whose training result passed the
@@ -51,14 +54,11 @@ dataset split, seed, iteration count, evaluator, and quality target remain
 fixed. Shortening training creates a different experiment and may cause the
 checkpoint to miss the unchanged gate.
 
-Instructors should compare the submitted plan with the reference plan and
-accept only the candidate learning-rate edit. The current assignment grader
-does not enforce experiment-plan diffs automatically.
-
-```bash
-git diff -- examples/03-training-tradeoff/plan.yaml \
-  > submissions/03-training-tradeoff/plan.diff
-```
+The instructor reference declares the candidate learning-rate setting as the
+only allowed edit. The runner rejects changes to the baseline, architecture,
+dataset, seed, iteration count, evaluator, quality target, device, or output
+policy before it starts the long training run. The aggregate provenance binds
+both plans and records the accepted learning-rate edit.
 
 ## Read the Report
 
@@ -87,5 +87,5 @@ diagnostic artifacts.
 
 Submit the plan aggregate and provenance manifest, both condition manifests,
 the accepted condition's decode report and manifest, the checkpoint digest,
-`plan.diff`, and `answers.md`. If no condition passes, submit the diagnostic
+student plan, and `answers.md`. If no condition passes, submit the diagnostic
 aggregate and explain why downstream inference was correctly withheld.

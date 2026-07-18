@@ -314,6 +314,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="Versioned pro experiment-plan YAML; replaces workload selection",
     )
     run.add_argument(
+        "--reference-plan",
+        type=str,
+        default=None,
+        help="Instructor-owned plan whose edit policy validates --plan",
+    )
+    run.add_argument(
         "--output-dir",
         default="submissions",
         help="Directory for report artifacts.",
@@ -1338,6 +1344,8 @@ def cmd_run(args: argparse.Namespace) -> int:
     workloads = load_workloads(args)
     if getattr(args, "plan", None):
         return cmd_run_plan(args, workloads)
+    if getattr(args, "reference_plan", None):
+        raise ValueError("--reference-plan requires --plan")
     selected = select_cli_workloads(workloads, args)
     if not selected:
         console.print("[red]No workloads selected.[/red]")
@@ -1428,6 +1436,15 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
     experiment_api = import_module("mlperf.experiment")
     plan_path = Path(args.plan).expanduser().resolve()
     plan = experiment_api.load_experiment_plan(plan_path)
+    reference_plan_path: Path | None = None
+    if getattr(args, "reference_plan", None):
+        reference_plan_path = Path(args.reference_plan).expanduser().resolve()
+        reference_plan = experiment_api.load_experiment_plan(reference_plan_path)
+        plan["instructor_binding"] = experiment_api.bind_instructor_reference(
+            plan,
+            reference_plan,
+            reference_source=reference_plan_path.name,
+        )
     resolved_runs: list[tuple[dict[str, Any], Workload, str | None, str | None]] = []
     for run in plan["runs"]:
         workload_id = resolve_cli_workload_id(
@@ -1444,6 +1461,12 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
     console.print(
         f"Selected {len(resolved_runs)} run(s) from pro experiment plan {plan['id']}."
     )
+    if plan.get("instructor_binding"):
+        accepted = len(plan["instructor_binding"]["accepted_changes"])
+        console.print(
+            "  Instructor reference verified; "
+            f"{accepted} allowed candidate edit(s) accepted."
+        )
     for index, (run, workload, mode, phase) in enumerate(resolved_runs, start=1):
         device = args.device if args.device is not None else run["device"]
         selection = str(mode or "default")
@@ -1575,6 +1598,7 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
             power=power_report,
             experiment_plan=plan_record,
             experiment_plan_path=plan_path,
+            experiment_reference_path=reference_plan_path,
         )
     finally:
         for key, value in aggregate_environment.items():
@@ -1636,6 +1660,7 @@ def write_aggregate_report(
     power: dict[str, Any] | None = None,
     experiment_plan: dict[str, Any] | None = None,
     experiment_plan_path: Path | None = None,
+    experiment_reference_path: Path | None = None,
 ) -> tuple[dict[str, Any], Path, dict[str, Path]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -1693,8 +1718,7 @@ def write_aggregate_report(
         ]
         if len(child_manifest_paths) != len(expected_children):
             raise ValueError(
-                "experiment aggregate is missing one or more child provenance "
-                "manifests"
+                "experiment aggregate is missing one or more child provenance manifests"
             )
         unverified_children = [
             path
@@ -1713,6 +1737,12 @@ def write_aggregate_report(
             "plan": str(experiment_plan.get("source") or experiment_plan_path.name),
             "child_manifests": [str(path) for path in child_manifest_paths],
         }
+        if experiment_reference_path is not None:
+            if not experiment_reference_path.is_file():
+                raise ValueError("experiment instructor reference plan is missing")
+            report["artifacts"]["instructor_reference_plan"] = str(
+                experiment_reference_path
+            )
         report["experiment_evidence"] = {
             "expected_child_manifests": len(expected_children),
             "verified_child_manifests": len(child_manifest_paths),
@@ -1722,6 +1752,8 @@ def write_aggregate_report(
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     if aggregate_manifest_path is not None:
         evidence_files = [experiment_plan_path]
+        if experiment_reference_path is not None:
+            evidence_files.append(experiment_reference_path)
         evidence_files.extend(
             Path(path)
             for path in report["artifacts"]["child_manifests"]
@@ -1861,9 +1893,7 @@ def enrich_report_for_display(
                 "reference_protocol", copy.deepcopy(workload.quality_reference_protocol)
             )
         if workload.quality_reviewer_notes:
-            quality.setdefault(
-                "reviewer_notes", list(workload.quality_reviewer_notes)
-            )
+            quality.setdefault("reviewer_notes", list(workload.quality_reviewer_notes))
         canonical_contract = workload.raw.get("canonical_max_contract") or {}
         if isinstance(canonical_contract, dict):
             provenance_contract = workload.raw.get("provenance") or {}
@@ -3061,9 +3091,7 @@ def run_pro_profile(
     return report
 
 
-def validate_pro_quality_contract(
-    workload: Workload, report: dict[str, Any]
-) -> None:
+def validate_pro_quality_contract(workload: Workload, report: dict[str, Any]) -> None:
     quality = report.get("quality") or {}
     if quality_required_value(quality, False) is not True:
         return
@@ -3408,7 +3436,9 @@ def _comparison_fingerprint(item: dict[str, Any]) -> str:
 
 def _comparison_provenance_verified(item: dict[str, Any]) -> bool:
     artifacts = item.get("artifacts") or {}
-    manifest_value = artifacts.get("provenance") if isinstance(artifacts, dict) else None
+    manifest_value = (
+        artifacts.get("provenance") if isinstance(artifacts, dict) else None
+    )
     if not manifest_value:
         return False
     manifest_path = Path(str(manifest_value))
@@ -3913,8 +3943,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
         {
             str(public.get("status"))
             for item in items
-            if isinstance((public := item.get("public")), dict)
-            and public.get("status")
+            if isinstance((public := item.get("public")), dict) and public.get("status")
         }
     )
     illustrative_data = any(
@@ -4187,8 +4216,7 @@ def dashboard_metric_label(metric: str) -> str:
         "auc": "AUC",
     }
     words = [
-        replacements.get(word.lower(), word.capitalize())
-        for word in normalized.split()
+        replacements.get(word.lower(), word.capitalize()) for word in normalized.split()
     ]
     return " ".join(words)
 
@@ -4418,9 +4446,7 @@ def baseline_comparison_section_html(report: dict[str, Any]) -> str:
             else "fail"
         )
         performance_badge = (
-            "pass"
-            if result.get("performance_compatible") and verified
-            else "warn"
+            "pass" if result.get("performance_compatible") and verified else "warn"
         )
         quality_label = (
             "verified compatible"
@@ -4538,9 +4564,10 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
         if run.get("phase") or result.get("phase"):
             mode += f" / {run.get('phase') or result.get('phase')}"
         environment = run.get("environment") or {}
-        setting = ", ".join(
-            f"{key}={value}" for key, value in sorted(environment.items())
-        ) or "No condition-specific settings"
+        setting = (
+            ", ".join(f"{key}={value}" for key, value in sorted(environment.items()))
+            or "No condition-specific settings"
+        )
         status = str(result.get("status") or "pending")
         quality = result.get("quality") or {}
         if quality_required_value(quality, False) is not True:
@@ -4803,11 +4830,7 @@ def experiment_performance_html(
         )
     if not charts:
         return ""
-    return (
-        "<div class='experiment-charts'>"
-        + "".join(charts)
-        + "</div>"
-    )
+    return "<div class='experiment-charts'>" + "".join(charts) + "</div>"
 
 
 def controlled_experiment_reasons(
@@ -4855,7 +4878,8 @@ def controlled_experiment_reasons(
     unsupported = changed_environment - set(EXPERIMENT_CONFIG_BINDINGS)
     if unsupported:
         reasons.append(
-            "no controlled-comparison adapter exists for " + ", ".join(sorted(unsupported))
+            "no controlled-comparison adapter exists for "
+            + ", ".join(sorted(unsupported))
         )
     controlled_fields = {
         EXPERIMENT_CONFIG_BINDINGS[key]
@@ -4898,7 +4922,9 @@ def write_html_report(
 
     title = "MLPerf EDU Report"
     if (report.get("selection") or {}).get("kind") == "plan":
-        title = f"MLPerf EDU Research Report: {(report.get('selection') or {}).get('name')}"
+        title = (
+            f"MLPerf EDU Research Report: {(report.get('selection') or {}).get('name')}"
+        )
     elif len(rows) == 1:
         title = f"MLPerf EDU Report: {rows[0].get('workload', 'unknown')}"
     elif report.get("suite"):

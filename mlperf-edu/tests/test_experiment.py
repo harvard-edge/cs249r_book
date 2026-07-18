@@ -5,7 +5,11 @@ from pathlib import Path
 import pytest
 
 from mlperf import edu_cli
-from mlperf.experiment import EXPERIMENT_PLAN_SCHEMA, load_experiment_plan
+from mlperf.experiment import (
+    EXPERIMENT_PLAN_SCHEMA,
+    bind_instructor_reference,
+    load_experiment_plan,
+)
 
 
 def write_plan(tmp_path: Path, body: str) -> Path:
@@ -80,9 +84,7 @@ runs:
         ("NOT_ALLOWED: value", "not an MLPERF_EDU"),
     ],
 )
-def test_load_experiment_plan_rejects_unsafe_environment(
-    tmp_path, fragment, message
-):
+def test_load_experiment_plan_rejects_unsafe_environment(tmp_path, fragment, message):
     path = write_plan(
         tmp_path,
         f"""
@@ -209,6 +211,118 @@ runs:
         load_experiment_plan(path)
 
 
+def test_instructor_reference_accepts_only_declared_candidate_edits(tmp_path):
+    reference_path = tmp_path / "reference.yaml"
+    reference_path.write_text(
+        f"""\
+schema: {EXPERIMENT_PLAN_SCHEMA}
+id: bound-plan
+study:
+  independent_variables:
+    - MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE
+edit_policy:
+  allowed_candidate_environment:
+    candidate:
+      - MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE
+runs:
+  - name: baseline
+    role: baseline
+    workload: image-classification
+    environment:
+      MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 16
+  - name: candidate
+    role: candidate
+    workload: image-classification
+    environment:
+      MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 64
+"""
+    )
+    student_path = tmp_path / "student.yaml"
+    student_path.write_text(
+        reference_path.read_text().replace(
+            "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 64",
+            "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 128",
+        )
+    )
+
+    reference = load_experiment_plan(reference_path)
+    student = load_experiment_plan(student_path)
+    binding = bind_instructor_reference(
+        student, reference, reference_source=reference_path.name
+    )
+
+    assert binding["status"] == "passed"
+    assert binding["reference_source_sha256"] == reference["source_sha256"]
+    assert binding["submitted_source_sha256"] == student["source_sha256"]
+    assert binding["accepted_changes"] == [
+        {
+            "run": "candidate",
+            "setting": "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE",
+            "reference_value": "64",
+            "submitted_value": "128",
+        }
+    ]
+
+    # Add an unauthorized explicit control while retaining the allowed edit.
+    student_path.write_text(
+        student_path.read_text().replace("runs:\n", "defaults:\n  device: cpu\nruns:\n")
+    )
+    unauthorized = load_experiment_plan(student_path)
+    with pytest.raises(ValueError, match="outside allowed candidate settings"):
+        bind_instructor_reference(
+            unauthorized, reference, reference_source=reference_path.name
+        )
+
+
+def test_edit_policy_rejects_baseline_and_undeclared_settings(tmp_path):
+    baseline_policy = write_plan(
+        tmp_path,
+        f"""
+schema: {EXPERIMENT_PLAN_SCHEMA}
+id: unsafe-policy
+study:
+  independent_variables: [MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE]
+edit_policy:
+  allowed_candidate_environment:
+    baseline:
+      - MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE
+runs:
+  - name: baseline
+    role: baseline
+    workload: image-classification
+    environment:
+      MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 16
+""".lstrip(),
+    )
+    with pytest.raises(ValueError, match="only for candidate runs"):
+        load_experiment_plan(baseline_policy)
+
+    undeclared_policy = write_plan(
+        tmp_path,
+        f"""
+schema: {EXPERIMENT_PLAN_SCHEMA}
+id: undeclared-policy
+study:
+  independent_variables: []
+edit_policy:
+  allowed_candidate_environment:
+    candidate:
+      - MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE
+runs:
+  - name: baseline
+    role: baseline
+    workload: image-classification
+  - name: candidate
+    role: candidate
+    workload: image-classification
+    environment:
+      MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 64
+""".lstrip(),
+    )
+    with pytest.raises(ValueError, match="not a declared independent variable"):
+        load_experiment_plan(undeclared_policy)
+
+
 def test_run_plan_separates_runs_records_plan_and_restores_environment(
     tmp_path, monkeypatch
 ):
@@ -228,6 +342,10 @@ study:
 output:
   directory: ignored-by-cli
   open_report: false
+edit_policy:
+  allowed_candidate_environment:
+    batch-64:
+      - MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE
 runs:
   - name: batch-16
     role: baseline
@@ -243,6 +361,13 @@ runs:
       MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 64
 """.lstrip(),
     )
+    reference_path = tmp_path / "reference-plan.yaml"
+    reference_path.write_text(
+        plan_path.read_text().replace(
+            "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 64",
+            "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 32",
+        )
+    )
     output_dir = tmp_path / "results"
     calls = []
 
@@ -257,9 +382,7 @@ runs:
                 "phase": phase,
                 "batch_size": batch_size,
                 "repetitions": os.environ["MLPERF_EDU_PRO_REPETITIONS"],
-                "quality_override": os.environ.get(
-                    "MLPERF_EDU_MAX_QUALITY_TARGET"
-                ),
+                "quality_override": os.environ.get("MLPERF_EDU_MAX_QUALITY_TARGET"),
             }
         )
         current_output.mkdir(parents=True, exist_ok=True)
@@ -326,6 +449,8 @@ runs:
             "run",
             "--plan",
             str(plan_path),
+            "--reference-plan",
+            str(reference_path),
             "--output-dir",
             str(output_dir),
             "--no-open-report",
@@ -352,15 +477,21 @@ runs:
     aggregate = json.loads(aggregate_path.read_text())
     assert aggregate["selection"] == {"kind": "plan", "name": "execution-test"}
     assert aggregate["experiment_plan"]["source_sha256"].startswith("sha256:")
+    binding = aggregate["experiment_plan"]["instructor_binding"]
+    assert binding["status"] == "passed"
+    assert binding["accepted_changes"][0]["reference_value"] == "32"
+    assert binding["accepted_changes"][0]["submitted_value"] == "64"
+    assert aggregate["artifacts"]["instructor_reference_plan"] == str(
+        reference_path
+    )
     assert aggregate["workloads"][0]["experiment_run"]["name"] == "batch-16"
     assert aggregate["workloads"][0]["experiment_run"]["role"] == "baseline"
     assert aggregate["workloads"][1]["experiment_run"]["name"] == "batch-64"
-    assert "MLPERF_EDU_MAX_QUALITY_TARGET" not in (
-        aggregate["run_fingerprint"]["software"]["performance_environment"]
+    assert (
+        "MLPERF_EDU_MAX_QUALITY_TARGET"
+        not in (aggregate["run_fingerprint"]["software"]["performance_environment"])
     )
-    aggregate_manifest = aggregate_path.with_name(
-        aggregate_path.stem + ".provd.json"
-    )
+    aggregate_manifest = aggregate_path.with_name(aggregate_path.stem + ".provd.json")
     assert aggregate_manifest.is_file()
     assert edu_cli.verify_provd(
         aggregate_manifest, repo_root=edu_cli.find_project_root()
@@ -461,9 +592,7 @@ def test_experiment_performance_blocks_quality_failed_condition():
             "backend": "pytorch-cpu",
             "device": "cpu",
             "config": {"batch_size": 16},
-            "environment": {
-                "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "16"
-            },
+            "environment": {"MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "16"},
             "repetitions": 1,
         },
         {
@@ -482,18 +611,14 @@ def test_experiment_performance_blocks_quality_failed_condition():
             "backend": "pytorch-cpu",
             "device": "cpu",
             "config": {"batch_size": 32},
-            "environment": {
-                "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "32"
-            },
+            "environment": {"MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "32"},
             "repetitions": 1,
         },
     ]
 
     html = edu_cli.experiment_performance_html(
         records,
-        independent_variables={
-            "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE"
-        },
+        independent_variables={"MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE"},
     )
 
     assert "comparison blocked" in html
