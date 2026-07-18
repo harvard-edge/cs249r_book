@@ -46,6 +46,7 @@ requirements:
     result = evaluate_assignment_contract(contract, rows)
 
     assert result["passed"] is True
+    assert result["assignment_source_sha256"].startswith("sha256:")
     assert result["requirements"][0]["matched_count"] == 1
     assert result["extra_results"] == []
 
@@ -111,4 +112,31 @@ requirements:
     )
 
     with pytest.raises(ValueError, match="duplicates"):
+        load_assignment_contract(path)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        """\
+schema: mlperf-edu-assignment/0.1
+id: typo
+allow_extra_result: false
+requirements:
+  - workload: image-classification
+""",
+        """\
+schema: mlperf-edu-assignment/0.1
+id: typo
+requirements:
+  - workload: image-classification
+    cout: 2
+""",
+    ],
+)
+def test_assignment_contract_rejects_unknown_fields(tmp_path: Path, body: str):
+    path = tmp_path / "assignment.yaml"
+    path.write_text(body)
+
+    with pytest.raises(ValueError, match="unknown fields"):
         load_assignment_contract(path)

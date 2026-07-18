@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from typing import Any
 
@@ -19,9 +20,21 @@ SELECTOR_FIELDS = (
 
 def load_assignment_contract(path: Path) -> dict[str, Any]:
     """Load and validate a versioned classroom assignment contract."""
-    payload = yaml.safe_load(path.read_text(encoding="utf-8"))
+    source_bytes = path.read_bytes()
+    payload = yaml.safe_load(source_bytes)
     if not isinstance(payload, dict):
         raise ValueError("assignment contract must be a mapping")
+    unknown_top_level = set(payload) - {
+        "schema",
+        "id",
+        "title",
+        "allow_extra_results",
+        "requirements",
+    }
+    if unknown_top_level:
+        raise ValueError(
+            f"assignment contract has unknown fields: {sorted(unknown_top_level)}"
+        )
     if payload.get("schema") != ASSIGNMENT_SCHEMA:
         raise ValueError(f"assignment schema must be {ASSIGNMENT_SCHEMA!r}")
     assignment_id = payload.get("id")
@@ -39,6 +52,17 @@ def load_assignment_contract(path: Path) -> dict[str, Any]:
     for index, requirement in enumerate(requirements):
         if not isinstance(requirement, dict):
             raise ValueError(f"assignment requirement {index + 1} must be a mapping")
+        unknown_requirement = set(requirement) - {
+            *SELECTOR_FIELDS,
+            "count",
+            "quality",
+            "config",
+        }
+        if unknown_requirement:
+            raise ValueError(
+                f"assignment requirement {index + 1} has unknown fields: "
+                f"{sorted(unknown_requirement)}"
+            )
         workload = requirement.get("workload")
         if not isinstance(workload, str) or not workload.strip():
             raise ValueError(f"assignment requirement {index + 1} needs a workload")
@@ -95,6 +119,7 @@ def load_assignment_contract(path: Path) -> dict[str, Any]:
     return {
         "schema": ASSIGNMENT_SCHEMA,
         "id": assignment_id,
+        "source_sha256": "sha256:" + hashlib.sha256(source_bytes).hexdigest(),
         "title": str(payload.get("title") or assignment_id),
         "allow_extra_results": allow_extra,
         "requirements": normalized_requirements,
@@ -213,6 +238,7 @@ def evaluate_assignment_contract(
         "schema": "mlperf-edu-assignment-grade/0.1",
         "assignment_schema": contract["schema"],
         "assignment_id": contract["id"],
+        "assignment_source_sha256": contract["source_sha256"],
         "title": contract["title"],
         "allow_extra_results": contract["allow_extra_results"],
         "passed": not errors,

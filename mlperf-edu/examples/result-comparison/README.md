@@ -1,5 +1,8 @@
 # Result Comparison Example
 
+This legacy path is retained for existing links. New courses should use the
+[numbered result-comparison lab](../04-result-comparison/README.md).
+
 ## Learning Goal
 
 This example teaches the difference between a quality comparison and a

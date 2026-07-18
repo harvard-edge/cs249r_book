@@ -84,7 +84,7 @@ isolated commands.
 - `examples/04-result-comparison` for compatible baseline comparison and an
   intentionally incompatible example.
 - `examples/05-assignment-package` for submission, verification, and grading.
-- `examples/research/pro-collection` for a pinned multi-workload research plan.
+- `examples/research/pro-collection` for a pinned controlled research plan.
 
 Each example should include learning goals, expected runtime and hardware,
 commands, allowed changes, expected report sections, interpretation questions,
@@ -123,13 +123,21 @@ research-environment workloads.
 - [x] Validate expected workload, profile, phase, configuration, and result
   cardinality.
 - [x] Add compatibility-checked baseline comparison to the CLI and dashboard.
-- [ ] Create the five classroom examples and instructor rubrics.
-- [ ] Repeat simulated student and instructor review with the rendered pages.
+- [x] Create the five classroom examples and instructor rubrics.
+- [x] Render the numbered sequence in the website navigation.
+- [ ] Bind allowed plan edits to an instructor reference automatically.
+- [ ] Add a provenance-bound precomputed-baseline import for candidate-only
+  training labs.
+- [ ] Publish CPU and accelerator runtime, download, disk, and peak-memory
+  budgets measured on course images.
+- [x] Repeat simulated student, instructor, and research review with the
+  rendered pages; record the supervised-pilot boundary.
 
 ### Research layer
 
 - [x] Expose a versioned pro experiment-plan file.
-- [ ] Add controlled configuration and hardware comparisons.
+- [x] Add fail-closed controlled configuration comparisons.
+- [ ] Add controlled cross-hardware comparisons.
 - [x] Add suite-level research quality small multiples and CSV/JSON export
   examples.
 - [ ] Complete current BFCL and EDM result packets.

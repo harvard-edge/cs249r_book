@@ -25,7 +25,10 @@ uv run mlperf run --plan examples/research/pro-collection/plan.yaml
 The plan writes each condition into a separate `runs/` directory and produces
 one suite-level JSON, CSV, and HTML report. The aggregate records the exact plan
 hash, normalized study design, resolved run settings, hardware fingerprint, and
-child result artifacts.
+child result artifacts. Explicit `baseline` and `candidate` roles let the HTML
+dashboard label a descriptive throughput delta without treating the two
+configurations as identical. Its aggregate provenance manifest binds the plan,
+aggregate JSON, and available child manifests.
 
 ## Interpret the Result
 
@@ -34,7 +37,13 @@ and meet the same target. Then inspect throughput. A difference is descriptive
 evidence for this machine, not a stable performance claim, because this starter
 plan runs each condition only once.
 
-The normal baseline comparison command intentionally rejects a paired
-performance claim when batch sizes differ. The suite report still preserves the
-declared independent variable so a later research analysis can model the
-controlled change without pretending the two configurations are identical.
+The normal rerun-comparison command intentionally rejects a paired performance
+claim when batch sizes differ. The experiment dashboard uses a narrower
+controlled-change rule: it draws the condition chart only when quality passes,
+the declared variable exactly matches the observed configuration difference,
+and dataset, evaluator, checkpoint, device, and other controls match. Otherwise
+the chart explains why the comparison was blocked.
+
+This is a minimal mechanism example. The numbered Example 02 adds the classroom
+submission contract and rubric; broader multi-workload research examples remain
+part of the later production layer.

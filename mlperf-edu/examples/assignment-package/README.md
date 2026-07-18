@@ -1,5 +1,8 @@
 # Assignment Package Example
 
+This legacy path is retained for existing links. New courses should use the
+[numbered assignment-package lab](../05-assignment-package/README.md).
+
 ## Learning Goal
 
 This lab verifies that a student can run one authoritative quality contract,

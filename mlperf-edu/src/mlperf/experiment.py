@@ -15,6 +15,7 @@ EXPERIMENT_PLAN_SCHEMA = "mlperf-edu-experiment-plan/0.1"
 DEVICES = {"auto", "cpu", "cuda", "mps"}
 MODES = {"training", "inference"}
 PHASES = {"full", "prefill", "decode"}
+ROLES = {"baseline", "candidate", "condition"}
 ENVIRONMENT_KEY = re.compile(r"^MLPERF_EDU_[A-Z0-9_]+$")
 RESERVED_ENVIRONMENT_KEYS = {"MLPERF_EDU_DEVICE", "MLPERF_EDU_PRO_REPETITIONS"}
 IMMUTABLE_CONTRACT_KEYS = {"MLPERF_EDU_MAX_QUALITY_TARGET"}
@@ -206,6 +207,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
             run,
             allowed={
                 "name",
+                "role",
                 "workload",
                 "variant",
                 "mode",
@@ -219,6 +221,11 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
         workload = _nonempty_string(
             run.get("workload"), label=f"experiment run {index} workload"
         )
+        role = run.get("role", "condition")
+        if role not in ROLES:
+            raise ValueError(
+                f"experiment run {index} role must be one of {sorted(ROLES)}"
+            )
         variant = run.get("variant")
         if variant is not None:
             variant = _nonempty_string(
@@ -266,6 +273,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
         normalized_runs.append(
             {
                 "name": name,
+                "role": role,
                 "workload": workload,
                 "variant": variant,
                 "mode": mode,
@@ -275,6 +283,30 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
                 "environment": environment,
             }
         )
+
+    comparison_groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for run in normalized_runs:
+        group = (
+            run["workload"],
+            run["variant"],
+            run["mode"],
+            run["phase"],
+        )
+        comparison_groups.setdefault(group, []).append(run)
+    for group, grouped_runs in comparison_groups.items():
+        baseline_count = sum(run["role"] == "baseline" for run in grouped_runs)
+        candidate_count = sum(run["role"] == "candidate" for run in grouped_runs)
+        group_label = "/".join(str(value or "default") for value in group)
+        if baseline_count > 1:
+            raise ValueError(
+                f"experiment comparison group {group_label!r} can declare at most "
+                "one baseline run"
+            )
+        if candidate_count and baseline_count != 1:
+            raise ValueError(
+                f"candidate runs in comparison group {group_label!r} require "
+                "exactly one baseline run"
+            )
 
     normalized = {
         "schema": EXPERIMENT_PLAN_SCHEMA,

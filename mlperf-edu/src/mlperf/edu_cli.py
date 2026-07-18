@@ -1441,7 +1441,7 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
         if phase:
             selection = f"{selection}/{phase}"
         console.print(
-            f"  {index}. {run['name']} | {workload.id} | {selection} | "
+            f"  {index}. {run['name']} ({run['role']}) | {workload.id} | {selection} | "
             f"device={device} | repetitions={run['repetitions']}"
         )
     if getattr(args, "dry_run", False):
@@ -1466,32 +1466,46 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
         power_meter.start()
 
     workload_reports: list[dict[str, Any]] = []
+    managed_keys = (
+        set(experiment_api.PLAN_ENVIRONMENT_KEYS)
+        | set(experiment_api.RESERVED_ENVIRONMENT_KEYS)
+        | set(experiment_api.IMMUTABLE_CONTRACT_KEYS)
+    )
     for index, (run, workload, mode, phase) in enumerate(resolved_runs, start=1):
         run_dir = output_dir / "runs" / f"{index:02d}-{run['name']}"
         environment = dict(run["environment"])
         environment["MLPERF_EDU_PRO_REPETITIONS"] = str(run["repetitions"])
         device = args.device if args.device is not None else run["device"]
         environment["MLPERF_EDU_DEVICE"] = "" if device == "auto" else device
-        previous = {key: os.environ.get(key) for key in environment}
+        previous = {key: os.environ.get(key) for key in managed_keys}
         try:
+            for key in managed_keys:
+                os.environ.pop(key, None)
             for key, value in environment.items():
                 if key == "MLPERF_EDU_DEVICE" and not value:
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
             report = run_workload(workload, "pro", run_dir, mode=mode, phase=phase)
+            validate_pro_quality_contract(workload, report)
             annotate_execution_device(report)
             report["experiment_run"] = {
                 "plan_id": plan["id"],
                 "plan_source_sha256": plan["source_sha256"],
                 "index": index,
                 "name": run["name"],
+                "role": run["role"],
                 "device": device,
                 "repetitions": run["repetitions"],
                 "environment": dict(run["environment"]),
             }
             enrich_report_for_display(report, workloads)
             export_workload_reports([report], workloads)
+            if not _comparison_provenance_verified(report):
+                raise ValueError(
+                    f"experiment child {run['name']!r} did not emit a verified "
+                    "provenance manifest"
+                )
         except Exception as exc:
             if not plan["keep_going"]:
                 raise
@@ -1510,6 +1524,7 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                     "plan_source_sha256": plan["source_sha256"],
                     "index": index,
                     "name": run["name"],
+                    "role": run["role"],
                     "device": device,
                     "repetitions": run["repetitions"],
                     "environment": dict(run["environment"]),
@@ -1526,23 +1541,38 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
 
     power_report = power_meter.stop_report() if plan_power else None
     plan_record = copy.deepcopy(plan)
-    plan_record["source"] = str(plan_path)
+    try:
+        plan_source_label = plan_path.relative_to(Path.cwd().resolve()).as_posix()
+    except ValueError:
+        plan_source_label = plan_path.name
+    plan_record["source"] = plan_source_label
     plan_record["cli_overrides"] = {
         "device": args.device,
         "output_directory": str(output_dir),
         "power": plan_power,
         "open_report": open_report,
     }
-    _, report_path, exports = write_aggregate_report(
-        profile="pro",
-        suite=None,
-        workload=None,
-        workload_reports=workload_reports,
-        output_dir=output_dir,
-        open_report=open_report,
-        power=power_report,
-        experiment_plan=plan_record,
-    )
+    aggregate_environment = {key: os.environ.get(key) for key in managed_keys}
+    try:
+        for key in managed_keys:
+            os.environ.pop(key, None)
+        _, report_path, exports = write_aggregate_report(
+            profile="pro",
+            suite=None,
+            workload=None,
+            workload_reports=workload_reports,
+            output_dir=output_dir,
+            open_report=open_report,
+            power=power_report,
+            experiment_plan=plan_record,
+            experiment_plan_path=plan_path,
+        )
+    finally:
+        for key, value in aggregate_environment.items():
+            if value is None:
+                os.environ.pop(key, None)
+            else:
+                os.environ[key] = value
     return print_run_summary("pro", workload_reports, report_path, exports)
 
 
@@ -1596,6 +1626,7 @@ def write_aggregate_report(
     open_report: bool,
     power: dict[str, Any] | None = None,
     experiment_plan: dict[str, Any] | None = None,
+    experiment_plan_path: Path | None = None,
 ) -> tuple[dict[str, Any], Path, dict[str, Path]]:
     output_dir.mkdir(parents=True, exist_ok=True)
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
@@ -1631,13 +1662,80 @@ def write_aggregate_report(
         "workloads": workload_reports,
         "generated_at": datetime.now(timezone.utc).isoformat(),
     }
+    aggregate_manifest_path: Path | None = None
     if power:
         report["power"] = power
     if experiment_plan:
+        if experiment_plan_path is None or not experiment_plan_path.is_file():
+            raise ValueError("experiment aggregate requires its source plan file")
         report["experiment_plan"] = experiment_plan
+        aggregate_manifest_path = report_path.with_name(
+            report_path.stem + ".provd.json"
+        )
+        child_manifest_paths = [
+            Path(str((item.get("artifacts") or {}).get("provenance")))
+            for item in workload_reports
+            if (item.get("artifacts") or {}).get("provenance")
+        ]
+        expected_children = [
+            item
+            for item in workload_reports
+            if item.get("status") != "execution_failed"
+        ]
+        if len(child_manifest_paths) != len(expected_children):
+            raise ValueError(
+                "experiment aggregate is missing one or more child provenance "
+                "manifests"
+            )
+        unverified_children = [
+            path
+            for path in child_manifest_paths
+            if not path.is_file()
+            or not verify_provd(path, repo_root=find_project_root()).all_ok
+        ]
+        if unverified_children:
+            raise ValueError(
+                "experiment aggregate has unverified child manifest(s): "
+                + ", ".join(path.name for path in unverified_children)
+            )
+        report["artifacts"] = {
+            "report": str(report_path),
+            "provenance": str(aggregate_manifest_path),
+            "plan": str(experiment_plan.get("source") or experiment_plan_path.name),
+            "child_manifests": [str(path) for path in child_manifest_paths],
+        }
+        report["experiment_evidence"] = {
+            "expected_child_manifests": len(expected_children),
+            "verified_child_manifests": len(child_manifest_paths),
+            "complete": len(child_manifest_paths) == len(expected_children),
+        }
     attach_run_fingerprints(report, hardware=hardware)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    if aggregate_manifest_path is not None:
+        evidence_files = [experiment_plan_path]
+        evidence_files.extend(
+            Path(path)
+            for path in report["artifacts"]["child_manifests"]
+            if Path(path).is_file()
+        )
+        aggregate_manifest = build_provd(
+            workload=f"experiment:{experiment_plan['id']}",
+            scenario="research-plan",
+            division="open",
+            hardware_fingerprint=hardware,
+            report=report,
+            report_path=report_path,
+            dataset_name="experiment-plan-and-child-manifests",
+            dataset_files=evidence_files,
+            rng_seed=None,
+            repo_root=find_project_root(),
+        )
+        aggregate_manifest_path.write_text(
+            json.dumps(aggregate_manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+        )
     exports = write_report_exports(report, report_path, open_report=open_report)
+    if aggregate_manifest_path is not None:
+        exports["provenance"] = aggregate_manifest_path
     return report, report_path, exports
 
 
@@ -1646,10 +1744,10 @@ def export_workload_reports(
 ) -> None:
     """Create HTML/CSV siblings for per-workload JSON reports.
 
-    Runners write the measurement JSON before building provenance manifests, so
-    this function deliberately does not rewrite workload JSON. It only derives
-    human/spreadsheet views and records their paths in the aggregate in-memory
-    report.
+    Runners write the measurement JSON before building provenance manifests.
+    Plan execution adds condition identity after the runner returns, so this
+    function rewrites that metadata into the child JSON and then refreshes the
+    measurement leaf before deriving human and spreadsheet views.
     """
     for item in workload_reports:
         artifacts = item.get("artifacts")
@@ -1682,9 +1780,9 @@ def export_workload_reports(
             )
             continue
         try:
-            for field in ("device_requested", "device_executed"):
+            for field in ("device_requested", "device_executed", "experiment_run"):
                 if item.get(field) is not None:
-                    report[field] = item[field]
+                    report[field] = copy.deepcopy(item[field])
             enrich_report_for_display(report, workloads or {})
             attach_run_fingerprints(report)
             report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
@@ -1753,6 +1851,32 @@ def enrich_report_for_display(
             quality.setdefault(
                 "reference_protocol", copy.deepcopy(workload.quality_reference_protocol)
             )
+        if workload.quality_reviewer_notes:
+            quality.setdefault(
+                "reviewer_notes", list(workload.quality_reviewer_notes)
+            )
+        canonical_contract = workload.raw.get("canonical_max_contract") or {}
+        if isinstance(canonical_contract, dict):
+            provenance_contract = workload.raw.get("provenance") or {}
+            source_url = canonical_contract.get("upstream_repository") or (
+                provenance_contract.get("repository")
+                if isinstance(provenance_contract, dict)
+                else None
+            )
+            source_revision = canonical_contract.get("upstream_commit")
+            if source_url or source_revision or workload.quality_reviewer_notes:
+                quality.setdefault(
+                    "target_source",
+                    {
+                        "url": source_url,
+                        "revision": source_revision,
+                        "rationale": (
+                            workload.quality_reviewer_notes[0]
+                            if workload.quality_reviewer_notes
+                            else None
+                        ),
+                    },
+                )
         functional_check = workload.raw.get("functional_check")
         if isinstance(functional_check, dict):
             quality.setdefault("functional_check", copy.deepcopy(functional_check))
@@ -2616,6 +2740,8 @@ def print_run_summary(
     console.print(f"Dashboard: {exports['html']}")
     console.print(f"JSON: {report_path}")
     console.print(f"CSV: {exports['csv']}")
+    if exports.get("provenance"):
+        console.print(f"Aggregate provenance: {exports['provenance']}")
     for item in workload_reports:
         artifacts = item.get("artifacts") or {}
         if artifacts.get("report"):
@@ -2805,6 +2931,7 @@ def run_pro_profile(
             execution_kwargs["phase"] = phase
         with TemporaryNanogptCheckpoint(output_dir):
             subreport = max_runner(workload, rep_dir, **execution_kwargs)
+        validate_pro_quality_contract(workload, subreport)
         publish_shared_checkpoint(workload, subreport, output_dir)
         subreports.append(subreport)
     wall_time = time.perf_counter() - start
@@ -2814,6 +2941,13 @@ def run_pro_profile(
     manifest_path = (output_dir / f"{workload.id}_pro.provd.json").resolve()
     execution_passed = all(item.get("status") == "passed" for item in subreports)
     subrun_qualities = [item.get("quality") or {} for item in subreports]
+    evaluator_contracts = {
+        json.dumps(_comparison_evaluator(item), sort_keys=True) for item in subreports
+    }
+    if len(evaluator_contracts) > 1:
+        raise ValueError(
+            f"pro subruns for {workload.id} used different evaluator contracts"
+        )
     quality_required = all(
         quality_required_value(quality, False) is True for quality in subrun_qualities
     )
@@ -2916,6 +3050,64 @@ def run_pro_profile(
         json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
     )
     return report
+
+
+def validate_pro_quality_contract(
+    workload: Workload, report: dict[str, Any]
+) -> None:
+    quality = report.get("quality") or {}
+    if quality_required_value(quality, False) is not True:
+        return
+    expected = {
+        "metric": workload.quality_metric,
+        "target": workload.quality_value,
+        "direction": workload.quality_direction,
+        "tolerance": workload.quality_tolerance,
+    }
+    observed = {
+        "metric": quality.get("metric"),
+        "target": quality.get("target"),
+        "direction": quality.get("direction", workload.quality_direction),
+        "tolerance": quality.get("tolerance", workload.quality_tolerance),
+    }
+    if observed != expected:
+        raise ValueError(
+            f"pro quality contract for {workload.id} differs from the registry: "
+            f"observed {observed}, expected {expected}"
+        )
+    if quality.get("override") is True:
+        raise ValueError(
+            f"pro quality contract for {workload.id} records a target override"
+        )
+    metrics = report.get("metrics") or {}
+    metric_key = metric_key_for_quality(workload.quality_metric, metrics)
+    value = metrics.get(metric_key) if metric_key else None
+    target = workload.quality_value
+    if not all(
+        isinstance(item, (int, float)) and not isinstance(item, bool)
+        for item in (value, target)
+    ):
+        raise ValueError(
+            f"pro quality contract for {workload.id} has no numeric observed "
+            f"value for {workload.quality_metric}"
+        )
+    tolerance = (
+        float(workload.quality_tolerance)
+        if isinstance(workload.quality_tolerance, (int, float))
+        and not isinstance(workload.quality_tolerance, bool)
+        else 0.0
+    )
+    if workload.quality_direction == "higher":
+        recomputed = float(value) + tolerance >= float(target)
+    elif workload.quality_direction == "lower":
+        recomputed = float(value) <= float(target) + tolerance
+    else:
+        return
+    if quality.get("target_met") is not recomputed:
+        raise ValueError(
+            f"pro quality decision for {workload.id} does not match its observed "
+            "metric and registry target"
+        )
 
 
 def common_report_value(reports: list[dict[str, Any]], field: str) -> Any:
@@ -3205,6 +3397,20 @@ def _comparison_fingerprint(item: dict[str, Any]) -> str:
     return str(fingerprint.get("comparison_fingerprint_sha256") or "")
 
 
+def _comparison_provenance_verified(item: dict[str, Any]) -> bool:
+    artifacts = item.get("artifacts") or {}
+    manifest_value = artifacts.get("provenance") if isinstance(artifacts, dict) else None
+    if not manifest_value:
+        return False
+    manifest_path = Path(str(manifest_value))
+    if not manifest_path.is_file():
+        return False
+    try:
+        return verify_provd(manifest_path, repo_root=find_project_root()).all_ok
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return False
+
+
 def _comparison_metric(item: dict[str, Any], *, quality: bool) -> dict[str, Any]:
     metrics = item.get("metrics") or {}
     if not isinstance(metrics, dict):
@@ -3260,7 +3466,9 @@ def build_baseline_comparison(
             "phase": key[3] or None,
             "quality_compatible": False,
             "performance_compatible": False,
+            "provenance_verified": False,
             "reasons": [],
+            "warnings": [],
         }
         if len(matches) != 1:
             result["reasons"].append(
@@ -3269,6 +3477,13 @@ def build_baseline_comparison(
             results.append(result)
             continue
         baseline_item = matches[0]
+        result["provenance_verified"] = _comparison_provenance_verified(
+            item
+        ) and _comparison_provenance_verified(baseline_item)
+        if not result["provenance_verified"]:
+            result["warnings"].append(
+                "one or both provenance manifests did not verify; comparison is exploratory"
+            )
         quality_reasons: list[str] = []
         if (item.get("quality") or {}).get("quality_required") is not True or (
             baseline_item.get("quality") or {}
@@ -3371,6 +3586,9 @@ def build_baseline_comparison(
         ),
         "performance_compatible": sum(
             1 for result in results if result["performance_compatible"]
+        ),
+        "provenance_verified": sum(
+            1 for result in results if result["provenance_verified"]
         ),
         "incompatible": sum(
             1 for result in results if not result["quality_compatible"]
@@ -3543,6 +3761,7 @@ def write_csv_report(report: dict[str, Any], output: Path) -> None:
         "run_selector",
         "experiment_id",
         "experiment_run_name",
+        "experiment_run_role",
         "experiment_run_index",
         "plan_source_sha256",
         "planned_device",
@@ -3678,6 +3897,22 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
     functional_results = 0
     functional_passed = 0
     items = report_items(report)
+    verified_manifests = sum(
+        1 for item in items if _comparison_provenance_verified(item)
+    )
+    public_statuses = sorted(
+        {
+            str(public.get("status"))
+            for item in items
+            if isinstance((public := item.get("public")), dict)
+            and public.get("status")
+        }
+    )
+    illustrative_data = any(
+        "synthetic" in str(item.get("data_mode") or "").lower()
+        or "fixture" in str(item.get("data_mode") or "").lower()
+        for item in items
+    )
     for item in items:
         quality = item.get("quality") or {}
         metrics = item.get("metrics") or {}
@@ -3692,6 +3927,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
         direction = str(quality.get("direction") or "")
         target_kind = str(quality.get("target_kind") or "").replace("_", " ")
         target_basis = str(quality.get("target_basis") or "").replace("_", " ")
+        target_source = quality.get("target_source") or {}
         quality_required = quality_required_value(quality, False) is True
         target_met = quality.get("target_met")
         run_passed = str(item.get("status") or "").lower() == "passed"
@@ -3720,7 +3956,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
                 result_label = "Path failed"
                 result_class = "fail"
 
-        workload_name = str(item.get("workload") or item.get("id") or "unknown")
+        workload_name = dashboard_run_label(item, default="unknown")
         displayed_metric = str(metric_key or metric_name or "quality metric")
         formatted_value, raw_value = format_dashboard_metric(displayed_metric, value)
         target_text = format_quality_target(displayed_metric, target, direction)
@@ -3730,7 +3966,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
             else ""
         )
         if quality_required:
-            card_title = displayed_metric
+            card_title = dashboard_metric_label(displayed_metric)
             card_value = formatted_value
             value_class = "metric-value"
             attainment = quality_target_attainment(
@@ -3757,6 +3993,32 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
                 if target_kind or target_basis
                 else ""
             )
+            source_parts = []
+            source_url = ""
+            source_revision = ""
+            if isinstance(target_source, dict):
+                if target_source.get("rationale"):
+                    source_parts.append(str(target_source["rationale"]))
+                if target_source.get("url"):
+                    source_url = str(target_source["url"])
+                    source_revision = str(target_source.get("revision") or "")
+            if source_parts or source_url:
+                source_html = escape(" · ".join(source_parts))
+                if source_url:
+                    link_label = "Upstream reference"
+                    if source_revision:
+                        link_label += f" @ {source_revision}"
+                    if source_html:
+                        source_html += " · "
+                    source_html += (
+                        f"<a href='{escape(source_url, quote=True)}'>"
+                        f"{escape(link_label)}</a>"
+                    )
+                target_kind_html += (
+                    "<div class='metric-source'><strong>Target authority</strong> · "
+                    + source_html
+                    + "</div>"
+                )
         else:
             card_title = "Setup and execution"
             card_value = "Passed" if run_passed else "Failed"
@@ -3810,9 +4072,7 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
     elif quality_results:
         eyebrow = "Lead results"
         heading = "Quality Results"
-        summary = (
-            f"{targets_met} of {quality_results} authoritative quality targets met"
-        )
+        summary = f"{targets_met} of {quality_results} quality targets met"
     else:
         eyebrow = "Readiness check"
         heading = "Functional Readiness"
@@ -3833,14 +4093,42 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
                 "Functional paths passed", functional_passed, functional_results
             )
         )
-    meters_html = f"<div class='summary-meters'>{''.join(meters)}</div>"
-    boundary_html = ""
-    if functional_results:
-        boundary_html = (
-            "<div class='lead-note'>Functional cards confirm setup and execution. "
-            "Any max target shown is context only and was not evaluated in this "
-            "run.</div>"
+    meters.append(
+        dashboard_progress_meter_html(
+            "Provenance manifests verified", verified_manifests, len(items)
         )
+    )
+    meters_html = f"<div class='summary-meters'>{''.join(meters)}</div>"
+    boundary_notes: list[str] = []
+    if functional_results:
+        boundary_notes.append(
+            "Functional cards confirm setup and execution. "
+            "Any max target shown is context only and was not evaluated in this "
+            "run."
+        )
+    if verified_manifests != len(items):
+        boundary_notes.append(
+            f"Only {verified_manifests} of {len(items)} workload provenance "
+            "manifests verified; treat unverified values as exploratory."
+        )
+    if illustrative_data:
+        boundary_notes.append(
+            "Illustrative synthetic data: use this page to review layout and "
+            "interpretation only, not as benchmark evidence."
+        )
+    if public_statuses and not set(public_statuses).issubset(
+        {"score-bearing", "performance-bearing"}
+    ):
+        boundary_notes.append(
+            "Registry status: "
+            + ", ".join(public_statuses)
+            + ". This report is not a public-result candidate."
+        )
+    boundary_html = (
+        f"<div class='lead-note'>{escape(' '.join(boundary_notes))}</div>"
+        if boundary_notes
+        else ""
+    )
     return f"""
   <section class="section" aria-labelledby="quality-results-heading">
     <div class="section-heading">
@@ -3877,6 +4165,23 @@ def format_dashboard_metric(metric: str, value: Any) -> tuple[str, str]:
     ):
         return f"{float(value) * 100:.2f}%", format_cell(value)
     return format_cell(value), ""
+
+
+def dashboard_metric_label(metric: str) -> str:
+    normalized = metric.replace("_", " ")
+    replacements = {
+        "top1": "Top-1",
+        "top5": "Top-5",
+        "ndcg": "nDCG",
+        "mse": "MSE",
+        "fid": "FID",
+        "auc": "AUC",
+    }
+    words = [
+        replacements.get(word.lower(), word.capitalize())
+        for word in normalized.split()
+    ]
+    return " ".join(words)
 
 
 def format_quality_target(metric: str, target: Any, direction: str) -> str:
@@ -3944,7 +4249,7 @@ def run_configuration_section_html(report: dict[str, Any]) -> str:
         )
         if not rows:
             continue
-        workload_name = str(item.get("workload") or item.get("id") or "Run")
+        workload_name = dashboard_run_label(item)
         cards.append(
             f"<article class='detail-card'><h3>{escape(workload_name)}</h3><dl>{rows}</dl></article>"
         )
@@ -3995,7 +4300,7 @@ def lineage_section_html(report: dict[str, Any]) -> str:
                 f"<div class='lineage-details'>{detail_rows}</div>"
                 "</article>"
             )
-        workload_name = str(item.get("workload") or item.get("id") or "Run")
+        workload_name = dashboard_run_label(item)
         workloads_html.append(
             f"<article class='lineage-workload'><h3>{escape(workload_name)}</h3>"
             f"<div class='lineage-flow'>{''.join(stages)}</div></article>"
@@ -4033,9 +4338,9 @@ def provenance_section_html(report: dict[str, Any]) -> str:
         )
         rows.append(
             "<tr>"
-            f"<td>{escape(str(item.get('workload') or item.get('id') or ''))}</td>"
-            f"<td><code>{escape(str(artifacts.get('provenance') or 'Not emitted'))}</code></td>"
-            f"<td><code>{escape(str(artifacts.get('report') or ''))}</code></td>"
+            f"<td>{escape(dashboard_run_label(item))}</td>"
+            f"<td><code>{escape(dashboard_artifact_label(artifacts.get('provenance'), empty='Not emitted'))}</code></td>"
+            f"<td><code>{escape(dashboard_artifact_label(artifacts.get('report')))}</code></td>"
             f"<td><code>{escape(digest)}</code></td>"
             f"<td><code>{escape(checkpoint_digest)}</code></td>"
             "</tr>"
@@ -4093,9 +4398,35 @@ def baseline_comparison_section_html(report: dict[str, Any]) -> str:
                 f"<small>{escape(str(performance.get('metric')))} · "
                 f"{escape(improvement_text)} improvement</small></div>"
             )
-        reasons = "; ".join(result.get("reasons") or []) or "Compatible"
-        quality_badge = "pass" if result.get("quality_compatible") else "fail"
-        performance_badge = "pass" if result.get("performance_compatible") else "warn"
+        boundaries = [*(result.get("reasons") or []), *(result.get("warnings") or [])]
+        reasons = "; ".join(boundaries) or "Verified compatible"
+        verified = result.get("provenance_verified") is True
+        quality_badge = (
+            "pass"
+            if result.get("quality_compatible") and verified
+            else "warn"
+            if result.get("quality_compatible")
+            else "fail"
+        )
+        performance_badge = (
+            "pass"
+            if result.get("performance_compatible") and verified
+            else "warn"
+        )
+        quality_label = (
+            "verified compatible"
+            if result.get("quality_compatible") and verified
+            else "exploratory"
+            if result.get("quality_compatible")
+            else "blocked"
+        )
+        performance_label = (
+            "verified compatible"
+            if result.get("performance_compatible") and verified
+            else "exploratory"
+            if result.get("performance_compatible")
+            else "blocked"
+        )
         run_label = str(result.get("workload") or "")
         if result.get("phase"):
             run_label += f" / {result['phase']}"
@@ -4103,17 +4434,18 @@ def baseline_comparison_section_html(report: dict[str, Any]) -> str:
             "<tr>"
             f"<td>{escape(run_label)}</td>"
             f"<td><span class='badge {quality_badge}'>"
-            f"{'compatible' if result.get('quality_compatible') else 'blocked'}</span>"
+            f"{quality_label}</span>"
             f"<div>{escape(quality_text)}</div></td>"
             f"<td><span class='badge {performance_badge}'>"
-            f"{'compatible' if result.get('performance_compatible') else 'blocked'}</span>"
+            f"{performance_label}</span>"
             f"{performance_html}</td>"
             f"<td>{escape(reasons)}</td>"
             "</tr>"
         )
     cards = (
-        f"<div class='card'><div class='label'>Quality Comparable</div><div class='value'>{int(comparison.get('quality_compatible', 0))}</div></div>"
-        f"<div class='card'><div class='label'>Performance Comparable</div><div class='value'>{int(comparison.get('performance_compatible', 0))}</div></div>"
+        f"<div class='card'><div class='label'>Quality Structurally Compatible</div><div class='value'>{int(comparison.get('quality_compatible', 0))}</div></div>"
+        f"<div class='card'><div class='label'>Performance Structurally Compatible</div><div class='value'>{int(comparison.get('performance_compatible', 0))}</div></div>"
+        f"<div class='card'><div class='label'>Provenance Verified</div><div class='value'>{int(comparison.get('provenance_verified', 0))}</div></div>"
         f"<div class='card'><div class='label'>Incompatible</div><div class='value'>{int(comparison.get('incompatible', 0))}</div></div>"
     )
     return f"""
@@ -4124,7 +4456,7 @@ def baseline_comparison_section_html(report: dict[str, Any]) -> str:
       <thead><tr><th>Workload</th><th>Quality</th><th>Performance</th><th>Boundary</th></tr></thead>
       <tbody>{"".join(rows)}</tbody>
     </table></div>
-    <div class="note">Quality comparison requires the same task, data, evaluator, and target contract. Performance comparison additionally requires matching checkpoint lineage and the complete comparison fingerprint. A blocked comparison is not a negative result; it means the runs answer different questions.</div>
+    <div class="note">Quality comparison requires the same task, data, evaluator, and target contract. Performance comparison additionally requires matching checkpoint lineage and the complete comparison fingerprint. A structurally compatible comparison is labeled exploratory until both provenance manifests verify. A blocked comparison is not a negative result; it means the runs answer different questions.</div>
   </section>
 """
 
@@ -4149,6 +4481,15 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
         for label, value in study_fields
         if value not in (None, "", [], {})
     )
+    aggregate_artifacts = report.get("artifacts") or {}
+    aggregate_manifest = (
+        aggregate_artifacts.get("provenance")
+        if isinstance(aggregate_artifacts, dict)
+        else None
+    )
+    experiment_evidence = report.get("experiment_evidence") or {}
+    if not isinstance(experiment_evidence, dict):
+        experiment_evidence = {}
     provenance_rows = "".join(
         f"<div class='definition-row'><dt>{escape(label)}</dt>"
         f"<dd><code>{escape(str(value))}</code></dd></div>"
@@ -4157,6 +4498,19 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
             ("Schema", plan.get("schema")),
             ("Source SHA-256", plan.get("source_sha256")),
             ("Source", plan.get("source")),
+            (
+                "Aggregate evidence manifest",
+                dashboard_artifact_label(aggregate_manifest),
+            ),
+            (
+                "Aggregate manifest verified",
+                "yes" if _comparison_provenance_verified(report) else "no",
+            ),
+            (
+                "Verified child manifests",
+                f"{experiment_evidence.get('verified_child_manifests', 0)} / "
+                f"{experiment_evidence.get('expected_child_manifests', 0)}",
+            ),
         )
         if value not in (None, "")
     )
@@ -4166,6 +4520,7 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
         if isinstance(item.get("experiment_run"), dict)
     }
     condition_rows: list[str] = []
+    performance_records: list[dict[str, Any]] = []
     for index, run in enumerate(plan.get("runs") or [], start=1):
         if not isinstance(run, dict):
             continue
@@ -4187,16 +4542,132 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
             quality_text = "Target not met"
         else:
             quality_text = "Pending"
+        requested_device = str(run.get("device") or "auto")
+        executed_device = str(result.get("device_executed") or "")
+        device_label = requested_device
+        if executed_device:
+            device_label += f" → {executed_device}"
         condition_rows.append(
             "<tr>"
             f"<td>{index}</td><td>{escape(str(run.get('name') or ''))}</td>"
+            f"<td>{escape(str(run.get('role') or 'condition'))}</td>"
             f"<td>{escape(str(run.get('workload') or ''))}</td>"
-            f"<td>{escape(mode)}</td><td>{escape(str(run.get('device') or 'auto'))}</td>"
+            f"<td>{escape(mode)}</td><td>{escape(device_label)}</td>"
             f"<td>{escape(str(run.get('repetitions') or 1))}</td>"
             f"<td><code>{escape(setting)}</code></td>"
             f"<td><span class='badge {status_class(status)}'>{escape(status)}</span>"
             f"<div>{escape(quality_text)}</div></td>"
             "</tr>"
+        )
+        metrics = result.get("metrics") or {}
+        performance_key = metric_key_for_throughput(metrics)
+        performance_value = metrics.get(performance_key) if performance_key else None
+        performance_base = (
+            performance_key.removesuffix("_mean") if performance_key else ""
+        )
+        if (
+            performance_key
+            and isinstance(performance_value, (int, float))
+            and not isinstance(performance_value, bool)
+            and math.isfinite(float(performance_value))
+            and float(performance_value) > 0
+        ):
+            performance_records.append(
+                {
+                    "name": str(run.get("name") or index),
+                    "role": str(run.get("role") or "condition"),
+                    "workload": str(
+                        result.get("workload") or run.get("workload") or "workload"
+                    ),
+                    "mode": str(result.get("mode") or run.get("mode") or ""),
+                    "phase": str(result.get("phase") or run.get("phase") or ""),
+                    "metric": performance_key,
+                    "value": float(performance_value),
+                    "range_min": metrics.get(f"{performance_base}_min"),
+                    "range_max": metrics.get(f"{performance_base}_max"),
+                    "quality_eligible": (
+                        result.get("status") == "passed"
+                        and quality_required_value(quality, False) is True
+                        and quality.get("target_met") is True
+                    ),
+                    "dataset": _comparison_dataset(result),
+                    "evaluator": _comparison_evaluator(result),
+                    "quality_contract": _comparison_quality_contract(result),
+                    "checkpoint": _comparison_checkpoint(result),
+                    "backend": result.get("backend"),
+                    "device": result.get("device_executed"),
+                    "config": strip_path_fields(
+                        copy.deepcopy(result.get("config") or {})
+                    ),
+                    "environment": dict(run.get("environment") or {}),
+                    "repetitions": run.get("repetitions"),
+                    "provenance_verified": _comparison_provenance_verified(result),
+                }
+            )
+    independent_variables = {
+        str(value) for value in study.get("independent_variables") or []
+    }
+    performance_html = experiment_performance_html(
+        performance_records, independent_variables=independent_variables
+    )
+    repetition_counts = {
+        int(run.get("repetitions") or 1)
+        for run in plan.get("runs") or []
+        if isinstance(run, dict)
+    }
+    if repetition_counts == {1}:
+        repetition_note = (
+            "One outer run supports initial quality and workflow review; it does "
+            "not establish a stable performance distribution."
+        )
+    else:
+        repetition_note = (
+            "Outer-run counts vary from "
+            f"{min(repetition_counts)} to {max(repetition_counts)}. Charts show "
+            "means and available min–max ranges; a stability claim still requires "
+            "the declared repetition protocol."
+        )
+    condition_failures = [
+        item
+        for item in report_items(report)
+        if item.get("status") != "passed"
+        or (
+            quality_required_value(item.get("quality") or {}, False) is True
+            and (item.get("quality") or {}).get("target_met") is not True
+        )
+    ]
+    evidence_failures = [
+        item
+        for item in report_items(report)
+        if item.get("status") != "execution_failed"
+        and not _comparison_provenance_verified(item)
+    ]
+    if condition_failures:
+        next_action = (
+            "At least one condition did not pass its quality contract. Treat the "
+            "condition as a diagnostic result, inspect its configuration and "
+            "quality card, and rerun the same plan after addressing the cause. "
+            "Performance comparison remains blocked."
+        )
+    elif evidence_failures:
+        next_action = (
+            "The recorded values passed their quality gates, but one or more "
+            "child provenance manifests did not verify. Treat the values as "
+            "exploratory, repair or regenerate the evidence, and do not use the "
+            "performance delta."
+        )
+    elif repetition_counts == {1}:
+        next_action = (
+            "The conditions passed initial quality review. Use the observed delta "
+            "to explain this machine and configuration, preserve the JSON, HTML, "
+            "CSV, and provenance files, and increase plan repetitions only when "
+            "starting the later stability phase."
+        )
+    else:
+        next_action = (
+            "The repeated conditions passed quality review. Inspect the displayed "
+            "ranges and the complete subrun evidence before making a stability "
+            "claim or promoting a baseline."
         )
     return f"""
   <section class="section" aria-labelledby="experiment-plan-heading">
@@ -4206,12 +4677,170 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
       <article class="detail-card"><h3>Plan Provenance</h3><dl>{provenance_rows}</dl></article>
     </div>
     <div class="table-scroll"><table>
-      <thead><tr><th>#</th><th>Condition</th><th>Workload</th><th>Mode</th><th>Device</th><th>Outer Runs</th><th>Declared Settings</th><th>Outcome</th></tr></thead>
+      <thead><tr><th>#</th><th>Condition</th><th>Role</th><th>Workload</th><th>Mode</th><th>Device</th><th>Outer Runs</th><th>Declared Settings</th><th>Outcome</th></tr></thead>
       <tbody>{"".join(condition_rows)}</tbody>
     </table></div>
-    <div class="note">Quality cards above are direction-aware small multiples. They share a 100% target-attainment boundary, not a raw metric axis. One outer run supports initial quality and workflow review; it does not establish a stable performance distribution.</div>
+    {performance_html}
+    <article class="detail-card next-action"><div class="eyebrow">Interpretation</div><h3>What This Means and What to Do Next</h3><p>{escape(next_action)}</p></article>
+    <div class="note">Quality cards above are direction-aware small multiples. They share a 100% target-attainment boundary, not a raw metric axis. {escape(repetition_note)}</div>
   </section>
 """
+
+
+EXPERIMENT_CONFIG_BINDINGS = {
+    "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "batch_size",
+    "MLPERF_EDU_MAX_LR": "learning_rate",
+}
+
+
+def experiment_performance_html(
+    records: list[dict[str, Any]], *, independent_variables: set[str]
+) -> str:
+    if len(records) < 2:
+        return ""
+    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    for record in records:
+        key = (
+            str(record["workload"]),
+            str(record["mode"]),
+            str(record["phase"]),
+            str(record["metric"]),
+        )
+        groups.setdefault(key, []).append(record)
+    charts: list[str] = []
+    for (workload, mode, phase, metric), items in sorted(groups.items()):
+        if len(items) < 2:
+            continue
+        reasons = controlled_experiment_reasons(
+            items, independent_variables=independent_variables
+        )
+        if reasons:
+            charts.append(
+                "<article class='detail-card experiment-chart'>"
+                f"<h3>{escape(workload)} · {escape(dashboard_metric_label(metric))}</h3>"
+                "<span class='badge warn'>comparison blocked</span>"
+                f"<div class='note'>{escape('; '.join(reasons))}</div></article>"
+            )
+            continue
+        maximum = max(float(item["value"]) for item in items)
+        baseline = next(
+            (float(item["value"]) for item in items if item["role"] == "baseline"),
+            None,
+        )
+        bars: list[str] = []
+        for item in items:
+            value = float(item["value"])
+            width = max(2.0, value / maximum * 100.0)
+            delta = ""
+            if baseline and item["role"] != "baseline":
+                delta = f" · {(value / baseline - 1.0) * 100.0:+.2f}% vs baseline"
+            range_text = ""
+            if isinstance(item.get("range_min"), (int, float)) and isinstance(
+                item.get("range_max"), (int, float)
+            ):
+                range_text = (
+                    f" · range {format_cell(item['range_min'])}–"
+                    f"{format_cell(item['range_max'])}"
+                )
+            bars.append(
+                "<div class='experiment-bar'>"
+                f"<div><strong>{escape(str(item['name']))}</strong>"
+                f"<span>{escape(str(item['role']))}</span></div>"
+                "<div class='experiment-bar-track'>"
+                f"<i style='width:{width:.2f}%'></i></div>"
+                f"<code>{escape(format_cell(value))}{escape(range_text)}{escape(delta)}</code></div>"
+            )
+        charts.append(
+            "<article class='detail-card experiment-chart'>"
+            f"<h3>{escape(workload)} · {escape(dashboard_metric_label(metric))}</h3>"
+            f"<div class='metric-kind'>{escape(' / '.join(part for part in (mode, phase) if part))}</div>"
+            "<span class='badge warn'>observed one-run delta</span>"
+            f"{''.join(bars)}</article>"
+        )
+    if not charts:
+        return ""
+    return (
+        "<div class='experiment-charts'>"
+        + "".join(charts)
+        + "</div>"
+    )
+
+
+def controlled_experiment_reasons(
+    items: list[dict[str, Any]], *, independent_variables: set[str]
+) -> list[str]:
+    reasons: list[str] = []
+    if sum(item.get("role") == "baseline" for item in items) != 1:
+        reasons.append("this workload and phase do not have exactly one baseline")
+    if any(item.get("quality_eligible") is not True for item in items):
+        reasons.append("every compared condition must pass the same quality gate")
+    if any(item.get("provenance_verified") is not True for item in items):
+        reasons.append("every compared condition must have verified provenance")
+    for label in ("dataset", "evaluator", "quality_contract", "backend", "device"):
+        if any(item.get(label) in (None, "", {}, []) for item in items):
+            reasons.append(f"{label.replace('_', ' ')} evidence is missing")
+        values = {
+            json.dumps(item.get(label), sort_keys=True, default=str) for item in items
+        }
+        if len(values) != 1:
+            reasons.append(f"{label.replace('_', ' ')} differs")
+    if items[0].get("mode") == "inference":
+        if any(item.get("checkpoint") in (None, "", {}, []) for item in items):
+            reasons.append("checkpoint lineage evidence is missing")
+        checkpoints = {
+            json.dumps(item.get("checkpoint"), sort_keys=True, default=str)
+            for item in items
+        }
+        if len(checkpoints) != 1:
+            reasons.append("checkpoint lineage differs")
+    if len({item.get("repetitions") for item in items}) != 1:
+        reasons.append("outer repetition counts differ")
+
+    environment_keys = set().union(
+        *(set((item.get("environment") or {}).keys()) for item in items)
+    )
+    changed_environment = {
+        key
+        for key in environment_keys
+        if len({(item.get("environment") or {}).get(key) for item in items}) > 1
+    }
+    if changed_environment != independent_variables:
+        reasons.append(
+            "actual setting differences do not exactly match the declared independent variables"
+        )
+    unsupported = changed_environment - set(EXPERIMENT_CONFIG_BINDINGS)
+    if unsupported:
+        reasons.append(
+            "no controlled-comparison adapter exists for " + ", ".join(sorted(unsupported))
+        )
+    controlled_fields = {
+        EXPERIMENT_CONFIG_BINDINGS[key]
+        for key in changed_environment
+        if key in EXPERIMENT_CONFIG_BINDINGS
+    }
+    normalized_configs = []
+    for item in items:
+        config = dict(item.get("config") or {})
+        environment = item.get("environment") or {}
+        for key in changed_environment - unsupported:
+            field = EXPERIMENT_CONFIG_BINDINGS[key]
+            if field not in config or not equivalent_plan_value(
+                config[field], environment.get(key)
+            ):
+                reasons.append(f"reported config.{field} does not match planned {key}")
+        for field in controlled_fields:
+            config.pop(field, None)
+        normalized_configs.append(json.dumps(config, sort_keys=True, default=str))
+    if len(set(normalized_configs)) != 1:
+        reasons.append("undeclared configuration fields differ")
+    return list(dict.fromkeys(reasons))
+
+
+def equivalent_plan_value(actual: Any, planned: Any) -> bool:
+    try:
+        return math.isclose(float(actual), float(planned), rel_tol=0.0, abs_tol=1e-12)
+    except (TypeError, ValueError):
+        return str(actual) == str(planned)
 
 
 def write_html_report(
@@ -4257,7 +4886,7 @@ def write_html_report(
     provenance_html = provenance_section_html(report)
     body_rows = "\n".join(
         "<tr>"
-        f"<td>{escape(str(row.get('workload', '')))}</td>"
+        f"<td>{escape(dashboard_row_label(row))}</td>"
         f"<td>{escape(str(row.get('suite', '')))}</td>"
         f"<td>{escape(str(row.get('profile', '')))}</td>"
         f"<td><span class='badge {status_class(str(row.get('status', '')))}'>{escape(str(row.get('status', '')))}</span></td>"
@@ -4325,6 +4954,7 @@ def write_html_report(
     .metric-observation {{ margin-top: -5px; color: var(--muted); font-size: 12px; }}
     .metric-target {{ margin-top: 8px; color: var(--muted); font-weight: 600; }}
     .metric-kind {{ margin-top: 3px; color: var(--muted); font-size: 12px; text-transform: capitalize; }}
+    .metric-source {{ margin-top: 8px; color: var(--muted); font-size: 11px; }}
     .attainment {{ margin-top: 12px; }}
     .detail-grid {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; }}
     .detail-card {{ background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }}
@@ -4347,6 +4977,14 @@ def write_html_report(
     .comparison-bars span, .comparison-bars small {{ color: var(--muted); font-size: 11px; }}
     .comparison-bars i {{ display: block; height: 8px; background: #84adff; border-radius: 999px; }}
     .comparison-bars i.current {{ background: var(--accent); }}
+    .experiment-charts {{ display: grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 14px; margin-top: 14px; }}
+    .experiment-bar {{ display: grid; grid-template-columns: minmax(110px, .7fr) minmax(100px, 1fr) minmax(145px, auto); gap: 12px; align-items: center; margin-top: 12px; }}
+    .experiment-bar span {{ display: block; color: var(--muted); font-size: 11px; text-transform: capitalize; }}
+    .experiment-bar-track {{ height: 10px; overflow: hidden; background: #eaecf0; border-radius: 999px; }}
+    .experiment-bar-track i {{ display: block; height: 100%; background: var(--accent); border-radius: inherit; }}
+    .next-action {{ margin-top: 14px; border-color: #84adff; background: var(--accent-soft); }}
+    .next-action h3 {{ margin-top: 4px; }}
+    .next-action p {{ margin: 8px 0 0; }}
     code {{ font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace; overflow-wrap: anywhere; white-space: normal; }}
     table {{ width: 100%; border-collapse: collapse; background: var(--surface); border: 1px solid var(--line); border-radius: 10px; overflow: hidden; }}
     th, td {{ text-align: left; padding: 10px 12px; border-bottom: 1px solid var(--line); vertical-align: top; }}
@@ -4363,6 +5001,9 @@ def write_html_report(
       header, .section-heading {{ align-items: flex-start; flex-direction: column; }}
       .meta, .section-summary {{ text-align: left; }}
       .lineage-flow {{ grid-template-columns: 1fr; }}
+      .experiment-charts {{ grid-template-columns: minmax(0, 1fr); }}
+      .experiment-bar {{ grid-template-columns: minmax(90px, .7fr) minmax(80px, 1fr); }}
+      .experiment-bar code {{ grid-column: 1 / -1; }}
       .lineage-stage:not(:last-child)::after {{ content: "↓"; right: auto; left: 4px; top: calc(100% + 1px); }}
     }}
   </style>
@@ -4376,7 +5017,7 @@ def write_html_report(
     </div>
     <div class="meta">
       <div>{escape(str(generated_at))}</div>
-      <div>{escape(str(source_path))}</div>
+      <div>{escape(source_path.name)}</div>
     </div>
   </header>
   {quality_html}
@@ -4552,7 +5193,7 @@ def assets_section_html(report: dict[str, Any]) -> str:
             continue
         asset_rows.append(
             "<tr>"
-            f"<td>{escape(str(row.get('workload', '')))}</td>"
+            f"<td>{escape(dashboard_row_label(row))}</td>"
             f"<td>{escape(format_cell(row.get('dataset')))}</td>"
             f"<td>{escape(format_cell(row.get('dataset_license_status')))}</td>"
             f"<td>{escape(format_cell(row.get('dataset_public_release_status')))}</td>"
@@ -4585,15 +5226,55 @@ def assets_section_html(report: dict[str, Any]) -> str:
 
 
 def format_hardware_value(value: Any) -> str:
-    if isinstance(value, (dict, list, tuple)):
-        return json.dumps(value, sort_keys=True)
-    return format_cell(value)
+    safe_value = dashboard_safe_value(value)
+    if isinstance(safe_value, (dict, list, tuple)):
+        return json.dumps(safe_value, sort_keys=True)
+    return format_cell(safe_value)
+
+
+def dashboard_safe_value(value: Any) -> Any:
+    """Keep machine-local absolute paths out of the human-facing dashboard."""
+    if isinstance(value, dict):
+        return {key: dashboard_safe_value(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [dashboard_safe_value(item) for item in value]
+    if isinstance(value, str) and Path(value).is_absolute():
+        return f"local-environment:{Path(value).name or 'root'}"
+    return value
+
+
+def dashboard_artifact_label(value: Any, *, empty: str = "") -> str:
+    if value in (None, ""):
+        return empty
+    text = str(value)
+    if "!/" in text:
+        archive, member = text.split("!/", 1)
+        return f"{Path(archive).name}!/{member}"
+    return Path(text).name if Path(text).is_absolute() else text
 
 
 def report_items(report: dict[str, Any]) -> list[dict[str, Any]]:
     if isinstance(report.get("workloads"), list):
         return report["workloads"]
     return [report]
+
+
+def dashboard_run_label(item: dict[str, Any], *, default: str = "Run") -> str:
+    workload = str(item.get("workload") or item.get("id") or default)
+    experiment_run = item.get("experiment_run") or {}
+    if not isinstance(experiment_run, dict) or not experiment_run.get("name"):
+        return workload
+    role = str(experiment_run.get("role") or "condition")
+    return f"{workload} · {experiment_run['name']} ({role})"
+
+
+def dashboard_row_label(row: dict[str, Any]) -> str:
+    workload = str(row.get("workload") or "")
+    name = str(row.get("experiment_run_name") or "")
+    if not name:
+        return workload
+    role = str(row.get("experiment_run_role") or "condition")
+    return f"{workload} · {name} ({role})"
 
 
 def report_rows(report: dict[str, Any]) -> list[dict[str, Any]]:
@@ -4670,6 +5351,7 @@ def report_row(
         "run_selector": run_selector,
         "experiment_id": experiment_run.get("plan_id", ""),
         "experiment_run_name": experiment_run.get("name", ""),
+        "experiment_run_role": experiment_run.get("role", ""),
         "experiment_run_index": experiment_run.get("index", ""),
         "plan_source_sha256": experiment_run.get("plan_source_sha256", ""),
         "planned_device": experiment_run.get("device", ""),
@@ -5144,6 +5826,20 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
     )
     workload_id = report.get("workload") or manifest.get("workload", "unknown")
     registry_workload = registry_workload_for_id(str(workload_id))
+    canonical_quality_errors: list[str] = []
+    if quality_required:
+        if registry_workload is None:
+            canonical_quality_errors.append(
+                f"no registry quality contract exists for {workload_id}"
+            )
+        else:
+            try:
+                validate_pro_quality_contract(registry_workload, report)
+            except ValueError as exc:
+                canonical_quality_errors.append(str(exc))
+    canonical_quality_verified = not canonical_quality_errors
+    passed = bool(passed and canonical_quality_verified)
+    quality_ready = bool(quality_ready and canonical_quality_verified)
     mode = report.get("mode")
     if mode is None and registry_workload:
         modes = list(registry_workload.raw.get("modes") or [])
@@ -5176,14 +5872,16 @@ def grade_manifest(manifest_path: Path) -> dict[str, Any]:
         "verified": result.all_ok,
         "passed": passed,
         "quality_ready": quality_ready,
+        "canonical_quality_verified": canonical_quality_verified,
         "metric": metric_key or metric_name or "",
         "value": metrics.get(metric_key) if metric_key else "",
         "target": quality.get("target", ""),
         "direction": quality.get("direction", ""),
         "quality_required": quality_required,
         "target_met": target_met,
-        "warning_count": 0,
-        "warnings": [],
+        "warning_count": len(canonical_quality_errors),
+        "warnings": canonical_quality_errors,
+        "verification_errors": canonical_quality_errors,
     }
 
 
@@ -5759,10 +6457,11 @@ def package_dataset_policy_issue(manifest: dict[str, Any]) -> str | None:
         return None
     dossier = asset_dossier(dataset_name)
     release_status = str(dossier.get("public_release_status") or "")
-    if release_status not in {"restricted-needs-approval", "needs-release-decision"}:
+    if release_status in {"public-ok-bundled", "public-ok-with-attribution"}:
         return None
     policy = str(
-        dossier.get("public_release_policy") or "Resolve the dataset release policy."
+        dossier.get("public_release_policy")
+        or "Use external asset references instead of redistributing dataset bytes."
     )
     return f"{dataset_name} has release status {release_status}. {policy}"
 

@@ -324,17 +324,59 @@ def test_pro_profile_repeats_max_runner_and_emits_reviewable_artifacts(
     manifest_path = tmp_path / "image-classification_pro.provd.json"
     assert json.loads(report_path.read_text())["status"] == "passed"
     assert json.loads(manifest_path.read_text())["workload"] == "image-classification"
+    report["experiment_run"] = {
+        "plan_id": "fixture-plan",
+        "plan_source_sha256": "sha256:fixture",
+        "index": 1,
+        "name": "fixture-condition",
+        "role": "baseline",
+        "device": "cpu",
+        "repetitions": 2,
+        "environment": {},
+    }
     edu_cli.export_workload_reports([report], {workload.id: workload})
+    stored_report = json.loads(report_path.read_text())
+    assert stored_report["experiment_run"]["name"] == "fixture-condition"
+    assert edu_cli.verify_provd(
+        manifest_path, repo_root=edu_cli.find_project_root()
+    ).all_ok
     assert report_path.with_suffix(".html").is_file()
     assert report_path.with_suffix(".csv").is_file()
     pro_html = report_path.with_suffix(".html").read_text()
     assert "Quality Results" in pro_html
     assert "Target attainment" in pro_html
     assert "102.4%" in pro_html
+    assert "image-classification · fixture-condition (baseline)" in pro_html
+    assert str(tmp_path) not in pro_html
     grade = edu_cli.grade_manifest(manifest_path)
     assert grade["verified"] is True
     assert grade["passed"] is True
     assert grade["quality_ready"] is True
+
+
+def test_pro_profile_rejects_runner_quality_contract_drift(tmp_path, monkeypatch):
+    workload = load_registry()["image-classification"]
+
+    def max_runner(_workload, _output_dir):
+        return {
+            "status": "passed",
+            "metrics": {"top1_accuracy": 0.99},
+            "quality": {
+                "metric": "top1_accuracy",
+                "target": 0.99,
+                "quality_required": True,
+                "target_met": True,
+            },
+        }
+
+    monkeypatch.setattr(
+        edu_cli,
+        "load_runner",
+        lambda _workload, profile: max_runner if profile == "max" else None,
+    )
+
+    with pytest.raises(ValueError, match="differs from the registry"):
+        edu_cli.run_workload(workload, "pro", tmp_path)
 
 
 def test_pro_profile_preserves_functional_only_max_readiness(tmp_path, monkeypatch):
@@ -651,7 +693,7 @@ def test_dashboard_derives_quality_results_and_target_attainment():
     html = edu_cli.quality_dashboard_html(report)
 
     assert "Quality Results" in html
-    assert "1 of 2 authoritative quality targets met" in html
+    assert "1 of 2 quality targets met" in html
     assert "Quality targets met" in html
     assert "1 / 2" in html
     assert "Target attainment" in html
@@ -1465,7 +1507,7 @@ def test_package_and_grade_verified_manifest(tmp_path):
     result = run_cli(
         "run",
         "--workload",
-        "causal-language-modeling",
+        "image-classification",
         "--profile",
         "min",
         "--output-dir",
@@ -1473,8 +1515,8 @@ def test_package_and_grade_verified_manifest(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
 
-    manifest_path = tmp_path / "causal-language-modeling_training_min.provd.json"
-    report_path = tmp_path / "causal-language-modeling_training_min_report.json"
+    manifest_path = tmp_path / "image-classification_min.provd.json"
+    report_path = tmp_path / "image-classification_min_report.json"
     package_path = tmp_path / "submission.zip"
     grade_path = tmp_path / "grade.json"
 
@@ -1508,7 +1550,7 @@ def test_package_and_grade_verified_manifest(tmp_path):
     assert f"report/{report_path.with_suffix('.html').name}" in names
     assert f"report/{report_path.with_suffix('.csv').name}" in names
     assert index["schema"] == "mlperf-edu-package/0.2"
-    assert index["workload"] == "causal-language-modeling"
+    assert index["workload"] == "image-classification"
     assert all(check["ok"] for check in index["verification"])
     assert index["source_manifest"] == f"manifest/{manifest_path.name}"
     assert all(not os.path.isabs(item["path"]) for item in index["included_files"])
@@ -1532,7 +1574,7 @@ def test_package_and_grade_verified_manifest(tmp_path):
     assert summary["passed"] == 1
     assert summary["failed"] == 0
     assert summary["warning_count"] == 0
-    assert summary["results"][0]["workload"] == "causal-language-modeling"
+    assert summary["results"][0]["workload"] == "image-classification"
     assert summary["results"][0]["verified"] is True
     assert summary["results"][0]["quality_required"] is False
     assert "gated" not in summary["results"][0]
@@ -1545,11 +1587,10 @@ def test_package_and_grade_verified_manifest(tmp_path):
     assignment_path.write_text(
         """\
 schema: mlperf-edu-assignment/0.1
-id: nanogpt-setup-lab
+id: image-classification-portable-readiness-lab
 requirements:
-  - workload: causal-language-modeling
+  - workload: image-classification
     profile: min
-    mode: training
     count: 1
     quality:
       required: false
@@ -1564,7 +1605,10 @@ requirements:
         str(package_grade_path),
     )
     assert package_grade.returncode == 0, package_grade.stdout + package_grade.stderr
-    assert "Assignment nanogpt-setup-lab: passed" in package_grade.stdout
+    assert (
+        "Assignment image-classification-portable-readiness-lab: passed"
+        in package_grade.stdout
+    )
     package_summary = json.loads(package_grade_path.read_text())
     assert package_summary["assignment"]["passed"] is True
     assert package_summary["results"][0]["package_verified"] is True
@@ -1649,7 +1693,8 @@ def test_report_baseline_comparison_separates_quality_and_performance(tmp_path):
     assert html_compare.returncode == 0, html_compare.stdout + html_compare.stderr
     html = html_path.read_text()
     assert "Baseline Comparison" in html
-    assert "Quality Comparable" in html
+    assert "Quality Structurally Compatible" in html
+    assert "exploratory" in html
     assert "comparison-bars" in html
 
     current_report["config"]["batch_size"] = 64
@@ -1765,6 +1810,16 @@ def test_package_policy_allows_open_or_artifact_free_datasets():
     unresolved_without_bytes = {"leaves": {"dataset": {"name": "cifar10", "files": []}}}
     assert package_dataset_policy_issue(fashion) is None
     assert package_dataset_policy_issue(unresolved_without_bytes) is None
+
+    fetch_only = {
+        "leaves": {
+            "dataset": {
+                "name": "tinyshakespeare",
+                "files": [{"path": "/tmp/input.txt", "sha256": "sha256:fixture"}],
+            }
+        }
+    }
+    assert "public-ok-fetch-only" in package_dataset_policy_issue(fetch_only)
 
 
 def test_package_carries_all_manifest_dependencies_and_survives_source_removal(
@@ -1912,6 +1967,48 @@ def test_grade_uses_quality_required_not_legacy_gated(tmp_path):
     assert summary["results"][0]["quality_required"] is True
     assert "gated" not in summary["results"][0]
     assert summary["results"][0]["target_met"] is False
+
+
+def test_grade_rejects_verified_report_with_lowered_registry_target(tmp_path):
+    report_path = tmp_path / "image-classification_max_report.json"
+    manifest_path = tmp_path / "image-classification_max.provd.json"
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "workload": "image-classification",
+        "profile": "max",
+        "mode": "inference",
+        "status": "passed",
+        "metrics": {"top1_accuracy": 0.80},
+        "quality": {
+            "metric": "top1_accuracy",
+            "target": 0.80,
+            "direction": "higher",
+            "tolerance": 0.0,
+            "quality_required": True,
+            "target_met": True,
+        },
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    manifest = build_provd(
+        workload="image-classification",
+        scenario="offline",
+        division="open",
+        hardware_fingerprint={"platform": "test"},
+        report=report,
+        report_path=report_path,
+        repo_root=PROJECT_ROOT,
+    )
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
+
+    grade = edu_cli.grade_manifest(manifest_path)
+
+    assert grade["verified"] is True
+    assert grade["canonical_quality_verified"] is False
+    assert grade["passed"] is False
+    assert grade["quality_ready"] is False
+    assert "differs from the registry" in grade["warnings"][0]
 
 
 def test_nanogpt_min_run_writes_verifiable_artifacts(tmp_path):

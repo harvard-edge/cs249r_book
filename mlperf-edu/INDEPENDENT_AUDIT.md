@@ -76,9 +76,42 @@ introductory classroom pilot. Their highest-priority findings were addressed.
 - The report clearly labels `min` as setup evidence with no baseline or quality
   claim.
 
-The remaining classroom blockers are product features rather than benchmark
-identity defects. The suite still needs an assignment contract, packaged-result
-grading, examples, and compatibility-checked baseline comparison.
+The first review identified missing assignment contracts, packaged-result
+grading, complete examples, and compatibility-checked comparison. Those product
+features are now implemented.
+
+## Repeated Product Review
+
+A second simulated review used the rendered dashboard, numbered labs, generated
+website, CLI dry runs, and desktop and narrow layout evidence. The reviewers did
+not receive a promised verdict; they were asked to find blockers.
+
+The student, TA, and research reviewers initially returned no-go decisions. The
+highest-risk findings were valid and are now enforced in code and tests.
+
+- A plan cannot change the registry quality target, inherit an ambient target
+  override, or report a different metric, target, direction, tolerance, or
+  decision.
+- A controlled performance delta requires every participating child manifest
+  to verify. The aggregate fails closed unless it binds every nonfailed child
+  manifest.
+- Assignment grading rechecks the canonical registry quality contract and
+  recomputes the decision instead of trusting a submitted `target_met` field.
+- The dashboard leads with child-manifest verification and experimental public
+  status. It no longer calls a passing value an authoritative public result.
+- The portable-package lab now uses an artifact-free `min` result. The package
+  command rejects fetch-only and release-review dataset bytes instead of
+  contradicting the dataset policy.
+- The health, inference, comparison, and packaging labs now request complete
+  evidence trees or unambiguous source artifacts. All five labs are rendered in
+  the website navigation.
+
+The repeated review supports a supervised pilot for Labs 01, 02, 04, and 05.
+Lab 03 is explicitly a take-home accelerator exercise until the product can
+bind a precomputed instructor baseline into a candidate-only plan. Automated
+allowed-plan-diff grading and measured course-image resource budgets also remain
+open. These are product-readiness limits, not reasons to change the fourteen
+benchmark identities or lower their quality targets.
 
 ## Primary Sources
 
@@ -93,9 +126,10 @@ grading, examples, and compatibility-checked baseline comparison.
 
 ## Sign-Off Boundary
 
-The suite is approved for the next spiral as an experimental classroom and
-research preview. This approval covers workload selection, initial target
-contracts, one-result quality evaluation, the `min` health journey, and
-fail-closed authoritative runners. It does not cover promoted performance
-baselines, timing stability, public production release, or external benchmark
-governance.
+The suite is approved for the next spiral as an experimental, supervised
+classroom and research design preview. This approval covers workload selection,
+initial target contracts, one-result quality evaluation, the `min` health
+journey, provenance-gated controlled comparisons, canonical assignment grading,
+and fail-closed authoritative runners. It does not cover an unsupervised course
+release, promoted performance baselines, timing stability, public production
+release, or external benchmark governance.
