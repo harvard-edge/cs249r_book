@@ -59,6 +59,8 @@ MAX_NEW_TOKENS = 4096
 PROGRESS_INTERVAL = 10
 TARGET_ACCURACY = 0.8292
 EXPECTED_EXAMPLES = 1150
+BFCL_IMPORT_PACKET_ENV = "MLPERF_EDU_BFCL_IMPORT_PACKET"
+BFCL_IMPORT_PACKET_SCHEMA = "mlperf-edu-bfcl-generation-evidence/0.1"
 BFCL_REFERENCE_FAILING_TASKS = (
     "simple_java_36",
     "simple_java_64",
@@ -501,6 +503,136 @@ def _load_resumable_samples(
     return samples
 
 
+def _resolve_packet_file(packet_path: Path, value: Any, *, label: str) -> Path:
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"BFCL import packet {label} must be a nonempty path")
+    candidate = Path(value).expanduser()
+    if not candidate.is_absolute():
+        candidate = packet_path.parent / candidate
+    candidate = candidate.resolve()
+    if not candidate.is_file():
+        raise FileNotFoundError(f"BFCL import packet {label} is missing: {candidate}")
+    return candidate
+
+
+def import_bfcl_generation_evidence(
+    *, packet_path: Path, tasks: list[dict[str, Any]], samples_path: Path
+) -> tuple[list[dict[str, Any]], dict[str, Any], list[Path]]:
+    """Import a complete, hash-bound BFCL generation campaign for rescoring."""
+    packet_path = packet_path.expanduser().resolve()
+    if not packet_path.is_file():
+        raise FileNotFoundError(f"BFCL import packet is missing: {packet_path}")
+    try:
+        packet = json.loads(packet_path.read_text())
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"invalid BFCL import packet JSON: {packet_path}") from exc
+    if not isinstance(packet, dict) or packet.get("schema") != BFCL_IMPORT_PACKET_SCHEMA:
+        raise ValueError(
+            f"BFCL import packet schema must be {BFCL_IMPORT_PACKET_SCHEMA}"
+        )
+    if packet.get("model") != {"id": MODEL_ID, "revision": MODEL_REVISION}:
+        raise ValueError("BFCL import packet model pin does not match the runner")
+    if packet.get("dataset_revision") != BFCL_COMMIT:
+        raise ValueError("BFCL import packet dataset revision does not match the runner")
+    generation = packet.get("generation")
+    if not isinstance(generation, dict):
+        raise ValueError("BFCL import packet must describe the generation runtime")
+    backend = generation.get("backend")
+    execution_dtype = generation.get("execution_dtype")
+    if not isinstance(backend, str) or not backend:
+        raise ValueError("BFCL import packet generation backend must be nonempty")
+    if execution_dtype not in {"float32", "bfloat16"}:
+        raise ValueError("BFCL import packet execution dtype is unsupported")
+    if generation.get("decoding") != "greedy":
+        raise ValueError("BFCL import packet must bind greedy decoding")
+
+    results = packet.get("results")
+    if not isinstance(results, dict) or set(results) != set(CATEGORY_COUNTS):
+        raise ValueError("BFCL import packet must bind all six result categories")
+    task_by_category = {
+        category: [task for task in tasks if task["category"] == category]
+        for category in CATEGORY_COUNTS
+    }
+    imported_by_id: dict[str, dict[str, Any]] = {}
+    source_files: list[Path] = [packet_path]
+    file_evidence: dict[str, Any] = {}
+    for category, expected_count in CATEGORY_COUNTS.items():
+        entry = results[category]
+        if not isinstance(entry, dict):
+            raise ValueError(f"BFCL import entry is invalid for {category}")
+        path = _resolve_packet_file(packet_path, entry.get("path"), label=category)
+        expected_digest = entry.get("sha256")
+        if expected_digest != f"sha256:{sha256_file(path)}":
+            raise ValueError(f"BFCL import SHA-256 mismatch for {category}")
+        records = _read_jsonl(path)
+        category_tasks = task_by_category[category]
+        if len(records) != expected_count or entry.get("examples") != expected_count:
+            raise ValueError(f"BFCL import count mismatch for {category}")
+        for task, record in zip(category_tasks, records, strict=True):
+            if record.get("id") != task["id"]:
+                raise ValueError(f"BFCL import task order changed for {category}")
+            if record.get("audit_execution") != backend:
+                raise ValueError(f"BFCL import backend changed for {task['id']}")
+            response = record.get("result")
+            input_tokens = record.get("input_token_count")
+            output_tokens = record.get("output_token_count")
+            latency = record.get("latency")
+            if (
+                not isinstance(response, str)
+                or not isinstance(input_tokens, int)
+                or input_tokens <= 0
+                or not isinstance(output_tokens, int)
+                or output_tokens <= 0
+                or not isinstance(latency, (int, float))
+                or not math.isfinite(float(latency))
+                or float(latency) <= 0
+            ):
+                raise ValueError(f"BFCL import measurement is invalid for {task['id']}")
+            imported_by_id[task["id"]] = {
+                "id": task["id"],
+                "category": category,
+                "task_fingerprint": task["fingerprint"],
+                "model_revision": MODEL_REVISION,
+                "response": clean_qwen_response(response),
+                "input_tokens": input_tokens,
+                "output_tokens": output_tokens,
+                "latency_seconds": float(latency),
+            }
+        source_files.append(path)
+        file_evidence[category] = {
+            "path": str(path),
+            "sha256": expected_digest,
+            "examples": expected_count,
+        }
+
+    samples = [imported_by_id[task["id"]] for task in tasks]
+    if len(samples) != EXPECTED_EXAMPLES:
+        raise ValueError("BFCL import did not cover all 1,150 tasks")
+    if samples_path.is_file():
+        if _read_jsonl(samples_path) != samples:
+            raise ValueError(
+                "BFCL import conflicts with the existing canonical samples file"
+            )
+    else:
+        temporary = samples_path.with_suffix(samples_path.suffix + ".tmp")
+        with temporary.open("w", encoding="utf-8") as handle:
+            for sample in samples:
+                handle.write(json.dumps(sample, ensure_ascii=False) + "\n")
+        os.replace(temporary, samples_path)
+
+    evidence = {
+        "mode": "imported-hash-bound-generation",
+        "schema": BFCL_IMPORT_PACKET_SCHEMA,
+        "packet": str(packet_path),
+        "packet_sha256": f"sha256:{sha256_file(packet_path)}",
+        "backend": backend,
+        "execution_dtype": execution_dtype,
+        "examples": len(samples),
+        "files": file_evidence,
+    }
+    return samples, evidence, source_files
+
+
 def _generate_samples(
     *,
     model: Any,
@@ -628,6 +760,17 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
         )
 
     snapshot = _snapshot_model(workload)
+    generation_evidence: dict[str, Any] | None = None
+    generation_source_files: list[Path] = []
+    import_packet = os.environ.get(BFCL_IMPORT_PACKET_ENV)
+    if import_packet:
+        _, generation_evidence, generation_source_files = (
+            import_bfcl_generation_evidence(
+                packet_path=Path(import_packet),
+                tasks=tasks,
+                samples_path=samples_path,
+            )
+        )
     samples = _load_resumable_samples(samples_path, tasks)
     resumed_examples = len(samples)
     execution_dtype = torch.float32
@@ -684,8 +827,17 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
         "suite": workload.suite,
         "profile": "max",
         "status": "passed" if target_met else "quality_failed",
-        "backend": f"pytorch-{device.type}",
-        "data_mode": "real",
+        "backend": (
+            f"{generation_evidence['backend']}-generation/"
+            f"pytorch-{device.type}-evaluation"
+            if generation_evidence
+            else f"pytorch-{device.type}"
+        ),
+        "data_mode": (
+            "real-imported-generation-evidence"
+            if generation_evidence
+            else "real"
+        ),
         "model": {
             "id": MODEL_ID,
             "revision": MODEL_REVISION,
@@ -734,6 +886,13 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
             "transformers_version": transformers.__version__,
         },
         "seed": seed,
+        "generation_evidence": generation_evidence
+        or {
+            "mode": "current-run-or-exact-resume",
+            "backend": f"pytorch-{device.type}",
+            "execution_dtype": str(execution_dtype).removeprefix("torch."),
+            "examples": len(samples),
+        },
         "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
             "evaluation_examples": len(tasks),
@@ -746,6 +905,11 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
             "attention_implementation": "eager",
             "aggregation": "official-non-live-ast-summary",
             "resumable_prefix_examples": resumed_examples,
+            "generation_source": (
+                "imported-hash-bound-generation"
+                if generation_evidence
+                else "current-run-or-exact-resume"
+            ),
         },
         "metrics": {
             "non_live_ast_accuracy": score,
@@ -778,6 +942,9 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
             "stage": "quality-conformance",
             "end_to_end_execution": True,
             "authoritative_quality_contract_executed": True,
+            "current_invocation_generated_model_outputs": not bool(
+                generation_evidence
+            ),
             "repeatability_verified": False,
             "promotion_eligible": False,
             "next_stage": "stability" if target_met else "quality-target-review",
@@ -788,6 +955,9 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
             "weights": str(snapshot),
             "samples": str(samples_path),
             "evaluation_results": str(results_path),
+            "generation_packet": (
+                generation_evidence["packet"] if generation_evidence else None
+            ),
         },
     }
     report_path.write_text(
@@ -811,6 +981,7 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
         dataset_files=[
             paths["archive"],
             *dataset_asset.files,
+            *generation_source_files,
             samples_path,
             results_path,
         ],

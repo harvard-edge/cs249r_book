@@ -50,7 +50,7 @@ uv run mlperf run --workload image-classification --profile max \
 | `graph-node-classification` | Official OGB GCN recipe on `ogbn-arxiv` | training | test accuracy within the published GCN reference tolerance |
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | reproduce the published test MSE of 0.290; the current 0.292393 result misses |
 | `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; first complete result reached 0.554878 and did not meet the unchanged target |
-| `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; complete authoritative runner ready, current full artifact pending |
+| `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; the complete 1,150-case result reached 0.785208 and did not meet the unchanged target |
 | `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; complete runner ready, execution gated on licensed data and a 256-GB-class environment |
 | `image-generation` | NVIDIA EDM and the three-trial CIFAR-10 FID protocol | inference | published 1.79 minimum FID across three 50,000-image trials; measured minimum 1.801554, with a current packet still needed |
 | `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; complete resumable runner gated on a reviewed legacy GPU environment |
@@ -65,6 +65,16 @@ For the current quality-readiness milestone, one complete authoritative run is
 enough to accept or reject a quality target. The complete required evaluation
 set and every declared quality gate still apply. Repeated runs and timing
 variation remain part of the later promotion and stability phase.
+
+A max runner may rescore retained model outputs only through an explicit,
+hash-bound import packet. For BFCL, set `MLPERF_EDU_BFCL_IMPORT_PACKET` to a
+`mlperf-edu-bfcl-generation-evidence/0.1` JSON packet that binds the exact
+model and dataset revisions, generation backend, execution dtype, greedy
+decoding, and SHA-256 digest and count of every category result file. The
+runner rejects missing categories, changed bytes, task-order drift, model
+drift, and conflicts with an existing canonical sample file. The report labels
+the generation as imported and records whether the current invocation generated
+the model outputs. Importing evidence never turns a target miss into a pass.
 
 ## Workload Identity
 

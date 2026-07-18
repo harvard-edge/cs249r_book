@@ -157,7 +157,7 @@ def test_functional_stage_workloads_separate_probe_from_quality_contract():
     workloads = load_registry()
     expected_status = {
         "code-generation": "quality-audited-target-not-met",
-        "function-calling": "runnable-quality-conformance",
+        "function-calling": "quality-audited-target-not-met",
         "recommendation": "environment-gated-quality-conformance",
         "image-generation": "quality-audited-target-not-met",
         "reinforcement-learning": "environment-gated-quality-conformance",
