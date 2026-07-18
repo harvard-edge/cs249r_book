@@ -725,7 +725,7 @@ def test_dashboard_derives_quality_results_and_target_attainment():
             },
             {
                 "workload": "quality-fail",
-                "status": "passed",
+                "status": "quality_failed",
                 "quality": {
                     "quality_required": True,
                     "metric": "fid",
@@ -748,7 +748,48 @@ def test_dashboard_derives_quality_results_and_target_attainment():
     assert "Target attainment" in html
     assert "112.5%" in html
     assert "99.4%" in html
+    assert "Target not met" in html
+    assert "Run failed" not in html
     assert "Functional Readiness" not in html
+
+
+def test_dashboard_keeps_nonpass_states_distinct():
+    report = {
+        "workloads": [
+            {
+                "workload": "environment-gated",
+                "status": "not_implemented",
+                "max_execution": "environment-gated-quality-conformance",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "skipped",
+                "status": "skipped",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "unsupported",
+                "status": "unsupported",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "execution-failed",
+                "status": "execution_failed",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+        ]
+    }
+
+    html = edu_cli.quality_dashboard_html(report)
+
+    assert "Environment gated" in html
+    assert "Skipped" in html
+    assert "Unsupported" in html
+    assert "Run failed" in html
 
 
 def test_dashboard_uses_separate_meters_for_mixed_results():
@@ -1127,14 +1168,14 @@ def test_fetch_manual_quality_assets_returns_actionable_nonzero_status():
         "fetch", "--workload", "recommendation", "--profile", "max"
     )
     assert recommendation.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in recommendation.stdout
+    assert "MANUAL ACTION REQUIRED" in " ".join(recommendation.stdout.split())
     assert "unshuffled day 23" in recommendation.stdout
 
     reinforcement = run_cli(
         "fetch", "--workload", "reinforcement-learning", "--profile", "max"
     )
     assert reinforcement.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in reinforcement.stdout
+    assert "MANUAL ACTION REQUIRED" in " ".join(reinforcement.stdout.split())
     assert "professional-move inputs" in reinforcement.stdout
 
 
@@ -1238,6 +1279,18 @@ def test_health_dry_run_uses_all_registered_min_paths(tmp_path):
     assert "min-all" in result.stdout
     assert "all workloads" in result.stdout
     assert not any(tmp_path.iterdir())
+
+
+def test_health_success_points_to_authoritative_quality_journey(monkeypatch, capsys):
+    monkeypatch.setattr(edu_cli, "cmd_validate", lambda _args: 0)
+    args = edu_cli.build_parser().parse_args(["health"])
+
+    assert edu_cli.cmd_health(args) == 0
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "Next: choose a workload" in output
+    assert "mlperf show <workload>" in output
+    assert "mlperf run --profile max" in output
 
 
 def test_suite_filtered_health_uses_the_selected_suite(tmp_path):

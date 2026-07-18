@@ -1055,7 +1055,7 @@ def print_next_commands(args: argparse.Namespace) -> None:
 
 def cmd_health(args: argparse.Namespace) -> int:
     """Run the complete min-profile validation through a student-facing command."""
-    return cmd_validate(
+    status = cmd_validate(
         argparse.Namespace(
             registry=args.registry,
             preset="coverage",
@@ -1071,6 +1071,12 @@ def cmd_health(args: argparse.Namespace) -> int:
             device=args.device,
         )
     )
+    if status == 0 and not args.dry_run:
+        console.print(
+            "Next: choose a workload with `mlperf show <workload>`, then run its "
+            "authoritative quality path with `mlperf fetch` and `mlperf run --profile max`."
+        )
+    return status
 
 
 def cmd_fetch(args: argparse.Namespace) -> int:
@@ -2075,6 +2081,11 @@ def enrich_report_for_display(
             "rationale": workload.public_rationale,
         },
     )
+    canonical_contract = workload.raw.get("canonical_max_contract") or {}
+    if isinstance(canonical_contract, dict) and canonical_contract.get(
+        "execution_status"
+    ):
+        report.setdefault("max_execution", canonical_contract["execution_status"])
     report.setdefault("model", workload.model)
     report.setdefault("scenario", workload.scenario)
     if workload.dataset:
@@ -4088,6 +4099,27 @@ def quality_attainment_meter_html(attainment: float | None) -> str:
     )
 
 
+def dashboard_nonpass_state(
+    item: dict[str, Any], *, functional: bool
+) -> tuple[str, str]:
+    status = str(item.get("status") or "").lower()
+    max_execution = str(item.get("max_execution") or "").lower()
+    if max_execution.startswith("environment-gated"):
+        return "Environment gated", "warn"
+    labels = {
+        "skipped": ("Skipped", "warn"),
+        "unsupported": ("Unsupported", "warn"),
+        "not_implemented": ("Not implemented", "warn"),
+        "definition_valid": ("Definition only", "warn"),
+        "execution_failed": ("Path failed" if functional else "Run failed", "fail"),
+        "failed": ("Path failed" if functional else "Run failed", "fail"),
+    }
+    return labels.get(
+        status,
+        ("Path failed" if functional else "Run failed", "fail"),
+    )
+
+
 def quality_dashboard_html(report: dict[str, Any]) -> str:
     cards: list[str] = []
     quality_results = 0
@@ -4127,19 +4159,21 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
         target_source = quality.get("target_source") or {}
         quality_required = quality_required_value(quality, False) is True
         target_met = quality.get("target_met")
-        run_passed = str(item.get("status") or "").lower() == "passed"
+        run_status = str(item.get("status") or "").lower()
+        run_passed = run_status == "passed"
         if quality_required:
             quality_results += 1
-            if not run_passed:
-                result_label = "Run failed"
-                result_class = "fail"
-            elif target_met is True:
+            if target_met is True and run_passed:
                 targets_met += 1
                 result_label = "Target met"
                 result_class = "pass"
-            elif target_met is False:
+            elif target_met is False and run_status in {"passed", "quality_failed"}:
                 result_label = "Target not met"
                 result_class = "fail"
+            elif not run_passed:
+                result_label, result_class = dashboard_nonpass_state(
+                    item, functional=False
+                )
             else:
                 result_label = "Target pending"
                 result_class = "warn"
@@ -4150,8 +4184,9 @@ def quality_dashboard_html(report: dict[str, Any]) -> str:
                 result_label = "Path passed"
                 result_class = "pass"
             else:
-                result_label = "Path failed"
-                result_class = "fail"
+                result_label, result_class = dashboard_nonpass_state(
+                    item, functional=True
+                )
 
         workload_name = dashboard_run_label(item, default="unknown")
         displayed_metric = str(metric_key or metric_name or "quality metric")
