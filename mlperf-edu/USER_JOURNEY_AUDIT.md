@@ -171,8 +171,8 @@ authenticated producer identity remain release gates.
 - Registry mirrors, selection ledger, taxonomy, reference claims, generated
   pages, the ten-page review paper, the rendered site, and the clean wheel all
   passed their checks.
-- The full Python suite passed from this audit branch. It is rerun after the
-  final commit so the source-lock test can execute against a clean worktree.
+- All 391 Python tests passed from the clean audit commit, including the
+  measurement-surface source-lock test.
 
 ### Defects found and fixed
 
