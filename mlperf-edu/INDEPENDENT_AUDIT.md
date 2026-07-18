@@ -56,8 +56,12 @@ measured misses into passes.
   labeled as SHA-256. The current packet replaces it with six verified
   per-category SHA-256 digests and a complete canonical sample artifact.
 - HumanEval+ generated-code execution and EDM pickle loading remain security
-  review boundaries. They are suitable for a controlled source-checkout
-  preview, not an unattended multi-tenant service.
+  boundaries. The generated-code container now adds a host-user mapping, init,
+  and core-file and open-file limits to its existing isolation. EDM rehashes
+  the same open file immediately before deserialization. These controls are
+  suitable for a controlled source-checkout preview, not an unattended
+  multi-tenant service. [SECURITY_REVIEW.md](SECURITY_REVIEW.md) records the
+  production gates.
 - DLRM and MiniGo retain their full upstream contracts. They fail closed when
   the licensed data, memory, legacy runtime, or GPU environment is absent.
 

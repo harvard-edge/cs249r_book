@@ -75,9 +75,15 @@ def test_evalplus_container_has_no_network_or_host_execution_surface(tmp_path: P
 
     assert "--network none" in rendered
     assert "--read-only" in command
+    assert "--init" in command
     assert "--cap-drop ALL" in rendered
     assert "--security-opt no-new-privileges" in rendered
     assert "--pids-limit 512" in rendered
+    assert "--ulimit core=0:0" in rendered
+    assert "--ulimit nofile=1024:1024" in rendered
+    assert "--user" in command
+    assert "PYTHONDONTWRITEBYTECODE=1" in command
+    assert "PYTHONNOUSERSITE=1" in command
     assert "HUMANEVAL_OVERRIDE_PATH=/input/HumanEvalPlus.jsonl.gz" in command
     assert "/workspace/samples.jsonl" in command
     assert "@sha256:" in code_generation.EVALPLUS_BASE_IMAGE

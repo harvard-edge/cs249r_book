@@ -152,8 +152,11 @@ A production release would additionally require the following work.
   policy.
 - [ ] Close MLCommons review of the name, scope, governance, and result wording.
 - [ ] Close dataset redistribution and fetch-only decisions.
-- [ ] Complete security review of generated-code sandboxing and the legacy
-  container paths.
+- [x] Document the generated-code, trusted-pickle, and legacy-runtime security
+  boundaries in [SECURITY_REVIEW.md](SECURITY_REVIEW.md), and harden the local
+  EvalPlus and EDM preview paths.
+- [ ] Replace executable EDM pickle inputs with reviewed safe derived
+  artifacts and qualify independently built, signed DLRM and MiniGo runtimes.
 - [ ] Produce signed release artifacts and authenticated provenance when
   producer identity matters.
 - [ ] Reproduce the suite on independent CPU, Apple Silicon, and CUDA systems.

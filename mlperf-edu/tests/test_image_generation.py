@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import pickle
 from pathlib import Path
 
 import numpy as np
@@ -27,6 +28,44 @@ class _ZeroDenoiser:
     def __call__(self, x, _sigma, _labels):
         self.calls += 1
         return torch.zeros_like(x)
+
+
+def test_pinned_pickle_is_hashed_before_deserialization(monkeypatch, tmp_path: Path):
+    path = tmp_path / "checkpoint.pkl"
+    path.write_bytes(b"not the pinned checkpoint")
+    deserialized = False
+
+    def unexpected_load(_handle):
+        nonlocal deserialized
+        deserialized = True
+        raise AssertionError("unverified pickle bytes must not be deserialized")
+
+    monkeypatch.setattr(image_generation.pickle, "load", unexpected_load)
+
+    with pytest.raises(ValueError, match="refusing to deserialize"):
+        image_generation._load_pinned_pickle(
+            path,
+            torch.device("cpu"),
+            expected_sha256="0" * 64,
+        )
+
+    assert not deserialized
+
+
+def test_pinned_pickle_loads_the_verified_module(tmp_path: Path):
+    path = tmp_path / "checkpoint.pkl"
+    with path.open("wb") as handle:
+        pickle.dump({"ema": torch.nn.Linear(2, 1)}, handle)
+
+    module = image_generation._load_pinned_pickle(
+        path,
+        torch.device("cpu"),
+        expected_sha256=hashlib.sha256(path.read_bytes()).hexdigest(),
+        key="ema",
+    )
+
+    assert isinstance(module, torch.nn.Linear)
+    assert not module.training
 
 
 def test_mps_adapter_preserves_official_35_evaluation_schedule():

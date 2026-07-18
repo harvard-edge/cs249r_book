@@ -133,10 +133,38 @@ def _import_edm_source(source_root: Path) -> Any:
     return edm_sampler
 
 
-def _load_pickle(path: Path, device: torch.device, *, key: str | None = None) -> Any:
+def _load_pinned_pickle(
+    path: Path,
+    device: torch.device,
+    *,
+    expected_sha256: str,
+    key: str | None = None,
+) -> Any:
+    """Deserialize one trusted upstream pickle only after checking its bytes."""
+    expected = expected_sha256.removeprefix("sha256:")
     with path.open("rb") as handle:
+        digest = hashlib.sha256()
+        for chunk in iter(lambda: handle.read(8 << 20), b""):
+            digest.update(chunk)
+        observed = digest.hexdigest()
+        if observed != expected:
+            raise ValueError(
+                f"refusing to deserialize {path.name}: expected SHA-256 "
+                f"{expected}, found {observed}"
+            )
+        handle.seek(0)
         payload = pickle.load(handle)
-    value = payload[key] if key is not None else payload
+
+    if key is not None:
+        if not isinstance(payload, dict) or key not in payload:
+            raise ValueError(f"pinned pickle does not contain the required {key!r} key")
+        value = payload[key]
+    else:
+        value = payload
+    if not callable(getattr(value, "to", None)) or not callable(
+        getattr(value, "eval", None)
+    ):
+        raise TypeError("pinned pickle did not contain a loadable PyTorch module")
     return value.to(device).eval()
 
 
@@ -647,7 +675,12 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
     asset = ensure_edm_cifar10(download=True)
     paths = edm_cifar10_paths()
     official_sampler = _import_edm_source(paths["source"])
-    net = _load_pickle(paths["checkpoint"], device, key="ema")
+    net = _load_pinned_pickle(
+        paths["checkpoint"],
+        device,
+        expected_sha256=EDM_CIFAR10_CHECKPOINT_SHA256,
+        key="ema",
+    )
     n_params = sum(parameter.numel() for parameter in net.parameters())
     output_dir.mkdir(parents=True, exist_ok=True)
     results_path = (output_dir / "image-generation_max_evaluation.json").resolve()
@@ -666,7 +699,11 @@ def run_image_generation_max(workload: Workload, output_dir: Path) -> dict[str, 
         list(imported_generation["source_files"]) if imported_generation else []
     )
 
-    detector = _load_pickle(paths["inception"], device)
+    detector = _load_pinned_pickle(
+        paths["inception"],
+        device,
+        expected_sha256=EDM_INCEPTION_SHA256,
+    )
     trial_records: list[dict[str, Any]] = []
     trial_artifacts: list[Path] = []
     for trial_index, seed_start in enumerate(QUALITY_TRIAL_SEED_STARTS, start=1):
