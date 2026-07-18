@@ -291,6 +291,158 @@ MINIGO_SOURCE_FILES = {
 }
 
 
+def dlrm_environment_handoff_contract() -> dict[str, Any]:
+    """Return the portable environment contract for DLRM quality execution."""
+    return {
+        "schema": "mlperf-edu-environment-handoff/0.1",
+        "workload": "recommendation",
+        "profile": "max",
+        "execution_status": "environment-gated-quality-conformance",
+        "quality": {
+            "metric": "roc_auc",
+            "target": 0.8025,
+            "direction": "higher",
+            "acceptance_runs": 1,
+        },
+        "required_hardware": {
+            "system": "single-node",
+            "recommended_host_memory_gib": 256,
+            "device_choices": ["cpu", "gpu"],
+            "gpu_requirement": "CUDA-visible PyTorch when device is gpu",
+        },
+        "external_assets": {
+            "dataset": {
+                "name": "Criteo Terabyte",
+                "split": "unshuffled-day-23-accuracy-set",
+                "license_gate": "manual upstream terms acceptance",
+                "redistributed_by_mlperf_edu": False,
+                "required_preprocessed_files": [
+                    "day_day_count.npz",
+                    "day_fea_count.npz",
+                    *[f"day_{day}_reordered.npz" for day in range(24)],
+                ],
+            },
+            "checkpoint": {
+                "name": "tb00_40M.pt",
+                "url": DLRM_CHECKPOINT_URL,
+                "md5": DLRM_CHECKPOINT_MD5,
+            },
+        },
+        "source": {
+            "inference_revision": DLRM_INFERENCE_COMMIT,
+            "implementation_revision": DLRM_IMPLEMENTATION_COMMIT,
+            "training_submodule_revision": DLRM_TRAINING_SUBMODULE_COMMIT,
+        },
+        "environment": {
+            "MLPERF_EDU_CRITEO_TERMS_ACCEPTED": (
+                "1 after reviewing and accepting the upstream terms"
+            ),
+            "MLPERF_EDU_DLRM_DATA_DIR": (
+                "absolute directory containing all 26 preprocessed files"
+            ),
+            "MLPERF_EDU_DLRM_CHECKPOINT": (
+                "absolute path to the MD5-pinned tb00_40M.pt"
+            ),
+            "MLPERF_EDU_DLRM_PYTHON": (
+                "Python with torch, scikit-learn, and mlperf_loadgen"
+            ),
+            "MLPERF_EDU_DLRM_DEVICE": "cpu or gpu",
+        },
+        "preflight_command": (
+            "mlperf doctor --workload recommendation --profile max --format json"
+        ),
+        "run_command": (
+            "mlperf run --workload recommendation --profile max "
+            "--output-dir submissions/recommendation-max"
+        ),
+        "production_ready": False,
+        "remaining_after_quality": [
+            "independent platform reproduction",
+            "security and license review",
+            "artifact signing",
+            "later timing stability campaign",
+        ],
+    }
+
+
+def minigo_environment_handoff_contract() -> dict[str, Any]:
+    """Return the portable environment contract for MiniGo quality execution."""
+    return {
+        "schema": "mlperf-edu-environment-handoff/0.1",
+        "workload": "reinforcement-learning",
+        "profile": "max",
+        "execution_status": "environment-gated-quality-conformance",
+        "quality": {
+            "metric": "professional_move_prediction",
+            "target": 0.40,
+            "direction": "higher",
+            "acceptance_runs": 1,
+            "secondary_gate": {
+                "metric": "playoff_win_rate",
+                "target": 0.55,
+                "direction": "higher",
+            },
+        },
+        "required_hardware": {
+            "system": "single-node",
+            "accelerator": "NVIDIA GPU",
+            "container_gpu_interface": "Docker-compatible --gpus all",
+            "legacy_runtime": "CUDA with the pinned TensorFlow 1.x environment",
+        },
+        "external_assets": {
+            "professional_games": {
+                "count": 4,
+                "source_revision": MINIGO_COMMIT,
+                "review_gate": "release and terms review before use",
+            },
+            "container_image": {
+                "identity": "repository/image@sha256:<64 hex>",
+                "build_source": "reinforcement/tensorflow/Dockerfile",
+                "immutable_digest_required": True,
+            },
+            "self_play": {
+                "generated_by_run": True,
+                "games_per_generation": 2_000,
+                "workers": 16,
+                "search_readouts": 200,
+            },
+        },
+        "source": {
+            "training_revision": MINIGO_COMMIT,
+            "critical_files": {
+                name: f"sha256:{digest}" for name, digest in MINIGO_SOURCE_FILES.items()
+            },
+        },
+        "environment": {
+            "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED": (
+                "1 after release and terms review"
+            ),
+            "MLPERF_EDU_MINIGO_IMAGE": (
+                "immutable repository/image@sha256:<64 hex>"
+            ),
+            "MLPERF_EDU_MINIGO_CONTAINER_RUNTIME": (
+                "Docker-compatible executable; defaults to docker"
+            ),
+        },
+        "preflight_command": (
+            "mlperf doctor --workload reinforcement-learning --profile max "
+            "--format json"
+        ),
+        "run_command": (
+            "mlperf run --workload reinforcement-learning --profile max "
+            "--output-dir submissions/reinforcement-learning-max"
+        ),
+        "resumable": True,
+        "production_ready": False,
+        "remaining_after_quality": [
+            "independent platform reproduction",
+            "security and professional-game terms review",
+            "artifact signing",
+            "later timing stability campaign",
+        ],
+    }
+
+
 @dataclass(frozen=True)
 class DatasetAsset:
     name: str

@@ -95,38 +95,38 @@ def test_run_validate_and_health_advertise_device_selection():
         assert "--device {auto,cpu,cuda,mps}" in result.stdout
 
 
-def test_run_dashboard_opens_by_default_and_can_be_disabled():
+def test_run_dashboard_stays_closed_by_default_and_can_be_opened():
     parser = edu_cli.build_parser()
 
     default_args = parser.parse_args(
         ["run", "--workload", "causal-language-modeling", "--profile", "min"]
     )
-    disabled_args = parser.parse_args(
+    enabled_args = parser.parse_args(
         [
             "run",
             "--workload",
             "causal-language-modeling",
             "--profile",
             "min",
-            "--no-open-report",
+            "--open-report",
         ]
     )
 
-    assert default_args.open_report is True
-    assert disabled_args.open_report is False
+    assert default_args.open_report is False
+    assert enabled_args.open_report is True
     help_result = run_cli("run", "--help")
-    assert "Open the generated HTML dashboard (default)." in help_result.stdout
+    assert "Open the generated HTML dashboard." in help_result.stdout
     assert "--no-open-report" in help_result.stdout
 
 
-def test_health_dashboard_opens_by_default_and_can_be_disabled():
+def test_health_dashboard_stays_closed_by_default_and_can_be_opened():
     parser = edu_cli.build_parser()
 
     default_args = parser.parse_args(["health"])
-    disabled_args = parser.parse_args(["health", "--no-open-report"])
+    enabled_args = parser.parse_args(["health", "--open-report"])
 
-    assert default_args.open_report is True
-    assert disabled_args.open_report is False
+    assert default_args.open_report is False
+    assert enabled_args.open_report is True
     assert default_args.output_dir == "submissions/health"
 
 
@@ -1439,7 +1439,7 @@ def test_report_command_exports_json_csv_html(tmp_path):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "Dashboard:" in result.stdout
-    assert "browser opening suppressed" in result.stdout
+    assert "browser opening suppressed" not in result.stdout
 
     report_path = tmp_path / "causal-language-modeling_training_min_report.json"
     manifest_path = tmp_path / "causal-language-modeling_training_min.provd.json"

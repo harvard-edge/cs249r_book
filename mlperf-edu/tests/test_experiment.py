@@ -55,6 +55,22 @@ runs:
     assert len(plan["source_sha256"]) == 71
 
 
+def test_experiment_plan_does_not_open_reports_by_default(tmp_path):
+    path = write_plan(
+        tmp_path,
+        f"""
+schema: {EXPERIMENT_PLAN_SCHEMA}
+id: closed-report
+runs:
+  - workload: image-classification
+""".lstrip(),
+    )
+
+    plan = load_experiment_plan(path)
+
+    assert plan["output"]["open_report"] is False
+
+
 @pytest.mark.parametrize(
     ("fragment", "message"),
     [

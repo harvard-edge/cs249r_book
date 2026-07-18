@@ -20,6 +20,7 @@ from mlperf.assets import (
     DLRM_INFERENCE_COMMIT,
     DLRM_INFERENCE_FILES,
     DLRM_TRAINING_SUBMODULE_COMMIT,
+    dlrm_environment_handoff_contract,
     dlrm_reference_paths,
     ensure_dlrm_reference,
     sha256_file,
@@ -44,68 +45,7 @@ TERMS_ENV = "MLPERF_EDU_CRITEO_TERMS_ACCEPTED"
 
 def environment_handoff_contract() -> dict[str, Any]:
     """Describe the complete external environment needed for DLRM quality."""
-    return {
-        "schema": "mlperf-edu-environment-handoff/0.1",
-        "workload": "recommendation",
-        "profile": "max",
-        "execution_status": "environment-gated-quality-conformance",
-        "quality": {
-            "metric": "roc_auc",
-            "target": TARGET_ROC_AUC,
-            "direction": "higher",
-            "acceptance_runs": 1,
-        },
-        "required_hardware": {
-            "system": "single-node",
-            "recommended_host_memory_gib": 256,
-            "device_choices": ["cpu", "gpu"],
-            "gpu_requirement": "CUDA-visible PyTorch when device is gpu",
-        },
-        "external_assets": {
-            "dataset": {
-                "name": "Criteo Terabyte",
-                "split": "unshuffled-day-23-accuracy-set",
-                "license_gate": "manual upstream terms acceptance",
-                "redistributed_by_mlperf_edu": False,
-                "required_preprocessed_files": [
-                    "day_day_count.npz",
-                    "day_fea_count.npz",
-                    *[f"day_{day}_reordered.npz" for day in range(24)],
-                ],
-            },
-            "checkpoint": {
-                "name": "tb00_40M.pt",
-                "url": DLRM_CHECKPOINT_URL,
-                "md5": DLRM_CHECKPOINT_MD5,
-            },
-        },
-        "source": {
-            "inference_revision": DLRM_INFERENCE_COMMIT,
-            "implementation_revision": DLRM_IMPLEMENTATION_COMMIT,
-            "training_submodule_revision": DLRM_TRAINING_SUBMODULE_COMMIT,
-        },
-        "environment": {
-            TERMS_ENV: "1 after reviewing and accepting the upstream terms",
-            DATA_DIR_ENV: "absolute directory containing all 26 preprocessed files",
-            CHECKPOINT_ENV: "absolute path to the MD5-pinned tb00_40M.pt",
-            PYTHON_ENV: "Python with torch, scikit-learn, and mlperf_loadgen",
-            DEVICE_ENV: "cpu or gpu",
-        },
-        "preflight_command": (
-            "mlperf doctor --workload recommendation --profile max --format json"
-        ),
-        "run_command": (
-            "mlperf run --workload recommendation --profile max "
-            "--output-dir submissions/recommendation-max"
-        ),
-        "production_ready": False,
-        "remaining_after_quality": [
-            "independent platform reproduction",
-            "security and license review",
-            "artifact signing",
-            "later timing stability campaign",
-        ],
-    }
+    return dlrm_environment_handoff_contract()
 
 
 def required_preprocessed_files(data_dir: Path) -> tuple[Path, ...]:

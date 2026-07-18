@@ -57,6 +57,7 @@ from .assets import (
     cifar10_paths,
     edm_cifar10_paths,
     dlrm_reference_paths,
+    dlrm_environment_handoff_contract,
     ensure_bfcl_non_live_ast,
     ensure_cifar10,
     ensure_edm_cifar10,
@@ -80,6 +81,7 @@ from .assets import (
     mlperf_tiny_kws_paths,
     mlperf_tiny_vww_paths,
     minigo_reference_paths,
+    minigo_environment_handoff_contract,
     sst2_paths,
     ogbn_arxiv_paths,
     ettm1_paths,
@@ -247,7 +249,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     health = subparsers.add_parser(
         "health",
-        help="Verify every min path and open the suite health report",
+        help="Verify every min path and generate the suite health report",
         description=(
             "Run the complete classroom health check. This checks the environment, "
             "executes every registered min path, verifies the provenance manifests, "
@@ -276,7 +278,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--open-report",
         dest="open_report",
         action="store_true",
-        help="Open the generated HTML health report (default).",
+        help="Open the generated HTML health report.",
     )
     health_opening.add_argument(
         "--no-open-report",
@@ -285,7 +287,7 @@ def build_parser() -> argparse.ArgumentParser:
         help="Generate the HTML health report without opening a browser.",
     )
     add_device(health)
-    health.set_defaults(func=cmd_health, open_report=True)
+    health.set_defaults(func=cmd_health, open_report=False)
 
     fetch = subparsers.add_parser("fetch", help="Fetch or verify assets for workloads")
     add_selection(fetch)
@@ -321,7 +323,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--open-report",
         dest="open_report",
         action="store_true",
-        help="Open the generated HTML dashboard (default).",
+        help="Open the generated HTML dashboard.",
     )
     report_opening.add_argument(
         "--no-open-report",
@@ -351,7 +353,7 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Add estimated aggregate power and energy telemetry to the run report",
     )
-    run.set_defaults(func=cmd_run, open_report=True)
+    run.set_defaults(func=cmd_run, open_report=False)
 
     verify = subparsers.add_parser("verify", help="Verify a provenance manifest")
     verify.add_argument("manifest", type=str)
@@ -709,9 +711,7 @@ def workload_profile_readiness_checks(
         return checks
 
     if workload.id == "recommendation":
-        from mlperf.runners.recommendation import environment_handoff_contract
-
-        handoff = environment_handoff_contract()
+        handoff = dlrm_environment_handoff_contract()
         missing = [
             name
             for name, ready in (
@@ -767,9 +767,7 @@ def workload_profile_readiness_checks(
         return checks
 
     if workload.id == "reinforcement-learning":
-        from mlperf.runners.reinforcement import environment_handoff_contract
-
-        handoff = environment_handoff_contract()
+        handoff = minigo_environment_handoff_contract()
         missing = [
             name
             for name, ready in (

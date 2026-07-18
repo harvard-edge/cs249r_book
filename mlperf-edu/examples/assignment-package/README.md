@@ -28,9 +28,10 @@ uv run mlperf package \
   --output submissions/image-classification-quality-lab.zip
 ```
 
-The run opens its HTML dashboard by default. Before submitting, the student
-should identify the observed top-1 accuracy, target, target decision, measured
-region, checkpoint source, dataset split, and device.
+The run writes its HTML dashboard without opening a browser. Add
+`--open-report` when the student wants to inspect it immediately. Before
+submitting, the student should identify the observed top-1 accuracy, target,
+target decision, measured region, checkpoint source, dataset split, and device.
 
 ## Instructor Flow
 

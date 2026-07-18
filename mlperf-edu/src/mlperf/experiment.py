@@ -188,7 +188,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
         label="experiment output directory",
     )
     open_report = _boolean(
-        output.get("open_report", True), label="output.open_report"
+        output.get("open_report", False), label="output.open_report"
     )
     power = _boolean(payload.get("power", False), label="experiment power")
     keep_going = _boolean(

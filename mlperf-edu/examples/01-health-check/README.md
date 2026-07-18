@@ -19,8 +19,8 @@ uv run mlperf doctor
 uv run mlperf health --output-dir submissions/01-health
 ```
 
-The second command opens the suite health HTML by default. Add
-`--no-open-report` on a headless machine.
+The second command writes the suite health HTML without opening a browser. Add
+`--open-report` only when you want to view it immediately.
 
 `doctor` reports both the fourteen-workload registry and the four-workload
 starter selection. `health` deliberately expands to all fourteen functional
