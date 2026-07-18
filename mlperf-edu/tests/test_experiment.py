@@ -323,6 +323,187 @@ runs:
         load_experiment_plan(undeclared_policy)
 
 
+def test_baseline_import_is_fail_closed_and_baseline_only(tmp_path):
+    accepted = write_plan(
+        tmp_path,
+        f"""
+schema: {EXPERIMENT_PLAN_SCHEMA}
+id: imported-baseline
+runs:
+  - name: baseline
+    role: baseline
+    workload: image-classification
+    repetitions: 1
+    baseline_import:
+      manifest: baseline/source.provd.json
+      sha256: sha256:{'0' * 64}
+  - name: candidate
+    role: candidate
+    workload: image-classification
+""".lstrip(),
+    )
+    plan = load_experiment_plan(accepted)
+    assert plan["runs"][0]["baseline_import"]["manifest"] == (
+        "baseline/source.provd.json"
+    )
+
+    candidate_import = write_plan(
+        tmp_path,
+        accepted.read_text().replace(
+            "role: baseline\n", "role: candidate\n", 1
+        ),
+    )
+    with pytest.raises(ValueError, match="requires role: baseline"):
+        load_experiment_plan(candidate_import)
+
+    unsafe_path = write_plan(
+        tmp_path,
+        accepted.read_text().replace(
+            "baseline/source.provd.json", "../source.provd.json"
+        ),
+    )
+    with pytest.raises(ValueError, match="within the plan directory"):
+        load_experiment_plan(unsafe_path)
+
+
+def test_import_plan_baseline_verifies_and_wraps_source_evidence(tmp_path):
+    workloads = edu_cli.load_workloads(
+        edu_cli.build_parser().parse_args(["list"])
+    )
+    workload = workloads["image-classification"]
+    source_dir = tmp_path / "baseline"
+    source_dir.mkdir()
+    source_report_path = source_dir / "source_report.json"
+    source_manifest_path = source_dir / "source.provd.json"
+    source_report = {
+        "schema": "mlperf-edu-report/0.1",
+        "id": workload.id,
+        "workload": workload.id,
+        "suite": workload.suite,
+        "profile": "pro",
+        "mode": "inference",
+        "phase": None,
+        "scenario": "offline",
+        "status": "passed",
+        "backend": "pytorch-cpu",
+        "device_executed": "cpu",
+        "config": {"batch_size": 16},
+        "metrics": {"top1_accuracy": 0.87, "samples_per_second": 100.0},
+        "quality": {
+            "metric": "top1_accuracy",
+            "target": 0.85,
+            "direction": "higher",
+            "tolerance": 0.0,
+            "quality_required": True,
+            "target_met": True,
+        },
+        "experiment_run": {
+            "plan_id": "instructor-source",
+            "name": "baseline",
+            "role": "baseline",
+        },
+        "artifacts": {
+            "report": str(source_report_path),
+            "provenance": str(source_manifest_path),
+        },
+    }
+    source_report_path.write_text(
+        json.dumps(source_report, indent=2, sort_keys=True) + "\n"
+    )
+    source_manifest = edu_cli.build_provd(
+        workload=workload.id,
+        scenario="offline",
+        division="open",
+        hardware_fingerprint=edu_cli.detect_hardware(),
+        report=source_report,
+        report_path=source_report_path,
+        dataset_name="fixture",
+        dataset_files=[],
+        repo_root=edu_cli.find_project_root(),
+    )
+    source_manifest_path.write_text(
+        json.dumps(source_manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
+    source_report_before = source_report_path.read_bytes()
+    source_manifest_before = source_manifest_path.read_bytes()
+    manifest_digest, _ = edu_cli.sha256_file_for_report(source_manifest_path)
+    plan_path = write_plan(
+        tmp_path,
+        f"""
+schema: {EXPERIMENT_PLAN_SCHEMA}
+id: candidate-only-training
+study:
+  independent_variables:
+    - MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE
+runs:
+  - name: baseline
+    role: baseline
+    workload: image-classification
+    mode: inference
+    environment:
+      MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 16
+    baseline_import:
+      manifest: baseline/source.provd.json
+      sha256: sha256:{manifest_digest}
+  - name: candidate
+    role: candidate
+    workload: image-classification
+    mode: inference
+    environment:
+      MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE: 64
+""".lstrip(),
+    )
+    run = load_experiment_plan(plan_path)["runs"][0]
+
+    imported = edu_cli.import_plan_baseline(
+        run,
+        workload,
+        mode="inference",
+        phase=None,
+        plan_path=plan_path,
+        output_dir=tmp_path / "imported",
+    )
+
+    assert imported["execution_origin"] == "provenance-bound-baseline-import"
+    assert imported["baseline_import"]["source_manifest_sha256"] == (
+        f"sha256:{manifest_digest}"
+    )
+    imported["experiment_run"] = {
+        "plan_id": "candidate-only-training",
+        "index": 1,
+        "name": "baseline",
+        "role": "baseline",
+        "imported": True,
+        "environment": run["environment"],
+    }
+    edu_cli.enrich_report_for_display(imported, workloads)
+    edu_cli.export_workload_reports([imported], workloads)
+    wrapper_manifest = Path(imported["artifacts"]["provenance"])
+    assert edu_cli.verify_provd(
+        wrapper_manifest, repo_root=edu_cli.find_project_root()
+    ).all_ok
+    aggregate = {
+        "experiment_plan": load_experiment_plan(plan_path),
+        "workloads": [imported],
+    }
+    assert "baseline · imported" in edu_cli.experiment_plan_section_html(aggregate)
+    assert edu_cli.report_rows(imported)[0]["experiment_run_imported"] is True
+    assert source_report_path.read_bytes() == source_report_before
+    assert source_manifest_path.read_bytes() == source_manifest_before
+
+    bad_run = json.loads(json.dumps(run))
+    bad_run["baseline_import"]["sha256"] = f"sha256:{'f' * 64}"
+    with pytest.raises(ValueError, match="manifest digest differs"):
+        edu_cli.import_plan_baseline(
+            bad_run,
+            workload,
+            mode="inference",
+            phase=None,
+            plan_path=plan_path,
+            output_dir=tmp_path / "rejected",
+        )
+
+
 def test_run_plan_separates_runs_records_plan_and_restores_environment(
     tmp_path, monkeypatch
 ):

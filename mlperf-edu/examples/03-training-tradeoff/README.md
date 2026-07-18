@@ -17,10 +17,25 @@ Existing Apple M5 Max evidence is roughly 34–36 minutes per training condition
 or about 70 minutes for the two-condition plan before inference. This is a
 planning reference, not a promised runtime. Instructors should record CPU,
 MPS, or CUDA time, peak memory, download size, and disk use on the course image.
-The current plan runner does not import a precomputed baseline into a
-candidate-only aggregate. Until that workflow exists, do not advertise a
-precomputed-baseline shortcut; assign the full plan only when the course budget
-can accommodate it.
+
+An instructor can run and verify the baseline once, place its report and
+manifest in a `baseline/` directory beside the distributed student plan, and
+declare the relative manifest path plus its exact SHA-256 under the baseline
+run.
+
+```yaml
+baseline_import:
+  manifest: baseline/causal-language-modeling_training_pro.provd.json
+  sha256: sha256:<complete-manifest-digest>
+```
+
+The student still submits a plan with one baseline and one candidate. The
+runner imports the baseline instead of executing it. It rejects a changed
+digest, failed provenance, a nonbaseline source condition, a target miss, or a
+mismatch in workload, mode, phase, device, or declared configuration. It writes
+a new wrapper report and manifest without modifying the instructor's source
+files. This reduces the student execution budget to the candidate run while
+keeping the baseline visible in the aggregate dashboard.
 
 ## Inspect and Run
 
@@ -32,6 +47,11 @@ uv run mlperf run --plan examples/03-training-tradeoff/plan.yaml --dry-run
 uv run mlperf run --plan student-training-plan.yaml \
   --reference-plan examples/03-training-tradeoff/plan.yaml
 ```
+
+The committed example executes both conditions so it works without an external
+baseline bundle. An instructor who distributes a precomputed baseline adds the
+`baseline_import` block to both the instructor reference and student copy before
+students make their permitted candidate learning-rate edit.
 
 Run decode inference only from a condition whose training result passed the
 fixed validation-loss gate and whose manifest verifies.

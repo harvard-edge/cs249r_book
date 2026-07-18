@@ -75,7 +75,7 @@ lowering a target to fit one local result.
 
 - [x] Bind allowed experiment-plan edits automatically to the instructor's
   reference contract.
-- [ ] Add a provenance-bound precomputed-baseline import for training labs that
+- [x] Add a provenance-bound precomputed-baseline import for training labs that
   cannot produce the candidate checkpoint during class.
 - [ ] Measure and publish CPU and accelerator runtime, download, disk, and
   peak-memory budgets on the course images.

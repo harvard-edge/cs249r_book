@@ -1475,6 +1475,7 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
         console.print(
             f"  {index}. {run['name']} ({run['role']}) | {workload.id} | {selection} | "
             f"device={device} | repetitions={run['repetitions']}"
+            + (" | provenance-bound baseline import" if run.get("baseline_import") else "")
         )
     if getattr(args, "dry_run", False):
         console.print("[green]dry-run complete[/green]")
@@ -1518,7 +1519,17 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                     os.environ.pop(key, None)
                 else:
                     os.environ[key] = value
-            report = run_workload(workload, "pro", run_dir, mode=mode, phase=phase)
+            if run.get("baseline_import"):
+                report = import_plan_baseline(
+                    run,
+                    workload,
+                    mode=mode,
+                    phase=phase,
+                    plan_path=plan_path,
+                    output_dir=run_dir,
+                )
+            else:
+                report = run_workload(workload, "pro", run_dir, mode=mode, phase=phase)
             validate_pro_quality_contract(workload, report)
             annotate_execution_device(report)
             report["experiment_run"] = {
@@ -1530,6 +1541,7 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                 "device": device,
                 "repetitions": run["repetitions"],
                 "environment": dict(run["environment"]),
+                "imported": bool(run.get("baseline_import")),
             }
             enrich_report_for_display(report, workloads)
             export_workload_reports([report], workloads)
@@ -1560,6 +1572,7 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                     "device": device,
                     "repetitions": run["repetitions"],
                     "environment": dict(run["environment"]),
+                    "imported": bool(run.get("baseline_import")),
                 },
             }
             console.print(f"[red]{run['name']} failed:[/red] {exc}")
@@ -1607,6 +1620,128 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
             else:
                 os.environ[key] = value
     return print_run_summary("pro", workload_reports, report_path, exports)
+
+
+def import_plan_baseline(
+    run: dict[str, Any],
+    workload: Workload,
+    *,
+    mode: str | None,
+    phase: str | None,
+    plan_path: Path,
+    output_dir: Path,
+) -> dict[str, Any]:
+    """Create an immutable wrapper around one verified instructor baseline."""
+    import_spec = run.get("baseline_import") or {}
+    manifest_path = (plan_path.parent / str(import_spec.get("manifest"))).resolve()
+    if not manifest_path.is_file():
+        raise ValueError(f"baseline import manifest is missing: {manifest_path}")
+    digest, _ = sha256_file_for_report(manifest_path)
+    observed_digest = f"sha256:{digest}"
+    if observed_digest != import_spec.get("sha256"):
+        raise ValueError(
+            "baseline import manifest digest differs from the plan: "
+            f"observed {observed_digest}, expected {import_spec.get('sha256')}"
+        )
+    verification = verify_provd(manifest_path, repo_root=find_project_root())
+    if not verification.all_ok:
+        failed = [name for name, ok, _detail in verification.checks if not ok]
+        raise ValueError(
+            "baseline import provenance did not verify: " + ", ".join(failed[:8])
+        )
+    manifest = json.loads(manifest_path.read_text())
+    source_report_path = manifest_report_path(manifest, manifest_path)
+    if source_report_path is None or not source_report_path.is_file():
+        raise ValueError("baseline import manifest does not bind an available report")
+    source_report = json.loads(source_report_path.read_text())
+    if source_report.get("execution_origin") == "provenance-bound-baseline-import":
+        raise ValueError("baseline imports cannot be chained through another import")
+    source_workload = source_report.get("workload") or source_report.get("id")
+    if source_workload != workload.id:
+        raise ValueError(
+            f"baseline import workload is {source_workload!r}, expected {workload.id!r}"
+        )
+    if source_report.get("profile") != "pro":
+        raise ValueError("baseline import requires a pro-profile source result")
+    if source_report.get("mode") != mode or source_report.get("phase") != phase:
+        raise ValueError("baseline import mode or phase differs from the plan")
+    source_condition = source_report.get("experiment_run") or {}
+    if source_condition.get("role") != "baseline":
+        raise ValueError("baseline import source must record experiment role: baseline")
+    if source_report.get("status") != "passed":
+        raise ValueError("baseline import source did not pass its result contract")
+    quality = source_report.get("quality") or {}
+    if (
+        quality_required_value(quality, False) is not True
+        or quality.get("target_met") is not True
+    ):
+        raise ValueError("baseline import source must pass its canonical quality target")
+    validate_pro_quality_contract(workload, source_report)
+    source_config = source_report.get("config") or {}
+    for setting, expected_value in run.get("environment", {}).items():
+        config_field = EXPERIMENT_CONFIG_BINDINGS.get(setting)
+        if not config_field:
+            raise ValueError(
+                f"baseline import cannot bind unsupported setting {setting!r}"
+            )
+        actual_value = source_config.get(config_field)
+        if str(actual_value) != str(expected_value):
+            raise ValueError(
+                f"baseline import config.{config_field} is {actual_value!r}, "
+                f"expected {expected_value!r}"
+            )
+    planned_device = str(run.get("device") or "auto")
+    source_device = str(source_report.get("device_executed") or "")
+    if planned_device != "auto" and source_device != planned_device:
+        raise ValueError(
+            f"baseline import device is {source_device!r}, expected {planned_device!r}"
+        )
+
+    source_report_digest, source_report_n_bytes = sha256_file_for_report(
+        source_report_path
+    )
+    hardware = (
+        ((manifest.get("leaves") or {}).get("hardware") or {}).get("fingerprint")
+        or source_report.get("hardware")
+        or detect_hardware()
+    )
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = output_dir / f"{workload.id}_pro_report.json"
+    wrapper_manifest_path = output_dir / f"{workload.id}_pro.provd.json"
+    report = copy.deepcopy(source_report)
+    report["execution_origin"] = "provenance-bound-baseline-import"
+    report["baseline_import"] = {
+        "schema": "mlperf-edu-baseline-import/0.1",
+        "source_manifest": str(manifest_path),
+        "source_manifest_sha256": observed_digest,
+        "source_report": str(source_report_path),
+        "source_report_sha256": f"sha256:{source_report_digest}",
+        "source_report_n_bytes": source_report_n_bytes,
+        "source_plan_id": source_condition.get("plan_id"),
+        "source_run_name": source_condition.get("name"),
+        "source_run_role": source_condition.get("role"),
+    }
+    report["artifacts"] = {
+        "report": str(report_path),
+        "provenance": str(wrapper_manifest_path),
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    wrapper_manifest = build_provd(
+        workload=workload.id,
+        scenario=str(source_report.get("scenario") or workload.scenario or "pro"),
+        division="open",
+        hardware_fingerprint=hardware,
+        report=report,
+        report_path=report_path,
+        dataset_name="provenance-bound-instructor-baseline",
+        dataset_files=[manifest_path, source_report_path],
+        rng_seed=None,
+        repo_root=find_project_root(),
+    )
+    wrapper_manifest_path.write_text(
+        json.dumps(wrapper_manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
+    return report
 
 
 def print_run_selection(
@@ -3801,6 +3936,7 @@ def write_csv_report(report: dict[str, Any], output: Path) -> None:
         "experiment_id",
         "experiment_run_name",
         "experiment_run_role",
+        "experiment_run_imported",
         "experiment_run_index",
         "plan_source_sha256",
         "planned_device",
@@ -4534,6 +4670,18 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
             ("Source SHA-256", plan.get("source_sha256")),
             ("Source", plan.get("source")),
             (
+                "Instructor reference SHA-256",
+                (plan.get("instructor_binding") or {}).get(
+                    "reference_source_sha256"
+                ),
+            ),
+            (
+                "Accepted instructor-policy edits",
+                len((plan.get("instructor_binding") or {}).get("accepted_changes") or []),
+            )
+            if plan.get("instructor_binding")
+            else ("Accepted instructor-policy edits", None),
+            (
                 "Aggregate evidence manifest",
                 dashboard_artifact_label(aggregate_manifest),
             ),
@@ -4583,10 +4731,15 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
         device_label = requested_device
         if executed_device:
             device_label += f" → {executed_device}"
+        role_label = str(run.get("role") or "condition")
+        if run.get("baseline_import") or (
+            (result.get("experiment_run") or {}).get("imported") is True
+        ):
+            role_label += " · imported"
         condition_rows.append(
             "<tr>"
             f"<td>{index}</td><td>{escape(str(run.get('name') or ''))}</td>"
-            f"<td>{escape(str(run.get('role') or 'condition'))}</td>"
+            f"<td>{escape(role_label)}</td>"
             f"<td>{escape(str(run.get('workload') or ''))}</td>"
             f"<td>{escape(mode)}</td><td>{escape(device_label)}</td>"
             f"<td>{escape(str(run.get('repetitions') or 1))}</td>"
@@ -5422,6 +5575,7 @@ def report_row(
         "experiment_id": experiment_run.get("plan_id", ""),
         "experiment_run_name": experiment_run.get("name", ""),
         "experiment_run_role": experiment_run.get("role", ""),
+        "experiment_run_imported": experiment_run.get("imported", ""),
         "experiment_run_index": experiment_run.get("index", ""),
         "plan_source_sha256": experiment_run.get("plan_source_sha256", ""),
         "planned_device": experiment_run.get("device", ""),

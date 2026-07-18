@@ -12,11 +12,18 @@ import yaml
 from .fingerprint import PERFORMANCE_ENVIRONMENT_ALLOWLIST
 
 
-EXPERIMENT_PLAN_SCHEMA = "mlperf-edu-experiment-plan/0.2"
-LEGACY_EXPERIMENT_PLAN_SCHEMA = "mlperf-edu-experiment-plan/0.1"
+EXPERIMENT_PLAN_SCHEMA = "mlperf-edu-experiment-plan/0.3"
+LEGACY_EXPERIMENT_PLAN_SCHEMAS = {
+    "mlperf-edu-experiment-plan/0.1",
+    "mlperf-edu-experiment-plan/0.2",
+}
 SUPPORTED_EXPERIMENT_PLAN_SCHEMAS = {
     EXPERIMENT_PLAN_SCHEMA,
-    LEGACY_EXPERIMENT_PLAN_SCHEMA,
+    *LEGACY_EXPERIMENT_PLAN_SCHEMAS,
+}
+EDIT_POLICY_SCHEMAS = {
+    EXPERIMENT_PLAN_SCHEMA,
+    "mlperf-edu-experiment-plan/0.2",
 }
 INSTRUCTOR_BINDING_SCHEMA = "mlperf-edu-instructor-plan-binding/0.1"
 DEVICES = {"auto", "cpu", "cuda", "mps"}
@@ -28,6 +35,7 @@ RESERVED_ENVIRONMENT_KEYS = {"MLPERF_EDU_DEVICE", "MLPERF_EDU_PRO_REPETITIONS"}
 IMMUTABLE_CONTRACT_KEYS = {"MLPERF_EDU_MAX_QUALITY_TARGET"}
 SENSITIVE_TOKENS = {"TOKEN", "KEY", "SECRET", "PASSWORD", "CREDENTIAL"}
 IDENTIFIER = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
+SHA256_DIGEST = re.compile(r"^sha256:[0-9a-f]{64}$")
 PLAN_ENVIRONMENT_KEYS = {
     key for key in PERFORMANCE_ENVIRONMENT_ALLOWLIST if key.startswith("MLPERF_EDU_")
 } | {
@@ -177,6 +185,28 @@ def _edit_policy(
     return {"allowed_candidate_environment": normalized}
 
 
+def _baseline_import(value: Any, *, label: str) -> dict[str, str] | None:
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ValueError(f"{label} must be a mapping")
+    _known_keys(value, allowed={"manifest", "sha256"}, label=label)
+    manifest = _nonempty_string(value.get("manifest"), label=f"{label}.manifest")
+    manifest_path = Path(manifest)
+    if (
+        manifest_path.is_absolute()
+        or "\\" in manifest
+        or any(part in {"", ".", ".."} for part in manifest_path.parts)
+    ):
+        raise ValueError(
+            f"{label}.manifest must be a normalized path within the plan directory"
+        )
+    digest = _nonempty_string(value.get("sha256"), label=f"{label}.sha256")
+    if not SHA256_DIGEST.fullmatch(digest):
+        raise ValueError(f"{label}.sha256 must be a complete SHA-256 digest")
+    return {"manifest": manifest_path.as_posix(), "sha256": digest}
+
+
 def _difference_paths(left: Any, right: Any, *, prefix: str = "plan") -> list[str]:
     if isinstance(left, dict) and isinstance(right, dict):
         differences: list[str] = []
@@ -210,9 +240,10 @@ def bind_instructor_reference(
     """Validate a student plan against instructor-owned allowed edits."""
     if plan["schema"] != reference["schema"]:
         raise ValueError("student and instructor plans must use the same schema")
-    if reference["schema"] != EXPERIMENT_PLAN_SCHEMA:
+    if reference["schema"] not in EDIT_POLICY_SCHEMAS:
         raise ValueError(
-            f"instructor plan binding requires schema {EXPERIMENT_PLAN_SCHEMA!r}"
+            "instructor plan binding requires an experiment-plan schema with "
+            "edit_policy support"
         )
 
     expected = copy.deepcopy(reference)
@@ -290,7 +321,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
         "output",
         "runs",
     }
-    if schema == EXPERIMENT_PLAN_SCHEMA:
+    if schema in EDIT_POLICY_SCHEMAS:
         allowed_top_level.add("edit_policy")
     _known_keys(
         payload,
@@ -355,22 +386,25 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
 
     normalized_runs: list[dict[str, Any]] = []
     names: set[str] = set()
+    allowed_run_fields = {
+        "name",
+        "role",
+        "workload",
+        "variant",
+        "mode",
+        "phase",
+        "device",
+        "repetitions",
+        "environment",
+    }
+    if schema == EXPERIMENT_PLAN_SCHEMA:
+        allowed_run_fields.add("baseline_import")
     for index, run in enumerate(runs, start=1):
         if not isinstance(run, dict):
             raise ValueError(f"experiment run {index} must be a mapping")
         _known_keys(
             run,
-            allowed={
-                "name",
-                "role",
-                "workload",
-                "variant",
-                "mode",
-                "phase",
-                "device",
-                "repetitions",
-                "environment",
-            },
+            allowed=allowed_run_fields,
             label=f"experiment run {index}",
         )
         workload = _nonempty_string(
@@ -411,6 +445,22 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
                 run.get("environment"), label=f"experiment run {index} environment"
             )
         )
+        baseline_import = (
+            _baseline_import(
+                run.get("baseline_import"),
+                label=f"experiment run {index} baseline_import",
+            )
+            if schema == EXPERIMENT_PLAN_SCHEMA
+            else None
+        )
+        if baseline_import is not None and role != "baseline":
+            raise ValueError(
+                f"experiment run {index} baseline_import requires role: baseline"
+            )
+        if baseline_import is not None and repetitions != 1:
+            raise ValueError(
+                f"experiment run {index} baseline_import requires repetitions: 1"
+            )
         name = _identifier(
             run.get("name")
             or "-".join(
@@ -423,19 +473,20 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
         if name in names:
             raise ValueError(f"duplicate experiment run name {name!r}")
         names.add(name)
-        normalized_runs.append(
-            {
-                "name": name,
-                "role": role,
-                "workload": workload,
-                "variant": variant,
-                "mode": mode,
-                "phase": phase,
-                "device": device,
-                "repetitions": repetitions,
-                "environment": environment,
-            }
-        )
+        normalized_run = {
+            "name": name,
+            "role": role,
+            "workload": workload,
+            "variant": variant,
+            "mode": mode,
+            "phase": phase,
+            "device": device,
+            "repetitions": repetitions,
+            "environment": environment,
+        }
+        if baseline_import is not None:
+            normalized_run["baseline_import"] = baseline_import
+        normalized_runs.append(normalized_run)
 
     comparison_groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
     for run in normalized_runs:
@@ -471,7 +522,7 @@ def load_experiment_plan(path: Path) -> dict[str, Any]:
             runs=normalized_runs,
             independent_variables=independent_variables,
         )
-        if schema == EXPERIMENT_PLAN_SCHEMA
+        if schema in EDIT_POLICY_SCHEMAS
         else {"allowed_candidate_environment": {}}
     )
     normalized = {

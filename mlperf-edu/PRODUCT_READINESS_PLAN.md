@@ -126,7 +126,7 @@ research-environment workloads.
 - [x] Create the five classroom examples and instructor rubrics.
 - [x] Render the numbered sequence in the website navigation.
 - [x] Bind allowed plan edits to an instructor reference automatically.
-- [ ] Add a provenance-bound precomputed-baseline import for candidate-only
+- [x] Add a provenance-bound precomputed-baseline import for candidate-only
   training labs.
 - [ ] Publish CPU and accelerator runtime, download, disk, and peak-memory
   budgets measured on course images.
