@@ -60,8 +60,9 @@ HumanEval+, BFCL, Criteo Terabyte, CIFAR-10 EDM inputs, and MiniGo self-play are
 registered because their workload identities and upstream contracts are known.
 Every workload now has a fail-closed max runner for its complete canonical
 contract. HumanEval+, BFCL, and EDM consume their complete local evaluation
-assets. DLRM and MiniGo require external research environments and do not fall
-back to reduced substitutes. End-to-end RAG and ReAct agent datasets remain
+assets. DLRM and MiniGo currently require external research environments, and
+their planned local backends must not fall back to reduced substitutes.
+End-to-end RAG and ReAct agent datasets remain
 outside the portfolio because no stable upstream tuple fixes the complete task
 and evaluator without project choices.
 

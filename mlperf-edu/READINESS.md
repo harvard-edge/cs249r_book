@@ -3,9 +3,11 @@
 ## Scope
 
 This checklist tracks the first usable version of all fourteen workloads. The
-current milestone requires one complete authoritative run to evaluate a quality
-target. It does not require five timing repetitions, a promoted performance
-baseline, or production publication.
+first milestone requires every authoritative quality path to run on a supported
+local machine. One complete run is enough to evaluate a quality target. The
+milestone does not require five timing repetitions, a promoted performance
+baseline, or production publication. The implementation plan is maintained in
+[LOCAL_EXECUTION_PLAN.md](LOCAL_EXECUTION_PLAN.md).
 
 The existing provisional importer contains twelve evidence cases across the
 original quality scope. That evidence scope contains nine workloads. The five
@@ -13,15 +15,18 @@ quality-conformance workloads remain outside that importer until their result
 gates close deliberately.
 
 A workload is initially usable when its CLI path, exact assets, quality target,
-evaluator, report, and provenance boundary are explicit. A functional `min`
-probe establishes setup only. It never counts as quality evidence.
+evaluator, report, and provenance boundary are explicit and its authoritative
+path can complete without remote compute. A functional `min` probe establishes
+setup only. It never counts as quality evidence. An environment handoff is
+useful diagnostic output, but it does not satisfy the local milestone.
 
 ## Portfolio Status
 
 Every workload has a `min` runner, an authoritative `max` runner, a target with
-an upstream basis, and a one-result acceptance contract. Eight workloads have
-at least one complete target-passing result. Four record an honest quality gap,
-and two await the required research execution environment.
+an upstream basis, and a one-result acceptance contract. Twelve authoritative
+paths run locally. Eight workloads have at least one complete target-passing
+result, four record an honest quality gap, and two still require local executor
+work.
 
 | **Workload** | **Quality Target** | **Initial Quality Status** | **Next Work** |
 |:---|:---|:---|:---|
@@ -37,8 +42,8 @@ and two await the required research execution environment.
 | `code-generation` | HumanEval+ pass@1 ≥ 0.573, or at least 94 of 164 tasks | Complete result missed at 91 of 164, or 0.554878 | Investigate the three-task gap without weakening the target. |
 | `function-calling` | BFCL V4 Non-Live AST accuracy ≥ 0.8292 | Complete provenance-bound 1,150-case result missed at 0.785208 | Review the category gaps without weakening the target or changing the pinned evaluator. |
 | `image-generation` | minimum CIFAR-10 FID ≤ 1.79 across three trials | Complete provenance-bound packet rescored at 1.801554 | Review the narrow gap without weakening the target, reducing the image count, or changing the sampler. |
-| `recommendation` | Criteo Terabyte ROC AUC ≥ 0.8025 | Runner ready; execution is environment-gated | Run on a 256-GB-class system with the licensed data, official checkpoint, and pinned legacy runtime. |
-| `reinforcement-learning` | professional-move prediction ≥ 0.40 plus the 0.55 playoff gate | Runner ready; execution is environment-gated | Run the resumable loop on a suitable NVIDIA system with a reviewed immutable TensorFlow 1.x image. |
+| `recommendation` | Criteo Terabyte ROC AUC ≥ 0.8025 | Reference runner ready; local execution blocked | Add a verified manual-data journey and an out-of-core CPU backend that preserves the full accuracy contract. |
+| `reinforcement-learning` | professional-move prediction ≥ 0.40 plus the 0.55 playoff gate | Reference runner ready; local execution blocked | Add a native CPU or MPS backend that preserves MiniGo semantics and both quality gates. |
 
 ## Model and Checkpoint Lineage
 
@@ -97,10 +102,10 @@ pretrained model as locally trained.
    The default is one max-contract execution. Optional repetition belongs to
    the later stability phase.
 
-Every `min` path is intended for classroom hardware. Most `max` paths are
-laptop-capable. DLRM and MiniGo are research-environment exceptions, and their
-CLI paths fail closed when the required data, memory, legacy runtime, or GPU is
-not available.
+Every `min` path is intended for classroom hardware. Twelve `max` paths are
+already laptop-capable. DLRM and MiniGo currently fail closed when the required
+data, memory, legacy runtime, or GPU is unavailable. They are remaining
+milestone blockers rather than accepted research-environment exceptions.
 
 ```bash
 uv run mlperf doctor
@@ -135,17 +140,21 @@ when the dashboard should open immediately. `--no-open-report` and
 - [x] Produce and verify the complete current BFCL artifact.
 - [x] Produce and verify the complete current three-trial EDM artifact.
 - [x] Publish machine-readable DLRM and MiniGo environment handoffs.
-- [ ] Execute the DLRM quality contract in its required environment.
-- [ ] Execute the MiniGo quality contract in its required environment.
+- [ ] Implement and parity-test an out-of-core local DLRM backend.
+- [ ] Implement and parity-test a native CPU or MPS MiniGo backend.
+- [ ] Complete a clean-cache asset audit for all fourteen workloads.
+- [ ] Execute the DLRM quality contract on the supported local machine.
+- [ ] Execute the MiniGo quality contract on the supported local machine.
 - [ ] Populate measured working-set, arithmetic-intensity, and dispatch evidence
   for research interpretation after the authoritative max contracts settle.
-- [ ] Complete an interactive visual browser review of the standalone run dashboard.
+- [x] Complete desktop and narrow-viewport visual review of the standalone run
+  dashboard.
 - [ ] Resolve any target gap without lowering a target to fit a local result.
 
 ## Production Readiness
 
-Production publication is not required for this initial classroom and research
-milestone. The current product remains an experimental source-checkout preview.
+Production publication is not required for the local-execution milestone. The
+current product remains an experimental source-checkout preview.
 A production release would additionally require the following work.
 
 - [ ] Adopt an authoritative component license and package-index versioning

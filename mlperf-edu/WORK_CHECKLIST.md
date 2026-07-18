@@ -3,7 +3,8 @@
 Last updated on July 18, 2026. This is the maintained progress view for the
 fourteen-workload suite. [READINESS.md](READINESS.md) contains the detailed
 evidence, and [PRODUCT_READINESS_PLAN.md](PRODUCT_READINESS_PLAN.md) explains
-the intended classroom and research experience.
+the intended classroom and research experience. The strict local milestone is
+defined in [LOCAL_EXECUTION_PLAN.md](LOCAL_EXECUTION_PLAN.md).
 
 ## Current Snapshot
 
@@ -17,11 +18,11 @@ the intended classroom and research experience.
 - [x] 8 of those 12 results meet the declared target.
 - [x] 4 of those 12 results record an honest target miss without weakening the
   target.
-- [ ] 2 of 14 quality runs still require their declared external research
-  environments.
+- [ ] 2 of 14 quality paths still require local executor work.
 
-The initial local suite is workable. Full one-run quality coverage is 12 of 14
-until the DLRM and MiniGo handoffs are executed on suitable systems. Stability,
+The supervised preview is workable, but the first local milestone is not
+complete. Full one-run quality coverage remains 12 of 14 until DLRM has an
+out-of-core local backend and MiniGo has a native CPU or MPS backend. Stability,
 promotion, and production publication are separate later phases.
 
 ## Initial Suite
@@ -46,10 +47,10 @@ promotion, and production publication are separate later phases.
   supervised-pilot boundary.
 - [x] Produce complete provenance-bound BFCL and EDM quality packets.
 - [x] Publish machine-readable DLRM and MiniGo execution handoffs.
-- [ ] Execute the DLRM quality run with the licensed Criteo data, official
-  checkpoint, pinned legacy runtime, and a 256-GB-class system.
-- [ ] Execute the MiniGo quality run in the reviewed immutable TensorFlow 1.x
-  GPU environment.
+- [ ] Implement and parity-test an out-of-core local DLRM backend for the
+  licensed Criteo data and official checkpoint.
+- [ ] Implement and parity-test a native CPU or MPS MiniGo backend.
+- [ ] Execute both complete quality contracts on the supported local machine.
 
 ## Quality Follow-Up
 
@@ -94,11 +95,9 @@ lowering a target to fit one local result.
 - [ ] Add controlled cross-hardware comparisons.
 - [ ] Populate measured working-set, arithmetic-intensity, and dispatch
   evidence for research interpretation.
-- [ ] Perform an explicitly requested interactive review of a standalone run
-  dashboard. Layout automation already passes and no browser should open as a
-  side effect of routine verification. The July 18 attempt stopped without
-  opening anything because the in-app browser runtime reported no available
-  browser.
+- [x] Review standalone run dashboards at desktop and narrow viewports with
+  repository Playwright, saved screenshots, and manual visual inspection. No
+  browser opens as a side effect of routine verification.
 
 ## Stability and Promotion
 
