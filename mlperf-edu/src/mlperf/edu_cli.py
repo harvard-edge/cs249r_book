@@ -1475,7 +1475,11 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
         console.print(
             f"  {index}. {run['name']} ({run['role']}) | {workload.id} | {selection} | "
             f"device={device} | repetitions={run['repetitions']}"
-            + (" | provenance-bound baseline import" if run.get("baseline_import") else "")
+            + (
+                " | provenance-bound baseline import"
+                if run.get("baseline_import")
+                else ""
+            )
         )
     if getattr(args, "dry_run", False):
         console.print("[green]dry-run complete[/green]")
@@ -1675,7 +1679,9 @@ def import_plan_baseline(
         quality_required_value(quality, False) is not True
         or quality.get("target_met") is not True
     ):
-        raise ValueError("baseline import source must pass its canonical quality target")
+        raise ValueError(
+            "baseline import source must pass its canonical quality target"
+        )
     validate_pro_quality_contract(workload, source_report)
     source_config = source_report.get("config") or {}
     for setting, expected_value in run.get("environment", {}).items():
@@ -2113,7 +2119,12 @@ def enrich_report_for_display(
         report.setdefault("variant", workload_variant_name(workload))
         report.setdefault("run_selector", workload_run_selector(workload))
 
-    report["execution_lineage"] = build_execution_lineage(report, workload)
+    execution_lineage = build_execution_lineage(report, workload)
+    report["execution_lineage"] = execution_lineage
+    if execution_lineage.get("mode"):
+        report.setdefault("mode", execution_lineage["mode"])
+    if execution_lineage.get("phase"):
+        report.setdefault("phase", execution_lineage["phase"])
     report["review_contract"] = evaluate_report_contract(workload, report)
     strip_promoted_baseline_metadata(report)
 
@@ -2153,6 +2164,12 @@ def build_execution_lineage(
         or (implemented_modes[0] if len(implemented_modes) == 1 else "")
     )
     profile = str(report.get("profile") or "")
+    phase = str(
+        report.get("phase")
+        or canonical.get("phase")
+        or (raw.get("default_phase") if mode == "inference" else "")
+        or ""
+    )
     runners = raw.get("runner") or {}
     runner_spec = ""
     if isinstance(runners, dict):
@@ -2302,6 +2319,7 @@ def build_execution_lineage(
         {
             "schema": "mlperf-edu-execution-lineage/0.1",
             "mode": mode,
+            "phase": phase,
             "profile": profile,
             "training": training,
             "checkpoint": checkpoint,
@@ -3944,8 +3962,13 @@ def write_csv_report(report: dict[str, Any], output: Path) -> None:
         "planned_environment",
         "suite",
         "profile",
+        "mode",
+        "phase",
+        "scenario",
         "status",
         "backend",
+        "device_requested",
+        "device_executed",
         "data_mode",
         "dataset",
         "dataset_license_status",
@@ -4671,13 +4694,13 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
             ("Source", plan.get("source")),
             (
                 "Instructor reference SHA-256",
-                (plan.get("instructor_binding") or {}).get(
-                    "reference_source_sha256"
-                ),
+                (plan.get("instructor_binding") or {}).get("reference_source_sha256"),
             ),
             (
                 "Accepted instructor-policy edits",
-                len((plan.get("instructor_binding") or {}).get("accepted_changes") or []),
+                len(
+                    (plan.get("instructor_binding") or {}).get("accepted_changes") or []
+                ),
             )
             if plan.get("instructor_binding")
             else ("Accepted instructor-policy edits", None),
@@ -5585,8 +5608,15 @@ def report_row(
         ),
         "suite": item.get("suite", default_suite or ""),
         "profile": item.get("profile", default_profile or ""),
+        "mode": item.get("mode")
+        or (item.get("execution_lineage") or {}).get("mode", ""),
+        "phase": item.get("phase")
+        or (item.get("execution_lineage") or {}).get("phase", ""),
+        "scenario": item.get("scenario", ""),
         "status": item.get("status", ""),
         "backend": item.get("backend", ""),
+        "device_requested": item.get("device_requested", ""),
+        "device_executed": item.get("device_executed", ""),
         "data_mode": item.get("data_mode", ""),
         "dataset": dataset_value,
         "dataset_license_status": dataset_asset.get("license_status", ""),
@@ -7389,8 +7419,13 @@ def write_validation_workload_csv(report: dict[str, Any], output: Path) -> None:
         "run_selector",
         "suite",
         "profile",
+        "mode",
+        "phase",
+        "scenario",
         "status",
         "backend",
+        "device_requested",
+        "device_executed",
         "data_mode",
         "dataset",
         "dataset_license_status",
@@ -7636,7 +7671,7 @@ def write_validation_html(
     h1 {{ margin:0 0 6px; font-size:clamp(28px,4vw,38px); line-height:1.15; letter-spacing:-.03em; }}
     h2 {{ margin:0; font-size:20px; }}
     .meta,.note {{ color:var(--muted); font-size:12px; }}
-    .meta {{ text-align:right; }}
+    .meta {{ max-width:100%; overflow-wrap:anywhere; text-align:right; }}
     .grid {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin:18px 0 24px; }}
     .card,.panel,.suite-bars {{ background:var(--surface); border:1px solid var(--line); border-radius:12px; padding:16px 18px; }}
     .label,.eyebrow {{ color:var(--muted); font-size:11px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; }}
@@ -7826,11 +7861,11 @@ def cmd_list(args: argparse.Namespace) -> int:
         return 0
 
     table = Table(title="MLPerf EDU Workloads")
-    table.add_column("Workload", no_wrap=True, min_width=44)
-    table.add_column("Internal ID", no_wrap=True, min_width=22)
+    table.add_column("Workload", no_wrap=True, min_width=28)
+    table.add_column("Internal ID", no_wrap=True, min_width=18)
     table.add_column("Suite", no_wrap=True)
-    table.add_column("Public", no_wrap=True, min_width=20)
-    table.add_column("Quality", overflow="fold")
+    table.add_column("Public", no_wrap=True, min_width=12)
+    table.add_column("Quality", overflow="fold", min_width=18)
     for workload in selected:
         quality = "n/a"
         if workload.quality_metric:
@@ -8252,13 +8287,23 @@ def workload_summary(workload: Workload) -> dict[str, Any]:
         "internal_id": workload.id,
         "run_selector": workload_run_selector(workload),
         "suite": workload.suite,
+        "profiles": list(workload.supports_profiles),
         "public_status": workload.public_status,
         "model": workload.model,
         "dataset": workload.dataset,
         "quality_metric": workload.quality_metric,
         "quality_value": workload.quality_value,
+        "quality_direction": workload.quality_direction,
+        "quality_tolerance": workload.quality_tolerance,
         "quality_target_kind": workload.quality_target_kind,
         "quality_target_basis": workload.quality_target_basis,
+        "modes": list(workload_modes(workload)),
+        "default_mode": workload_default_mode(workload),
+        "default_phase": workload_default_phase(workload),
+        "scenario": workload.scenario,
+        "evaluator": workload_evaluator(workload),
+        "max_execution": workload_max_execution_status(workload),
+        "max_next_gate": workload_max_next_gate(workload),
         "functional_check": functional_check_summary(
             workload.raw.get("functional_check")
         ),
@@ -8267,6 +8312,82 @@ def workload_summary(workload: Workload) -> dict[str, Any]:
         summary["canonical_workload"] = canonical
         summary["variant"] = workload_variant_name(workload)
     return summary
+
+
+def workload_modes(workload: Workload) -> tuple[str, ...]:
+    return tuple(
+        str(mode)
+        for mode in (
+            workload.raw.get("implemented_modes") or workload.raw.get("modes") or ()
+        )
+    )
+
+
+def workload_default_mode(workload: Workload) -> str:
+    canonical = workload.raw.get("canonical_max_contract") or {}
+    modes = workload_modes(workload)
+    return str(
+        workload.raw.get("default_mode")
+        or (canonical.get("mode") if isinstance(canonical, dict) else "")
+        or (modes[0] if len(modes) == 1 else "")
+    )
+
+
+def workload_default_phase(workload: Workload) -> str:
+    canonical = workload.raw.get("canonical_max_contract") or {}
+    return str(
+        workload.raw.get("default_phase")
+        or (canonical.get("phase") if isinstance(canonical, dict) else "")
+        or ""
+    )
+
+
+def workload_evaluator(workload: Workload) -> str:
+    canonical = workload.raw.get("canonical_max_contract") or {}
+    evaluator: Any = canonical.get("evaluator") if isinstance(canonical, dict) else None
+    if isinstance(evaluator, dict):
+        for key in ("name", "evaluator", "adapter", "source_file"):
+            if evaluator.get(key):
+                return str(evaluator[key])
+    elif evaluator:
+        return str(evaluator)
+
+    config = canonical.get("config") if isinstance(canonical, dict) else {}
+    if isinstance(config, dict) and config.get("evaluator"):
+        return str(config["evaluator"])
+
+    evaluator = workload.raw.get("evaluator")
+    if isinstance(evaluator, dict):
+        for key in ("name", "evaluator", "adapter", "source_file"):
+            if evaluator.get(key):
+                return str(evaluator[key])
+    elif evaluator:
+        return str(evaluator)
+
+    runner = workload.raw.get("runner") or {}
+    max_runner = runner.get("max") if isinstance(runner, dict) else None
+    if max_runner and workload.quality_metric:
+        return f"{max_runner} ({workload.quality_metric})"
+    return ""
+
+
+def workload_max_execution_status(workload: Workload) -> str:
+    canonical = workload.raw.get("canonical_max_contract") or {}
+    if isinstance(canonical, dict) and canonical.get("execution_status"):
+        return str(canonical["execution_status"])
+    runner = workload.raw.get("runner") or {}
+    return (
+        "local-runner-available"
+        if isinstance(runner, dict) and runner.get("max")
+        else "not-implemented"
+    )
+
+
+def workload_max_next_gate(workload: Workload) -> str:
+    spiral = workload.raw.get("spiral") or {}
+    if isinstance(spiral, dict) and spiral.get("next_gate"):
+        return str(spiral["next_gate"])
+    return ""
 
 
 def cmd_show(args: argparse.Namespace) -> int:
@@ -8299,8 +8420,25 @@ def cmd_show(args: argparse.Namespace) -> int:
         table.add_row("variant", workload_variant_name(workload))
         table.add_row("run_as", workload_run_selector(workload))
     table.add_row("scenario", workload.scenario or "")
+    modes = workload_modes(workload)
+    if modes:
+        table.add_row("modes", ", ".join(modes))
+    if workload_default_mode(workload):
+        table.add_row("default_mode", workload_default_mode(workload))
+    if workload_default_phase(workload):
+        table.add_row("default_phase", workload_default_phase(workload))
+    if workload_evaluator(workload):
+        table.add_row("evaluator", workload_evaluator(workload))
+    table.add_row("max_execution", workload_max_execution_status(workload))
+    if workload_max_next_gate(workload):
+        table.add_row("max_next_gate", workload_max_next_gate(workload))
     if workload.quality_metric:
-        table.add_row("quality", f"{workload.quality_metric}={workload.quality_value}")
+        table.add_row("quality_metric", workload.quality_metric)
+        table.add_row("quality_target", str(workload.quality_value))
+        table.add_row("quality_direction", workload.quality_direction or "")
+        table.add_row("quality_tolerance", str(workload.quality_tolerance))
+        table.add_row("quality_target_kind", workload.quality_target_kind or "")
+        table.add_row("quality_target_basis", workload.quality_target_basis or "")
     console.print(table)
     return 0
 
