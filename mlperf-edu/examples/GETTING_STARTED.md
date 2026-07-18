@@ -17,9 +17,9 @@ uv run mlperf show image-classification
 ```
 
 `mlperf health` checks the environment, runs all fourteen min paths, verifies
-their provenance manifests, and opens the suite health report. A passing health
-report establishes functional readiness only. It does not evaluate any max
-quality target.
+their provenance manifests, and writes the suite health report without opening
+it. A passing health report establishes functional readiness only. It does not
+evaluate any max quality target.
 
 The v0.1 registry contains fourteen workload identities.
 

@@ -34,7 +34,7 @@ endorsement.
 | `graph-node-classification` | Published OGB mean and standard deviation | Passing | Conditional. The one-sided tolerance needs domain approval before publication. |
 | `time-series-forecasting` | Published PatchTST result | Missed | Accepted after correction to the strict 0.290 reproduction point. |
 | `code-generation` | Published Qwen2.5-Coder HumanEval+ result | Missed | Accepted |
-| `function-calling` | Frozen BFCL V4 leaderboard result | Missed | Conditional. Freeze the mutable leaderboard snapshot and regenerate the complete artifact ledger. |
+| `function-calling` | Frozen BFCL V4 leaderboard result | Missed | Accepted after pinning the leaderboard/evaluator revisions and regenerating the complete 1,150-case artifact ledger. |
 | `recommendation` | MLPerf Inference inherited gate | Environment gated | Accepted |
 | `image-generation` | Published NVIDIA EDM result | Missed | Accepted after defining one result as the upstream three-trial minimum. |
 | `reinforcement-learning` | Historical MLPerf Training gates | Environment gated | Accepted |
@@ -52,9 +52,9 @@ measured misses into passes.
 - HumanEval+, SST-2, and NanoBEIR reports now bind every consumed checkpoint,
   tokenizer, vocabulary, and configuration file rather than only the weight
   tensor.
-- The BFCL ledger contained one 40-character identifier in a list labeled as
-  SHA-256. The unverified per-category list is removed until a complete current
-  run regenerates it.
+- The earlier BFCL ledger contained one 40-character identifier in a list
+  labeled as SHA-256. The current packet replaces it with six verified
+  per-category SHA-256 digests and a complete canonical sample artifact.
 - HumanEval+ generated-code execution and EDM pickle loading remain security
   review boundaries. They are suitable for a controlled source-checkout
   preview, not an unattended multi-tenant service.

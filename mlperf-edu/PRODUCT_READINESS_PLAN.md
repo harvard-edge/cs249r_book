@@ -56,7 +56,7 @@ differ instead of drawing a misleading chart.
 
 The intended student flow is short enough to teach in one lab.
 
-1. Run `mlperf health` and open the generated HTML report.
+1. Run `mlperf health` and open the generated HTML report only when it is useful.
 2. Choose a laptop-capable workload with `mlperf list` and `mlperf show`.
 3. Fetch and verify the pinned `max` assets.
 4. Run the authoritative baseline once and read its quality decision.

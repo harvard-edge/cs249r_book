@@ -48,8 +48,9 @@ number means.
 This distinction is important for the four current near-misses. PatchTST,
 HumanEval+, BFCL, and EDM remain below strict published-reference points. Their
 results do not justify lowering the gates. The causal-language-modeling point,
-graph tolerance, and mutable BFCL leaderboard snapshot remain conditional until
-their interpretation or frozen source is independently approved.
+graph tolerance, and causal-language-modeling interpretation remain conditional
+until independently approved. The BFCL data, leaderboard result, and evaluator
+are now pinned to immutable revisions.
 
 ## Score-Bearing Targets
 
@@ -76,9 +77,9 @@ required external execution environment is unavailable.
 | **Workload** | **Authoritative Target** | **Current Boundary** |
 |:---|:---|:---|
 | `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | The complete 164-task run passed 91 tasks, or 0.554878. The unchanged gate requires at least 94. |
-| `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | The pinned 1,150-case runner and official evaluator are ready. A complete artifact from the current runner remains pending; the earlier full audit reached 0.7852. |
+| `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | The complete provenance-bound 1,150-case packet rescored at 0.785208 and did not meet the unchanged gate. |
 | `recommendation` | MLPerf Inference v1.0.1 DLRM Criteo Terabyte ROC AUC of 0.8025 | The complete historical accuracy adapter is ready. Execution requires licensed Criteo data, the roughly 90 GB checkpoint, a legacy runtime, and a 256-GB-class system. |
-| `image-generation` | NVIDIA EDM CIFAR-10 minimum FID of 1.79 across three trials | One acceptance result now contains three independent 50,000-image trials, matching the upstream score definition. Prior trials reached a minimum FID of 1.8015540749984766, and a current three-trial artifact remains pending. |
+| `image-generation` | NVIDIA EDM CIFAR-10 minimum FID of 1.79 across three trials | The complete packet binds and rehashes three independent 50,000-image trials and rescored at 1.8015540749997014, missing the unchanged gate. |
 | `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | The complete resumable self-play, training, and evaluation loop is ready. Execution requires a reviewed immutable legacy GPU image and a suitable NVIDIA system. |
 
 ## Performance-Bearing Phase Gates

@@ -6,15 +6,19 @@ adapts the reproducibility, verification, disclosure, and comparability
 discipline of mature benchmark suites to classroom-scale PyTorch workloads.
 It is not an official MLCommons benchmark and is not endorsed by MLCommons.
 
-The v0.1 portfolio contains fourteen workloads. The current quality-evidence
-scope covers nine workloads and twelve historical evidence cases. Eight
-workloads have at least one complete target-passing result. The other six have
-complete, fail-closed authoritative runners and either a measured target gap or
-an external execution-environment gate. MLPerf EDU contributes the thin
-PyTorch adapter, execution harness,
-measurement controls, provenance, and reports needed to move each definition
-through functional, quality-conformant, repeatability-verified, and
-promotion-ready stages.
+The maintained [work checklist](WORK_CHECKLIST.md) shows what is complete, what
+still blocks full one-run coverage, and what is deliberately deferred to the
+stability or production phase.
+
+The v0.1 portfolio contains fourteen workloads. Twelve now have at least one
+complete authoritative quality result. Eight meet their declared target, and
+four record an honest target miss. The remaining two have complete,
+fail-closed runners and machine-readable handoffs for their external research
+environments. The promoted-evidence snapshot still covers nine workloads and
+twelve historical cases. MLPerf EDU contributes the thin PyTorch adapter,
+execution harness, measurement controls, provenance, and reports needed to
+move each definition through functional, quality-conformant,
+repeatability-verified, and promotion-ready stages.
 
 ## Install From the Checkout
 
