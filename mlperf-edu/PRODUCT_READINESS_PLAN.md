@@ -128,8 +128,10 @@ research-environment workloads.
 - [x] Bind allowed plan edits to an instructor reference automatically.
 - [x] Add a provenance-bound precomputed-baseline import for candidate-only
   training labs.
-- [ ] Publish CPU and accelerator runtime, download, disk, and peak-memory
-  budgets measured on course images.
+- [x] Publish CPU and accelerator-requested functional runtime, download, disk,
+  and peak-memory budgets on the first course image.
+- [ ] Publish authoritative `max` budgets for the workloads selected on each
+  actual course image.
 - [x] Repeat simulated student, instructor, and research review with the
   rendered pages; record the supervised-pilot boundary.
 

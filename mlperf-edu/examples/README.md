@@ -35,8 +35,9 @@ Before choosing a `max` workload, read the
 [fourteen-workload readiness matrix](../READINESS.md#portfolio-status). It
 separates target-passing, target-gap, and research-environment workloads and
 states the next quality task for each. Instructors should publish course-machine
-runtime, memory, download, and disk budgets because those costs are hardware
-dependent and are not yet measured consistently across all fourteen workloads.
+`max` runtime, memory, download, and disk budgets because those costs are
+hardware dependent. The initial [course-image budget](../COURSE_BUDGETS.md)
+already covers every functional `min` path on CPU and the available MPS paths.
 
 The three legacy `lab*.py` files remain standalone teaching experiments. They
 do not emit canonical benchmark artifacts and should not be presented as

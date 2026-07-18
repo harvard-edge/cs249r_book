@@ -9,6 +9,8 @@ It is not an official MLCommons benchmark and is not endorsed by MLCommons.
 The maintained [work checklist](WORK_CHECKLIST.md) shows what is complete, what
 still blocks full one-run coverage, and what is deliberately deferred to the
 stability or production phase.
+The [course-image budgets](COURSE_BUDGETS.md) provide measured one-run CPU and
+MPS functional planning ceilings without turning them into performance claims.
 
 The v0.1 portfolio contains fourteen workloads. Twelve now have at least one
 complete authoritative quality result. Eight meet their declared target, and

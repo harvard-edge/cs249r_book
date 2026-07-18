@@ -77,8 +77,10 @@ lowering a target to fit one local result.
   reference contract.
 - [x] Add a provenance-bound precomputed-baseline import for training labs that
   cannot produce the candidate checkpoint during class.
-- [ ] Measure and publish CPU and accelerator runtime, download, disk, and
-  peak-memory budgets on the course images.
+- [x] Measure and publish one-run CPU and accelerator-requested functional
+  runtime, download, disk, and peak-memory budgets on the first course image.
+- [ ] Measure authoritative `max` budgets for the workloads selected on each
+  actual course image.
 - [ ] Add controlled cross-hardware comparisons.
 - [ ] Populate measured working-set, arithmetic-intensity, and dispatch
   evidence for research interpretation.
