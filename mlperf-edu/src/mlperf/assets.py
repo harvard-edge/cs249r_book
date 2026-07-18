@@ -49,6 +49,9 @@ MLPERF_TINY_IMAGE_FLOAT_MODEL_SHA256 = (
 MLPERF_TINY_IMAGE_PERF_INDICES_SHA256 = (
     "3bd4a88eeb4c50fad652d0f24c8af13bc9219ba2878aea47c6536bfbeb43024d"
 )
+MLPERF_TINY_IMAGE_EVALUATOR_SHA256 = (
+    "64be48b7cfe4ca1157f01227f3122ee1760c8c5509c6875cacaab8ff931b22d1"
+)
 EEMBC_RUNNER_COMMIT = "cf7c2f2634608a7c0ea7458ab7cb3379f2863424"
 EEMBC_RUNNER_ARCHIVE_URL = (
     f"https://github.com/eembc/benchmark-runner-ml/archive/{EEMBC_RUNNER_COMMIT}.tar.gz"
@@ -903,6 +906,7 @@ def mlperf_tiny_image_paths(root: Path | None = None) -> dict[str, Path]:
         "root": base,
         "float_model": base / "pretrainedResnet.tflite",
         "performance_indices": base / "perf_samples_idxs.npy",
+        "evaluator_source": base / "eval_functions_eembc.py",
     }
 
 
@@ -1618,6 +1622,11 @@ def ensure_mlperf_tiny_image(
             paths["performance_indices"],
             f"{MLPERF_TINY_IMAGE_BASE_URL}/perf_samples_idxs.npy",
             MLPERF_TINY_IMAGE_PERF_INDICES_SHA256,
+        ),
+        (
+            paths["evaluator_source"],
+            f"{MLPERF_TINY_IMAGE_BASE_URL}/eval_functions_eembc.py",
+            MLPERF_TINY_IMAGE_EVALUATOR_SHA256,
         ),
     )
     for destination, url, expected_sha256 in specifications:

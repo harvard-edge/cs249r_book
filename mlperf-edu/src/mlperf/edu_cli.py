@@ -1202,13 +1202,15 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             source = f"https://huggingface.co/datasets/{CIFAR10_HF_REPO_ID}/tree/{CIFAR10_HF_REVISION}"
             return (
                 f"- {workload.id}: {dataset} -> {paths['root']} ({source}); "
-                f"MLPerf Tiny model/index -> {evaluation_paths['root']}; {terms}"
+                "MLPerf Tiny model, index, and evaluator -> "
+                f"{evaluation_paths['root']}; {terms}"
             )
         asset = ensure_cifar10(download=True)
         evaluation = ensure_mlperf_tiny_image(download=True)
         return (
             f"- {workload.id}: {dataset} at {asset.root} "
-            f"({asset.sha256[:19]}, {asset.n_bytes} bytes); MLPerf Tiny model/index "
+            f"({asset.sha256[:19]}, {asset.n_bytes} bytes); MLPerf Tiny model, "
+            "index, and evaluator "
             f"at {evaluation.root} ({evaluation.sha256[:19]}, "
             f"{evaluation.n_bytes} bytes); {terms}"
         )
@@ -4610,6 +4612,9 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
     performance_html = experiment_performance_html(
         performance_records, independent_variables=independent_variables
     )
+    comparison_blockers = experiment_comparison_blockers(
+        performance_records, independent_variables=independent_variables
+    )
     repetition_counts = {
         int(run.get("repetitions") or 1)
         for run in plan.get("runs") or []
@@ -4656,6 +4661,13 @@ def experiment_plan_section_html(report: dict[str, Any]) -> str:
             "exploratory, repair or regenerate the evidence, and do not use the "
             "performance delta."
         )
+    elif comparison_blockers:
+        next_action = (
+            "The recorded values passed their quality and provenance checks, but "
+            "the controlled performance comparison is blocked. Inspect the "
+            "comparison boundary shown above, align the missing or differing "
+            "evidence, and rerun the same plan before interpreting a delta."
+        )
     elif repetition_counts == {1}:
         next_action = (
             "The conditions passed initial quality review. Use the observed delta "
@@ -4691,6 +4703,31 @@ EXPERIMENT_CONFIG_BINDINGS = {
     "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "batch_size",
     "MLPERF_EDU_MAX_LR": "learning_rate",
 }
+
+
+def experiment_comparison_blockers(
+    records: list[dict[str, Any]], *, independent_variables: set[str]
+) -> list[str]:
+    """Return the unique reasons that block any comparable experiment group."""
+    groups: dict[tuple[str, str, str, str], list[dict[str, Any]]] = {}
+    for record in records:
+        key = (
+            str(record["workload"]),
+            str(record["mode"]),
+            str(record["phase"]),
+            str(record["metric"]),
+        )
+        groups.setdefault(key, []).append(record)
+    blockers: list[str] = []
+    for items in groups.values():
+        if len(items) < 2:
+            continue
+        blockers.extend(
+            controlled_experiment_reasons(
+                items, independent_variables=independent_variables
+            )
+        )
+    return list(dict.fromkeys(blockers))
 
 
 def experiment_performance_html(

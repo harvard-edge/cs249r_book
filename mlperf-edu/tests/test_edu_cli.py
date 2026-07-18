@@ -11,7 +11,7 @@ from pathlib import Path
 
 import pytest
 
-from mlperf import edu_cli
+from mlperf import assets, edu_cli
 from mlperf.edu_cli import (
     default_collection_for,
     enrich_report_for_display,
@@ -2266,6 +2266,11 @@ def test_image_classification_max_run_writes_verifiable_artifacts(tmp_path):
     assert report["device_requested"] == "cpu"
     assert report["device_executed"] == "cpu"
     assert report["metrics"]["correct"] == 174
+    assert report["evaluator"]["name"] == "mlperf-tiny-top1-accuracy"
+    assert report["evaluator"]["revision"] == assets.MLPERF_TINY_COMMIT
+    assert report["evaluator"]["source_sha256"] == (
+        f"sha256:{assets.MLPERF_TINY_IMAGE_EVALUATOR_SHA256}"
+    )
     assert Path(report["artifacts"]["weights"]).name == "pretrainedResnet.tflite"
     assert (
         Path(report["artifacts"]["performance_indices"]).name == "perf_samples_idxs.npy"

@@ -13,6 +13,7 @@ import torch
 from torch.utils.data import DataLoader, Subset
 
 from mlperf.assets import (
+    MLPERF_TINY_COMMIT,
     ensure_cifar10,
     ensure_mlperf_tiny_image,
     load_cifar10_dataset,
@@ -136,6 +137,18 @@ def run_image_classification_max(
     dataset_asset = ensure_cifar10(download=True)
     evaluation_asset = ensure_mlperf_tiny_image(download=True)
     evaluation_paths = mlperf_tiny_image_paths()
+    canonical_contract = workload.raw.get("canonical_max_contract") or {}
+    evaluator_contract = canonical_contract.get("evaluator") or {}
+    if not isinstance(evaluator_contract, dict) or not evaluator_contract:
+        raise ValueError("image-classification evaluator contract is missing")
+    evaluator_digest = f"sha256:{sha256_file(evaluation_paths['evaluator_source'])}"
+    if (
+        evaluator_contract.get("revision") != MLPERF_TINY_COMMIT
+        or evaluator_contract.get("source_sha256") != evaluator_digest
+    ):
+        raise ValueError(
+            "image-classification evaluator asset differs from the canonical contract"
+        )
     indices = np.load(evaluation_paths["performance_indices"], allow_pickle=False)
     if indices.shape != (200,) or len(np.unique(indices)) != 200:
         raise ValueError(
@@ -230,6 +243,7 @@ def run_image_classification_max(
             "sha256": evaluation_asset.sha256,
             "n_bytes": evaluation_asset.n_bytes,
         },
+        "evaluator": dict(evaluator_contract),
         "seed": seed,
         "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {

@@ -483,3 +483,77 @@ def test_experiment_performance_blocks_quality_failed_condition():
     assert "comparison blocked" in html
     assert "must pass the same quality gate" in html
     assert "vs baseline" not in html
+
+
+def test_experiment_next_action_does_not_recommend_a_blocked_delta(monkeypatch):
+    monkeypatch.setattr(edu_cli, "_comparison_provenance_verified", lambda _item: True)
+    report = {
+        "experiment_plan": {
+            "id": "blocked-comparison",
+            "title": "Blocked comparison",
+            "study": {
+                "independent_variables": [
+                    "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE"
+                ]
+            },
+            "runs": [
+                {
+                    "name": "baseline",
+                    "role": "baseline",
+                    "workload": "image-classification",
+                    "mode": "inference",
+                    "device": "cpu",
+                    "repetitions": 1,
+                    "environment": {
+                        "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "16"
+                    },
+                },
+                {
+                    "name": "candidate",
+                    "role": "candidate",
+                    "workload": "image-classification",
+                    "mode": "inference",
+                    "device": "cpu",
+                    "repetitions": 1,
+                    "environment": {
+                        "MLPERF_EDU_IMAGE_CLASSIFICATION_MAX_BATCH_SIZE": "64"
+                    },
+                },
+            ],
+        },
+        "workloads": [],
+    }
+    for index, batch_size in enumerate((16, 64), start=1):
+        report["workloads"].append(
+            {
+                "workload": "image-classification",
+                "profile": "pro",
+                "mode": "inference",
+                "status": "passed",
+                "backend": "pytorch-cpu",
+                "device_executed": "cpu",
+                "dataset": {"name": "cifar10", "revision": "same"},
+                "model_source": {"revision": "same"},
+                "execution_lineage": {"checkpoint": {"revision": "same"}},
+                "config": {"batch_size": batch_size},
+                "metrics": {
+                    "top1_accuracy": 0.87,
+                    "samples_per_second": float(batch_size),
+                },
+                "quality": {
+                    "metric": "top1_accuracy",
+                    "metric_key": "top1_accuracy",
+                    "target": 0.85,
+                    "direction": "higher",
+                    "quality_required": True,
+                    "target_met": True,
+                },
+                "experiment_run": {"index": index},
+            }
+        )
+
+    html = edu_cli.experiment_plan_section_html(report)
+
+    assert "evaluator evidence is missing" in html
+    assert "controlled performance comparison is blocked" in html
+    assert "Use the observed delta" not in html

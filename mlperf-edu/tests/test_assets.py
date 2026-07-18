@@ -111,6 +111,45 @@ def test_evalplus_fetch_extracts_pinned_evaluator_source(monkeypatch, tmp_path):
     assert (result.root / "evalplus" / "evaluate.py").is_file()
 
 
+def test_mlperf_tiny_image_fetch_pins_model_index_and_evaluator(monkeypatch, tmp_path):
+    sources = {
+        "trained_models/pretrainedResnet.tflite": b"model",
+        "perf_samples_idxs.npy": b"indices",
+        "eval_functions_eembc.py": b"def calculate_accuracy(): pass\n",
+    }
+    monkeypatch.setattr(
+        assets,
+        "MLPERF_TINY_IMAGE_FLOAT_MODEL_SHA256",
+        hashlib.sha256(sources["trained_models/pretrainedResnet.tflite"]).hexdigest(),
+    )
+    monkeypatch.setattr(
+        assets,
+        "MLPERF_TINY_IMAGE_PERF_INDICES_SHA256",
+        hashlib.sha256(sources["perf_samples_idxs.npy"]).hexdigest(),
+    )
+    monkeypatch.setattr(
+        assets,
+        "MLPERF_TINY_IMAGE_EVALUATOR_SHA256",
+        hashlib.sha256(sources["eval_functions_eembc.py"]).hexdigest(),
+    )
+
+    def fake_download(url, destination):
+        relative = url.removeprefix(assets.MLPERF_TINY_IMAGE_BASE_URL + "/")
+        destination.write_bytes(sources[relative])
+
+    monkeypatch.setattr(assets, "_download", fake_download)
+
+    result = assets.ensure_mlperf_tiny_image(root=tmp_path / "cache")
+
+    assert result.name == "mlperf-tiny-image-evaluation"
+    assert [path.name for path in result.files] == [
+        "pretrainedResnet.tflite",
+        "perf_samples_idxs.npy",
+        "eval_functions_eembc.py",
+    ]
+    assert all(path.is_file() for path in result.files)
+
+
 def test_bfcl_fetch_validates_all_non_live_ast_examples(monkeypatch, tmp_path):
     source_root = tmp_path / "source"
     data_root = source_root / "bfcl_eval" / "data"
