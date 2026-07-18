@@ -56,20 +56,30 @@ promotion, and production publication are separate later phases.
 These items refine or approve quality interpretation. They do not justify
 lowering a target to fit one local result.
 
-- [ ] Investigate the PatchTST result of 0.292393 MSE against the unchanged
-  target of at most 0.290.
-- [ ] Investigate the HumanEval+ result of 91 passing tasks against the
-  unchanged requirement of at least 94 of 164.
-- [ ] Analyze the BFCL category gaps behind the 0.785208 result against the
-  unchanged 0.8292 target.
-- [ ] Review the EDM sampler and numerical path behind the 1.801554 minimum FID
-  against the unchanged target of at most 1.79.
+- [x] Investigate the PatchTST result. Two exact Apple Silicon reproductions
+  reached 0.29168 and 0.29239 MSE. Neither met the unchanged 0.290 point, and
+  no post-result tolerance was introduced.
+- [x] Investigate the HumanEval+ result. Attention, dtype, Transformers, Qwen
+  evaluator, and EvalPlus variants were cross-checked. The authoritative run
+  still passed 91 of 164 tasks against the unchanged 94-task requirement.
+- [x] Analyze the BFCL category gaps. Java and JavaScript account for the
+  largest deficits, while Python, multiple, and parallel-multiple meet or
+  exceed the corresponding published category scores. The aggregate remains
+  0.785208 against the unchanged 0.8292 target.
+- [x] Review the EDM sampler and numerical path. Three complete 50,000-image
+  trials were independently rehashed and rescored, the official 18-step and
+  35-evaluation schedule was preserved, and the evaluator cross-check differed
+  by only 2.53e-8 FID. The best result remains 1.801554 against 1.79.
 - [ ] Obtain domain approval for the one-sided OGB GCN target interpretation.
 - [ ] Obtain independent approval for the nanoGPT target interpretation.
-- [ ] Resolve the keyword-spotting adapter's quality-preserving but nonidentical
-  promotion boundary.
-- [ ] Close dataset redistribution and fetch-only wording before public
-  release.
+- [x] Resolve the keyword-spotting adapter boundary. Retain it as a disclosed,
+  quality-preserving educational adaptation and block promotion until an
+  exact-source execution path or authoritative unquantized weights establish
+  parity.
+- [x] Use conservative fetch-only wording and reject restricted dataset bytes
+  from portable packages while decisions remain open.
+- [ ] Close the remaining external dataset redistribution and component-terms
+  decisions before public release.
 
 ## Classroom and Research Follow-Up
 
@@ -86,7 +96,9 @@ lowering a target to fit one local result.
   evidence for research interpretation.
 - [ ] Perform an explicitly requested interactive review of a standalone run
   dashboard. Layout automation already passes and no browser should open as a
-  side effect of routine verification.
+  side effect of routine verification. The July 18 attempt stopped without
+  opening anything because the in-app browser runtime reported no available
+  browser.
 
 ## Stability and Promotion
 
@@ -103,8 +115,10 @@ Production publication is not required for the initial classroom and research
 preview.
 
 - [ ] Close component licensing, package naming, versioning, and governance.
-- [ ] Complete security review of generated-code execution, untrusted pickle
-  handling, and legacy container paths.
+- [x] Harden and document the controlled-preview generated-code and pinned
+  pickle paths in [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+- [ ] Replace executable EDM pickle inputs with safe reviewed artifacts and
+  qualify independently built, signed DLRM and MiniGo runtime images.
 - [ ] Close MLCommons review of the project name, scope, and result wording.
 - [ ] Sign release artifacts and authenticate provenance where producer
   identity matters.

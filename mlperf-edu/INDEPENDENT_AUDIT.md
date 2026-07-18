@@ -110,12 +110,13 @@ highest-risk findings were valid and are now enforced in code and tests.
   evidence trees or unambiguous source artifacts. All five labs are rendered in
   the website navigation.
 
-The repeated review supports a supervised pilot for Labs 01, 02, 04, and 05.
-Lab 03 is explicitly a take-home accelerator exercise until the product can
-bind a precomputed instructor baseline into a candidate-only plan. Automated
-allowed-plan-diff grading and measured course-image resource budgets also remain
-open. These are product-readiness limits, not reasons to change the fourteen
-benchmark identities or lower their quality targets.
+The repeated review now supports a supervised pilot for all five labs. Lab 03
+can bind a provenance-verified instructor baseline into a candidate-only plan,
+and the CLI enforces allowed plan edits against the instructor reference.
+Measured functional CPU and accelerator-requested resource budgets are
+published for the first course system. Authoritative max budgets on each
+selected course image remain open. This limit is not a reason to change the
+fourteen benchmark identities or lower their quality targets.
 
 ## Primary Sources
 

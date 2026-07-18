@@ -67,10 +67,12 @@ and evaluator without project choices.
 
 ## Reviewer Checklist
 
-- [ ] Every active dataset has an authoritative upstream source.
-- [ ] Every revision, file, and split is pinned and verified.
+- [x] Every active dataset has an authoritative upstream source.
+- [x] Every revision, file, and split is pinned and verified, or is generated
+  by the pinned run contract.
 - [ ] License and attribution text is accurate.
-- [ ] Fetch-only and redistribution rules are explicit.
-- [ ] Generated reports disclose data mode and asset hashes.
-- [ ] Package tests reject restricted bytes.
-- [ ] No removed workload dataset remains on the public benchmark site.
+- [x] Fetch-only and redistribution rules are explicit and conservative while
+  external decisions remain open.
+- [x] Generated reports disclose data mode and asset hashes.
+- [x] Package tests reject restricted bytes.
+- [x] No removed workload dataset remains on the public benchmark site.

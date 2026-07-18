@@ -47,8 +47,8 @@ number means.
 
 This distinction is important for the four current near-misses. PatchTST,
 HumanEval+, BFCL, and EDM remain below strict published-reference points. Their
-results do not justify lowering the gates. The causal-language-modeling point,
-graph tolerance, and causal-language-modeling interpretation remain conditional
+results do not justify lowering the gates. The graph tolerance and the
+causal-language-modeling reproduction-point interpretation remain conditional
 until independently approved. The BFCL data, leaderboard result, and evaluator
 are now pinned to immutable revisions.
 
