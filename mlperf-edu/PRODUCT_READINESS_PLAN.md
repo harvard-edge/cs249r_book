@@ -141,6 +141,8 @@ research-environment workloads.
 - [x] Add suite-level research quality small multiples and CSV/JSON export
   examples.
 - [x] Complete current BFCL and EDM result packets.
+- [x] Publish machine-readable DLRM and MiniGo execution handoffs with exact
+  environment, asset, source, and command requirements.
 - [ ] Execute DLRM and MiniGo in their required environments.
 
 ### Production release

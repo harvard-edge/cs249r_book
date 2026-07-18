@@ -112,6 +112,18 @@ compilers, and model execution. Distributed and datacenter-scale claims are
 outside v0.1. A profile describes contract depth rather than promising that
 every workload fits every student's machine.
 
+The two environment-gated max workloads expose complete transfer contracts:
+
+```bash
+uv run mlperf doctor --workload recommendation --profile max --format json
+uv run mlperf doctor --workload reinforcement-learning --profile max --format json
+```
+
+The failing doctor check contains a machine-readable handoff with the required
+hardware, licensed or reviewed assets, exact source and checkpoint identity,
+environment variables, preflight, and run command. It does not claim that the
+quality run occurred on the current machine.
+
 ## Evidence and Provenance
 
 The current twelve evidence cases consist of one canonical `max` case for each

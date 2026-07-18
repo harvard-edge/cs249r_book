@@ -37,6 +37,78 @@ PRO_GAMES_REVIEW_ENV = "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED"
 IMAGE_PATTERN = re.compile(r"^[^@\s]+@sha256:[0-9a-f]{64}$")
 
 
+def environment_handoff_contract() -> dict[str, Any]:
+    """Describe the complete external environment needed for MiniGo quality."""
+    return {
+        "schema": "mlperf-edu-environment-handoff/0.1",
+        "workload": "reinforcement-learning",
+        "profile": "max",
+        "execution_status": "environment-gated-quality-conformance",
+        "quality": {
+            "metric": "professional_move_prediction",
+            "target": TARGET_PROFESSIONAL_MOVE_ACCURACY,
+            "direction": "higher",
+            "acceptance_runs": 1,
+            "secondary_gate": {
+                "metric": "playoff_win_rate",
+                "target": PLAYOFF_WIN_RATE,
+                "direction": "higher",
+            },
+        },
+        "required_hardware": {
+            "system": "single-node",
+            "accelerator": "NVIDIA GPU",
+            "container_gpu_interface": "Docker-compatible --gpus all",
+            "legacy_runtime": "CUDA with the pinned TensorFlow 1.x environment",
+        },
+        "external_assets": {
+            "professional_games": {
+                "count": 4,
+                "source_revision": MINIGO_COMMIT,
+                "review_gate": "release and terms review before use",
+            },
+            "container_image": {
+                "identity": "repository/image@sha256:<64 hex>",
+                "build_source": "reinforcement/tensorflow/Dockerfile",
+                "immutable_digest_required": True,
+            },
+            "self_play": {
+                "generated_by_run": True,
+                "games_per_generation": SELF_PLAY_GAMES_PER_GENERATION,
+                "workers": SELF_PLAY_WORKERS,
+                "search_readouts": SEARCH_READOUTS,
+            },
+        },
+        "source": {
+            "training_revision": MINIGO_COMMIT,
+            "critical_files": {
+                name: f"sha256:{digest}" for name, digest in MINIGO_SOURCE_FILES.items()
+            },
+        },
+        "environment": {
+            PRO_GAMES_REVIEW_ENV: "1 after release and terms review",
+            IMAGE_ENV: "immutable repository/image@sha256:<64 hex>",
+            RUNTIME_ENV: "Docker-compatible executable; defaults to docker",
+        },
+        "preflight_command": (
+            "mlperf doctor --workload reinforcement-learning --profile max "
+            "--format json"
+        ),
+        "run_command": (
+            "mlperf run --workload reinforcement-learning --profile max "
+            "--output-dir submissions/reinforcement-learning-max"
+        ),
+        "resumable": True,
+        "production_ready": False,
+        "remaining_after_quality": [
+            "independent platform reproduction",
+            "security and professional-game terms review",
+            "artifact signing",
+            "later timing stability campaign",
+        ],
+    }
+
+
 RESUMABLE_WRAPPER = """#!/usr/bin/env bash
 set -euo pipefail
 

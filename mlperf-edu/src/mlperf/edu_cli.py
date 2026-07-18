@@ -692,9 +692,9 @@ def selection_label(
 
 def workload_profile_readiness_checks(
     workload: Workload, profile: str
-) -> list[dict[str, str]]:
+) -> list[dict[str, Any]]:
     """Return lightweight, non-mutating readiness checks for a selected profile."""
-    checks: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
     runners = workload.raw.get("runner") or {}
     runner_profile = profile if profile != "pro" else "max"
     if not runners.get(runner_profile):
@@ -709,6 +709,9 @@ def workload_profile_readiness_checks(
         return checks
 
     if workload.id == "recommendation":
+        from mlperf.runners.recommendation import environment_handoff_contract
+
+        handoff = environment_handoff_contract()
         missing = [
             name
             for name, ready in (
@@ -735,6 +738,7 @@ def workload_profile_readiness_checks(
                         "research environment is gated; set " + ", ".join(missing)
                     ),
                     "status": "fail",
+                    "handoff": handoff,
                 }
             )
             return checks
@@ -757,11 +761,15 @@ def workload_profile_readiness_checks(
                     else "missing " + ", ".join(missing_paths)
                 ),
                 "status": "ok" if not missing_paths else "fail",
+                "handoff": handoff,
             }
         )
         return checks
 
     if workload.id == "reinforcement-learning":
+        from mlperf.runners.reinforcement import environment_handoff_contract
+
+        handoff = environment_handoff_contract()
         missing = [
             name
             for name, ready in (
@@ -793,6 +801,7 @@ def workload_profile_readiness_checks(
                     else "research environment is gated; set " + ", ".join(missing)
                 ),
                 "status": "ok" if not missing else "fail",
+                "handoff": handoff,
             }
         )
         return checks
@@ -818,7 +827,7 @@ def workload_profile_readiness_checks(
 
 
 def collect_doctor_report(args: argparse.Namespace) -> dict[str, Any]:
-    checks: list[dict[str, str]] = []
+    checks: list[dict[str, Any]] = []
     selected: list[Workload] = []
     workloads: dict[str, Workload] = {}
     profile = getattr(args, "profile", "min")

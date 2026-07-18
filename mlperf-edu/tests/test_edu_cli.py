@@ -503,6 +503,54 @@ def test_doctor_fails_closed_on_missing_recommendation_max_environment():
     assert "MLPERF_EDU_DLRM_DATA_DIR" in result.stdout
 
 
+def test_doctor_json_emits_external_environment_handoffs():
+    recommendation_result = run_cli(
+        "doctor",
+        "--workload",
+        "recommendation",
+        "--profile",
+        "max",
+        "--format",
+        "json",
+        env_extra={
+            "MLPERF_EDU_CRITEO_TERMS_ACCEPTED": "",
+            "MLPERF_EDU_DLRM_DATA_DIR": "",
+            "MLPERF_EDU_DLRM_CHECKPOINT": "",
+        },
+    )
+    reinforcement_result = run_cli(
+        "doctor",
+        "--workload",
+        "reinforcement-learning",
+        "--profile",
+        "max",
+        "--format",
+        "json",
+        env_extra={
+            "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED": "",
+            "MLPERF_EDU_MINIGO_IMAGE": "",
+        },
+    )
+
+    assert recommendation_result.returncode == 1
+    recommendation_checks = json.loads(recommendation_result.stdout)["checks"]
+    recommendation_handoff = next(
+        check["handoff"] for check in recommendation_checks if "handoff" in check
+    )
+    assert recommendation_handoff["workload"] == "recommendation"
+    assert recommendation_handoff["required_hardware"][
+        "recommended_host_memory_gib"
+    ] == 256
+
+    assert reinforcement_result.returncode == 1
+    reinforcement_checks = json.loads(reinforcement_result.stdout)["checks"]
+    reinforcement_handoff = next(
+        check["handoff"] for check in reinforcement_checks if "handoff" in check
+    )
+    assert reinforcement_handoff["workload"] == "reinforcement-learning"
+    assert reinforcement_handoff["required_hardware"]["accelerator"] == "NVIDIA GPU"
+
+
 def test_list_default_contains_canonical_language_modeling():
     result = run_cli("list")
     assert result.returncode == 0

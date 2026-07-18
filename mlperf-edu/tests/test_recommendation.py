@@ -85,3 +85,19 @@ def test_preprocessed_file_contract_covers_all_24_days(tmp_path: Path):
     assert files[1].name == "day_fea_count.npz"
     assert files[2].name == "day_0_reordered.npz"
     assert files[-1].name == "day_23_reordered.npz"
+
+
+def test_environment_handoff_is_complete_without_licensed_assets():
+    handoff = recommendation.environment_handoff_contract()
+
+    assert handoff["execution_status"] == "environment-gated-quality-conformance"
+    assert handoff["required_hardware"]["recommended_host_memory_gib"] == 256
+    assert handoff["external_assets"]["checkpoint"]["md5"] == (
+        recommendation.DLRM_CHECKPOINT_MD5
+    )
+    assert len(
+        handoff["external_assets"]["dataset"]["required_preprocessed_files"]
+    ) == 26
+    assert recommendation.TERMS_ENV in handoff["environment"]
+    assert "--profile max" in handoff["run_command"]
+    assert handoff["production_ready"] is False

@@ -110,3 +110,17 @@ def test_official_contract_constants_are_not_reduced_for_classroom_runs():
     assert reinforcement.SEARCH_READOUTS == 200
     assert reinforcement.PLAYOFF_GAMES == 100
     assert reinforcement.PLAYOFF_WIN_RATE == pytest.approx(0.55)
+
+
+def test_environment_handoff_requires_immutable_nvidia_runtime():
+    handoff = reinforcement.environment_handoff_contract()
+
+    assert handoff["execution_status"] == "environment-gated-quality-conformance"
+    assert handoff["required_hardware"]["accelerator"] == "NVIDIA GPU"
+    assert handoff["external_assets"]["professional_games"]["count"] == 4
+    assert handoff["external_assets"]["container_image"][
+        "immutable_digest_required"
+    ]
+    assert reinforcement.IMAGE_ENV in handoff["environment"]
+    assert handoff["resumable"] is True
+    assert handoff["production_ready"] is False
