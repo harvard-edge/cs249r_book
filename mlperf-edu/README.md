@@ -52,7 +52,7 @@ uv run mlperf run --workload image-classification --profile max \
 | `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; first complete result reached 0.554878 and did not meet the unchanged target |
 | `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; the complete 1,150-case result reached 0.785208 and did not meet the unchanged target |
 | `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; complete runner ready, execution gated on licensed data and a 256-GB-class environment |
-| `image-generation` | NVIDIA EDM and the three-trial CIFAR-10 FID protocol | inference | published 1.79 minimum FID across three 50,000-image trials; measured minimum 1.801554, with a current packet still needed |
+| `image-generation` | NVIDIA EDM and the three-trial CIFAR-10 FID protocol | inference | published 1.79 minimum FID across three 50,000-image trials; the provenance-bound packet rescored at 1.801554 and did not meet the unchanged target |
 | `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; complete resumable runner gated on a reviewed legacy GPU environment |
 
 The [selection ledger](registry/selection-ledger.yaml) records the authority,
@@ -75,6 +75,13 @@ runner rejects missing categories, changed bytes, task-order drift, model
 drift, and conflicts with an existing canonical sample file. The report labels
 the generation as imported and records whether the current invocation generated
 the model outputs. Importing evidence never turns a target miss into a pass.
+
+For EDM, `MLPERF_EDU_EDM_IMPORT_PACKET` accepts only a complete
+`mlperf-edu-edm-generation-evidence/0.1` packet. It binds the generator and
+evaluator source bytes, sampler precision, checkpoint, three exact seed ranges,
+source manifests, and source evaluations. The runner rehashes all 150,000 PNGs,
+recomputes all three FIDs with the pinned detector and reference statistics,
+and refuses the packet if a rescore differs by more than (10^{-6}).
 
 ## Workload Identity
 

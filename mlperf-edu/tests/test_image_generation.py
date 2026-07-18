@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 
@@ -17,6 +18,11 @@ class _ZeroDenoiser:
 
     def __init__(self) -> None:
         self.calls = 0
+        self.round_calls = 0
+
+    def round_sigma(self, values):
+        self.round_calls += 1
+        return values
 
     def __call__(self, x, _sigma, _labels):
         self.calls += 1
@@ -30,8 +36,10 @@ def test_mps_adapter_preserves_official_35_evaluation_schedule():
     result = image_generation.edm_mps_sampler(model, latents, None)
 
     assert result.shape == latents.shape
+    assert result.dtype == torch.float64
     assert torch.isfinite(result).all()
     assert model.calls == image_generation.NETWORK_EVALUATIONS_PER_IMAGE == 35
+    assert model.round_calls == 1
 
 
 def test_per_seed_randomness_is_independent_of_batch_partitioning():
@@ -94,9 +102,186 @@ def test_quality_score_is_minimum_of_exactly_three_trials():
         image_generation.quality_score_from_trials([1.8])
 
 
+def test_fid_statistics_use_the_scipy_api_without_removed_disp_argument():
+    mu = np.array([0.0, 1.0], dtype=np.float64)
+    sigma = np.eye(2, dtype=np.float64)
+
+    score = image_generation.fid_from_statistics(mu, sigma, mu, sigma)
+
+    assert score == pytest.approx(0.0, abs=1e-12)
+
+
 def test_official_contract_constants_are_not_reduced_for_classroom_runs():
     assert image_generation.EXPECTED_IMAGES == 50_000
     assert image_generation.QUALITY_TRIAL_SEED_STARTS == (0, 50_000, 100_000)
     assert image_generation.NUM_STEPS == 18
     assert image_generation.NETWORK_EVALUATIONS_PER_IMAGE == 35
     assert image_generation.TARGET_FID == pytest.approx(1.79)
+
+
+def _sha256(path: Path) -> str:
+    return f"sha256:{hashlib.sha256(path.read_bytes()).hexdigest()}"
+
+
+def _write_edm_import_packet(monkeypatch, tmp_path: Path) -> Path:
+    monkeypatch.setattr(image_generation, "EXPECTED_IMAGES", 2)
+    monkeypatch.setattr(image_generation, "QUALITY_TRIAL_SEED_STARTS", (0, 2, 4))
+    generator = tmp_path / "generator.py"
+    evaluator = tmp_path / "evaluator.py"
+    generator.write_text("# generator\n")
+    evaluator.write_text("# evaluator\n")
+    trials = []
+    for trial, seed_start in enumerate((0, 2, 4), start=1):
+        images_root = tmp_path / f"images-{trial}"
+        image_records = []
+        for seed in range(seed_start, seed_start + 2):
+            path = image_generation._seed_image_path(images_root, seed)
+            path.parent.mkdir(parents=True, exist_ok=True)
+            Image.fromarray(
+                np.full((32, 32, 3), seed, dtype=np.uint8), "RGB"
+            ).save(path)
+            image_records.append(
+                {
+                    "path": path.relative_to(images_root).as_posix(),
+                    "seed": seed,
+                    "sha256": hashlib.sha256(path.read_bytes()).hexdigest(),
+                    "size_bytes": path.stat().st_size,
+                }
+            )
+        manifest = tmp_path / f"source-manifest-{trial}.json"
+        manifest.write_text(
+            json.dumps(
+                {
+                    "schema": "mlperf-edu-edm-image-set/0.1",
+                    "generator_status": {
+                        "adapter_sha256": _sha256(generator).removeprefix("sha256:"),
+                        "state": "complete",
+                        "completed": 2,
+                        "requested_seed_range": [seed_start, seed_start + 2],
+                        "network_sha256": image_generation.EDM_CIFAR10_CHECKPOINT_SHA256,
+                        "upstream_revision": image_generation.EDM_COMMIT,
+                        "device": "mps",
+                        "elapsed_seconds": 10.0 + trial,
+                        "sampler": {
+                            "name": "edm",
+                            "num_steps": image_generation.NUM_STEPS,
+                            "nfe": image_generation.NETWORK_EVALUATIONS_PER_IMAGE,
+                            "stochasticity": 0,
+                        },
+                    },
+                    "image_contract": {
+                        "count": 2,
+                        "mode": "RGB",
+                        "resolution": [32, 32],
+                    },
+                    "images": image_records,
+                }
+            )
+            + "\n"
+        )
+        evaluation = tmp_path / f"source-evaluation-{trial}.json"
+        evaluation.write_text(
+            json.dumps(
+                {
+                    "adapter_sha256": _sha256(evaluator).removeprefix("sha256:"),
+                    "state": "complete",
+                    "num_expected": 2,
+                    "upstream_revision": image_generation.EDM_COMMIT,
+                    "detector_sha256": image_generation.EDM_INCEPTION_SHA256,
+                    "reference_sha256": image_generation.EDM_CIFAR10_FID_REFERENCE_SHA256,
+                    "fid": 1.8 + trial / 100,
+                }
+            )
+            + "\n"
+        )
+        trials.append(
+            {
+                "seed_start": seed_start,
+                "seed_end": seed_start + 1,
+                "images_root": str(images_root),
+                "source_manifest": {
+                    "path": manifest.name,
+                    "sha256": _sha256(manifest),
+                },
+                "source_evaluation": {
+                    "path": evaluation.name,
+                    "sha256": _sha256(evaluation),
+                },
+            }
+        )
+    packet = tmp_path / "packet.json"
+    packet.write_text(
+        json.dumps(
+            {
+                "schema": image_generation.EDM_IMPORT_PACKET_SCHEMA,
+                "model": {
+                    "checkpoint_sha256": (
+                        f"sha256:{image_generation.EDM_CIFAR10_CHECKPOINT_SHA256}"
+                    ),
+                    "upstream_revision": image_generation.EDM_COMMIT,
+                },
+                "sampler": {
+                    "name": "edm-algorithm-2",
+                    "sampler_steps": image_generation.NUM_STEPS,
+                    "network_evaluations_per_image": (
+                        image_generation.NETWORK_EVALUATIONS_PER_IMAGE
+                    ),
+                    "stochasticity": 0,
+                    "state_precision": "float64-cpu-state-float32-mps-network",
+                    "random_device": "cpu",
+                },
+                "adapters": [
+                    {
+                        "path": generator.name,
+                        "sha256": _sha256(generator),
+                        "role": "generator",
+                    },
+                    {
+                        "path": evaluator.name,
+                        "sha256": _sha256(evaluator),
+                        "role": "evaluator",
+                    },
+                ],
+                "trials": trials,
+            }
+        )
+        + "\n"
+    )
+    return packet
+
+
+def test_edm_import_binds_source_code_images_and_prior_evaluation(
+    monkeypatch, tmp_path: Path
+):
+    packet = _write_edm_import_packet(monkeypatch, tmp_path)
+
+    evidence = image_generation.load_edm_generation_evidence(packet)
+    first = evidence["trials"][0]
+    current_manifest = tmp_path / "current.jsonl"
+    image_set = image_generation.build_image_manifest(
+        first["images_root"],
+        current_manifest,
+        seed_start=0,
+        expected_manifest=first["source_manifest"],
+    )
+
+    assert evidence["mode"] == "imported-hash-bound-generation"
+    assert len(evidence["trials"]) == 3
+    assert first["prior_fid"] == pytest.approx(1.81)
+    assert image_set["images"] == 2
+
+
+def test_edm_import_rejects_changed_image_bytes(monkeypatch, tmp_path: Path):
+    packet = _write_edm_import_packet(monkeypatch, tmp_path)
+    evidence = image_generation.load_edm_generation_evidence(packet)
+    first = evidence["trials"][0]
+    image_path = image_generation._seed_image_path(first["images_root"], 0)
+    Image.fromarray(np.ones((32, 32, 3), dtype=np.uint8), "RGB").save(image_path)
+
+    with pytest.raises(ValueError, match="changed at seed 0"):
+        image_generation.build_image_manifest(
+            first["images_root"],
+            tmp_path / "current.jsonl",
+            seed_start=0,
+            expected_manifest=first["source_manifest"],
+        )

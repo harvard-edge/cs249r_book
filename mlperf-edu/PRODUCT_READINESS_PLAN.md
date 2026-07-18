@@ -140,7 +140,7 @@ research-environment workloads.
 - [ ] Add controlled cross-hardware comparisons.
 - [x] Add suite-level research quality small multiples and CSV/JSON export
   examples.
-- [ ] Complete current BFCL and EDM result packets.
+- [x] Complete current BFCL and EDM result packets.
 - [ ] Execute DLRM and MiniGo in their required environments.
 
 ### Production release
