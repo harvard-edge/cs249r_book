@@ -23,7 +23,9 @@ SCREENSHOT_PAGES = (
     "benchmarks/language/causal-language-modeling.html",
     "labs/index.html",
     "guide/instructors.html",
+    "guide/research.html",
     "guide/results.html",
+    "guide/troubleshooting.html",
     "reference/cli.html",
 )
 

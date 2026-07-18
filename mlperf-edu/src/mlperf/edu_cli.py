@@ -604,8 +604,9 @@ def add_profile(parser: argparse.ArgumentParser) -> None:
         choices=PROFILE_CHOICES,
         default="min",
         help=(
-            "Run scale: min=quick representative path, max=full suite, "
-            "pro=research variants and knobs. Defaults to min."
+            "Contract depth: min=quick functional path, max=complete quality "
+            "evaluation for the selected workload(s), pro=research variants and "
+            "knobs. Defaults to min."
         ),
     )
 

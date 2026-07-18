@@ -58,6 +58,17 @@ def test_cli_help():
     assert "--maturity" not in result.stdout
 
 
+def test_profile_help_describes_contract_depth_not_max_as_the_full_suite():
+    result = run_cli("run", "--help")
+
+    assert result.returncode == 0
+    normalized = " ".join(result.stdout.split())
+    assert (
+        "max=complete quality evaluation for the selected workload(s)" in normalized
+    )
+    assert "max=full suite" not in normalized
+
+
 def test_keyboard_interrupt_returns_shell_interrupt_status(monkeypatch, capsys):
     def interrupted(_args):
         raise KeyboardInterrupt

@@ -17,8 +17,10 @@ boundary for generated code, upstream pickle files, and historical runtimes.
 The v0.1 portfolio contains fourteen workloads. Twelve now have at least one
 complete authoritative quality result. Eight meet their declared target, and
 four record an honest target miss. The remaining two have complete,
-fail-closed runners and machine-readable handoffs for their external research
-environments. The promoted-evidence snapshot still covers nine workloads and
+fail-closed reference runners but do not yet run on the supported local
+machine. They are open first-milestone blockers under the
+[local execution plan](LOCAL_EXECUTION_PLAN.md). The promoted-evidence snapshot
+still covers nine workloads and
 twelve historical cases. MLPerf EDU contributes the thin PyTorch adapter,
 execution harness, measurement controls, provenance, and reports needed to
 move each definition through functional, quality-conformant,
@@ -31,8 +33,16 @@ The review build uses Python 3.10 or newer and a locked `uv` environment.
 ```bash
 git clone https://github.com/harvard-edge/cs249r_book
 cd cs249r_book/mlperf-edu
+uv sync --locked
+uv run mlperf init --profile min --output-dir submissions/first-run
+```
+
+The guided setup checks the environment, runs the four-workload functional
+starter path, verifies provenance, and writes HTML, JSON, and CSV reports
+without opening a browser. Development dependencies are separate.
+
+```bash
 uv sync --locked --extra dev
-uv run mlperf doctor
 ```
 
 Fetch assets before measurement so network transfer is outside the timed
@@ -112,7 +122,7 @@ uv run mlperf run --workload causal-language-modeling --profile max \
 | **Profile** | **Purpose** | **Result Boundary** |
 |:---|:---|:---|
 | `min` | Fast installation, teaching, and CI check | Functional only; never a public score or performance baseline |
-| `max` | Authoritative quality contract | Usually laptop-capable; DLRM and MiniGo require their declared single-node research environments |
+| `max` | Authoritative quality contract | Twelve paths are laptop-capable; local DLRM and MiniGo executors remain first-milestone work |
 | `pro` | Extended single-node research envelope | Adds controlled configurations without changing workload identity or the quality target |
 
 The research envelope supports processors, memory systems, runtimes,
@@ -120,7 +130,8 @@ compilers, and model execution. Distributed and datacenter-scale claims are
 outside v0.1. A profile describes contract depth rather than promising that
 every workload fits every student's machine.
 
-The two environment-gated max workloads expose complete transfer contracts:
+The two blocked local paths expose complete legacy-environment transfer
+contracts while their local executors are developed.
 
 ```bash
 uv run mlperf doctor --workload recommendation --profile max --format json
@@ -130,7 +141,7 @@ uv run mlperf doctor --workload reinforcement-learning --profile max --format js
 The failing doctor check contains a machine-readable handoff with the required
 hardware, licensed or reviewed assets, exact source and checkpoint identity,
 environment variables, preflight, and run command. It does not claim that the
-quality run occurred on the current machine.
+quality run occurred on the current machine or satisfy the local milestone.
 
 ## Evidence and Provenance
 
@@ -166,12 +177,21 @@ Every run writes these review artifacts:
 
 ```bash
 uv run mlperf verify submissions/image-review/image-classification_max.provd.json
-uv run mlperf package submissions/image-review/image-classification_max.provd.json
 uv run mlperf report submissions/image-review --format html --open
 ```
 
 Verification checks recorded bytes and provenance. It does not authenticate
 the producer or imply MLCommons acceptance.
+
+Portable packaging is demonstrated with the dataset-free functional result in
+Example 05. Many score-bearing `max` results bind fetch-only or release-review
+dataset bytes and are intentionally refused by `mlperf package`.
+
+```bash
+uv run mlperf package \
+  submissions/05-assignment/image-classification_min.provd.json \
+  --output submissions/05-assignment.zip
+```
 
 ## Validation
 
