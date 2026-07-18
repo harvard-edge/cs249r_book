@@ -39,8 +39,10 @@ promotion, and production publication are separate later phases.
 - [x] Show suite health counts, per-workload quality decisions, target markers,
   compatible baseline comparisons, and research small multiples where the
   result data supports them.
-- [x] Publish the 38-page website, all workload pages, classroom examples,
-  instructor rubrics, and a pro research example.
+- [x] Publish the website, all workload pages, classroom examples, instructor
+  rubrics, and a pro research example.
+- [x] Add one canonical first-run journey, role-based student, instructor, and
+  researcher routes, a first-result walkthrough, and troubleshooting guidance.
 - [x] Verify desktop and mobile layouts for the website and representative
   standalone dashboards.
 - [x] Record simulated student, instructor, and research reviews and retain the

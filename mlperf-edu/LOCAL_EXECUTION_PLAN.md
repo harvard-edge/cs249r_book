@@ -131,6 +131,10 @@ control task would be a new benchmark decision, not an implementation fix.
 The user journey should expose one local preparation path for the entire
 portfolio.
 
+> **Planned CLI surface.** The following all-workload acceptance sequence is a
+> design target, not a list of commands available today. In particular,
+> `doctor --local` and `run --resume` are not implemented.
+
 ```bash
 uv sync --locked
 uv run mlperf doctor --profile max --collection all --local
@@ -141,8 +145,7 @@ uv run mlperf run --profile max --collection all \
 uv run mlperf verify runs/local-acceptance
 ```
 
-The exact option names above are part of the implementation work. The completed
-CLI must provide the following behavior.
+The completed CLI must provide the following behavior.
 
 - `doctor --local` checks compute support, memory, disk, dependencies, source
   revisions, assets, and resumability before a long run starts.

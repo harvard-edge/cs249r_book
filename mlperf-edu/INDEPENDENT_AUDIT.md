@@ -118,6 +118,47 @@ published for the first course system. Authoritative max budgets on each
 selected course image remain open. This limit is not a reason to change the
 fourteen benchmark identities or lower their quality targets.
 
+## Setup-to-Results Usability Review
+
+A third review followed the complete setup, first-run, first-quality-result,
+and research-plan journey. Independent simulated student, TA, and research
+readers reviewed the source instructions and rendered desktop and narrow pages.
+The review also compared the entry path with the progressive-disclosure
+patterns used in the official uv, PyTorch, Hugging Face, and Gymnasium guides.
+
+The review found two correctness defects, which are now covered by tests. The
+time-series page had preserved a pass decision from an earlier provisional
+target instead of recomputing against the current 0.290 contract. Packaging
+instructions also recommended a score-bearing max artifact whose restricted
+dataset policy required the CLI to refuse it. The page now reports the current
+time-series miss, and the portable exercise uses a dataset-free min artifact
+without making a quality claim.
+
+The usability findings led to the following changes.
+
+- The homepage and Getting Started page use one canonical sequence based on
+  `uv sync --locked` and `mlperf init`.
+- Prerequisites, expected files, command roles, and success states are visible
+  before the first quality run.
+- Image classification replaces causal language modeling as the first max
+  workload.
+- Student, instructor, and researcher routes lead to purpose-specific guidance.
+- The results guide begins with an execution-to-publication claim ladder.
+- A troubleshooting page covers environment selection, assets, devices, target
+  misses, provenance, packaging policy, interrupted runs, and TA diagnostics.
+- The research guide states the one-run evidence boundary and preserves plans,
+  child reports, and manifests as one review packet.
+- DLRM and MiniGo pages now lead with environment preflight and handoff commands
+  instead of generic local max and pro commands.
+- The documentation states that general `run --resume` behavior is planned but
+  not implemented.
+
+All 40 rendered pages pass HTTP, console, content-shell, horizontal-overflow,
+and table-scroll-cue checks at desktop and 390-pixel viewports. The review still
+does not replace observation of students and instructors in a real course.
+Authoritative max budgets, general resume behavior, and local DLRM and MiniGo
+backends remain open.
+
 ## Primary Sources
 
 - [MLPerf Tiny rules](https://github.com/mlcommons/tiny/blob/4addd0fa08d216e20637637874e084895f289da4/benchmark/MLPerfTiny_Rules.adoc)
@@ -128,6 +169,10 @@ fourteen benchmark identities or lower their quality targets.
 - [Qwen2.5-Coder technical report](https://arxiv.org/abs/2409.12186)
 - [NVIDIA EDM reference implementation](https://github.com/NVlabs/edm)
 - [MLPerf Training benchmark paper](https://arxiv.org/abs/1910.01500)
+- [uv installation guide](https://docs.astral.sh/uv/getting-started/installation/)
+- [PyTorch quickstart](https://docs.pytorch.org/tutorials/beginner/basics/quickstart_tutorial.html)
+- [Hugging Face Transformers quicktour](https://huggingface.co/docs/transformers/quicktour)
+- [Gymnasium basic usage](https://gymnasium.farama.org/introduction/basic_usage/)
 
 ## Sign-Off Boundary
 

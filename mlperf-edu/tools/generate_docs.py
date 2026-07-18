@@ -469,12 +469,43 @@ def section_execution_boundary(w: Workload) -> str:
 
 
 def section_how_to_run(w: Workload) -> str:
-    lines = ["## How to Run", "", "```bash"]
     target = (
         f"--workload {w.canonical_workload} --variant {w.variant}"
         if w.variant
         else f"--workload {w.id}"
     )
+    canonical = w.raw.get("canonical_max_contract") or {}
+    if canonical.get("execution_status") == "environment-gated-quality-conformance":
+        next_gate = ((w.raw.get("spiral") or {}).get("next_gate") or "").strip()
+        lines = [
+            "## Current Preflight and Handoff",
+            "",
+            "::: {.callout-warning}",
+            "**The quality path is not a general local run yet.** " + esc(next_gate),
+            "The `max` and `pro` runners fail closed until the declared assets, "
+            "hardware, and runtime are available. Use `doctor` to inspect the "
+            "machine-readable environment handoff.",
+            ":::",
+            "",
+            "```bash",
+            "# inspect the authoritative environment handoff",
+            f"{CHECKOUT_COMMAND} doctor {target} --profile max --format json",
+            "",
+            "# preview asset requirements without downloading",
+            f"{CHECKOUT_COMMAND} fetch {target} --profile max --dry-run",
+            "",
+            "# the bounded functional path runs on supported local hardware",
+            f"{CHECKOUT_COMMAND} run {target} --profile min",
+            "```",
+            "",
+            "A successful `min` result verifies the local plumbing only. It does not "
+            "evaluate the authoritative quality target. See the "
+            "[running guide](../../guide/running.qmd) for the current local-execution "
+            "boundary and recovery status.",
+        ]
+        return "\n".join(lines) + "\n"
+
+    lines = ["## How to Run", "", "```bash"]
     shared_checkpoint = w.raw.get("shared_checkpoint")
     max_execution = w.raw.get("max_execution") or {}
     implemented_modes = set(w.raw.get("implemented_modes") or [])
@@ -507,7 +538,7 @@ def section_how_to_run(w: Workload) -> str:
             "# checkpoint-backed benchmark run (reuses the same output directory)"
         )
         lines.append(
-            f'{CHECKOUT_COMMAND} run {target} --profile max --output-dir "$OUTPUT_DIR" --open-report'
+            f'{CHECKOUT_COMMAND} run {target} --profile max --output-dir "$OUTPUT_DIR"'
         )
     else:
         if max_execution.get("fetched_assets_used") is False:
@@ -517,9 +548,9 @@ def section_how_to_run(w: Workload) -> str:
             lines.append(f"{CHECKOUT_COMMAND} fetch {target} --profile max")
         lines.append("")
         lines.append(
-            "# benchmark run (writes JSON/HTML/CSV reports + .provd provenance)"
+            "# benchmark run (writes JSON/HTML/CSV reports + .provd.json provenance)"
         )
-        lines.append(f"{CHECKOUT_COMMAND} run {target} --profile max --open-report")
+        lines.append(f"{CHECKOUT_COMMAND} run {target} --profile max")
     lines.append("")
     lines.append("# quick smoke pass")
     lines.append(f"{CHECKOUT_COMMAND} run {target} --profile min")
@@ -712,9 +743,7 @@ def _quality_result(record: dict[str, Any], workload: Workload) -> str:
         "direction": direction,
         "tolerance": tolerance,
     }
-    source_gate_comparable = {
-        key: source_gate.get(key) for key in current_gate
-    }
+    source_gate_comparable = {key: source_gate.get(key) for key in current_gate}
     disclosure = (
         " *(recomputed with the current registry contract)*"
         if source_gate_comparable != current_gate
@@ -735,9 +764,7 @@ def _repeatability_result(record: dict[str, Any]) -> str:
     return f"CV {float(cv):.2%}; **{status}**"
 
 
-def section_reference_results(
-    workload: Workload, records: list[dict[str, Any]]
-) -> str:
+def section_reference_results(workload: Workload, records: list[dict[str, Any]]) -> str:
     if not records:
         return ""
     evidence_labels = {

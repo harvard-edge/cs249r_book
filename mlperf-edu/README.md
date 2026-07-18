@@ -33,8 +33,16 @@ The review build uses Python 3.10 or newer and a locked `uv` environment.
 ```bash
 git clone https://github.com/harvard-edge/cs249r_book
 cd cs249r_book/mlperf-edu
+uv sync --locked
+uv run mlperf init --profile min --output-dir submissions/first-run
+```
+
+The guided setup checks the environment, runs the four-workload functional
+starter path, verifies provenance, and writes HTML, JSON, and CSV reports
+without opening a browser. Development dependencies are separate.
+
+```bash
 uv sync --locked --extra dev
-uv run mlperf doctor
 ```
 
 Fetch assets before measurement so network transfer is outside the timed
