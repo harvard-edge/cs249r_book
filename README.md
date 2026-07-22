@@ -436,7 +436,13 @@ Yes. Both volumes are free to read online at [mlsysbook.ai](https://mlsysbook.ai
       <td width="50%" align="center">
         <b>Star the repo</b><br>
         Stars signal to universities and foundations that this work matters. They directly fund workshops and hardware kits for underserved classrooms.<br><br>
-        <a href="https://star-history.com/#harvard-edge/cs249r_book&Date"><img src="https://api.star-history.com/svg?repos=harvard-edge/cs249r_book&type=Date" alt="Star History Chart" width="400"></a><br>
+        <a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
+          <picture>
+            <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&theme=dark&legend=top-left">
+            <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left">
+            <img src="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left" alt="Star History Chart" width="400">
+          </picture>
+        </a><br>
         100 → 1,000 → <b>10,000</b> → 100,000 → <b>1M learners by 2030</b>
       </td>
       <td width="50%" align="center">
