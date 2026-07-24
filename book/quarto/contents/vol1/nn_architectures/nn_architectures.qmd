@@ -169,7 +169,7 @@ To understand *why* these specific models were chosen, consider the history of m
 import pandas as pd
 from book.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.7))
 
 # =============================================================================
 # DATA
@@ -447,6 +447,8 @@ class WorkloadSignatures:
 
 These bottlenecks are not accidental; they are the "signatures" of the underlying math. We quantify these signatures using arithmetic intensity $(I)$\index{Arithmetic Intensity!lighthouse signatures}, defined as FLOP/byte: floating-point work divided by bytes moved from main memory. @Sec-appdx-algorithm-foundations-computational-complexity-cheat-sheet-0c6c gives the per-operation FLOP and parameter formulas that supply the numerator of this ratio, so the intensity of any layer can be estimated before hardware is provisioned. @Tbl-workload-signatures compares the signatures of our three primary Lighthouses, exposing the roughly `{python} WorkloadSignatures.resnet_to_gpt2_ratio_mult_str` gap between ResNet and GPT-2.
 
+This table provides the quantitative justification for architecture selection: one chooses a transformer not because it is "better" in the abstract, but because the project can afford the bandwidth pressure implied by its low operation-to-byte ratio in exchange for its relational flexibility. Conversely, MobileNet is the right choice when the machine axis lacks the bandwidth to sustain a denser signature.
+
 | **Model Family**     |  **Lighthouse** |                  **Intensity** $(I)$                   | **Hardware Affinity**          |
 |:---------------------|:---------------:|:------------------------------------------------------:|:-------------------------------|
 | **Dense CNN**        |  **ResNet-50**  |  ~`{python} WorkloadSignatures.resnet_intensity_str`   | **Compute-Rich** (GPUs/TPUs)   |
@@ -455,7 +457,6 @@ These bottlenecks are not accidental; they are the "signatures" of the underlyin
 
 : **Lighthouse Workload Signatures**: The arithmetic intensity $(I)$ of a model family determines its "natural" hardware home. High-intensity models like ResNet saturate the ALUs of a GPU, while low-intensity models like GPT-2 are perpetually "starved" for data, making memory bandwidth the only metric that matters for their performance. {#tbl-workload-signatures tbl-colwidths="[20,20,20,40]"}
 
-This table provides the quantitative justification for architecture selection: one chooses a transformer not because it is "better" in the abstract, but because the project can afford the bandwidth pressure implied by its low operation-to-byte ratio in exchange for its relational flexibility. Conversely, MobileNet is the right choice when the machine axis lacks the bandwidth to sustain a denser signature.
 
 The "Bottleneck" column in @tbl-lighthouse-comparison deserves particular attention: it identifies which system resource (compute throughput, memory bandwidth, memory capacity, latency, or power) limits performance for each workload class. In iron law terms (@sec-introduction-iron-law-ml-systems-c32a), the bottleneck identifies whether $O$ (operations) or $D_{\text{vol}}$ (data movement) dominates the runtime. These distinctions determine which optimization strategies prove effective, a theme we return to throughout subsequent chapters.
 
@@ -790,9 +791,6 @@ Consider classifying $28{\times}28$ MNIST digits (784 input pixels, 10 output cl
 - Test Accuracy: ~97–98 percent
 - Rationale: Treats every pixel independently. Must learn all spatial correlations from data alone. No prior knowledge about spatial structure.
 
-```{=latex}
-\tcbbreak
-```
 **CNN approach**:
 
 - Architecture: Conv(32, $3{\times}3$) → Pool → Conv(64, $3{\times}3$) → Pool → FC(128) → 10
@@ -1562,7 +1560,7 @@ In practice, the contrast is stark: an equivariant\index{Equivariance!translatio
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.0}
+\renewcommand{\arraystretch}{1.05}
 ```
 **Setup**: Consider a $7{\times}7$ image with a vertical edge at column 3:
 $$
@@ -1683,8 +1681,6 @@ Equivariance carries systems implications that extend beyond mathematical elegan
 
 The computational structure created by equivariance proves equally valuable for systems optimization. The sliding window pattern applies the same operation at every spatial position, creating regular computation that hardware can exploit. Input pixels are used by multiple filter positions, enabling im2col optimizations that restructure data for efficient matrix operations. The resulting computation is inherently SIMD-friendly, as modern GPUs can execute identical instructions across spatial positions simultaneously. This structural regularity explains why TPUs and AI accelerators include specialized units for convolution: the operation maps efficiently to silicon precisely because equivariance creates predictable, parallelizable patterns.
 
-Equivariance also improves sample efficiency in ways that benefit the entire training pipeline. When a network learns an edge detector at one position, equivariance ensures that same detector works at all positions automatically. Training no longer requires examples with edges at every possible location, providing a form of built-in data augmentation. The systems benefits cascade: less training data means reduced storage requirements, faster training, and lower bandwidth consumption during data loading.
-
 ::: {#thrm-nn-architectures-group-equivariance .callout-theorem title="Group equivariance formulation"}
 
 From a group theory perspective, convolution's equivariance to translations represents one instance of a general principle. The translation group $(\mathbb{R}^2, +)$ consists of all 2D translations, closed under composition (translating by $v$ then $u$ equals translating by $v + u$). Convolution is equivariant to this group. Recent research extends this framework to other symmetry groups. @cohen2016group developed Group-Equivariant CNNs\index{Group-Equivariant CNN} that handle rotations and reflections by constructing filters equivariant to rotation groups. This allows learning rotation-invariant features for tasks like satellite imagery or medical imaging where orientation does not determine meaning.
@@ -1697,6 +1693,8 @@ $$
 Standard CNNs are translation-equivariant, while rotation-equivariant networks extend this to rotation groups. The architectural principle generalizes: data symmetries should be embedded as equivariances in the architecture. For systems engineering, identifying data symmetries directly informs architecture choice: more constrained architectures with stronger symmetries often produce smaller models, and specialized equivariances may require custom operations like rotation convolutions that need either hardware support or efficient software implementations.
 
 :::
+
+Equivariance also improves sample efficiency in ways that benefit the entire training pipeline. When a network learns an edge detector at one position, equivariance ensures that same detector works at all positions automatically. Training no longer requires examples with edges at every possible location, providing a form of built-in data augmentation. The systems benefits cascade: less training data means reduced storage requirements, faster training, and lower bandwidth consumption during data loading.
 
 In practice, perfect equivariance is often sacrificed for computational efficiency or training stability. Asymmetric padding\index{Convolution!padding} at image boundaries breaks perfect translation equivariance, as does strided downsampling\index{Convolution!stride}, which introduces quantization where a one-pixel shift in input produces a noninteger shift in output. Batch normalization, a later normalization layer that stabilizes activations using batch statistics, also breaks equivariance when those statistics are computed per position in some implementations. Modern networks accept these deviations as necessary trade-offs, and the slight loss of theoretical purity rarely impacts practical performance.
 
@@ -1745,18 +1743,11 @@ def conv_layer_spatial(input, kernel, bias):
 
 @Lst-conv_layer_compute reveals the logical computational pattern: seven nested loops that process each spatial position. While functionally correct, this naive implementation is rarely used in practice due to poor memory locality. Instead, the im2col approach trades memory (duplicating overlapping input pixels) for computational regularity, converting the messy nested loops into a streamlined matrix multiplication that saturates hardware FP units.
 
-The seven nested loops reveal different aspects of the computation. The loop structure divides into three groups: the outer loops manage position, determining which image and where in the image; the middle loop handles output features, computing different learned patterns; and the inner loops perform the actual convolution, sliding the kernel window across the input.
-
-Examining this process in detail, the outer two loops (`for y` and `for x`) traverse each spatial position in the output feature map. At each position, values are computed for each output channel (`for out_channel` loop), representing different learned features or patterns: the 32 different feature detectors.
-
-The inner 3 loops implement the actual convolution operation at each position. For each output value, we process a local $3{\times}3$ region of the input (the `ky` and `kx` loops) across all input channels (`for in_channel` loop). This creates a sliding window effect, where the same $3{\times}3$ filter moves across the image, performing multiply-accumulates between the filter weights and the local input values. Unlike the MLP's global connectivity, this local processing pattern means each output value depends only on a small neighborhood of the input.
-
 ::: {#lst-conv_layer_compute lst-cap="**Logical Convolution Computation**: Seven nested loops expose $\mathcal{O}(B \times H_{\text{img}} \times W_{\text{img}} \times C_{\text{out}} \times K_h \times K_w \times C_{\text{in}})$ complexity. While logically sound, this pattern is inefficient on hardware; production systems transform this into tiled matrix multiplications."}
 
 ```{.python}
 def conv_layer_compute(input, kernel, bias):
-    # Logical view of convolution (usually implemented via im2col +
-    # GEMM)
+    # Logical view of convolution (usually implemented via im2col + GEMM)
     # Loop 1: Process each image in batch
     for image in range(batch_size):
         # Loop 2&3: Move across image spatially
@@ -1774,6 +1765,12 @@ def conv_layer_compute(input, kernel, bias):
 ```
 
 :::
+
+The seven nested loops reveal different aspects of the computation. The loop structure divides into three groups: the outer loops manage position, determining which image and where in the image; the middle loop handles output features, computing different learned patterns; and the inner loops perform the actual convolution, sliding the kernel window across the input.
+
+Examining this process in detail, the outer two loops (`for y` and `for x`) traverse each spatial position in the output feature map. At each position, values are computed for each output channel (`for out_channel` loop), representing different learned features or patterns: the 32 different feature detectors.
+
+The inner 3 loops implement the actual convolution operation at each position. For each output value, we process a local $3{\times}3$ region of the input (the `ky` and `kx` loops) across all input channels (`for in_channel` loop). This creates a sliding window effect, where the same $3{\times}3$ filter moves across the image, performing multiply-accumulates between the filter weights and the local input values. Unlike the MLP's global connectivity, this local processing pattern means each output value depends only on a small neighborhood of the input.
 
 With $3{\times}3$ filters and 32 output channels, each output position requires only nine multiply-accumulate operations per input channel, compared to 784 in the reference MLP layer. This operation repeats for every spatial position and every output channel.
 
@@ -1857,8 +1854,6 @@ The sliding window pattern of convolutions creates a distinctive data movement p
 
 The predictable spatial access pattern enables strategic data movement optimizations. The CPU/GPU caching strategies described earlier apply directly to data movement: frameworks orchestrate computation to maximize `{python} CNNSysImpl.spatial_positions_str` uses of each filter weight and minimize redundant feature map accesses, exploiting the same spatial locality that makes CNNs memory-efficient.
 
-These memory, compute, and data-movement patterns converge in one model that serves as the chapter's reference point for compute-bound vision workloads: the ResNet-50 architecture.
-
 ```{python}
 #| echo: false
 #| label: cnn-lighthouse-profile-recap
@@ -1924,7 +1919,7 @@ class CNNLighthouseProfile:
 
 ```{=latex}
 \begingroup
-%\renewcommand{\arraystretch}{1.2}
+\renewcommand{\arraystretch}{1.3}
 ```
 
 | **Property**    | **Value**                                                           | **System Implication**                                                                                                                     |
@@ -1935,20 +1930,23 @@ class CNNLighthouseProfile:
 | **Bottleneck**  | FP Throughput                                                       | Benefits maximally from specialized Matrix Units (Tensor Cores).                                                                           |
 | **Profile**     | High effective arithmetic intensity under reuse                     | Arithmetic intensity depends on batch size, convolution algorithm, and materialized memory traffic.                                        |
 
-: **ResNet-50 systems profile**: Quantitative properties of the vision lighthouse and their system consequences. Under batched convolutional reuse, ResNet-50 has high effective arithmetic intensity and is typically compute-bound, so peak FP throughput on Tensor Cores often sets the ceiling before memory bandwidth does. {#tbl-nn-architectures-resnet50-profile tbl-colwidths="[15,22,63]"}
+: **ResNet-50 systems profile**: Quantitative properties of the vision lighthouse and their system consequences. Under batched convolutional reuse, ResNet-50 has high effective arithmetic intensity and is typically compute-bound, so peak FP throughput on Tensor Cores often sets the ceiling before memory bandwidth does. {#tbl-nn-architectures-resnet50-profile tbl-colwidths="[14,22,64]"}
 
 ```{=latex}
 \endgroup
 ```
 :::
 
-ResNet-50's compute-bound profile assumes abundant hardware resources, yet most inference runs on devices with power budgets three orders of magnitude smaller than a data center GPU. MobileNetV2 demonstrates that architectural innovation can target this regime, achieving competitive accuracy with a fraction of the computational cost.
-
-The ResNet-50 and MobileNetV2 profiles create a natural expectation: a model with `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` fewer FLOPs should execute proportionally faster. On mobile CPUs, where compute and memory bandwidth are roughly balanced, that expectation holds. On data center GPUs, where peak FLOP/s outpaces memory bandwidth by 10--20$\times$, the relationship inverts: MobileNetV2's low arithmetic intensity starves the hardware of useful work, and kernel launch overhead dominates the execution timeline.
+These memory, compute, and data-movement patterns converge in one model that serves as the chapter's reference point for compute-bound vision workloads: the ResNet-50 architecture.
 
 ::: {#lhs-nn-architectures-mobilenet-efficiency-lighthouse .callout-lighthouse title="MobileNetV2 (efficiency lighthouse)"}
 
 **Why it matters**: MobileNetV2 represents *latency-constrained* edge workloads. Its depthwise separable convolutions trade channel mixing capacity for speed, making it a useful baseline for mobile apps, embedded vision, and neural architecture search (NAS), automated search over model designs. @Tbl-nn-architectures-mobilenet-profile summarizes the efficiency lighthouse's quantitative properties:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
 
 | **Property**    | **Value**                                              | **System Implication**                                                                                                                               |
 |:----------------|:-------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -1958,9 +1956,16 @@ The ResNet-50 and MobileNetV2 profiles create a natural expectation: a model wit
 | **Bottleneck**  | Overhead/Serial Ops                                    | Kernel launch overhead often dominates actual compute.                                                                                               |
 | **Profile**     | Low Arithmetic Intensity                               | Memory access and control logic matter more than peak FLOP/s.                                                                                        |
 
-: **MobileNetV2 systems profile**: Quantitative properties of the efficiency lighthouse and their system consequences. Roughly an order of magnitude smaller than ResNet-50 in both parameters and FLOPs, MobileNetV2's low arithmetic intensity makes single-image latency---driven by kernel-launch overhead and memory access---the binding constraint on mobile CPUs. {#tbl-nn-architectures-mobilenet-profile tbl-colwidths="[16,25,59]"}
+: **MobileNetV2 systems profile**: Quantitative properties of the efficiency lighthouse and their system consequences. Roughly an order of magnitude smaller than ResNet-50 in both parameters and FLOPs, MobileNetV2's low arithmetic intensity makes single-image latency---driven by kernel-launch overhead and memory access---the binding constraint on mobile CPUs. {#tbl-nn-architectures-mobilenet-profile tbl-colwidths="[17,25,58]"}
 
+```{=latex}
+\endgroup
+```
 :::
+
+ResNet-50's compute-bound profile assumes abundant hardware resources, yet most inference runs on devices with power budgets three orders of magnitude smaller than a data center GPU. MobileNetV2 demonstrates that architectural innovation can target this regime, achieving competitive accuracy with a fraction of the computational cost.
+
+The ResNet-50 and MobileNetV2 profiles create a natural expectation: a model with `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` fewer FLOPs should execute proportionally faster. On mobile CPUs, where compute and memory bandwidth are roughly balanced, that expectation holds. On data center GPUs, where peak FLOP/s outpaces memory bandwidth by 10--20$\times$, the relationship inverts: MobileNetV2's low arithmetic intensity starves the hardware of useful work, and kernel launch overhead dominates the execution timeline.
 
 With the hardware-mapping caveat in mind, the architectural efficiency of CNNs allows further optimization through specialized techniques like depthwise separable convolutions and pruning [removing low-value weights or channels], detailed in @sec-model-compression. These optimization strategies build on spatial locality principles, with @sec-hardware-acceleration detailing how modern processors exploit convolution's inherent data reuse patterns\index{Convolution!hardware optimization}.
 
@@ -2036,23 +2041,23 @@ where $\mathbf{h}_t$ denotes the hidden state at time $t$, $\mathbf{x}_t$ denote
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\large\usefont{T1}{phv}{m}{n}]
 \tikzset{%
-Line/.style={line width=0.75pt,black!60,text=black}
+Line/.style={line width=0.95pt,black!60,text=black}
 }
 \def\radius{7mm}
 \foreach \x/\i/\f in {0/1/$\mathbf{h}$,5/2/$\mathbf{h}_{t-1}$,9/3/$\mathbf{h}_t$,13/4/$\mathbf{h}_{t+1}$}{
-\coordinate (2ball-\i) at  (1.2*\x,0);
-\fill[fill=mygreen!50] (1.2*\x,0) circle (\radius)node[]{\f};
+\coordinate (2ball-\i) at  (1.3*\x,0);
+\fill[fill=mygreen!50] (1.3*\x,0) circle (\radius)node[]{\f};
 }
 
 \def\radiuss{6mm}
 \foreach \x/\i/\f in {0/1/$\mathbf{y}$,5/2/$\mathbf{y}_{t-1}$,9/3/$\mathbf{y}_t$,13/4/$\mathbf{y}_{t+1}$}{
-\coordinate (1ball-\i) at  (1.2*\x,3);
-\fill[fill=myorange!50] (1.2*\x,3) circle (\radiuss)node[]{\f};
+\coordinate (1ball-\i) at  (1.3*\x,3);
+\fill[fill=myorange!50] (1.3*\x,3) circle (\radiuss)node[]{\f};
 }
 
 \foreach \x/\i/\f in {0/1/$\mathbf{x}$,5/2/$\mathbf{x}_{t-1}$,9/3/$\mathbf{x}_t$,13/4/$\mathbf{x}_{t+1}$}{
-\coordinate (3ball-\i) at  (1.2*\x,-2.5);
-\fill[fill=mypurple!50] (1.2*\x,-2.5) circle (\radiuss)node[]{\f};
+\coordinate (3ball-\i) at  (1.3*\x,-2.5);
+\fill[fill=mypurple!50] (1.3*\x,-2.5) circle (\radiuss)node[]{\f};
 }
 
 \foreach \x/\f in {1/$\mathbf{W}_{\text{hx}}$,2/$\mathbf{W}_{\text{hx}}$,3/$\mathbf{W}_{\text{hx}}$,4/$\mathbf{W}_{\text{hx}}$}{
@@ -2065,7 +2070,7 @@ Line/.style={line width=0.75pt,black!60,text=black}
   in
     coordinate (from) at ($ (\from) + (\n1:\radiuss) $)
     coordinate (to) at ($ (\to) + (\n1+180:\radius) $);
-  \draw[Line,-latex] (from) --node[fill=white]{\f} (to);
+  \draw[Line,-{Latex[length=3.0mm]}] (from) --node[fill=white,pos=0.36]{\f} (to);
  }
 
 \foreach \x/\f in {1/$\mathbf{W}_{\text{yh}}$,2/$\mathbf{W}_{\text{yh}}$,3/$\mathbf{W}_{\text{yh}}$,4/$\mathbf{W}_{\text{yh}}$}{
@@ -2078,7 +2083,7 @@ Line/.style={line width=0.75pt,black!60,text=black}
   in
     coordinate (from) at ($ (\from) + (\n1:\radius) $)
     coordinate (to) at ($ (\to) + (\n1+180:\radiuss) $);
-  \draw[Line,-latex] (from) --node[fill=white,pos=0.55]{\f} (to);
+  \draw[Line,-{Latex[length=3.0mm]}] (from) --node[fill=white,pos=0.55]{\f} (to);
  }
 
 \foreach \x/\f in {2/$\mathbf{W}_{\text{hh}}$,3/$\mathbf{W}_{\text{hh}}$}{
@@ -2092,17 +2097,17 @@ Line/.style={line width=0.75pt,black!60,text=black}
   in
     coordinate (from) at ($ (\from) + (\n1:\radius) $)
     coordinate (to) at ($ (\to) + (\n1+180:\radius) $);
-  \draw[Line,-latex] (from) --node[fill=white]{\f} (to);
+  \draw[Line,-{Latex[length=3.0mm]}] (from) --node[fill=white]{\f} (to);
  }
 
-\draw[Line,-latex,shorten <=6.96mm] (2ball-4)--node[fill=white,pos=0.6]{$\mathbf{W}_{\text{hh}}$}++(0:2.25);
-\draw[Line,-latex,shorten <=6.96mm,shorten >=6.96mm] (2ball-1)--++(0:1.2)coordinate(A)--++(90:1)--
-node[fill=white,pos=0.50]{$\mathbf{W}_{\text{hh}}$}++(180:2.5)|-(2ball-1);
+\draw[Line,-{Latex[length=3.0mm]},shorten <=6.96mm] (2ball-4)--node[fill=white,pos=0.6,inner sep=0.5pt]{$\mathbf{W}_{\text{hh}}$}++(0:2.25);
+\draw[Line,-{Latex[length=3.0mm]},shorten <=6.96mm,shorten >=6.96mm] (2ball-1)--++(0:1.2)coordinate(A)--++(90:1)--
+node[fill=white,pos=0.50,inner sep=1pt]{$\mathbf{W}_{\text{hh}}$}++(180:2.5)|-(2ball-1);
 
 \node[single arrow, draw=none, fill=cyan!50, anchor=west,
       minimum width = 20pt, single arrow head extend=3pt,
       minimum height=7mm](AR)at($(A)+(0.1,0)$){\small unfold};
-\draw[Line,-latex,shorten >=6.96mm] (AR)--node[fill=white,pos=0.3]{$\mathbf{W}_{\text{hh}}$}(2ball-2);
+\draw[Line,-{Latex[length=3.0mm]},shorten >=6.96mm] (AR)--node[fill=white,pos=0.3,inner sep=0.5pt]{$\mathbf{W}_{\text{hh}}$}(2ball-2);
 \end{tikzpicture}
 ```
 
@@ -2168,8 +2173,6 @@ class RNNCompute:
 
 @Lst-rnn_layer_step demonstrates the single-time-step mechanism using framework-level matrix operations: combine the previous hidden state with the current input, add the bias, and apply the activation to produce the next hidden state. The code is intentionally local to one step because the systems cost is not the step itself, but the dependency chain that prevents parallel execution across time.
 
-The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_hx` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
-
 ::: {#lst-rnn_layer_step lst-cap="**RNN Layer Abstraction**: Framework-level implementation combining two matrix multiplications, $\mathbf{h}_{t-1}\mathbf{W}_{\text{hh}}$ and $\mathbf{x}_t\mathbf{W}_{\text{hx}}$, per time step. For 128-dimensional hidden state and 100-dimensional input, each step requires `{python} RNNCompute.recurrent_str` + `{python} RNNCompute.input_str` = `{python} RNNCompute.total_str` MACs, but sequential dependencies prevent parallelization across time."}
 
 ```{.python}
@@ -2184,7 +2187,11 @@ def rnn_layer_step(x_t, h_prev, W_hh, W_hx, b):
 
 :::
 
+The function handles a single time step, taking the current input `x_t` and previous hidden state `h_prev`, along with two weight matrices: `W_hh` for hidden-to-hidden connections and `W_hx` for input-to-hidden connections. Through matrix multiplication operations (`matmul`), it merges the previous state and current input to generate the next hidden state.
+
 The simple recurrence $\mathbf{h}_t = \tanh(\mathbf{W}_{\text{hh}} \mathbf{h}_{t-1} + \mathbf{W}_{\text{hx}} \mathbf{x}_t + \mathbf{b})$ conceals a computational structure with unique challenges: sequential dependencies that prevent parallelization, memory access patterns that differ from feedforward networks, and state management requirements that affect system design. The detailed implementation in @lst-rnn_layer_compute reveals the computational reality beneath the mathematical abstraction. Its nested loop structure exposes how sequential processing creates both limitations and opportunities in system optimization.
+
+The nested loops in `rnn_layer_compute` expose the core computational pattern of RNNs. Loop one processes each sequence in the batch independently, allowing for batch-level parallelism. Within each batch item, Loop two computes how the previous hidden state influences the next state through the recurrent weights $\mathbf{W}_{\text{hh}}$. Loop three then incorporates new information from the current input through the input weights $\mathbf{W}_{\text{hx}}$. Finally, Loop four adds biases and applies the activation function to produce the new hidden state.
 
 ::: {#lst-rnn_layer_compute lst-cap="**RNN Layer Computation**: Nested loops expose the sequential dependency structure. Loop 1 enables batch parallelism, but Loops 2-3 must complete before Loop 4's activation, and crucially, each time step depends on the previous step's output, creating $\mathcal{O}(S)$ sequential depth that prevents GPU parallelization across the time dimension."}
 
@@ -2195,8 +2202,7 @@ def rnn_layer_compute(x_t, h_prev, W_hh, W_hx, b):
 
     # Loop 1: Process each sequence in the batch
     for batch in range(batch_size):
-        # Loop 2: Compute recurrent contribution
-        # (h_prev × W_hh)
+        # Loop 2: Compute recurrent contribution (h_prev × W_hh)
         for i in range(hidden_dim):
             for j in range(hidden_dim):
                 h_t[batch, i] += h_prev[batch, j] * W_hh[j, i]
@@ -2214,8 +2220,6 @@ def rnn_layer_compute(x_t, h_prev, W_hh, W_hx, b):
 ```
 
 :::
-
-The nested loops in `rnn_layer_compute` expose the core computational pattern of RNNs. Loop one processes each sequence in the batch independently, allowing for batch-level parallelism. Within each batch item, Loop two computes how the previous hidden state influences the next state through the recurrent weights $\mathbf{W}_{\text{hh}}$. Loop three then incorporates new information from the current input through the input weights $\mathbf{W}_{\text{hx}}$. Finally, Loop four adds biases and applies the activation function to produce the new hidden state.
 
 For a sequence processing task with input dimension 100 and hidden state dimension 128, each time step requires two matrix multiplications: one $128{\times}128$ for the recurrent connection and one $100{\times}128$ for the input projection. While individual time steps can process in parallel across batch elements, the time steps themselves must execute sequentially, producing a computational pattern with fundamentally different parallelization characteristics than MLPs or CNNs.
 
@@ -2238,10 +2242,6 @@ The RNN bottlenecks analyzed earlier become concrete with a simple example. Cons
 Attention mechanisms[^fn-bahdanau-attention] address precisely this challenge [@bahdanau2015neural] by introducing dynamic connectivity patterns that adapt based on input content. Rather than processing elements in predetermined order with fixed relationships, attention mechanisms compute the relevance between all pairs of elements and weight their interactions accordingly, replacing structural constraints with learned, data-dependent processing patterns.
 
 [^fn-bahdanau-attention]: **Bahdanau Attention**: This approach broke the "fixed-length vector" bottleneck of prior sequence-to-sequence models by allowing a decoder to dynamically query all input elements at each output step, creating the adaptive connectivity described. This replaced the structural constraint of a fixed-capacity channel with a learned, content-based weighting system. The core trade-off was accepting a linear, $\mathcal{O}(S)$ memory cost to store all input states in exchange for overcoming the information loss inherent in a single vector. \index{Attention Mechanism!Bahdanau}\index{Attention Mechanism!information bottleneck}
-
-While attention mechanisms were initially used as components within recurrent architectures, their ability to connect any position to any other made the recurrent structure unnecessary for many sequence tasks. The transformer[^fn-transformer-name] architecture [@vaswani2017] demonstrated that attention alone could entirely replace sequential processing. This architectural shift traded the RNN's $\mathcal{O}(S)$ sequential depth for $\mathcal{O}(1)$ information flow between any two positions, enabling massive parallelization on high-throughput accelerators.
-
-[^fn-transformer-name]: **Transformer**: The founding paper, "Attention Is All You Need," made the explicit systems claim that a parallel attention mechanism could fully replace sequential recurrent processing. This architectural trade eliminates an RNN's $\mathcal{O}(S)$ path length constraint on parallelism but introduces an $\mathcal{O}(S^2)$ computational and memory cost, as every token must attend to every other. This quadratic growth is the bottleneck that limited GPT-3's reported context window to 2048 tokens and continues to shape context-window engineering. \index{Transformer!etymology}\index{Transformer!architectural shift}
 
 ```{python}
 #| echo: false
@@ -2292,6 +2292,10 @@ class AttentionDefinitionCosts:
 
 :::
 
+While attention mechanisms were initially used as components within recurrent architectures, their ability to connect any position to any other made the recurrent structure unnecessary for many sequence tasks. The transformer[^fn-transformer-name] architecture [@vaswani2017] demonstrated that attention alone could entirely replace sequential processing. This architectural shift traded the RNN's $\mathcal{O}(S)$ sequential depth for $\mathcal{O}(1)$ information flow between any two positions, enabling massive parallelization on high-throughput accelerators.
+
+[^fn-transformer-name]: **Transformer**: The founding paper, "Attention Is All You Need," made the explicit systems claim that a parallel attention mechanism could fully replace sequential recurrent processing. This architectural trade eliminates an RNN's $\mathcal{O}(S)$ path length constraint on parallelism but introduces an $\mathcal{O}(S^2)$ computational and memory cost, as every token must attend to every other. This quadratic growth is the bottleneck that limited GPT-3's reported context window to 2048 tokens and continues to shape context-window engineering. \index{Transformer!etymology}\index{Transformer!architectural shift}
+
 The transformer architecture in @sec-network-architectures-transformers-attentiononly-architecture-1b56 inherits every important systems property from attention itself: dynamic routing, parallel sequence processing, and quadratic score construction. The next step is therefore to establish what kind of pattern-processing problem attention solves before treating the transformer as a full architecture.
 
 ### Pattern processing needs {#sec-network-architectures-pattern-processing-needs-4b64}
@@ -2301,7 +2305,7 @@ Dynamic pattern processing addresses scenarios where relationships between eleme
 ::: {#fig-transformer-attention-visualized fig-env="figure" fig-pos="htb" fig-cap="**Attention Weights Visualization**: An attention head from a transformer (layer 4, head 2) resolving the pronoun \"they.\" Line thickness indicates attention weight magnitude: the model attends most strongly to \"student\" and \"finish,\" with weaker contextual links to nearby function words. This dynamic routing replaces RNN sequential processing with $\mathcal{O}(1)$ information flow depth, enabling parallel computation across all positions simultaneously." fig-alt="Self-attention visualization labeled Layer 4 Head 2 for the sentence 'The student did not finish the homework because they were tired.' Tokens are listed vertically in two columns. Cyan attention lines connect the highlighted pronoun they on the right to all tokens on the left; thicker lines to student and finish indicate high attention weights, demonstrating pronoun-referent linking across arbitrary distances."}
 
 ```{.tikz}
-\scalebox{0.9}{%
+\scalebox{0.8}{%
 \begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{
   token/.style={rectangle, text width=24mm,minimum width=25mm, minimum height=6mm, draw=none, fill=cyan!50},
@@ -2366,11 +2370,10 @@ In this equation, $\mathbf{Q}$ (queries), $\mathbf{K}$ (keys), and $\mathbf{V}$ 
 
 [^fn-attention-qkv]: **Query-Key-Value (QKV)**: The terminology is borrowed from information retrieval, explaining why the equation uses three distinct learned projections to calculate pairwise scores. Creating these projections requires three independent weight matrices, costing $3 \times d_{\text{model}}^2$ parameters per layer. The direct systems consequence is the "KV cache" for autoregressive inference: all prior Key and Value vectors must be stored for the next token, causing memory to grow linearly ($\mathcal{O}(S)$) with sequence length and potentially dominate serving memory at long contexts or high concurrency. \index{Attention Mechanism!query-key-value}\index{Query-Key-Value}\index{QKV!KV cache}
 
-The attention operation involves several key steps. First, it computes query, key, and value projections for each position in the sequence. In @fig-attention, each cell in the $S{\times}S$ attention matrix represents a query-key interaction, and the color intensity reveals which positions attend most strongly to which others. Finally, these attention weights combine value vectors to produce the output.
-
 ::: {#fig-attention fig-env="figure" fig-pos="htb" fig-cap="**Query-Key-Value Attention Mechanism**: For a 6-token sequence, queries (cyan) match against keys (red) to produce a $6{\times}6$ attention matrix with $\mathcal{O}(S^2)$ entries. Color intensity indicates attention weight: darker cells show stronger relationships. Each output position aggregates information from all values (green) weighted by its attention row. The matrix structure reveals both the computational pattern (thirty-six similarity computations) and the naive memory bottleneck (storing $S^2$ attention weights). Source: Transformer Explainer [@cho2025]." fig-alt="6-by-6 attention matrix with gradient coloring from blue to red indicating attention weights. Cyan query vectors enter from left, red key vectors from top, green value vectors from below. Output vectors exit right, showing weighted aggregation pattern."}
 
 ```{.tikz}
+\scalebox{0.88}{%
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
 \tikzset{%
    Line/.style={line width=1.1pt,BrownLine,text=black},
@@ -2483,10 +2486,12 @@ The attention operation involves several key steps. First, it computes query, ke
 }
 \node[above=1mm of X1]{Out};
 
-\end{tikzpicture}
+\end{tikzpicture}}
 ```
 
 :::
+
+The attention operation involves several key steps. First, it computes query, key, and value projections for each position in the sequence. In @fig-attention, each cell in the $S{\times}S$ attention matrix represents a query-key interaction, and the color intensity reveals which positions attend most strongly to which others. Finally, these attention weights combine value vectors to produce the output.
 
 Unlike the fixed weight matrices found in previous architectures, attention weights are computed dynamically for each input. Follow the matrix dimensions in @fig-attention-weightcalc to see this dynamic computation unfold: the embedding matrix multiplies with QKV weight matrices in a single batched operation, and the resulting projections change for every new input sequence.
 
@@ -2687,6 +2692,12 @@ class QKVProjectionCosts:
 
 Attention mechanisms create computational patterns that differ significantly from previous architectures. @Lst-attention_layer_compute reveals how dynamic connectivity translates into specific computational requirements, exposing the nested loops that implement pairwise attention scoring.
 
+The translation from attention's mathematical elegance to hardware execution reveals the computational price of dynamic connectivity. While the attention equation $\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}(\mathbf{Q}\mathbf{K}^T/\sqrt{d_k})\mathbf{V}$ appears as a straightforward matrix operation, the physical implementation requires orchestrating quadratic numbers of pairwise computations that create different system demands than previous architectures. The nested loops in `attention_layer_compute` expose this computational signature. The first loop processes each sequence in the batch independently. The second and third loops compute attention scores between all pairs of positions, creating the quadratic computation pattern that makes attention both powerful and computationally demanding. The fourth loop uses these attention weights to combine values from all positions, completing the dynamic connectivity pattern that defines attention mechanisms.
+
+### System implications {#sec-network-architectures-system-implications-05a3}
+
+Attention mechanisms exhibit distinctive system-level patterns that differ from previous architectures through their dynamic connectivity requirements. In iron law terms (@sec-introduction-iron-law-ml-systems-c32a), attention shifts the bottleneck from the latency-bound sequential path of RNNs toward quadratic score interactions and data movement. Naive implementations materialize an $\mathcal{O}(S^2)$ attention matrix, while tiled algorithms such as FlashAttention avoid storing the full matrix by recomputing and streaming blocks through faster memory.
+
 ```{python}
 #| echo: false
 #| label: attention-computation-costs
@@ -2764,11 +2775,6 @@ def attention_layer_compute(Q, K, V):
 
 :::
 
-The translation from attention's mathematical elegance to hardware execution reveals the computational price of dynamic connectivity. While the attention equation $\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}(\mathbf{Q}\mathbf{K}^T/\sqrt{d_k})\mathbf{V}$ appears as a straightforward matrix operation, the physical implementation requires orchestrating quadratic numbers of pairwise computations that create different system demands than previous architectures. The nested loops in `attention_layer_compute` expose this computational signature. The first loop processes each sequence in the batch independently. The second and third loops compute attention scores between all pairs of positions, creating the quadratic computation pattern that makes attention both powerful and computationally demanding. The fourth loop uses these attention weights to combine values from all positions, completing the dynamic connectivity pattern that defines attention mechanisms.
-
-### System implications {#sec-network-architectures-system-implications-05a3}
-
-Attention mechanisms exhibit distinctive system-level patterns that differ from previous architectures through their dynamic connectivity requirements. In iron law terms (@sec-introduction-iron-law-ml-systems-c32a), attention shifts the bottleneck from the latency-bound sequential path of RNNs toward quadratic score interactions and data movement. Naive implementations materialize an $\mathcal{O}(S^2)$ attention matrix, while tiled algorithms such as FlashAttention avoid storing the full matrix by recomputing and streaming blocks through faster memory.
 
 #### Memory requirements {#sec-network-architectures-memory-requirements-72c3}
 
@@ -2861,10 +2867,6 @@ Modern AI scaling is defined by the cost of Attention. Verify your intuition:
 
 Data movement in attention mechanisms presents challenges distinct from all previous architectures. Each attention operation requires projecting and moving query, key, and value vectors for every position, then coordinating value movement during the weighted combination. A naive implementation also stores and accesses the full $S{\times}S$ attention matrix, making intermediate scores a major bandwidth cost; tiled exact attention changes this traffic pattern. Unlike the predictable spatial access patterns of CNNs or the sequential access of RNNs, attention moves dynamically computed scores and vectors across the memory hierarchy, complicating simple caching strategies.
 
-The distinctive memory, computation, and data movement characteristics of attention shape system design in fundamental ways—and raise the question of whether attention is effective enough to replace other architectural components entirely.
-
-That scaling pressure was not hypothetical: early transformer deployments had to enforce short context windows because attention scores could exhaust memory long before model accuracy stopped improving.
-
 ```{python}
 #| echo: false
 #| label: transformer-complexity-anchor
@@ -2923,6 +2925,10 @@ class TransformerComplexityAnchor:
 
 :::
 
+The distinctive memory, computation, and data movement characteristics of attention shape system design in fundamental ways—and raise the question of whether attention is effective enough to replace other architectural components entirely.
+
+That scaling pressure was not hypothetical: early transformer deployments had to enforce short context windows because attention scores could exhaust memory long before model accuracy stopped improving.
+
 Despite these costs, attention's ability to connect any position to any other in constant depth is too effective to serve merely as an add-on to recurrent architectures. Attention can bypass sequential processing entirely, eliminating the rationale for preserving recurrent structure. The question of whether attention can replace recurrence altogether produced a central architectural shift in deep learning systems.
 
 ## Transformers: Parallel Sequence Processing {#sec-network-architectures-transformers-attentiononly-architecture-1b56}
@@ -2980,11 +2986,10 @@ Attention mechanisms exhibit significant redundancy (many heads learning similar
 
 This information-theoretic interpretation reveals why attention is effective for selective processing. The mechanism balances two competing objectives: focusing probability mass on high-scoring positions while preserving enough entropy to avoid a brittle hard selection. This smooth weighting helps transformers handle long sequences and complex dependencies.
 
-Self-attention learns dynamic activation patterns across the input sequence. Unlike CNNs which apply fixed filters or RNNs which use fixed recurrence patterns, attention learns which elements should activate together based on their content. This creates a form of adaptive connectivity where the effective network topology changes for each input. Recent research has shown that attention heads in trained models often specialize in detecting specific linguistic or semantic patterns [@clark2019], suggesting that the mechanism naturally discovers interpretable structural regularities in data. The encoder-decoder diagram in @fig-transformer places this mechanism inside the residual, normalization, and feed-forward scaffolding that makes the full architecture trainable.
-
 ::: {#fig-transformer fig-env="figure" fig-pos="htb" fig-cap="**Transformer Architecture (Encoder-Decoder)**: Complete architecture. The encoder (left, repeated $N_L$ times) consists of multi-head attention followed by feed-forward layers, each with residual connections (arrows bypassing blocks) and layer normalization. The decoder (right) adds masked attention to prevent attending to future tokens during autoregressive generation. Positional encodings (sine waves) inject sequence order information absent from the permutation-invariant attention operation. This design enables training parallelism across all positions while the decoder maintains autoregressive causality during inference. Source: [@vaswani2017]." fig-alt="Encoder-decoder architecture. Encoder: multi-head attention, add-norm, feed-forward, add-norm, repeated N_L times. Decoder adds masked attention. Positional encoding sine waves at inputs. Skip connections bypass sublayers. Linear and softmax at top."}
 
 ```{.tikz}
+\scalebox{0.78}{%
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{%
   do path picture/.style={%
@@ -3112,22 +3117,18 @@ Self-attention learns dynamic activation patterns across the input sequence. Unl
 \draw[LineA,line width=0.85pt,black](PT1)-|(RB4.270);
 %
 \draw[LineA](RB9.north)--++(0,5mm)node[above=-3pt]{Output Probabilities};
-\end{tikzpicture}
+\end{tikzpicture}}
 ```
 
 :::
+
+Self-attention learns dynamic activation patterns across the input sequence. Unlike CNNs which apply fixed filters or RNNs which use fixed recurrence patterns, attention learns which elements should activate together based on their content. This creates a form of adaptive connectivity where the effective network topology changes for each input. Recent research has shown that attention heads in trained models often specialize in detecting specific linguistic or semantic patterns [@clark2019], suggesting that the mechanism naturally discovers interpretable structural regularities in data. The encoder-decoder diagram in @fig-transformer places this mechanism inside the residual, normalization, and feed-forward scaffolding that makes the full architecture trainable.
 
 The transformer architecture applies this self-attention mechanism within a broader structure that typically includes feed-forward layers, layer normalization\index{Layer Normalization!Transformer}, and residual connections\index{Residual Connection!Transformer}. @Fig-transformer shows input tokens entering repeated attention and feed-forward blocks, each wrapped with residual connections and normalization, and emerging as contextualized representations. Because all positions can be processed in parallel rather than sequentially, the architecture trades recurrent state for large matrix operations that map well to accelerator training.
 
 ### Computational mapping {#sec-network-architectures-computational-mapping-aea3}
 
 While transformer self-attention builds upon the basic attention mechanism, it introduces distinct computational patterns that set it apart. @Lst-self_attention_layer presents a typical implementation, showing how self-attention derives queries, keys, and values from the same input sequence.
-
-The preceding self-attention implementation shows how transformers process entire sequences in parallel. The picture changes at inference time, when the model generates tokens one at a time, a shift whose system consequences the next section quantifies through the GPT-2 XL lighthouse.
-
-### System implications {#sec-network-architectures-system-implications-77ac}
-
-The quadratic bottleneck analyzed earlier manifests differently during training and inference, creating a bifurcation in system behavior defined by two distinct iron law regimes (@sec-introduction-iron-law-ml-systems-c32a): *training* is dominated by $O$ (compute), while *inference* is dominated by $D_{\text{vol}}$ (data movement). The same attention mechanism therefore demands different optimizations depending on whether the system is learning from a full sequence or generating one token at a time.
 
 ::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from the same input $\mathbf{X}$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $N_{\text{heads}}$ parallel attention heads with dimension $d_k = d_{\text{model}}/N_{\text{heads}}$, then concatenates and projects. For GPT-2 (768-dim, 12 heads), each head operates on 64 dimensions, reducing per-head attention memory while enabling diverse relationship patterns."}
 
@@ -3146,7 +3147,6 @@ def self_attention_layer(X, W_Q, W_K, W_V, d_k):
 
     return output
 
-
 def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
     outputs = []
     for i in range(num_heads):
@@ -3162,6 +3162,12 @@ def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
 ```
 
 :::
+
+The preceding self-attention implementation shows how transformers process entire sequences in parallel. The picture changes at inference time, when the model generates tokens one at a time, a shift whose system consequences the next section quantifies through the GPT-2 XL lighthouse.
+
+### System implications {#sec-network-architectures-system-implications-77ac}
+
+The quadratic bottleneck analyzed earlier manifests differently during training and inference, creating a bifurcation in system behavior defined by two distinct iron law regimes (@sec-introduction-iron-law-ml-systems-c32a): *training* is dominated by $O$ (compute), while *inference* is dominated by $D_{\text{vol}}$ (data movement). The same attention mechanism therefore demands different optimizations depending on whether the system is learning from a full sequence or generating one token at a time.
 
 #### Training: The quadratic compute wall {#sec-network-architectures-training-quadratic-compute-wall-de9d}
 
@@ -3326,7 +3332,7 @@ This implementation reveals three key computational characteristics. Self-attent
 import numpy as np
 from book.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.75))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.1))
 
 # =============================================================================
 # DATA
@@ -4104,7 +4110,7 @@ yshift=0mm,fill=none,fit=(M2-1-1)(M2-2-2),line width=1.5pt](F5){};
 \node[below=3pt of M3]{Filter Kernels};
 \end{scope}
 %MA4
-\begin{scope}[local bounding box=MA4,shift={($(M2-2-1.north west)+(-2.5,0.5)$)}]
+\begin{scope}[local bounding box=MA4,shift={($(M2-2-1.north west)+(-2.75,0.5)$)}]
     \matrix[mymatrix,
  nodes={
       fill=cyan!30}](M4){%
@@ -4117,7 +4123,7 @@ yshift=0mm,fill=none,fit=(M4-1-1)(M4-2-2),line width=1.5pt](F2){};
 \node[below=3pt of M4]{Input feature maps};
 \end{scope}
 %MA5
-\begin{scope}[local bounding box=MA4,shift={($(M3-2-1.north west)+(-2.5,-0.5)$)}]
+\begin{scope}[local bounding box=MA4,shift={($(M3-2-1.north west)+(-2.75,-0.5)$)}]
     \matrix[mymatrix,
  nodes={ fill=orange!40}](M5){%
 10& 11&12 \\
@@ -4128,7 +4134,7 @@ yshift=0mm,fill=none,fit=(M4-1-1)(M4-2-2),line width=1.5pt](F2){};
 yshift=0mm,fill=none,fit=(M5-1-2)(M5-2-3),line width=1.5pt](F4){};
 \end{scope}
 %MA6
-\begin{scope}[local bounding box=MA6,shift={($(MA1.east)+(1.8,0)$)}]
+\begin{scope}[local bounding box=MA6,shift={($(MA1.east)+(1.98,0)$)}]
     \matrix[mymatrix,
  nodes={fill=green!40},
 row 5/.style={nodes={fill=yellow!30}},
@@ -4661,7 +4667,7 @@ LineA/.style={BrownLine!80, line width=1.0pt,{-{Triangle[width=0.7*6pt,length=1.
     minimum width=35mm, minimum height=10mm
   },
     Box1/.style={Box, draw=RedLine, fill=RedL, node distance=30mm},
-    Box2/.style={Box, draw=BlueLine, fill=BlueL!50, node distance=9mm,
+    Box2/.style={Box, draw=BlueLine, fill=BlueL!50, node distance=10mm,
     },
     RedT/.style={blue!55!black,font=\footnotesize\usefont{T1}{phv}{m}{n}},
  decision/.style = {align=flush center,text width=42mm,minimum width=40mm,diamond, aspect=2.2, node distance=6mm,
@@ -4708,7 +4714,7 @@ LineA/.style={BrownLine!80, line width=1.0pt,{-{Triangle[width=0.7*6pt,length=1.
 %
 \draw[LineA](D6)--node[above,pos=0,anchor=south east]{No}node[below,RedT,pos=0,anchor=north east]{Not met}(IM);
 %
-\draw[LineA](SD.east)--++(10mm,0)|-node[above,RedT,pos=0.8,anchor=south east]{Insufficient}(D1);
+\draw[LineA](SD.east)--++(14mm,0)|-node[above,RedT,pos=0.8,anchor=south east]{Insufficient}(D1);
 \draw[LineA](IM.west)--++(-10mm,0)|-(D1);
 \end{tikzpicture}}
 ```
@@ -4978,6 +4984,8 @@ Power is the final check. Estimated inference power is ~`{python} WildlifeModelS
 
 The fifth step is risk assessment. @Tbl-nn-architectures-wildlife-risks pairs the top accuracy, thermal, and species-coverage risks with the engineering mitigation chosen for each:
 
+The resolution is therefore MobileNetV2 (`{python} WildlifeModelSizing.width_mult_str` width) with INT8 weight storage, deployed on a Cortex-A53 system on chip (SoC) with `{python} WildlifeModelSizing.edge_ram_mb_str` RAM. The systems insight is that this architecture fits the stated model, compute, and active-power budgets, processing images in about `{python} WildlifeModelSizing.compute_latency_ms_str` under the stated throughput assumption and leaving memory headroom for system operations. The accuracy and six-month battery targets remain deployment validation requirements. The decision was driven by matching the CNN inductive bias to the spatial data characteristics, then checking the hardware constraints quantitatively.
+
 | **Risk**                             | **Mitigation**                                                                   |
 |:-------------------------------------|:---------------------------------------------------------------------------------|
 | **90% accuracy not achieved**        | Train on augmented dataset; consider EfficientNet-Lite if MobileNet insufficient |
@@ -4986,7 +4994,6 @@ The fifth step is risk assessment. @Tbl-nn-architectures-wildlife-risks pairs th
 
 : **Wildlife camera deployment risks**: Top accuracy, thermal, and species-coverage risks for the MobileNetV2 deployment, paired with the engineering mitigation chosen for each. {#tbl-nn-architectures-wildlife-risks}
 
-The resolution is therefore MobileNetV2 (`{python} WildlifeModelSizing.width_mult_str` width) with INT8 weight storage, deployed on a Cortex-A53 system on chip (SoC) with `{python} WildlifeModelSizing.edge_ram_mb_str` RAM. The systems insight is that this architecture fits the stated model, compute, and active-power budgets, processing images in about `{python} WildlifeModelSizing.compute_latency_ms_str` under the stated throughput assumption and leaving memory headroom for system operations. The accuracy and six-month battery targets remain deployment validation requirements. The decision was driven by matching the CNN inductive bias to the spatial data characteristics, then checking the hardware constraints quantitatively.
 
 This worked example demonstrates the systematic approach that transforms architectural knowledge into practical engineering decisions. Yet even with systematic methodology, practitioners routinely make costly mistakes because architecture selection involves counterintuitive trade-offs. A model with fewer FLOPs can run slower on certain hardware. A more expressive architecture can deliver worse accuracy on problems that do not match its inductive bias. An architecture that performs beautifully in the lab can likewise fail catastrophically when deployed to production hardware with different memory hierarchies. The most common errors are catalogued next, each grounded in the systems principles developed throughout this chapter.
 

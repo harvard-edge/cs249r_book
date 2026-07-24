@@ -4557,8 +4557,6 @@ Learning rate selection\index{Learning Rate!selection criteria}\index{Hyperparam
 
 Convergence monitoring\index{Convergence!monitoring}\index{Validation!accuracy plateau} provides essential feedback during training and continues into production deployment, as covered in @sec-ml-operations. As training progresses, the loss value typically stabilizes around a particular value, indicating the network is approaching a local optimum. Validation accuracy often plateaus as well, suggesting the network has extracted most learnable patterns from the data. The gap between training and validation performance reveals whether the network is overfitting\index{Overfitting!training challenge} or generalizing well to new examples. The interplay between batch size, available memory, and computational resources requires careful balancing to achieve efficient training within hardware constraints, the same memory-computation trade-offs established in the preceding backpropagation section.
 
-Detecting the optimal stopping point requires periodically evaluating the model on the validation set and saving its weights to durable storage, a practice called **checkpointing**\index{Checkpointing!I/O cost}. For a small model like the MNIST network, writing a checkpoint costs a negligible amount of time. For a model whose parameters occupy tens to hundreds of gigabytes, a checkpoint write serializes all of those bytes to disk or object storage, stalling the training loop for seconds to minutes while the I/O completes. Running validation itself requires a full forward pass over the held-out dataset, which at large scale consumes meaningful accelerator time that would otherwise go to training. Checkpointing and validation are therefore not free statistical observations: they impose a recurring I/O and compute tax whose frequency must be tuned against the risk of missing the generalization peak. Saving too infrequently risks losing the best weights to a subsequent degradation epoch; saving too frequently stresses storage bandwidth and adds overhead. This is why convergence monitoring, while conceptually straightforward, becomes a systems infrastructure problem at scale.
-
 ::: {#chk-nn-computation-neural-network-learning-process .callout-checkpoint title="Neural network learning process"}
 
 You have now covered the complete training cycle, the mathematical machinery that enables neural networks to learn from data. Before moving to inference and deployment, verify your understanding:
@@ -4574,6 +4572,8 @@ Use the MNIST network (784 → 128 → 64 → 10) and a batch size of 32 as the 
 If any concepts feel unclear, review the earlier sections on Forward Propagation, Loss Functions, Backward Propagation, or the Optimization Process. These mechanisms form the foundation for understanding the training-vs.-inference distinction we explore next.
 
 :::
+
+Detecting the optimal stopping point requires periodically evaluating the model on the validation set and saving its weights to durable storage, a practice called **checkpointing**\index{Checkpointing!I/O cost}. For a small model like the MNIST network, writing a checkpoint costs a negligible amount of time. For a model whose parameters occupy tens to hundreds of gigabytes, a checkpoint write serializes all of those bytes to disk or object storage, stalling the training loop for seconds to minutes while the I/O completes. Running validation itself requires a full forward pass over the held-out dataset, which at large scale consumes meaningful accelerator time that would otherwise go to training. Checkpointing and validation are therefore not free statistical observations: they impose a recurring I/O and compute tax whose frequency must be tuned against the risk of missing the generalization peak. Saving too infrequently risks losing the best weights to a subsequent degradation epoch; saving too frequently stresses storage bandwidth and adds overhead. This is why convergence monitoring, while conceptually straightforward, becomes a systems infrastructure problem at scale.
 
 The complete training pipeline, from forward propagation through loss computation to gradient-based weight updates, is now established. Training, however, is preparation, not the end goal. The following checkpoint consolidates that learning process before we examine what happens when a trained model must answer queries in production.
 
@@ -4929,11 +4929,6 @@ For our canonical MNIST network (`{python} MnistInferenceResourceLocal.mnist_arc
 
 [^fn-fp32-precision]: [offset=-40mm] **FP32 (Single Precision)**: The IEEE 754 standard (1985) format using 32 bits (1 sign, 8 exponent, 23 mantissa) that became the default for neural network training because its dynamic range accommodates gradient magnitudes spanning many orders of magnitude. Halving to FP16 or BF16\index{BF16!reduced-precision format} ("brain floating point," developed at Google Brain) saves 2$\times$ memory and doubles throughput on hardware with 16-bit datapaths; further reduction to INT8 yields 4$\times$ savings but requires posttraining calibration. See @sec-appdx-machine-foundations-numerical-representations-c889 for a detailed comparison of numerical formats and their precision-throughput trade-offs. \index{FP32!numerical precision}
 
-The transient side is smaller. A single image starts as 784 input values, then produces layer outputs of 128, 64, and 10 values. If counted naively, that is `{python} MnistInferenceResourceLocal.total_inf_act_str` activation values, or about `{python} MnistInferenceResourceLocal.total_infer_act_kb_str` at FP32. In a real inference engine, those values do not all need to persist at once. Once Layer 2 has consumed Layer 1's output, the Layer 1 buffer can be reused; once the output layer has consumed Layer 2's activations, that buffer can be reused as well. Training cannot discard those intermediates because backpropagation needs them later. The training memory estimate therefore has distinct terms: parameters, gradients, optimizer state, and batch-scaled saved activations, all multiplied by their numerical precision. That is why gradient storage and backpropagation overhead multiply training resource demands by `{python} MnistInferenceResourceLocal.training_ratio_mult_str` or more for this worked example (see @sec-neural-computation-model-size-computational-complexity-1f0f).
-
-```{=latex}
-\newpage
-```
 | **Layer**   | **Weights**                                                                                         | **Biases**                                    | **Multiply-Adds**                                         |
 |:------------|:----------------------------------------------------------------------------------------------------|:----------------------------------------------|:----------------------------------------------------------|
 | **Layer 1** | `{python} MnistInferenceResourceLocal.w1_dims_math` = `{python} MnistInferenceResourceLocal.w1_str` | `{python} MnistInferenceResourceLocal.b1_str` | `{python} MnistInferenceResourceLocal.inf_madd_l1_str`    |
@@ -4942,6 +4937,10 @@ The transient side is smaller. A single image starts as 784 input values, then p
 | **Total**   | `{python} MnistInferenceResourceLocal.total_params_str`                                             | Included in total                             | `{python} MnistInferenceResourceLocal.inf_madd_total_str` |
 
 : **MNIST Inference Resources by Layer**: The persistent parameter block and multiply-add count for the canonical MNIST network. In fully connected layers, the same weights that occupy memory also determine the arithmetic work per inference. {#tbl-mnist-inference-resource-by-layer tbl-colwidths="[25,25,25,25]"}
+
+```{=latex}
+\newpage
+```
 
 This persistent-plus-rolling-buffer model also explains the deployment optimizations that follow. Batching increases arithmetic reuse and hardware occupancy but expands activation storage. Lower numerical precision can shrink the persistent parameter block and activation buffers, but only if accuracy survives the smaller representation. Hardware-specific layouts improve cache reuse by keeping the rolling buffer close to the compute units. The predictable, streamlined nature of inference enables these optimizations precisely because parameters are fixed and activations have short lifetimes.
 
@@ -4995,7 +4994,7 @@ The complexity of this task becomes evident: a ZIP code recognition system must 
 
 ::: {#fig-usps-digit-examples fig-env="figure" fig-pos="htb" fig-cap="**Handwritten Address Variability**: Real-world USPS mail samples, including handwritten city names (Pasadena, BurBank, Buffalo variants, TULSA, Galveston, Allentown) and five-digit ZIP codes, exhibit significant variations in stroke width, slant, and character formation. These examples demonstrate the need for effective feature extraction and model generalization to achieve high accuracy in optical character recognition (OCR) tasks." fig-alt="Grid of USPS mail samples: handwritten city names (Pasadena, BurBank, Buffalo variants, Tulsa, Galveston, Allentown) and five-digit ZIP codes (14240, 85202, 50350, 47304, and others), showing variation in stroke width, slant, and character formation."}
 
-![](images/jpg/usps_examples_new.jpg){width="75%"}
+![](images/jpg/usps_examples_new.jpg){width="70%"}
 
 :::
 
@@ -5467,6 +5466,8 @@ The USPS ZIP code recognition system's central lesson is that neural computation
 
 The system's development shows why understanding both theoretical foundations and practical considerations matters. While the biological visual system processes handwritten digits effortlessly, translating this capability into an artificial system required careful consideration of network architecture, training procedures, and system integration.
 
+The success of this early large-scale neural network deployment helped establish many practices we now consider standard: the importance of thorough training data, the need for confidence metrics, the role of pre- and postprocessing, and the critical nature of system-level optimization. These operational considerations are formalized in @sec-ml-operations, which covers production ML system maintenance and monitoring. The comparison with a modern embedded implementation separates what changed in the machine from what stayed fixed in the algorithm.
+
 ::: {#exmp-nn-computation-then-vs-now-usps-modern-hardware .callout-example title="Then vs. now: USPS on modern hardware"}
 
 The same neural network computation that required industrial-scale infrastructure in 1990 runs on pocket-sized devices today. @Tbl-then-vs-now quantifies four decades of progress, separating what changed in the surrounding machine from what stayed fixed in the algorithm. The unchanged model-storage row matters as much as the dramatic hardware rows.
@@ -5488,8 +5489,6 @@ Hardware improved dramatically across the table, ranging from `{python} UspsLene
 **Systems lesson**: Today's smartphones run real-time neural networks for face recognition, language translation, and voice assistants, tasks that would have required far larger infrastructure in the 1990s. Forty years of hardware progress did not change the algorithm or the pipeline shape; it moved the same computation from one postal facility to billions of devices.
 
 :::
-
-The success of this early large-scale neural network deployment helped establish many practices we now consider standard: the importance of thorough training data, the need for confidence metrics, the role of pre- and postprocessing, and the critical nature of system-level optimization. These operational considerations are formalized in @sec-ml-operations, which covers production ML system maintenance and monitoring. The comparison with a modern embedded implementation separates what changed in the machine from what stayed fixed in the algorithm.
 
 While hardware efficiency improved by orders of magnitude, modern edge AI systems face even tighter constraints than the USPS deployment: milliwatt power budgets vs. watts, millisecond latency requirements vs. tens of milliseconds, and deployment on battery-powered devices vs. dedicated infrastructure. Yet the same engineering principles apply—preprocessing for real-world variation, confidence-based routing to human review, and end-to-end pipeline optimization. This historical case study provides a reusable template for reasoning about ML systems deployment across the entire spectrum from cloud to edge to tiny devices. The operational considerations demonstrated here are formalized in @sec-ml-operations.
 
@@ -5723,7 +5722,6 @@ class SummaryParadigmCostRecap:
     dl_ops_ratio_mult_str = fmt_multiple(dl_ops_ratio, precision=1, commas=True)
 ```
 
-The running MNIST example made this escalation tangible: the same 28 by 28 digit that required about `{python} SummaryParadigmCostRecap.rb_comparisons_str` demanded `{python} SummaryParadigmCostRecap.dl_total_macs_str` in even a modest three-layer network—a `{python} SummaryParadigmCostRecap.dl_ops_ratio_mult_str` increase that generalizes across the systems dimensions captured in @tbl-evolution. These fundamentals primarily develop the algorithm axis of the D·A·M taxonomy while revealing how algorithmic choices propagate into machine constraints.
 
 ::: {.callout-takeaways title="The math behind the model"}
 
@@ -5736,6 +5734,8 @@ The running MNIST example made this escalation tangible: the same 28 by 28 digit
 * **The complete ML pipeline determines end-to-end performance**: Preprocessing, neural computation, and postprocessing all contribute to latency and reliability. The USPS deployment demonstrated that production success depends on the entire pipeline operating within real-world constraints, not on model accuracy on a test set alone.
 
 :::
+
+The running MNIST example made this escalation tangible: the same 28 by 28 digit that required about `{python} SummaryParadigmCostRecap.rb_comparisons_str` demanded `{python} SummaryParadigmCostRecap.dl_total_macs_str` in even a modest three-layer network—a `{python} SummaryParadigmCostRecap.dl_ops_ratio_mult_str` increase that generalizes across the systems dimensions captured in @tbl-evolution. These fundamentals primarily develop the algorithm axis of the D·A·M taxonomy while revealing how algorithmic choices propagate into machine constraints.
 
 The mathematical and systems implications emerge through fully connected architectures. The multilayer perceptrons explored here demonstrate universal function approximation: with enough neurons and appropriate weights, such networks can theoretically learn any continuous function. This mathematical generality comes with computational costs. Consider our MNIST example: a 28 by 28 pixel image contains `{python} MnistWeightsCalc.mnist_pixels_str` input values, and a fully connected network treats each pixel independently, learning over `{python} MnistWeightsCalc.fc1_weights_str` weights in the first layer alone by connecting `{python} MnistWeightsCalc.mnist_pixels_str` inputs to `{python} MnistWeightsCalc.fc1_neurons_str` neurons. Neighboring pixels are highly correlated while distant pixels rarely interact. Fully connected architectures expend computational resources learning irrelevant long-range relationships.
 
