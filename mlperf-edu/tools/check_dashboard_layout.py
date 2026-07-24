@@ -1,11 +1,12 @@
 #!/usr/bin/env python3
-"""Verify the rendered MLPerf EDU site at desktop and narrow viewports."""
+"""Capture and verify rendered MLPerf EDU result dashboards."""
 
 from __future__ import annotations
 
 import argparse
 import contextlib
 import json
+import re
 import socket
 import sys
 import threading
@@ -15,19 +16,6 @@ from pathlib import Path
 
 
 VIEWPORTS = ((1440, 1000, "desktop"), (390, 844, "narrow"))
-SCREENSHOT_PAGES = (
-    "index.html",
-    "getting-started.html",
-    "readiness.html",
-    "benchmarks/index.html",
-    "benchmarks/language/causal-language-modeling.html",
-    "labs/index.html",
-    "guide/instructors.html",
-    "guide/research.html",
-    "guide/results.html",
-    "guide/troubleshooting.html",
-    "reference/cli.html",
-)
 
 
 class _QuietHandler(SimpleHTTPRequestHandler):
@@ -57,33 +45,49 @@ def _serve(directory: Path):
         server.server_close()
 
 
-def _rendered_pages(build_dir: Path) -> list[str]:
-    return [
-        path.relative_to(build_dir).as_posix()
-        for path in sorted(build_dir.rglob("*.html"))
-    ]
+def _slug(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", value.lower()).strip("-")
 
 
-def _failure(page: str, viewport: str, check: str, detail: str) -> dict[str, str]:
-    return {"page": page, "viewport": viewport, "check": check, "detail": detail}
+def _parse_page(value: str) -> tuple[str, Path]:
+    if "=" not in value:
+        raise argparse.ArgumentTypeError("page must use LABEL=/path/to/report.html")
+    label, raw_path = value.split("=", 1)
+    path = Path(raw_path).expanduser().resolve()
+    if not label.strip():
+        raise argparse.ArgumentTypeError("page label cannot be empty")
+    if not path.is_file() or path.suffix.lower() != ".html":
+        raise argparse.ArgumentTypeError(f"HTML report does not exist: {path}")
+    return label.strip(), path
+
+
+def _failure(label: str, viewport: str, check: str, detail: str) -> dict[str, str]:
+    return {
+        "page": label,
+        "viewport": viewport,
+        "check": check,
+        "detail": detail,
+    }
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(
-        description="Check every rendered page for load, console, and viewport failures."
+        description="Check result dashboards at desktop and narrow viewports."
     )
-    parser.add_argument("--build-dir", type=Path, required=True)
+    parser.add_argument(
+        "--page",
+        action="append",
+        required=True,
+        type=_parse_page,
+        metavar="LABEL=PATH",
+        help="named HTML report to inspect; may be repeated",
+    )
     parser.add_argument("--report-dir", type=Path, required=True)
     args = parser.parse_args()
 
-    build_dir = args.build_dir.resolve()
-    report_dir = args.report_dir.resolve()
-    if not build_dir.is_dir():
-        parser.error(f"rendered site directory does not exist: {build_dir}")
-
-    pages = _rendered_pages(build_dir)
-    if not pages:
-        parser.error(f"no rendered HTML pages found under {build_dir}")
+    labels = [label for label, _ in args.page]
+    if len(labels) != len(set(labels)):
+        parser.error("page labels must be unique")
 
     try:
         from playwright.sync_api import sync_playwright
@@ -94,22 +98,25 @@ def main() -> int:
         )
         return 2
 
+    report_dir = args.report_dir.resolve()
     report_dir.mkdir(parents=True, exist_ok=True)
     failures: list[dict[str, str]] = []
     runs: list[dict[str, object]] = []
 
-    with _serve(build_dir) as base_url, sync_playwright() as playwright:
+    with sync_playwright() as playwright:
         browser = playwright.chromium.launch()
         try:
-            for width, height, label in VIEWPORTS:
-                context = browser.new_context(
-                    viewport={"width": width, "height": height}
-                )
-                try:
-                    for relative_path in pages:
+            for label, report_path in args.page:
+                with _serve(report_path.parent) as base_url:
+                    for width, height, viewport_label in VIEWPORTS:
+                        context = browser.new_context(
+                            viewport={"width": width, "height": height}
+                        )
                         page = context.new_page()
                         console_errors: list[str] = []
                         page_errors: list[str] = []
+                        failed_requests: list[str] = []
+                        bad_responses: list[str] = []
                         page.on(
                             "console",
                             lambda message, errors=console_errors: (
@@ -122,9 +129,23 @@ def main() -> int:
                             "pageerror",
                             lambda error, errors=page_errors: errors.append(str(error)),
                         )
+                        page.on(
+                            "requestfailed",
+                            lambda request, errors=failed_requests: errors.append(
+                                request.url
+                            ),
+                        )
+                        page.on(
+                            "response",
+                            lambda response, errors=bad_responses: (
+                                errors.append(f"{response.status} {response.url}")
+                                if response.status >= 400
+                                else None
+                            ),
+                        )
                         try:
                             response = page.goto(
-                                f"{base_url}/{relative_path}",
+                                f"{base_url}/{report_path.name}",
                                 wait_until="networkidle",
                                 timeout=30_000,
                             )
@@ -136,24 +157,41 @@ def main() -> int:
                                   bodyWidth: document.body.scrollWidth,
                                   heading: document.querySelector('h1')?.innerText?.trim() || '',
                                   mainPresent: Boolean(document.querySelector('main')),
-                                  wideTableCount: Array.from(document.querySelectorAll('main table'))
-                                    .filter((table) => table.scrollWidth > table.clientWidth + 1).length,
-                                  uncuedWideTableCount: Array.from(document.querySelectorAll('main table'))
-                                    .filter((table) => table.scrollWidth > table.clientWidth + 1)
-                                    .filter((table) => !getComputedStyle(table, '::before').content.includes('Swipe horizontally')).length
+                                  textLength: document.body.innerText.trim().length
                                 })"""
                             )
                             if status != 200:
                                 failures.append(
                                     _failure(
-                                        relative_path, label, "HTTP_STATUS", str(status)
+                                        label,
+                                        viewport_label,
+                                        "HTTP_STATUS",
+                                        str(status),
+                                    )
+                                )
+                            if bad_responses:
+                                failures.append(
+                                    _failure(
+                                        label,
+                                        viewport_label,
+                                        "RESOURCE_STATUS",
+                                        "; ".join(bad_responses[:3]),
+                                    )
+                                )
+                            if failed_requests:
+                                failures.append(
+                                    _failure(
+                                        label,
+                                        viewport_label,
+                                        "REQUEST_FAILURES",
+                                        "; ".join(failed_requests[:3]),
                                     )
                                 )
                             if console_errors:
                                 failures.append(
                                     _failure(
-                                        relative_path,
                                         label,
+                                        viewport_label,
                                         "CONSOLE_ERRORS",
                                         "; ".join(console_errors[:3]),
                                     )
@@ -161,19 +199,23 @@ def main() -> int:
                             if page_errors:
                                 failures.append(
                                     _failure(
-                                        relative_path,
                                         label,
+                                        viewport_label,
                                         "PAGE_ERRORS",
                                         "; ".join(page_errors[:3]),
                                     )
                                 )
-                            if not layout["mainPresent"] or not layout["heading"]:
+                            if (
+                                not layout["mainPresent"]
+                                or not layout["heading"]
+                                or int(layout["textLength"]) < 40
+                            ):
                                 failures.append(
                                     _failure(
-                                        relative_path,
                                         label,
+                                        viewport_label,
                                         "CONTENT_SHELL",
-                                        "rendered page is missing main content or an h1 heading",
+                                        "report is missing its main content, heading, or result text",
                                     )
                                 )
                             viewport_width = int(layout["viewportWidth"])
@@ -187,52 +229,49 @@ def main() -> int:
                             if overflow > 1:
                                 failures.append(
                                     _failure(
-                                        relative_path,
                                         label,
+                                        viewport_label,
                                         "HORIZONTAL_PAGE_OVERFLOW",
                                         f"page is {overflow}px wider than its {viewport_width}px viewport",
                                     )
                                 )
-                            if label == "narrow" and layout["uncuedWideTableCount"]:
-                                failures.append(
-                                    _failure(
-                                        relative_path,
-                                        label,
-                                        "TABLE_SCROLL_CUE",
-                                        f"{layout['uncuedWideTableCount']} of {layout['wideTableCount']} horizontally scrollable tables lack a visible cue",
-                                    )
-                                )
 
+                            screenshot_path = report_dir / (
+                                f"{_slug(label)}-{viewport_label}.png"
+                            )
+                            page.screenshot(path=screenshot_path, full_page=True)
+                            preview_path = report_dir / (
+                                f"{_slug(label)}-{viewport_label}-preview.png"
+                            )
+                            page.screenshot(path=preview_path)
                             runs.append(
                                 {
-                                    "page": relative_path,
-                                    "viewport": label,
+                                    "page": label,
+                                    "source": str(report_path),
+                                    "viewport": viewport_label,
                                     "status": status,
                                     "heading": layout["heading"],
                                     "document_width": layout["documentWidth"],
                                     "viewport_width": viewport_width,
+                                    "screenshot": str(screenshot_path),
+                                    "preview": str(preview_path),
                                 }
                             )
-                            if relative_path in SCREENSHOT_PAGES:
-                                screenshot = report_dir / (
-                                    f"{relative_path.removesuffix('.html').replace('/', '-')}-{label}.png"
-                                )
-                                page.screenshot(path=screenshot, full_page=True)
                         except Exception as error:  # noqa: BLE001
                             failures.append(
-                                _failure(relative_path, label, "PAGE_LOAD", repr(error))
+                                _failure(
+                                    label, viewport_label, "PAGE_LOAD", repr(error)
+                                )
                             )
                         finally:
                             page.close()
-                finally:
-                    context.close()
+                            context.close()
         finally:
             browser.close()
 
     report = {
         "schema_version": "0.1",
-        "build_dir": str(build_dir),
-        "page_count": len(pages),
+        "page_count": len(args.page),
         "viewport_count": len(VIEWPORTS),
         "run_count": len(runs),
         "failure_count": len(failures),
@@ -243,7 +282,9 @@ def main() -> int:
     report_path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
 
     if failures:
-        print(f"site layout failed with {len(failures)} issue(s); see {report_path}")
+        print(
+            f"dashboard layout failed with {len(failures)} issue(s); see {report_path}"
+        )
         for failure in failures[:20]:
             print(
                 f"- {failure['page']} [{failure['viewport']}] "
@@ -252,7 +293,7 @@ def main() -> int:
         return 1
 
     print(
-        f"site layout passed for {len(pages)} pages across "
+        f"dashboard layout passed for {len(args.page)} pages across "
         f"{len(VIEWPORTS)} viewports ({len(runs)} runs); report: {report_path}"
     )
     return 0

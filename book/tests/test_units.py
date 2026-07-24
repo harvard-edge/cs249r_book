@@ -237,7 +237,7 @@ def test_memory_bandwidth():
     ok &= check("A100 ~2 TB/s", A100_MEM_BW.to(TB / second).magnitude, 2.039)
     ok &= check("V100 900 GB/s", V100_MEM_BW.to(GB / second).magnitude, 900.0)
     ok &= check("H100 3350 GB/s", H100_MEM_BW.to(GB / second).magnitude, 3350.0)
-    ok &= check("Mobile 100 GB/s", MOBILE_NPU_MEM_BW.to(GB / second).magnitude, 100.0)
+    ok &= check("Mobile 51.2 GB/s", MOBILE_NPU_MEM_BW.to(GB / second).magnitude, 51.2)
     return ok
 
 

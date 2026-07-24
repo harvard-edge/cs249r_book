@@ -58,6 +58,17 @@ def test_cli_help():
     assert "--maturity" not in result.stdout
 
 
+def test_profile_help_describes_contract_depth_not_max_as_the_full_suite():
+    result = run_cli("run", "--help")
+
+    assert result.returncode == 0
+    normalized = " ".join(result.stdout.split())
+    assert (
+        "max=complete quality evaluation for the selected workload(s)" in normalized
+    )
+    assert "max=full suite" not in normalized
+
+
 def test_keyboard_interrupt_returns_shell_interrupt_status(monkeypatch, capsys):
     def interrupted(_args):
         raise KeyboardInterrupt
@@ -538,9 +549,10 @@ def test_doctor_json_emits_external_environment_handoffs():
         check["handoff"] for check in recommendation_checks if "handoff" in check
     )
     assert recommendation_handoff["workload"] == "recommendation"
-    assert recommendation_handoff["required_hardware"][
-        "recommended_host_memory_gib"
-    ] == 256
+    assert (
+        recommendation_handoff["required_hardware"]["recommended_host_memory_gib"]
+        == 256
+    )
 
     assert reinforcement_result.returncode == 1
     reinforcement_checks = json.loads(reinforcement_result.stdout)["checks"]
@@ -724,7 +736,7 @@ def test_dashboard_derives_quality_results_and_target_attainment():
             },
             {
                 "workload": "quality-fail",
-                "status": "passed",
+                "status": "quality_failed",
                 "quality": {
                     "quality_required": True,
                     "metric": "fid",
@@ -747,7 +759,48 @@ def test_dashboard_derives_quality_results_and_target_attainment():
     assert "Target attainment" in html
     assert "112.5%" in html
     assert "99.4%" in html
+    assert "Target not met" in html
+    assert "Run failed" not in html
     assert "Functional Readiness" not in html
+
+
+def test_dashboard_keeps_nonpass_states_distinct():
+    report = {
+        "workloads": [
+            {
+                "workload": "environment-gated",
+                "status": "not_implemented",
+                "max_execution": "environment-gated-quality-conformance",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "skipped",
+                "status": "skipped",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "unsupported",
+                "status": "unsupported",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "execution-failed",
+                "status": "execution_failed",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+        ]
+    }
+
+    html = edu_cli.quality_dashboard_html(report)
+
+    assert "Environment gated" in html
+    assert "Skipped" in html
+    assert "Unsupported" in html
+    assert "Run failed" in html
 
 
 def test_dashboard_uses_separate_meters_for_mixed_results():
@@ -905,6 +958,15 @@ def test_nanogpt_inference_lineage_excludes_source_promoted_results():
 
 def test_execution_lineage_distinguishes_pretrained_and_run_trained_models():
     workloads = load_registry()
+    inferred = {
+        "workload": "image-classification",
+        "profile": "max",
+        "quality": {},
+    }
+    enrich_report_for_display(inferred, workloads)
+    assert inferred["mode"] == "inference"
+    assert inferred["execution_lineage"]["mode"] == "inference"
+
     pretrained = {
         "workload": "code-generation",
         "profile": "max",
@@ -954,8 +1016,27 @@ def test_show_workload():
     assert "min, max, pro" in result.stdout
     assert "public_status" in result.stdout
     assert "experimental" in result.stdout
+    assert "evaluator" in result.stdout
+    assert "cross_entropy_loss" in result.stdout
+    assert "default_mode" in result.stdout
+    assert "training" in result.stdout
+    assert "default_phase" in result.stdout
+    assert "full" in result.stdout
+    assert "quality_direction" in result.stdout
+    assert "lower" in result.stdout
+    assert "quality_tolerance" in result.stdout
+    assert "max_execution" in result.stdout
     assert "source_suite" not in result.stdout
     assert "maturity" not in result.stdout
+
+
+def test_show_environment_gated_workload_discloses_next_gate():
+    result = run_cli("show", "recommendation")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "environment-gated-quality-conformance" in result.stdout
+    assert "max_next_gate" in result.stdout
+    assert "256-GB-class environment" in result.stdout
+    assert "mlperf-inference-accuracy-dlrm" in result.stdout
 
 
 def test_info_dataset_shows_asset_dossier():
@@ -1098,14 +1179,14 @@ def test_fetch_manual_quality_assets_returns_actionable_nonzero_status():
         "fetch", "--workload", "recommendation", "--profile", "max"
     )
     assert recommendation.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in recommendation.stdout
+    assert "MANUAL ACTION REQUIRED" in " ".join(recommendation.stdout.split())
     assert "unshuffled day 23" in recommendation.stdout
 
     reinforcement = run_cli(
         "fetch", "--workload", "reinforcement-learning", "--profile", "max"
     )
     assert reinforcement.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in reinforcement.stdout
+    assert "MANUAL ACTION REQUIRED" in " ".join(reinforcement.stdout.split())
     assert "professional-move inputs" in reinforcement.stdout
 
 
@@ -1211,6 +1292,18 @@ def test_health_dry_run_uses_all_registered_min_paths(tmp_path):
     assert not any(tmp_path.iterdir())
 
 
+def test_health_success_points_to_authoritative_quality_journey(monkeypatch, capsys):
+    monkeypatch.setattr(edu_cli, "cmd_validate", lambda _args: 0)
+    args = edu_cli.build_parser().parse_args(["health"])
+
+    assert edu_cli.cmd_health(args) == 0
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "Next: choose a workload" in output
+    assert "mlperf show <workload>" in output
+    assert "mlperf run --profile max" in output
+
+
 def test_suite_filtered_health_uses_the_selected_suite(tmp_path):
     result = run_cli(
         "health",
@@ -1259,6 +1352,7 @@ def test_validation_runner_exception_still_writes_failure_report(tmp_path, monke
     html = reports[0].with_suffix(".html").read_text()
     assert "Needs attention" in html
     assert "missing licensed benchmark environment" in html
+    assert "overflow-wrap:anywhere" in html
 
 
 def test_validate_release_dry_run_includes_min_max_and_research_pro(tmp_path):
@@ -1500,8 +1594,13 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert rows[0]["workload"] == "causal-language-modeling"
     assert rows[0]["suite"] == "language"
     assert rows[0]["profile"] == "min"
+    assert rows[0]["mode"] == "training"
+    assert rows[0]["phase"] == ""
+    assert rows[0]["scenario"] == "training"
     assert rows[0]["status"] == "passed"
     assert rows[0]["backend"] == "pytorch-cpu"
+    assert rows[0]["device_requested"] == "auto"
+    assert rows[0]["device_executed"] == "cpu"
     assert rows[0]["data_mode"] == "synthetic-deterministic"
     assert rows[0]["dataset"] == "tinyshakespeare"
     assert rows[0]["dataset_license_status"] == "mit-repository-public-domain-text"

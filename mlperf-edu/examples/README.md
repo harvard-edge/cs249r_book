@@ -33,7 +33,7 @@ a research-facing study.
 
 Before choosing a `max` workload, read the
 [fourteen-workload readiness matrix](../READINESS.md#portfolio-status). It
-separates target-passing, target-gap, and research-environment workloads and
+separates target-passing, target-gap, and blocked local workloads and
 states the next quality task for each. Instructors should publish course-machine
 `max` runtime, memory, download, and disk budgets because those costs are
 hardware dependent. The initial [course-image budget](../COURSE_BUDGETS.md)

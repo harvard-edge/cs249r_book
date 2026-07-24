@@ -66,14 +66,15 @@ A profile defines the depth of the benchmark contract, not a universal machine
 size. Every `min` path must run on classroom hardware and must preserve enough of
 the workload identity to verify setup, execution, reporting, and provenance. A
 `max` path runs the unchanged authoritative quality contract. Most max paths fit
-the laptop envelope, while DLRM and MiniGo require their declared single-node
-research environments. The `pro` profile adds research controls without
+the laptop envelope. DLRM and MiniGo still require their declared single-node
+research environments, but the first milestone now requires local backends that
+preserve those same contracts. The `pro` profile adds research controls without
 silently changing the task, data, evaluator, or quality target.
 
 This separation keeps all fourteen workloads teachable without pretending that
-a bounded classroom probe is a benchmark-quality result. It also keeps the
-research-only environment requirements visible before a student starts a long
-run.
+a bounded classroom probe is a benchmark-quality result. It also keeps current
+resource requirements visible while the local DLRM and MiniGo executors are
+developed.
 
 ## Gate Performance With Quality
 

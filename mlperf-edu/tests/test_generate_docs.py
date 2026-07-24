@@ -10,7 +10,6 @@ import yaml
 from mlperf.registry import load_registry
 from tools import generate_docs
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -143,6 +142,18 @@ def test_generated_workload_pages_disclose_indexed_reference_evidence(
     assert "CV 5.19%; **diagnostic fail**" in combined
 
 
+def test_generated_reference_results_use_current_registry_quality_contract(
+    generated_outputs,
+):
+    page = generated_outputs[
+        ROOT / "site" / "benchmarks" / "timeseries" / "time-series-forecasting.qmd"
+    ]
+
+    assert "target ≤ 0.2900; **fail**" in page
+    assert "recomputed with the current registry contract" in page
+    assert "target ≤ 0.2929; **pass**" not in page
+
+
 def test_quality_conformance_pages_disclose_result_boundary(generated_outputs):
     workload_pages = [
         content
@@ -180,6 +191,21 @@ def test_consolidated_language_page_runs_training_before_inference():
     assert section.index(training) < section.index(prefill)
     assert section.count('--output-dir "$OUTPUT_DIR"') >= 4
     assert "nanogpt-prefill" not in section
+
+
+def test_environment_gated_pages_lead_with_preflight_not_generic_max_run():
+    workloads = load_registry(ROOT / "registry")
+
+    for workload_id in ("recommendation", "reinforcement-learning"):
+        section = generate_docs.section_how_to_run(workloads[workload_id])
+        target = f"--workload {workload_id}"
+
+        assert "## Current Preflight and Handoff" in section
+        assert f"doctor {target} --profile max --format json" in section
+        assert f"fetch {target} --profile max --dry-run" in section
+        assert f"run {target} --profile min" in section
+        assert f"run {target} --profile max" not in section
+        assert f"run {target} --profile pro" not in section
 
 
 def test_site_install_commands_use_the_source_checkout(generated_outputs):

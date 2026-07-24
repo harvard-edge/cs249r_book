@@ -218,7 +218,7 @@ Beyond the technical limits of latency, the economics of serving have undergone 
 
 ::: {#ws-model-serving-facebook-inference-tax .callout-war-story title="The inference tax at Facebook"}
 
-**Context**: In 2018, Kim Hazelwood and Facebook's AI Infrastructure team described a production ML workload that touched nearly every user-facing surface: News Feed ranking, Ads ranking, Search, image understanding (Lumos), face recognition (Facer), anomaly detection (Sigma), automated video captioning, and a Translate system serving roughly 4.5 billion translated post impressions per day across more than two thousand language pairs [@hazelwood2018].
+**Context**: In 2018, Kim Hazelwood and Facebook's AI Infrastructure team described a production ML workload that touched nearly every user-facing surface: News Feed ranking, Ads ranking, Search, image understanding (Lumos), face recognition (Facer), anomaly detection (Sigma), automated video captioning, and a Translate system serving roughly 4.5 billion translated post impressions per day across more than two thousand translation directions [@hazelwood2018].
 
 **Failure mode**: The expensive part of ML had moved into serving. Inference ran on the order of tens of trillions of operations per day under strict tail-latency targets, where live request arrivals constrained batching and a one-hour-old ranking model measurably degraded News Feed quality---forcing aggressive retraining alongside aggressive serving.
 
@@ -2850,11 +2850,15 @@ class BatchThroughputCalc:
     per_image_ms_value = [inf / b for inf, b in zip(inference_ms_value, batch_sizes)]
     throughput_value = [b / (inf / 1000.0) for b, inf in zip(batch_sizes, inference_ms_value)]
     throughput_ratio_value = throughput_value[-1] / throughput_value[0]
+    batch8_vs_batch1_ratio_value = throughput_value[2] / throughput_value[0]  # batch-8 vs batch-1 saturated throughput
     batch32_total_ms_value = batch_window_ms_value + inference_ms_value[-1] * ms
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(throughput_value == sorted(throughput_value), "Throughput must increase monotonically with batch size.")
     check(abs(throughput_ratio_value - 6.4) < 0.05, f"batch-32/batch-1 throughput ratio should be ~6.4x, got {throughput_ratio_value:.2f}.")
+    check(
+        abs(batch8_vs_batch1_ratio_value - 4.4) < 0.05, f"batch-8/batch-1 throughput ratio should be ~4.4x, got {batch8_vs_batch1_ratio_value:.2f}."
+    )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Table columns (one entry per batch size)
@@ -2866,6 +2870,7 @@ class BatchThroughputCalc:
     gpu_util_prose_str = [fmt_percent(u / 100, precision=0, commas=False, style='prose') for u in gpu_util_pct]
     # Prose scalars (callout below)
     throughput_ratio_mult_str = fmt_multiple(throughput_ratio_value, precision=1, commas=False)
+    batch8_vs_batch1_mult_str = fmt_multiple(batch8_vs_batch1_ratio_value, precision=1, commas=False)
     batch_window_ms_str = fmt_time(batch_window_ms_value, 'millisecond', precision=0, commas=False)
     batch32_inference_ms_str = fmt_time(inference_ms_value[-1] * ms, 'millisecond', precision=0, commas=False)
     batch32_total_ms_str = fmt_time(batch32_total_ms_value, 'millisecond', precision=0, commas=False)
@@ -2903,7 +2908,7 @@ The times shown are pure inference time, excluding queue wait; @sec-model-servin
 
 :::
 
-The table reveals the throughput-latency trade-off in stark terms: larger batches dramatically improve hardware efficiency but increase per-request latency. In practice, the optimal batch size depends on both the latency Service Level Objective (SLO) and the arrival rate of requests. The question facing every serving engineer is therefore quantitative: determining the largest batch size that still meets a given latency SLO. In this scenario, batch size 8 with a 5 ms batching window has worst-case user latency of about 14 ms (5 ms wait plus 9 ms inference), below a 20 ms SLO budget. That earns nearly 3$\times$ higher service throughput than batch-1 serving on the same hardware, provided sustained load is high enough to fill the batching window. Plotting the same trade-off in @fig-throughput-latency-knee reveals the knee where extra batching stops paying for its latency cost: throughput is already flattening while latency begins to spike, so batching beyond that point trades modest capacity gains for queueing delay.
+The table reveals the throughput-latency trade-off in stark terms: larger batches dramatically improve hardware efficiency but increase per-request latency. In practice, the optimal batch size depends on both the latency Service Level Objective (SLO) and the arrival rate of requests. The question facing every serving engineer is therefore quantitative: determining the largest batch size that still meets a given latency SLO. In this scenario, batch size 8 with a 5 ms batching window has worst-case user latency of about 14 ms (5 ms wait plus 9 ms inference), below a 20 ms SLO budget. That earns `{python} BatchThroughputCalc.batch8_vs_batch1_mult_str` higher service throughput than batch-1 serving on the same hardware, provided sustained load is high enough to fill the batching window. Plotting the same trade-off in @fig-throughput-latency-knee reveals the knee where extra batching stops paying for its latency cost: throughput is already flattening while latency begins to spike, so batching beyond that point trades modest capacity gains for queueing delay.
 
 ::: {#fig-throughput-latency-knee fig-env="figure" fig-pos="htb" fig-cap="**The Throughput-Latency Knee**: Batch size vs. throughput (blue) and latency (orange). Throughput increases with batch size as hardware utilization improves, but eventually saturates. Latency remains relatively flat until the knee, after which it spikes due to queuing. Values are representative and depend on model/hardware." fig-alt="Dual-axis line chart. Blue line (throughput) rises and plateaus. Orange line (latency) stays low then spikes upward. A vertical line marks the optimal point where throughput is high before latency explodes."}
 

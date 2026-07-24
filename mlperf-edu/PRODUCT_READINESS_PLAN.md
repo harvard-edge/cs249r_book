@@ -7,16 +7,19 @@ have the same evidentiary strength.
 
 1. The health layer proves that installation, CLI dispatch, all fourteen
    functional paths, result serialization, and provenance verification work.
-2. The assignment layer lets a student run an authoritative workload, modify
+2. The local quality layer proves that all fourteen authoritative paths can
+   fetch or verify their exact assets and complete without remote compute.
+3. The assignment layer lets a student run an authoritative workload, modify
    one declared component, compare compatible results, explain the change, and
    submit a verifiable package.
-3. The research layer lets a user define a controlled collection, preserve
+4. The research layer lets a user define a controlled collection, preserve
    complete configuration and lineage, compare systems, and export analysis
    without weakening quality gates.
 
 Production publication is a later release layer. It adds security, packaging,
 governance, independent reproduction, and promoted stability evidence. The
-initial classroom milestone does not depend on it.
+first milestone still requires local execution of every authoritative quality
+path. [LOCAL_EXECUTION_PLAN.md](LOCAL_EXECUTION_PLAN.md) defines that gate.
 
 ## Dashboard Contract
 
@@ -101,8 +104,9 @@ provenance compatibility.
 
 Research examples should cover hardware comparison, compiler or precision
 changes, training-to-inference lineage, controlled ablation, and export to JSON
-or CSV for notebooks. DLRM and MiniGo should remain clearly labeled as
-research-environment workloads.
+or CSV for notebooks. The legacy full-memory DLRM and TensorFlow 1.x MiniGo
+backends may remain optional research references, but the default quality paths
+must also run locally.
 
 ## Work Queue
 
@@ -115,6 +119,22 @@ research-environment workloads.
 - [x] Add suite-level health summaries and categorical graphs.
 - [x] Audit target authority, datasets, evaluators, and provenance.
 - [x] Correct the PatchTST and EDM quality contracts.
+
+### Local Execution Milestone
+
+- [x] Define the supported local-machine and one-run acceptance boundary.
+- [x] Keep all fourteen source-backed quality targets unchanged during local
+  executor work.
+- [ ] Add a clean-cache asset ledger and `doctor --local` preflight.
+- [ ] Add resumable portfolio execution for long preprocessing, training, and
+  evaluation stages.
+- [ ] Implement and parity-test an out-of-core DLRM backend for the complete
+  Criteo accuracy contract.
+- [ ] Implement and parity-test a native CPU or MPS MiniGo backend for the
+  complete historical quality loop.
+- [ ] Resolve the four measured target gaps without fitting the targets to local
+  results.
+- [ ] Produce one verified local quality decision for all fourteen workloads.
 
 ### Assignment layer
 
@@ -145,7 +165,8 @@ research-environment workloads.
 - [x] Complete current BFCL and EDM result packets.
 - [x] Publish machine-readable DLRM and MiniGo execution handoffs with exact
   environment, asset, source, and command requirements.
-- [ ] Execute DLRM and MiniGo in their required environments.
+- [ ] Retain the legacy DLRM and MiniGo backends as optional reference paths
+  after the local executors pass parity checks.
 
 ### Production release
 
