@@ -12,7 +12,21 @@ const papers: Paper[] = [
     authors: "Zandieh et al., 2025",
     url: "https://arxiv.org/abs/2504.19874",
   },
-  // add 3-5 more here
+  {
+    title: "EvolKV: Evolutionary KV Cache Compression for LLM Inference",
+    authors: "Yu & Chai, 2025",
+    url: "https://arxiv.org/abs/2509.08315",
+  },
+  {
+    title: "KV Cache Transform Coding for Compact Storage in LLM Inference",
+    authors: "Staniszewski & Łańcucki, 2025",
+    url: "https://arxiv.org/abs/2511.01815",
+  },
+  {
+    title: "C²KV: Compressed and Composable KV Cache Reuse for Efficient LLM Inference",
+    authors: "Du et al., 2026",
+    url: "https://arxiv.org/abs/2607.17715",
+  },
 ];
 
 export default function RecentPapers({ className }: { className?: string }) {
