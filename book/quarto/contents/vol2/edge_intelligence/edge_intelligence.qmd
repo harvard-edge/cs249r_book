@@ -1335,7 +1335,7 @@ Consider a standard neural network layer:
 $$
 y = W x + b
 $$
-where $W \in \mathbb{R}^{m \times n}$ is the weight matrix, $b \in \mathbb{R}^m$ is the bias vector, and $x \in \mathbb{R}^n$ is the input. In full training, gradients are computed for both $W$ and $b$. In bias-only adaptation, we constrain:
+where $\mathbf{W} \in \mathbb{R}^{m \times n}$ is the weight matrix, $b \in \mathbb{R}^m$ is the bias vector, and $x \in \mathbb{R}^n$ is the input. In full training, gradients are computed for both $W$ and $b$. In bias-only adaptation, we constrain:
 $$
 \frac{\partial \mathcal{L}}{\partial W} = 0, \quad \frac{\partial \mathcal{L}}{\partial b} \neq 0
 $$
@@ -1711,11 +1711,11 @@ The adapters act as learnable perturbations on top of a frozen backbone. Because
 
 #### Low-rank techniques {#sec-edge-intelligence-lowrank-techniques-4570}
 
-Another efficient strategy is to constrain weight updates themselves to a low-rank structure. Rather than updating a full matrix $W$, the update is approximated as:
+Another efficient strategy is to constrain weight updates themselves to a low-rank structure. Rather than updating a full matrix $\mathbf{W}$, the update is approximated as:
 $$
-\Delta W \approx U V^\top
+\Delta \mathbf{W} \approx \mathbf{U} \mathbf{V}^\top
 $$
-where $U \in \mathbb{R}^{m \times r}$ and $V \in \mathbb{R}^{n \times r}$, with $r \ll \min(m,n)$. This reduces the number of trainable parameters from $mn$ to $r(m + n)$.
+where $\mathbf{U} \in \mathbb{R}^{m \times r}$ and $\mathbf{V} \in \mathbb{R}^{n \times r}$, with $r \ll \min(m,n)$. This reduces the number of trainable parameters from $mn$ to $r(m + n)$.
 
 ```{python}
 #| echo: false
@@ -1772,7 +1772,7 @@ class EdgeLoraParameterEfficiency:
     fp16_weight_footprint_gb_str = fmt_memory(fp16_weight_footprint, unit=GB, precision=0, commas=False)
 ```
 
-[^fn-lora-parameter-efficiency]: **LoRA**\index{LoRA!parameter efficiency}: @hu2021lora learns rank-$r$ decomposition matrices $A$ and $B$ instead of updating full weight matrices, reducing trainable parameters by 100--10,000$\times$ while maintaining much of the adaptation quality. For on-device learning, this compression is decisive, but it affects adapter state rather than the full model footprint: a model with `{python} EdgeLoraParameterEfficiency.base_model_params_b_str` parameters has about a `{python} EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str` FP16 weight footprint before gradients, optimizer state, and activations, while rank `{python} EdgeAdaptationTierProfile.mid_tier_lora_rank_str` LoRA can reduce the trainable adapter parameters to tens or hundreds of megabytes. Practical phone deployment still requires storing, quantizing, or offloading the frozen base model.
+[^fn-lora-parameter-efficiency]: **LoRA**\index{LoRA!parameter efficiency}: @hu2021lora learns rank-$r$ decomposition matrices $\mathbf{A}$ and $\mathbf{B}$ instead of updating full weight matrices, reducing trainable parameters by 100--10,000$\times$ while maintaining much of the adaptation quality. For on-device learning, this compression is decisive, but it affects adapter state rather than the full model footprint: a model with `{python} EdgeLoraParameterEfficiency.base_model_params_b_str` parameters has about a `{python} EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str` FP16 weight footprint before gradients, optimizer state, and activations, while rank `{python} EdgeAdaptationTierProfile.mid_tier_lora_rank_str` LoRA can reduce the trainable adapter parameters to tens or hundreds of megabytes. Practical phone deployment still requires storing, quantizing, or offloading the frozen base model.
 
 Consider a mobile deployment where a language model with `{python} EdgeLoraParameterEfficiency.base_model_params_b_str` parameters has a `{python} EdgeLoraParameterEfficiency.fp16_weight_footprint_gb_str` FP16 weight footprint, before accounting for the additional gradients, optimizer states, and activations required by full fine-tuning. That footprint is impossible on smartphones with about `{python} EdgeAdaptationTierProfile.smartphone_ram_gb_str` total memory unless the base model is aggressively quantized, partitioned, or offloaded. LoRA with rank `{python} EdgeAdaptationTierProfile.mid_tier_lora_rank_str` can reduce the trainable adapter parameters to tens or hundreds of megabytes, making local adaptation plausible only when the frozen base model is handled separately.
 
@@ -1842,7 +1842,7 @@ In smartphone camera pipelines, environmental lighting, user preferences, and le
 
 Selecting the right adaptation strategy requires quantitative analysis of the resource-expressivity spectrum. For a 10M parameter model, the trade-offs are concrete. Bias-only updates are the most efficient, requiring just 50 KB of trainable parameters and negligible compute overhead, but they struggle to adapt to structural domain shifts like changing sensor geometries or new object categories. At the other extreme, full fine-tuning offers maximum expressivity but demands 40 MB or more of gradients and optimizer states, making it infeasible for background training on typical mobile devices. Low-rank techniques (LoRA) and residual adapters occupy the strategic middle ground: a rank-16 LoRA configuration requires approximately 2 MB of trainable memory, while a standard residual adapter needs approximately 5 MB.
 
-The decision between LoRA and residual adapters often hinges on inference latency constraints. LoRA matrices can be mathematically merged into the frozen backbone weights during inference $(W_{\text{final}} = W_{\text{frozen}} + U V^\top)$, resulting in zero additional inference latency. This makes LoRA ideal for latency-critical paths like real-time video processing where every millisecond matters. Residual adapters, conversely, remain distinct modules ($y = f(x) + \text{Adapter}(x)$), adding 1--3 percent to inference latency due to the extra forward pass through the adapter layers. However, this separation enables the hot-swapping capability described earlier: switching adapters requires loading only the small adapter weights rather than recomputing merged matrices.
+The decision between LoRA and residual adapters often hinges on inference latency constraints. LoRA matrices can be mathematically merged into the frozen backbone weights during inference $(\mathbf{W}_{\text{final}} = \mathbf{W}_{\text{frozen}} + \mathbf{U} \mathbf{V}^\top)$, resulting in zero additional inference latency. This makes LoRA ideal for latency-critical paths like real-time video processing where every millisecond matters. Residual adapters, conversely, remain distinct modules ($y = f(x) + \text{Adapter}(x)$), adding 1--3 percent to inference latency due to the extra forward pass through the adapter layers. However, this separation enables the hot-swapping capability described earlier: switching adapters requires loading only the small adapter weights rather than recomputing merged matrices.
 
 Implementing these adaptation techniques requires system-level support for dynamic computation graphs and the ability to selectively inject trainable parameters. Not all deployment environments or inference engines support such capabilities natively. TensorFlow Lite and Open Neural Network Exchange (ONNX) Runtime Mobile provide support for adapter-style architectures, but custom inference stacks on microcontrollers may require manual implementation of the adapter forward pass.
 
