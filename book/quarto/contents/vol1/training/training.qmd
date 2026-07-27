@@ -385,7 +385,7 @@ These scaling challenges share a common thread: every bottleneck traces back to 
 
 ## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
 
-Matrix multiplication is just $C = AB$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between rectified linear unit (ReLU) and sigmoid determines whether Tensor Cores can accelerate computation. @Sec-neural-computation established *what* neural network operations compute and *why* they enable learning; the systems question is *what they cost*\index{Training!mathematical foundations}\index{Training!computational cost} in FLOPs, memory, and bandwidth when those operations execute at scale.
+Matrix multiplication is just $\mathbf{C} = \mathbf{A}\mathbf{B}$ in notation, but training GPT-2 requires executing that operation billions of times with matrices too large to fit in fast memory. The activation function $f(x) = \max(0, x)$ appears trivial, yet the choice between rectified linear unit (ReLU) and sigmoid determines whether Tensor Cores can accelerate computation. @Sec-neural-computation established *what* neural network operations compute and *why* they enable learning; the systems question is *what they cost*\index{Training!mathematical foundations}\index{Training!computational cost} in FLOPs, memory, and bandwidth when those operations execute at scale.
 
 Four dimensions structure this cost analysis:
 
@@ -1658,7 +1658,7 @@ class AttentionIntensity:
 
 To build intuition for these relationships, study the roofline diagram in @fig-training-roofline, the standard diagnostic tool for understanding hardware utilization. The ridge point marks the "knee" where the sloped memory-bound region meets the flat compute-bound ceiling. Operations falling left of this point, including attention softmax\index{Attention!softmax arithmetic intensity}, are starved for data: the accelerator could compute faster, but memory bandwidth cannot deliver operands quickly enough. Operations to the right are compute bound: adding more memory bandwidth would not help because the arithmetic units themselves limit throughput. Notice how GPT-2's training operations distribute across this landscape.
 
-Consider a GPT-2 attention layer\index{Arithmetic Intensity!attention layer} that materializes the $S{\times}S$ attention-score matrix. For each head, the $QK^\top$ product costs approximately $2S^2d_{\text{head}}$ FLOPs, while writing the FP16 score matrix and reading it back for softmax traffic moves about $4S^2$ bytes. The arithmetic intensity of this materialized score path is therefore $d_{\text{head}}/2$. For GPT-2 Small ($d_{\text{model}}=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $d_{\text{head}}=$ `{python} AttentionIntensity.head_dim_str`), this yields `{python} AttentionIntensity.attn_intensity_str`, below the A100's ridge point, making standard materialized attention memory bound. Scaling the hidden dimension raises projection intensity, but it does not remove the $\mathcal{O}(S^2)$ score-matrix traffic that FlashAttention targets.
+Consider a GPT-2 attention layer\index{Arithmetic Intensity!attention layer} that materializes the $S{\times}S$ attention-score matrix. For each head, the $\mathbf{Q}\mathbf{K}^\top$ product costs approximately $2S^2d_{\text{head}}$ FLOPs, while writing the FP16 score matrix and reading it back for softmax traffic moves about $4S^2$ bytes. The arithmetic intensity of this materialized score path is therefore $d_{\text{head}}/2$. For GPT-2 Small ($d_{\text{model}}=$ `{python} AttentionIntensity.H_small_str` across `{python} AttentionIntensity.heads_small_str` heads, so $d_{\text{head}}=$ `{python} AttentionIntensity.head_dim_str`), this yields `{python} AttentionIntensity.attn_intensity_str`, below the A100's ridge point, making standard materialized attention memory bound. Scaling the hidden dimension raises projection intensity, but it does not remove the $\mathcal{O}(S^2)$ score-matrix traffic that FlashAttention targets.
 
 Accelerators have characteristic hardware ridge points where operations transition from memory-bound to compute bound. A representative data-center accelerator has a ridge point high enough that low-intensity operations such as materialized attention softmax remain memory bound even when large matrix multiplications are compute bound. Operations below the ridge point are memory bound; above it, they are compute bound.
 
@@ -4350,9 +4350,9 @@ FlashAttention\index{FlashAttention!I/O-aware algorithm}\index{FlashAttention!me
 
 As detailed in @sec-network-architectures, standard self-attention\index{Attention!memory bottleneck}\index{Attention!quadratic complexity} computes relationships between all positions in a sequence. For an input sequence of length $S$, the mechanism computes an $S{\times}S$ attention matrix according to @eq-attention:
 
-$$ \text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V $$ {#eq-attention}
+$$ \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V} $$ {#eq-attention}
 
-Here, $Q$, $K$, and $V$ are the query, key, and value matrices for the sequence, and $d_k$ is the key-vector dimension used to scale the dot products before softmax. The $QK^T$ term is the source of the $S{\times}S$ score matrix, which is why attention becomes an I/O problem even when the arithmetic itself maps well to Tensor Cores.
+Here, $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are the query, key, and value matrices for the sequence, and $d_k$ is the key-vector dimension used to scale the dot products before softmax. The $\mathbf{Q}\mathbf{K}^T$ term is the source of the $S{\times}S$ score matrix, which is why attention becomes an I/O problem even when the arithmetic itself maps well to Tensor Cores.
 
 ```{python}
 #| echo: false
@@ -4408,11 +4408,11 @@ where $\text{dsoftmax}$ denotes the Jacobian-vector product of softmax, which it
 
 #### IO-aware attention through tiling {#sec-model-training-ioaware-attention-tiling-f02f}
 
-FlashAttention eliminates the need to materialize full $S{\times}S$ attention matrices in HBM by computing attention incrementally through tiling\index{FlashAttention!tiling strategy}\index{Tiling!attention computation}. Instead of computing the entire attention matrix at once, the algorithm partitions $Q$, $K$, and $V$ into tiles small enough to fit in fast SRAM, computes attention scores for these tiles, and incrementally accumulates results.
+FlashAttention eliminates the need to materialize full $S{\times}S$ attention matrices in HBM by computing attention incrementally through tiling\index{FlashAttention!tiling strategy}\index{Tiling!attention computation}. Instead of computing the entire attention matrix at once, the algorithm partitions $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ into tiles small enough to fit in fast SRAM, computes attention scores for these tiles, and incrementally accumulates results.
 
 The key algorithmic insight relies on the mathematical structure of softmax attention. Standard attention computes:
 $$
-\text{Attention}(Q, K, V) = \text{softmax}\left(\frac{QK^T}{\sqrt{d_k}}\right)V
+\text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V}
 $$
 
 @Algo-streaming-attention decomposes this computation by partitioning the queries and the keys/values into tiles small enough to fit in SRAM, then streaming over the key/value tiles while maintaining the running softmax statistics needed to assemble each output tile, without ever forming the full score matrix.
@@ -4431,18 +4431,18 @@ $$
 \begin{algorithm}
 \caption{FlashAttention: tiled attention with online softmax}
 \begin{algorithmic}
-\Require queries $Q$, keys $K$, values $V$ for a length-$S$ sequence; tile size $b$
-\Ensure attention output $Y$, without materializing the $S\times S$ score matrix
-\For{each query tile $Q_i$}
-    \State in SRAM: $Y_i^{\text{acc}} \gets \mathbf{0}$, $m_i \gets -\infty$, $l_i \gets 0$
-    \For{each key/value tile $(K_j, V_j)$}
-        \State load $Q_i, K_j, V_j$ into SRAM; $Z_{ij} \gets Q_i K_j^\top / \sqrt{d_k}$
-        \State $m_i' \gets \max(m_i,\operatorname{rowmax}(Z_{ij}))$ \Comment{new stable max}
-        \State $Y_i^{\text{acc}} \gets Y_i^{\text{acc}}\odot e^{m_i-m_i'} + e^{Z_{ij}-m_i'}V_j$
-        \State $l_i \gets l_i\odot e^{m_i-m_i'} + \operatorname{rowsum}(e^{Z_{ij}-m_i'})$; $m_i \gets m_i'$
-        \State discard $Z_{ij}$ \Comment{never written to HBM}
+\Require queries $\mathbf{Q}$, keys $\mathbf{K}$, values $\mathbf{V}$ for a length-$S$ sequence; tile size $b$
+\Ensure attention output $\mathbf{Y}$, without materializing the $S\times S$ score matrix
+\For{each query tile $\mathbf{Q}_i$}
+    \State in SRAM: $\mathbf{Y}_i^{\text{acc}} \gets \mathbf{0}$, $m_i \gets -\infty$, $l_i \gets 0$
+    \For{each key/value tile $(\mathbf{K}_j, \mathbf{V}_j)$}
+        \State load $\mathbf{Q}_i, \mathbf{K}_j, \mathbf{V}_j$ into SRAM; $\mathbf{Z}_{ij} \gets \mathbf{Q}_i \mathbf{K}_j^\top / \sqrt{d_k}$
+        \State $m_i' \gets \max(m_i,\operatorname{rowmax}(\mathbf{Z}_{ij}))$ \Comment{new stable max}
+        \State $\mathbf{Y}_i^{\text{acc}} \gets \mathbf{Y}_i^{\text{acc}}\odot e^{m_i-m_i'} + e^{\mathbf{Z}_{ij}-m_i'}\mathbf{V}_j$
+        \State $l_i \gets l_i\odot e^{m_i-m_i'} + \operatorname{rowsum}(e^{\mathbf{Z}_{ij}-m_i'})$; $m_i \gets m_i'$
+        \State discard $\mathbf{Z}_{ij}$ \Comment{never written to HBM}
     \EndFor
-    \State $Y_i \gets Y_i^{\text{acc}} / l_i$; write $Y_i$ to HBM
+    \State $\mathbf{Y}_i \gets \mathbf{Y}_i^{\text{acc}} / l_i$; write $\mathbf{Y}_i$ to HBM
 \EndFor
 \end{algorithmic}
 \end{algorithm}
@@ -4454,7 +4454,7 @@ The online softmax\index{Online Softmax!incremental computation} algorithm enabl
 
 #### Memory and IO complexity analysis {#sec-model-training-memory-io-complexity-analysis-5da5}
 
-FlashAttention improves both activation memory and memory IO\index{FlashAttention!IO complexity reduction}, which are the limiting costs in bandwidth-bound attention. Standard attention requires $\mathcal{O}(S^2)$ memory to store score matrices $\mathbf{Z}_{\text{attn}}$ and attention-probability matrices $A_{\text{attn}}$ across all sequence positions. FlashAttention reduces the stored activation footprint to $\mathcal{O}(S)$ by keeping only input and output tensors $(Q, K, V, Y)$ plus a small SRAM buffer for the current tile.
+FlashAttention improves both activation memory and memory IO\index{FlashAttention!IO complexity reduction}, which are the limiting costs in bandwidth-bound attention. Standard attention requires $\mathcal{O}(S^2)$ memory to store score matrices $\mathbf{Z}_{\text{attn}}$ and attention-probability matrices $\mathbf{A}_{\text{attn}}$ across all sequence positions. FlashAttention reduces the stored activation footprint to $\mathcal{O}(S)$ by keeping only input and output tensors $(\mathbf{Q}, \mathbf{K}, \mathbf{V}, \mathbf{Y})$ plus a small SRAM buffer for the current tile.
 
 ```{python}
 #| echo: false
@@ -4499,11 +4499,11 @@ class FlashAttentionCalc:
 
 For $S = 4096$, $d_{\text{head}} = 64$: Standard attention requires $4096^2 \times 4$ bytes = `{python} FlashAttentionCalc.fa_standard_mb_str` per head. FlashAttention requires only $(3 \times 4096{\times}64) \times 4$ bytes ≈ `{python} FlashAttentionCalc.fa_flash_mb_str` per head, a `{python} FlashAttentionCalc.fa_reduction_mult_str` reduction.
 
-The IO pattern changes for the same reason. Standard attention reads $Q$, $K$, and $V$ from HBM, writes score, probability, and output matrices during the forward pass, then rereads those stored matrices during the backward pass before writing $dQ$, $dK$, and $dV$. The resulting HBM traffic includes the same $\mathcal{O}(S^2)$ term that made the activation footprint large. FlashAttention forms score and probability blocks in SRAM and never writes the full $S \times S$ tensors to HBM. In the backward pass, it recomputes the needed blocks rather than reading stored full matrices. The exact HBM IO complexity depends on tile size and available SRAM because key and value blocks are streamed repeatedly across query blocks, so the bound is not simply $\mathcal{O}(S \cdot d)$.
+The IO pattern changes for the same reason. Standard attention reads $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from HBM, writes score, probability, and output matrices during the forward pass, then rereads those stored matrices during the backward pass before writing $d\mathbf{Q}$, $d\mathbf{K}$, and $d\mathbf{V}$. The resulting HBM traffic includes the same $\mathcal{O}(S^2)$ term that made the activation footprint large. FlashAttention forms score and probability blocks in SRAM and never writes the full $S \times S$ tensors to HBM. In the backward pass, it recomputes the needed blocks rather than reading stored full matrices. The exact HBM IO complexity depends on tile size and available SRAM because key and value blocks are streamed repeatedly across query blocks, so the bound is not simply $\mathcal{O}(S \cdot d)$.
 
 For large sequence lengths, FlashAttention reduces HBM traffic by avoiding writes and rereads of the $S \times S$ score and probability matrices. With $S = 4096$ and $d_{\text{head}} = 64$, the activation memory footprint falls from hundreds of MB per head for stored attention matrices to a few MB for tiled inputs and outputs, while the precise bandwidth reduction depends on hardware and kernel tiling.
 
-Both approaches require the same $\mathcal{O}(S^2 d)$ asymptotic FLOPs for attention computation. FlashAttention's backward pass recomputes attention activations from the saved $Q, K, V$ rather than storing the full score and probability matrices, trading a small amount of recomputation for dramatically reduced HBM traffic. By converting the workload from bandwidth-bound to compute-bound, FlashAttention achieves net speedups since modern GPUs have abundant compute capacity but limited memory bandwidth.
+Both approaches require the same $\mathcal{O}(S^2 d)$ asymptotic FLOPs for attention computation. FlashAttention's backward pass recomputes attention activations from the saved $\mathbf{Q}, \mathbf{K}, \mathbf{V}$ rather than storing the full score and probability matrices, trading a small amount of recomputation for dramatically reduced HBM traffic. By converting the workload from bandwidth-bound to compute-bound, FlashAttention achieves net speedups since modern GPUs have abundant compute capacity but limited memory bandwidth.
 
 #### Implementation and hardware utilization {#sec-model-training-implementation-hardware-utilization-20a8}
 
@@ -6269,7 +6269,7 @@ Once training crosses the node boundary, the strategy must match communication f
 
 [^fn-gpipe-training]: **GPipe (2019)**: GPipe implements the described microbatching strategy, staggering execution to fill the idle "bubbles" in naive model parallelism and thus boost utilization [@huang2019gpipe]. The key trade-off it manages is increased memory for storing the activations of multiple in-flight microbatches. It preserves large-batch training dynamics by accumulating gradients before the weight update, achieving 80--93 percent hardware efficiency when scaling across 2--4 accelerators. \index{GPipe!pipeline parallelism}
 
-Tensor parallelism\index{Tensor Parallelism!operation splitting}\index{Tensor Parallelism!intra-layer splitting} takes a finer-grained approach: rather than assigning whole layers to devices, it splits individual operations across devices. Consider a transformer's feed-forward layer with a large matrix multiplication $Y = XW$. Tensor parallelism splits the weight matrix $W$ column-wise across GPUs, so each accelerator computes a portion of the output. The results are then gathered to form the complete output. This strategy is particularly effective for the massive attention and feed-forward layers in large transformers, where a single operation may involve matrices too large for one GPU's memory. Megatron-LM demonstrated that tensor parallelism enables training models with billions of parameters by distributing individual attention heads and feed-forward blocks across devices [@shoeybi2019megatron].
+Tensor parallelism\index{Tensor Parallelism!operation splitting}\index{Tensor Parallelism!intra-layer splitting} takes a finer-grained approach: rather than assigning whole layers to devices, it splits individual operations across devices. Consider a transformer's feed-forward layer with a large matrix multiplication $\mathbf{Y} = \mathbf{X}\mathbf{W}$. Tensor parallelism splits the weight matrix $\mathbf{W}$ column-wise across GPUs, so each accelerator computes a portion of the output. The results are then gathered to form the complete output. This strategy is particularly effective for the massive attention and feed-forward layers in large transformers, where a single operation may involve matrices too large for one GPU's memory. Megatron-LM demonstrated that tensor parallelism enables training models with billions of parameters by distributing individual attention heads and feed-forward blocks across devices [@shoeybi2019megatron].
 
 Hybrid strategies combine these approaches because each has different scaling characteristics. @Tbl-hybrid-parallelism-placement shows the usual hierarchy: use the fastest links for the most frequent communication and reserve slower network tiers for less frequent synchronization.
 
