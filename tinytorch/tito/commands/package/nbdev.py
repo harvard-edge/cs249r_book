@@ -50,7 +50,7 @@ class NbdevCommand(BaseCommand):
 
         elif args.build_docs:
             console.print("📚 Building documentation from notebooks...")
-            result = subprocess.run(["nbdev_docs"], capture_output=True, text=True)
+            result = subprocess.run(["nbdev_docs"], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if result.returncode == 0:
                 console.print(Panel("[green]✅ Documentation built successfully![/green]",
                                   title="Docs Success", border_style="green"))
@@ -61,7 +61,7 @@ class NbdevCommand(BaseCommand):
 
         elif args.test:
             console.print("🧪 Running notebook tests...")
-            result = subprocess.run(["nbdev_test"], capture_output=True, text=True)
+            result = subprocess.run(["nbdev_test"], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if result.returncode == 0:
                 console.print(Panel("[green]✅ Notebook tests passed![/green]",
                                   title="Test Success", border_style="green"))
@@ -72,7 +72,7 @@ class NbdevCommand(BaseCommand):
 
         elif args.clean:
             console.print("🧹 Cleaning notebook outputs...")
-            result = subprocess.run(["nbdev_clean"], capture_output=True, text=True)
+            result = subprocess.run(["nbdev_clean"], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if result.returncode == 0:
                 console.print(Panel("[green]✅ Notebook outputs cleaned![/green]",
                                   title="Clean Success", border_style="green"))

@@ -262,7 +262,7 @@ def _get_callback_host() -> str:
             result = subprocess.run(
                 ['hostname', '-I'],
                 capture_output=True,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
                 timeout=2
             )
             if result.returncode == 0:

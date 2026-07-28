@@ -156,7 +156,7 @@ class TinyTorchStatusAnalyzer:
 
         try:
             # Check if tito is available
-            result = subprocess.run(['tito', '--version'], capture_output=True, text=True, timeout=10)
+            result = subprocess.run(['tito', '--version'], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10)
             if result.returncode == 0:
                 tito_status['tito_available'] = True
             else:
@@ -169,7 +169,7 @@ class TinyTorchStatusAnalyzer:
             test_commands = ['system info', 'module status']
             for cmd in test_commands:
                 try:
-                    result = subprocess.run(f'tito {cmd}'.split(), capture_output=True, text=True, timeout=30)
+                    result = subprocess.run(f'tito {cmd}'.split(), capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
                     tito_status['commands_working'][cmd] = result.returncode == 0
                     if result.returncode != 0:
                         tito_status['issues'].append(f"Tito '{cmd}' command failed")
@@ -279,7 +279,7 @@ except Exception as e:
 
                 # Run the test
                 result = subprocess.run([sys.executable, temp_file_path],
-                                     capture_output=True, text=True, timeout=30)
+                                     capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=30)
 
                 status.imports_successfully = "SUCCESS" in result.stdout
                 status.runs_without_errors = result.returncode == 0 and "SUCCESS" in result.stdout
