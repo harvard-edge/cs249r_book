@@ -825,6 +825,60 @@ def section_calibration_observation(w: Workload) -> str:
     return f"## Local Calibration Observation\n\n{body}"
 
 
+def section_results_pointer(w: Workload, records: list[dict[str, Any]]) -> str:
+    """Show one illustrative measurement, then send the reader to their own run.
+
+    The site is not a scoreboard. It carries just enough of a number to make
+    the metric and the time cost concrete, explicitly labelled as one machine's
+    observation. Evidence classes, repeatability statistics, pass/fail verdicts,
+    and promotion eligibility belong to the run artifact, not to a page every
+    reader sees regardless of their hardware.
+    """
+    lines = ["## Results", ""]
+
+    example = next(
+        (r for r in records if (r.get("quality") or {}).get("aggregate")), None
+    )
+    if example is not None:
+        quality = example["quality"]
+        metric = esc(str(quality.get("metric") or w.quality_metric))
+        observed = _result_number((quality.get("aggregate") or {}).get("mean"))
+        measurement = example.get("measurement") or {}
+        cost_metric = esc(str(measurement.get("primary_metric") or ""))
+        cost = _result_number((measurement.get("aggregate") or {}).get("mean"))
+        chips = ", ".join((example.get("execution") or {}).get("hardware_chips") or [])
+
+        lines += [
+            "To make the metric concrete, one run of this benchmark on "
+            f"{esc(chips) or 'the project reference machine'} observed "
+            f"`{metric}` of {observed}, taking {cost} `{cost_metric}`.",
+            "",
+            "That is an illustration, not a target and not a score. It comes "
+            "from a single machine and your hardware will produce different "
+            "timing. The number that matters is the one your own run reports.",
+            "",
+        ]
+
+    lines += [
+        "Run the benchmark and read your own report:",
+        "",
+        "```bash",
+        f"{CHECKOUT_COMMAND} run --workload {w.id} --profile max",
+        "```",
+        "",
+        "Every run writes an HTML dashboard for reading, JSON for machine use, "
+        "CSV for spreadsheets, and a `.provd.json` provenance manifest. Those "
+        "artifacts carry the quality decision, timing distribution, hardware "
+        "and software fingerprint, asset digests, and model lineage for the run "
+        "you performed.",
+        "",
+        "See [Reading Results](../../guide/results.qmd) for how to interpret "
+        "them.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
 def section_regime(w: Workload) -> str:
     regime = w.raw.get("regime")
     if not isinstance(regime, dict) or not regime:
@@ -897,10 +951,11 @@ def render_workload_body(
         section_how_to_run(w),
         section_quality_target(w),
         section_performance_contract(w),
-        section_reference_results(w, reference_results.get(w.id, [])),
-        section_verified_baseline(w),
-        section_calibration_observation(w),
-        section_regime(w),
+        # Measurements are deliberately absent from the website. The site
+        # describes what a workload is and how to run it; every number belongs
+        # to the report a run produces on the reader's own machine. See
+        # section_results_pointer.
+        section_results_pointer(w, reference_results.get(w.id, [])),
         section_model_source(w),
         section_runner(w, source_paths),
     ]
