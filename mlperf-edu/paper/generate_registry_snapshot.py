@@ -667,6 +667,34 @@ def executed_contract_macros(
     ]
 
 
+DETERMINISM = PROJECT / "paper" / "evidence" / "determinism" / "determinism_study.json"
+
+
+def determinism_macros() -> list[str]:
+    """Expose the seed and backend determinism study to the paper.
+
+    The registry accepts a quality verdict from a single run. That is only
+    defensible if the quality metric is actually deterministic, so the claim
+    needs measurement rather than assertion.
+    """
+    if not DETERMINISM.is_file():
+        return []
+    study = json.loads(DETERMINISM.read_text(encoding="utf-8"))
+    cases = study["cases"]
+    require(bool(cases), "determinism study has no cases")
+    worst_seed = max(abs(finite_number(c["seed_spread"], label="seed spread")) for c in cases)
+    worst_backend = max(
+        abs(finite_number(c["backend_delta"], label="backend delta")) for c in cases
+    )
+    return [
+        rf"\newcommand{{\DeterminismWorkloads}}{{{len(cases)}}}",
+        rf"\newcommand{{\DeterminismSeeds}}{{{len(study['seeds'])}}}",
+        rf"\newcommand{{\DeterminismExecutions}}{{{study['executions']}}}",
+        rf"\newcommand{{\DeterminismMaxSeedSpread}}{{{worst_seed:.1e}}}",
+        rf"\newcommand{{\DeterminismMaxBackendDelta}}{{{worst_backend:.1e}}}",
+    ]
+
+
 def render_tex(
     workloads: dict[str, Workload],
     index: dict[str, Any],
@@ -710,6 +738,7 @@ def render_tex(
         *host_macros(),
         *measured_macros(workloads),
         *executed_contract_macros(workloads, gate_status),
+        *determinism_macros(),
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
         rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",

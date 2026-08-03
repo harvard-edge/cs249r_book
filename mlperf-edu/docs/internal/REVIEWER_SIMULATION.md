@@ -93,7 +93,7 @@ This is the single highest-value measurement still missing.
 
 ## R4. Quality is N=1 while timing is N=5
 
-**Severity: medium.**
+**Severity: medium. Largely answered by measurement; see below.**
 
 The contract sets `acceptance_runs: 1` for quality and `outer_reference_runs: 5`
 for timing. The suite therefore reports careful variance on the number that
@@ -110,14 +110,23 @@ of the quality metric rather than replacing the single-run gate. This is
 cheaper than it sounds for the fast workloads and would let the paper state how
 close to the boundary the marginal passes actually sit.
 
-**Partial evidence in hand.** Time-series forecasting was re-executed under the
-live contract and reproduced its recorded result exactly: test MSE
-0.29239310753925907, best validation MSE 0.3627879949991176, best epoch 22, 42
-epochs before early stopping. Wall clock moved from 14.3 to 13.2 minutes, which
-is timing noise. Same-seed determinism therefore holds for at least one
-training workload, which is a weaker claim than seed sensitivity but rules out
-run-to-run drift as an explanation for the marginal passes. The open question
-remains what a *different* seed does.
+**Answered, for inference.** A determinism study now covers 6 inference
+workloads under 5 seeds and both the MPS and CPU backends, 36 executions. The
+quality metric did not move at all: maximum seed spread 0.0, maximum backend
+delta 0.0, every value bit-identical. The thin margins are exact reproductions
+of the published numbers rather than lucky draws, because these workloads
+evaluate a pinned checkpoint over a fixed set and consume no randomness. The
+single-run acceptance rule is sound for them, and quality is also shown to be
+backend-independent, which timing is not.
+
+Time-series forecasting separately reproduced its recorded result exactly on
+re-execution under the live contract, so same-seed determinism holds for at
+least one training workload.
+
+**Still open:** whether a *different* seed moves a training workload. The four
+training workloads were not swept, and the paper does not claim they are
+seed-invariant. Recommendation and time-series are the cheap ones to test at
+roughly 32 and 14 minutes per seed.
 
 ## R5. The suite has no comparison baseline
 
