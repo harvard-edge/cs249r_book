@@ -670,6 +670,25 @@ def executed_contract_macros(
 DETERMINISM = PROJECT / "paper" / "evidence" / "determinism" / "determinism_study.json"
 
 
+def locally_runnable_macros(workloads: dict[str, Workload]) -> list[str]:
+    """Count workloads whose authoritative path runs on the target platform.
+
+    Reporting only the registry total invites the fair objection that the
+    portfolio is padded with workloads nobody can execute. Naming the gated
+    ones is cheaper than being asked about them.
+    """
+    gated = [
+        workload_id
+        for workload_id, workload in workloads.items()
+        if (workload.raw.get("canonical_max_contract") or {}).get("execution_status")
+        == "environment-gated-quality-conformance"
+    ]
+    return [
+        rf"\newcommand{{\LocallyRunnableWorkloads}}{{{len(workloads) - len(gated)}}}",
+        rf"\newcommand{{\EnvironmentGatedWorkloads}}{{{len(gated)}}}",
+    ]
+
+
 def determinism_macros() -> list[str]:
     """Expose the seed and backend determinism study to the paper.
 
@@ -739,6 +758,7 @@ def render_tex(
         *measured_macros(workloads),
         *executed_contract_macros(workloads, gate_status),
         *determinism_macros(),
+        *locally_runnable_macros(workloads),
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
         rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
