@@ -378,6 +378,16 @@ def main() -> int:
         f"(later phase; never gates a quality decision)"
     )
 
+    # The min/max/pro contract is only meaningful if every workload has all three.
+    from mlperf.registry import RESEARCH_WORKLOADS
+
+    pro_gap = sorted(set(w["workload"] for w in rows) - set(RESEARCH_WORKLOADS))
+    print(
+        f"{'profiles':<8} min={len(rows)}  max={len(rows)}  "
+        f"pro={len(rows) - len(pro_gap)}"
+        + (f"  MISSING pro: {', '.join(pro_gap)}" if pro_gap else "")
+    )
+
     if any(r["stale_gate"] for r in rows):
         stale = [r["workload"] for r in rows if r["stale_gate"]]
         print(f"\n!  retained record graded under a superseded gate: {', '.join(stale)}")
