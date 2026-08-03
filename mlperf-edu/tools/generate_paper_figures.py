@@ -64,7 +64,12 @@ def style() -> None:
 def save(fig, name: str) -> None:
     OUT.mkdir(parents=True, exist_ok=True)
     for suffix in ("pdf", "png"):
-        fig.savefig(OUT / f"{name}.{suffix}")
+        # Matplotlib stamps a creation timestamp into the file, so regenerating
+        # unchanged figures would show up as a diff and make the committed
+        # copies look stale on every run. Suppressing it keeps regeneration
+        # byte-identical, which is what lets the figures be checked in at all.
+        metadata = {"CreationDate": None} if suffix == "pdf" else {}
+        fig.savefig(OUT / f"{name}.{suffix}", metadata=metadata)
     plt.close(fig)
     print(f"wrote {OUT / f'{name}.pdf'}")
 

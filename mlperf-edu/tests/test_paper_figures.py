@@ -83,3 +83,31 @@ def test_every_included_figure_regenerates_from_committed_inputs(tmp_path, monke
         f"paper.tex includes {missing} but the generator could not produce them "
         "from committed inputs; the shipped PDFs are stale"
     )
+
+
+def test_regenerating_a_figure_is_byte_identical(tmp_path, monkeypatch):
+    """Committed figures are only maintainable if regeneration is a no-op.
+
+    Matplotlib stamps a creation timestamp into PDF output by default, which
+    would make every regeneration look like a change and leave a reader unable
+    to tell a stale figure from a fresh one.
+    """
+    module = load_generator()
+    module.style()
+    workloads = module.load_registry(ROOT / "registry")
+    reports = module.load_reports([COMMITTED_RUNS])
+    evidence = module.load_evidence()
+
+    digests = []
+    for run in ("first", "second"):
+        out = tmp_path / run
+        monkeypatch.setattr(module, "OUT", out)
+        module.fig_quality_vs_target(workloads, reports, evidence)
+        module.fig_runtime(workloads, reports, evidence)
+        digests.append(
+            {p.name: p.read_bytes() for p in sorted(out.glob("*.pdf"))}
+        )
+
+    assert digests[0].keys() == digests[1].keys()
+    differing = [name for name in digests[0] if digests[0][name] != digests[1][name]]
+    assert not differing, f"regeneration was not byte-identical for {differing}"
