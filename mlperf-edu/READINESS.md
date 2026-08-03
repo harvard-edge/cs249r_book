@@ -136,7 +136,7 @@ when the dashboard should open immediately. `--no-open-report` and
   verifies their manifests, and writes the suite report without opening it.
 - [x] Preserve pro subrun configuration and artifacts in the aggregate report.
 - [x] Generate a benchmark page for every workload from the registry.
-- [x] Pass desktop and mobile layout checks for all 38 website pages.
+- [x] Pass desktop and mobile layout checks for all 40 website pages.
 - [x] Produce and verify the complete current BFCL artifact.
 - [x] Produce and verify the complete current three-trial EDM artifact.
 - [x] Publish machine-readable DLRM and MiniGo environment handoffs.

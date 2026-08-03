@@ -162,7 +162,7 @@ authenticated producer identity remain release gates.
   comparison, and blocked comparison behavior were exercised.
 - The public CLI verified 18 final-run manifests after the earlier 41-manifest
   audit pass.
-- Playwright checked 38 website pages at two viewports, for 76 clean page runs.
+- Playwright checked 40 website pages at two viewports, for 80 clean page runs.
   The dashboard gate checked nine representative result pages at two
   viewports, for 18 clean runs, plus a two-viewport visual-state fixture.
 - Screenshots were stored outside the repository and manually reviewed for the
