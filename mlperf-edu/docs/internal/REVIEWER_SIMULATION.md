@@ -110,6 +110,15 @@ of the quality metric rather than replacing the single-run gate. This is
 cheaper than it sounds for the fast workloads and would let the paper state how
 close to the boundary the marginal passes actually sit.
 
+**Partial evidence in hand.** Time-series forecasting was re-executed under the
+live contract and reproduced its recorded result exactly: test MSE
+0.29239310753925907, best validation MSE 0.3627879949991176, best epoch 22, 42
+epochs before early stopping. Wall clock moved from 14.3 to 13.2 minutes, which
+is timing noise. Same-seed determinism therefore holds for at least one
+training workload, which is a weaker claim than seed sensitivity but rules out
+run-to-run drift as an explanation for the marginal passes. The open question
+remains what a *different* seed does.
+
 ## R5. The suite has no comparison baseline
 
 **Severity: medium.**
