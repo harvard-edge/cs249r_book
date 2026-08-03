@@ -438,6 +438,36 @@ def case_display(entry: dict[str, Any]) -> str:
     return f"{tex(WORKLOAD_PAPER_LABELS.get(workload, workload))} ({tex(suffix)})"
 
 
+def host_macros() -> list[str]:
+    """Emit reference-host facts from the committed hardware record.
+
+    The paper must not hand-type the machine it was measured on. Every host
+    fact comes from the same content-addressed artifact the runs recorded.
+    """
+    candidates = sorted((PROJECT / "conformance_results").glob("course-budgets-*.json"))
+    require(bool(candidates), "no committed course-budget record for the reference host")
+    record = json.loads(candidates[-1].read_text())
+    hardware = record.get("hardware") or {}
+    require(bool(hardware), f"{candidates[-1].name} carries no hardware fingerprint")
+
+    topology = hardware.get("cpu_topology") or {}
+    memory_gb = finite_number(hardware["memory_gb"], label="host memory")
+
+    def field(key: str) -> str:
+        value = hardware.get(key)
+        require(bool(value), f"reference host record lacks {key}")
+        return tex(str(value))
+
+    return [
+        rf"\newcommand{{\HostChip}}{{{field('chip')}}}",
+        rf"\newcommand{{\HostMachine}}{{{field('machine_model')}}}",
+        rf"\newcommand{{\HostMemoryGB}}{{{memory_gb:.0f}}}",
+        rf"\newcommand{{\HostCores}}{{{int(topology['physical_cores'])}}}",
+        rf"\newcommand{{\HostPython}}{{{field('python_version')}}}",
+        rf"\newcommand{{\HostTorch}}{{{field('pytorch_version')}}}",
+    ]
+
+
 def registry_gate(workloads: dict[str, Workload], workload_id: str) -> dict[str, Any]:
     """The authoritative quality gate, always read from the live registry."""
     workload = workloads[workload_id]
@@ -616,6 +646,7 @@ def render_tex(
         rf"\newcommand{{\ScoreBearingCases}}{{{roles['score-bearing']}}}",
         rf"\newcommand{{\ScoreBearingPassing}}{{{gate_status['passing']}}}",
         rf"\newcommand{{\ScoreBearingMissing}}{{{gate_status['missing']}}}",
+        *host_macros(),
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
         rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
