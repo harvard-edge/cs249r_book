@@ -116,19 +116,22 @@ def _load_leave_one_out(
     train_users = sorted_users[~is_test]
     train_items = sorted_items[~is_test]
 
-    seen: list[set[int]] = [set() for _ in range(n_users)]
-    for user, item in zip(sorted_users, sorted_items):
-        seen[user].add(int(item))
+    # The rows are already grouped by user, so each user's interactions are one
+    # contiguous slice. Reading membership from those slices avoids building
+    # 138k Python sets over 20M boxed ints, which dominated both the wall clock
+    # and the peak memory of split construction.
+    user_starts = np.searchsorted(sorted_users, np.arange(n_users), side="left")
+    user_ends = np.searchsorted(sorted_users, np.arange(n_users), side="right")
 
     rng = np.random.default_rng(seed)
     negatives = np.empty((n_users, negatives_per_user), dtype=np.int64)
     for user in range(n_users):
-        blocked = seen[user]
+        blocked = np.unique(sorted_items[user_starts[user] : user_ends[user]])
         # Rejection sampling cannot terminate for a user who has interacted
         # with all but a few items, and the loop below would spin forever with
         # no diagnostic. The candidate count is part of the metric, so the
         # honest response is to fail rather than quietly return fewer.
-        available = n_items - len(blocked)
+        available = n_items - blocked.size
         if available < negatives_per_user:
             raise ValueError(
                 f"user {user} has only {available} unseen items but the "
@@ -136,10 +139,14 @@ def _load_leave_one_out(
                 "The candidate count defines the metric and cannot be reduced "
                 "to fit the data."
             )
+        # Draws and acceptance order are unchanged from the per-element form:
+        # the same batches are drawn in the same sequence and survivors keep
+        # their positions, so the sampled negatives are identical.
         drawn: list[int] = []
         while len(drawn) < negatives_per_user:
             batch = rng.integers(0, n_items, size=negatives_per_user * 2)
-            drawn.extend(int(i) for i in batch if int(i) not in blocked)
+            keep = batch[~np.isin(batch, blocked, assume_unique=False)]
+            drawn.extend(keep.tolist())
         negatives[user] = drawn[:negatives_per_user]
 
     return {
@@ -200,7 +207,11 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
     eval_negatives = int(contract.get("negatives_per_user_eval", 100))
     lr = float(contract.get("learning_rate", 0.0005))
     batch_size = int(contract.get("batch_size", 2048))
-    epochs = int(os.environ.get("MLPERF_EDU_NCF_MAX_EPOCHS", 20))
+    # The epoch budget is part of the contract, not a runner default, so the
+    # registry stays the single source of truth for what "max" costs.
+    epochs = int(
+        os.environ.get("MLPERF_EDU_NCF_MAX_EPOCHS", contract.get("max_epochs", 7))
+    )
 
     asset = ensure_movielens_20m(download=True)
     ratings_csv = movielens_20m_paths()["ratings"]
