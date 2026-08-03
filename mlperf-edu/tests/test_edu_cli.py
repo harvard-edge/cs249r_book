@@ -590,7 +590,7 @@ def test_list_discovery_subjects():
         row["profile"]: row["workloads"]
         for row in json.loads(profiles_json.stdout)["profiles"]
     }
-    assert profile_counts == {"min": 4, "max": 14, "pro": 9}
+    assert profile_counts == {"min": 4, "max": 14, "pro": 14}
 
 
 def test_info_profile_shows_default_selection():
@@ -1031,12 +1031,12 @@ def test_show_workload():
 
 
 def test_show_environment_gated_workload_discloses_next_gate():
-    result = run_cli("show", "recommendation")
+    # Recommendation left this set when its contract moved from DLRM on Criteo
+    # Terabyte to MLPerf v0.5 NCF on MovieLens-20M, which trains on a laptop.
+    result = run_cli("show", "reinforcement-learning")
     assert result.returncode == 0, result.stdout + result.stderr
     assert "environment-gated-quality-conformance" in result.stdout
     assert "max_next_gate" in result.stdout
-    assert "256-GB-class environment" in result.stdout
-    assert "mlperf-inference-accuracy-dlrm" in result.stdout
 
 
 def test_info_dataset_shows_asset_dossier():
@@ -1175,13 +1175,6 @@ def test_fetch_new_quality_assets_dry_run_discloses_authoritative_sources():
 
 
 def test_fetch_manual_quality_assets_returns_actionable_nonzero_status():
-    recommendation = run_cli(
-        "fetch", "--workload", "recommendation", "--profile", "max"
-    )
-    assert recommendation.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in " ".join(recommendation.stdout.split())
-    assert "unshuffled day 23" in recommendation.stdout
-
     reinforcement = run_cli(
         "fetch", "--workload", "reinforcement-learning", "--profile", "max"
     )

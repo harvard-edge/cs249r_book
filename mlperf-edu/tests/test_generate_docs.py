@@ -212,9 +212,25 @@ def test_consolidated_language_page_runs_training_before_inference():
 
 
 def test_environment_gated_pages_lead_with_preflight_not_generic_max_run():
-    workloads = load_registry(ROOT / "registry")
+    """Only workloads that cannot execute locally get the preflight treatment.
 
-    for workload_id in ("recommendation", "reinforcement-learning"):
+    Recommendation left this set when its contract moved from DLRM on Criteo
+    Terabyte, which needed a 256 GB-class runtime, to MLPerf v0.5 NCF on
+    MovieLens-20M, which trains on a laptop. The gated set is derived from the
+    registry rather than hardcoded so a future promotion cannot silently leave a
+    page telling users to run a preflight for a workload that simply runs.
+    """
+    workloads = load_registry(ROOT / "registry")
+    gated = [
+        workload_id
+        for workload_id, workload in workloads.items()
+        if (workload.raw.get("canonical_max_contract") or {}).get("execution_status")
+        == "environment-gated-quality-conformance"
+    ]
+    assert gated, "expected at least one environment-gated workload"
+    assert "recommendation" not in gated
+
+    for workload_id in gated:
         section = generate_docs.section_how_to_run(workloads[workload_id])
         target = f"--workload {workload_id}"
 

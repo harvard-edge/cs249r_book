@@ -158,7 +158,6 @@ def test_functional_stage_workloads_separate_probe_from_quality_contract():
     expected_status = {
         "code-generation": "quality-audited-target-not-met",
         "function-calling": "quality-audited-target-not-met",
-        "recommendation": "environment-gated-quality-conformance",
         "image-generation": "quality-audited-target-not-met",
         "reinforcement-learning": "environment-gated-quality-conformance",
     }
@@ -192,12 +191,13 @@ def test_new_quality_contracts_pin_complete_evaluation_boundaries():
     assert len(functions["evaluator_revision"]) == 40
 
     recommendation = workloads["recommendation"].raw["canonical_max_contract"]
-    assert recommendation["split"] == "unshuffled-day-23-accuracy-set"
-    assert recommendation["config"]["max_ind_range"] == 40_000_000
-    assert recommendation["config"]["accuracy_mode"] is True
+    assert recommendation["split"] == "leave-one-out-999-negatives"
+    # The candidate count is part of the HR@10 definition, not a tuning knob.
+    assert recommendation["config"]["negatives_per_user_eval"] == 999
+    assert recommendation["config"]["predictive_factors"] == 64
     assert (
         workloads["recommendation"].raw["provenance"]["authority"]
-        == "MLCommons MLPerf Inference v1.0.1 DLRM"
+        == "MLCommons MLPerf Training v0.5 recommendation"
     )
 
     images = workloads["image-generation"].raw["canonical_max_contract"]
@@ -375,7 +375,7 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     vww = asset_dossier("mlperf-tiny-vww-eval")
     humaneval = asset_dossier("humaneval-plus")
     bfcl = asset_dossier("bfcl-v4-non-live-ast")
-    criteo = asset_dossier("criteo-terabyte")
+    movielens = asset_dossier("movielens-20m")
     minigo = asset_dossier("minigo-self-play")
 
     assert tiny["expected_download_bytes"] == 5_600_000
@@ -405,7 +405,8 @@ def test_public_asset_dossiers_include_size_and_hash_policy():
     assert humaneval["public_release_status"] == "public-ok-fetch-only"
     assert bfcl["version"].startswith("bfcl-")
     assert bfcl["public_release_status"] == "needs-release-decision"
-    assert criteo["public_release_status"] == "fetch-instructions-only"
+    assert movielens["public_release_status"] == "fetch-only"
+    assert movielens["expected_download_bytes"] == 198_702_078
     assert minigo["type"] == "generated-dataset"
 
 
@@ -506,7 +507,7 @@ def test_canonical_workloads_declare_exact_runners():
         "recommendation": (
             "recommendation",
             "mlperf.runners.functional_setup:run_recommendation_min",
-            "mlperf.runners.recommendation:run_recommendation_max",
+            "mlperf.runners.ncf:run_recommendation_max",
         ),
         "image-generation": (
             "vision",
