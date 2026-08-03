@@ -36,7 +36,7 @@ gates a quality decision.
 | `image-generation` | ok | **MISS*** | 1.8016 | ≤ 1.7900 | n/a | import result into evidence index |
 | `information-retrieval` | ok | **PASS** | 0.6072 | ≥ 0.6072 | verified (5) | none |
 | `keyword-spotting` | ok | **PASS** | 0.9020 | ≥ 0.9000 | verified (5) | none |
-| `recommendation` | ok | **MISS*** | 0.6223 | ≥ 0.6350 | n/a | import result into evidence index |
+| `recommendation` | ok | **MISS*** | 0.6232 | ≥ 0.6350 | n/a | import result into evidence index |
 | `reinforcement-learning` | ok | **BLOCKED** | — | — | n/a | local backend required |
 | `text-classification` | ok | **PASS** | 0.9106 | ≥ 0.9106 | verified (5) | none |
 | `time-series-forecasting` | ok | **MISS** | 0.2924 ⚠ | ≤ 0.2900 | not established (1) | target gap, investigated |
@@ -65,7 +65,7 @@ These are the runtimes actually recorded, not estimates.
 | `image-generation` | inference | `final_trial_generation_seconds` | 3.10 h | 3 | registry audit record |
 | `information-retrieval` | inference | `inference_and_evaluation_seconds` | 18.0 s | 5 | evidence index |
 | `keyword-spotting` | inference | `inference_seconds` | 8.0 s | 5 | evidence index |
-| `recommendation` | training | `train_and_eval_seconds` | 35.5 min | 1 | registry audit record |
+| `recommendation` | training | `train_and_eval_seconds` | 1.64 h | 1 | registry audit record |
 | `text-classification` | inference | `inference_seconds` | 4.4 s | 5 | evidence index |
 | `time-series-forecasting` | training | `train_and_eval_seconds` | 14.2 min | 1 | evidence index |
 | `visual-wake-words` | inference | `inference_seconds` | 0.7 s | 5 | evidence index |
@@ -77,9 +77,5 @@ One pass through every timed case in the evidence index is about 62.0 min of com
 
 ## What Is Missing
 
-- `recommendation` (DLRM) needs an out-of-core backend and the licensed
-  Criteo accuracy set before its contract can run locally.
-- `reinforcement-learning` (MiniGo) needs a native CPU or MPS backend.
-- Three audited misses are recorded in the registry but not imported into
-  the evidence index, so they carry digests and runtime without appearing
-  as cases.
+- `reinforcement-learning` cannot run its contract locally. Supply a reviewed immutable CUDA/TensorFlow 1.x runtime image and execute the resumable pinned MiniGo quality loop on a suitable NVIDIA system.
+- 4 audited misses are recorded in the registry but not imported into the evidence index, so they carry digests and runtime without appearing as cases.
