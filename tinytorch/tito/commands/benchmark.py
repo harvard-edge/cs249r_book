@@ -285,9 +285,14 @@ class BenchmarkCommand(BaseCommand):
             ))
             return 1
 
-        # Check if Module 20 competition code is available
+        # Check if Module 20 competition code is available. `tito module
+        # complete 20` exports the capstone notebook to tinytorch/olympics.py
+        # (see tito/commands/module/workflow.py's export path mapping), not
+        # tinytorch/competition/submit.py -- that module has never existed,
+        # so this check previously always failed and reported "Module 20 not
+        # complete" even for students who genuinely finished it.
         try:
-            from tinytorch.competition.submit import OlympicEvent, generate_submission
+            from tinytorch.olympics import generate_submission
         except ImportError:
             console.print(Panel(
                 "[yellow]⚠️  Module 20 (Capstone) not complete[/yellow]\n\n"
