@@ -209,7 +209,7 @@ not an execution failure. The workflow records and checks that distinction.
 - [x] Every applicable `pro` path passes and retains workload identity with one canonical measurement by default.
 - [x] Explicit mode and phase selection works and invalid combinations fail early.
 - [x] Fetch runs before measurement and verifies pinned assets.
-- [x] JSON, CSV, a default-opening HTML dashboard, and provenance files are emitted for every completed run.
+- [x] JSON, CSV, an HTML dashboard, and provenance files are emitted for every completed run.
 
 ## Platform Coverage
 

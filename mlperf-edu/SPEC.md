@@ -68,17 +68,19 @@ ledger with explicit reasons.
 | `information-retrieval` | language | Sentence Transformers | CrossEncoder NanoBEIR reranking | pair tokenization, encoder scoring, and ranking |
 | `graph-node-classification` | graph | Open Graph Benchmark | official GCN training on `ogbn-arxiv` | sparse gather, scatter, and irregular memory access |
 | `time-series-forecasting` | timeseries | PatchTST | official ETTm1 training and evaluation | long-context attention and patch-based sequence processing |
-| `code-generation` | language | Qwen and EvalPlus | complete pinned HumanEval+ generation and sandboxed evaluation; one local result pending | variable-length autoregressive decode and sandboxed evaluation |
-| `function-calling` | language | BFCL and Qwen | bounded grammar-constrained generation and AST-evaluator probe; full BFCL conformance pending | schema-heavy prefill and structured decode |
-| `recommendation` | recommendation | Meta DLRM | bounded dense-sparse functional probe; full Criteo conformance pending | embedding lookup and dense-sparse interaction |
-| `image-generation` | vision | NVIDIA EDM | bounded iterative-denoising probe; full 50,000-image FID conformance pending | repeated denoiser execution and scheduler overhead |
-| `reinforcement-learning` | reinforcement | MLPerf Training MiniGo | bounded policy-value self-play and training probe; full MiniGo conformance pending | search-coupled inference and dynamic training data |
+| `code-generation` | language | Qwen and EvalPlus | complete pinned HumanEval+ generation and sandboxed evaluation; executed, target not met | variable-length autoregressive decode and sandboxed evaluation |
+| `function-calling` | language | BFCL and Qwen | complete 1,150-case BFCL AST evaluation; executed, target not met | schema-heavy prefill and structured decode |
+| `recommendation` | recommendation | Meta DLRM | dense-sparse functional probe; authoritative Criteo contract not executed locally | embedding lookup and dense-sparse interaction |
+| `image-generation` | vision | NVIDIA EDM | complete three-trial 50,000-image FID protocol; executed, target not met | repeated denoiser execution and scheduler overhead |
+| `reinforcement-learning` | reinforcement | MLPerf Training MiniGo | policy-value self-play probe; authoritative MiniGo contract not executed locally | search-coupled inference and dynamic training data |
 
 The five new workloads MUST retain `experimental` status and MUST set
-`promotion_scope` to false until their quality evidence is accepted. The four
-remaining functional probes MUST state that the authoritative quality contract
-was not executed. Code generation MAY emit a canonical `max` quality result,
-but it MUST remain ineligible for promotion during this readiness stage.
+`promotion_scope` to false until their quality evidence is accepted. Code
+generation, function calling, and image generation MAY emit a canonical `max`
+quality result and MUST report the measured shortfall against the unchanged
+target; they MUST remain ineligible for promotion during this readiness stage.
+Recommendation and reinforcement learning MUST state that the authoritative
+quality contract was not executed locally.
 MiniGo remains the reinforcement-learning identity; a small control task MUST
 NOT be substituted under that label.
 
@@ -261,7 +263,7 @@ case fingerprints and disclosures.
 A v0.1 review candidate is conformant only when:
 
 1. The native registry and packaged flat mirrors agree.
-2. Exactly nine workload definitions pass schema and taxonomy validation.
+2. All fourteen workload definitions pass schema and taxonomy validation.
 3. All twelve draft evidence cases pass import, digest, source-lock, lineage,
    and evidence-class validation.
 4. Every public claim is bound to the committed draft index and distinguishes

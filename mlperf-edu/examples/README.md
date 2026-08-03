@@ -32,11 +32,11 @@ The separate `research/pro-collection` example uses the same plan mechanism for
 a research-facing study.
 
 Before choosing a `max` workload, read the
-[fourteen-workload readiness matrix](../READINESS.md#portfolio-status). It
+[fourteen-workload readiness matrix](../docs/internal/STATUS.md). It
 separates target-passing, target-gap, and blocked local workloads and
 states the next quality task for each. Instructors should publish course-machine
 `max` runtime, memory, download, and disk budgets because those costs are
-hardware dependent. The initial [course-image budget](../COURSE_BUDGETS.md)
+hardware dependent. The initial [course-image budget](../docs/internal/COURSE_BUDGETS.md)
 already covers every functional `min` path on CPU and the available MPS paths.
 
 The three legacy `lab*.py` files remain standalone teaching experiments. They

@@ -6,10 +6,10 @@ adapts the reproducibility, verification, disclosure, and comparability
 discipline of mature benchmark suites to classroom-scale PyTorch workloads.
 It is not an official MLCommons benchmark and is not endorsed by MLCommons.
 
-The maintained [work checklist](WORK_CHECKLIST.md) shows what is complete, what
+The maintained [work checklist](docs/internal/STATUS.md) shows what is complete, what
 still blocks full one-run coverage, and what is deliberately deferred to the
 stability or production phase.
-The [course-image budgets](COURSE_BUDGETS.md) provide measured one-run CPU and
+The [course-image budgets](docs/internal/COURSE_BUDGETS.md) provide measured one-run CPU and
 MPS functional planning ceilings without turning them into performance claims.
 [SECURITY_REVIEW.md](SECURITY_REVIEW.md) defines the controlled-preview
 boundary for generated code, upstream pickle files, and historical runtimes.
@@ -19,7 +19,7 @@ complete authoritative quality result. Eight meet their declared target, and
 four record an honest target miss. The remaining two have complete,
 fail-closed reference runners but do not yet run on the supported local
 machine. They are open first-milestone blockers under the
-[local execution plan](LOCAL_EXECUTION_PLAN.md). The promoted-evidence snapshot
+[local execution plan](docs/internal/STATUS.md). The promoted-evidence snapshot
 still covers nine workloads and
 twelve historical cases. MLPerf EDU contributes the thin PyTorch adapter,
 execution harness, measurement controls, provenance, and reports needed to
@@ -217,14 +217,14 @@ and builds the site and paper.
 ## Documentation and Review
 
 - [Specification](SPEC.md)
-- [Proposal](PROPOSAL.md)
+- [Proposal](docs/internal/DIRECTION.md)
 - [Public result rules](PUBLIC_RULES.md)
-- [Quality target review](QUALITY_TARGET_REVIEW.md)
-- [Independent audit](INDEPENDENT_AUDIT.md)
-- [Initial usability readiness](READINESS.md)
-- [Product readiness plan](PRODUCT_READINESS_PLAN.md)
-- [Dataset release review](DATASET_RELEASE_REVIEW.md)
-- [Release checklist](RELEASE_CHECKLIST.md)
+- [Quality target review](docs/internal/QUALITY_TARGET_REVIEW.md)
+- [Independent audit](docs/internal/INDEPENDENT_AUDIT.md)
+- [Initial usability readiness](docs/internal/STATUS.md)
+- [Product readiness plan](docs/internal/STATUS.md)
+- [Dataset release review](docs/internal/DATASET_RELEASE_REVIEW.md)
+- [Release checklist](docs/internal/RELEASE_CHECKLIST.md)
 - [Generated benchmark site](site/benchmarks/index.qmd)
 - [Companion paper](paper/paper.tex)
 

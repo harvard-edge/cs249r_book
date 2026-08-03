@@ -18,9 +18,15 @@ baseline index. A local run outside the closure can be useful for teaching or
 research, but it is not a promoted reference result.
 
 Code generation, function calling, recommendation, image generation, and
-reinforcement learning are functional-stage integrations. Their current
-bounded probes set `promotion_scope` to false, do not execute the authoritative
-quality contract, and cannot enter `reference_results/`.
+reinforcement learning set `promotion_scope` to false and cannot enter
+`reference_results/`. They divide into two states. Code generation, function
+calling, and image generation have executed their authoritative quality
+contract and missed the unchanged target; the registry records this as
+`quality-audited-target-not-met`, and the shortfall MUST be reported rather
+than reframed as an unexecuted probe. Recommendation and reinforcement learning
+have not executed their authoritative contract locally, because DLRM requires
+licensed Criteo data with an out-of-core backend and MiniGo requires a legacy
+runtime outside the declared envelope.
 
 ## Result Roles
 

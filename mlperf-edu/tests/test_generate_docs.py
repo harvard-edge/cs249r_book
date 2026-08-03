@@ -121,9 +121,8 @@ def test_selection_ledger_exactly_covers_registered_workloads():
     assert selected == set(workloads)
 
 
-def test_generated_workload_pages_disclose_indexed_reference_evidence(
-    generated_outputs,
-):
+def test_generated_workload_pages_send_readers_to_their_own_run(generated_outputs):
+    """The site explains and instructs. It is not a results scoreboard."""
     workload_pages = [
         content
         for path, content in generated_outputs.items()
@@ -131,27 +130,46 @@ def test_generated_workload_pages_disclose_indexed_reference_evidence(
     ]
 
     assert len(generate_docs.load_provisional_reference_results()) == 9
-    assert sum("## Draft Reference Results" in page for page in workload_pages) == 9
-    assert sum("## Draft Reference Results" not in page for page in workload_pages) == 5
+    assert len(workload_pages) == 14
+    for page in workload_pages:
+        assert "## Results" in page
+        assert "read your own report" in page
+
     combined = "\n".join(workload_pages)
-    assert "Five-run verified" in combined
-    assert "One-run provisional" in combined
-    assert "Two-run provisional" in combined
-    assert "None are MLCommons-verified results" in combined
-    assert "do not establish repeatability" in combined
-    assert "CV 5.19%; **diagnostic fail**" in combined
+    # Evidence taxonomy, repeatability statistics, and verdicts are properties
+    # of a run and belong to its artifact, not to a page every reader sees.
+    for banned in (
+        "## Draft Reference Results",
+        "## Measured Systems Regime",
+        "Five-run verified",
+        "One-run provisional",
+        "Two-run provisional",
+        "do not establish repeatability",
+        "CV 5.19%",
+    ):
+        assert banned not in combined, f"site must not publish {banned!r}"
 
 
-def test_generated_reference_results_use_current_registry_quality_contract(
+def test_illustrative_numbers_are_not_presented_as_targets_or_scores(
     generated_outputs,
 ):
+    """A single observation may calibrate the metric; it may not read as a score."""
     page = generated_outputs[
-        ROOT / "site" / "benchmarks" / "timeseries" / "time-series-forecasting.qmd"
+        ROOT / "site" / "benchmarks" / "tiny" / "anomaly-detection.qmd"
     ]
 
-    assert "target ≤ 0.2900; **fail**" in page
-    assert "recomputed with the current registry contract" in page
-    assert "target ≤ 0.2929; **pass**" not in page
+    assert "To make the metric concrete" in page
+    assert "not a target and not a score" in page
+    assert "your hardware will produce different" in page
+
+    # The superseded 0.292929 gate may appear only as the reviewer note
+    # recording why it was withdrawn. It must never reappear as a live target.
+    timeseries = generated_outputs[
+        ROOT / "site" / "benchmarks" / "timeseries" / "time-series-forecasting.qmd"
+    ]
+    assert "policy-derived gate was removed" in timeseries
+    assert "target ≤ 0.2929" not in timeseries
+    assert "0.2929; **pass**" not in timeseries
 
 
 def test_quality_conformance_pages_disclose_result_boundary(generated_outputs):
