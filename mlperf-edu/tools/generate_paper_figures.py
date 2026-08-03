@@ -229,6 +229,23 @@ def fig_training_curves(workloads, reports) -> None:
                 curves.append((wid, key, series, gate.get("target")))
                 break
 
+    # Curves recorded in the registry rather than in a run report. The
+    # recommendation study is the clearest example: it is what established that
+    # the workload peaks early and then degrades, which is why its contract
+    # caps the epoch budget. Omitting it would drop the most informative curve
+    # the suite has.
+    for wid, workload in sorted(workloads.items()):
+        if any(existing[0] == wid for existing in curves):
+            continue
+        contract = workload.raw.get("canonical_max_contract") or {}
+        recorded = contract.get("measured_evidence") or {}
+        for key, label in (("hit_rate_curve", "hit rate at 10"),):
+            series = recorded.get(key)
+            if isinstance(series, list) and len(series) > 1:
+                gate = contract.get("quality") or {}
+                curves.append((wid, label, series, gate.get("target")))
+                break
+
     if not curves:
         print("no multi-epoch curves available yet; skipping fig_training_curves")
         return
@@ -255,12 +272,14 @@ def fig_training_curves(workloads, reports) -> None:
             )
         ax.set_title(wid, fontsize=7.5)
         ax.set_xlabel("epoch")
-        ax.set_ylabel(key.replace("_", " "))
+        ax.set_ylabel(key.replace("_", " ") if "_" in key else key)
         for spine in ("top", "right"):
             ax.spines[spine].set_visible(False)
     for index in range(len(curves), rows_n * cols):
         axes[index // cols][index % cols].axis("off")
-    fig.suptitle("Convergence of the training workloads", fontsize=9, y=1.02)
+    title = ("Convergence of the training workloads" if len(curves) > 1
+             else f"Convergence of {curves[0][0]}")
+    fig.suptitle(title, fontsize=9, y=1.02)
     fig.tight_layout()
     save(fig, "fig_training_curves")
 
