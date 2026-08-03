@@ -124,6 +124,18 @@ def _load_leave_one_out(
     negatives = np.empty((n_users, negatives_per_user), dtype=np.int64)
     for user in range(n_users):
         blocked = seen[user]
+        # Rejection sampling cannot terminate for a user who has interacted
+        # with all but a few items, and the loop below would spin forever with
+        # no diagnostic. The candidate count is part of the metric, so the
+        # honest response is to fail rather than quietly return fewer.
+        available = n_items - len(blocked)
+        if available < negatives_per_user:
+            raise ValueError(
+                f"user {user} has only {available} unseen items but the "
+                f"contract requires {negatives_per_user} evaluation negatives. "
+                "The candidate count defines the metric and cannot be reduced "
+                "to fit the data."
+            )
         drawn: list[int] = []
         while len(drawn) < negatives_per_user:
             batch = rng.integers(0, n_items, size=negatives_per_user * 2)
