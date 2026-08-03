@@ -642,6 +642,31 @@ def measured_macros(workloads: dict[str, Workload]) -> list[str]:
     return lines
 
 
+def executed_contract_macros(
+    workloads: dict[str, Workload], gate_status: dict[str, int]
+) -> list[str]:
+    """Count every contract the suite actually executed, not just the admitted ones.
+
+    Score-bearing counts describe what was admitted to review. On their own they
+    read as though the workloads that ran and missed were never attempted, which
+    is the opposite of what the fail-closed rule is for. Reporting both the
+    executed total and the admitted subset shows the rule working.
+    """
+    recorded_misses = 0
+    for workload in workloads.values():
+        contract = workload.raw.get("canonical_max_contract") or {}
+        evidence = contract.get("measured_evidence") or {}
+        if evidence.get("score", evidence.get("best_score")) is not None:
+            recorded_misses += 1
+    executed = gate_status["passing"] + gate_status["missing"] + recorded_misses
+    require(executed > 0, "no executed contracts found")
+    return [
+        rf"\newcommand{{\ExecutedContracts}}{{{executed}}}",
+        rf"\newcommand{{\ExecutedContractsPassing}}{{{gate_status['passing']}}}",
+        rf"\newcommand{{\ExecutedContractsMissing}}{{{executed - gate_status['passing']}}}",
+    ]
+
+
 def render_tex(
     workloads: dict[str, Workload],
     index: dict[str, Any],
@@ -684,6 +709,7 @@ def render_tex(
         rf"\newcommand{{\ScoreBearingMissing}}{{{gate_status['missing']}}}",
         *host_macros(),
         *measured_macros(workloads),
+        *executed_contract_macros(workloads, gate_status),
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
         rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
