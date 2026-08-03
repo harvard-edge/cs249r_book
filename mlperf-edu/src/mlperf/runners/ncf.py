@@ -23,6 +23,7 @@ from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
+    TrainingProgress,
     configured_seed,
     select_torch_device,
     synchronize_device,
@@ -212,6 +213,7 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
     target = float(workload.quality_value or 0.635)
     tolerance = float(workload.quality_tolerance or 0.0)
 
+    progress = TrainingProgress(workload.id, epochs, unit="epoch")
     synchronize_device(device)
     started = time.perf_counter()
     for epoch in range(epochs):
@@ -250,10 +252,14 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
         if hit_rate > best_hr:
             best_hr = hit_rate
             best_state = {k: v.detach().cpu().clone() for k, v in model.state_dict().items()}
+        progress.update(
+            epoch + 1, loss=losses[-1], hr10=hit_rate, best=best_hr, target=target
+        )
         if best_hr >= target - tolerance:
             break
     synchronize_device(device)
     duration = time.perf_counter() - started
+    progress.close(f"best HR@10 {best_hr:.4f} against target {target:.4f}")
 
     target_met = best_hr + tolerance >= target
     output_dir.mkdir(parents=True, exist_ok=True)

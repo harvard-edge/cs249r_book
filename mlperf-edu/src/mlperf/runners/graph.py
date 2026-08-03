@@ -16,6 +16,7 @@ from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
+    TrainingProgress,
     configured_seed,
     select_torch_device,
     synchronize_device,
@@ -193,6 +194,7 @@ def run_graph_node_classification_max(
     best_validation = -1.0
     test_at_best_validation = 0.0
     best_state: dict[str, torch.Tensor] | None = None
+    progress = TrainingProgress(workload.id, epochs, unit="epoch")
     synchronize_device(device)
     start = time.perf_counter()
     for _epoch in range(epochs):
@@ -228,8 +230,15 @@ def run_graph_node_classification_max(
                 key: value.detach().clone() for key, value in model.state_dict().items()
             }
         epoch_times.append(time.perf_counter() - epoch_start)
+        progress.update(
+            _epoch + 1,
+            loss=losses[-1],
+            val_acc=accuracies["valid"],
+            best_val=best_validation,
+        )
     synchronize_device(device)
     duration = time.perf_counter() - start
+    progress.close(f"test accuracy at best validation {test_at_best_validation:.4f}")
     if not math.isfinite(duration) or duration <= 0:
         raise RuntimeError("ogbn-arxiv training duration must be finite and positive")
 
