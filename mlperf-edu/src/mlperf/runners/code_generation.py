@@ -4,6 +4,7 @@ import json
 import math
 import os
 import shutil
+import sys
 import subprocess
 import time
 from pathlib import Path
@@ -232,7 +233,17 @@ def _snapshot_model(workload: Workload) -> Path:
     return snapshot
 
 
-def _ensure_evalplus_image(source_root: Path) -> tuple[str, bool]:
+HOST_ENGINE_SENTINEL = "host-no-sandbox"
+
+
+def evalplus_source_root() -> Path:
+    from mlperf.assets import ensure_evalplus_evaluator
+
+    return ensure_evalplus_evaluator(download=True).root
+
+
+def docker_available() -> bool:
+    """True when a Docker engine is reachable."""
     try:
         subprocess.run(
             ["docker", "info", "--format", "{{.ServerVersion}}"],
@@ -240,12 +251,42 @@ def _ensure_evalplus_image(source_root: Path) -> tuple[str, bool]:
             capture_output=True,
             text=True,
         )
-    except (FileNotFoundError, subprocess.CalledProcessError) as exc:
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+    return True
+
+
+def evalplus_host_command(
+    *,
+    source_root: Path,
+    workspace: Path,
+    workers: int,
+) -> list[str]:
+    """Run the pinned EvalPlus source directly, without a container.
+
+    The evaluator commit still matches the image because it is the same
+    downloaded source tree. What is lost is the OS sandbox, not comparability.
+    """
+    return [
+        sys.executable,
+        "-m",
+        "evalplus.evaluate",
+        "--dataset",
+        "humaneval",
+        "--samples",
+        str((workspace / "samples.jsonl").resolve()),
+        "--parallel",
+        str(workers),
+    ]
+
+
+def _ensure_evalplus_image(source_root: Path) -> tuple[str, bool]:
+    if not docker_available():
         raise RuntimeError(
             "The authoritative code-generation quality run requires a running "
             "Docker engine so generated code is never executed on the host. Start "
             "Docker Desktop and rerun the command."
-        ) from exc
+        )
 
     inspection = subprocess.run(
         ["docker", "image", "inspect", EVALPLUS_IMAGE, "--format", "{{.Id}}"],
@@ -296,17 +337,53 @@ def _evaluate_in_sandbox(
     results_path = workspace / "samples_eval_results.json"
     results_path.unlink(missing_ok=True)
     workers = max(1, min(int(os.environ.get("MLPERF_EDU_EVALPLUS_WORKERS", "4")), 8))
-    command = evalplus_docker_command(
-        image=EVALPLUS_IMAGE,
-        workspace=workspace,
-        dataset_archive=dataset_archive,
-        workers=workers,
-    )
-    subprocess.run(command, check=True)
+
+    if image_id == HOST_ENGINE_SENTINEL:
+        source_root = evalplus_source_root()
+        command = evalplus_host_command(
+            source_root=source_root, workspace=workspace, workers=workers
+        )
+        env = dict(
+            os.environ,
+            PYTHONPATH=str(source_root),
+            HUMANEVAL_OVERRIDE_PATH=str(dataset_archive.resolve()),
+            PYTHONDONTWRITEBYTECODE="1",
+            PYTHONNOUSERSITE="1",
+        )
+        subprocess.run(command, check=True, cwd=workspace, env=env)
+    else:
+        command = evalplus_docker_command(
+            image=EVALPLUS_IMAGE,
+            workspace=workspace,
+            dataset_archive=dataset_archive,
+            workers=workers,
+        )
+        subprocess.run(command, check=True)
     if not results_path.is_file():
         raise FileNotFoundError("EvalPlus did not produce its expected result artifact")
     if sha256_file(container_samples) != sha256_file(samples_path):
         raise RuntimeError("the sandbox modified the generated sample input")
+
+    if image_id == HOST_ENGINE_SENTINEL:
+        # The evaluator commit still matches the container image because this is
+        # the same pinned source tree. The OS sandbox is what is missing, so the
+        # result is recorded as non-conformant and cannot become a baseline.
+        return results_path, {
+            "engine": "host",
+            "conformant": False,
+            "evidence_eligible": False,
+            "evalplus_commit": EVALPLUS_COMMIT,
+            "sandbox": "none",
+            "reason": (
+                "Docker was unavailable, so generated code ran directly on the "
+                "host without network, filesystem, capability, or resource "
+                "isolation. Use the Docker engine for any result that is "
+                "intended to be comparable or published."
+            ),
+            "python": sys.version.split()[0],
+            "workers": workers,
+        }
+
     return results_path, {
         "engine": "docker",
         "image": EVALPLUS_IMAGE,
@@ -441,7 +518,22 @@ def run_code_generation_max(workload: Workload, output_dir: Path) -> dict[str, A
     device = select_torch_device()
     dataset_asset = ensure_humaneval_plus(download=True)
     evaluator_asset = ensure_evalplus_evaluator(download=True)
-    image_id, image_built = _ensure_evalplus_image(evaluator_asset.root)
+    if docker_available():
+        image_id, image_built = _ensure_evalplus_image(evaluator_asset.root)
+    else:
+        # Fall back loudly. The run still uses the pinned evaluator source, but
+        # without the container it has no sandbox and is not evidence-eligible.
+        print(
+            "WARNING: Docker is unavailable. Running EvalPlus directly on the "
+            "host.\n"
+            "         Model-generated code will execute with no network, "
+            "filesystem,\n"
+            "         capability, or resource isolation.\n"
+            "         This result is marked non-conformant and cannot become a "
+            "baseline.",
+            file=sys.stderr,
+        )
+        image_id, image_built = HOST_ENGINE_SENTINEL, False
     dataset_path = humaneval_plus_paths()["dataset"]
     dataset_archive = humaneval_plus_paths()["archive"]
     tasks = load_humaneval_plus_tasks(dataset_path)
