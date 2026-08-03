@@ -66,7 +66,7 @@ def save(fig, name: str) -> None:
     for suffix in ("pdf", "png"):
         fig.savefig(OUT / f"{name}.{suffix}")
     plt.close(fig)
-    print(f"wrote paper/figures/{name}.pdf")
+    print(f"wrote {OUT / f'{name}.pdf'}")
 
 
 def load_reports(paths: list[Path]) -> dict[str, dict]:
