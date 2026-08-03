@@ -245,7 +245,8 @@ def fig_training_curves(workloads, reports) -> None:
             ax.spines[spine].set_visible(False)
     for index in range(len(curves), rows_n * cols):
         axes[index // cols][index % cols].axis("off")
-    fig.suptitle("Convergence of the training workloads", fontsize=9)
+    fig.suptitle("Convergence of the training workloads", fontsize=9, y=1.02)
+    fig.tight_layout()
     save(fig, "fig_training_curves")
 
 
