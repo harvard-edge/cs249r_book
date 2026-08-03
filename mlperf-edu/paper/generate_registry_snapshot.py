@@ -606,6 +606,42 @@ def snapshot_date(records: list[dict[str, Any]]) -> str:
     return f"{latest.strftime('%B')} {latest.day}, {latest.year}"
 
 
+def measured_macros(workloads: dict[str, Workload]) -> list[str]:
+    """Emit measured/published pairs for workloads that carry a recorded score.
+
+    Prose that hand-types "reported 1.80 rather than the published 1.79" is a
+    silent drift surface: the registry can move and the sentence still reads
+    fine. Both halves of every such comparison come from here instead, so a
+    changed gate or a re-measured result cannot leave the narrative behind.
+    """
+    lines: list[str] = []
+    for workload_id, workload in sorted(workloads.items()):
+        contract = workload.raw.get("canonical_max_contract") or {}
+        evidence = contract.get("measured_evidence") or {}
+        score = evidence.get("score", evidence.get("best_score"))
+        if score is None:
+            continue
+        gate = contract.get("quality") or {}
+        target = gate.get("target")
+        require(
+            target is not None,
+            f"{workload_id} records measured evidence but declares no gate target",
+        )
+        name = "".join(part.capitalize() for part in workload_id.split("-"))
+        metric_key = str(gate.get("metric_key") or gate.get("metric") or "")
+        as_percent = metric_key.endswith(("accuracy", "pass_at_1", "ndcg_at_10"))
+        decimals = len(str(target).partition(".")[2]) or 2
+
+        def render(value: float) -> str:
+            if as_percent:
+                return f"{100.0 * float(value):.2f}\\%"
+            return f"{float(value):.{decimals}f}"
+
+        lines.append(rf"\newcommand{{\{name}Measured}}{{{render(score)}}}")
+        lines.append(rf"\newcommand{{\{name}Published}}{{{render(target)}}}")
+    return lines
+
+
 def render_tex(
     workloads: dict[str, Workload],
     index: dict[str, Any],
@@ -647,6 +683,7 @@ def render_tex(
         rf"\newcommand{{\ScoreBearingPassing}}{{{gate_status['passing']}}}",
         rf"\newcommand{{\ScoreBearingMissing}}{{{gate_status['missing']}}}",
         *host_macros(),
+        *measured_macros(workloads),
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
         rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
