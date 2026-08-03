@@ -1914,6 +1914,66 @@ def ensure_ogbn_arxiv(
     )
 
 
+MOVIELENS_20M_URL = "https://files.grouplens.org/datasets/movielens/ml-20m.zip"
+MOVIELENS_20M_SHA256 = (
+    "96f243c338a8665f6bcc89c53edf6ee39162a846940de6b7c8c48aeada765ff3"
+)
+
+
+def movielens_20m_paths(root: Path | None = None) -> dict[str, Path]:
+    base = (root or asset_cache_root()) / "movielens-20m"
+    return {
+        "root": base,
+        "archive": base / "ml-20m.zip",
+        "ratings": base / "ml-20m" / "ratings.csv",
+    }
+
+
+def ensure_movielens_20m(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
+    """Fetch and verify the official MovieLens-20M archive.
+
+    The MLPerf Training v0.5 recommendation benchmark is defined on this exact
+    release, so the archive digest is pinned rather than the extracted files.
+    """
+    paths = movielens_20m_paths(root)
+    base = paths["root"]
+    archive = paths["archive"]
+    ratings = paths["ratings"]
+    base.mkdir(parents=True, exist_ok=True)
+
+    if not archive.is_file() or sha256_file(archive) != MOVIELENS_20M_SHA256:
+        if not download:
+            raise FileNotFoundError(
+                f"MovieLens-20M is missing at {archive}. "
+                "Run `mlperf fetch --workload recommendation --profile max`."
+            )
+        tmp = archive.with_suffix(".download")
+        _download(MOVIELENS_20M_URL, tmp)
+        if sha256_file(tmp) != MOVIELENS_20M_SHA256:
+            tmp.unlink(missing_ok=True)
+            raise ValueError("MovieLens-20M archive SHA-256 does not match the pinned value")
+        tmp.replace(archive)
+
+    if not ratings.is_file():
+        import zipfile
+
+        with zipfile.ZipFile(archive) as handle:
+            handle.extract("ml-20m/ratings.csv", path=base)
+    if not ratings.is_file():
+        raise FileNotFoundError("MovieLens-20M ratings.csv was not extracted")
+
+    return DatasetAsset(
+        name="movielens-20m",
+        root=base,
+        files=(archive,),
+        sha256=f"sha256:{MOVIELENS_20M_SHA256}",
+        n_bytes=archive.stat().st_size,
+        source=MOVIELENS_20M_URL,
+    )
+
+
 def ensure_ettm1(*, download: bool = True, root: Path | None = None) -> DatasetAsset:
     paths = ettm1_paths(root)
     base = paths["root"]
