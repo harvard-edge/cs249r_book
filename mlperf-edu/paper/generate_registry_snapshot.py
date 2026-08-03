@@ -705,13 +705,22 @@ def determinism_macros() -> list[str]:
     worst_backend = max(
         abs(finite_number(c["backend_delta"], label="backend delta")) for c in cases
     )
-    return [
+    training = study.get("training_cases") or []
+    flipping = [c for c in training if c.get("verdict_flips")]
+    macros = [
         rf"\newcommand{{\DeterminismWorkloads}}{{{len(cases)}}}",
         rf"\newcommand{{\DeterminismSeeds}}{{{len(study['seeds'])}}}",
         rf"\newcommand{{\DeterminismExecutions}}{{{study['executions']}}}",
         rf"\newcommand{{\DeterminismMaxSeedSpread}}{{{worst_seed:.1e}}}",
         rf"\newcommand{{\DeterminismMaxBackendDelta}}{{{worst_backend:.1e}}}",
     ]
+    if training:
+        macros += [
+            rf"\newcommand{{\TrainingSeedWorkloads}}{{{len(training)}}}",
+            rf"\newcommand{{\TrainingSeedFlipping}}{{{len(flipping)}}}",
+            rf"\newcommand{{\TrainingSeedCount}}{{{len(study.get('seeds_training') or [])}}}",
+        ]
+    return macros
 
 
 def render_tex(

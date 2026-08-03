@@ -123,10 +123,24 @@ Time-series forecasting separately reproduced its recorded result exactly on
 re-execution under the live contract, so same-seed determinism holds for at
 least one training workload.
 
-**Still open:** whether a *different* seed moves a training workload. The four
-training workloads were not swept, and the paper does not claim they are
-seed-invariant. Recommendation and time-series are the cheap ones to test at
-roughly 32 and 14 minutes per seed.
+**Answered for training too, and the answer is worse.** Sweeping 3 seeds across
+the 2 cheap training workloads, the seed spread exceeded the margin to the
+effective threshold in both, and the verdict flipped in both directions:
+
+| Workload | seed 42 | seed 1 | seed 7 | threshold | verdict |
+|:---|---:|---:|---:|---:|:---|
+| graph node classification | 0.72096 | 0.71148 | 0.71819 | >= 0.71450 | pass, **miss**, pass |
+| time-series forecasting | 0.29239 | 0.29225 | 0.28892 | <= 0.29000 | miss, miss, **pass** |
+
+A recorded pass becomes a miss and a recorded miss becomes a pass. Single-run
+acceptance is therefore unsound for training contracts, and the honest reading
+of a training row is one draw from a distribution about as wide as its distance
+to the gate. The paper now says this rather than implying training behaves like
+inference.
+
+**Still open:** the correct accepted-run count for training. v0.1 keeps
+`acceptance_runs: 1` uniformly, which this result shows is wrong for training.
+Raising it is a contract change and belongs to a version boundary, not a patch.
 
 ## R5. The suite has no comparison baseline
 
