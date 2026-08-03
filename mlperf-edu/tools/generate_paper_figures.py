@@ -39,6 +39,7 @@ import matplotlib.pyplot as plt  # noqa: E402
 from mlperf.registry import load_registry  # noqa: E402
 
 OUT = ROOT / "paper" / "figures"
+COMMITTED_RUNS = ROOT / "paper" / "evidence" / "runs"
 PASS_COLOR = "#2b7a3d"
 MISS_COLOR = "#b3402f"
 NEUTRAL = "#4a6fa5"
@@ -280,13 +281,22 @@ def main() -> int:
         "report_dirs",
         nargs="*",
         type=Path,
-        help="directories to scan for *_max_report.json",
+        help=(
+            "directories to scan for *_max_report.json; defaults to the "
+            "committed paper/evidence/runs so the figures reproduce from a "
+            "clean checkout"
+        ),
     )
     args = ap.parse_args()
 
+    # Every figure the paper ships must be regenerable by a reviewer who only
+    # has the repository. Defaulting to committed evidence is what makes that
+    # true; passing a scratch directory is the exception, not the norm.
+    report_dirs = args.report_dirs or [COMMITTED_RUNS]
+
     style()
     workloads = load_registry(ROOT / "registry")
-    reports = load_reports(args.report_dirs)
+    reports = load_reports(report_dirs)
     evidence = load_evidence()
     print(f"registry {len(workloads)} | run reports {len(reports)} | evidence {len(evidence)}")
 

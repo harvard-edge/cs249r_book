@@ -93,6 +93,10 @@ def _load_leave_one_out(
     item_array = np.asarray(items, dtype=np.int64)
     stamp_array = np.asarray(stamps, dtype=np.int64)
 
+    # 20M boxed Python ints per list is gigabytes the arrays now hold compactly.
+    # Releasing them here keeps the peak inside a laptop's memory budget.
+    del users, items, stamps
+
     # Reindex to dense ids so embedding tables stay tight.
     unique_users, user_idx = np.unique(user_array, return_inverse=True)
     unique_items, item_idx = np.unique(item_array, return_inverse=True)
@@ -132,7 +136,10 @@ def _load_leave_one_out(
         "train_items": train_items,
         "test_items": test_items,
         "eval_negatives": negatives,
-        "seen": seen,
+        # `seen` is deliberately not returned. Nothing downstream reads it, and
+        # holding several gigabytes of per-user Python sets alive for the whole
+        # training run is the difference between a laptop that trains and a
+        # laptop that swaps.
         "n_interactions": int(sorted_users.size),
     }
 
