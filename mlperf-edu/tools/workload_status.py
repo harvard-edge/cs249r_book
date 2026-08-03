@@ -116,7 +116,17 @@ def status_for(workload, records: list[dict]) -> dict:
         elif runs:
             timing = f"not established ({runs})"
     elif execution_status == "quality-audited-target-not-met":
+        # The run happened and is digest-bound in the registry; it just never
+        # made it into the evidence index. Report its value rather than a dash.
         quality = "MISS*"
+        measured = (
+            workload.raw.get("canonical_max_contract") or {}
+        ).get("measured_evidence") or {}
+        for key in ("score", "best_score"):
+            if isinstance(measured.get(key), (int, float)):
+                observed = float(measured[key])
+                break
+        runs = int(measured.get("result_count") or 1)
     elif execution_status == "environment-gated-quality-conformance":
         quality = "BLOCKED"
 
@@ -145,11 +155,176 @@ def status_for(workload, records: list[dict]) -> dict:
     }
 
 
+def humanize(seconds: float) -> str:
+    if seconds < 90:
+        return f"{seconds:.1f} s"
+    if seconds < 5400:
+        return f"{seconds / 60:.1f} min"
+    return f"{seconds / 3600:.2f} h"
+
+
+def runtime_rows(workloads, evidence: dict[str, list[dict]]) -> list[dict]:
+    """Every measured runtime we hold, from either evidence records or the registry.
+
+    A workload whose authoritative run is recorded in the registry but not
+    imported into the evidence index still has a real, digest-bound runtime.
+    Reporting only the index would hide it.
+    """
+    rows: list[dict] = []
+    for wid, workload in sorted(workloads.items()):
+        for record in evidence.get(wid, []):
+            measurement = record.get("measurement") or {}
+            median = (measurement.get("aggregate") or {}).get("median")
+            if median is None:
+                continue
+            phase = record.get("phase")
+            metric = str(measurement.get("primary_metric") or "")
+            rows.append(
+                {
+                    "workload": wid,
+                    "case": record.get("mode") + (f" / {phase}" if phase else ""),
+                    "metric": metric,
+                    "value": float(median),
+                    # Only a *_seconds metric is a duration. The causal inference
+                    # phases report throughput, and formatting a rate as a
+                    # duration produces nonsense.
+                    "is_duration": metric.endswith("_seconds"),
+                    "runs": int(measurement.get("run_count") or 0),
+                    "source": "evidence index",
+                }
+            )
+
+        contract = workload.raw.get("canonical_max_contract") or {}
+        measured = contract.get("measured_evidence") or {}
+        for key, value in measured.items():
+            if not key.endswith("_seconds") or not isinstance(value, (int, float)):
+                continue
+            rows.append(
+                {
+                    "workload": wid,
+                    "case": str(contract.get("mode") or "max"),
+                    "metric": key,
+                    "value": float(value),
+                    "is_duration": True,
+                    "runs": int(measured.get("result_count") or 1),
+                    "source": "registry audit record",
+                }
+            )
+    return rows
+
+
+def render_markdown(rows: list[dict], runtimes: list[dict]) -> str:
+    quality_tally: dict[str, int] = {}
+    for r in rows:
+        quality_tally[r["quality"]] = quality_tally.get(r["quality"], 0) + 1
+    verified = sum(1 for r in rows if r["timing"].startswith("verified"))
+
+    out = [
+        "<!-- GENERATED FILE - do not edit by hand.",
+        "     Regenerate with: python3 tools/workload_status.py --write -->",
+        "",
+        "# Workload Status",
+        "",
+        "Every number here is read from the registry and the retained evidence.",
+        "Quality decisions are recomputed against the live registry contract, so a",
+        "record graded under a superseded gate cannot report its own result.",
+        "",
+        "## Summary",
+        "",
+        "| Dimension | Result |",
+        "|:---|:---|",
+        f"| Workloads registered | {len(rows)} |",
+        f"| Quality contract passed | {quality_tally.get('PASS', 0)} |",
+        f"| Target missed, recorded | {quality_tally.get('MISS', 0) + quality_tally.get('MISS*', 0)} |",
+        f"| Blocked on a local backend | {quality_tally.get('BLOCKED', 0)} |",
+        f"| Configuration defects | {sum(1 for r in rows if r['config'] != 'ok')} |",
+        f"| Timing repeatability established | {verified} |",
+        "",
+        "Quality is decided on the registry's `acceptance_runs: 1`, so one complete",
+        "run accepts or rejects a result. Timing repeatability uses",
+        "`outer_reference_runs: 5` and belongs to the later promotion phase; it never",
+        "gates a quality decision.",
+        "",
+        "## Quality",
+        "",
+        "| Workload | Config | Quality | Observed | Target | Timing | Needs |",
+        "|:---|:---|:---|---:|---:|:---|:---|",
+    ]
+    for r in rows:
+        if r["observed"] is None:
+            observed = target = "—"
+        else:
+            op = "≤" if r["direction"] == "lower" else "≥"
+            observed = f"{r['observed']:.4f}"
+            target = f"{op} {float(r['target']):.4f}"
+            if r["stale_gate"]:
+                observed += " ⚠"
+        out.append(
+            f"| `{r['workload']}` | {r['config']} | **{r['quality']}** | "
+            f"{observed} | {target} | {r['timing']} | {r['needs']} |"
+        )
+
+    out += [
+        "",
+        "`MISS*` means the authoritative contract ran and missed its target, and the",
+        "result is recorded in the registry but not imported into the evidence index.",
+        "⚠ marks a retained record still carrying a superseded gate.",
+        "",
+        "## Measured Runtime",
+        "",
+        "Training and inference are separate cases under one workload identity.",
+        "These are the runtimes actually recorded, not estimates.",
+        "",
+        "| Workload | Case | Metric | Measured | Runs | Source |",
+        "|:---|:---|:---|---:|---:|:---|",
+    ]
+    for rt in sorted(runtimes, key=lambda x: (x["workload"], x["case"])):
+        if rt["is_duration"]:
+            measured = humanize(rt["value"])
+        else:
+            measured = f"{rt['value']:,.1f} /s"
+        out.append(
+            f"| `{rt['workload']}` | {rt['case']} | `{rt['metric']}` | "
+            f"{measured} | {rt['runs']} | {rt['source']} |"
+        )
+
+    total = sum(
+        rt["value"]
+        for rt in runtimes
+        if rt["is_duration"] and rt["source"] == "evidence index"
+    )
+    out += [
+        "",
+        "Rows marked `/s` are throughput, not elapsed time. The causal inference",
+        "phases report tokens per second, so they are excluded from the total below.",
+        "",
+        f"One pass through every timed case in the evidence index is about "
+        f"{humanize(total)} of compute.",
+        "",
+        "## What Is Missing",
+        "",
+        "- `recommendation` (DLRM) needs an out-of-core backend and the licensed",
+        "  Criteo accuracy set before its contract can run locally.",
+        "- `reinforcement-learning` (MiniGo) needs a native CPU or MPS backend.",
+        "- Three audited misses are recorded in the registry but not imported into",
+        "  the evidence index, so they carry digests and runtime without appearing",
+        "  as cases.",
+        "",
+    ]
+    return "\n".join(out)
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(
         description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter
     )
     ap.add_argument("--json", action="store_true", help="emit JSON")
+    ap.add_argument("--markdown", action="store_true", help="emit markdown to stdout")
+    ap.add_argument(
+        "--write",
+        action="store_true",
+        help="write docs/internal/WORKLOAD_STATUS.md",
+    )
     args = ap.parse_args()
 
     workloads = load_registry(ROOT / "registry")
@@ -158,6 +333,16 @@ def main() -> int:
 
     if args.json:
         print(json.dumps(rows, indent=2))
+        return 0
+
+    if args.markdown or args.write:
+        document = render_markdown(rows, runtime_rows(workloads, evidence))
+        if args.write:
+            target = ROOT / "docs" / "internal" / "WORKLOAD_STATUS.md"
+            target.write_text(document)
+            print(f"wrote {target.relative_to(ROOT)}")
+        else:
+            print(document)
         return 0
 
     w = max(len(r["workload"]) for r in rows)

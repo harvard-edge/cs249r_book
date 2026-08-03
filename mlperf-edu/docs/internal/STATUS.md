@@ -12,7 +12,8 @@ computes them:
 
 | Question | Where to get it |
 |:---|:---|
-| Is every workload configured to run? | `python3 tools/audit_workload_readiness.py` |
+| **Where does every workload stand?** | **[WORKLOAD_STATUS.md](WORKLOAD_STATUS.md)** — generated; quality, runtime, and what each needs |
+| Is every workload configured to run? | `python3 tools/workload_status.py` |
 | Which cases have evidence, and of what class? | `provisional_results/index.json` |
 | What is each workload's contract and gate? | `registry/suites/**` |
 | What did a run actually measure? | the report that run wrote |

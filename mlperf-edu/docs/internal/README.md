@@ -25,7 +25,8 @@ on your machine.
 | Document | Answers |
 |:---|:---|
 | [DIRECTION](DIRECTION.md) | Why this exists, what it refuses to do, how a workload is admitted |
-| [STATUS](STATUS.md) | Where each workload stands and what open work remains |
+| [STATUS](STATUS.md) | Decisions and open work |
+| [WORKLOAD_STATUS](WORKLOAD_STATUS.md) | Generated: per-workload quality, runtime, and gaps |
 | [SHIP_PLAN](SHIP_PLAN.md) | The plan of record for making it downloadable |
 
 `DIRECTION` replaced three documents that shared a verbatim mission paragraph
