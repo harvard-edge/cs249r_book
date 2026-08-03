@@ -16,10 +16,23 @@ import sys
 from pathlib import Path
 from typing import Dict, Type, Optional, List
 
-# Fix encoding issues on Windows (emoji/unicode output)
+# Fix encoding issues on Windows (emoji/unicode output).
 # See: https://github.com/harvard-edge/cs249r_book/discussions/1145
+#
+# Setting PYTHONIOENCODING here has no effect: sys.stdout/sys.stderr are
+# already constructed by the time this module executes, using whatever
+# encoding the interpreter picked at startup (typically the console's
+# legacy codepage, e.g. cp1252, not UTF-8). Reading the env var again
+# after the fact changes nothing, so every emoji this CLI prints
+# (banners, checkmarks, error icons) raised an unhandled
+# UnicodeEncodeError and crashed with a raw traceback on most Windows
+# terminals. Reconfiguring the already-open streams directly is the
+# only way to actually fix the encoding for this process.
 if sys.platform == "win32" or os.name == "nt":
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(encoding="utf-8", errors="replace")
 
 # Set TINYTORCH_QUIET before any tinytorch imports to suppress autograd messages
 os.environ['TINYTORCH_QUIET'] = '1'
