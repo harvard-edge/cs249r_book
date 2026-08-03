@@ -15,48 +15,46 @@ repository root:
 | [PUBLIC_RULES](../../PUBLIC_RULES.md) | What may be claimed about a result |
 | [SECURITY_REVIEW](../../SECURITY_REVIEW.md) | Generated-code and runtime boundaries |
 
-Measurements are deliberately absent from all of the above. Numbers belong to
-the run that produced them, so every quality decision, timing distribution, and
-hardware fingerprint lives in the report a run writes on your machine.
+Measurements are deliberately absent from all of the above, and from everything
+here. Numbers belong to the run that produced them, so every quality decision,
+timing distribution, and hardware fingerprint lives in the report a run writes
+on your machine.
 
-## What Is Here
+## The Three Live Documents
 
-**Direction and plan**
+| Document | Answers |
+|:---|:---|
+| [DIRECTION](DIRECTION.md) | Why this exists, what it refuses to do, how a workload is admitted |
+| [STATUS](STATUS.md) | Where each workload stands and what open work remains |
+| [SHIP_PLAN](SHIP_PLAN.md) | The plan of record for making it downloadable |
 
-- [SHIP_PLAN](SHIP_PLAN.md) is the current plan of record: the acceptance test
-  for a downloadable benchmark, the blocking decisions, and the ordering.
-- [NORTH_STAR](NORTH_STAR.md), [PROPOSAL](PROPOSAL.md), and
-  [DESIGN_PHILOSOPHY](DESIGN_PHILOSOPHY.md) record the original framing. They
-  overlap heavily and are candidates to merge into one statement.
+`DIRECTION` replaced three documents that shared a verbatim mission paragraph
+and restated the same design commitments. `STATUS` replaced four checkbox
+ledgers that covered the same fourteen workloads and the same two blockers,
+listing several open items in three slightly different wordings each. That
+duplication was the direct cause of every stale published claim found in audit,
+because correcting one copy left the others wrong.
 
-**Status ledgers**
+## Reference and Archive
 
-- [WORK_CHECKLIST](WORK_CHECKLIST.md) is the maintained progress view.
-- [READINESS](READINESS.md) holds the per-workload evidence detail.
-- [PRODUCT_READINESS_PLAN](PRODUCT_READINESS_PLAN.md) describes the intended
-  classroom and research experience.
-- [LOCAL_EXECUTION_PLAN](LOCAL_EXECUTION_PLAN.md) defines the remaining DLRM,
-  MiniGo, and asset work.
-- [RELEASE_CHECKLIST](RELEASE_CHECKLIST.md) tracks release gates.
-
-These four ledgers cover the same fourteen workloads and the same two blockers.
-That overlap is the known cause of claim drift and they should collapse into
-one.
-
-**Reviews and decisions**
-
-- [QUALITY_TARGET_REVIEW](QUALITY_TARGET_REVIEW.md) records the authority behind
-  every threshold. This is the most reusable document here.
+- [QUALITY_TARGET_REVIEW](QUALITY_TARGET_REVIEW.md) records the authority
+  behind every threshold. The most reusable document here.
 - [DATASET_RELEASE_REVIEW](DATASET_RELEASE_REVIEW.md) records redistribution
   decisions.
-- [COURSE_BUDGETS](COURSE_BUDGETS.md) records measured planning ceilings.
+- [COURSE_BUDGETS](COURSE_BUDGETS.md) records measured planning ceilings and is
+  the source the paper reads for reference-host facts.
+- [RELEASE_CHECKLIST](RELEASE_CHECKLIST.md) tracks release gates.
 - [INDEPENDENT_AUDIT](INDEPENDENT_AUDIT.md) and
   [USER_JOURNEY_AUDIT](USER_JOURNEY_AUDIT.md) are dated review snapshots. Treat
-  them as an archive pair rather than living documents.
+  them as an archive pair, not living documents.
 
 ## Maintenance Rule
 
 A fact belongs to exactly one document. When a claim about workload counts,
 evidence classes, or quality outcomes appears in more than one place, the copies
-drift and the published ones go stale. Prefer a cross-reference to a restatement,
-and prefer generating a claim from the registry to writing it down at all.
+drift and the published ones go stale.
+
+In order of preference: generate the claim from the registry, cross-reference
+the one document that owns it, or, last, write it down. Anything countable
+should come from `tools/audit_workload_readiness.py`,
+`provisional_results/index.json`, or the registry itself rather than from prose.

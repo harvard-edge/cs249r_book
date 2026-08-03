@@ -24,22 +24,27 @@ from mlperf.registry import load_registry  # noqa: E402
 
 INDEX_PATH = ROOT / "reference_results" / "index.json"
 PROVISIONAL_INDEX_PATH = ROOT / "provisional_results" / "index.json"
+# Documents that state counts or per-case values, and must therefore stay bound
+# to the committed evidence index.
+#
+# docs/internal/DIRECTION.md and docs/internal/STATUS.md are deliberately absent.
+# They carry no counts and no measurements, deferring every countable fact to the
+# registry, the evidence index, and tools/audit_workload_readiness.py. Requiring
+# them to restate an inventory would reintroduce exactly the duplication that
+# made published claims drift in the first place. A document that makes no
+# numeric claim has nothing for this gate to verify.
 PUBLIC_DOCUMENTS = (
     "README.md",
     "SPEC.md",
-    "docs/internal/PROPOSAL.md",
     "PUBLIC_RULES.md",
     "docs/internal/QUALITY_TARGET_REVIEW.md",
-    "docs/internal/READINESS.md",
     "docs/internal/RELEASE_CHECKLIST.md",
 )
 WORKLOAD_DOCUMENTS = frozenset(
     {
         "README.md",
         "SPEC.md",
-        "docs/internal/PROPOSAL.md",
         "docs/internal/QUALITY_TARGET_REVIEW.md",
-        "docs/internal/READINESS.md",
         "docs/internal/RELEASE_CHECKLIST.md",
     }
 )
