@@ -49,9 +49,13 @@ whether the shortfalls indicate that laptop-scale reproduction is infeasible,
 or that these particular adapters are wrong. The paper currently answers
 neither.
 
-The gaps are small and suspiciously consistent in direction: every miss is on
-the losing side by 1 to 5 percent relative. That pattern suggests systematic
-adapter differences rather than scale limits.
+The gaps are all small. Measured as relative shortfall against the published
+target they are 0.6 percent (image generation), 0.8 percent (time-series
+forecasting), 1.9 percent (recommendation), 3.2 percent (code generation), and
+5.3 percent (function calling). Being on the losing side is definitional and
+proves nothing; the informative part is that none exceeds six percent, which is
+closer to what adapter and precision differences produce than to what a scale
+limit would.
 
 - Recommendation now has the strongest evidence: HR@10 peaks at 0.6232 on epoch
   7 and declines, so the 1.8 percent relative gap is not a budget limit. It is

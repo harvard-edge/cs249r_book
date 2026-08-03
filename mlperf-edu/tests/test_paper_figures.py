@@ -111,3 +111,50 @@ def test_regenerating_a_figure_is_byte_identical(tmp_path, monkeypatch):
     assert digests[0].keys() == digests[1].keys()
     differing = [name for name in digests[0] if digests[0][name] != digests[1][name]]
     assert not differing, f"regeneration was not byte-identical for {differing}"
+
+
+def test_quality_figure_covers_every_executed_contract():
+    """The figure and the abstract must describe the same denominator.
+
+    The abstract reports how many inherited contracts the suite executed. If the
+    figure silently omitted the ones held out of score-bearing review, a reader
+    counting bars would compute a higher pass rate than the text claims, which
+    is precisely the selective-denominator impression the paper avoids.
+    """
+    import yaml
+
+    module = load_generator()
+    workloads = module.load_registry(ROOT / "registry")
+    reports = module.load_reports([COMMITTED_RUNS])
+    evidence = module.load_evidence()
+
+    plotted = 0
+    for wid, workload in workloads.items():
+        contract = workload.raw.get("canonical_max_contract") or {}
+        gate = contract.get("quality") or {}
+        if gate.get("target") in (None, 0):
+            continue
+        observed = (reports.get(wid, {}).get("metrics") or {}).get(gate.get("metric_key"))
+        if observed is None:
+            observed = next(
+                (
+                    r["quality"]["aggregate"]["median"]
+                    for r in evidence.get(wid, [])
+                    if (r.get("quality") or {}).get("aggregate")
+                ),
+                None,
+            )
+        if observed is None:
+            recorded = contract.get("measured_evidence") or {}
+            observed = recorded.get("score", recorded.get("best_score"))
+        if observed is not None:
+            plotted += 1
+
+    generated = (ROOT / "paper" / "generated_registry.tex").read_text(encoding="utf-8")
+    claimed = int(
+        re.search(r"\\newcommand\{\\ExecutedContracts\}\{(\d+)\}", generated).group(1)
+    )
+    assert plotted == claimed, (
+        f"the quality figure plots {plotted} contracts but the paper claims "
+        f"{claimed} were executed"
+    )

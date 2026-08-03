@@ -114,6 +114,15 @@ def fig_quality_vs_target(workloads, reports, evidence) -> None:
                 if quality.get("aggregate"):
                     observed = quality["aggregate"]["median"]
                     break
+        if observed is None:
+            # Contracts that ran and missed are held out of the evidence index
+            # by the fail-closed rule, but they were still executed. Omitting
+            # them would let the figure show a higher pass rate than the text
+            # reports, which is the impression the paper works to avoid.
+            recorded = (
+                workload.raw.get("canonical_max_contract") or {}
+            ).get("measured_evidence") or {}
+            observed = recorded.get("score", recorded.get("best_score"))
         if observed is None or target in (None, 0):
             continue
         # Ratio >= 1 always means "met", whichever way the metric points.
