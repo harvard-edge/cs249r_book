@@ -125,7 +125,7 @@ dependencies, datasets, and model weights.
 
 ## Release Checks
 
-Use [RELEASE_CHECKLIST.md](RELEASE_CHECKLIST.md) as the executable ledger. The
+Use [RELEASE_CHECKLIST.md](docs/internal/RELEASE_CHECKLIST.md) as the executable ledger. The
 minimum install and packaging subset follows.
 
 ```bash

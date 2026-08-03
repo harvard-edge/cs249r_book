@@ -60,7 +60,7 @@ measured misses into passes.
   and core-file and open-file limits to its existing isolation. EDM rehashes
   the same open file immediately before deserialization. These controls are
   suitable for a controlled source-checkout preview, not an unattended
-  multi-tenant service. [SECURITY_REVIEW.md](SECURITY_REVIEW.md) records the
+  multi-tenant service. [SECURITY_REVIEW.md](../../SECURITY_REVIEW.md) records the
   production gates.
 - DLRM and MiniGo retain their full upstream contracts. They fail closed when
   the licensed data, memory, legacy runtime, or GPU environment is absent.

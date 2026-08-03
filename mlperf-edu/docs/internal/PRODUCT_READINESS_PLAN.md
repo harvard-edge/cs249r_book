@@ -175,7 +175,7 @@ must also run locally.
   immediately before loading them in the controlled preview.
 - [ ] Replace executable EDM pickle inputs, qualify signed legacy runtime
   images, and close the remaining production controls in
-  [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+  [SECURITY_REVIEW.md](../../SECURITY_REVIEW.md).
 - [ ] Sign release artifacts and provenance where producer identity matters.
 - [ ] Reproduce on independent CPU, Apple Silicon, and CUDA systems.
 - [ ] Run the later stability campaign and promote compatible baselines.

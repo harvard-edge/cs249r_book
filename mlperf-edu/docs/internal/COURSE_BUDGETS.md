@@ -6,7 +6,7 @@ This initial budget covers one functional `min` run for every workload on the
 July 18, 2026 Apple Silicon course image. It measures setup and artifact
 generation, not authoritative `max` quality execution or stability. The exact
 machine record and all 28 observations are in
-[`course-budgets-apple-m5-max-20260718.json`](conformance_results/course-budgets-apple-m5-max-20260718.json).
+[`course-budgets-apple-m5-max-20260718.json`](../../conformance_results/course-budgets-apple-m5-max-20260718.json).
 
 The source checkout was clean at `d94c7649851d9caa8c378dc8329d8af26812336c`.
 The machine was a 64 GiB Apple M5 Max MacBook Pro running macOS 26.4, Python

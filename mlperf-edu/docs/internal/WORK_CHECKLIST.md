@@ -117,7 +117,7 @@ preview.
 
 - [ ] Close component licensing, package naming, versioning, and governance.
 - [x] Harden and document the controlled-preview generated-code and pinned
-  pickle paths in [SECURITY_REVIEW.md](SECURITY_REVIEW.md).
+  pickle paths in [SECURITY_REVIEW.md](../../SECURITY_REVIEW.md).
 - [ ] Replace executable EDM pickle inputs with safe reviewed artifacts and
   qualify independently built, signed DLRM and MiniGo runtime images.
 - [ ] Close MLCommons review of the project name, scope, and result wording.

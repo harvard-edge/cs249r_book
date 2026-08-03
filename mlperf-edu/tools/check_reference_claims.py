@@ -27,20 +27,20 @@ PROVISIONAL_INDEX_PATH = ROOT / "provisional_results" / "index.json"
 PUBLIC_DOCUMENTS = (
     "README.md",
     "SPEC.md",
-    "PROPOSAL.md",
+    "docs/internal/PROPOSAL.md",
     "PUBLIC_RULES.md",
-    "QUALITY_TARGET_REVIEW.md",
-    "READINESS.md",
-    "RELEASE_CHECKLIST.md",
+    "docs/internal/QUALITY_TARGET_REVIEW.md",
+    "docs/internal/READINESS.md",
+    "docs/internal/RELEASE_CHECKLIST.md",
 )
 WORKLOAD_DOCUMENTS = frozenset(
     {
         "README.md",
         "SPEC.md",
-        "PROPOSAL.md",
-        "QUALITY_TARGET_REVIEW.md",
-        "READINESS.md",
-        "RELEASE_CHECKLIST.md",
+        "docs/internal/PROPOSAL.md",
+        "docs/internal/QUALITY_TARGET_REVIEW.md",
+        "docs/internal/READINESS.md",
+        "docs/internal/RELEASE_CHECKLIST.md",
     }
 )
 RETIRED_PUBLIC_IDS = frozenset(
@@ -425,7 +425,7 @@ def check_documents(
         if "eight retained" in lowered or "eight summaries" in lowered:
             errors.append(f"{name}: stale eight-summary claim remains")
         if (
-            name in {"QUALITY_TARGET_REVIEW.md", "RELEASE_CHECKLIST.md"}
+            name in {"docs/internal/QUALITY_TARGET_REVIEW.md", "docs/internal/RELEASE_CHECKLIST.md"}
             and source_sha not in text
         ):
             errors.append(f"{name}: full evidence source SHA is missing")
