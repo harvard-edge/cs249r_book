@@ -438,7 +438,59 @@ def case_display(entry: dict[str, Any]) -> str:
     return f"{tex(WORKLOAD_PAPER_LABELS.get(workload, workload))} ({tex(suffix)})"
 
 
-def evidence_rows(records: list[dict[str, Any]]) -> str:
+def registry_gate(workloads: dict[str, Workload], workload_id: str) -> dict[str, Any]:
+    """The authoritative quality gate, always read from the live registry."""
+    workload = workloads[workload_id]
+    gate = (workload.raw.get("canonical_max_contract") or {}).get("quality") or {}
+    require(bool(gate), f"{workload_id} lacks a canonical gate")
+    return gate
+
+
+def gate_satisfied(value: float, gate: dict[str, Any]) -> bool:
+    target = float(gate["target"])
+    tolerance = float(gate.get("tolerance") or 0.0)
+    if gate.get("direction") == "lower":
+        return value <= target + tolerance
+    return value >= target - tolerance
+
+
+def gate_is_stale(record_gate: dict[str, Any], current: dict[str, Any]) -> bool:
+    """True when a retained record was graded against a superseded contract."""
+    if not record_gate:
+        return False
+    same_target = record_gate.get("target") == current.get("target")
+    same_tol = float(record_gate.get("tolerance") or 0.0) == float(
+        current.get("tolerance") or 0.0
+    )
+    return not (same_target and same_tol)
+
+
+def score_gate_status(
+    records: list[dict[str, Any]], workloads: dict[str, Workload]
+) -> dict[str, Any]:
+    """Recompute every score-bearing case against the current registry contract."""
+    passing, missing, stale = 0, 0, []
+    for record in records:
+        entry = record["entry"]
+        if str(entry["result_role"]) != "score-bearing":
+            continue
+        quality = record["result"].get("quality") or {}
+        current = registry_gate(workloads, str(entry["workload"]))
+        observed = finite_number(
+            quality["aggregate"]["median"], label="quality median"
+        )
+        if gate_is_stale(quality.get("gate") or {}, current):
+            stale.append(str(entry["workload"]))
+        if gate_satisfied(observed, current):
+            passing += 1
+        else:
+            missing += 1
+    return {"passing": passing, "missing": missing, "stale": sorted(set(stale))}
+
+
+def evidence_rows(
+    records: list[dict[str, Any]], workloads: dict[str, Workload]
+) -> str:
     rows = []
     for record in records:
         entry = record["entry"]
@@ -461,7 +513,12 @@ def evidence_rows(records: list[dict[str, Any]]) -> str:
             if repeatability.get("passed") is False:
                 repeatability_text += " diagnostic"
         quality = payload.get("quality")
-        gate = quality.get("gate") if isinstance(quality, dict) else {}
+        if role == "score-bearing":
+            # The registry is authoritative. A retained record graded against a
+            # superseded contract must never publish its own looser gate.
+            gate = registry_gate(workloads, str(entry["workload"]))
+        else:
+            gate = quality.get("gate") if isinstance(quality, dict) else {}
         gate_text = format_gate(gate or {}, role=role)
         if isinstance(quality, dict):
             quality_metric = str(quality["metric"])
@@ -470,6 +527,8 @@ def evidence_rows(records: list[dict[str, Any]]) -> str:
                 label=f"{quality_metric} median",
             )
             observed_text = format_number(quality_median, quality_metric)
+            if role == "score-bearing" and not gate_satisfied(quality_median, gate):
+                observed_text += r" \textbf{(miss)}"
         else:
             observed_text = "pass"
         reference = format_number(median, metric)
@@ -529,6 +588,7 @@ def render_tex(
     }
     roles = Counter(record["entry"]["result_role"] for record in records)
     evidence_classes = Counter(record["result"]["evidence_class"] for record in records)
+    gate_status = score_gate_status(records, workloads)
     score_medians = [
         finite_number(
             record["result"]["measurement"]["aggregate"]["median"],
@@ -554,6 +614,8 @@ def render_tex(
         rf"\newcommand{{\EvidenceWorkloads}}{{{len(promotion_workloads)}}}",
         rf"\newcommand{{\FunctionalSetupWorkloads}}{{{len(workloads) - len(promotion_workloads)}}}",
         rf"\newcommand{{\ScoreBearingCases}}{{{roles['score-bearing']}}}",
+        rf"\newcommand{{\ScoreBearingPassing}}{{{gate_status['passing']}}}",
+        rf"\newcommand{{\ScoreBearingMissing}}{{{gate_status['missing']}}}",
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
         rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
@@ -570,7 +632,7 @@ def render_tex(
         dataset_rows(workloads),
         "}",
         r"\newcommand{\ReferenceEvidenceTableRows}{%",
-        evidence_rows(records),
+        evidence_rows(records, workloads),
         "}",
         "",
     ]
