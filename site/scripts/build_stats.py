@@ -40,7 +40,12 @@ GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "")
 # a trailing "+". Exact for anything countable from the repo (a deck count is
 # precisely knowable, and "35" reads better than "35+"); floored for community
 # numbers that are approximate at the source anyway.
-PLUS_STYLE = {"stars", "merged_prs", "readers", "countries", "subscribers"}
+#
+# "stars" is deliberately exact. A floored "27,000+" would not visibly change
+# until the count crossed 28,000, which defeats the point of a live counter
+# next to a "Star on GitHub" call to action. The rounded form is still
+# available as {{stats.stars_rounded}} for milestone-style copy.
+PLUS_STYLE = {"merged_prs", "readers", "countries", "subscribers"}
 
 warnings: list[str] = []
 
@@ -395,6 +400,11 @@ def main() -> int:
         key: render(key, value) if isinstance(value, int) else str(value)
         for key, value in values.items()
     }
+
+    # Milestone copy wants the round number even though the headline counter is
+    # exact, so both forms of the star count are published.
+    if isinstance(values.get("stars"), int):
+        display["stars_rounded"] = f"{floor_2sf(values['stars']):,}+"
 
     CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
     CACHE_PATH.write_text(json.dumps({
