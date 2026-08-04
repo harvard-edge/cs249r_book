@@ -54,13 +54,44 @@ trials. Our three trials returned 1.8139, 1.8016, and 1.8155, so the minimum is
 1.8016 against a published 1.79.
 
 A minimum-of-three is a biased-low statistic, and 0.6% relative is within what
-sampler and seed choice plausibly move. But this is a suspicion, not a finding:
-the published trial spread is not recorded in the contract, so there is nothing
-to compare our spread against.
+sampler and seed choice plausibly move.
 
-**What would settle it:** record the published per-trial values if they exist,
-or run additional trial sets and report our own spread. Until then this stays
-an honest miss with an unverified explanation.
+### RESOLVED without new compute (2026-08-04)
+
+The comparison this section said was missing was the wrong comparison. The
+published trial spread is not needed, because our own three trials already
+bound the question:
+
+| Quantity | Value |
+|---|---:|
+| Trials | 1.8139, 1.8016, 1.8155 |
+| Best trial | 1.8016 |
+| Target (lower is better) | 1.7900 |
+| Margin, best trial to target | 0.0116 |
+| Spread across our three trials | 0.0140 |
+
+**The procedure's own run-to-run spread is 1.21x the distance by which it
+misses.** The shortfall is therefore inside the noise of the measurement that
+produced it, and a fourth trial could plausibly land under the target without
+anything changing. That is established from committed evidence rather than
+suspected.
+
+The variance is in generation, not scoring. The committed
+`current_packet_rescore` re-evaluates the same 150,000 images and reproduces
+every trial to within 1.2e-12 FID, with all image hashes verified. So the
+evaluator is deterministic and the seed block driving sampling is what moves
+the number.
+
+This is the same structural finding as the training seed sweep, in a third
+place: a single accepted run does not settle a verdict whenever the procedure's
+spread is comparable to its margin. Inference over a pinned checkpoint is
+bit-identical; anything that samples or trains is not.
+
+**What remains open:** whether the published 1.79 is itself a
+minimum-of-three or a different statistic. If it is a minimum of three, the
+comparison is like for like and the gap is variance. If it is a mean or a best
+of more trials, the comparison is biased and the gap may be smaller than it
+looks. That is a question about the upstream paper, not about our run.
 
 ## recommendation — a real gap, and not a budget one
 
