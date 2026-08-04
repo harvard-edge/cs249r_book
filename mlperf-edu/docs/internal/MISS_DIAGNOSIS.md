@@ -101,16 +101,48 @@ evaluation protocol was already checked once: a held-out-item leakage probe over
 500 sampled users found zero contaminated users, and the candidate count is the
 inherited 999.
 
-That leaves the adapter. Candidates, untested:
+That leaves the adapter. Candidates:
 
-- Learning-rate schedule. The contract fixes Adam at 5e-4 with no decay; the
-  reference may anneal.
+- ~~Learning-rate schedule.~~ **Tested and refuted, 2026-08-04. See below.**
 - Negative sampling during training. Four negatives per positive, resampled
   each epoch, matches the reference in count but perhaps not in method.
 - Embedding initialisation and the GMF/MLP fusion detail.
 
-**What would settle it:** an ablation over the learning-rate schedule, which is
-the cheapest of the three at roughly 32 minutes per run.
+### RESULT: annealing does not help, it hurts (2026-08-04)
+
+Running the ablation first required adding `MLPERF_EDU_NCF_LR_SCHEDULE` and
+`MLPERF_EDU_NCF_LEARNING_RATE` as `pro`-envelope overrides. The runner read the
+rate straight from the contract, so the hypothesis had been structurally
+untestable rather than merely untested.
+
+Controlled comparison. Same runner, same contract, same 7-epoch budget, same
+5e-4 base rate, same seed. Only the schedule differs.
+
+| Schedule | HR@10 | Gap to 0.6350 |
+|---|---:|---:|
+| Constant 5e-4 (contract, recorded) | 0.6232 | -0.0118 |
+| Cosine 5e-4 to 2.5e-5 (ablation) | 0.6155 | -0.0195 |
+
+Cosine per-epoch HR@10: 0.5460, 0.5874, 0.6014, 0.6110, 0.6134, **0.6155**,
+0.6143. Rate per epoch: 5.00e-4, 4.75e-4, 4.06e-4, 3.06e-4, 1.94e-4, 9.41e-5,
+2.48e-5.
+
+**Annealing is 0.0077 worse than the constant rate.** It widens the gap by
+about two thirds. The curve also never shows the late-training instability the
+hypothesis predicted; it rises monotonically to epoch 6 and dips once at 7,
+which is the shape of a model that ran out of learning rate rather than one
+that overshot.
+
+One caveat on scope. Cosine over 7 epochs conflates annealing with a reduction
+in total learning, since the average rate over the run is roughly half the
+constant one. What is refuted is the specific claim that annealing within the
+contract's budget recovers the gap. A reference that anneals over a much longer
+schedule is not tested by this, and testing it would cost proportionally more.
+
+**Consequence:** the cheapest of the three candidates is eliminated. Negative
+sampling method and the GMF/MLP fusion detail move to the front, and both are
+code-inspection tasks against the v0.5 reference before they are run-cost
+tasks, which makes them cheaper than this ablation was.
 
 ## code generation — a real gap, and the evaluator is not the cause
 
