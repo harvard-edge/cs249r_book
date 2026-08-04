@@ -19,7 +19,10 @@ def main() -> int:
     bib_path = Path(__file__).resolve().parent / "refs.bib"
 
     reader = PdfReader(pdf_path)
-    if not 5 <= len(reader.pages) <= 14:
+    # Sanity range, not an editorial page budget. It catches a collapsed or
+    # runaway build; the upper bound was raised from 14 to 18 in 2026-08 when
+    # the workload suite moved to one paragraph per benchmark.
+    if not 5 <= len(reader.pages) <= 18:
         raise SystemExit(f"unexpected page count: {len(reader.pages)}")
     page_text = [(page.extract_text() or "").strip() for page in reader.pages]
     for number, text in enumerate(page_text, start=1):

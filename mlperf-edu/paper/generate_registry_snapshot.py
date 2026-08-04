@@ -567,12 +567,17 @@ def evidence_rows(
                 f" [{format_number(minimum, metric)}, {format_number(maximum, metric)}]"
             )
         measurement_text = f"{tex(METRIC_LABELS.get(metric, metric))} {reference}"
-        evidence_label = {
-            "five-run-verified": "verified",
-            "single-run-provisional": "provisional",
-            "two-run-provisional": "provisional",
-        }[str(payload["evidence_class"])]
-        evidence_label += f" ({run_count})"
+        # The verified/provisional two-tier evidence class was retired: it
+        # gated nothing, and the run count carries the same information without
+        # implying a promotion status the framework no longer assigns. The
+        # class is still validated above; only the display label changed.
+        # Retained records keep their original class string as data.
+        require(
+            str(payload["evidence_class"])
+            in {"five-run-verified", "single-run-provisional", "two-run-provisional"},
+            f"unknown evidence class {payload['evidence_class']!r}",
+        )
+        evidence_label = str(run_count)
         devices = ", ".join(
             (payload.get("execution") or {}).get("executed_devices") or []
         )
