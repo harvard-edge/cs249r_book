@@ -138,9 +138,24 @@ of a training row is one draw from a distribution about as wide as its distance
 to the gate. The paper now says this rather than implying training behaves like
 inference.
 
-**Still open:** the correct accepted-run count for training. v0.1 keeps
-`acceptance_runs: 1` uniformly, which this result shows is wrong for training.
-Raising it is a contract change and belongs to a version boundary, not a patch.
+**Resolved as a design position, not a defect.** The natural reflex is to raise
+`acceptance_runs` for training until the interval is narrow enough to hide the
+flip. For this suite that is the wrong trade. A production submission absorbs
+seed variance into a many-run protocol because its job is to publish a defensible
+number. This suite's job is to teach when a comparison holds, and the cheapest
+demonstration it can offer is a student watching a passing workload miss under a
+different seed. Averaging that away removes the lesson and keeps only the
+conclusion.
+
+So v0.1 keeps `acceptance_runs: 1`, reports the measured spread beside every
+affected verdict, and builds a classroom exercise on it. A reviewer who reads
+this as sloppiness has a fair question; the answer is that the spread is
+measured, published, annotated in the contracts, and load-bearing for the
+pedagogy rather than unexamined.
+
+**Still open:** whether a reviewer accepts that argument. It is a positioning
+claim, not a measurement, and it is the one place where the educational purpose
+and benchmark convention genuinely pull in different directions.
 
 ## R5. The suite has no comparison baseline
 
