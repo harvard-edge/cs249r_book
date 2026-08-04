@@ -37,8 +37,6 @@ from .assets import (
     CIFAR10_HF_REVISION,
     EDM_CIFAR10_CHECKPOINT_URL,
     EDM_CIFAR10_FID_REFERENCE_URL,
-    DLRM_IMPLEMENTATION_ARCHIVE_URL,
-    DLRM_INFERENCE_ARCHIVE_URL,
     EEMBC_RUNNER_ARCHIVE_URL,
     EVALPLUS_ARCHIVE_URL,
     HUMANEVAL_PLUS_URL,
@@ -56,8 +54,6 @@ from .assets import (
     bfcl_non_live_ast_paths,
     cifar10_paths,
     edm_cifar10_paths,
-    dlrm_reference_paths,
-    dlrm_environment_handoff_contract,
     ensure_bfcl_non_live_ast,
     ensure_cifar10,
     ensure_edm_cifar10,
@@ -81,7 +77,6 @@ from .assets import (
     mlperf_tiny_kws_paths,
     mlperf_tiny_vww_paths,
     minigo_reference_paths,
-    minigo_environment_handoff_contract,
     sst2_paths,
     ogbn_arxiv_paths,
     ettm1_paths,
@@ -717,100 +712,6 @@ def workload_profile_readiness_checks(
     if profile == "min":
         return checks
 
-    if workload.id == "recommendation":
-        handoff = dlrm_environment_handoff_contract()
-        missing = [
-            name
-            for name, ready in (
-                (
-                    "MLPERF_EDU_CRITEO_TERMS_ACCEPTED",
-                    os.environ.get("MLPERF_EDU_CRITEO_TERMS_ACCEPTED") == "1",
-                ),
-                (
-                    "MLPERF_EDU_DLRM_DATA_DIR",
-                    bool(os.environ.get("MLPERF_EDU_DLRM_DATA_DIR")),
-                ),
-                (
-                    "MLPERF_EDU_DLRM_CHECKPOINT",
-                    bool(os.environ.get("MLPERF_EDU_DLRM_CHECKPOINT")),
-                ),
-            )
-            if not ready
-        ]
-        if missing:
-            checks.append(
-                {
-                    "name": f"{workload.id} {profile}",
-                    "detail": (
-                        "research environment is gated; set " + ", ".join(missing)
-                    ),
-                    "status": "fail",
-                    "handoff": handoff,
-                }
-            )
-            return checks
-        data_dir = Path(os.environ["MLPERF_EDU_DLRM_DATA_DIR"]).expanduser()
-        checkpoint = Path(os.environ["MLPERF_EDU_DLRM_CHECKPOINT"]).expanduser()
-        missing_paths = [
-            label
-            for label, present in (
-                ("Criteo data directory", data_dir.is_dir()),
-                ("DLRM checkpoint", checkpoint.is_file()),
-            )
-            if not present
-        ]
-        checks.append(
-            {
-                "name": f"{workload.id} {profile}",
-                "detail": (
-                    "prepared licensed data and checkpoint found"
-                    if not missing_paths
-                    else "missing " + ", ".join(missing_paths)
-                ),
-                "status": "ok" if not missing_paths else "fail",
-                "handoff": handoff,
-            }
-        )
-        return checks
-
-    if workload.id == "reinforcement-learning":
-        handoff = minigo_environment_handoff_contract()
-        missing = [
-            name
-            for name, ready in (
-                (
-                    "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED",
-                    os.environ.get("MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED") == "1",
-                ),
-                (
-                    "MLPERF_EDU_MINIGO_IMAGE",
-                    bool(os.environ.get("MLPERF_EDU_MINIGO_IMAGE")),
-                ),
-            )
-            if not ready
-        ]
-        runtime = os.environ.get("MLPERF_EDU_MINIGO_CONTAINER_RUNTIME", "docker")
-        runtime_path = (
-            str(Path(runtime).expanduser())
-            if Path(runtime).expanduser().is_file()
-            else shutil.which(runtime)
-        )
-        if not runtime_path:
-            missing.append("MLPERF_EDU_MINIGO_CONTAINER_RUNTIME")
-        checks.append(
-            {
-                "name": f"{workload.id} {profile}",
-                "detail": (
-                    "immutable MiniGo image and container runtime declared"
-                    if not missing
-                    else "research environment is gated; set " + ", ".join(missing)
-                ),
-                "status": "ok" if not missing else "fail",
-                "handoff": handoff,
-            }
-        )
-        return checks
-
     missing_assets = [
         row["asset"]
         for row in cache_asset_rows(workload)
@@ -829,6 +730,26 @@ def workload_profile_readiness_checks(
             }
         )
     return checks
+
+
+def container_engine_available() -> bool:
+    """True when a Docker engine is reachable.
+
+    Deliberately duplicated from the code-generation runner rather than
+    imported. Importing the runner would add it to the measurement source-lock
+    closure, and preflight is not a measurement input. The duplication is held
+    in step by a test that asserts both probes agree.
+    """
+    try:
+        subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+    return True
 
 
 def collect_doctor_report(args: argparse.Namespace) -> dict[str, Any]:
@@ -1298,26 +1219,6 @@ def fetch_workload_asset(workload: Workload, *, dry_run: bool) -> str:
             return f"- {workload.id}: {dataset} -> {paths['data']} ({BFCL_ARCHIVE_URL}); {terms}"
         asset = ensure_bfcl_non_live_ast(download=True)
         return f"- {workload.id}: {dataset} at {asset.root} ({asset.sha256[:19]}, {asset.n_bytes} bytes); {terms}"
-    if dataset == "criteo-terabyte":
-        paths = dlrm_reference_paths()
-        if dry_run:
-            source_detail = (
-                f"reference={paths['inference_source']} "
-                f"({DLRM_INFERENCE_ARCHIVE_URL}); "
-                f"implementation={paths['implementation_source']} "
-                f"({DLRM_IMPLEMENTATION_ARCHIVE_URL})"
-            )
-        else:
-            source_detail = (
-                f"pinned reference sources configured at {paths['root']} "
-                "(fetched and hash-validated by the max runner)"
-            )
-        return (
-            f"- {workload.id}: {source_detail}; MANUAL ACTION REQUIRED; "
-            "accept the Criteo terms, "
-            "prepare unshuffled day 23, and provide the official MLPerf "
-            f"Inference v1.0.1 40M checkpoint; {terms}"
-        )
     if dataset == "minigo-self-play":
         paths = minigo_reference_paths()
         source_detail = (

@@ -14,9 +14,10 @@ workload that is doing fine gets read as unfinished:
            or rejects a quality result. This is the dimension that says whether
            a workload works.
 
-  TIMING   Is fresh-process timing repeatability established? The registry sets
-           `outer_reference_runs: 5` in the measurement protocol. This belongs
-           to the later promotion phase and never gates a quality decision.
+  TIMING   How many timing measurements a case has. The registry sets
+           `outer_reference_runs: 1`, matching the single-run acceptance rule.
+           Repeated timing is reported where it exists and never gates a
+           quality decision.
 
 Quality decisions are recomputed against the live registry contract, so a
 retained record graded under a superseded gate cannot report its own result.
@@ -112,9 +113,9 @@ def status_for(workload, records: list[dict]) -> dict:
 
         rep = record.get("repeatability") or {}
         if rep.get("passed") and runs >= 5:
-            timing = f"verified ({runs})"
+            timing = f"{runs} run(s)"
         elif runs:
-            timing = f"not established ({runs})"
+            timing = f"{runs} run(s)"
     elif execution_status == "quality-audited-target-not-met":
         # The run happened and is digest-bound in the registry; it just never
         # made it into the evidence index. Report its value rather than a dash.
@@ -153,6 +154,33 @@ def status_for(workload, records: list[dict]) -> dict:
         "stale_gate": stale,
         "needs": need,
     }
+
+
+def missing_items(rows: list[dict], workloads: dict) -> list[str]:
+    """Derive the gap list instead of hardcoding it.
+
+    This block previously named recommendation as a DLRM workload blocked on
+    licensed Criteo data, which stopped being true when the contract moved to
+    NCF on MovieLens-20M, and it stated a miss count that drifted as workloads
+    were measured. Reading both from the registry keeps the document honest.
+    """
+    items: list[str] = []
+    for row in rows:
+        if row["quality"] != "BLOCKED":
+            continue
+        workload = workloads[row["workload"]]
+        gate = ((workload.raw.get("spiral") or {}).get("next_gate") or "").strip()
+        detail = f" {gate}" if gate else ""
+        items.append(f"- `{row['workload']}` cannot run its contract locally.{detail}")
+    audited = sum(1 for row in rows if row["quality"] == "MISS*")
+    if audited:
+        items.append(
+            f"- {audited} audited miss{'es are' if audited != 1 else ' is'} recorded "
+            "in the registry but not imported into the evidence index, so "
+            f"{'they carry' if audited != 1 else 'it carries'} digests and runtime "
+            "without appearing as cases."
+        )
+    return items or ["- Nothing outstanding."]
 
 
 def humanize(seconds: float) -> str:
@@ -213,11 +241,11 @@ def runtime_rows(workloads, evidence: dict[str, list[dict]]) -> list[dict]:
     return rows
 
 
-def render_markdown(rows: list[dict], runtimes: list[dict]) -> str:
+def render_markdown(rows: list[dict], runtimes: list[dict], workloads: dict) -> str:
     quality_tally: dict[str, int] = {}
     for r in rows:
         quality_tally[r["quality"]] = quality_tally.get(r["quality"], 0) + 1
-    verified = sum(1 for r in rows if r["timing"].startswith("verified"))
+    repeated = sum(1 for r in rows if r["perf_cases"] and (r["runs"] or 0) > 1)
 
     out = [
         "<!-- GENERATED FILE - do not edit by hand.",
@@ -238,7 +266,7 @@ def render_markdown(rows: list[dict], runtimes: list[dict]) -> str:
         f"| Target missed, recorded | {quality_tally.get('MISS', 0) + quality_tally.get('MISS*', 0)} |",
         f"| Blocked on a local backend | {quality_tally.get('BLOCKED', 0)} |",
         f"| Configuration defects | {sum(1 for r in rows if r['config'] != 'ok')} |",
-        f"| Timing repeatability established | {verified} |",
+        f"| Cases with repeated timing | {repeated} |",
         "",
         "Quality is decided on the registry's `acceptance_runs: 1`, so one complete",
         "run accepts or rejects a result. Timing repeatability uses",
@@ -303,12 +331,7 @@ def render_markdown(rows: list[dict], runtimes: list[dict]) -> str:
         "",
         "## What Is Missing",
         "",
-        "- `recommendation` (DLRM) needs an out-of-core backend and the licensed",
-        "  Criteo accuracy set before its contract can run locally.",
-        "- `reinforcement-learning` (MiniGo) needs a native CPU or MPS backend.",
-        "- Three audited misses are recorded in the registry but not imported into",
-        "  the evidence index, so they carry digests and runtime without appearing",
-        "  as cases.",
+        *missing_items(rows, workloads),
         "",
     ]
     return "\n".join(out)
@@ -336,7 +359,7 @@ def main() -> int:
         return 0
 
     if args.markdown or args.write:
-        document = render_markdown(rows, runtime_rows(workloads, evidence))
+        document = render_markdown(rows, runtime_rows(workloads, evidence), workloads)
         if args.write:
             target = ROOT / "docs" / "internal" / "WORKLOAD_STATUS.md"
             target.write_text(document)
@@ -372,10 +395,20 @@ def main() -> int:
         summary = "  ".join(f"{k}={v}" for k, v in sorted(tally.items()))
         print(f"{label:<8} {summary}")
 
-    verified = sum(1 for r in rows if r["timing"].startswith("verified"))
+    repeated = sum(1 for r in rows if (r["runs"] or 0) > 1)
     print(
-        f"{'timing':<8} repeatability established={verified}  "
-        f"(later phase; never gates a quality decision)"
+        f"{'timing':<8} cases with repeated timing={repeated}  "
+        f"(reported, never gates a quality decision)"
+    )
+
+    # The min/max/pro contract is only meaningful if every workload has all three.
+    from mlperf.registry import RESEARCH_WORKLOADS
+
+    pro_gap = sorted(set(w["workload"] for w in rows) - set(RESEARCH_WORKLOADS))
+    print(
+        f"{'profiles':<8} min={len(rows)}  max={len(rows)}  "
+        f"pro={len(rows) - len(pro_gap)}"
+        + (f"  MISSING pro: {', '.join(pro_gap)}" if pro_gap else "")
     )
 
     if any(r["stale_gate"] for r in rows):

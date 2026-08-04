@@ -87,13 +87,13 @@ WORKLOAD_PAPER_LABELS = {
 DATASET_PAPER_LABELS = {
     "bfcl-v4-non-live-ast": "BFCL v4 non-live AST",
     "cifar10": "CIFAR-10",
-    "criteo-terabyte": "Criteo Terabyte",
     "ettm1": "ETTm1",
     "humaneval-plus": "HumanEval+",
     "mlperf-tiny-anomaly-eval": "ToyCar (MLPerf Tiny)",
     "mlperf-tiny-kws-eval": "Keyword spotting (MLPerf Tiny)",
     "mlperf-tiny-vww-eval": "Visual wake words (MLPerf Tiny)",
     "minigo-self-play": "MiniGo self-play",
+    "movielens-20m": "MovieLens 20M",
     "nanobeir-reranking": "NanoBEIR",
     "ogbn-arxiv": "ogbn-arxiv",
     "prompt-suite-local": "Deterministic prompt suite",
@@ -104,13 +104,13 @@ DATASET_PAPER_LABELS = {
 DATASET_SPLIT_LABELS = {
     "bfcl-v4-non-live-ast": "official non-live AST split",
     "cifar10": "Tiny 200-example set",
-    "criteo-terabyte": "official day split",
     "ettm1": "official 12/4/4-month split",
     "humaneval-plus": "official 164-task set",
     "mlperf-tiny-anomaly-eval": "Tiny 248-recording set",
     "mlperf-tiny-kws-eval": "Tiny 1,000-example set",
     "mlperf-tiny-vww-eval": "Tiny 1,000-example set",
     "minigo-self-play": "self-play trajectories",
+    "movielens-20m": "leave-one-out, 999 negatives",
     "nanobeir-reranking": "three English subsets",
     "ogbn-arxiv": "official time split",
     "prompt-suite-local": "deterministic prompts",
@@ -606,6 +606,123 @@ def snapshot_date(records: list[dict[str, Any]]) -> str:
     return f"{latest.strftime('%B')} {latest.day}, {latest.year}"
 
 
+def measured_macros(workloads: dict[str, Workload]) -> list[str]:
+    """Emit measured/published pairs for workloads that carry a recorded score.
+
+    Prose that hand-types "reported 1.80 rather than the published 1.79" is a
+    silent drift surface: the registry can move and the sentence still reads
+    fine. Both halves of every such comparison come from here instead, so a
+    changed gate or a re-measured result cannot leave the narrative behind.
+    """
+    lines: list[str] = []
+    for workload_id, workload in sorted(workloads.items()):
+        contract = workload.raw.get("canonical_max_contract") or {}
+        evidence = contract.get("measured_evidence") or {}
+        score = evidence.get("score", evidence.get("best_score"))
+        if score is None:
+            continue
+        gate = contract.get("quality") or {}
+        target = gate.get("target")
+        require(
+            target is not None,
+            f"{workload_id} records measured evidence but declares no gate target",
+        )
+        name = "".join(part.capitalize() for part in workload_id.split("-"))
+        metric_key = str(gate.get("metric_key") or gate.get("metric") or "")
+        as_percent = metric_key.endswith(("accuracy", "pass_at_1", "ndcg_at_10"))
+        decimals = len(str(target).partition(".")[2]) or 2
+
+        def render(value: float) -> str:
+            if as_percent:
+                return f"{100.0 * float(value):.2f}\\%"
+            return f"{float(value):.{decimals}f}"
+
+        lines.append(rf"\newcommand{{\{name}Measured}}{{{render(score)}}}")
+        lines.append(rf"\newcommand{{\{name}Published}}{{{render(target)}}}")
+    return lines
+
+
+def executed_contract_macros(
+    workloads: dict[str, Workload], gate_status: dict[str, int]
+) -> list[str]:
+    """Count every contract the suite actually executed, not just the admitted ones.
+
+    Score-bearing counts describe what was admitted to review. On their own they
+    read as though the workloads that ran and missed were never attempted, which
+    is the opposite of what the fail-closed rule is for. Reporting both the
+    executed total and the admitted subset shows the rule working.
+    """
+    recorded_misses = 0
+    for workload in workloads.values():
+        contract = workload.raw.get("canonical_max_contract") or {}
+        evidence = contract.get("measured_evidence") or {}
+        if evidence.get("score", evidence.get("best_score")) is not None:
+            recorded_misses += 1
+    executed = gate_status["passing"] + gate_status["missing"] + recorded_misses
+    require(executed > 0, "no executed contracts found")
+    return [
+        rf"\newcommand{{\ExecutedContracts}}{{{executed}}}",
+        rf"\newcommand{{\ExecutedContractsPassing}}{{{gate_status['passing']}}}",
+        rf"\newcommand{{\ExecutedContractsMissing}}{{{executed - gate_status['passing']}}}",
+    ]
+
+
+DETERMINISM = PROJECT / "paper" / "evidence" / "determinism" / "determinism_study.json"
+
+
+def locally_runnable_macros(workloads: dict[str, Workload]) -> list[str]:
+    """Count workloads whose authoritative path runs on the target platform.
+
+    Reporting only the registry total invites the fair objection that the
+    portfolio is padded with workloads nobody can execute. Naming the gated
+    ones is cheaper than being asked about them.
+    """
+    gated = [
+        workload_id
+        for workload_id, workload in workloads.items()
+        if (workload.raw.get("canonical_max_contract") or {}).get("execution_status")
+        == "environment-gated-quality-conformance"
+    ]
+    return [
+        rf"\newcommand{{\LocallyRunnableWorkloads}}{{{len(workloads) - len(gated)}}}",
+        rf"\newcommand{{\EnvironmentGatedWorkloads}}{{{len(gated)}}}",
+    ]
+
+
+def determinism_macros() -> list[str]:
+    """Expose the seed and backend determinism study to the paper.
+
+    The registry accepts a quality verdict from a single run. That is only
+    defensible if the quality metric is actually deterministic, so the claim
+    needs measurement rather than assertion.
+    """
+    if not DETERMINISM.is_file():
+        return []
+    study = json.loads(DETERMINISM.read_text(encoding="utf-8"))
+    cases = study["cases"]
+    require(bool(cases), "determinism study has no cases")
+    worst_seed = max(abs(finite_number(c["seed_spread"], label="seed spread")) for c in cases)
+    worst_backend = max(
+        abs(finite_number(c["backend_delta"], label="backend delta")) for c in cases
+    )
+    training = study.get("training_cases") or []
+    flipping = [c for c in training if c.get("verdict_flips")]
+    macros = [
+        rf"\newcommand{{\DeterminismWorkloads}}{{{len(cases)}}}",
+        rf"\newcommand{{\DeterminismSeeds}}{{{len(study['seeds'])}}}",
+        rf"\newcommand{{\DeterminismExecutions}}{{{study['executions']}}}",
+        rf"\newcommand{{\DeterminismMaxSeedSpread}}{{{worst_seed:.1e}}}",
+        rf"\newcommand{{\DeterminismMaxBackendDelta}}{{{worst_backend:.1e}}}",
+    ]
+    if training:
+        macros += [
+            rf"\newcommand{{\TrainingSeedWorkloads}}{{{len(training)}}}",
+            rf"\newcommand{{\TrainingSeedFlipping}}{{{len(flipping)}}}",
+            rf"\newcommand{{\TrainingSeedCount}}{{{len(study.get('seeds_training') or [])}}}",
+        ]
+    return macros
+
+
 def render_tex(
     workloads: dict[str, Workload],
     index: dict[str, Any],
@@ -647,10 +764,12 @@ def render_tex(
         rf"\newcommand{{\ScoreBearingPassing}}{{{gate_status['passing']}}}",
         rf"\newcommand{{\ScoreBearingMissing}}{{{gate_status['missing']}}}",
         *host_macros(),
+        *measured_macros(workloads),
+        *executed_contract_macros(workloads, gate_status),
+        *determinism_macros(),
+        *locally_runnable_macros(workloads),
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
-        rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
-        rf"\newcommand{{\ProvisionalEvidenceCases}}{{{len(records) - evidence_classes['five-run-verified']}}}",
         rf"\newcommand{{\ScoreReferenceTotalMinutes}}{{{sum(score_medians) / 60.0:.1f}}}",
         rf"\newcommand{{\ScoreReferenceMinSeconds}}{{{min(score_medians):.3f}}}",
         rf"\newcommand{{\ScoreReferenceMaxMinutes}}{{{max(score_medians) / 60.0:.1f}}}",

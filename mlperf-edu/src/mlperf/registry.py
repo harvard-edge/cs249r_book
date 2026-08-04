@@ -114,7 +114,16 @@ STANDARD_WORKLOAD_ORDER = (
 
 STANDARD_WORKLOADS = set(STANDARD_WORKLOAD_ORDER)
 
+# The pro profile is the research envelope over the SAME workload identity, and
+# it resolves to each workload's max runner. Every registered workload therefore
+# has a pro path; excluding some left five workloads with no research profile at
+# all, which contradicted the documented min/max/pro contract.
 RESEARCH_WORKLOAD_ORDER = (
+    "image-classification",
+    "keyword-spotting",
+    "anomaly-detection",
+    "visual-wake-words",
+    "causal-language-modeling",
     "text-classification",
     "information-retrieval",
     "graph-node-classification",

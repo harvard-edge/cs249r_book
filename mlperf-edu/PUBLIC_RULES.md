@@ -23,10 +23,9 @@ reinforcement learning set `promotion_scope` to false and cannot enter
 calling, and image generation have executed their authoritative quality
 contract and missed the unchanged target; the registry records this as
 `quality-audited-target-not-met`, and the shortfall MUST be reported rather
-than reframed as an unexecuted probe. Recommendation and reinforcement learning
-have not executed their authoritative contract locally, because DLRM requires
-licensed Criteo data with an out-of-core backend and MiniGo requires a legacy
-runtime outside the declared envelope.
+than reframed as an unexecuted probe. Reinforcement learning has not executed
+its authoritative contract locally, because MiniGo requires a legacy CUDA and
+TensorFlow 1.x runtime outside the declared envelope.
 
 ## Result Roles
 

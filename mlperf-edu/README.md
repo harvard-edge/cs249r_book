@@ -69,7 +69,7 @@ uv run mlperf run --workload image-classification --profile max \
 | `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | reproduce the published test MSE of 0.290; the current 0.292393 result misses |
 | `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; first complete result reached 0.554878 and did not meet the unchanged target |
 | `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; the complete 1,150-case result reached 0.785208 and did not meet the unchanged target |
-| `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; complete runner ready, execution gated on licensed data and a 256-GB-class environment |
+| `recommendation` | MLPerf Training v0.5 NCF on MovieLens-20M | training | published 0.635 HR@10; trains locally in roughly half an hour and is recorded as a miss at 0.6232 |
 | `image-generation` | NVIDIA EDM and the three-trial CIFAR-10 FID protocol | inference | published 1.79 minimum FID across three 50,000-image trials; the provenance-bound packet rescored at 1.801554 and did not meet the unchanged target |
 | `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; complete resumable runner gated on a reviewed legacy GPU environment |
 
@@ -122,7 +122,7 @@ uv run mlperf run --workload causal-language-modeling --profile max \
 | **Profile** | **Purpose** | **Result Boundary** |
 |:---|:---|:---|
 | `min` | Fast installation, teaching, and CI check | Functional only; never a public score or performance baseline |
-| `max` | Authoritative quality contract | Twelve paths are laptop-capable; local DLRM and MiniGo executors remain first-milestone work |
+| `max` | Authoritative quality contract | Thirteen paths are laptop-capable; a local MiniGo executor remains first-milestone work |
 | `pro` | Extended single-node research envelope | Adds controlled configurations without changing workload identity or the quality target |
 
 The research envelope supports processors, memory systems, runtimes,

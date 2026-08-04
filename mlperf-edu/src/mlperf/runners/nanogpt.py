@@ -17,6 +17,7 @@ from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd, verify_provd
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
+    TrainingProgress,
     configured_seed,
     select_torch_device,
     synchronize_device,
@@ -660,6 +661,7 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     iteration_times: list[float] = []
     best_val_loss = float("inf")
     best_state: dict[str, torch.Tensor] | None = None
+    progress = TrainingProgress(workload.id, max_iters + 1, unit="iter")
     synchronize_device(device)
     start = time.perf_counter()
     for iteration in range(max_iters + 1):
@@ -705,9 +707,16 @@ def run_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         optimizer.step()
         iteration_times.append(time.perf_counter() - iteration_start)
+        progress.update(
+            iteration + 1,
+            train_loss=train_losses[-1] if train_losses else float("nan"),
+            val_loss=val_losses[-1] if val_losses else float("nan"),
+            best_val=best_val_loss,
+        )
 
     synchronize_device(device)
     duration = time.perf_counter() - start
+    progress.close(f"best validation loss {best_val_loss:.4f}")
     target = _env_float(
         "MLPERF_EDU_MAX_QUALITY_TARGET", float(workload.quality_value or 1.4697)
     )
