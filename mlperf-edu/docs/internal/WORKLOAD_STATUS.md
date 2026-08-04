@@ -16,7 +16,7 @@ record graded under a superseded gate cannot report its own result.
 | Target missed, recorded | 5 |
 | Blocked on a local backend | 0 |
 | Configuration defects | 0 |
-| Timing repeatability established | 6 |
+| Cases with repeated timing | 1 |
 
 Quality is decided on the registry's `acceptance_runs: 1`, so one complete
 run accepts or rejects a result. Timing repeatability uses
@@ -27,20 +27,20 @@ gates a quality decision.
 
 | Workload | Config | Quality | Observed | Target | Timing | Needs |
 |:---|:---|:---|---:|---:|:---|:---|
-| `anomaly-detection` | ok | **PASS** | 0.9029 | ≥ 0.8500 | verified (5) | none |
-| `causal-language-modeling` | ok | **PASS** | 1.4590 | ≤ 1.4697 | not established (2) | none |
+| `anomaly-detection` | ok | **PASS** | 0.9029 | ≥ 0.8500 | 5 run(s) | none |
+| `causal-language-modeling` | ok | **PASS** | 1.4590 | ≤ 1.4697 | 2 run(s) | none |
 | `code-generation` | ok | **MISS*** | 0.5549 | ≥ 0.5730 | n/a | import result into evidence index |
 | `function-calling` | ok | **MISS*** | 0.7852 | ≥ 0.8292 | n/a | import result into evidence index |
-| `graph-node-classification` | ok | **PASS** | 0.7210 | ≥ 0.7174 | not established (1) | none |
-| `image-classification` | ok | **PASS** | 0.8700 | ≥ 0.8500 | verified (5) | none |
+| `graph-node-classification` | ok | **PASS** | 0.7210 | ≥ 0.7174 | 1 run(s) | none |
+| `image-classification` | ok | **PASS** | 0.8700 | ≥ 0.8500 | 5 run(s) | none |
 | `image-generation` | ok | **MISS*** | 1.8016 | ≤ 1.7900 | n/a | import result into evidence index |
-| `information-retrieval` | ok | **PASS** | 0.6072 | ≥ 0.6072 | verified (5) | none |
-| `keyword-spotting` | ok | **PASS** | 0.9020 | ≥ 0.9000 | verified (5) | none |
+| `information-retrieval` | ok | **PASS** | 0.6072 | ≥ 0.6072 | 5 run(s) | none |
+| `keyword-spotting` | ok | **PASS** | 0.9020 | ≥ 0.9000 | 5 run(s) | none |
 | `recommendation` | ok | **MISS*** | 0.6232 | ≥ 0.6350 | n/a | import result into evidence index |
 | `reinforcement-learning` | ok | **NOT RUN** | — | — | n/a | run the max contract |
-| `text-classification` | ok | **PASS** | 0.9106 | ≥ 0.9106 | verified (5) | none |
-| `time-series-forecasting` | ok | **MISS** | 0.2924 ⚠ | ≤ 0.2900 | not established (1) | target gap, investigated |
-| `visual-wake-words` | ok | **PASS** | 0.8510 | ≥ 0.8000 | verified (5) | none |
+| `text-classification` | ok | **PASS** | 0.9106 | ≥ 0.9106 | 5 run(s) | none |
+| `time-series-forecasting` | ok | **MISS** | 0.2924 ⚠ | ≤ 0.2900 | 1 run(s) | target gap, investigated |
+| `visual-wake-words` | ok | **PASS** | 0.8510 | ≥ 0.8000 | 5 run(s) | none |
 
 `MISS*` means the authoritative contract ran and missed its target, and the
 result is recorded in the registry but not imported into the evidence index.

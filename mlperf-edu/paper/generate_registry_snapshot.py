@@ -770,8 +770,6 @@ def render_tex(
         *locally_runnable_macros(workloads),
         rf"\newcommand{{\PerformanceBearingCases}}{{{roles['performance-bearing']}}}",
         rf"\newcommand{{\ReferenceEvidenceCases}}{{{len(records)}}}",
-        rf"\newcommand{{\FiveRunEvidenceCases}}{{{evidence_classes['five-run-verified']}}}",
-        rf"\newcommand{{\ProvisionalEvidenceCases}}{{{len(records) - evidence_classes['five-run-verified']}}}",
         rf"\newcommand{{\ScoreReferenceTotalMinutes}}{{{sum(score_medians) / 60.0:.1f}}}",
         rf"\newcommand{{\ScoreReferenceMinSeconds}}{{{min(score_medians):.3f}}}",
         rf"\newcommand{{\ScoreReferenceMaxMinutes}}{{{max(score_medians) / 60.0:.1f}}}",

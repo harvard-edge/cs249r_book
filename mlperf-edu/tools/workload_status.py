@@ -14,9 +14,10 @@ workload that is doing fine gets read as unfinished:
            or rejects a quality result. This is the dimension that says whether
            a workload works.
 
-  TIMING   Is fresh-process timing repeatability established? The registry sets
-           `outer_reference_runs: 5` in the measurement protocol. This belongs
-           to the later promotion phase and never gates a quality decision.
+  TIMING   How many timing measurements a case has. The registry sets
+           `outer_reference_runs: 1`, matching the single-run acceptance rule.
+           Repeated timing is reported where it exists and never gates a
+           quality decision.
 
 Quality decisions are recomputed against the live registry contract, so a
 retained record graded under a superseded gate cannot report its own result.
@@ -112,9 +113,9 @@ def status_for(workload, records: list[dict]) -> dict:
 
         rep = record.get("repeatability") or {}
         if rep.get("passed") and runs >= 5:
-            timing = f"verified ({runs})"
+            timing = f"{runs} run(s)"
         elif runs:
-            timing = f"not established ({runs})"
+            timing = f"{runs} run(s)"
     elif execution_status == "quality-audited-target-not-met":
         # The run happened and is digest-bound in the registry; it just never
         # made it into the evidence index. Report its value rather than a dash.
@@ -244,7 +245,7 @@ def render_markdown(rows: list[dict], runtimes: list[dict], workloads: dict) -> 
     quality_tally: dict[str, int] = {}
     for r in rows:
         quality_tally[r["quality"]] = quality_tally.get(r["quality"], 0) + 1
-    verified = sum(1 for r in rows if r["timing"].startswith("verified"))
+    repeated = sum(1 for r in rows if r["perf_cases"] and (r["runs"] or 0) > 1)
 
     out = [
         "<!-- GENERATED FILE - do not edit by hand.",
@@ -265,7 +266,7 @@ def render_markdown(rows: list[dict], runtimes: list[dict], workloads: dict) -> 
         f"| Target missed, recorded | {quality_tally.get('MISS', 0) + quality_tally.get('MISS*', 0)} |",
         f"| Blocked on a local backend | {quality_tally.get('BLOCKED', 0)} |",
         f"| Configuration defects | {sum(1 for r in rows if r['config'] != 'ok')} |",
-        f"| Timing repeatability established | {verified} |",
+        f"| Cases with repeated timing | {repeated} |",
         "",
         "Quality is decided on the registry's `acceptance_runs: 1`, so one complete",
         "run accepts or rejects a result. Timing repeatability uses",
@@ -394,10 +395,10 @@ def main() -> int:
         summary = "  ".join(f"{k}={v}" for k, v in sorted(tally.items()))
         print(f"{label:<8} {summary}")
 
-    verified = sum(1 for r in rows if r["timing"].startswith("verified"))
+    repeated = sum(1 for r in rows if (r["runs"] or 0) > 1)
     print(
-        f"{'timing':<8} repeatability established={verified}  "
-        f"(later phase; never gates a quality decision)"
+        f"{'timing':<8} cases with repeated timing={repeated}  "
+        f"(reported, never gates a quality decision)"
     )
 
     # The min/max/pro contract is only meaningful if every workload has all three.

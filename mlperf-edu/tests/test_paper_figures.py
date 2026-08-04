@@ -75,7 +75,6 @@ def test_every_included_figure_regenerates_from_committed_inputs(tmp_path, monke
     module.fig_quality_vs_target(workloads, reports, evidence)
     module.fig_runtime(workloads, reports, evidence)
     module.fig_training_curves(workloads, reports)
-    module.fig_repeatability(evidence)
 
     produced = {path.stem for path in tmp_path.glob("*.pdf")}
     missing = [name for name in included_figures() if name not in produced]

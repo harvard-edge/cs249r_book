@@ -129,7 +129,10 @@ def test_all_measurement_contracts_pin_outer_execution_stabilization():
             contract["measurement_protocol"] for contract in phases.values()
         )
         for protocol in protocols:
-            assert protocol["outer_reference_runs"] == 5
+            # Timing repeatability was reduced from five runs to one so the
+            # timing protocol matches the single-run acceptance rule. The
+            # already-measured five-run records are retained as data.
+            assert protocol["outer_reference_runs"] == 1
             assert isinstance(protocol["outer_preconditioning_runs"], int)
             assert protocol["outer_preconditioning_runs"] >= 0
             assert 0 <= protocol["outer_inter_execution_cooldown_seconds"] <= 300

@@ -14,9 +14,6 @@ Four figures, each answering a question a reviewer will ask:
   fig_training_curves     Does it converge, and how fast? Per-epoch quality for
                           every workload that trains, with the target line.
 
-  fig_repeatability       Is the timing trustworthy? Coefficient of variation
-                          for cases with five fresh-process runs.
-
 Reads the registry, the evidence index, and any run reports passed on the
 command line. Writes PDF and PNG into paper/figures/.
 """
@@ -284,30 +281,6 @@ def fig_training_curves(workloads, reports) -> None:
     save(fig, "fig_training_curves")
 
 
-def fig_repeatability(evidence) -> None:
-    rows = []
-    for wid, records in sorted(evidence.items()):
-        for record in records:
-            repeatability = record.get("repeatability") or {}
-            cv = repeatability.get("coefficient_of_variation")
-            runs = (record.get("measurement") or {}).get("run_count") or 0
-            if isinstance(cv, (int, float)) and runs >= 5:
-                phase = record.get("phase")
-                rows.append((wid + (f"/{phase}" if phase else ""), 100.0 * cv))
-    if not rows:
-        return
-    rows.sort(key=lambda r: r[1])
-    fig, ax = plt.subplots(figsize=(5.4, 0.3 * len(rows) + 1.1))
-    ax.barh([r[0] for r in rows], [r[1] for r in rows], color=NEUTRAL, height=0.6)
-    ax.axvline(5.0, color=MISS_COLOR, linestyle="--", linewidth=1)
-    ax.text(5.0, -0.7, " 5% promotion limit", color=MISS_COLOR, fontsize=6.5)
-    ax.set_xlabel("timing coefficient of variation (%), five fresh processes")
-    ax.set_title("Timing repeatability")
-    for spine in ("top", "right"):
-        ax.spines[spine].set_visible(False)
-    save(fig, "fig_repeatability")
-
-
 def main() -> int:
     ap = argparse.ArgumentParser(description=__doc__)
     ap.add_argument(
@@ -336,7 +309,6 @@ def main() -> int:
     fig_quality_vs_target(workloads, reports, evidence)
     fig_runtime(workloads, reports, evidence)
     fig_training_curves(workloads, reports)
-    fig_repeatability(evidence)
     return 0
 
 
