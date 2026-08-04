@@ -50,38 +50,45 @@ class NbdevCommand(BaseCommand):
 
         elif args.build_docs:
             console.print("📚 Building documentation from notebooks...")
-            result = subprocess.run(["nbdev_docs"], capture_output=True, text=True)
-            if result.returncode == 0:
-                console.print(Panel("[green]✅ Documentation built successfully![/green]",
-                                  title="Docs Success", border_style="green"))
-            else:
-                console.print(Panel(f"[red]❌ Docs build failed: {result.stderr}[/red]",
-                                  title="Docs Error", border_style="red"))
-            return result.returncode
+            return self._run_nbdev_tool("nbdev-docs", "Docs", console)
 
         elif args.test:
             console.print("🧪 Running notebook tests...")
-            result = subprocess.run(["nbdev_test"], capture_output=True, text=True)
-            if result.returncode == 0:
-                console.print(Panel("[green]✅ Notebook tests passed![/green]",
-                                  title="Test Success", border_style="green"))
-            else:
-                console.print(Panel(f"[red]❌ Notebook tests failed: {result.stderr}[/red]",
-                                  title="Test Error", border_style="red"))
-            return result.returncode
+            return self._run_nbdev_tool("nbdev-test", "Test", console)
 
         elif args.clean:
             console.print("🧹 Cleaning notebook outputs...")
-            result = subprocess.run(["nbdev_clean"], capture_output=True, text=True)
-            if result.returncode == 0:
-                console.print(Panel("[green]✅ Notebook outputs cleaned![/green]",
-                                  title="Clean Success", border_style="green"))
-            else:
-                console.print(Panel(f"[red]❌ Clean failed: {result.stderr}[/red]",
-                                  title="Clean Error", border_style="red"))
-            return result.returncode
+            return self._run_nbdev_tool("nbdev-clean", "Clean", console)
 
         else:
             console.print(Panel("[yellow]⚠️  No nbdev action specified. Use --export, --build-docs, --test, or --clean[/yellow]",
                               title="No Action", border_style="yellow"))
             return 1
+
+    def _run_nbdev_tool(self, command: str, label: str, console) -> int:
+        """Run one of nbdev's own CLI tools (nbdev-docs, nbdev-test, nbdev-clean).
+
+        nbdev 3.x registers these console scripts with hyphens
+        (nbdev-docs, not nbdev_docs); calling the underscore form raises
+        FileNotFoundError since it has never existed under that name.
+        """
+        try:
+            result = subprocess.run(
+                [command], capture_output=True, text=True, encoding="utf-8", errors="replace"
+            )
+        except FileNotFoundError:
+            console.print(Panel(
+                f"[red]❌ '{command}' not found[/red]\n\n"
+                "This requires nbdev to be installed:\n"
+                "  [cyan]pip install nbdev[/cyan]",
+                title=f"{label} Error", border_style="red"
+            ))
+            return 1
+
+        if result.returncode == 0:
+            console.print(Panel(f"[green]✅ {label} succeeded![/green]",
+                              title=f"{label} Success", border_style="green"))
+        else:
+            console.print(Panel(f"[red]❌ {label} failed: {result.stderr}[/red]",
+                              title=f"{label} Error", border_style="red"))
+        return result.returncode

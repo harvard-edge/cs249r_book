@@ -205,10 +205,16 @@ export default function GauntletPage() {
     // Hydrate scenario/details for the whole session in parallel. When the
     // worker responses come back, swap the questions state to the hydrated
     // copies. Until then the UI shows summaries (empty scenario/details).
-    Promise.all(selected.map(q => getQuestionFullDetail(q.id))).then(results => {
+    // allSettled (not all) so one failed hydration doesn't reject the whole
+    // batch — Promise.all would turn a single rejected fetch into an
+    // unhandled promise rejection here, since there was no .catch().
+    Promise.allSettled(selected.map(q => getQuestionFullDetail(q.id))).then(results => {
       // Fall back to the original summary for any question the Worker couldn't hydrate
       // rather than silently discarding the entire batch when even one fetch fails.
-      const merged = selected.map((s, i) => results[i] ?? s);
+      const merged = selected.map((s, i) => {
+        const r = results[i];
+        return (r.status === 'fulfilled' && r.value) ? r.value : s;
+      });
       setQuestions(merged);
     });
   }, [selectedTrack, selectedLevel, selectedDuration]);
