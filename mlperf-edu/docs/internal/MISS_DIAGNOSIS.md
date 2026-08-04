@@ -113,17 +113,66 @@ better place to run the precision experiment first.
 
 ---
 
+## RESULT: the precision hypothesis is refuted for code generation (2026-08-04)
+
+The experiment was run. `MLPERF_EDU_DEVICE=cpu`, profile `max`, full 164-task
+HumanEval+, backend recorded as `pytorch-cpu`, `device_executed: cpu`.
+
+| Path | Passing | pass@1 |
+|---|---:|---:|
+| CPU, enforced float32 (this run) | 92 / 164 | 0.560976 |
+| MPS host (recorded) | 92 / 164 | 0.560976 |
+| Container (recorded) | 91 / 164 | 0.554878 |
+| Gate (Qwen published) | 94 / 164 | 0.573000 |
+
+The comparison is config-controlled. The CPU run and the committed MPS record
+share `execution_dtype: float32`, `attention_implementation: eager`, greedy
+decoding, the same ChatML prompt format, and the same 2,048-token cap. Only the
+backend differs.
+
+**At identical configuration, CPU and MPS agree exactly.** Not within a task:
+the same 92, the same pass@1 to six decimal places. MPS was already honouring
+float32 end to end, so the suspected precision loss on the committed path does
+not exist and cannot be what costs the two tasks. Generation time was 851.6 s.
+
+One caveat, and it matters. `registry/selection-ledger.yaml` records an
+exploratory MPS sweep in which bfloat16 with SDPA attention and bfloat16 with
+eager attention both scored 92, while a float32 variant scored **93**. That
+float32 entry does not name its attention implementation, so it is most likely
+the SDPA path. If so, the one recoverable task is attributable to *attention
+implementation*, not to precision, and the committed eager configuration is
+what leaves it on the table. That is a cheap, specific follow-up, and it is a
+different experiment from the one just run.
+
+Three consequences:
+
+1. **The code-generation gap is real, and it is not a backend effect.** It is a
+   genuine reproduction gap against Qwen's published number rather than an
+   artifact of laptop execution. What remains to diagnose is narrower than
+   before: attention implementation (see the caveat above), stop rules, or a
+   difference between the pinned model bytes and the checkpoint behind the
+   published figure.
+2. **The shared-cause hypothesis is dead.** Code generation and function
+   calling do not share a precision explanation, because code generation has no
+   precision problem to share. Function calling still runs
+   `pytorch-bfloat16-mps-greedy`, so a precision hypothesis remains live *for
+   that workload alone* and is now the only reason to spend its ~3.5 hours.
+3. **A positive finding for the paper.** Backend independence of task quality,
+   previously measured across six deterministic inference workloads, now also
+   holds for a generative greedy-decoding workload scored by test execution.
+   That is a stronger statement than the determinism study alone supports.
+
+The one real variance is host 92 vs container 91. Both are float32 greedy, so
+that single-task difference is an evaluator-environment effect rather than a
+model effect, and it bounds the run-to-run noise of this workload at about one
+task.
+
 ## What this adds up to
 
 One contract error, now corrected without changing a verdict. One shortfall
-that is probably variance and is not yet established. Three that are probably
-real adapter gaps sharing one plausible cause.
-
-**The single most valuable experiment available is a float32 rerun of code
-generation.** It is affordable at roughly 15 minutes, it tests the hypothesis
-shared by the two largest gaps, and either outcome is publishable: the gap
-closes and laptop precision has a measured quality cost, or it does not and
-three workloads need individual diagnosis.
+that is probably variance and is not yet established. Three real adapter gaps
+that no longer share a common cause, one of which (code generation) is now
+confirmed to be independent of execution backend.
 
 Nothing here justifies moving a target to make a result pass, and nothing here
 has been moved for that reason.
