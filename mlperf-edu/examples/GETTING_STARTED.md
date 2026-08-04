@@ -7,7 +7,8 @@ optimization ideas but never claim canonical benchmark status.
 
 ## Setup
 
-Install the locked development environment from the project directory.
+Follow the quickstart in the [project README](../README.md) first, then add the
+dev extra and get oriented.
 
 ```bash
 uv sync --locked --extra dev
