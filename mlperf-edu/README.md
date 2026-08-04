@@ -124,7 +124,17 @@ target and six are recorded misses.
 The misses are the interesting part. Each one is a place where a laptop
 implementation of a real contract did not reach the published number, recorded
 rather than rescued. The [selection ledger](registry/selection-ledger.yaml)
-gives the authority, rationale, and evidence for every task.
+gives the authority, rationale, and evidence for every task, and
+[MISS_DIAGNOSIS.md](docs/internal/MISS_DIAGNOSIS.md) investigates each shortfall.
+
+Running locally is not the same as carrying committed reference evidence, and
+the difference matters when you cite a number. The retained evidence snapshot
+covers nine workloads across twelve evidence cases, counting training and the
+full, prefill, and decode inference phases of `causal-language-modeling`
+separately. The other five workloads execute their contract end to end but are
+held at a functional stage, so they produce results you can inspect and
+reproduce, not baselines you should quote. Every workload in the suite remains
+experimental until external review.
 
 ## Where To Go Next
 
