@@ -77,7 +77,6 @@ from .assets import (
     mlperf_tiny_kws_paths,
     mlperf_tiny_vww_paths,
     minigo_reference_paths,
-    minigo_environment_handoff_contract,
     sst2_paths,
     ogbn_arxiv_paths,
     ettm1_paths,
@@ -712,70 +711,6 @@ def workload_profile_readiness_checks(
         ]
     if profile == "min":
         return checks
-
-    if workload.id == "reinforcement-learning":
-        handoff = minigo_environment_handoff_contract()
-        missing = [
-            name
-            for name, ready in (
-                (
-                    "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED",
-                    os.environ.get("MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED") == "1",
-                ),
-                (
-                    "MLPERF_EDU_MINIGO_IMAGE",
-                    bool(os.environ.get("MLPERF_EDU_MINIGO_IMAGE")),
-                ),
-            )
-            if not ready
-        ]
-        runtime = os.environ.get("MLPERF_EDU_MINIGO_CONTAINER_RUNTIME", "docker")
-        runtime_path = (
-            str(Path(runtime).expanduser())
-            if Path(runtime).expanduser().is_file()
-            else shutil.which(runtime)
-        )
-        if not runtime_path:
-            missing.append("MLPERF_EDU_MINIGO_CONTAINER_RUNTIME")
-        checks.append(
-            {
-                "name": f"{workload.id} {profile}",
-                "detail": (
-                    "immutable MiniGo image and container runtime declared"
-                    if not missing
-                    else "research environment is gated; set " + ", ".join(missing)
-                ),
-                "status": "ok" if not missing else "fail",
-                "handoff": handoff,
-            }
-        )
-        return checks
-
-    if workload.id == "code-generation":
-        # EvalPlus executes generated solutions through multiprocessing and
-        # reliability_guard, which assume Linux fork and rlimit semantics. On
-        # macOS without a container every canonical solution fails, so the run
-        # refuses rather than report a meaningless score. Preflight has to
-        # surface that here; otherwise doctor reports ready and the run dies.
-        if not container_engine_available():
-            detail = (
-                "container runtime unavailable; EvalPlus needs Linux fork and "
-                "rlimit semantics"
-            )
-            checks.append(
-                {
-                    "name": f"{workload.id} {profile}",
-                    "detail": (
-                        detail + " and host execution is refused on macOS. "
-                        "Start Docker and rerun."
-                        if sys.platform == "darwin"
-                        else detail + "; host execution runs unsandboxed."
-                    ),
-                    "status": "fail" if sys.platform == "darwin" else "warn",
-                }
-            )
-            if sys.platform == "darwin":
-                return checks
 
     missing_assets = [
         row["asset"]

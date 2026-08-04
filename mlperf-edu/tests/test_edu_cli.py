@@ -520,46 +520,20 @@ def test_doctor_does_not_gate_recommendation_on_the_retired_dlrm_environment():
     assert "MLPERF_EDU_CRITEO_TERMS_ACCEPTED" not in result.stdout
 
 
-def test_doctor_json_emits_the_minigo_environment_handoff():
-    """MiniGo is the only workload that still hands off to another environment.
+def test_doctor_emits_no_environment_handoffs():
+    """No workload hands off to another environment any more.
 
-    Recommendation used to appear here too. Its handoff described a 256 GiB
-    Criteo host, which stopped being the contract when the workload moved to
-    NCF on MovieLens-20M and became locally trainable.
+    Recommendation left this set when its contract moved to NCF on
+    MovieLens-20M. Reinforcement learning left it when the PyTorch adapter
+    replaced the CUDA and TensorFlow 1.x MiniGo container. A handoff appearing
+    here again means a workload stopped running locally.
     """
-    reinforcement_result = run_cli(
-        "doctor",
-        "--workload",
-        "reinforcement-learning",
-        "--profile",
-        "max",
-        "--format",
-        "json",
-        env_extra={
-            "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED": "",
-            "MLPERF_EDU_MINIGO_IMAGE": "",
-        },
-    )
-
-    assert reinforcement_result.returncode == 1
-    reinforcement_checks = json.loads(reinforcement_result.stdout)["checks"]
-    reinforcement_handoff = next(
-        check["handoff"] for check in reinforcement_checks if "handoff" in check
-    )
-    assert reinforcement_handoff["workload"] == "reinforcement-learning"
-    assert reinforcement_handoff["required_hardware"]["accelerator"] == "NVIDIA GPU"
-
-    recommendation_result = run_cli(
-        "doctor",
-        "--workload",
-        "recommendation",
-        "--profile",
-        "max",
-        "--format",
-        "json",
-    )
-    recommendation_checks = json.loads(recommendation_result.stdout)["checks"]
-    assert not any("handoff" in check for check in recommendation_checks)
+    for workload_id in ("reinforcement-learning", "recommendation"):
+        result = run_cli(
+            "doctor", "--workload", workload_id, "--profile", "max", "--format", "json"
+        )
+        checks = json.loads(result.stdout)["checks"]
+        assert not any("handoff" in check for check in checks), workload_id
 
 
 def test_list_default_contains_canonical_language_modeling():
@@ -1029,13 +1003,23 @@ def test_show_workload():
     assert "maturity" not in result.stdout
 
 
-def test_show_environment_gated_workload_discloses_next_gate():
-    # Recommendation left this set when its contract moved from DLRM on Criteo
-    # Terabyte to MLPerf v0.5 NCF on MovieLens-20M, which trains on a laptop.
-    result = run_cli("show", "reinforcement-learning")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "environment-gated-quality-conformance" in result.stdout
-    assert "max_next_gate" in result.stdout
+def test_no_workload_is_environment_gated():
+    """Every registered workload executes its contract on the target platform.
+
+    Two workloads used to be gated. Recommendation left when its contract moved
+    from DLRM on Criteo Terabyte to MLPerf v0.5 NCF on MovieLens-20M.
+    Reinforcement learning left when the PyTorch adapter replaced the CUDA and
+    TensorFlow 1.x MiniGo container. A workload reappearing here means the
+    suite stopped being runnable as shipped.
+    """
+    import yaml
+
+    for path in sorted((PROJECT_ROOT / "registry" / "suites").glob("*/*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        contract = spec.get("canonical_max_contract") or {}
+        assert contract.get("execution_status") != (
+            "environment-gated-quality-conformance"
+        ), f"{spec['id']} is environment-gated"
 
 
 def test_info_dataset_shows_asset_dossier():

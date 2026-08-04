@@ -211,14 +211,16 @@ def test_consolidated_language_page_runs_training_before_inference():
     assert "nanogpt-prefill" not in section
 
 
-def test_environment_gated_pages_lead_with_preflight_not_generic_max_run():
-    """Only workloads that cannot execute locally get the preflight treatment.
+def test_no_workload_page_leads_with_a_preflight_instead_of_a_run():
+    """Every workload page can tell the reader to just run it.
 
-    Recommendation left this set when its contract moved from DLRM on Criteo
-    Terabyte, which needed a 256 GB-class runtime, to MLPerf v0.5 NCF on
-    MovieLens-20M, which trains on a laptop. The gated set is derived from the
-    registry rather than hardcoded so a future promotion cannot silently leave a
-    page telling users to run a preflight for a workload that simply runs.
+    This test used to assert the opposite for the gated set: that pages for
+    workloads which could not execute locally led with doctor and a handoff
+    rather than a max run. That set is now empty. Recommendation left it when
+    its contract moved to NCF on MovieLens-20M, and reinforcement learning left
+    it when the PyTorch adapter replaced the MiniGo container. The invariant
+    worth holding is the inverse, so a workload that stops running locally
+    fails here rather than quietly regrowing a preflight page.
     """
     workloads = load_registry(ROOT / "registry")
     gated = [
@@ -227,19 +229,16 @@ def test_environment_gated_pages_lead_with_preflight_not_generic_max_run():
         if (workload.raw.get("canonical_max_contract") or {}).get("execution_status")
         == "environment-gated-quality-conformance"
     ]
-    assert gated, "expected at least one environment-gated workload"
-    assert "recommendation" not in gated
+    assert not gated, f"these workloads no longer run locally: {gated}"
 
-    for workload_id in gated:
-        section = generate_docs.section_how_to_run(workloads[workload_id])
-        target = f"--workload {workload_id}"
-
-        assert "## Current Preflight and Handoff" in section
-        assert f"doctor {target} --profile max --format json" in section
-        assert f"fetch {target} --profile max --dry-run" in section
-        assert f"run {target} --profile min" in section
-        assert f"run {target} --profile max" not in section
-        assert f"run {target} --profile pro" not in section
+    for workload_id, workload in workloads.items():
+        section = generate_docs.section_how_to_run(workload)
+        assert "## Current Preflight and Handoff" not in section, workload_id
+        # Mode-bearing workloads spell the command as
+        # `run --workload X --mode training --profile max`, so match the two
+        # halves rather than one fixed string.
+        assert f"run --workload {workload_id}" in section, workload_id
+        assert "--profile max" in section, workload_id
 
 
 def test_site_install_commands_use_the_source_checkout(generated_outputs):

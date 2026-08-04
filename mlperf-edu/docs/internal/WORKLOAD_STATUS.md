@@ -14,7 +14,7 @@ record graded under a superseded gate cannot report its own result.
 | Workloads registered | 14 |
 | Quality contract passed | 8 |
 | Target missed, recorded | 5 |
-| Blocked on a local backend | 1 |
+| Blocked on a local backend | 0 |
 | Configuration defects | 0 |
 | Timing repeatability established | 6 |
 
@@ -37,7 +37,7 @@ gates a quality decision.
 | `information-retrieval` | ok | **PASS** | 0.6072 | ≥ 0.6072 | verified (5) | none |
 | `keyword-spotting` | ok | **PASS** | 0.9020 | ≥ 0.9000 | verified (5) | none |
 | `recommendation` | ok | **MISS*** | 0.6232 | ≥ 0.6350 | n/a | import result into evidence index |
-| `reinforcement-learning` | ok | **BLOCKED** | — | — | n/a | local backend required |
+| `reinforcement-learning` | ok | **NOT RUN** | — | — | n/a | run the max contract |
 | `text-classification` | ok | **PASS** | 0.9106 | ≥ 0.9106 | verified (5) | none |
 | `time-series-forecasting` | ok | **MISS** | 0.2924 ⚠ | ≤ 0.2900 | not established (1) | target gap, investigated |
 | `visual-wake-words` | ok | **PASS** | 0.8510 | ≥ 0.8000 | verified (5) | none |
@@ -77,5 +77,4 @@ One pass through every timed case in the evidence index is about 62.0 min of com
 
 ## What Is Missing
 
-- `reinforcement-learning` cannot run its contract locally. Supply a reviewed immutable CUDA/TensorFlow 1.x runtime image and execute the resumable pinned MiniGo quality loop on a suitable NVIDIA system.
 - 4 audited misses are recorded in the registry but not imported into the evidence index, so they carry digests and runtime without appearing as cases.

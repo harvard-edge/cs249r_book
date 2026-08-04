@@ -155,11 +155,14 @@ def test_all_quality_contracts_classify_the_target_kind():
 
 def test_functional_stage_workloads_separate_probe_from_quality_contract():
     workloads = load_registry()
+    # Reinforcement learning is absent on purpose. It used to declare
+    # environment-gated-quality-conformance because the only runner was a
+    # CUDA and TensorFlow 1.x container. The PyTorch adapter executes the
+    # contract locally, so it no longer carries an execution_status at all.
     expected_status = {
         "code-generation": "quality-audited-target-not-met",
         "function-calling": "quality-audited-target-not-met",
         "image-generation": "quality-audited-target-not-met",
-        "reinforcement-learning": "environment-gated-quality-conformance",
     }
 
     for workload_id, status in expected_status.items():
@@ -517,7 +520,7 @@ def test_canonical_workloads_declare_exact_runners():
         "reinforcement-learning": (
             "reinforcement",
             "mlperf.runners.functional_setup:run_reinforcement_learning_min",
-            "mlperf.runners.reinforcement:run_reinforcement_learning_max",
+            "mlperf.runners.minigo:run_reinforcement_learning_max",
         ),
     }
 
@@ -561,7 +564,13 @@ def test_functional_spiral_workloads_fail_closed_for_promotion():
         assert spiral["repeatability_verified"] is False
         assert spiral["promotion_ready"] is False
         assert spiral["next_gate"]
-        assert workload.raw["canonical_max_contract"]["execution_status"]
+        # execution_status marks a contract that cannot complete as written on
+        # the target platform. Reinforcement learning shed it when the PyTorch
+        # adapter replaced the container, so it is no longer required of every
+        # functional-spiral workload, only of those still blocked.
+        contract = workload.raw["canonical_max_contract"]
+        if workload_id != "reinforcement-learning":
+            assert contract["execution_status"]
 
 
 def test_retrieval_declares_one_complete_evaluation_protocol():
