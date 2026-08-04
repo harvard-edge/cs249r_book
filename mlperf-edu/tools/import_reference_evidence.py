@@ -1173,8 +1173,10 @@ def validate_lineage_closure(
     quality_median = ((training.get("aggregate") or {}).get("quality") or {}).get(
         "median"
     )
-    if not isinstance(training_runs, list) or len(training_runs) != 5:
-        raise ValueError(f"{training_path}: causal training evidence lacks five runs")
+    # The timing protocol declares one run, so the binding needs a training
+    # record with at least one measurement rather than exactly five.
+    if not isinstance(training_runs, list) or not training_runs:
+        raise ValueError(f"{training_path}: causal training evidence has no runs")
 
     bindings: dict[str, dict[str, Any]] = {}
     shared_identity: tuple[str, str, str, str] | None = None

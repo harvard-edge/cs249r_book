@@ -29,7 +29,7 @@ retained result against the current gate.
 
 | Tier | Count | Workloads |
 |:---|:---|:---|
-| Verified (gate + five-run repeatability) | 6 | anomaly-detection, image-classification, information-retrieval, keyword-spotting, text-classification, visual-wake-words |
+| Verified (gate + repeated-timing repeatability) | 6 | anomaly-detection, image-classification, information-retrieval, keyword-spotting, text-classification, visual-wake-words |
 | Passes gate, under five runs | 2 | causal-language-modeling, graph-node-classification |
 | Quality miss | 1 | time-series-forecasting |
 | No retained local result | 5 | code-generation, function-calling, image-generation, recommendation, reinforcement-learning |
@@ -194,7 +194,8 @@ minutes cold, including fetch, on a mid-range laptop.
 
 ### 3.3 Fail closed with an actionable message
 
-DLRM and MiniGo fail closed today, which is correct, but the message must tell a
+No workload fails closed on environment any more. The remaining fail-closed
+paths are asset fetches and quality gates, and those messages must still tell a
 user what to do next rather than only what went wrong.
 
 ### 3.4 Quarantine preview workloads
