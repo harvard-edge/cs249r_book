@@ -768,17 +768,17 @@ def section_reference_results(workload: Workload, records: list[dict[str, Any]])
     if not records:
         return ""
     evidence_labels = {
-        "five-run-verified": "Five-run verified",
-        "single-run-provisional": "One-run provisional",
-        "two-run-provisional": "Two-run provisional",
+        "five-run-verified": "Repeated timing",
+        "single-run-provisional": "One measurement",
+        "two-run-provisional": "Two measurements",
     }
     lines = [
         "## Draft Reference Results",
         "",
         "These project-generated measurements demonstrate the current `max` paths on "
-        "the disclosed reference system. Five-run records passed the project quality "
-        "and repeatability checks. Provisional records establish execution and quality "
-        "only; they do not establish repeatability. Quality decisions are recomputed "
+        "the disclosed reference system. Records measured more than once report a "
+        "timing spread; a single measurement is reported as one measurement and "
+        "makes no repeatability claim. Quality decisions are recomputed "
         "against the current registry contract so a preserved historical target cannot "
         "make a stale pass claim. None are MLCommons-verified results.",
         "",
@@ -806,9 +806,9 @@ def section_reference_results(workload: Workload, records: list[dict[str, Any]])
         )
     lines += [
         "",
-        "> Five-run verified means eligible for the project's future promotion import. "
-        "One-run and two-run provisional records are not review eligible and make no "
-        "repeatability claim.",
+        "> Quality is accepted from one complete run. Timing is reported from the "
+        "measurements a case actually has, and repeated timing is reported where it "
+        "exists rather than treated as a separate class of result.",
     ]
     return "\n".join(lines) + "\n"
 

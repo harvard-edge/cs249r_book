@@ -9,7 +9,7 @@ evidence that would answer it, because the point of this exercise is to decide
 what to measure next, not to collect opinions.
 
 Snapshot reviewed: 9 score-bearing cases (8 pass, 1 miss), 12 evidence cases
-(6 five-run verified, 6 provisional), 62.0 minutes for one score-bearing pass,
+(6 repeated-timing, 6 provisional), 62.0 minutes for one score-bearing pass,
 14 workloads across 7 suites, all measured on one Apple-silicon laptop.
 
 ---

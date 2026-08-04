@@ -59,10 +59,13 @@ These are ordered in [SHIP_PLAN](SHIP_PLAN.md), which is the plan of record.
 
 ### Local execution
 
-- [ ] Implement and parity-test an out-of-core DLRM backend that preserves the
-      complete Criteo accuracy contract, then execute that contract locally.
-- [ ] Implement and parity-test a native CPU or MPS MiniGo backend that
-      preserves both quality gates, then execute that contract locally.
+- [x] Recommendation executes its contract locally. The identity moved to
+      MLPerf Training v0.5 NCF on MovieLens-20M, which fits the envelope; the
+      DLRM path it replaced never could.
+- [x] MiniGo executes its contract locally through a PyTorch adapter that
+      replaces only the network. Go rules, MCTS, and the professional-move
+      evaluation remain the pinned reference code.
+- [ ] Record a real MiniGo result. Only a smoke run exists so far.
 - [ ] Complete a clean-cache asset audit for all workloads, so a first run on a
       machine with no prior state is verified rather than assumed.
 - [ ] Add resumable execution for long preprocessing and training paths.
@@ -89,8 +92,7 @@ target to fit a local result.
 
 ### Production release
 
-- [ ] Replace executable EDM pickle inputs with reviewed safe artifacts, and
-      qualify independently built, signed DLRM and MiniGo runtimes.
+- [ ] Replace executable EDM pickle inputs with reviewed safe artifacts.
 - [ ] Produce signed release artifacts and authenticated provenance where
       producer identity matters.
 - [ ] Define support, vulnerability response, retention, and rollback

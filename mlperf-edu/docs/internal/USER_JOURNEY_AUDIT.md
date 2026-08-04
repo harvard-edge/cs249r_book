@@ -1,5 +1,16 @@
 # MLPerf EDU User Journey Audit
 
+> **Superseded in part, 2026-08-04.** Recommendation moved from DLRM on Criteo
+> Terabyte to MLPerf Training v0.5 NCF on MovieLens-20M, reinforcement
+> learning moved from a CUDA and TensorFlow 1.x container to a PyTorch
+> adapter, and the timing protocol dropped from five runs to one. No
+> workload is environment-gated. Statements below about gated execution,
+> licensed Criteo data, or five-run promotion describe the state at the
+> time of the audit and are retained as a record rather than corrected.
+> Current state: [WORKLOAD_STATUS.md](WORKLOAD_STATUS.md) and
+> [MISS_DIAGNOSIS.md](MISS_DIAGNOSIS.md).
+
+
 Last updated on July 18, 2026. This checklist follows the product from a fresh
 source checkout through setup, benchmark execution, result interpretation,
 classroom submission, and research use. A checked item must have direct command
