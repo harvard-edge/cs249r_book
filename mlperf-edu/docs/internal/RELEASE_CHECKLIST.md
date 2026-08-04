@@ -21,7 +21,7 @@ and narrow smoke checks do not prove a broad release claim.
 - [x] `time-series-forecasting` uses the official PatchTST ETTm1 recipe and split.
 - [x] `code-generation` has a complete HumanEval+ runner and a target-missing 91-of-164 result.
 - [x] `function-calling` has a complete 1,150-case BFCL runner; the current full artifact remains pending.
-- [x] `recommendation` has a complete historical DLRM accuracy adapter that fails closed without its licensed data, checkpoint, runtime, and memory envelope.
+- [x] `recommendation` runs the MLPerf Training v0.5 NCF contract on MovieLens-20M locally in roughly half an hour and records a measured miss against the published 0.635 HR@10.
 - [x] `image-generation` has a complete 50,000-image EDM FID runner; the current full artifact remains pending.
 - [x] `reinforcement-learning` has a complete resumable MiniGo quality loop that fails closed without its reviewed legacy GPU environment.
 - [x] Modes, phases, configurations, scenarios, and profiles are separate taxonomy axes.
@@ -35,22 +35,22 @@ workloads and the following twelve evidence cases. The five quality-conformance
 workloads cannot enter this closure until complete results pass their
 authoritative gates and the importer is expanded deliberately.
 
-- [x] `image-classification__max__inference` — five-run verified
-- [x] `keyword-spotting__max__inference` — five-run verified
-- [x] `anomaly-detection__max__inference` — five-run verified
-- [x] `visual-wake-words__max__inference` — five-run verified
+- [x] `image-classification__max__inference` — repeated-timing
+- [x] `keyword-spotting__max__inference` — repeated-timing
+- [x] `anomaly-detection__max__inference` — repeated-timing
+- [x] `visual-wake-words__max__inference` — repeated-timing
 - [x] `causal-language-modeling__max__training` — two-run provisional
 - [x] `causal-language-modeling__max__inference__full` — one-run provisional
 - [x] `causal-language-modeling__max__inference__prefill` — one-run provisional
 - [x] `causal-language-modeling__max__inference__decode` — one-run provisional
-- [x] `text-classification__max__inference` — five-run verified
-- [x] `information-retrieval__max__inference` — five-run verified
+- [x] `text-classification__max__inference` — repeated-timing
+- [x] `information-retrieval__max__inference` — repeated-timing
 - [x] `graph-node-classification__max__training` — one-run provisional
 - [x] `time-series-forecasting__max__training` — one-run provisional
 
 These boxes mean that class-labeled draft evidence exists for every case. They
 do not erase the evidence-class labels or promote a provisional record. The authoritative draft closure is the
-twelve-entry `provisional_results/index.json`, with six five-run verified
+twelve-entry `provisional_results/index.json`, with six repeated-timing
 records and six provisional records. Full promotion still requires a complete
 twelve-entry `reference_results/index.json` whose summaries all pass
 acceptance, repeatability, digest, source-lock, provenance, and lineage
@@ -68,17 +68,17 @@ crossed a battery-to-AC transition.
 
 | Evidence case | Device | Observed result | Canonical gate | Quality margin | Provenance | Promotion state |
 |---|---|---:|---:|---:|---|---|
-| `image-classification__max__inference` | CPU | 0.870000 top-1 | >= 0.850000 | +0.020000 | verified | Clean current-source five-run sweep retained; promotion import awaits portfolio closure |
+| `image-classification__max__inference` | CPU | 0.870000 top-1 | >= 0.850000 | +0.020000 | verified | Clean current-source repeated-timing sweep retained; promotion import awaits portfolio closure |
 | `keyword-spotting__max__inference` | MPS | 0.902000 top-1 | >= 0.900000 | +0.002000 | verified | Adapter is quality-preserving but nonidentical; promotion is blocked |
-| `anomaly-detection__max__inference` | MPS | 0.902910 ROC AUC | >= 0.850000 | +0.052910 | verified | Clean current-source five-run sweep retained; strongest converted-model metric reproduction |
-| `visual-wake-words__max__inference` | MPS | 0.851000 top-1 | >= 0.800000 | +0.051000 | verified | Clean current-source five-run sweep retained; exact top-1 parity passes all three audited LiteRT resolvers |
-| `causal-language-modeling__max__training` | MPS | 1.458786 loss | <= 1.469700 | +0.010914 | verified | Three diagnostic runs now pass; clean five-run timing campaign required |
-| `causal-language-modeling__max__inference__full` | CPU | 884.48 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean five-run campaign required |
-| `causal-language-modeling__max__inference__prefill` | CPU | 30,280.26 prefill tokens/s | functional gate | pass | verified with training lineage | Clean five-run campaign required |
-| `causal-language-modeling__max__inference__decode` | CPU | 879.88 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean five-run campaign required |
-| `text-classification__max__inference` | MPS | 0.910550475 accuracy | >= 0.910550459 | +0.000000016 | verified | Clean current-source five-run sweep retained; exact pinned-checkpoint conformance gate |
-| `information-retrieval__max__inference` | MPS | 0.607168410 nDCG@10 | >= 0.607168410 | 0.000000000 | verified | Clean current-source five-run sweep retained; exact published-example conformance gate |
-| `graph-node-classification__max__training` | MPS | 0.722342 accuracy | >= 0.717400 | +0.004942 before tolerance | verified | Clean five-run accuracy and timing distribution required |
+| `anomaly-detection__max__inference` | MPS | 0.902910 ROC AUC | >= 0.850000 | +0.052910 | verified | Clean current-source repeated-timing sweep retained; strongest converted-model metric reproduction |
+| `visual-wake-words__max__inference` | MPS | 0.851000 top-1 | >= 0.800000 | +0.051000 | verified | Clean current-source repeated-timing sweep retained; exact top-1 parity passes all three audited LiteRT resolvers |
+| `causal-language-modeling__max__training` | MPS | 1.458786 loss | <= 1.469700 | +0.010914 | verified | Three diagnostic runs now pass; clean repeated timing campaign required |
+| `causal-language-modeling__max__inference__full` | CPU | 884.48 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean repeated-timing campaign required |
+| `causal-language-modeling__max__inference__prefill` | CPU | 30,280.26 prefill tokens/s | functional gate | pass | verified with training lineage | Clean repeated-timing campaign required |
+| `causal-language-modeling__max__inference__decode` | CPU | 879.88 output tokens/s and 64 decode steps | functional gate | pass | verified with training lineage | Clean repeated-timing campaign required |
+| `text-classification__max__inference` | MPS | 0.910550475 accuracy | >= 0.910550459 | +0.000000016 | verified | Clean current-source repeated-timing sweep retained; exact pinned-checkpoint conformance gate |
+| `information-retrieval__max__inference` | MPS | 0.607168410 nDCG@10 | >= 0.607168410 | 0.000000000 | verified | Clean current-source repeated-timing sweep retained; exact published-example conformance gate |
+| `graph-node-classification__max__training` | MPS | 0.722342 accuracy | >= 0.717400 | +0.004942 before tolerance | verified | Clean repeated-timing accuracy and timing distribution required |
 | `time-series-forecasting__max__training` | MPS | 0.292393 MSE | <= 0.290000 | -0.002393 | verified | Historical artifact no longer passes after removing the unsupported derived gate; investigate the quality gap before rerunning |
 
 Diagnostic artifacts are under
@@ -94,7 +94,7 @@ seconds across a battery-to-AC transition.
 
 Five short cases completed methodology-valid promotion-candidate sweeps on
 2026-07-17 against clean Git revision
-`f9e0c61da296d3b92a4705503d4bc6988c16c01c`. Each case ran in five fresh
+`f9e0c61da296d3b92a4705503d4bc6988c16c01c`. Each case ran in repeated fresh
 processes on AC power with Low Power Mode disabled, the canonical seed of 42,
 and the registry-defined inter-execution cooldown. Every run passed its quality
 gate, and every timing coefficient of variation stayed below the 5% limit.

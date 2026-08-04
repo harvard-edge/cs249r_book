@@ -1,5 +1,16 @@
 # MLPerf EDU Independent Audit
 
+> **Superseded in part, 2026-08-04.** Recommendation moved from DLRM on Criteo
+> Terabyte to MLPerf Training v0.5 NCF on MovieLens-20M, reinforcement
+> learning moved from a CUDA and TensorFlow 1.x container to a PyTorch
+> adapter, and the timing protocol dropped from five runs to one. No
+> workload is environment-gated. Statements below about gated execution,
+> licensed Criteo data, or five-run promotion describe the state at the
+> time of the audit and are retained as a record rather than corrected.
+> Current state: [WORKLOAD_STATUS.md](WORKLOAD_STATUS.md) and
+> [MISS_DIAGNOSIS.md](MISS_DIAGNOSIS.md).
+
+
 ## Verdict
 
 The fourteen-workload portfolio is coherent and covers distinct systems

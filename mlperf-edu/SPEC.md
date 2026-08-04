@@ -70,7 +70,7 @@ ledger with explicit reasons.
 | `time-series-forecasting` | timeseries | PatchTST | official ETTm1 training and evaluation | long-context attention and patch-based sequence processing |
 | `code-generation` | language | Qwen and EvalPlus | complete pinned HumanEval+ generation and sandboxed evaluation; executed, target not met | variable-length autoregressive decode and sandboxed evaluation |
 | `function-calling` | language | BFCL and Qwen | complete 1,150-case BFCL AST evaluation; executed, target not met | schema-heavy prefill and structured decode |
-| `recommendation` | recommendation | Meta DLRM | dense-sparse functional probe; authoritative Criteo contract not executed locally | embedding lookup and dense-sparse interaction |
+| `recommendation` | recommendation | MLPerf Training v0.5 NCF | trains locally on MovieLens-20M; published 0.635 HR@10 target, recorded as a miss | embedding lookup and dense interaction |
 | `image-generation` | vision | NVIDIA EDM | complete three-trial 50,000-image FID protocol; executed, target not met | repeated denoiser execution and scheduler overhead |
 | `reinforcement-learning` | reinforcement | MLPerf Training MiniGo | policy-value self-play probe; authoritative MiniGo contract not executed locally | search-coupled inference and dynamic training data |
 

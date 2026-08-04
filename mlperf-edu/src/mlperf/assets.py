@@ -761,25 +761,25 @@ ASSET_DOSSIERS: dict[str, AssetDossier] = {
         expected_download_bytes=45_100_000,
         hash_policy="The GitHub source archive and the twelve question and possible-answer files are pinned by SHA-256.",
     ),
-    "criteo-terabyte": AssetDossier(
-        id="criteo-terabyte",
+    "movielens-20m": AssetDossier(
+        id="movielens-20m",
         asset_type="dataset",
-        display_name="Criteo Terabyte click logs",
-        source_url="https://ailab.criteo.com/download-criteo-1tb-click-logs-dataset/",
-        citation="Criteo Terabyte Click Logs and MLPerf Inference v1.0.1 DLRM.",
-        license="Criteo dataset terms require explicit acceptance",
+        display_name="MovieLens 20M",
+        source_url="https://files.grouplens.org/datasets/movielens/ml-20m.zip",
+        citation="Harper and Konstan, The MovieLens Datasets: History and Context, ACM TiiS 2015.",
+        license="GroupLens research terms permit research use with citation and prohibit redistribution without permission",
         license_spdx=None,
-        license_status="external-terms-acceptance-required",
-        terms_summary="The official DLRM accuracy run uses the unshuffled day 23 data and the 40-million-entry float32 checkpoint.",
-        public_result_use="MLPerf Inference v1.0.1 quality candidate after terms acceptance",
-        public_release_status="fetch-instructions-only",
-        public_release_policy="The user must obtain Criteo data under its upstream terms. MLPerf EDU must not download or redistribute it automatically.",
-        release_next_step="Document local Criteo and checkpoint paths, verify the official hashes, and retain terms acceptance outside result packages.",
-        license_evidence_url="https://ailab.criteo.com/download-criteo-1tb-click-logs-dataset/",
-        attribution="Criteo and MLCommons DLRM contributors.",
-        version="mlperf-inference-v1.0.1-day23",
-        expected_download_bytes=343_000_000_000,
-        hash_policy="Validate the official source files and record derived day-23 accuracy-set hashes locally without redistributing the data.",
+        license_status="research-use-with-citation",
+        terms_summary="MLPerf Training v0.5 trains NCF on the 20-million-rating implicit-feedback set, holding out each user's last interaction and scoring it against 999 sampled negatives.",
+        public_result_use="MLPerf Training v0.5 recommendation quality candidate",
+        public_release_status="fetch-only",
+        public_release_policy="Fetch the pinned archive from GroupLens. Do not redistribute the data inside result packages.",
+        release_next_step="Record the GroupLens citation requirement in any published result package.",
+        license_evidence_url="https://grouplens.org/datasets/movielens/20m/",
+        attribution="GroupLens Research, University of Minnesota.",
+        version="ml-20m",
+        expected_download_bytes=198_702_078,
+        hash_policy="Pin the archive SHA-256 and derive the ratings CSV from it rather than hashing extracted files.",
     ),
     "minigo-self-play": AssetDossier(
         id="minigo-self-play",
@@ -1911,6 +1911,66 @@ def ensure_ogbn_arxiv(
         sha256=f"sha256:{OGBN_ARXIV_ZIP_SHA256}",
         n_bytes=archive.stat().st_size,
         source=OGBN_ARXIV_URL,
+    )
+
+
+MOVIELENS_20M_URL = "https://files.grouplens.org/datasets/movielens/ml-20m.zip"
+MOVIELENS_20M_SHA256 = (
+    "96f243c338a8665f6bcc89c53edf6ee39162a846940de6b7c8c48aeada765ff3"
+)
+
+
+def movielens_20m_paths(root: Path | None = None) -> dict[str, Path]:
+    base = (root or asset_cache_root()) / "movielens-20m"
+    return {
+        "root": base,
+        "archive": base / "ml-20m.zip",
+        "ratings": base / "ml-20m" / "ratings.csv",
+    }
+
+
+def ensure_movielens_20m(
+    *, download: bool = True, root: Path | None = None
+) -> DatasetAsset:
+    """Fetch and verify the official MovieLens-20M archive.
+
+    The MLPerf Training v0.5 recommendation benchmark is defined on this exact
+    release, so the archive digest is pinned rather than the extracted files.
+    """
+    paths = movielens_20m_paths(root)
+    base = paths["root"]
+    archive = paths["archive"]
+    ratings = paths["ratings"]
+    base.mkdir(parents=True, exist_ok=True)
+
+    if not archive.is_file() or sha256_file(archive) != MOVIELENS_20M_SHA256:
+        if not download:
+            raise FileNotFoundError(
+                f"MovieLens-20M is missing at {archive}. "
+                "Run `mlperf fetch --workload recommendation --profile max`."
+            )
+        tmp = archive.with_suffix(".download")
+        _download(MOVIELENS_20M_URL, tmp)
+        if sha256_file(tmp) != MOVIELENS_20M_SHA256:
+            tmp.unlink(missing_ok=True)
+            raise ValueError("MovieLens-20M archive SHA-256 does not match the pinned value")
+        tmp.replace(archive)
+
+    if not ratings.is_file():
+        import zipfile
+
+        with zipfile.ZipFile(archive) as handle:
+            handle.extract("ml-20m/ratings.csv", path=base)
+    if not ratings.is_file():
+        raise FileNotFoundError("MovieLens-20M ratings.csv was not extracted")
+
+    return DatasetAsset(
+        name="movielens-20m",
+        root=base,
+        files=(archive,),
+        sha256=f"sha256:{MOVIELENS_20M_SHA256}",
+        n_bytes=archive.stat().st_size,
+        source=MOVIELENS_20M_URL,
     )
 
 

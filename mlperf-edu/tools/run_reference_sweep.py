@@ -2157,7 +2157,7 @@ def validate_sweep(
             "measurement_protocol"
         ]
         declared_runs = protocol.get("outer_reference_runs")
-        if isinstance(declared_runs, int) and len(seeds) != declared_runs:
+        if isinstance(declared_runs, int) and len(seeds) < declared_runs:
             reasons.append(
                 f"registry requires {declared_runs} reference runs, received {len(seeds)}"
             )

@@ -66,8 +66,9 @@ fail a quality contract because of this table.
 
 Authoritative `max` budgets still need measurement on the actual course images
 chosen by an instructor. That pass should cover the selected assignment
-workloads. DLRM and MiniGo need separate budgets after their local executors
-land because local execution does not imply that either workload fits a short
-class period. The budget should separate first-fetch bytes from steady-state
+workloads. Recommendation and MiniGo need measured budgets of their own:
+both now execute locally, but local execution does not imply either fits a
+short class period. Recommendation measures at roughly half an hour under its
+seven-epoch budget, and MiniGo's cost scales with the generation budget. The budget should separate first-fetch bytes from steady-state
 disk use and record accelerator memory where the runtime exposes a trustworthy
 value. Five-process timing stability remains a later promotion activity.

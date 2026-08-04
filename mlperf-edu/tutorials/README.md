@@ -6,8 +6,9 @@ not included in the current release.
 
 ## Setup
 
-Install the tutorial dependency and launch the marimo notebook from the
-`mlperf-edu` directory.
+Start from the quickstart in the [project README](../README.md), then add the
+tutorial dependency and launch the marimo notebook from the `mlperf-edu`
+directory.
 
 ```bash
 uv sync --extra tutorial
