@@ -495,7 +495,13 @@ def test_doctor_json_marks_bad_selection_as_failure():
     assert data["selected_workloads"] == []
 
 
-def test_doctor_fails_closed_on_missing_recommendation_max_environment():
+def test_doctor_does_not_gate_recommendation_on_the_retired_dlrm_environment():
+    """Recommendation trains locally since the contract moved to NCF.
+
+    The preflight used to demand Criteo terms acceptance and DLRM paths, so it
+    reported a gated environment for a workload that runs, and told the reader
+    to set variables nothing consults. Preflight and runner must agree.
+    """
     result = run_cli(
         "doctor",
         "--workload",
@@ -509,26 +515,18 @@ def test_doctor_fails_closed_on_missing_recommendation_max_environment():
         },
     )
 
-    assert result.returncode == 1
-    assert "research environment is gated" in result.stdout
-    assert "MLPERF_EDU_DLRM_DATA_DIR" in result.stdout
+    assert "research environment is gated" not in result.stdout
+    assert "MLPERF_EDU_DLRM_DATA_DIR" not in result.stdout
+    assert "MLPERF_EDU_CRITEO_TERMS_ACCEPTED" not in result.stdout
 
 
-def test_doctor_json_emits_external_environment_handoffs():
-    recommendation_result = run_cli(
-        "doctor",
-        "--workload",
-        "recommendation",
-        "--profile",
-        "max",
-        "--format",
-        "json",
-        env_extra={
-            "MLPERF_EDU_CRITEO_TERMS_ACCEPTED": "",
-            "MLPERF_EDU_DLRM_DATA_DIR": "",
-            "MLPERF_EDU_DLRM_CHECKPOINT": "",
-        },
-    )
+def test_doctor_json_emits_the_minigo_environment_handoff():
+    """MiniGo is the only workload that still hands off to another environment.
+
+    Recommendation used to appear here too. Its handoff described a 256 GiB
+    Criteo host, which stopped being the contract when the workload moved to
+    NCF on MovieLens-20M and became locally trainable.
+    """
     reinforcement_result = run_cli(
         "doctor",
         "--workload",
@@ -543,17 +541,6 @@ def test_doctor_json_emits_external_environment_handoffs():
         },
     )
 
-    assert recommendation_result.returncode == 1
-    recommendation_checks = json.loads(recommendation_result.stdout)["checks"]
-    recommendation_handoff = next(
-        check["handoff"] for check in recommendation_checks if "handoff" in check
-    )
-    assert recommendation_handoff["workload"] == "recommendation"
-    assert (
-        recommendation_handoff["required_hardware"]["recommended_host_memory_gib"]
-        == 256
-    )
-
     assert reinforcement_result.returncode == 1
     reinforcement_checks = json.loads(reinforcement_result.stdout)["checks"]
     reinforcement_handoff = next(
@@ -561,6 +548,18 @@ def test_doctor_json_emits_external_environment_handoffs():
     )
     assert reinforcement_handoff["workload"] == "reinforcement-learning"
     assert reinforcement_handoff["required_hardware"]["accelerator"] == "NVIDIA GPU"
+
+    recommendation_result = run_cli(
+        "doctor",
+        "--workload",
+        "recommendation",
+        "--profile",
+        "max",
+        "--format",
+        "json",
+    )
+    recommendation_checks = json.loads(recommendation_result.stdout)["checks"]
+    assert not any("handoff" in check for check in recommendation_checks)
 
 
 def test_list_default_contains_canonical_language_modeling():
@@ -2490,3 +2489,18 @@ def test_anomaly_detection_min_run_writes_verifiable_artifacts(tmp_path):
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
+
+
+def test_container_probe_matches_the_code_generation_runner():
+    """The preflight probe is duplicated on purpose; keep the two in step.
+
+    Importing the runner into the CLI would pull code_generation.py into the
+    measurement source-lock closure, and preflight is not a measurement input.
+    The cost of that separation is two definitions, so this pins them together:
+    if they ever disagree, doctor and the runner would give a user opposite
+    answers about whether a valid code-generation run is possible.
+    """
+    from mlperf import edu_cli
+    from mlperf.runners import code_generation
+
+    assert edu_cli.container_engine_available() == code_generation.docker_available()

@@ -57,7 +57,6 @@ from .assets import (
     cifar10_paths,
     edm_cifar10_paths,
     dlrm_reference_paths,
-    dlrm_environment_handoff_contract,
     ensure_bfcl_non_live_ast,
     ensure_cifar10,
     ensure_edm_cifar10,
@@ -717,62 +716,6 @@ def workload_profile_readiness_checks(
     if profile == "min":
         return checks
 
-    if workload.id == "recommendation":
-        handoff = dlrm_environment_handoff_contract()
-        missing = [
-            name
-            for name, ready in (
-                (
-                    "MLPERF_EDU_CRITEO_TERMS_ACCEPTED",
-                    os.environ.get("MLPERF_EDU_CRITEO_TERMS_ACCEPTED") == "1",
-                ),
-                (
-                    "MLPERF_EDU_DLRM_DATA_DIR",
-                    bool(os.environ.get("MLPERF_EDU_DLRM_DATA_DIR")),
-                ),
-                (
-                    "MLPERF_EDU_DLRM_CHECKPOINT",
-                    bool(os.environ.get("MLPERF_EDU_DLRM_CHECKPOINT")),
-                ),
-            )
-            if not ready
-        ]
-        if missing:
-            checks.append(
-                {
-                    "name": f"{workload.id} {profile}",
-                    "detail": (
-                        "research environment is gated; set " + ", ".join(missing)
-                    ),
-                    "status": "fail",
-                    "handoff": handoff,
-                }
-            )
-            return checks
-        data_dir = Path(os.environ["MLPERF_EDU_DLRM_DATA_DIR"]).expanduser()
-        checkpoint = Path(os.environ["MLPERF_EDU_DLRM_CHECKPOINT"]).expanduser()
-        missing_paths = [
-            label
-            for label, present in (
-                ("Criteo data directory", data_dir.is_dir()),
-                ("DLRM checkpoint", checkpoint.is_file()),
-            )
-            if not present
-        ]
-        checks.append(
-            {
-                "name": f"{workload.id} {profile}",
-                "detail": (
-                    "prepared licensed data and checkpoint found"
-                    if not missing_paths
-                    else "missing " + ", ".join(missing_paths)
-                ),
-                "status": "ok" if not missing_paths else "fail",
-                "handoff": handoff,
-            }
-        )
-        return checks
-
     if workload.id == "reinforcement-learning":
         handoff = minigo_environment_handoff_contract()
         missing = [
@@ -811,6 +754,32 @@ def workload_profile_readiness_checks(
         )
         return checks
 
+    if workload.id == "code-generation":
+        # EvalPlus executes generated solutions through multiprocessing and
+        # reliability_guard, which assume Linux fork and rlimit semantics. On
+        # macOS without a container every canonical solution fails, so the run
+        # refuses rather than report a meaningless score. Preflight has to
+        # surface that here; otherwise doctor reports ready and the run dies.
+        if not container_engine_available():
+            detail = (
+                "container runtime unavailable; EvalPlus needs Linux fork and "
+                "rlimit semantics"
+            )
+            checks.append(
+                {
+                    "name": f"{workload.id} {profile}",
+                    "detail": (
+                        detail + " and host execution is refused on macOS. "
+                        "Start Docker and rerun."
+                        if sys.platform == "darwin"
+                        else detail + "; host execution runs unsandboxed."
+                    ),
+                    "status": "fail" if sys.platform == "darwin" else "warn",
+                }
+            )
+            if sys.platform == "darwin":
+                return checks
+
     missing_assets = [
         row["asset"]
         for row in cache_asset_rows(workload)
@@ -829,6 +798,26 @@ def workload_profile_readiness_checks(
             }
         )
     return checks
+
+
+def container_engine_available() -> bool:
+    """True when a Docker engine is reachable.
+
+    Deliberately duplicated from the code-generation runner rather than
+    imported. Importing the runner would add it to the measurement source-lock
+    closure, and preflight is not a measurement input. The duplication is held
+    in step by a test that asserts both probes agree.
+    """
+    try:
+        subprocess.run(
+            ["docker", "info", "--format", "{{.ServerVersion}}"],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+    except (FileNotFoundError, subprocess.CalledProcessError):
+        return False
+    return True
 
 
 def collect_doctor_report(args: argparse.Namespace) -> dict[str, Any]:
