@@ -13,7 +13,7 @@ record graded under a superseded gate cannot report its own result.
 |:---|:---|
 | Workloads registered | 14 |
 | Quality contract passed | 8 |
-| Target missed, recorded | 5 |
+| Target missed, recorded | 6 |
 | Blocked on a local backend | 0 |
 | Configuration defects | 0 |
 | Cases with repeated timing | 1 |
@@ -37,7 +37,7 @@ gates a quality decision.
 | `information-retrieval` | ok | **PASS** | 0.6072 | ≥ 0.6072 | 5 run(s) | none |
 | `keyword-spotting` | ok | **PASS** | 0.9020 | ≥ 0.9000 | 5 run(s) | none |
 | `recommendation` | ok | **MISS*** | 0.6232 | ≥ 0.6350 | n/a | import result into evidence index |
-| `reinforcement-learning` | ok | **NOT RUN** | — | — | n/a | run the max contract |
+| `reinforcement-learning` | ok | **MISS*** | 0.0276 | ≥ 0.4000 | n/a | import result into evidence index |
 | `text-classification` | ok | **PASS** | 0.9106 | ≥ 0.9106 | 5 run(s) | none |
 | `time-series-forecasting` | ok | **MISS** | 0.2924 ⚠ | ≤ 0.2900 | 1 run(s) | target gap, investigated |
 | `visual-wake-words` | ok | **PASS** | 0.8510 | ≥ 0.8000 | 5 run(s) | none |
@@ -66,6 +66,7 @@ These are the runtimes actually recorded, not estimates.
 | `information-retrieval` | inference | `inference_and_evaluation_seconds` | 18.0 s | 5 | evidence index |
 | `keyword-spotting` | inference | `inference_seconds` | 8.0 s | 5 | evidence index |
 | `recommendation` | training | `train_and_eval_seconds` | 1.64 h | 1 | registry audit record |
+| `reinforcement-learning` | training | `self_play_and_training_seconds` | 7.7 min | 1 | registry audit record |
 | `text-classification` | inference | `inference_seconds` | 4.4 s | 5 | evidence index |
 | `time-series-forecasting` | training | `train_and_eval_seconds` | 14.2 min | 1 | evidence index |
 | `visual-wake-words` | inference | `inference_seconds` | 0.7 s | 5 | evidence index |
@@ -77,4 +78,4 @@ One pass through every timed case in the evidence index is about 62.0 min of com
 
 ## What Is Missing
 
-- 4 audited misses are recorded in the registry but not imported into the evidence index, so they carry digests and runtime without appearing as cases.
+- 5 audited misses are recorded in the registry but not imported into the evidence index, so they carry digests and runtime without appearing as cases.

@@ -194,6 +194,64 @@ def _hit_rate_at_10(
     return hits / float(n_users)
 
 
+LR_SCHEDULES = ("constant", "cosine", "step")
+
+
+def _optimizer_lr_override(contract: dict[str, Any]) -> float:
+    """Base learning rate, from the contract unless a research override is set.
+
+    Fails closed on a malformed or non-positive value rather than silently
+    falling back to the contract, because a typo that quietly reproduces the
+    baseline would make an ablation look like a null result.
+    """
+    contract_lr = float(contract.get("learning_rate", 0.0005))
+    raw = os.environ.get("MLPERF_EDU_NCF_LEARNING_RATE")
+    if raw is None or raw == "":
+        return contract_lr
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(
+            f"MLPERF_EDU_NCF_LEARNING_RATE must be a number, got {raw!r}"
+        ) from exc
+    if not value > 0.0:
+        raise ValueError(
+            f"MLPERF_EDU_NCF_LEARNING_RATE must be positive, got {value!r}"
+        )
+    return value
+
+
+def _lr_schedule_override() -> str:
+    """Learning-rate schedule for the run. Defaults to the contract's constant rate."""
+    raw = os.environ.get("MLPERF_EDU_NCF_LR_SCHEDULE")
+    if raw is None or raw == "":
+        return "constant"
+    value = raw.strip().lower()
+    if value not in LR_SCHEDULES:
+        raise ValueError(
+            f"MLPERF_EDU_NCF_LR_SCHEDULE must be one of {', '.join(LR_SCHEDULES)}, "
+            f"got {raw!r}"
+        )
+    return value
+
+
+def _build_lr_scheduler(
+    optimizer: "torch.optim.Optimizer", schedule: str, epochs: int
+) -> Any:
+    """Return a per-epoch scheduler, or None for the contract's constant rate."""
+    if schedule == "constant":
+        return None
+    if schedule == "cosine":
+        return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, epochs))
+    if schedule == "step":
+        # Halve at each third of the budget: a coarse anneal that does not
+        # depend on the epoch count being large.
+        return torch.optim.lr_scheduler.StepLR(
+            optimizer, step_size=max(1, epochs // 3), gamma=0.5
+        )
+    raise ValueError(f"unhandled schedule {schedule!r}")
+
+
 def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
     root = find_project_root()
     seed = configured_seed()
@@ -205,13 +263,19 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
     layer_sizes = [int(v) for v in contract.get("mlp_layer_sizes", [256, 256, 128, 64])]
     train_negatives = int(contract.get("negatives_per_positive_train", 4))
     eval_negatives = int(contract.get("negatives_per_user_eval", 100))
-    lr = float(contract.get("learning_rate", 0.0005))
     batch_size = int(contract.get("batch_size", 2048))
     # The epoch budget is part of the contract, not a runner default, so the
     # registry stays the single source of truth for what "max" costs.
     epochs = int(
         os.environ.get("MLPERF_EDU_NCF_MAX_EPOCHS", contract.get("max_epochs", 7))
     )
+    # Research overrides for the `pro` envelope. Both default to the contract,
+    # so an unset environment reproduces the canonical max path exactly. They
+    # exist because the contract fixes Adam at a constant rate while the
+    # upstream reference may anneal, and that hypothesis is untestable without
+    # a way to vary the schedule from outside the registry.
+    lr = _optimizer_lr_override(contract)
+    lr_schedule = _lr_schedule_override()
 
     asset = ensure_movielens_20m(download=True)
     ratings_csv = movielens_20m_paths()["ratings"]
@@ -221,6 +285,8 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
     model = NeuMF(split["n_users"], split["n_items"], factors, layer_sizes).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    scheduler = _build_lr_scheduler(optimizer, lr_schedule, epochs)
+    lr_by_epoch: list[float] = []
     loss_fn = nn.BCEWithLogitsLoss()
 
     train_users = torch.from_numpy(split["train_users"])
@@ -241,6 +307,7 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
     started = time.perf_counter()
     for epoch in range(epochs):
         epoch_start = time.perf_counter()
+        lr_by_epoch.append(float(optimizer.param_groups[0]["lr"]))
         model.train()
         # Fresh negatives each epoch, as in the v0.5 reference.
         neg_items = torch.from_numpy(
@@ -268,6 +335,8 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
             running += float(loss.detach())
             batches += 1
 
+        if scheduler is not None:
+            scheduler.step()
         hit_rate = _hit_rate_at_10(model, split, device)
         losses.append(running / max(1, batches))
         hit_rates.append(hit_rate)
@@ -318,6 +387,10 @@ def run_recommendation_max(workload: Workload, output_dir: Path) -> dict[str, An
             "negatives_per_positive_train": train_negatives,
             "negatives_per_user_eval": eval_negatives,
             "learning_rate": lr,
+            "learning_rate_schedule": lr_schedule,
+            "learning_rate_by_epoch": lr_by_epoch,
+            "learning_rate_overridden": lr
+            != float(contract.get("learning_rate", 0.0005)),
             "batch_size": batch_size,
             "epochs_requested": epochs,
         },

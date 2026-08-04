@@ -54,13 +54,44 @@ trials. Our three trials returned 1.8139, 1.8016, and 1.8155, so the minimum is
 1.8016 against a published 1.79.
 
 A minimum-of-three is a biased-low statistic, and 0.6% relative is within what
-sampler and seed choice plausibly move. But this is a suspicion, not a finding:
-the published trial spread is not recorded in the contract, so there is nothing
-to compare our spread against.
+sampler and seed choice plausibly move.
 
-**What would settle it:** record the published per-trial values if they exist,
-or run additional trial sets and report our own spread. Until then this stays
-an honest miss with an unverified explanation.
+### RESOLVED without new compute (2026-08-04)
+
+The comparison this section said was missing was the wrong comparison. The
+published trial spread is not needed, because our own three trials already
+bound the question:
+
+| Quantity | Value |
+|---|---:|
+| Trials | 1.8139, 1.8016, 1.8155 |
+| Best trial | 1.8016 |
+| Target (lower is better) | 1.7900 |
+| Margin, best trial to target | 0.0116 |
+| Spread across our three trials | 0.0140 |
+
+**The procedure's own run-to-run spread is 1.21x the distance by which it
+misses.** The shortfall is therefore inside the noise of the measurement that
+produced it, and a fourth trial could plausibly land under the target without
+anything changing. That is established from committed evidence rather than
+suspected.
+
+The variance is in generation, not scoring. The committed
+`current_packet_rescore` re-evaluates the same 150,000 images and reproduces
+every trial to within 1.2e-12 FID, with all image hashes verified. So the
+evaluator is deterministic and the seed block driving sampling is what moves
+the number.
+
+This is the same structural finding as the training seed sweep, in a third
+place: a single accepted run does not settle a verdict whenever the procedure's
+spread is comparable to its margin. Inference over a pinned checkpoint is
+bit-identical; anything that samples or trains is not.
+
+**What remains open:** whether the published 1.79 is itself a
+minimum-of-three or a different statistic. If it is a minimum of three, the
+comparison is like for like and the gap is variance. If it is a mean or a best
+of more trials, the comparison is biased and the gap may be smaller than it
+looks. That is a question about the upstream paper, not about our run.
 
 ## recommendation — a real gap, and not a budget one
 
@@ -70,16 +101,48 @@ evaluation protocol was already checked once: a held-out-item leakage probe over
 500 sampled users found zero contaminated users, and the candidate count is the
 inherited 999.
 
-That leaves the adapter. Candidates, untested:
+That leaves the adapter. Candidates:
 
-- Learning-rate schedule. The contract fixes Adam at 5e-4 with no decay; the
-  reference may anneal.
+- ~~Learning-rate schedule.~~ **Tested and refuted, 2026-08-04. See below.**
 - Negative sampling during training. Four negatives per positive, resampled
   each epoch, matches the reference in count but perhaps not in method.
 - Embedding initialisation and the GMF/MLP fusion detail.
 
-**What would settle it:** an ablation over the learning-rate schedule, which is
-the cheapest of the three at roughly 32 minutes per run.
+### RESULT: annealing does not help, it hurts (2026-08-04)
+
+Running the ablation first required adding `MLPERF_EDU_NCF_LR_SCHEDULE` and
+`MLPERF_EDU_NCF_LEARNING_RATE` as `pro`-envelope overrides. The runner read the
+rate straight from the contract, so the hypothesis had been structurally
+untestable rather than merely untested.
+
+Controlled comparison. Same runner, same contract, same 7-epoch budget, same
+5e-4 base rate, same seed. Only the schedule differs.
+
+| Schedule | HR@10 | Gap to 0.6350 |
+|---|---:|---:|
+| Constant 5e-4 (contract, recorded) | 0.6232 | -0.0118 |
+| Cosine 5e-4 to 2.5e-5 (ablation) | 0.6155 | -0.0195 |
+
+Cosine per-epoch HR@10: 0.5460, 0.5874, 0.6014, 0.6110, 0.6134, **0.6155**,
+0.6143. Rate per epoch: 5.00e-4, 4.75e-4, 4.06e-4, 3.06e-4, 1.94e-4, 9.41e-5,
+2.48e-5.
+
+**Annealing is 0.0077 worse than the constant rate.** It widens the gap by
+about two thirds. The curve also never shows the late-training instability the
+hypothesis predicted; it rises monotonically to epoch 6 and dips once at 7,
+which is the shape of a model that ran out of learning rate rather than one
+that overshot.
+
+One caveat on scope. Cosine over 7 epochs conflates annealing with a reduction
+in total learning, since the average rate over the run is roughly half the
+constant one. What is refuted is the specific claim that annealing within the
+contract's budget recovers the gap. A reference that anneals over a much longer
+schedule is not tested by this, and testing it would cost proportionally more.
+
+**Consequence:** the cheapest of the three candidates is eliminated. Negative
+sampling method and the GMF/MLP fusion detail move to the front, and both are
+code-inspection tasks against the v0.5 reference before they are run-cost
+tasks, which makes them cheaper than this ablation was.
 
 ## code generation — a real gap, and the evaluator is not the cause
 
@@ -113,17 +176,66 @@ better place to run the precision experiment first.
 
 ---
 
+## RESULT: the precision hypothesis is refuted for code generation (2026-08-04)
+
+The experiment was run. `MLPERF_EDU_DEVICE=cpu`, profile `max`, full 164-task
+HumanEval+, backend recorded as `pytorch-cpu`, `device_executed: cpu`.
+
+| Path | Passing | pass@1 |
+|---|---:|---:|
+| CPU, enforced float32 (this run) | 92 / 164 | 0.560976 |
+| MPS host (recorded) | 92 / 164 | 0.560976 |
+| Container (recorded) | 91 / 164 | 0.554878 |
+| Gate (Qwen published) | 94 / 164 | 0.573000 |
+
+The comparison is config-controlled. The CPU run and the committed MPS record
+share `execution_dtype: float32`, `attention_implementation: eager`, greedy
+decoding, the same ChatML prompt format, and the same 2,048-token cap. Only the
+backend differs.
+
+**At identical configuration, CPU and MPS agree exactly.** Not within a task:
+the same 92, the same pass@1 to six decimal places. MPS was already honouring
+float32 end to end, so the suspected precision loss on the committed path does
+not exist and cannot be what costs the two tasks. Generation time was 851.6 s.
+
+One caveat, and it matters. `registry/selection-ledger.yaml` records an
+exploratory MPS sweep in which bfloat16 with SDPA attention and bfloat16 with
+eager attention both scored 92, while a float32 variant scored **93**. That
+float32 entry does not name its attention implementation, so it is most likely
+the SDPA path. If so, the one recoverable task is attributable to *attention
+implementation*, not to precision, and the committed eager configuration is
+what leaves it on the table. That is a cheap, specific follow-up, and it is a
+different experiment from the one just run.
+
+Three consequences:
+
+1. **The code-generation gap is real, and it is not a backend effect.** It is a
+   genuine reproduction gap against Qwen's published number rather than an
+   artifact of laptop execution. What remains to diagnose is narrower than
+   before: attention implementation (see the caveat above), stop rules, or a
+   difference between the pinned model bytes and the checkpoint behind the
+   published figure.
+2. **The shared-cause hypothesis is dead.** Code generation and function
+   calling do not share a precision explanation, because code generation has no
+   precision problem to share. Function calling still runs
+   `pytorch-bfloat16-mps-greedy`, so a precision hypothesis remains live *for
+   that workload alone* and is now the only reason to spend its ~3.5 hours.
+3. **A positive finding for the paper.** Backend independence of task quality,
+   previously measured across six deterministic inference workloads, now also
+   holds for a generative greedy-decoding workload scored by test execution.
+   That is a stronger statement than the determinism study alone supports.
+
+The one real variance is host 92 vs container 91. Both are float32 greedy, so
+that single-task difference is an evaluator-environment effect rather than a
+model effect, and it bounds the run-to-run noise of this workload at about one
+task.
+
 ## What this adds up to
 
 One contract error, now corrected without changing a verdict. One shortfall
-that is probably variance and is not yet established. Three that are probably
-real adapter gaps sharing one plausible cause.
-
-**The single most valuable experiment available is a float32 rerun of code
-generation.** It is affordable at roughly 15 minutes, it tests the hypothesis
-shared by the two largest gaps, and either outcome is publishable: the gap
-closes and laptop precision has a measured quality cost, or it does not and
-three workloads need individual diagnosis.
+that is probably variance and is not yet established. Three real adapter gaps
+that no longer share a common cause, one of which (code generation) is now
+confirmed to be independent of execution backend.
 
 Nothing here justifies moving a target to make a result pass, and nothing here
 has been moved for that reason.
