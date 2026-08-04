@@ -1425,6 +1425,13 @@ suites:
           leaderboard section and is not the ogbn-arxiv GCN reference.
         - MLPerf EDU reports test accuracy at the epoch with the highest official
           validation accuracy, matching the OGB logger.
+        - ? Seed-sensitive verdict, retained deliberately. Measured across seeds 42,
+            1, and 7 the test accuracy spans 0.7115 to 0.7210, wider than the 0.0065
+            margin from the recorded result to the 0.7145 tolerance floor, so seed
+            1 misses while 42 and 7 pass. A local miss is within the expected spread
+            and is not a setup error. This workload is the suite's clearest demonstration
+            that one run is not a claim
+          : rerun it with MLPERF_EDU_SEED changed and watch the verdict move.
       measurement_protocol:
         primary_metric: train_and_eval_seconds
         scenario: training
@@ -1544,6 +1551,13 @@ suites:
           metric rather than a second admission gate.
         - Promotion still requires every canonical run to meet the unchanged reproduction
           point and a committed five-run timing sweep.
+        - Seed-sensitive verdict, retained deliberately. Measured across seeds 42,
+          1, and 7 the test MSE spans 0.2889 to 0.2924, wider than the 0.0024 margin
+          from the recorded result to the 0.2900 target, so seed 7 passes while 42
+          and 1 miss. The recorded miss is one draw rather than a settled verdict,
+          and a local pass is not evidence of a better system. Rerunning with MLPERF_EDU_SEED
+          changed shows a recorded miss becoming a pass, which is the counterpart
+          to the graph workload showing a pass becoming a miss.
         published_reference_value: 0.29
       measurement_protocol:
         primary_metric: train_and_eval_seconds
@@ -1656,16 +1670,16 @@ suites:
             exists.
   recommendation:
     recommendation:
-      model: Meta DLRM reference model
-      params: configuration-dependent
-      dataset: criteo-terabyte
-      dataset_source: Criteo Terabyte day 23 under the official MLPerf Inference v1.0.1
-        DLRM accuracy recipe
-      task: click-through-rate-prediction
+      model: mlperf-v0.5-ncf
+      params: unverified
+      dataset: movielens-20m
+      dataset_source: Official MovieLens 20M ratings under the MLPerf Training v0.5
+        recommendation preprocessing and leave-one-out split
+      task: implicit-feedback-recommendation
       modes:
-      - inference
+      - training
       implemented_modes:
-      - inference
+      - training
       promotion_scope: false
       spiral:
         stage: quality-conformance
@@ -1673,11 +1687,11 @@ suites:
         quality_conformant: false
         repeatability_verified: false
         promotion_ready: false
-        next_gate: Run the pinned accuracy adapter in a 256-GB-class environment with
-          the manually licensed Criteo data and official 40M checkpoint.
+        next_gate: Execute the MLPerf Training v0.5 contract locally and record the
+          HR@10 decision against the unchanged 0.635 target.
       quality_target:
-        metric: roc_auc
-        value: 0.8025
+        metric: hit_rate_at_10
+        value: 0.635
         direction: higher
         target_basis: literature
         target_kind: inherited_acceptance_gate
@@ -1685,70 +1699,156 @@ suites:
         reference_runs: 0
         acceptance_runs: 1
         reviewer_notes:
-        - The target is the official MLPerf Inference v1.0.1 DLRM ROC AUC result,
-          not a project-created threshold.
-        - The functional spiral exercises DLRM-style dense and sparse execution without
-          making a Criteo quality claim.
+        - The target is the MLPerf Training v0.5 recommendation quality target of
+          0.635 HR@10 for Neural Collaborative Filtering on MovieLens-20M. It is inherited,
+          not project-created.
+        - MLPerf retired the NCF recommendation benchmark after v0.5 because MovieLens-20M
+          was too small to differentiate datacenter-scale systems. That property is
+          what makes it appropriate here, and it is the same historical-MLPerf basis
+          on which MiniGo is retained as the reinforcement-learning identity.
+        - This replaces the DLRM and Criteo Terabyte contract, which could not execute
+          inside the declared laptop envelope. That contract required manually licensed
+          1 TB data, a roughly 90 GB checkpoint, and a 256 GB-class runtime.
+        - The substitution changes what the workload teaches. NCF exercises embedding
+          lookup and dense interaction, but its categorical cardinality is far below
+          Criteo's, so it does not expose the memory-capacity wall that motivated
+          DLRM. Record that limitation rather than implying equivalence.
+        - The parameter count is dominated by the user and item embedding tables and
+          is left unverified until the runner constructs the model and reports it.
+          Do not publish an estimated count.
+        - ? HR@10 is evaluated leave-one-out against 999 sampled negatives per user,
+            for 1000 candidates per user. The count is part of the metric, not a tuning
+            knob
+          : re-scoring one trained checkpoint at 100 negatives gives 0.9336 and at
+            999 gives 0.5474, so a smaller candidate set makes the published target
+            trivially beatable. An initial draft of this contract used 100, the convention
+            from the original NCF paper on smaller datasets, and produced an implausible
+            first-epoch pass. A held-out-item leakage check over 500 sampled users
+            found 0 contaminated users, confirming the split itself is sound and the
+            candidate count was the sole cause.
+        published_reference_value: 0.635
       measurement_protocol:
-        primary_metric: inference_seconds
-        scenario: offline
-        timing_scope: Canonical DLRM inference after embeddings, dense features, and
-          weights are resident
+        primary_metric: train_and_eval_seconds
+        scenario: training
+        timing_scope: MLPerf v0.5 NCF training loop through the epoch that reaches
+          the target, including per-epoch HR@10 evaluation
+        included_phases:
+        - user and item index construction and device transfer
+        - forward and backward passes
+        - Adam optimizer steps
+        - per-epoch leave-one-out HR@10 evaluation
+        excluded_phases:
+        - dataset fetching and CSV parsing
+        - leave-one-out split construction and negative-sample generation
+        - model construction
+        - best-checkpoint serialization
+        - final report and provenance serialization
+        device_synchronization: synchronize immediately before and after the measured
+          training-and-evaluation region
         outer_reference_runs: 5
         outer_preconditioning_runs: 0
         outer_inter_execution_cooldown_seconds: 30
-        repeatability_metric: inference_seconds
+        repeatability_metric: train_and_eval_seconds
         repeatability_limit: 0.05
       canonical_max_contract:
         result_role: score-bearing
-        mode: inference
-        model_id: mlperf-inference-v1.0.1-dlrm-40m
-        model_uri: https://dlrm.s3-us-west-1.amazonaws.com/models/tb00_40M.pt
-        upstream_revision: 8b58587c93af2a5ee67722064f2540a2db15d42f
-        dataset: criteo-terabyte
-        split: unshuffled-day-23-accuracy-set
+        mode: training
+        model_id: mlperf-v0.5-ncf
+        dataset: movielens-20m
+        split: leave-one-out-999-negatives
         data_mode: real
-        execution_status: environment-gated-quality-conformance
+        dataset_sha256: sha256:96f243c338a8665f6bcc89c53edf6ee39162a846940de6b7c8c48aeada765ff3
+        execution_status: quality-audited-target-not-met
         config:
-          dense_features: 13
-          max_ind_range: 40000000
+          predictive_factors: 64
+          mlp_layer_sizes:
+          - 256
+          - 256
+          - 128
+          - 64
+          negatives_per_positive_train: 4
+          negatives_per_user_eval: 999
+          optimizer: adam
+          learning_rate: 0.0005
+          batch_size: 2048
           model_precision: float32
-          accuracy_mode: true
-          evaluator: mlperf-inference-accuracy-dlrm
-          scenario: offline
-          samples_per_query_offline: 204800
-        functional_probe:
-          functional_probe_embedding_tables: 4
+          evaluator: mlperf-v0.5-ncf-hr10
+          max_epochs: 7
+          max_epochs_basis: Measured. HR@10 peaks at 0.6232 on epoch 7 and declines
+            thereafter, so a larger budget spends classroom time to reach a worse
+            score. Training stops early if the inherited target is met first. Override
+            with MLPERF_EDU_NCF_MAX_EPOCHS to study the full curve.
+        measured_evidence:
+          result_date: '2026-08-03'
+          status: quality_failed
+          result_count: 1
+          score: 0.6232
+          target: 0.635
+          epochs_completed: 20
+          best_epoch: 7
+          train_and_eval_seconds: 5912.0
+          hit_rate_curve:
+          - 0.5434
+          - 0.585
+          - 0.6011
+          - 0.6097
+          - 0.6133
+          - 0.6185
+          - 0.6232
+          - 0.6205
+          - 0.6214
+          - 0.6207
+          - 0.6226
+          - 0.6198
+          - 0.6225
+          - 0.621
+          - 0.618
+          - 0.6152
+          - 0.6157
+          - 0.6164
+          - 0.6123
+          - 0.6128
+          note: 'Twenty epochs in 98.5 minutes. This supersedes a seven-epoch result
+            that read the still-rising curve as an epoch limit rather than a convergence
+            failure. The full curve refutes that reading: HR@10 peaks at 0.6232 on
+            epoch 7, plateaus near 0.622, and declines to 0.6128 by epoch 20. The
+            remaining 13 epochs cost 63 minutes and made the result worse, so the
+            0.0118 shortfall against the inherited target is not a budget problem
+            and cannot be closed by training longer. It is a gap between this adapter
+            and the reference recipe, and it is recorded as a miss. Any epoch budget
+            above roughly 7 spends time without improving the score.'
         quality:
-          metric: roc_auc
-          metric_key: roc_auc
-          target: 0.8025
+          metric: hit_rate_at_10
+          metric_key: hit_rate_at_10
+          target: 0.635
           direction: higher
-      scenario: offline
+          tolerance: 0.0
+      scenario: training
       public:
         status: experimental
-        rationale: The max CLI is pinned to the complete MLPerf Inference v1.0.1 accuracy
-          contract, but execution remains gated on manually licensed Criteo data,
-          a roughly 90-GB checkpoint, and a 256-GB-class runtime.
+        rationale: The recommendation identity follows the MLPerf Training v0.5 NCF
+          contract on MovieLens-20M, which fits the declared laptop envelope. The
+          native runner trains locally in roughly half an hour and records a measured
+          miss against the published target.
       runner:
         min: mlperf.runners.functional_setup:run_recommendation_min
-        max: mlperf.runners.recommendation:run_recommendation_max
+        max: mlperf.runners.ncf:run_recommendation_max
       provenance:
-        authority: MLCommons MLPerf Inference v1.0.1 DLRM
-        repository: https://github.com/mlcommons/inference
-        commit: 8b58587c93af2a5ee67722064f2540a2db15d42f
-        path: recommendation/dlrm/pytorch
-        adaptation: The min profile retains a bounded plumbing probe. The max profile
-          invokes the pinned MLPerf Inference v1.0.1 runner and its exact DLRM submodule,
-          and fails closed until the official external assets and legacy runtime are
-          supplied.
+        authority: MLCommons MLPerf Training v0.5 recommendation
+        repository: https://github.com/mlcommons/training_results_v0.5
+        reference_implementation: https://github.com/mlcommons/training/tree/master/retired_benchmarks/recommendation
+        dataset_source: https://grouplens.org/datasets/movielens/20m/
+        adaptation: MLPerf EDU supplies a thin PyTorch adapter for the v0.5 NCF architecture,
+          the leave-one-out evaluation protocol, measurement boundaries, and provenance
+          capture. The model, dataset, split, evaluator, and quality target are inherited
+          unchanged.
       regime:
         working_set:
           value: unmeasured
-          note: Classification awaits the canonical embedding configuration.
+          note: Classification awaits a reference-platform measurement.
         arithmetic_intensity:
           value: unmeasured
-          note: Classification awaits the canonical embedding configuration.
+          note: Classification awaits a reference-platform measurement.
         dispatch:
           value: unmeasured
           note: Classification awaits a synchronized utilization trace.

@@ -270,7 +270,7 @@ def evalplus_host_command(
     return [
         sys.executable,
         "-m",
-        "evalplus.evaluate",
+        "mlperf.runners.evalplus_darwin",
         "--dataset",
         "humaneval",
         "--samples",
@@ -343,9 +343,13 @@ def _evaluate_in_sandbox(
         command = evalplus_host_command(
             source_root=source_root, workspace=workspace, workers=workers
         )
+        # The evaluator source and this package both have to be importable:
+        # the pinned evalplus tree supplies the harness, and mlperf supplies the
+        # Darwin rlimit shim that wraps it.
+        package_root = Path(__file__).resolve().parents[2]
         env = dict(
             os.environ,
-            PYTHONPATH=str(source_root),
+            PYTHONPATH=os.pathsep.join([str(source_root), str(package_root)]),
             HUMANEVAL_OVERRIDE_PATH=str(dataset_archive.resolve()),
             PYTHONDONTWRITEBYTECODE="1",
             PYTHONNOUSERSITE="1",
@@ -523,20 +527,6 @@ def run_code_generation_max(workload: Workload, output_dir: Path) -> dict[str, A
     else:
         # Fall back loudly. The run still uses the pinned evaluator source, but
         # without the container it has no sandbox and is not evidence-eligible.
-        if sys.platform == "darwin":
-            raise RuntimeError(
-                "Docker is unavailable and host execution cannot produce a valid "
-                "result on macOS.\n"
-                "The EvalPlus harness runs each solution through "
-                "multiprocessing and calls\n"
-                "reliability_guard, which sets os.fork to None and applies "
-                "RLIMIT_AS. Those assume\n"
-                "Linux fork semantics and Linux rlimit behaviour, so on Darwin "
-                "every canonical\n"
-                "reference solution fails and the score is meaningless.\n"
-                "Start Docker Desktop and rerun. Host execution is supported on "
-                "Linux only."
-            )
         print(
             "WARNING: Docker is unavailable. Running EvalPlus directly on the "
             "host.\n"
