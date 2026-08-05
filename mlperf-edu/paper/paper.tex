@@ -154,15 +154,17 @@ Benchmarking is the essential scientific instrument driving machine-learning sys
 \section{Introduction}
 \label{sec:intro}
 
-Benchmarking is the primary scientific instrument for diagnosing machine-learning systems performance, isolating hardware-software bottlenecks, and guiding systems research. Evaluating modern ML systems across training, serving, retrieval, graph analytics, time-series forecasting, and embedded inference requires holding task semantics and quality constant while recording the model, data, hardware, scenario, and measurement procedure. While MLPerf established this discipline for production systems~\citep{mattson2020,reddi2020mlperf,banbury2021mlperf}, its submission infrastructure often exceeds the resources of a course or an individual artifact review. Conversely, local educational setups frequently omit quality gates or unbind checkpoint lineage to achieve fast runtimes, relinquishing the scientific rigor that makes systems results comparable. The missing learning objective is Benchmarking Literacy, the ability to construct, inspect, reproduce, and defend an evidence-backed performance claim.
+Benchmarking is a fundamental scientific instrument for machine learning systems. It provides the empirical foundation to evaluate hardware-software trade-offs, diagnose performance bottlenecks, and compare systems fairly. Production benchmarking suites, such as MLPerf, enforce this discipline by fixing task definitions, datasets, metrics, and quality targets~\citep{mattson2020,reddi2020mlperf,banbury2021mlperf}. However, these suites require cluster-scale compute and complex submission infrastructure that exceed the resources of local educational environments. In response, local setups often rely on toy scripts or drop the evaluation target entirely to achieve fast runtimes. This approach destroys benchmark discipline and the scientific rigor required to make system results comparable.
 
-MLPerf EDU addresses this gap with an executable specification that brings production-grade benchmark discipline to single-node ML systems education. Its central contribution is an executable Evaluation Tuple and Fail-Closed Admission Rule that fit on a single laptop without compromising the evaluation contract.
+MLPerf EDU is a laptop-scale benchmark suite that bridges this gap. It provides an executable specification that brings production-grade benchmark discipline to single-node ML systems education. The suite ensures that every workload inherits its evaluation target from an upstream authority. To maintain evaluation integrity without large compute clusters, the framework enforces these targets through a Fail-Closed Admission Rule.
+
+The benchmark contract is formalized as an Evaluation Tuple.
 
 \begin{definition}[Evaluation Tuple]
-A benchmark configuration $\mathcal{S}=(W,D,M,H,S,C,P)$ binds the workload, data, model, hardware, scenario, constraints, and measurement protocol. It produces $\mathcal{M}=(Q,L,T,E)$, containing task quality, latency, throughput, and an energy observation when calibrated. An evidence package $\mathcal{E}$ records the configuration, measurements, source state, assets, and model lineage.
+A benchmark configuration $S=(W,D,M,H,S,C,P)$ binds the workload, data, model, hardware, scenario, constraints, and measurement protocol.
 \end{definition}
 
-The framework enforces this tuple through a Fail-Closed Admission Rule. A result $r$ is admissible only when
+The Fail-Closed Admission Rule requires a result to pass all validation checks to be accepted. A result $r$ is admissible only when:
 \[
 \begin{aligned}
 \operatorname{admit}(r)={}&
@@ -170,51 +172,41 @@ G_{\mathrm{sem}}(r)\land G_{\mathrm{protocol}}(r)\\
 &{}\land G_{\mathrm{provenance}}(r)\land G_{\mathrm{state}}(r),
 \end{aligned}
 \]
-where the semantic gate is task quality for score-bearing cases and functional correctness plus model lineage for performance-bearing cases. Fail-closed means the default is exclusion; a case that satisfies none of the gates by failing silently is treated as a failure rather than as missing data.
+where the semantic gate is task quality for score-bearing cases and functional correctness plus model lineage for performance-bearing cases. Fail-closed means the default is exclusion; any missed threshold or procedural violation is treated as a failure rather than missing data.
 
-The paper makes six contributions.
-
+This paper presents five technical contributions:
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
-\item \textbf{An executable benchmark contract.} The Evaluation Tuple and Fail-Closed Admission Rule form the basis of the runner, grading, host-state, and reporting invariants.
-\item \textbf{A backward-designed workload portfolio.} The 14 workload identities cover language, retrieval, recommendation, reinforcement learning, graph learning, time series, vision, and embedded inference.
-\item \textbf{Three execution intents.} The \texttt{min}, \texttt{max}, and \texttt{pro} profiles separate setup checks, comparable classroom runs, and research variants while preserving stable workload identities.
-\item \textbf{Auditable and lineage-bound evidence.} Executions emit JSON, HTML, CSV, and provenance manifests that bind source, assets, hardware, metrics, and training checkpoints.
-\item \textbf{A measured basis for single-run acceptance.} A 200-execution determinism study proves inference quality is bit-identical across seeds and backends, justifying single-run acceptance, whereas training seed variance flips pass/fail verdicts, refuting single-run training claims.
-\item \textbf{Measured laptop references.} The 12 retained evidence cases traverse the public command path and reproduce their inherited target on a single machine.
+\item \textbf{Executable benchmark contract.} We define the Evaluation Tuple and Fail-Closed Admission Rule to enforce rigorous runner, grading, and reporting invariants on constrained hardware.
+\item \textbf{Quality-gated workload portfolio.} We construct 14 workload identities covering language, retrieval, recommendation, reinforcement learning, graph learning, time series, vision, and embedded inference.
+\item \textbf{Three execution intents.} We separate setup checks, comparable classroom runs, and research variants into \texttt{min}, \texttt{max}, and \texttt{pro} profiles that preserve stable workload identities.
+\item \textbf{Auditable evidence package.} Executions emit structured reports and provenance manifests that bind source, assets, hardware, metrics, and training checkpoints.
+\item \textbf{Laptop-scale reference validation.} We provide 12 retained evidence cases that traverse the public command path and reproduce their inherited target on a single machine.
 \end{enumerate}
 
-The goal is to make professional evaluation practice inspectable at a scale students and researchers can run locally. \Cref{fig:architecture} summarizes the system.
+\Cref{fig:architecture} summarizes the system architecture.
 
-The paper follows this contract from gap to evidence. \Cref{sec:related} positions the work against existing benchmark surfaces. \Cref{sec:design} states the design principles that keep a laptop-scale workload faithful to its upstream task, and \Cref{sec:architecture} describes the implementation. \Cref{sec:suite} defines the workload portfolio. \Cref{sec:profiles} develops the three execution profiles. \Cref{sec:results} reports the measured evidence, \Cref{sec:education} the classroom progression, and \Cref{sec:limitations} what the evidence does not yet establish.
+The rest of the paper is organized as follows. \Cref{sec:related} positions the work against existing benchmark surfaces. \Cref{sec:design} details the design principles. \Cref{sec:architecture} describes the implementation of the benchmark harness and LoadGen. \Cref{sec:suite} defines the workload portfolio. \Cref{sec:profiles} explains the three execution profiles. \Cref{sec:results} reports the measured evidence, \Cref{sec:education} discusses the classroom progression, and \Cref{sec:limitations} states the limitations.
 
 \begin{figure*}[t]
 \centering
 \definecolor{slate}{RGB}{100,116,139}
-\definecolor{orange}{RGB}{249,115,22}
-\definecolor{blue}{RGB}{59,130,246}
 \begin{tikzpicture}[
-  node distance=8mm,
+  node distance=10mm,
   box/.style={draw=slate,rounded corners=4pt,minimum height=14mm,
-    text width=34mm,align=center,fill=slate!10,font=\sffamily\small},
-  gate/.style={draw=orange,rounded corners=4pt,minimum height=14mm,
-    text width=34mm,align=center,fill=orange!10,font=\sffamily\small},
-  artifact/.style={draw=blue,rounded corners=4pt,minimum height=14mm,
-    text width=34mm,align=center,fill=blue!10,font=\sffamily\small},
+    text width=30mm,align=center,fill=slate!10,font=\sffamily\small},
   arrow/.style={->,thick,draw=slate,font=\sffamily\scriptsize}
 ]
-\node[box] (registry) {Registry\\model, data, role};
-\node[box,right=of registry] (runner) {Runner\\\texttt{min}, \texttt{max}, \texttt{pro}};
-\node[gate,right=of runner] (gate) {Quality and protocol\\grade and audit};
-\node[artifact,right=of gate] (evidence) {Evidence package\\reports and manifest};
-\draw[arrow] (registry) -- (runner);
-\draw[arrow] (runner) -- (gate);
-\draw[arrow] (gate) -- node[above]{pass} (evidence);
-\draw[arrow] (evidence.south) -- ++(0,-6mm) -| node[pos=0.75,below=2pt,fill=white,inner sep=2pt]{verify and reproduce} (registry.south);
+\node[box] (registry) {Registry\\(Workloads \& Assets)};
+\node[box,right=of registry] (harness) {Benchmark Harness\\(Execution Profiles)};
+\node[box,right=of harness] (loadgen) {LoadGen\\(Scenario Scheduling)};
+\node[box,right=of loadgen] (report) {Report Generation\\(Provenance \& Grades)};
+
+\draw[arrow] (registry) -- (harness);
+\draw[arrow] (harness) -- (loadgen);
+\draw[arrow] (loadgen) -- (report);
+\draw[arrow] (report.south) -- ++(0,-6mm) -| node[pos=0.75,below=2pt,fill=white,inner sep=2pt]{verify} (registry.south);
 \end{tikzpicture}
-\caption{\textbf{MLPerf EDU system architecture.} Workloads flow through the unified CLI,
-asset, runner, grading, reporting, and provenance layers. The Evaluation Tuple
-binds each result to its model, data, hardware, scenario, constraints, and
-measurement protocol.}
+\caption{\textbf{MLPerf EDU system architecture.} Workloads are defined in the registry, executed by the benchmark harness, scheduled via the LoadGen, and validated during report generation.}
 \label{fig:architecture}
 \end{figure*}
 
