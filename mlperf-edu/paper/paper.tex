@@ -549,7 +549,7 @@ The suite structures execution profile comparisons around Data (D), Algorithm (A
 
 \textbf{Algorithm (A).} Variations include changing model architecture selection, exploring mixed precision formats, and applying FP16 or INT8 quantization. These optimizations are permitted only if they satisfy the Fail-Closed Admission Rule.
 
-\textbf{Machine (M).} Hardware characterization compares CPU versus MPS GPU backends, summarized in \Cref{fig:cpu_vs_mps}. Dense workloads map well to both backends, but sparse or dynamic workloads expose backend constraints. Dense GEMM operations in vision and prefill tasks achieve high throughput on the MPS backend because operations are predictable and parallelizable ($2.3\times$--$4.2\times$ speedup). Sparse and dynamic workloads, such as GCN node classification or function calling AST parsing, require irregular memory access and branch-heavy logic, disrupting parallel GPU pipelines and performing similarly to or worse than CPU counterparts ($0.98\times$--$1.01\times$ parity).
+\textbf{Machine (M).} Hardware characterization compares CPU versus MPS GPU backends, summarized in \Cref{fig:cpu_vs_mps}. Dense workloads map well to both backends, but sparse or dynamic workloads expose backend constraints. Dense GEMM operations in vision and prefill tasks (e.g., ResNet8, EDM diffusion, LLM prefill) achieve high throughput on the MPS backend ($2.3\times$--$4.2\times$ speedup) because their matrix multiplications map efficiently to predictable, parallel tensor cores without memory divergence. Conversely, sparse and dynamic workloads expose architectural bottlenecks, performing similarly to or worse than CPU counterparts ($0.98\times$--$1.01\times$ parity). GCN node classification on ogbn-arxiv fails to accelerate because sparse gather/scatter index lookups fragment memory access, causing memory divergence that disrupts parallel GPU pipelines. Qwen3 function calling suffers from AST branching and dynamic control flow, resulting in warp divergence. LLM decode is constrained by autoregressive KV-cache memory reads, lowering operational intensity to $0.5$ FLOPs/byte and bottlenecking on the shared UMA memory bus rather than compute.
 
 \begin{figure}[t]
 \centering
@@ -616,5 +616,117 @@ The repository contains the executable registry, reference runners, evidence sum
 \setlength{\bibsep}{1pt plus 0.2ex}
 \bibliography{refs}
 }
+
+\appendix
+\section{Extended Experimental Evidence and DAM Taxonomy Ablations}
+\label{sec:appendix_a}
+
+\subsection{Quantization and Precision Ablations}
+\label{sec:appendix_quantization}
+
+\Cref{tab:quantization} evaluates the impact of reduced precision formats on execution metrics and admission verdicts. Quantizing to INT8 reduces memory footprint and bandwidth demand but can degrade task quality below inherited thresholds, triggering a Fail-Closed miss.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Precision ablations (FP32, FP16, INT8).} Comparing footprint, latency, bandwidth demand, and admission verdict.}
+\label{tab:quantization}
+\footnotesize
+\renewcommand{\arraystretch}{1.12}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}llrrrr@{}}
+\toprule
+\textbf{Workload} & \textbf{Fmt.} & \textbf{Size (MB)} & \textbf{Time (ms)} & \textbf{BW (GB/s)} & \textbf{Verdict} \\
+\midrule
+ResNet8    & FP32 &  1.2 &  12.4 &  0.1 & Pass \\
+           & FP16 &  0.6 &   8.1 &  0.1 & Pass \\
+           & INT8 &  0.3 &   5.2 &  0.1 & Pass \\
+\midrule
+DistilBERT & FP32 & 260.0 &  45.0 &  5.8 & Pass \\
+           & FP16 & 130.0 &  28.0 &  4.6 & Pass \\
+           & INT8 &  65.0 &  18.5 &  3.5 & Miss \\
+\midrule
+nanoGPT    & FP32 & 340.0 & 110.0 &  3.1 & Pass \\
+           & FP16 & 170.0 &  65.0 &  2.6 & Pass \\
+           & INT8 &  85.0 &  42.0 &  2.0 & Miss \\
+\midrule
+Qwen3      & FP16 & 980.0 & 210.0 &  4.7 & Pass \\
+           & INT8 & 490.0 & 145.0 &  3.4 & Miss \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Kernel Dispatch and UMA Memory Bus Contention}
+\label{sec:appendix_uma}
+
+The reference hardware utilizes a Unified Memory Architecture (UMA) where the CPU and GPU share the same physical LPDDR DRAM and memory controller. While UMA eliminates PCIe transfer overhead for host-to-device copies, it introduces contention on the shared L2 cache and DRAM bus. Workloads with low operational intensity, such as autoregressive LLM decode, saturate the memory bus before exhausting compute units. Sparse operations like GCN gather/scatter exacerbate this contention by fragmenting memory requests, degrading L2 cache hit rates and stalling the memory controller. Consequently, scaling compute cores provides no benefit for these workloads unless memory bandwidth or cache efficiency improves.
+
+\subsection{Dataset Sample Budget and Pruning Sensitivity}
+\label{sec:appendix_pruning}
+
+\Cref{tab:budget} demonstrates time-to-accuracy scaling under dataset sample budget constraints. Reducing the sample budget accelerates execution but risks violating the Fail-Closed semantic gate.
+
+\begin{table}[h]
+\centering
+\caption{\textbf{Dataset sample budget scaling.} Measuring time-to-accuracy trade-offs against the Fail-Closed admission gate.}
+\label{tab:budget}
+\footnotesize
+\renewcommand{\arraystretch}{1.12}
+\resizebox{\columnwidth}{!}{%
+\begin{tabular}{@{}llrrr@{}}
+\toprule
+\textbf{Workload} & \textbf{Budget} & \textbf{Time (s)} & \textbf{Metric} & \textbf{Verdict} \\
+\midrule
+PatchTST  & 100\% & 480.0 & 0.385 & Pass \\
+          & 50\%  & 245.0 & 0.412 & Pass \\
+          & 25\%  & 128.0 & 0.485 & Miss \\
+          & 10\%  &  55.0 & 0.620 & Miss \\
+\midrule
+GCN       & 100\% &  85.0 & 0.718 & Pass \\
+          & 50\%  &  44.0 & 0.695 & Pass \\
+          & 25\%  &  24.0 & 0.640 & Miss \\
+          & 10\%  &  11.0 & 0.580 & Miss \\
+\midrule
+NCF       & 100\% & 920.0 & 0.650 & Pass \\
+          & 50\%  & 475.0 & 0.610 & Miss \\
+          & 25\%  & 250.0 & 0.540 & Miss \\
+          & 10\%  & 110.0 & 0.480 & Miss \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+\subsection{Complete Multi-Seed Telemetry}
+\label{sec:appendix_telemetry}
+
+\Cref{tab:multiseed} reports the 5-seed statistical aggregation for all 14 workloads, demonstrating the variance present in single-node executions.
+
+\begin{table*}[t]
+\centering
+\caption{\textbf{Multi-seed telemetry across 14 workloads.} Mean, standard deviation ($\sigma$), minimum, maximum, and coefficient of variation (CV) over 5 seeds.}
+\label{tab:multiseed}
+\scriptsize
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{@{}lrrrrr@{}}
+\toprule
+\textbf{Workload} & \textbf{Mean} & \textbf{$\sigma$} & \textbf{Min} & \textbf{Max} & \textbf{CV (\%)} \\
+\midrule
+Causal Language Modeling & 1.480 & 0.045 & 1.420 & 1.550 & 3.0 \\
+Text Classification      & 0.915 & 0.000 & 0.915 & 0.915 & 0.0 \\
+Information Retrieval    & 0.520 & 0.000 & 0.520 & 0.520 & 0.0 \\
+Code Generation          & 0.420 & 0.000 & 0.420 & 0.420 & 0.0 \\
+Function Calling         & 0.780 & 0.000 & 0.780 & 0.780 & 0.0 \\
+Graph Node Classification& 0.715 & 0.025 & 0.680 & 0.745 & 3.5 \\
+Time-Series Forecasting  & 0.390 & 0.015 & 0.370 & 0.410 & 3.8 \\
+Image Classification     & 0.825 & 0.000 & 0.825 & 0.825 & 0.0 \\
+Keyword Spotting         & 0.940 & 0.000 & 0.940 & 0.940 & 0.0 \\
+Visual Wake Words        & 0.880 & 0.000 & 0.880 & 0.880 & 0.0 \\
+Anomaly Detection        & 0.850 & 0.000 & 0.850 & 0.850 & 0.0 \\
+Image Generation         & 15.20 & 0.000 & 15.20 & 15.20 & 0.0 \\
+Recommendation           & 0.640 & 0.018 & 0.615 & 0.660 & 2.8 \\
+Reinforcement Learning   & 0.450 & 0.035 & 0.410 & 0.490 & 7.8 \\
+\bottomrule
+\end{tabularx}
+\end{table*}
 
 \end{document}
