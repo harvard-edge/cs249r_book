@@ -154,27 +154,21 @@ Benchmarking is the essential scientific instrument driving machine-learning sys
 \section{Introduction}
 \label{sec:intro}
 
-Benchmarking is a fundamental scientific instrument for machine learning systems. It provides the empirical foundation to evaluate hardware-software trade-offs, diagnose performance bottlenecks, and compare systems fairly. Production benchmarking suites, such as MLPerf, enforce this discipline by fixing task definitions, datasets, metrics, and quality targets~\citep{mattson2020,reddi2020mlperf,banbury2021mlperf}. However, these suites require cluster-scale compute and complex submission infrastructure that exceed the resources of local educational environments. In response, local setups often rely on toy scripts or drop the evaluation target entirely to achieve fast runtimes. This approach destroys benchmark discipline and the scientific rigor required to make system results comparable.
+Benchmarking is a fundamental scientific instrument for machine learning systems. It provides the empirical foundation to evaluate hardware-software trade-offs, diagnose performance bottlenecks, and compare systems fairly. MLPerf EDU provides an executable benchmark suite targeting single-node, quality-gated evaluation. Production suites enforce strict quality targets~\citep{mattson2020,reddi2020mlperf,banbury2021mlperf}. These suites require cluster-scale compute and complex submission infrastructure that exceed the resources of local educational environments. Local setups often rely on toy scripts or drop the evaluation target entirely to achieve fast runtimes. MLPerf EDU provides an executable specification that brings production-grade benchmark discipline to single-node ML systems education.
 
-MLPerf EDU is a laptop-scale benchmark suite that bridges this gap. It provides an executable specification that brings production-grade benchmark discipline to single-node ML systems education. The suite ensures that every workload inherits its evaluation target from an upstream authority. To maintain evaluation integrity without large compute clusters, the framework enforces these targets through a Fail-Closed Admission Rule.
+The Evaluation Tuple $E = (W, D, M, H, S, C, P)$ formalizes a benchmark run. $W$ selects the workload contract, $D$ binds the dataset split, $M$ specifies the model architecture, $H$ records the hardware configuration, $S$ selects the LoadGen scenario, $C$ specifies the execution profile, and $P$ records the task quality metric and protocol rules.
 
-The benchmark contract is formalized as an Evaluation Tuple.
-
-\begin{definition}[Evaluation Tuple]
-A benchmark configuration $E=(W,D,M,H,S,C,P)$ binds the workload, data, model, hardware, scenario, constraints, and measurement protocol.
-\end{definition}
-
-The Fail-Closed Admission Rule requires a result to pass all validation checks to be accepted. A result $r$ is admissible only when:
+The Fail-Closed Admission Rule requires a result to pass all validation checks to be accepted. A result $r$ is admissible only when
 \[
 \begin{aligned}
 \operatorname{admit}(r)={}&
 G_{\mathrm{sem}}(r)\land G_{\mathrm{protocol}}(r)\\
-&{}\land G_{\mathrm{provenance}}(r)\land G_{\mathrm{state}}(r),
+&{}\land G_{\mathrm{provenance}}(r)\land G_{\mathrm{state}}(r)
 \end{aligned}
 \]
-where the semantic gate is task quality for score-bearing cases and functional correctness plus model lineage for performance-bearing cases. Fail-closed means the default is exclusion; any missed threshold or procedural violation is treated as a failure rather than missing data.
+where $G_{\mathrm{sem}}$ checks task quality or functional correctness, $G_{\mathrm{protocol}}$ verifies measurement rules, $G_{\mathrm{provenance}}$ audits asset integrity, and $G_{\mathrm{state}}$ confirms host stability. The admission engine is fail-closed. Any missed threshold, missing hash, or procedural violation is treated as a failure rather than missing data.
 
-This paper presents five technical contributions:
+This paper presents five technical contributions.
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
 \item \textbf{Executable benchmark contract.} We define the Evaluation Tuple and Fail-Closed Admission Rule to enforce rigorous runner, grading, and reporting invariants on constrained hardware.
 \item \textbf{Quality-gated workload portfolio.} We construct 14 workload identities covering language, retrieval, recommendation, reinforcement learning, graph learning, time series, vision, and embedded inference.
@@ -528,142 +522,81 @@ result.}
 \label{fig:curves}
 \end{figure}
 
-\subsection{System Setup and Measurement Methodology}
+\subsection{Committed Reference Evidence}
 
-The evidence campaign evaluates the canonical cases on an Apple Silicon host with Unified Memory Architecture (UMA). The hardware profile includes a multi-core CPU and the Metal Performance Shaders (MPS) GPU backend. To isolate systemic variance, the measurement methodology enforces strict timing controls alongside power and thermal stability guards. A failed or interrupted attempt is retained and cannot be repaired by replacing selected executions. Power source, low power mode, and sleep or wake changes are checked before and after each execution. A changed host state invalidates the attempt even when its task metric passes. This separation is required because accuracy does not excuse unstable timing or uncontrolled measurement conditions. Committed Reference Evidence is detailed in \Cref{tab:reference-evidence}, establishing the baseline performance metrics across the suite.
+We evaluate the canonical cases on an Apple Silicon host with Unified Memory Architecture (UMA). The hardware profile includes a multi-core CPU and the Metal Performance Shaders (MPS) GPU backend. To isolate systemic variance, the measurement methodology enforces strict timing controls alongside power and thermal stability guards. A failed or interrupted attempt is retained and cannot be repaired by replacing selected executions. Power source, low power mode, and sleep or wake changes are checked before and after each execution. A changed host state invalidates the attempt even when its task metric passes. Accuracy does not excuse unstable timing or uncontrolled measurement conditions. \Cref{tab:reference-evidence} details the reference evidence, establishing baseline performance metrics across the suite.
 
 \subsection{Roofline Analysis and Bottleneck Characterization}
 
-Analyzing the workloads through the Roofline model maps operational intensity (FLOPs/byte) against memory bandwidth (GB/s), based on Williams et al. (2009) and Ofenbeck et al. (2014). Across all 14 workloads on single-node hardware, this mapping reveals distinct performance profiles, classifying them into two primary categories. The runtime distribution across workloads is shown in \Cref{fig:runtime}.
+The Roofline model maps operational intensity (FLOPs/byte) against memory bandwidth (GB/s), based on Williams et al. (2009) and Ofenbeck et al. (2014). This mapping classifies the 14 single-node workloads into two categories. The runtime distribution across workloads is shown in \Cref{fig:runtime}.
 
-Compute-bound workloads saturate the execution units before exhausting memory bandwidth. LLM Prefill, ResNet8 image classification, and EDM diffusion image generation exhibit high operational intensity. Their dense matrix multiplications map efficiently to the arithmetic logic units, making them limited by the available compute rather than data transfer rates.
+Compute-bound workloads saturate execution units before exhausting memory bandwidth. LLM Prefill, ResNet8 image classification, and EDM diffusion image generation exhibit high operational intensity. Their dense matrix multiplications map efficiently to arithmetic logic units, limited by compute capacity rather than memory transfer rates.
 
-DRAM memory-bandwidth bound workloads stall while waiting for data. LLM Decode is constrained by autoregressive KV-cache access, requiring constant memory reads for each generated token. GCN node classification relies on sparse gather/scatter index lookups on the ogbn-arxiv graph, fragmenting memory access. NCF recommendation depends on high-cardinality sparse embedding lookups on MovieLens-20M, which also thrashes caches and limits throughput to the memory bus speed.
+DRAM memory-bandwidth bound workloads stall waiting for data. LLM Decode is constrained by autoregressive KV-cache access, requiring memory reads for each generated token. GCN node classification relies on sparse gather/scatter index lookups on ogbn-arxiv, fragmenting memory access. NCF recommendation depends on high-cardinality sparse embedding lookups on MovieLens-20M, thrashing caches and bottlenecking on memory bus speed.
 
 \subsection{Execution Profile Ablations (DAM Taxonomy)}
 
-To explore system trade-offs systematically, the suite structures execution profile comparisons around the Data (D), Algorithm (A), and Machine (M) ablations, collectively termed the DAM Taxonomy. As shown in \Cref{fig:quality}, \ExecutedContractsPassing{} of the \ExecutedContracts{} contracts meet their inherited targets, while \ExecutedContractsMissing{} shortfalls are recorded under Fail-Closed admission.
+The suite structures execution profile comparisons around Data (D), Algorithm (A), and Machine (M) ablations (the DAM Taxonomy). \Cref{fig:quality} shows that \ExecutedContractsPassing{} of the \ExecutedContracts{} contracts meet their inherited targets, while \ExecutedContractsMissing{} shortfalls are recorded under Fail-Closed admission.
 
-\textbf{Data (D).} Ablations explore dataset pruning and sample selection to measure time-to-accuracy trade-offs efficiently under the Fail-Closed Admission Rule.
+\textbf{Data (D).} Ablations explore dataset pruning and sample selection to measure time-to-accuracy trade-offs under the Fail-Closed Admission Rule.
 
 \textbf{Algorithm (A).} Variations include changing model architecture selection, exploring mixed precision formats, and applying FP16 or INT8 quantization. These optimizations are permitted only if they satisfy the Fail-Closed Admission Rule.
 
-\textbf{Machine (M).} Hardware characterization compares CPU versus MPS GPU backends. Dense workloads map well to both backends, but sparse or dynamic workloads expose backend constraints. Dense GEMM operations in vision and prefill tasks achieve high throughput on the MPS backend because the operations are predictable and easy to parallelize. Sparse and dynamic workloads, such as GCN node classification or function calling AST parsing, require irregular memory access and branch-heavy logic, which disrupt the parallel execution pipelines of the GPU, often causing them to perform closer to, or worse than, their CPU counterparts.
+\textbf{Machine (M).} Hardware characterization compares CPU versus MPS GPU backends. Dense workloads map well to both backends, but sparse or dynamic workloads expose backend constraints. Dense GEMM operations in vision and prefill tasks achieve high throughput on the MPS backend because operations are predictable and parallelizable. Sparse and dynamic workloads, such as GCN node classification or function calling AST parsing, require irregular memory access and branch-heavy logic, disrupting parallel GPU pipelines and performing similarly to or worse than CPU counterparts.
 
 \subsection{Determinism and Seed Variance Study}
 
-A single accepted run decides a quality verdict, while any timing claim rests on repeated measurement. This asymmetry requires evaluating whether the quality metric is deterministic, citing Bouthillier et al. (2019) and Pham et al. (2020) regarding variance in machine learning.
+A single accepted run decides a quality verdict; timing claims require repeated measurement. This asymmetry requires evaluating quality metric determinism~\citep{bouthillier2019,pham2020}.
 
-Inference workloads demonstrated complete determinism. Running the inference workloads under multiple seeds on the default MPS backend and repeating on the CPU yielded bit-identical results. The quality metric did not move, exhibiting a coefficient of variation of 0.0\%.
+Inference workloads demonstrated complete determinism. Running inference workloads under multiple seeds on the default MPS backend and repeating on CPU yielded bit-identical results. The quality metric did not move, exhibiting a 0.0\% coefficient of variation.
 
-Training workloads exhibit significant seed variance, demonstrating why single-run training evaluations are invalid. Sweeping multiple seeds across the training workloads showed standard deviations ($\sigma$) in the range of [3.2\%, 6.8\%]. The per-epoch training curves in \Cref{fig:curves} confirm that the shortfall survives longer runs rather than closing with additional epochs. The spread exceeded the margin to the effective threshold, causing the pass or fail verdict to flip depending on the seed. Graph node classification fell below its tolerance floor under a different seed, while time-series forecasting reached inside its target under a third seed. This variance confirms that training evaluations require multi-seed statistical aggregation rather than single-run acceptance.
-
-
+Training workloads exhibit significant seed variance, demonstrating why single-run training evaluations are invalid. Sweeping multiple seeds across training workloads showed standard deviations ($\sigma$) of [3.2\%, 6.8\%]. The per-epoch training curves in \Cref{fig:curves} confirm that shortfalls survive longer runs rather than closing with additional epochs. The spread exceeded the margin to the effective threshold, flipping pass or fail verdicts depending on the seed. Graph node classification fell below its tolerance floor under a different seed, while time-series forecasting reached inside its target under a third seed. Training evaluations require multi-seed statistical aggregation rather than single-run acceptance.
 
 \section{Deployment and Classroom Integration}
 \label{sec:education}
 
 \subsection{Pedagogical Progression}
 
-The benchmark contract is itself the primary teaching object. Grounding hands-on machine learning systems education~\citep{reddi2020mlperf,rush2021} in inspectable, quality-gated benchmarking shifts the instructional focus from building isolated operators to evaluating end-to-end system behavior. The intended progression asks students to reproduce a fixed profile, diagnose performance bottlenecks, optimize a targeted systems variable, and defend the resulting comparison. This structured approach develops benchmarking literacy by ensuring that optimization efforts never silently degrade task quality.
+The benchmark contract is the primary teaching object. Grounding ML systems education~\citep{reddi2020mlperf,rush2021} in quality-gated benchmarking shifts instruction from building operators to evaluating end-to-end systems. Students reproduce a fixed profile, diagnose performance bottlenecks, optimize a targeted variable, and defend the comparison. This progression develops benchmarking literacy by ensuring optimizations never silently degrade task quality.
 
 \subsection{Taxonomy-Guided Lab Exercises}
 
-To map this progression to executable assignments, MLPerf EDU provides four concrete lab exercises structured around the MLSysBook DAM Taxonomy (Data, Algorithm, Machine):
+MLPerf EDU maps this progression to four executable lab exercises structured around the MLSysBook DAM Taxonomy (Data, Algorithm, Machine).
 
 \begin{enumerate}[leftmargin=*,itemsep=2pt]
-\item \textbf{Lab 1 (Machine / Roofline Profiling).} Students identify compute versus memory bandwidth bottlenecks. They map workload execution onto the roofline model, report timing distributions, and defend comparability statements across different hardware backends.
-\item \textbf{Lab 2 (Algorithm / Quantization).} Students evaluate FP16 and INT8 quantization techniques under Fail-Closed semantic gates. They measure the memory and latency benefits of reduced precision, showing that optimizations are invalid if task quality degrades beyond the inherited tolerance.
+\item \textbf{Lab 1 (Machine / Roofline Profiling).} Students identify compute versus memory bandwidth bottlenecks. They map workload execution onto the roofline model, report timing distributions, and defend comparability statements across hardware backends.
+\item \textbf{Lab 2 (Algorithm / Quantization).} Students evaluate FP16 and INT8 quantization under Fail-Closed semantic gates. They measure memory and latency benefits of reduced precision, showing that optimizations are invalid if task quality degrades beyond inherited tolerance.
 \item \textbf{Lab 3 (Data / Pruning).} Students explore dataset pruning and sample budgets to reach inherited targets efficiently. They observe how data quality scales against computation time, learning that parameter count alone is an insufficient systems cost model.
-\item \textbf{Lab 4 (Benchmarking Literacy \& Seed Variance).} Students conduct multi-seed statistical evaluation demonstrating why single-run training claims are invalid. They rerun a training workload under different seeds, observing a passing result miss and a recorded miss pass, reinforcing the necessity of aggregate measurement.
+\item \textbf{Lab 4 (Benchmarking Literacy \& Seed Variance).} Students conduct multi-seed statistical evaluations demonstrating why single-run training claims are invalid. They rerun a training workload under different seeds, observing a passing result miss and a recorded miss pass, reinforcing the necessity of aggregate measurement.
 \end{enumerate}
 
-Each lab features a deterministic offline mode that exercises real forward, backward, inference, or parity paths. By restricting the learning objectives to the DAM Taxonomy, students optimize the system under test without ever changing the definition of success.
+Each lab features a deterministic offline mode that exercises real forward, backward, inference, or parity paths. Restricting learning objectives to the DAM Taxonomy allows students to optimize the system under test without altering the definition of success.
 
 \subsection{Release Governance and Reproducibility}
 
-Applying the principles of \citet{stodden2014} for reproducible computational research, the suite integrates versioned benchmark releases, provenance verification, and course lab grading into a unified workflow. The cryptographic provenance manifest secures the lineage of every submitted run, enabling automated and auditable grading. A student submission carries its hardware configuration, asset hashes, and metric evaluations, allowing instructors to verify both execution integrity and performance outcomes without re-executing the workload.
+Following \citet{stodden2014}, the suite integrates versioned benchmark releases, provenance verification, and course lab grading into a unified workflow. The cryptographic provenance manifest secures the lineage of every submitted run for automated grading. A student submission carries its hardware configuration, asset hashes, and metric evaluations, so instructors can verify execution integrity without re-running the workload.
 
 \section{Limitations and Future Work}
 \label{sec:limitations}
 
-The framework admits only contracts that fit local hardware without changing
-their defining task. That choice preserves authority and access, but it enforces
-strict scope boundaries. The single-node laptop envelope constraints cannot
-capture cluster-scale distributed training dynamics~\citep{mattson2020} or
-datacenter TPU interconnect scaling behavior~\citep{jouppi2017,jouppi2021}.
-Character-level nanoGPT preserves attention, training, KV-cache construction,
-and autoregressive decode while omitting production tokenization and data scale.
-MLPerf Tiny models expose embedded-model structures on a laptop but do not
-reproduce microcontroller memory limits. Distributed and datacenter-scale claims
-are outside v0.1.
+The framework admits only contracts that fit local hardware without changing their defining task. That choice preserves authority and access, but it enforces strict scope boundaries. Single-node laptop envelope constraints cannot capture cluster-scale distributed training dynamics~\citep{mattson2020} or datacenter TPU interconnect scaling behavior~\citep{jouppi2017,jouppi2021}. Character-level nanoGPT preserves attention, training, KV-cache construction, and autoregressive decode while omitting production tokenization and data scale. MLPerf Tiny models expose embedded-model structures on a laptop but do not reproduce microcontroller memory limits. Distributed and datacenter-scale claims are outside v0.1.
 
-This paper evaluates the benchmark artifact, not its effect on learning.
-Executable labs, staged profiles, and reviewable reports establish curricular
-affordances, but they do not establish learning gains, instructor adoption, or
-accessibility. A classroom study should measure whether students improve at
-identifying invalid comparisons, preserving semantic gates, and defending
-systems claims.
+This paper evaluates the benchmark artifact, not its effect on learning. Executable labs, staged profiles, and reviewable reports establish curricular affordances, but they do not establish learning gains, instructor adoption, or accessibility. A classroom study should measure whether students improve at identifying invalid comparisons, preserving semantic gates, and defending systems claims.
 
-Timing is reported from the measurements each case actually has, and a case
-measured once is reported as measured once. Promotion to a published baseline
-would still require repeated timing under stable host conditions, asset policy,
-and portable evidence, which v0.1 does not claim.
-
-The current references come from one \HostChip{} \HostMachine{} with \HostMemoryGB{}\,GB of memory and \HostCores{} physical cores. Runtime is
-platform-specific, and every timing and repeatability number here characterizes
-that machine rather than the suite. Quality is better established. The
-determinism study shows the metric unchanged across seeds and across the MPS
-and CPU backends, so numerical drift between backends is measured rather than
-assumed for the inference cases. That leaves timing, training-workload seed
-sensitivity, and any drift specific to a different vendor's arithmetic as open
-questions. Cross-platform work should include Linux CPU and CUDA systems,
-clean-wheel installation, and repeated timing on each.
-
-Future directions involve transitioning the project toward community-driven
-MLCommons open working group governance and exploring synthetic workload
-generation~\citep{chung2023} to further reduce dependency on large public
-datasets while preserving system stress characteristics.
+Future work transitions the project to MLCommons open working group governance. The suite will also explore synthetic workload generation~\citep{chung2023} to reduce dependency on large public datasets while preserving system stress characteristics.
 
 \subsection{Threats to Validity}
 
-\textbf{Internal validity.} Where a case was measured over repeated fresh
-processes, that repetition reduces sensitivity to a single timing sample; where
-only one measurement exists, no repeatability claim is made and the report says
-so. Shared implementation error can remain across every case regardless of how
-many times it was run. Provenance digests detect byte changes and path drift;
-they do not prove that the computation occurred.
-
-\textbf{External validity.} One laptop establishes local feasibility, not
-performance portability. The evidence records hardware and software fingerprints
-so later systems can test both quality transfer and timing variation.
-
-\textbf{Construct validity.} The framework assumes that practicing controlled
-comparisons on reduced workloads improves production benchmarking judgment. That
-claim is plausible but unmeasured. The selection process may also favor tasks
-with compact pretrained checkpoints or established small evaluation sets.
-Formal course studies, independent workload review, and external artifact
-evaluation are needed to assess both effects.
+The single-node envelope limits structural validity. Local runs reflect single-host behavior and do not test multi-node communication or distributed scaling. Single-run inference evaluation relies on task determinism; workloads with stochastic components during serving would require repeated trials. Single-host timing is sensitive to background load, thermal throttling, and OS scheduling, which is why timing claims require controlled conditions and reported variance.
 
 \section{Conclusion}
 \label{sec:conclusion}
 
-MLPerf EDU brings benchmarking literacy to a scale that students and individual
-researchers can practice. By enforcing zero-discretion target inheritance and
-the Fail-Closed Admission Rule, the suite brings production-grade rigor to
-single-node ML systems evaluation. It demonstrates that the empirical foundation
-needed to diagnose bottlenecks and compare systems fairly can be preserved on
-constrained hardware without sacrificing comparability or technical rigor.
+MLPerf EDU brings benchmarking literacy to a scale that students and individual researchers can practice. By enforcing zero-discretion target inheritance and the Fail-Closed Admission Rule, the suite brings production-grade rigor to single-node ML systems evaluation. The suite preserves the empirical foundation needed to diagnose bottlenecks and compare systems on constrained hardware.
 
 \subsection*{Reproducibility}
 
-The repository contains the executable registry, reference runners, evidence
-summaries, website, labs, tutorial, and paper generator. The
-public entry point is \texttt{mlperf}. Runs produce JSON, HTML, CSV, and
-\texttt{.provd.json} artifacts. The paper imports generated registry counts and
-reference values so its quantitative claims remain synchronized with the
-committed class-labeled evidence. The larger raw packages are retained for
-\mbox{local reviewer handoff} and do not yet have public URLs.
+The repository contains the executable registry, reference runners, evidence summaries, website, labs, tutorial, and paper generator. The public entry point is \texttt{mlperf}. Runs produce JSON, HTML, CSV, and \texttt{.provd.json} artifacts. The paper imports generated registry counts and reference values so its quantitative claims remain synchronized with the committed class-labeled evidence. The larger raw packages are retained for \mbox{local reviewer handoff} and do not yet have public URLs.
 
 {\scriptsize
 \setlength{\bibsep}{1pt plus 0.2ex}
