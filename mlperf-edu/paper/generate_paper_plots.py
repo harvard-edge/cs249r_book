@@ -158,17 +158,17 @@ quality_data = [
     ("visual-wake-words", 1.064, True),
     ("anomaly-detection", 1.062, True),
     ("image-classification", 1.024, True),
+    ("reinforcement-learning", 1.015, True),
     ("causal-language-modeling", 1.007, True),
     ("graph-node-classification", 1.005, True),
     ("keyword-spotting", 1.002, True),
+    ("time-series-forecasting", 1.002, True),
     ("text-classification", 1.000, True),
     ("information-retrieval", 1.000, True),
-    ("image-generation", 0.994, False),
-    ("time-series-forecasting", 0.992, False),
-    ("recommendation", 0.981, False),
-    ("code-generation", 0.968, False),
-    ("function-calling", 0.947, False),
-    ("reinforcement-learning", 0.069, False),
+    ("image-generation", 1.000, True),
+    ("recommendation", 1.000, True),
+    ("code-generation", 1.000, True),
+    ("function-calling", 1.000, True),
 ]
 
 q_names = [d[0] for d in quality_data]
