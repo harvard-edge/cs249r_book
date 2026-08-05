@@ -270,6 +270,8 @@ def build_parser() -> argparse.ArgumentParser:
     )
     health_opening = health.add_mutually_exclusive_group()
     health_opening.add_argument(
+        "-o",
+        "--open",
         "--open-report",
         dest="open_report",
         action="store_true",
@@ -321,10 +323,12 @@ def build_parser() -> argparse.ArgumentParser:
     )
     report_opening = run.add_mutually_exclusive_group()
     report_opening.add_argument(
+        "-o",
+        "--open",
         "--open-report",
         dest="open_report",
         action="store_true",
-        help="Open the generated HTML dashboard.",
+        help="Automatically open the interactive HTML dashboard with curves and provenance upon completion.",
     )
     report_opening.add_argument(
         "--no-open-report",
