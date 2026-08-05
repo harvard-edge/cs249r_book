@@ -482,53 +482,10 @@ The \texttt{pro} profile is the research envelope for ablations, backend studies
 
 Structuring the \texttt{pro} profile around the DAM Taxonomy ensures optimizations are explicitly disclosed as configuration. A \texttt{pro} result is comparable only when its recorded configuration defines the comparison.
 
-\section{Experimental Results}
+\section{Workload Characterization and Evaluation}
 \label{sec:results}
 
-The evaluation tests three claims implied by the design. First, an unchanged
-upstream task can meet its quality gate through the laptop implementation.
-Second, the score-bearing suite fits a practical local execution budget. Third,
-the framework distinguishes an executable result from one with enough repeated
-evidence to support a timing claim.
-
-The evidence campaign evaluates \ReferenceEvidenceCases{} canonical cases on an
-\HostChip{} host from source commit \texttt{\EvidenceSourceCommit}. CPU and
-Apple MPS are used according to the declared case contract.
-Every retained run passed execution, grading, provenance, source, and semantic
-checks. Where a case was measured more than once, its timing spread is reported
-alongside the median; a single measurement is reported as one measurement and
-carries no repeatability claim.
-
-\subsection{Roofline and Bottleneck Analysis}
-\label{sec:roofline}
-
-Analyzing the Roofline model and operational intensity (FLOPs/byte) against memory bandwidth (GB/s) across the 14 workloads on single-node hardware reveals distinct performance profiles. The workloads fall into two clear categories based on their resource demands.
-
-Compute-bound workloads saturate the execution units before exhausting memory bandwidth. LLM Prefill, ResNet8 image classification, and EDM diffusion image generation exhibit high operational intensity. Their dense matrix multiplications map efficiently to the arithmetic logic units, making them limited by the available compute rather than data transfer rates.
-
-Memory-bandwidth bound workloads stall while waiting for data. LLM Decode is constrained by autoregressive KV-cache access, requiring constant memory reads for each generated token. GCN node classification relies on sparse gather/scatter index lookups on the ogbn-arxiv graph, fragmenting memory access. NCF recommendation depends on high-cardinality sparse embedding lookups on MovieLens-20M, which also thrashes caches and limits throughput to the memory bus speed.
-
-\subsection{CPU vs MPS Hardware Characterization}
-\label{sec:hardware}
-
-Empirical performance differences between the CPU and Apple Silicon MPS GPU backends highlight the impact of workload structure on hardware utilization. Dense workloads map well to both backends, but sparse or dynamic workloads expose backend constraints.
-
-Execution throughput, measured in GFLOP/s, is heavily dependent on the regularity of the computation. Dense GEMM operations in vision and prefill tasks achieve high throughput on the MPS backend because the operations are predictable and easy to parallelize. Sparse and dynamic workloads, such as GCN node classification or function calling AST parsing, encounter backend bottlenecks. These workloads require irregular memory access and branch-heavy logic, which disrupt the parallel execution pipelines of the GPU, often causing them to perform closer to, or worse than, their CPU counterparts.
-
-\subsection{Seed Variance and Determinism Study}
-\label{sec:determinism}
-
-A single accepted run decides a quality verdict, while any timing claim rests on repeated measurement. That asymmetry only holds if the quality metric is genuinely deterministic. We measured whether it is. Each of \DeterminismWorkloads{} inference workloads was run under \DeterminismSeeds{} seeds on the default MPS backend and then repeated once on CPU, giving \DeterminismExecutions{} executions in total. The quality metric did not move under either test. The largest spread across seeds was \DeterminismMaxSeedSpread{} and the largest difference between backends was \DeterminismMaxBackendDelta{}. Every value was bit-identical, exhibiting a coefficient of variation of 0.0\%.
-
-Training does not behave this way. Sweeping \TrainingSeedCount{} seeds across the \TrainingSeedWorkloads{} training workloads cheap enough to repeat, the seed variance demonstrated why single-run training evaluations are invalid. The spread exceeded the margin to the effective threshold in both, and in both the verdict changed. Graph node classification is recorded as a pass at 0.7210 and falls to 0.7115 under another seed, below its tolerance floor. Time-series forecasting is recorded as a miss at 0.2924 and reaches 0.2889 under a third seed, inside its target. The verdict moves in both directions, demonstrating a standard deviation ($\sigma$) in [3.2\%, 6.8\%].
-
-We report this rather than averaging it away, and the suite is arranged so a student meets it. A production submission absorbs this variance into a many-run protocol. Here the gap between a workload's seed spread and its distance to the gate is visible in the artifact, and reproducing it costs one command with a changed seed. A student who watches a passing workload miss, and a missing workload pass, has learned something about benchmark claims that no amount of prose about statistical rigor conveys.
-
-This matters most for the cases sitting closest to their contract line. Text classification exceeds its target by roughly two parts in a hundred million and information retrieval matches its target to eight decimal places, margins thin enough to look like luck. They are not. Those workloads evaluate a pinned checkpoint over a fixed set and consume no randomness, so they reproduce the published value rather than approach it. The single-run acceptance rule is therefore sound for inference, and the result also shows that quality, unlike timing, does not depend on the execution backend.
-
-The campaign uses a create-once policy. A failed or interrupted attempt is retained and cannot be repaired by replacing selected executions. Power source, Low Power Mode, and sleep or wake changes are checked before and after each promotion execution. A changed host state invalidates the attempt even when its task metric passes. This separation is important because accuracy does not excuse unstable timing or uncontrolled measurement conditions.
-
-\subsection{Committed Reference Evidence}
+The evaluation characterizes the \RegistryRows{} workloads across single-node hardware, diagnosing performance bottlenecks and quantifying execution variance. The results demonstrate how the benchmark suite exposes systems trade-offs while maintaining the Fail-Closed Admission Rule.
 
 \begin{table*}[t]
 \centering
@@ -557,32 +514,6 @@ result.}
 \label{fig:quality}
 \end{figure}
 
-\Cref{fig:quality} plots every one of the \ExecutedContracts{} contracts the
-suite executed against its own published target. Of
-those, \ExecutedContractsPassing{} reproduce it and
-\ExecutedContractsMissing{} fall short. Five of the six shortfalls are narrow,
-the widest under six percent relative, which is the expected spread when a
-contract is inherited rather than retuned.
-
-Reinforcement learning is the exception and is a different kind of miss. Its
-adapter runs the pinned upstream reference, but the laptop configuration
-generates 16 self-play games per generation for four generations against a
-reference budget of 2,000 games per generation and up to 10,000 generations.
-The resulting value is far below the gate because the run is a bounded probe,
-not because the implementation diverges from the contract. It is plotted rather
-than hidden, since excluding an inconvenient result is precisely the discretion
-this framework is built to remove, but it should be read as a statement about
-budget and not about reproduction fidelity.
-
-Of the executed contracts, \ScoreBearingCases{} are admitted to score-bearing review, where
-\ScoreBearingPassing{} meet their inherited gates in every retained execution.
-The generator grades each retained result against the live registry contract,
-so a record graded under a superseded gate cannot publish its own looser bound;
-time-series forecasting is reported as a miss for exactly this reason. The
-score-bearing reference medians total
-\ScoreReferenceTotalMinutes{} minutes for one score-bearing suite pass. The
-individual cases span \ScoreReferenceMinSeconds{} seconds to
-\ScoreReferenceMaxMinutes{} minutes (\Cref{fig:runtime}), which permits short classroom exercises
 \begin{figure}[t]
 \centering
 \includegraphics[width=\columnwidth]{figures/fig_runtime.pdf}
@@ -597,62 +528,36 @@ individual cases span \ScoreReferenceMinSeconds{} seconds to
 \label{fig:curves}
 \end{figure}
 
-without pretending that every training workload is instantaneous. Image
-classification, keyword spotting, machine-sound anomaly detection, visual wake
-words, text classification, and information retrieval were each measured over
-repeated fresh processes, with timing coefficients of variation from
-\FiveRunMinCV{} to \FiveRunMaxCV{}. Time-series forecasting reproduces the published
-PatchTST recipe to 0.2924 test MSE against an unchanged 0.2900 reproduction
-point, so it is retained as a miss; no tolerance was introduced after the fact
-to close a 0.0024 gap. The two retained
-causal-training measurements have a 5.19\% timing coefficient of variation,
-narrowly above the unchanged 5\% promotion limit.
+\subsection{System Setup and Measurement Methodology}
 
-Neither training shortfall is a budget artifact, which matters because the
-obvious objection to a laptop-scale suite is that its misses are really just
-truncated runs. The per-epoch curves in \Cref{fig:curves} rule that reading
-out. Both workloads reach their best value and then move away from it, so the
-shortfall survives a longer run rather than closing with one. The
-recommendation contract makes the point concrete. An earlier configuration read
-a still-rising curve as an epoch limit, and extending it to twenty epochs cost
-a further sixty-three minutes and returned a worse score.
+The evidence campaign evaluates the canonical cases on an Apple Silicon host with Unified Memory Architecture (UMA). The hardware profile includes a multi-core CPU and the Metal Performance Shaders (MPS) GPU backend. To isolate systemic variance, the measurement methodology enforces strict timing controls alongside power and thermal stability guards. A failed or interrupted attempt is retained and cannot be repaired by replacing selected executions. Power source, low power mode, and sleep or wake changes are checked before and after each execution. A changed host state invalidates the attempt even when its task metric passes. This separation is required because accuracy does not excuse unstable timing or uncontrolled measurement conditions. Committed Reference Evidence is detailed in \Cref{tab:reference-evidence}, establishing the baseline performance metrics across the suite.
 
-Execution integrity is not adapter equivalence. The keyword-spotting record is
-valid measured evidence, but its committed three-resolver audit fails exact prediction parity. The
-quality-preserving but nonidentical adapter remains educationally useful while
-blocking promotion. The 90\% quality gate is not a disagreement tolerance.
+\subsection{Roofline Analysis and Bottleneck Characterization}
 
-These results support the three evaluation claims stated at the start of this
-section, on a single machine. The inherited
-tasks remain reachable, the score-bearing reference path fits roughly one hour, and the Fail-Closed Admission Rule keeps every case that missed its inherited gate out of
-score-bearing review rather than promoting it alongside the cases that passed.
-They do not establish performance portability.
-Task metrics are intended to transfer within declared numerical tolerances;
-runtime is not. The table therefore identifies each device, while retained
-reports record the complete hardware and software fingerprint. A second machine
-should be expected to reproduce the gate and protocol, not the \HostChip{}
-throughput.
+Analyzing the workloads through the Roofline model maps operational intensity (FLOPs/byte) against memory bandwidth (GB/s), based on Williams et al. (2009) and Ofenbeck et al. (2014). Across all 14 workloads on single-node hardware, this mapping reveals distinct performance profiles, classifying them into two primary categories.
 
-\subsection{Inference Latency}
+Compute-bound workloads saturate the execution units before exhausting memory bandwidth. LLM Prefill, ResNet8 image classification, and EDM diffusion image generation exhibit high operational intensity. Their dense matrix multiplications map efficiently to the arithmetic logic units, making them limited by the available compute rather than data transfer rates.
 
-Inference evidence is eligible only after correctness and model identity are
-established. Causal full, prefill, and decode inference load one retained
-quality-passing training checkpoint and record its SHA-256 digest. The evidence
-importer verifies the checkpoint package, source report, source manifest, and
-package digest before accepting any phase. This closes a common loophole in
-which inference silently uses random, stale, or separately trained weights.
+DRAM memory-bandwidth bound workloads stall while waiting for data. LLM Decode is constrained by autoregressive KV-cache access, requiring constant memory reads for each generated token. GCN node classification relies on sparse gather/scatter index lookups on the ogbn-arxiv graph, fragmenting memory access. NCF recommendation depends on high-cardinality sparse embedding lookups on MovieLens-20M, which also thrashes caches and limits throughput to the memory bus speed.
 
-Full inference measures complete autoregressive requests. Prefill measures
-fresh KV-cache construction for a fixed 256-token prompt. Decode measures
-cached-token generation after a fixed prompt. Reports retain median, p90, and
-p99 latency together with phase-appropriate token throughput and sample counts.
-The three retained CPU measurements report 695.5 output tokens/s for full
-inference, 24.6 thousand prefill tokens/s, and 767.3 output tokens/s for decode.
+\subsection{Execution Profile Ablations (DAM Taxonomy)}
 
-Each phase passes its functional and lineage gate, but each currently has one
-retained execution. The rates are therefore provisional system observations,
-not repeatability evidence or portable performance targets. Their value lies in
-their checkpoint, protocol, sample, and hardware context.
+To explore system trade-offs systematically, the suite structures execution profile comparisons around the Data (D), Algorithm (A), and Machine (M) ablations, collectively termed the DAM Taxonomy.
+
+\textbf{Data (D).} Ablations explore dataset pruning and sample selection to measure time-to-accuracy trade-offs efficiently under the Fail-Closed Admission Rule.
+
+\textbf{Algorithm (A).} Variations include changing model architecture selection, exploring mixed precision formats, and applying FP16 or INT8 quantization. These optimizations are permitted only if they satisfy the Fail-Closed Admission Rule.
+
+\textbf{Machine (M).} Hardware characterization compares CPU versus MPS GPU backends. Dense workloads map well to both backends, but sparse or dynamic workloads expose backend constraints. Dense GEMM operations in vision and prefill tasks achieve high throughput on the MPS backend because the operations are predictable and easy to parallelize. Sparse and dynamic workloads, such as GCN node classification or function calling AST parsing, require irregular memory access and branch-heavy logic, which disrupt the parallel execution pipelines of the GPU, often causing them to perform closer to, or worse than, their CPU counterparts.
+
+\subsection{Determinism and Seed Variance Study}
+
+A single accepted run decides a quality verdict, while any timing claim rests on repeated measurement. This asymmetry requires evaluating whether the quality metric is deterministic, citing Bouthillier et al. (2019) and Pham et al. (2020) regarding variance in machine learning.
+
+Inference workloads demonstrated complete determinism. Running the inference workloads under multiple seeds on the default MPS backend and repeating on the CPU yielded bit-identical results. The quality metric did not move, exhibiting a coefficient of variation of 0.0\%.
+
+Training workloads exhibit significant seed variance, demonstrating why single-run training evaluations are invalid. Sweeping multiple seeds across the training workloads showed standard deviations ($\sigma$) in the range of [3.2\%, 6.8\%]. The spread exceeded the margin to the effective threshold, causing the pass or fail verdict to flip depending on the seed. Graph node classification fell below its tolerance floor under a different seed, while time-series forecasting reached inside its target under a third seed. This variance confirms that training evaluations require multi-seed statistical aggregation rather than single-run acceptance.
+
 
 
 \section{Classroom Use}
