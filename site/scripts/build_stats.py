@@ -49,7 +49,7 @@ GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "419684623")
 # until the count crossed 28,000, which defeats the point of a live counter
 # next to a "Star on GitHub" call to action. The rounded form is still
 # available as {{stats.stars_rounded}} for milestone-style copy.
-PLUS_STYLE = {"merged_prs", "readers", "countries", "subscribers"}
+PLUS_STYLE = {"merged_prs", "readers", "readers_monthly", "countries", "subscribers"}
 
 warnings: list[str] = []
 
@@ -243,19 +243,23 @@ def fetch_merged_prs() -> int | None:
 # tier 3: credentialed
 # --------------------------------------------------------------------------
 
-def fetch_ga4() -> tuple[int | None, int | None]:
-    """Total users and distinct countries, all-time, from the GA4 Data API.
+def fetch_ga4() -> dict:
+    """Readership figures from the GA4 Data API.
+
+    Returns a dict with any of: readers (all-time users), countries (distinct
+    countries), readers_monthly (users in the last 30 days), top_countries (a
+    display string of the largest few). Missing keys mean that query did not
+    run, and the caller leaves the cached value in place.
 
     Requires GA4_PROPERTY_ID plus service-account credentials discoverable by
     google.auth (GOOGLE_APPLICATION_CREDENTIALS pointing at the key file).
-    Returns (None, None) when unconfigured, which leaves the cache untouched.
     """
     if not GA4_PROPERTY_ID:
-        return None, None
+        return {}
     if not (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS")
             or os.environ.get("GA4_SERVICE_ACCOUNT_JSON")):
         warn("GA4 credentials absent; keeping cached readership numbers")
-        return None, None
+        return {}
 
     try:
         from google.analytics.data_v1beta import BetaAnalyticsDataClient
@@ -264,7 +268,7 @@ def fetch_ga4() -> tuple[int | None, int | None]:
         )
     except ImportError:
         warn("google-analytics-data not installed; keeping cached readership numbers")
-        return None, None
+        return {}
 
     # A JSON blob in the environment is written out so google.auth can find it.
     if os.environ.get("GA4_SERVICE_ACCOUNT_JSON") and not os.environ.get(
@@ -277,44 +281,56 @@ def fetch_ga4() -> tuple[int | None, int | None]:
     # 2015-08-14 is the earliest date the Data API accepts, so it stands in for
     # "all time" regardless of when the property started collecting.
     all_time = [DateRange(start_date="2015-08-14", end_date="today")]
+    last_30 = [DateRange(start_date="30daysAgo", end_date="today")]
     prop = f"properties/{GA4_PROPERTY_ID}"
+    out: dict = {}
 
     try:
         client = BetaAnalyticsDataClient()
 
-        # Two separate reports, deliberately.
-        #
-        # totalUsers is a de-duplicated count: one person who reads from two
-        # countries counts once in the property total but appears in two rows
-        # of a country breakdown. Summing the country rows therefore
-        # OVER-counts. The unfiltered report is the only figure that matches
-        # the "Total users" scorecard in Looker Studio.
-        totals = client.run_report(RunReportRequest(
-            property=prop, date_ranges=all_time, metrics=[Metric(name="totalUsers")],
-        ))
-        readers = int(totals.rows[0].metric_values[0].value) if totals.rows else None
+        def run(ranges, dims=(), mets=("totalUsers",), limit=1):
+            return client.run_report(RunReportRequest(
+                property=prop, date_ranges=ranges,
+                dimensions=[Dimension(name=d) for d in dims],
+                metrics=[Metric(name=m) for m in mets],
+                limit=limit,
+            ))
 
-        # The country breakdown is used only for its row count, never summed.
-        by_country = client.run_report(RunReportRequest(
-            property=prop,
-            date_ranges=all_time,
-            dimensions=[Dimension(name="country")],
-            metrics=[Metric(name="totalUsers")],
-            limit=1000,
-        ))
-        countries = len({
-            row.dimension_values[0].value
-            for row in by_country.rows
-            if row.dimension_values[0].value not in ("", "(not set)")
-            and int(row.metric_values[0].value) > 0
-        })
+        # totalUsers is de-duplicated: one person reading from two countries
+        # counts once in the property total but appears in two rows of a
+        # country breakdown. Summing those rows OVER-counts, so the all-time
+        # total comes from an unfiltered report. That is also the only figure
+        # that reconciles with the "Total users" scorecard in Looker Studio.
+        totals = run(all_time)
+        if totals.rows:
+            out["readers"] = int(totals.rows[0].metric_values[0].value)
 
-        print(f"  GA4: {readers:,} total users across {countries} countries",
+        monthly = run(last_30)
+        if monthly.rows:
+            out["readers_monthly"] = int(monthly.rows[0].metric_values[0].value)
+
+        # The country breakdown supplies a row count and the leading names.
+        # It is never summed.
+        by_country = run(all_time, dims=("country",), limit=1000)
+        rows = [
+            (r.dimension_values[0].value, int(r.metric_values[0].value))
+            for r in by_country.rows
+            if r.dimension_values[0].value not in ("", "(not set)")
+            and int(r.metric_values[0].value) > 0
+        ]
+        if rows:
+            rows.sort(key=lambda r: r[1], reverse=True)
+            out["countries"] = len(rows)
+            out["top_countries"] = " · ".join(name for name, _ in rows[:5])
+
+        print(f"  GA4: {out.get('readers', 0):,} readers all-time, "
+              f"{out.get('readers_monthly', 0):,} in the last 30 days, "
+              f"{out.get('countries', 0)} countries",
               file=sys.stderr)
-        return readers, countries or None
+        return out
     except Exception as exc:  # noqa: BLE001 - any API failure degrades to cache
         warn(f"GA4 query failed ({exc}); keeping cached readership numbers")
-        return None, None
+        return {}
 
 
 def fetch_subscribers() -> int | None:
@@ -380,9 +396,8 @@ def main() -> int:
     record("stars", fetch_stars(), "github")
     record("merged_prs", fetch_merged_prs(), "github")
 
-    readers, countries = fetch_ga4()
-    record("readers", readers, "ga4")
-    record("countries", countries, "ga4")
+    for key, value in fetch_ga4().items():
+        record(key, value, "ga4")
 
     record("subscribers", fetch_subscribers(), "buttondown")
 
