@@ -185,7 +185,7 @@ This paper presents five technical contributions:
 
 \Cref{fig:architecture} summarizes the system architecture.
 
-The rest of the paper is organized as follows. \Cref{sec:related} positions the work against existing benchmark surfaces. \Cref{sec:design} details the design principles. \Cref{sec:architecture} describes the implementation of the benchmark harness and LoadGen. \Cref{sec:suite} defines the workload portfolio. \Cref{sec:profiles} explains the three execution profiles. \Cref{sec:results} reports the measured evidence, \Cref{sec:education} discusses the classroom progression, and \Cref{sec:limitations} states the limitations.
+The rest of the paper is organized as follows. \Cref{sec:related} positions the work against existing benchmark surfaces. \Cref{sec:design} details the system design and implementation of the benchmark harness and traffic generator. \Cref{sec:suite} defines the workload portfolio. \Cref{sec:profiles} explains the three execution profiles. \Cref{sec:results} reports the measured evidence, \Cref{sec:education} discusses the classroom progression, and \Cref{sec:limitations} states the limitations.
 
 \begin{figure*}[t]
 \centering
@@ -217,7 +217,7 @@ Benchmarking is a mature field with well-governed suites, and a new suite must j
 
 \textbf{Production suites.} The official MLPerf Training and Inference suites established quality-gated, scenario-aware performance evaluation at production scale~\citep{mattson2020,reddi2020mlperf}. MLPerf Tiny applies this methodology to constrained embedded environments~\citep{banbury2021mlperf}. Both enforce strict quality-gated evaluation, but require cluster compute or custom embedded hardware. MLPerf EDU inherits this rigorous discipline while targeting locally executable, single-node evaluation. \Cref{tab:comparison} summarizes this positioning.
 
-\textbf{Educational lab setups.} Local educational setups and framework-building courses, such as MiniTorch, TinyGrad, or custom course scripts, fit local budgets and make tensors, operators, and automatic differentiation inspectable. However, they typically drop quality targets, ruining comparability. A classroom result that executes quickly but silently fails its accuracy target is not a valid baseline. MLPerf EDU provides this missing discipline. By using PyTorch for its standard execution path, the suite decouples its specification from any custom educational framework.
+\textbf{Educational lab setups.} Local educational setups and framework-building courses, such as MiniTorch, TinyGrad, or custom course scripts, fit local budgets and make tensors, operators, and automatic differentiation inspectable. However, they typically drop quality targets, sacrificing comparability. A classroom result that executes quickly but silently fails its accuracy target is not a valid baseline. MLPerf EDU provides this missing discipline. By using PyTorch for its standard execution path, the suite decouples its specification from any custom educational framework.
 
 \textbf{Microbenchmarks.} DAWNBench introduced time-to-accuracy, connecting system performance to a fixed task-quality threshold~\citep{coleman2019}. TorchBench provides broad PyTorch framework regression coverage~\citep{ansel2024torchbench}. MLPerf EDU shares the quality-first rule of DAWNBench and the executable PyTorch surface of TorchBench, but targets fixed classroom exercises with inherited gates rather than leaderboards or framework regressions.
 
@@ -227,7 +227,7 @@ Benchmarking is a mature field with well-governed suites, and a new suite must j
 \centering
 \caption{\textbf{Comparison with established benchmark surfaces.} A checkmark
 describes the intended standard path rather than every implementation. The
-bottom row is the one no existing surface occupies: a complete single-laptop
+\textbf{EDU} column is the one no existing surface occupies: a complete single-laptop
 path that still holds an inherited quality gate.}
 \label{tab:comparison}
 \footnotesize
@@ -252,36 +252,14 @@ That gap forced a build rather than an adoption. A suite built to demonstrate it
 
 % ============================================================================
 
-\section{Design Principles}
+\section{System Design and Implementation}
 \label{sec:design}
 
-Four principles guide the design of MLPerf EDU. Each addresses a specific failure mode that degrades a runnable script into an invalid benchmark. Together, these principles enforce the Evaluation Tuple and uphold the Fail-Closed Admission Rule.
+The implementation follows a white-box design where a single authoritative configuration defines the assets, execution path, and validation rules for each workload. A unified command-line interface drives the fetch, run, grade, report, and package operations. This single-source design ensures that any disagreement between the manuscript and the executable contract results in a build failure rather than a documentation error.
 
-\subsection{Inherited Quality Contracts}
+\subsection{Declarative Registry}
 
-Every quality target in the suite is inherited from an upstream authority. No target is ever set by this project. A suite that defines its own thresholds tends to define thresholds it can meet, adjusting tolerances to ensure local hardware passes. The result is a benchmark that cannot fail and therefore cannot inform.
-
-Inheritance removes the discretion that makes drift possible. A target arrives from a peer-reviewed paper, a recognized leaderboard, an official evaluator, or a published model card. The target binds the dataset split, the exact metric, and the numerical threshold. The project's only decision is whether a candidate execution satisfies that threshold. When a laptop implementation falls short, the framework reports a miss. The framework cannot convert a failure into a pass because it lacks the authority to change the target. 
-
-This strict adherence enforces the Evaluation Tuple. In this snapshot, \ExecutedContractsMissing{} contracts miss their inherited targets. Nudging a threshold or widening a tolerance would trivially rescue each one. Keeping them exposes the friction of real systems evaluation and gives students a suite in which failure is an inspectable outcome rather than a configuration error.
-
-\subsection{Transparent Benchmark State}
-
-Production benchmarks optimize for throughput using custom CUDA kernels, mixed-precision arithmetic, and aggressive operator fusion. These optimizations often render the underlying computation opaque. MLPerf EDU inverts this priority for its reference implementations, favoring pedagogical transparency over peak performance. 
-
-The standard execution path uses inspectable Python and PyTorch with explicit tensor operations and named dimensions. Thin adapters preserve the authoritative model and task contract rather than replacing them with approximations. Conformance is audited rather than assumed. For example, the current keyword-spotting adapter preserves the DS-CNN topology and quality gate but is prediction-nonidentical to the pinned LiteRT graph, correctly blocking promotion. Students can still inspect its depthwise and pointwise convolutions as separate \texttt{nn.Conv2d} layers. The reference path establishes a readable baseline, not a performance ceiling. Students introduce optimized kernels or alternative runtimes through recorded \texttt{pro} configurations, which remain strictly subject to the Fail-Closed Admission Rule and the original semantic gate.
-
-\subsection{Provenance-Bound Evidence}
-
-A benchmark without real data teaches stress testing, not systems evaluation. Students must observe how data distributions affect convergence rates, final accuracy, and relative system ranking. \Cref{tab:datasets} documents every dataset used by a canonical mode. The executable registry carries structured dossiers detailing pinned sources, dataset sizes, official splits, licensing terms, and digest policies. 
-
-The framework treats fetching and redistribution as separate decisions. A dataset can support a reproducible local run while its bytes remain excluded from a public evidence package, respecting distribution constraints while ensuring the Evaluation Tuple remains fully specified and verifiable.
-
-\subsection{End-to-End Execution Lineage}
-
-Isolated tools often provide only training or only inference, severing the causal link between a trained model and its deployment performance. MLPerf EDU preserves the complete pipeline whenever model lineage forms part of the workload contract. 
-
-Causal language-model training produces a quality-approved checkpoint. Subsequent full, prefill, and decode inference phases load that exact checkpoint, verifying its generated report, manifest, and digest prior to measurement. The registry centralizes metadata for the dataset, model, checkpoint, execution profile, and quality target. This design ensures deterministic, reproducible experiments that model the full lifecycle of an artifact. Training, full generation, prefill, and decode remain phases of a single workload identity. Treating them as separate identities would obscure their shared task semantics and checkpoint lineage, violating the integrity of the Evaluation Tuple.
+The declarative registry is the source of truth for all workloads and datasets in the suite. It stores workload identities, dataset splits, licensing terms, and inherited target rules in machine-readable dossiers. Model records bind a user-facing identifier to an implementation or pinned upstream revision. Dataset recipes distinguish bundled, fetched, cached, and synthetic assets. Dossiers also record the citation, license, release status, and expected cache behavior. By centralizing these parameters, the declarative registry prevents undocumented deviations during execution and ensures that every local run uses the correct authoritative assets and bounds.
 
 \begin{lstlisting}[caption={\textbf{Registry-driven workload metadata.} Workload rows declare the user-facing selector, suite, profile coverage, assets, and quality policy.},label={lst:factory},float=t]
 workload:
@@ -298,64 +276,25 @@ workload:
   public_status: experimental
 \end{lstlisting}
 
-% ============================================================================
+\subsection{Benchmark Harness \& Load Generator}
 
-\section{Architecture and Implementation}
-\label{sec:architecture}
+The execution harness provides the standard runtime environment for all benchmarks, decoupling scenario scheduling from the System Under Test (SUT) model execution. The Python-native load generator acts as the traffic generator, issuing queries and recording latency samples, percentiles, throughput, and functional outcomes. It implements inspectable scheduling for SingleStream and Offline scenarios. Designed for local experimentation, the traffic generator avoids opaque bindings where possible, serving as an inspectable substitute for the official MLPerf LoadGen.
 
-The implementation follows a white-box design where a declarative registry selects assets, runners, scenarios, profiles, gates, evidence roles, and promotion rules. A unified command-line interface drives the fetch, audit, run, grade, verify, report, package, and validation operations. The registry also generates the flat \texttt{workloads.yaml} compatibility mirror, website tables, and paper snapshot. This single-source design ensures that disagreement between the manuscript and the executable contract results in a build failure rather than a documentation error.
+\subsection{Provenance and Execution Lineage}
 
-\subsection{Registry}
+Every run produces a structured JSON report. A provenance digest in the form of a cryptographic Merkle tree binds this report and declared sidecars by size and SHA-256 hash. Hardware and software fingerprints, asset dossiers, quality metadata, and checkpoint lineage travel with the result. When a workload includes both training and serving phases, the provenance digest tracks the end-to-end execution lineage, verifying the causal link between a trained model and its deployment performance. Subsequent inference phases load the exact checkpoint produced by the training phase, verifying its generated report and manifest prior to measurement. This design ensures reproducible experiments that model the full lifecycle of a machine learning artifact. Hashing establishes integrity rather than authenticity. The manifest provides unauthenticated integrity, not proof of origin or execution.
 
-The registry controls both models and data. Model records bind a user-facing identifier to an implementation or pinned upstream revision. Checkpoint-backed inference requires a lineage record containing the source training workload, task quality, and checkpoint digest, preventing a serving result from silently changing weights between repetitions.
+\subsection{Fail-Closed Admission Engine}
 
-Dataset recipes distinguish bundled, fetched, cached, synthetic, and restricted assets. Reports record the resolved mode and relevant digests. A \texttt{min} runner can use a reduced or synthetic input, but the public audit rejects that mode for score-bearing evidence. Dataset dossiers also record the citation, license, release status, and expected cache behavior.
-
-\subsection{Load Generator}
-
-The Python-native load generator implements inspectable scheduling for single-stream, offline, server, and multi-stream experiments~\citep{reddi2020mlperf}. It records warmup and measurement counts, latency samples and percentiles, throughput, and functional outcomes. Designed for teaching and local experimentation, it avoids opaque bindings where possible, serving as an inspectable substitute rather than a drop-in replacement for the official MLPerf LoadGen.
-
-\subsection{Power Measurement}
-
-Promotion campaigns record the power source, Low Power Mode, and sleep or wake state at each execution boundary on supported hosts. A campaign refuses to start without external power and invalidates an affected attempt when the host state changes. These guards improve timing control but do not provide calibrated energy measurement. Absolute energy claims still require supported platform counters or an external meter with a disclosed calibration.
-
-\subsection{Merkle Provenance Engine}
-
-Each run produces a JSON report alongside human-readable HTML and CSV views. A \texttt{.provd.json} manifest binds the report and declared sidecars by size and SHA-256 digest. Hardware and software fingerprints, asset dossiers, quality metadata, and checkpoint lineage travel with the result. Packages rewrite machine-specific absolute paths so that verification works after extraction in a clean directory.
-
-Hashing establishes integrity rather than authenticity. A self-consistent manifest can still be fabricated by its creator. Independent reruns, signed attestations, or controlled execution provide stronger trust. The framework states this boundary instead of claiming that checksums prevent fraud. The manifest provides unauthenticated integrity, not proof of origin or execution.
-
-\subsection{CLI}
-
-The CLI makes the Evaluation Tuple concrete. The suite, workload, variant, and profile select the model, data, scenario, constraints, and protocol. The commands below cover the normal review path.
-
-\begin{lstlisting}[caption={CLI path from setup to verified evidence.},label={lst:cli}]
-$ mlperf doctor
-$ mlperf list workloads
-$ mlperf fetch \
-    --workload causal-language-modeling \
-    --mode training --profile max
-$ mlperf run \
-    --workload causal-language-modeling \
-    --mode training --profile max
-$ mlperf grade submissions/
-$ mlperf verify submissions/run.provd.json
-$ mlperf package submissions/run.provd.json
-$ mlperf audit --policy public
-\end{lstlisting}
-
-The same metadata drives individual runs and release presets. This reduces the chance that a paper-only configuration diverges from the executable path.
-
-\subsection{Validation Methodology}
-\label{sec:feedback}
-
-Validation is layered because a single green status can hide different kinds of failure. Unit and integration tests exercise runners, schemas, registry invariants, grading, provenance, packaging, and generators. Negative tests reject path traversal, changed source bytes, seed disagreement, incomplete functional gates, partial batch output, unavailable devices, unresolved dataset bytes, and timing evidence above its declared variation limit.
-
-The \texttt{smoke} preset runs four representative \texttt{min} workloads. The \texttt{coverage} preset runs all \RegistryRows{} \texttt{min} workloads. The \texttt{max} profile selects canonical quality paths for the \EvidenceWorkloads{} promotion-scope workloads and bounded functional probes for the remaining \FunctionalSetupWorkloads{}. The \texttt{pro} profile selects the research workloads and repeats their \texttt{max} contracts under a separate execution target. Each phase verifies provenance and applies its declared quality or functional gate.
-
-The full artifact test suite passes with two expected skips. The smoke and coverage presets passed 4/4 and 14/14 workloads. A retained one-measurement \texttt{pro} validation passed the four promotion-scope research workloads, their quality gates, provenance verification, and grading with zero warnings. The expanded \texttt{pro} plan adds the five bounded functional probes, whose individual \texttt{max} paths also pass. The \ReferenceEvidenceCases{} source-locked \texttt{max} cases all have retained evidence. A clean Python \HostPython{} wheel installed outside the checkout, loaded \RegistryRows{} workload definitions and \ReferenceEvidenceCases{} evidence records, executed the starter smoke path, and verified the resulting provenance.
-
-The Quarto site renders 31 pages and passes 62 desktop and narrow-viewport checks. The paper generator binds this manuscript to the same evidence index and source lock. The strict public audit remains fail-closed because all \RegistryRows{} workloads are experimental. The validation supports internal consistency and reviewability, not external reproducibility. Hosted Linux CI, dataset-policy decisions, and independent reproduction remain separate gates.
+The admission engine determines whether a completed run is accepted as valid evidence. It evaluates results using a strict gate:
+\[
+\begin{aligned}
+\operatorname{admit}(r)={}&
+G_{\mathrm{sem}}(r)\land G_{\mathrm{protocol}}(r)\\
+&{}\land G_{\mathrm{provenance}}(r)\land G_{\mathrm{state}}(r)
+\end{aligned}
+\]
+where $G_{\mathrm{sem}}$ checks task quality (for score-bearing workloads) or functional correctness (for performance-bearing workloads), $G_{\mathrm{protocol}}$ verifies measurement rules, $G_{\mathrm{provenance}}$ audits asset integrity, and $G_{\mathrm{state}}$ confirms host environment stability. The admission engine is fail-closed, meaning the default state is exclusion. Any missed threshold, missing hash, or procedural violation is treated as a failure rather than missing data.
 
 \section{Workload Suite}
 \label{sec:suite}
