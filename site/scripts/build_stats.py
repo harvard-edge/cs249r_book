@@ -34,7 +34,11 @@ CACHE_PATH = SITE_DIR / "config" / "stats-cache.json"
 
 GITHUB_REPO = "harvard-edge/cs249r_book"
 BUTTONDOWN_NEWSLETTER = "mlsysbook"
-GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "")
+# The GA4 property behind the Looker Studio readership report. A property ID is
+# not a credential -- it identifies the property, it does not grant access --
+# so it lives here rather than in a secret. Access is controlled by the service
+# account's Viewer grant in GA4 Property Access Management.
+GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "419684623")
 
 # Stats rendered as an exact figure vs. floored to two significant digits with
 # a trailing "+". Exact for anything countable from the repo (a deck count is
