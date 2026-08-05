@@ -49,7 +49,10 @@ GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "419684623")
 # until the count crossed 28,000, which defeats the point of a live counter
 # next to a "Star on GitHub" call to action. The rounded form is still
 # available as {{stats.stars_rounded}} for milestone-style copy.
-PLUS_STYLE = {"merged_prs", "readers", "readers_monthly", "countries", "subscribers"}
+# Reach figures render exact. In a card that presents them as measured
+# readings, "312,523" carries more authority than "310,000+", which reads
+# as marketing. Newsletter mockup copy keeps the rounded style.
+PLUS_STYLE = {"merged_prs", "subscribers"}
 
 warnings: list[str] = []
 
