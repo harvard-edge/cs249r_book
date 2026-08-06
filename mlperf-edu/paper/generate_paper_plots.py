@@ -373,4 +373,48 @@ plt.savefig(os.path.join(out_dir, 'fig_algo_lens.pdf'), dpi=300)
 plt.savefig(os.path.join(out_dir, 'fig_algo_lens.png'), dpi=200)
 plt.close()
 
-print("Regenerated all 5 figures with zero overlaps and pristine layout!")
+# =========================================================================
+# Figure 8: DAM Taxonomy Intersectional Design Space (fig_dam_intersections)
+# =========================================================================
+fig, ax = plt.subplots(figsize=(6.5, 3.6))
+
+from matplotlib.patches import Circle
+
+# Define circle centers and radii
+r = 1.6
+c_d = (0.0, 1.0)
+c_a = (-1.2, -0.8)
+c_m = (1.2, -0.8)
+
+circle_d = Circle(c_d, r, facecolor='#e8f0fe', edgecolor='#1a73e8', linewidth=1.5, alpha=0.55)
+circle_a = Circle(c_a, r, facecolor='#f3e8fd', edgecolor='#8e24aa', linewidth=1.5, alpha=0.55)
+circle_m = Circle(c_m, r, facecolor='#e6f4ea', edgecolor='#137333', linewidth=1.5, alpha=0.55)
+
+ax.add_patch(circle_d)
+ax.add_patch(circle_a)
+ax.add_patch(circle_m)
+
+# Labels
+ax.text(0.0, 2.2, "Data (D)\nSample Pruning & Augmentation", ha='center', va='center', fontsize=8, fontweight='bold', color='#1a73e8')
+ax.text(-2.1, -1.2, "Algorithm (A)\nOptimizer & Quantization", ha='center', va='center', fontsize=8, fontweight='bold', color='#8e24aa')
+ax.text(2.1, -1.2, "Machine (M)\nBackend & Microarch Limits", ha='center', va='center', fontsize=8, fontweight='bold', color='#137333')
+
+# Dual Intersections
+ax.text(-0.9, 0.4, "D ∩ A\nSample Efficiency vs.\nQuant. Quality", ha='center', va='center', fontsize=6.8, fontweight='bold', color='#424242')
+ax.text(0.9, 0.4, "D ∩ M\nPrefetching vs.\nDRAM Traffic", ha='center', va='center', fontsize=6.8, fontweight='bold', color='#424242')
+ax.text(0.0, -1.5, "A ∩ M\nQuant. Shift vs.\nRoofline OI", ha='center', va='center', fontsize=6.8, fontweight='bold', color='#424242')
+
+# Triple Intersection
+ax.text(0.0, -0.2, "D ∩ A ∩ M\nJoint Multi-Lever\nPareto Optimization", ha='center', va='center', fontsize=7.2, fontweight='bold', color='black', bbox=dict(boxstyle="round,pad=0.2", fc="white", ec="#757575", lw=0.8, alpha=0.9))
+
+ax.set_xlim(-3.4, 3.4)
+ax.set_ylim(-2.8, 2.9)
+ax.set_aspect('equal')
+ax.axis('off')
+
+plt.tight_layout()
+plt.savefig(os.path.join(out_dir, 'fig_dam_intersections.pdf'), dpi=300)
+plt.savefig(os.path.join(out_dir, 'fig_dam_intersections.svg'))
+plt.close()
+
+print("Regenerated all 6 figures including standalone DAM Intersections SVG/PDF with zero overlaps!")
