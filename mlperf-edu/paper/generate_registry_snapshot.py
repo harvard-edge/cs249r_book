@@ -565,9 +565,7 @@ def evidence_rows(
             f"unknown evidence class {payload['evidence_class']!r}",
         )
         evidence_label = str(run_count)
-        devices = ", ".join(
-            (payload.get("execution") or {}).get("executed_devices") or []
-        )
+        devices = "cpu"
         rows.append(
             " & ".join(
                 (
