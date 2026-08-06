@@ -37,9 +37,9 @@ def main() -> int:
         print(f"error: {BUILD_DIR} missing; nothing rendered", file=sys.stderr)
         return 1
 
-    display: dict[str, str] = json.loads(
-        CACHE_PATH.read_text(encoding="utf-8")
-    ).get("display", {})
+    cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
+    display: dict[str, str] = cache.get("display", {})
+    generated: str = cache.get("generated", "")
 
     unresolved: dict[str, set[str]] = {}
     substitutions = 0
@@ -68,7 +68,18 @@ def main() -> int:
                 missing.add(key)
                 return match.group(0)
             value = display[key]
-            return json.dumps(value)[1:-1] if is_json else value
+            if is_json:
+                return json.dumps(value)[1:-1]
+            # Wrap body-text values so the page can refresh them at load time
+            # from stats.json. Values inside an attribute or an SVG <text> node
+            # cannot carry a wrapper element, so those stay static; they are
+            # decorative or metadata rather than the figures a reader reads.
+            start = match.start()
+            in_attr = original.rfind("<", 0, start) > original.rfind(">", 0, start)
+            in_svg_text = original.rfind("<text", 0, start) > original.rfind("</text", 0, start)
+            if in_attr or in_svg_text:
+                return value
+            return f'<span data-stat="{key}">{value}</span>' 
 
         updated, count = PLACEHOLDER.subn(replace, original)
         if missing:
@@ -78,8 +89,15 @@ def main() -> int:
             substitutions += count
             touched += 1
 
-    print(f"Injected {substitutions} stat value(s) across {touched} page(s)",
-          file=sys.stderr)
+    # Publish the values at a stable URL. A scheduled job can refresh this one
+    # file without rebuilding the site, and every page load picks it up.
+    (BUILD_DIR / "stats.json").write_text(
+        json.dumps({"generated": generated, "display": display},
+                   indent=2, sort_keys=True) + "\n",
+        encoding="utf-8")
+
+    print(f"Injected {substitutions} stat value(s) across {touched} page(s); "
+          f"wrote stats.json", file=sys.stderr)
 
     if unresolved:
         print("\nerror: unresolved stat placeholders", file=sys.stderr)
