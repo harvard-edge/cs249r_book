@@ -45,12 +45,14 @@ with open(TEX_OUT, 'w', encoding='utf-8') as f:
     
     f.write("\\newcommand{\\QuantizationTableRows}{%\n")
     for row in quant_experiments:
-        f.write(f"  {row['workload']} & {row['format']} & {row['size_mb']:.1f} & {row['latency_ms']:.1f} & {row['bw_gbs']:.1f} & {row['score']} & {row['verdict']} \\\\\n")
+        v_badge = "\\badgePass{}" if row['verdict'] == "Pass" else "\\badgeMiss{}"
+        f.write(f"  {row['workload']} & {row['format']} & {row['size_mb']:.1f} & {row['latency_ms']:.1f} & {row['bw_gbs']:.1f} & {row['score']} & {v_badge} \\\\\n")
     f.write("}\n\n")
     
     f.write("\\newcommand{\\PruningTableRows}{%\n")
     for row in pruning_experiments:
-        f.write(f"  {row['workload']} & {row['budget']} & {row['time_s']:.1f} & {row['metric']} & {row['verdict']} \\\\\n")
+        v_badge = "\\badgePass{}" if row['verdict'] == "Pass" else "\\badgeMiss{}"
+        f.write(f"  {row['workload']} & {row['budget']} & {row['time_s']:.1f} & {row['metric']} & {v_badge} \\\\\n")
     f.write("}\n\n")
 
 print(f"Successfully generated {TEX_OUT}")

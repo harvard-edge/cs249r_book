@@ -544,39 +544,32 @@ def evidence_rows(
                 label=f"{quality_metric} median",
             )
             observed_text = format_number(quality_median, quality_metric)
-            if role == "score-bearing" and not gate_satisfied(quality_median, gate):
-                observed_text += r" \textbf{(miss)}"
+        role_badge = r"\badgeScore{}" if role == "score-bearing" else r"\badgePerf{}"
+        if role == "score-bearing" and not gate_satisfied(quality_median, gate):
+            observed_text += r" \badgeMiss{}"
+        elif role == "score-bearing":
+            observed_text += r" \badgePass{}"
         else:
-            observed_text = "pass"
+            observed_text = r"\badgePass{}"
         reference = format_number(median, metric)
         if run_count > 1:
             reference += (
                 f" [{format_number(minimum, metric)}, {format_number(maximum, metric)}]"
             )
         measurement_text = f"{tex(METRIC_LABELS.get(metric, metric))} {reference}"
-        # The verified/provisional two-tier evidence class was retired: it
-        # gated nothing, and the run count carries the same information without
-        # implying a promotion status the framework no longer assigns. The
-        # class is still validated above; only the display label changed.
-        # Retained records keep their original class string as data.
-        require(
-            str(payload["evidence_class"])
-            in {"five-run-verified", "single-run-provisional", "two-run-provisional"},
-            f"unknown evidence class {payload['evidence_class']!r}",
-        )
         evidence_label = str(run_count)
-        devices = "cpu"
+        devices = r"\badgeCPU{}"
         rows.append(
             " & ".join(
                 (
                     case_display(entry),
-                    "Score" if role == "score-bearing" else "Perf.",
+                    role_badge,
                     evidence_label,
                     gate_text,
                     observed_text,
                     measurement_text,
                     repeatability_text,
-                    tex(devices),
+                    devices,
                 )
             )
             + r" \\"

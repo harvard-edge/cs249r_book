@@ -108,6 +108,13 @@
 
 \setlength{\fboxsep}{1.8pt}
 
+% Results & Verdict badges
+\newcommand{\badgePass}{\colorbox{taggreenbg}{\fontsize{6.8}{7.8}\selectfont\color{taggreentxt}\textbf{Pass}}}
+\newcommand{\badgeMiss}{\colorbox{tagredbg}{\fontsize{6.8}{7.8}\selectfont\color{tagredtxt}\textbf{Miss}}}
+\newcommand{\badgeScore}{\colorbox{tagbluebg}{\fontsize{6.8}{7.8}\selectfont\color{tagbluetxt}\textbf{Score}}}
+\newcommand{\badgePerf}{\colorbox{tagpurplebg}{\fontsize{6.8}{7.8}\selectfont\color{tagpurpletxt}\textbf{Perf.}}}
+\newcommand{\badgeCPU}{\colorbox{taggraybg}{\fontsize{6.8}{7.8}\selectfont\color{taggraytxt}\textbf{cpu}}}
+
 % Bottleneck badges
 \newcommand{\badgeCompute}{\colorbox{taggreenbg}{\fontsize{6.8}{7.8}\selectfont\color{taggreentxt}\textbf{Compute-Bound}}}
 \newcommand{\badgeMemory}{\colorbox{tagorangebg}{\fontsize{6.8}{7.8}\selectfont\color{tagorangetxt}\textbf{DRAM Bandwidth}}}
@@ -459,18 +466,6 @@ The empirical Roofline results validate the core design thesis of MLPerf EDU: co
 
 \textbf{DRAM memory-bandwidth bound workloads ($I < 16.7\text{ FLOPs/B}$).} Workloads left of the knee stall waiting for memory data along the $150\text{ GB/s}$ slanted DRAM ceiling ($P = 150 \times I\text{ GFLOP/s}$). LLM Decode ($I=0.5\text{ FLOPs/B}$) is constrained by single-token autoregressive KV-cache reads across DRAM. GCN node classification ($I=1.2\text{ FLOPs/B}$) relies on sparse gather/scatter index lookups on \texttt{ogbn-arxiv}, fragmenting memory access and thrashing L2 caches. NCF recommendation ($I=2.1\text{ FLOPs/B}$) depends on high-cardinality sparse embedding lookups on \texttt{MovieLens-20M}, bottlenecking on shared memory bus bandwidth.
 
-\subsection{Hardware Characterization}
-Hardware characterization compares CPU versus MPS GPU backends, summarized in \Cref{fig:cpu_vs_mps}. Evaluating these backends closes the loop on why single-laptop benchmarking is a scientifically valid substitute for cluster evaluation. Dense GEMM workloads map efficiently to both backends, achieving $2.3\times$--$6.68\times$ speedups on the MPS GPU backend because their predictable tensor operations pipeline efficiently without thread divergence.
-
-Conversely, memory-bound, sparse, or branch-heavy workloads expose architectural limitations, yielding near $1.0\times$ CPU-GPU parity ($0.98\times$--$1.01\times$). GCN node classification fails to accelerate on GPU because sparse index lookups cause memory divergence that disrupts parallel execution pipelines. Qwen3 function calling suffers from dynamic AST branching, triggering warp divergence. LLM decode is constrained by single-token KV-cache reads, lowering operational intensity to $0.5\text{ FLOPs/byte}$ and bottlenecking on the UMA memory bus rather than GPU compute. These findings confirm that MLPerf EDU provides students and researchers with an inspectable micro-datacenter, exposing real system trade-offs without requiring cluster infrastructure.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/fig_cpu_vs_mps.pdf}
-\caption{\textbf{Hardware backend acceleration (MPS GPU vs. CPU baseline).} Dense GEMMs achieve $2.3\times$--$4.2\times$ GPU speedup, whereas sparse or memory-bound workloads exhibit near $1.0\times$ CPU-GPU parity.}
-\label{fig:cpu_vs_mps}
-\end{figure}
-
 \subsection{Determinism and Variance}
 A single accepted run decides a quality verdict; timing claims require repeated measurement. This asymmetry requires evaluating quality metric determinism~\citep{bouthillier2019,pham2020}.
 
@@ -574,7 +569,14 @@ Transitioning from FP32 to FP16 achieves a uniform $2.0\times$ reduction in mode
 For optimizer selection, while AdamW maintains 2 momentum/variance states per parameter ($8\text{ bytes/param}$ state overhead), Lion (EvoLved Sign Momentum) reduces optimizer memory state by 50\% ($4\text{ bytes/param}$), saving $1.36\text{ GB}$ state memory on nanoGPT and freeing memory capacity for model depth/width scaling under single-laptop limits.
 
 \subsection{Machine Lens Characterization}
-The Machine (M) lens provides hardware characterization and systems feedback, mapping operational intensity ($\text{FLOPs/byte}$) along the Roofline model~\citep{williams2009roofline} and evaluating hardware backends (CPU vs MPS GPU vs CUDA). The knee point at $I_{\text{knee}} = 16.7\text{ FLOPs/byte}$ separates compute-bound GEMM workloads ($I \ge 16.7$) from DRAM memory-bandwidth bound workloads ($I < 16.7$).
+The Machine (M) lens provides hardware characterization and systems feedback, mapping operational intensity ($\text{FLOPs/byte}$) along the Roofline model~\citep{williams2009roofline} and evaluating hardware backends (CPU vs MPS GPU vs CUDA), as summarized in \Cref{fig:cpu_vs_mps} and \Cref{tab:machine_exhaustive}. The knee point at $I_{\text{knee}} = 16.7\text{ FLOPs/byte}$ separates compute-bound GEMM workloads ($I \ge 16.7$) from DRAM memory-bandwidth bound workloads ($I < 16.7$).
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_cpu_vs_mps.pdf}
+\caption{\textbf{Hardware backend acceleration (MPS GPU vs. CPU baseline).} Dense GEMMs achieve $2.3\times$--$6.68\times$ GPU speedup, whereas sparse or memory-bound workloads exhibit near $1.0\times$ CPU-GPU parity.}
+\label{fig:cpu_vs_mps}
+\end{figure}
 
 \begin{table}[t]
 \centering
@@ -593,7 +595,9 @@ The Machine (M) lens provides hardware characterization and systems feedback, ma
 }
 \end{table}
 
-Crucially, cross-referencing precision quantization with Roofline dynamics reveals that INT8 dynamic quantization halves byte traffic per parameter read, effectively doubling operational intensity and shifting memory-bound workloads rightward along the Roofline curve toward the compute-bound plateau. Dense GEMM workloads achieve $2.3\times$--$4.15\times$ GPU speedups, whereas sparse or branch-heavy workloads (GCN graph scatter/gather, function calling AST parsing, LLM decode) exhibit near $1.0\times$ CPU-GPU parity due to warp divergence and UMA memory bus contention (\Cref{tab:machine_exhaustive}).
+Evaluating hardware backends closes the loop on why single-laptop benchmarking is a scientifically valid substitute for cluster evaluation. Dense GEMM workloads map efficiently to both backends, achieving $2.3\times$--$6.68\times$ speedups on the MPS GPU backend because their predictable tensor operations pipeline efficiently without thread divergence. Conversely, memory-bound, sparse, or branch-heavy workloads expose architectural limitations, yielding near $1.0\times$ CPU-GPU parity ($0.98\times$--$1.01\times$). GCN node classification fails to accelerate on GPU because sparse index lookups cause memory divergence that disrupts parallel execution pipelines. Qwen3 function calling suffers from dynamic AST branching, triggering warp divergence. LLM decode is constrained by single-token KV-cache reads, bottlenecking on the UMA memory bus rather than GPU compute.
+
+Crucially, cross-referencing precision quantization with Roofline dynamics reveals that INT8 dynamic quantization halves byte traffic per parameter read, effectively doubling operational intensity and shifting memory-bound workloads rightward along the Roofline curve toward the compute-bound plateau.
 
 \section{Limitations and Future Work}
 \label{sec:limitations}
