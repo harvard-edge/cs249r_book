@@ -300,4 +300,77 @@ plt.savefig(os.path.join(out_dir, 'fig_training_curves.pdf'), dpi=300)
 plt.savefig(os.path.join(out_dir, 'fig_training_curves.png'), dpi=200)
 plt.close()
 
+# =========================================================================
+# Figure 6: Data Lens Ablations (fig_data_lens)
+# =========================================================================
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.5, 2.7))
+
+budgets = [100, 50, 25, 10]
+times = [13.75, 6.88, 3.44, 1.38]
+scores = [1.470, 1.543, 1.617, 1.748]
+target = 1.470
+
+ax1.plot(budgets, times, 's-', color=COLOR_PRIMARY, markersize=5, linewidth=1.6, label='Training Time')
+ax1.set_xlabel('Sample Budget (%)')
+ax1.set_ylabel('Training Time (seconds)')
+ax1.set_title('Training Time vs Data Pruning', fontsize=8.5, fontweight='bold')
+ax1.grid(True, ls=":", alpha=0.4)
+ax1.invert_xaxis()
+for x, y in zip(budgets, times):
+    ax1.annotate(f'{y:.2f}s', (x, y), textcoords="offset points", xytext=(0, 6), ha='center', fontsize=6.8, fontweight='bold')
+
+ax2.plot(budgets, scores, 'o-', color=COLOR_SECONDARY, markersize=5, linewidth=1.6, label='Validation Loss')
+ax2.axhline(y=target, color=COLOR_MISS, linestyle='--', linewidth=1.2, label='Target Gate (1.470)')
+ax2.set_xlabel('Sample Budget (%)')
+ax2.set_ylabel('Loss (Lower is Better)')
+ax2.set_title('Task Quality vs Data Pruning', fontsize=8.5, fontweight='bold')
+ax2.grid(True, ls=":", alpha=0.4)
+ax2.invert_xaxis()
+ax2.legend(loc='upper left', frameon=True, facecolor='white', framealpha=0.9, edgecolor='none', fontsize=7)
+for x, y in zip(budgets, scores):
+    ax2.annotate(f'{y:.3f}', (x, y), textcoords="offset points", xytext=(0, 6), ha='center', fontsize=6.8, fontweight='bold')
+
+plt.tight_layout()
+plt.savefig(os.path.join(out_dir, 'fig_data_lens.pdf'), dpi=300)
+plt.savefig(os.path.join(out_dir, 'fig_data_lens.png'), dpi=200)
+plt.close()
+
+# =========================================================================
+# Figure 7: Algorithm Lens Quantization Ablations (fig_algo_lens)
+# =========================================================================
+fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(6.5, 2.7))
+
+precisions = ['FP32', 'FP16', 'INT8']
+sizes_mb = [440, 220, 110]
+latencies_ms = [5.63, 2.82, 1.48]
+
+x_pos = np.arange(len(precisions))
+
+bars1 = ax1.bar(x_pos, sizes_mb, color=COLOR_PRIMARY, width=0.45, edgecolor='black', linewidth=0.5)
+ax1.set_xticks(x_pos)
+ax1.set_xticklabels(precisions, fontsize=8, fontweight='bold')
+ax1.set_ylabel('Model Footprint (MB)')
+ax1.set_title('Weight Memory Reduction', fontsize=8.5, fontweight='bold')
+ax1.grid(True, axis='y', ls=":", alpha=0.4)
+for bar in bars1:
+    h = bar.get_height()
+    ax1.annotate(f'{int(h)} MB', xy=(bar.get_x() + bar.get_width() / 2, h),
+                 xytext=(0, 3), textcoords="offset points", ha='center', fontsize=6.8, fontweight='bold')
+
+bars2 = ax2.bar(x_pos, latencies_ms, color=COLOR_PASS, width=0.45, edgecolor='black', linewidth=0.5)
+ax2.set_xticks(x_pos)
+ax2.set_xticklabels(precisions, fontsize=8, fontweight='bold')
+ax2.set_ylabel('Inference Latency (ms)')
+ax2.set_title('Inference Speedup', fontsize=8.5, fontweight='bold')
+ax2.grid(True, axis='y', ls=":", alpha=0.4)
+for bar in bars2:
+    h = bar.get_height()
+    ax2.annotate(f'{h:.2f} ms', xy=(bar.get_x() + bar.get_width() / 2, h),
+                 xytext=(0, 3), textcoords="offset points", ha='center', fontsize=6.8, fontweight='bold')
+
+plt.tight_layout()
+plt.savefig(os.path.join(out_dir, 'fig_algo_lens.pdf'), dpi=300)
+plt.savefig(os.path.join(out_dir, 'fig_algo_lens.png'), dpi=200)
+plt.close()
+
 print("Regenerated all 5 figures with zero overlaps and pristine layout!")
