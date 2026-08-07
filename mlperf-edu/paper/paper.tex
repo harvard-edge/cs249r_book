@@ -213,13 +213,13 @@ To achieve comprehensive single-node coverage without compromising benchmark aut
 
 Using these workloads, researchers and students execute controlled empirical studies that illuminate non-obvious relationships across the Data (D), Algorithm (A), and Machine (M) taxonomy. For example, while ML practitioners expect GPU hardware acceleration to scale uniformly across models, sparse Graph Neural Networks (GCN) and agentic tool-calling AST parsing show zero GPU speedup ($0.98\times\text{--}1.01\times$) over a standard CPU due to irregular memory gather operations and warp divergence. Conversely, INT8 dynamic quantization halves parameter byte traffic, effectively doubling operational intensity and shifting memory-bound workloads rightward into the compute-bound regime.
 
-Beyond providing an executable workload registry, MLPerf EDU is designed around five foundational systems principles intended to instill rigorous empirical discipline:
+Beyond providing an executable workload registry, MLPerf EDU addresses a critical gap in ML systems education and research. Learners and researchers require an accessible benchmark suite that instills rigorous empirical discipline without requiring multi-node GPU clusters. MLPerf EDU is engineered around five foundational educational and systems principles:
 \begin{itemize}[leftmargin=*,itemsep=1.5pt]
 \item \textbf{P1 (Quality-Performance Coupling):} Systems performance cannot be evaluated in a vacuum separated from statistical task quality. Throughput gains achieved by degrading model output or relaxing accuracy thresholds are invalid; every workload inherits non-negotiable quality target floors ($G_{\text{sem}}$) directly from upstream standards.
 \item \textbf{P2 (Reproducibility and Auditability):} Performance metrics without cryptographic asset lineage, seed logging, and bit-identical determinism validation are scientifically uninterpretable. The suite embeds SHA-256 provenance manifests (\texttt{.provd.json}) into every run to guarantee unauthenticated auditability.
-\item \textbf{P3 (Multi-Dimensional Pareto Trade-Offs):} Benchmarking is not the pursuit of a single scalar leaderboard score. The DAM Taxonomy trains evaluators to analyze multi-objective Pareto trade-offs—balancing dataset sample efficiency, algorithmic precision/memory overhead, and microarchitectural hardware resource limits.
-\item \textbf{P4 (Microarchitectural Fidelity):} Systems education must preserve real hardware-software execution bottlenecks (Compute-Bound vs DRAM Memory-Bandwidth Bound, warp divergence, UMA bus contention) on consumer hardware rather than masking symptoms or relying on uncalibrated toy operators.
-\item \textbf{P5 (Statistical Variance \& Determinism Awareness):} Single-run training claims are invalid. Evaluators must distinguish between bit-identical inference determinism ($0.0\%$ CV) and stochastic training seed sensitivity ($\sigma = 3.2\%\text{--}6.8\%$) requiring multi-seed statistical aggregation.
+\item \textbf{P3 (Microarchitectural Fidelity):} Systems education must preserve real hardware-software execution bottlenecks (Compute-Bound vs DRAM Memory-Bandwidth Bound, warp divergence, UMA bus contention) on consumer hardware rather than masking symptoms or relying on uncalibrated toy operators.
+\item \textbf{P4 (Statistical Variance \& Determinism Awareness):} Single-run training claims are invalid. Evaluators must distinguish between bit-identical inference determinism ($0.0\%$ CV) and stochastic training seed sensitivity ($\sigma = 3.2\%\text{--}6.8\%$) requiring multi-seed statistical aggregation.
+\item \textbf{P5 (Multi-Dimensional Pareto Trade-Offs):} Benchmarking is not the pursuit of a single scalar leaderboard score. The DAM Taxonomy trains evaluators to analyze multi-objective Pareto trade-offs—balancing dataset sample efficiency (Data), algorithmic precision/memory overhead (Algorithm), and microarchitectural hardware resource limits (Machine).
 \end{itemize}
 
 The remainder of this paper is organized as follows. \Cref{sec:related} positions the suite against prior work. \Cref{sec:suite} presents the 14 workload specifications. \Cref{sec:harness} details the benchmark harness, load generator, and execution profiles. \Cref{sec:characterization} establishes single-laptop baseline characterization. \Cref{sec:dam_eval} analyzes the DAM Taxonomy evaluation. \Cref{sec:limitations} outlines system limitations, and \Cref{sec:conclusion} concludes.
@@ -592,6 +592,7 @@ Transitioning from FP32 to FP16 achieves a uniform $2.0\times$ reduction in mode
 For optimizer selection, while AdamW maintains 2 momentum/variance states per parameter ($8\text{ bytes/param}$ state overhead), Lion (EvoLved Sign Momentum) reduces optimizer memory state by 50\% ($4\text{ bytes/param}$), saving $1.36\text{ GB}$ state memory on nanoGPT and freeing memory capacity for model depth/width scaling under single-laptop limits.
 
 \subsection{Machine Lens Characterization}
+\label{sec:machine_lens}
 The Machine (M) lens provides hardware characterization and systems feedback, mapping operational intensity ($\text{FLOPs/byte}$) along the Roofline model~\citep{williams2009roofline} and evaluating hardware backends (CPU vs MPS GPU vs CUDA), as summarized in \Cref{fig:cpu_vs_mps} and \Cref{tab:machine_exhaustive}. The knee point at $I_{\text{knee}} = 16.7\text{ FLOPs/byte}$ separates compute-bound GEMM workloads ($I \ge 16.7$) from DRAM memory-bandwidth bound workloads ($I < 16.7$).
 
 \begin{figure}[t]
@@ -621,6 +622,18 @@ The Machine (M) lens provides hardware characterization and systems feedback, ma
 Evaluating hardware backends closes the loop on why single-laptop benchmarking is a scientifically valid substitute for cluster evaluation. Dense GEMM workloads map efficiently to both backends, achieving $2.3\times$--$6.68\times$ speedups on the MPS GPU backend because their predictable tensor operations pipeline efficiently without thread divergence. Conversely, memory-bound, sparse, or branch-heavy workloads expose architectural limitations, yielding near $1.0\times$ CPU-GPU parity ($0.98\times$--$1.01\times$). GCN node classification fails to accelerate on GPU because sparse index lookups cause memory divergence that disrupts parallel execution pipelines. Qwen3 function calling suffers from dynamic AST branching, triggering warp divergence. LLM decode is constrained by single-token KV-cache reads, bottlenecking on the UMA memory bus rather than GPU compute.
 
 Crucially, cross-referencing precision quantization with Roofline dynamics reveals that INT8 dynamic quantization halves byte traffic per parameter read, effectively doubling operational intensity and shifting memory-bound workloads rightward along the Roofline curve toward the compute-bound plateau.
+
+\subsection{Principle Fulfillment Summary}
+\label{sec:principle_fulfillment}
+
+The empirical findings in \Cref{sec:characterization} and \Cref{sec:dam_eval} directly fulfill the five core educational and systems principles introduced in \Cref{sec:intro}:
+\begin{enumerate}[leftmargin=*,itemsep=1.5pt]
+\item \textbf{P1 (Quality-Performance Coupling):} Verified across all ablation runs (\Cref{tab:quant_summary}). Runs that achieved low latency via aggressive quantization (e.g., INT8 on ResNet8 dropping accuracy below $85.0\%$) triggered hard \texttt{FAIL} admission verdicts, proving that throughput claims are invalid without enforced quality floors.
+\item \textbf{P2 (Reproducibility and Auditability):} Verified via cryptographic SHA-256 asset lineage and manifest validation (\texttt{.provd.json}). Every run logs exact hardware state, seed configuration, and checksums, guaranteeing unauthenticated auditability.
+\item \textbf{P3 (Microarchitectural Fidelity):} Verified by Roofline analysis (\Cref{fig:roofline}) and CPU vs. MPS hardware telemetry (\Cref{sec:machine_lens}). Single-laptop execution preserves genuine compute-bound and memory-bound bottlenecks, including counter-intuitive zero-speedup phenomena ($0.98\times\text{--}1.01\times$) on irregular workloads (GCN, AST parsing).
+\item \textbf{P4 (Statistical Variance \& Determinism Awareness):} Verified by multi-seed statistical telemetry (\Cref{tab:multiseed}). The evaluation quantifies bit-identical inference determinism ($0.0\%$ CV) against stochastic training variance ($\sigma = 3.2\%\text{--}6.8\%$), demonstrating why single-run training benchmarks lead to flawed conclusions.
+\item \textbf{P5 (Multi-Dimensional Pareto Trade-Offs):} Verified through the DAM Taxonomy ablations (\Cref{fig:data_lens,fig:algo_lens,fig:cpu_vs_mps}). The results expose non-linear Pareto trade-offs across sample budgets ($D$), precision/optimizer overhead ($A$), and compute device scaling ($M$).
+\end{enumerate}
 
 \section{Limitations and Future Work}
 \label{sec:limitations}
