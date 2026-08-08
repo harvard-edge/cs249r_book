@@ -565,6 +565,16 @@ function mlsRollDuration(from, to) {
     + (MLS_ROLL_MAX_MS - MLS_ROLL_MIN_MS) * Math.min(1, Math.max(0, ratio)));
 }
 
+// Drop the width reservation taken for the animation. It is a pixel value
+// measured at one viewport, so leaving it behind would fight a later rotation
+// or resize; once the figure holds its final string it occupies exactly that
+// width on its own and needs no help.
+function mlsRelease(el) {
+  el.style.minWidth = '';
+  el.style.display = '';
+  el.style.textAlign = '';
+}
+
 function mlsRoll(el, from, to, final, duration) {
   let started = null;
   el.textContent = Math.round(from).toLocaleString();
@@ -578,6 +588,7 @@ function mlsRoll(el, from, to, final, duration) {
       requestAnimationFrame(frame);
     } else {
       el.textContent = final;   // land on the exact published string
+      mlsRelease(el);
     }
   }
   requestAnimationFrame(frame);
@@ -589,6 +600,7 @@ function mlsCountUp(el, text, from) {
   if (mlsReduceMotion || !/^[\d,]+$/.test(final.trim())
       || !Number.isFinite(target) || target <= 0) {
     el.textContent = final;
+    mlsRelease(el);          // nothing animates, so hold no reservation
     return;
   }
   const start = (Number.isFinite(from) && from >= 0) ? from : null;
@@ -627,8 +639,23 @@ mlsReady(function () {
 
   // Roll one figure from what this reader last saw, then remember the new
   // value for their next visit.
+  //
+  // Before counting up, reserve the width the finished figure needs. A count
+  // from 0 to 314,517 grows from one character to seven, and above the 560px
+  // breakpoint the three readings are sized by their content, so without this
+  // the row visibly shoves itself outward for the whole animation. Measuring
+  // the final string rather than guessing keeps the reservation exact at every
+  // clamp() font size, and it can never overflow a narrow column because the
+  // width measured is the width that figure occupies at rest anyway.
   function rollFigure(el, key, text) {
     const final = String(text);
+    el.textContent = final;
+    const width = el.getBoundingClientRect().width;
+    if (width > 0) {
+      el.style.display = 'inline-block';
+      el.style.minWidth = width + 'px';
+      el.style.textAlign = 'center';
+    }
     mlsCountUp(el, final, mlsCacheGet(key));
     const value = Number(final.replace(/,/g, ''));
     if (/^[\d,]+$/.test(final.trim()) && Number.isFinite(value)) {
@@ -653,13 +680,19 @@ mlsReady(function () {
   }
 
   if ('IntersectionObserver' in window) {
+    // threshold 0 with the root inset from the bottom, rather than a fraction
+    // of the card. A visible-fraction threshold silently never fires when the
+    // element is taller than the viewport can ever show that fraction of, which
+    // is a real risk on a short landscape phone. Insetting the root instead
+    // fires when the card's top reaches the upper three quarters of the
+    // viewport, at any card height.
     const observer = new IntersectionObserver((entries, obs) => {
       entries.forEach(entry => {
         if (!entry.isIntersecting) return;
         obs.unobserve(entry.target);   // roll once, not on every scroll past
         rollCard();
       });
-    }, { threshold: 0.35 });
+    }, { threshold: 0, rootMargin: '0px 0px -25% 0px' });
     observer.observe(card);
   } else {
     rollCard();                        // no observer support: just refresh
