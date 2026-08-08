@@ -523,7 +523,67 @@ function mlsReady(fn) {
 const mlsReduceMotion = !!(window.matchMedia
   && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-function mlsCountUp(el, text) {
+// Each figure remembers what the reader last saw. A returning reader then
+// watches the number travel from that remembered value to the current one, so
+// the animation shows the growth since their last visit rather than replaying
+// the same sweep from zero. A first visit, or a visit where nothing moved,
+// still gets the full sweep.
+const MLS_CACHE_PREFIX = 'mlsysbook.stat.v1.';
+
+function mlsCacheGet(key) {
+  try {
+    const raw = window.localStorage.getItem(MLS_CACHE_PREFIX + key);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch (err) {
+    return null;        // storage blocked (private mode, disabled cookies)
+  }
+}
+
+function mlsCacheSet(key, value) {
+  try {
+    window.localStorage.setItem(MLS_CACHE_PREFIX + key, String(value));
+  } catch (err) {
+    /* quota or private mode: the roll still works, it just starts from zero */
+  }
+}
+
+// Time the roll to the distance it travels, on a log scale. A jump of a few
+// hundred readers should tick over quickly; a full sweep from zero earns the
+// long version. Linear scaling would make every realistic delta indistinguishable
+// from instant, because a day of growth is a rounding error against the total.
+const MLS_ROLL_MIN_MS = 400;
+const MLS_ROLL_MAX_MS = 1400;
+
+function mlsRollDuration(from, to) {
+  const delta = Math.abs(to - from);
+  if (delta === 0) return MLS_ROLL_MIN_MS;
+  const span = Math.max(Math.abs(to), 1);
+  const ratio = Math.log10(1 + delta) / Math.log10(1 + span);
+  return Math.round(MLS_ROLL_MIN_MS
+    + (MLS_ROLL_MAX_MS - MLS_ROLL_MIN_MS) * Math.min(1, Math.max(0, ratio)));
+}
+
+function mlsRoll(el, from, to, final, duration) {
+  let started = null;
+  el.textContent = Math.round(from).toLocaleString();
+  function frame(now) {
+    if (started === null) started = now;
+    const p = Math.min(1, (now - started) / duration);
+    if (p < 1) {
+      // easeOutCubic: quick off the mark, then settles onto the figure.
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(from + (to - from) * eased).toLocaleString();
+      requestAnimationFrame(frame);
+    } else {
+      el.textContent = final;   // land on the exact published string
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function mlsCountUp(el, text, from) {
   const final = String(text);
   const target = Number(final.replace(/,/g, ''));
   if (mlsReduceMotion || !/^[\d,]+$/.test(final.trim())
@@ -531,21 +591,16 @@ function mlsCountUp(el, text) {
     el.textContent = final;
     return;
   }
-  const duration = 1200;
-  let started = null;
-  el.textContent = '0';
-  function frame(now) {
-    if (started === null) started = now;
-    const p = Math.min(1, (now - started) / duration);
-    if (p < 1) {
-      // easeOutCubic: quick off the mark, then settles onto the figure.
-      el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))).toLocaleString();
-      requestAnimationFrame(frame);
-    } else {
-      el.textContent = final;   // land on the exact published string
-    }
+  const start = (Number.isFinite(from) && from >= 0) ? from : null;
+  if (start === null || start === target) {
+    // First visit, or nothing moved since the last one: play the full sweep so
+    // the figure still arrives rather than sitting there already finished.
+    mlsRoll(el, 0, target, final, MLS_ROLL_MAX_MS);
+  } else {
+    // Travel from what this reader last saw. Handles a decrease too, which is
+    // rare but real: a star can be withdrawn.
+    mlsRoll(el, start, target, final, mlsRollDuration(start, target));
   }
-  requestAnimationFrame(frame);
 }
 
 mlsReady(function () {
@@ -570,18 +625,29 @@ mlsReady(function () {
 
   if (!card) return;
 
+  // Roll one figure from what this reader last saw, then remember the new
+  // value for their next visit.
+  function rollFigure(el, key, text) {
+    const final = String(text);
+    mlsCountUp(el, final, mlsCacheGet(key));
+    const value = Number(final.replace(/,/g, ''));
+    if (/^[\d,]+$/.test(final.trim()) && Number.isFinite(value)) {
+      mlsCacheSet(key, value);
+    }
+  }
+
   function rollCard() {
     Promise.all([mlsStats, mlsStars]).then(([display, stars]) => {
       card.querySelectorAll('[data-stat]').forEach(el => {
         const key = el.getAttribute('data-stat');
         const live = (key === 'stars' && stars) ? stars.toLocaleString() : display[key];
-        mlsCountUp(el, live != null ? live : el.textContent);
+        rollFigure(el, key, live != null ? live : el.textContent);
       });
       // If the build did not wrap the star count in a data-stat span, roll the
       // element that carries it directly.
       const starEl = card.querySelector('.gh-star-count');
       if (starEl && stars && !starEl.querySelector('[data-stat]')) {
-        mlsCountUp(starEl, stars.toLocaleString());
+        rollFigure(starEl, 'stars', stars.toLocaleString());
       }
     });
   }
