@@ -3962,13 +3962,13 @@ pics/brick/.style = {
 \draw[Line,line width=2.6pt,violet]
    (S\k)+(\i:0.7*\ra) arc[start angle=\i, end angle=\newX, radius=0.7*\ra];
 }
-\draw[LineA](S1.220)--++(210:2.15)coordinate(MA);
+\draw[LineA](S1.240)--++(210:2.15)coordinate(MA);
  \node[Box,anchor=north](FO)at(MA){\textbf{Foundational}\\ Post-Training Quantization
 FP32/FP16/INT8 Basic Calibration};
- \draw[LineA](S2.220)--++(210:2.15)coordinate(ST);
+ \draw[LineA](S2.240)--++(210:2.15)coordinate(ST);
  \node[Box,anchor=north](PR)at(ST){\textbf{Production}\\ Quantization-Aware Training
 Mixed-Precision Per-Channel Quantization};
- \draw[LineA](S3.220)--++(210:2.15)coordinate(ST1);
+ \draw[LineA](S3.240)--++(210:2.15)coordinate(ST1);
  \node[Box,anchor=north](RE)at(ST1){\textbf{Research Frontier}\\ INT4/INT2
 Binary/Ternary Networks Extreme Quantization};
 %
@@ -4350,12 +4350,26 @@ class QuantizationMathCalc:
     steps_str = fmt(int_steps, precision=0, commas=False)
     scale_str = fmt(scale, precision=4, commas=False)
     zp_quotient_str = fmt(zp_quotient, precision=2, commas=False)
-    scale_fraction_math = fmt_math(rf"\frac{{{range_str}}}{{{steps_str}}}")
+    scale_fraction_raw = rf"\frac{{{range_str}}}{{{steps_str}}}"
+    scale_fraction_math = fmt_math(scale_fraction_raw)
     steps_math = fmt_math(f"2^{bits} - 1")
     zero_point_str = fmt_int(zero_point, commas=False)
     x_val_str = fmt_int(x_val, commas=False)
     x_q_str = fmt_int(x_q, commas=False)
     x_recon_str = fmt_int(x_recon, commas=False)
+    alpha_math = fmt_math(rf"\alpha = {alpha_str}")
+    beta_math = fmt_math(rf"\beta = {beta_str}")
+    range_math = fmt_math(rf"\beta - \alpha = {range_str}")
+    scale_math = fmt_math(
+      rf"s = {scale_fraction_raw} \approx {scale_str}"
+    )
+
+    zero_point_math = fmt_math(
+       rf"z = \text{{round}}(-(\alpha)/s)"
+        rf" = \text{{round}}\!\left(-({alpha_str})/{scale_fraction_raw}\right)"
+        rf" = \text{{round}}({zp_quotient_str})"
+        rf" = {zero_point_str}"
+    )
 ```
 
 ::: {#exmp-model-compression-scale-zero-point .callout-example title="Calculating scale and zero-point"}
@@ -4374,13 +4388,16 @@ We need a linear mapping $x \approx s(x_q - z)$, where $s$ is the **scale**\inde
 3.  **Quantize $(x \to x_q)$** using @eq-quantize:
     $$x_q = \text{clamp}\left(\text{round}\left(\frac{x}{s} + z\right), 0, 2^b - 1\right)$$ {#eq-quantize}
 
+```{=latex}
+\vspace*{-2ex}
+```
 **Scenario**:
-Suppose the activations range from $\alpha$ = `{python} QuantizationMathCalc.alpha_str` to $\beta$ = `{python} QuantizationMathCalc.beta_str`, and the target precision is UINT8 $(b=8)$.
+Suppose the activations range from `{python} QuantizationMathCalc.alpha_math` to `{python} QuantizationMathCalc.beta_math`, and the target precision is UINT8 $(b=8)$.
 
-*   **Range**: $\beta - \alpha$ = `{python} QuantizationMathCalc.range_str`.
-*   **Steps**: `{python} QuantizationMathCalc.steps_math` = `{python} QuantizationMathCalc.steps_str`.
-*   **Scale**: $s$ = `{python} QuantizationMathCalc.range_str`/`{python} QuantizationMathCalc.steps_str` $\approx$ `{python} QuantizationMathCalc.scale_str`.
-*   **Zero-point**: $z = \text{round}(-(\alpha) / s)$ = round(-(`{python} QuantizationMathCalc.alpha_str`)/`{python} QuantizationMathCalc.scale_fraction_math`) = round(`{python} QuantizationMathCalc.zp_quotient_str`) = `{python} QuantizationMathCalc.zero_point_str`.
+* **Range**: `{python} QuantizationMathCalc.range_math`.
+* **Steps**: `{python} QuantizationMathCalc.steps_math` = `{python} QuantizationMathCalc.steps_str`.
+* **Scale**: `{python} QuantizationMathCalc.scale_math`.
+* **Zero-point**: `{python} QuantizationMathCalc.zero_point_math`.
 
 **Systems insight**: The real value $0.0$ is represented by the integer `{python} QuantizationMathCalc.zero_point_str`, which ensures that zero-padding (common in CNNs) is represented exactly, preventing "quantization drift"\index{Quantization!drift} where padding introduces nonzero noise.
 
@@ -5269,6 +5286,11 @@ On a V100 GPU with `{python} V100Specs.v100_bw_gb_per_s_str` HBM bandwidth and `
 
 Fusion effectiveness varies by workload, as @tbl-fusion-speedup shows: memory-bound operations benefit most, while compute-bound operations see minimal improvement.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Workload**            |   **Speedup**    | **Why**                                             |
 |:------------------------|:----------------:|:----------------------------------------------------|
 | Element-wise operations |   2--4$\times$   | Highly memory bound, low arithmetic intensity       |
@@ -5277,6 +5299,10 @@ Fusion effectiveness varies by workload, as @tbl-fusion-speedup shows: memory-bo
 | Attention mechanisms    |   2--4$\times$   | Long sequences; quadratic memory scaling            |
 
 : **Operator Fusion Speedup by Workload**: Memory-bound workloads gain most from fusion, while compute-bound workloads see only marginal improvement. {#tbl-fusion-speedup tbl-colwidths="[34,18,48]"}
+
+```{=latex}
+\endgroup
+```
 
 Fusion also reduces kernel launch overhead. Each CUDA kernel launch incurs microsecond-scale latency. For a ResNet-50 with fifty-three convolutional layers, unfused execution launches `{python} FusionCalc.kernels_unfused_str` kernels (Conv + BN + ReLU), while fused execution launches `{python} FusionCalc.kernels_fused_str` kernels, saving repeated launch overhead in addition to memory traffic.
 
@@ -6866,6 +6892,11 @@ Knowing *how* each technique works is necessary but not sufficient; the practica
 
 Before choosing a sequence, separate the major levers by what they change. Pruning changes the operation pattern and only becomes fast when the resulting structure maps to kernels. Quantization changes bit width and is usually the first memory and bandwidth lever. Distillation changes the model itself by training a smaller dense student. @Tbl-optimization-comparison summarizes the first-order trade-offs; the sections that follow then refine the choice by constraint, hardware support, and engineering budget.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Technique**    | **Primary Goal**    | **Accuracy Impact** |    **Training Cost**    | **Hardware Dependency** | **Best For**                          |
 |:-----------------|:--------------------|:-------------------:|:-----------------------:|:-----------------------:|:--------------------------------------|
 | **Pruning**      | Reduce FLOPs/Size   |       Moderate      |    Low (fine-tuning)    |  High (for sparse ops)  | Latency-critical apps                 |
@@ -6874,9 +6905,14 @@ Before choosing a sequence, separate the major levers by what they change. Pruni
 
 : **Optimization Technique Trade-Offs**: Comparison of the three major optimization approaches across key performance dimensions, highlighting how each technique addresses different constraints and deployment scenarios. Pruning excels for computational reduction but requires sparse hardware support, quantization provides balanced size and speed improvements with wide hardware compatibility, while distillation produces high-quality compressed models at higher training cost. {#tbl-optimization-comparison tbl-colwidths="[13,13,16,20,16,22]"}
 
+```{=latex}
+\endgroup
+```
+
 ### Mapping constraints to techniques {#sec-model-compression-mapping-constraints-techniques-ff2c}
 
 The binding constraint should determine the optimization family before a team chooses a specific technique. @Tbl-constraint-opt-mapping connects each system constraint to the representation, precision, or architectural dimension most likely to relieve it, so technique selection starts from the deployment bottleneck rather than from the most familiar compression method.
+
 
 | **System Constraint**      | **Model Representation** | **Numerical Precision** | **Architectural Efficiency** |
 |:---------------------------|:------------------------:|:-----------------------:|:----------------------------:|
@@ -7167,6 +7203,8 @@ A mobile BERT pipeline\index{BERT!mobile deployment pipeline} makes that sequenc
 
 This example illustrates why sequencing matters: pruning first concentrates important weights into smaller ranges, making subsequent quantization more effective. Applying quantization before pruning reduces numerical precision available for importance-based pruning decisions, degrading final accuracy. Effective combination requires understanding these dependencies and developing application sequences that maximize cumulative benefits.
 
+With dozens of techniques across three optimization dimensions, rigorous measurement is essential for validating that optimizations achieve their intended goals. A practitioner who prunes, quantizes, and fuses without profiling the actual impact on target hardware is optimizing blindly.
+
 ::: {#exmp-model-compression-bert-base-mobile-deployment-pipeline .callout-example title="BERT-Base mobile deployment pipeline"}
 
 **Scenario**: An illustrative BERT-Base mobile deployment pipeline that combines published compression patterns rather than reproducing one paper's exact experiment [@sanh2019distilbert; @jiao2020; @zafrir2019].
@@ -7176,8 +7214,6 @@ This example illustrates why sequencing matters: pruning first concentrates impo
 **Systems insight**: The combined impact is `{python} BertCompression.compression_ratio_mult_str` memory reduction (`{python} BertCompression.full_mb_str` to `{python} BertCompression.compressed_mb_str`), `{python} BertCompression.mobile_speedup_mult_str` inference speedup on mobile CPU, and only `{python} BertCompression.final_accuracy_loss_pct_str` final accuracy loss vs. `{python} BertCompression.wrong_order_loss_pct_str` if quantization had been applied before pruning. The ordering of compression techniques changes the final deployment trade-off.
 
 :::
-
-With dozens of techniques across three optimization dimensions, rigorous measurement is essential for validating that optimizations achieve their intended goals. A practitioner who prunes, quantizes, and fuses without profiling the actual impact on target hardware is optimizing blindly.
 
 ## Efficiency Measurement {#sec-model-compression-efficiency-measurement-2424}
 
@@ -7379,7 +7415,7 @@ Quantizing ResNet-50 from FP32 to INT8 should be evaluated as a before-and-after
 
 The aggregate numbers make INT8 look almost free, but the diagnostic measurements explain why validation still matters. Per-class accuracy degradation spans `{python} ResNet50Int8Metrics.per_class_drop_pp_range_str`, with the highest impact on fine-grained categories, and the latency gain is hardware-dependent: this profile shows `{python} ResNet50Int8Metrics.latency_speedup_mult_str` on GPU but only `{python} ResNet50Int8Metrics.cpu_speedup_mult_str` on CPU.
 
-With these comprehensive baselines in place, the measurement framework must track optimization impact systematically. Rather than evaluating techniques in isolation, applying our three-dimensional framework requires understanding how different approaches interact when combined. Sequential application can lead to compounding benefits or unexpected interactions that diminish overall effectiveness. @Sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4 later expands this into a full efficiency-quality evaluation framework.
+With these comprehensive baselines in place, the measurement framework must track optimization impact systematically. Rather than evaluating techniques in isolation, applying our \mbox{three-dimensional} framework requires understanding how different approaches interact when combined. Sequential application can lead to compounding benefits or unexpected interactions that diminish overall effectiveness. @Sec-benchmarking-compression-validation-efficiencyquality-frontier-e9c4 later expands this into a full efficiency-quality evaluation framework.
 
 Rigorous measurement tells practitioners whether their optimizations succeeded, but the measurements themselves require tooling to perform. Profiling, quantization, pruning, and deployment all depend on software frameworks that automate otherwise prohibitively complex workflows.
 
@@ -7854,7 +7890,7 @@ Sparsity diagnostics answer a deployment question: which layers actually became 
 %====================================================
 % GEOMETRY
 %====================================================
-\def\BoxW{1.08}
+\def\BoxW{1.13}
 \def\BoxH{0.52}
 \def\GapX{0.20}
 \def\GapY{0.2}
@@ -7911,19 +7947,19 @@ Sparsity diagnostics answer a deployment question: which layers actually became 
 \node[
   font=\usefont{T1}{phv}{b}{n}\normalsize,
   text=black!80
-] at (\CenterX,2.05)
+] at (\CenterX,1.85)
 {Weight Sparsity Distribution Across Layers};
 
 \node[
   font=\usefont{T1}{phv}{m}{it}\normalsize,
   text=black!55
-] at (\CenterX,1.65)
+] at (\CenterX,1.45)
 {Darker shades indicate higher sparsity (more weights pruned)};
 
 \node[
   font=\usefont{T1}{phv}{m}{it}\small,
   text=black!55
-] at (\CenterX,-9.91)
+] at (\CenterX,-9.51)
 {Sparsity varies by layer type: early conv layers retain features; FC layers tolerate aggressive pruning};
 
 %====================================================
@@ -7934,7 +7970,7 @@ Sparsity diagnostics answer a deployment question: which layers actually became 
   \node[
     font=\usefont{T1}{phv}{m}{n}\small,
     text=black!75
-  ] at (\xc,0.95) {\txt};
+  ] at (\xc,0.9) {\txt};
 }
 
 %====================================================
@@ -7965,7 +8001,7 @@ Sparsity diagnostics answer a deployment question: which layers actually became 
   anchor=east,
     font=\usefont{T1}{phv}{m}{n}\normalsize,
   text=black!75
-] at (1.30,-8.7) {Sparsity:};
+] at (1.30,-8.5) {Sparsity:};
 
 \foreach \clr/\lab [count=\i from 0] in {
   leg1/{0\%},
@@ -7979,25 +8015,25 @@ Sparsity diagnostics answer a deployment question: which layers actually became 
     rounded corners=2.8pt,
     fill=\clr,
     draw=none
-  ] (\xx,-9.0) rectangle ++(1.15,0.56);
+  ] (\xx,-8.8) rectangle ++(1.15,0.56);
 
   \node[
     font=\usefont{T1}{phv}{m}{n}\small,
     text=black!75
-  ] at (\xx+0.575,-9.24) {\lab};
+  ] at (\xx+0.575,-9.04) {\lab};
 }
 %
-\draw[black!70,thick](103*\StartY,0.35)--++(0.5,0)
+\draw[black!70,thick](106*\StartY,0.35)--++(0.5,0)
 node[align=left,anchor=west]{\textit{\color{black!50}Low sparsity}\\
 \textit{\color{black!50}(early layers preserved)}};
 %
-\draw[black!70,thick](103*\StartY,-3.25)--++(0.5,0)
+\draw[black!70,thick](106*\StartY,-3.25)--++(0.5,0)
 node[align=left,anchor=west]{\textbf{\color{crimson}High sparsity}\\
 \textit{\color{black!50}FC layers: most}\\
 \textit{\color{black!50}parameters pruned}
 };
 %
-\draw[black!70,thick](103*\StartY,-6.85)--++(0.5,0)
+\draw[black!70,thick](106*\StartY,-6.85)--++(0.5,0)
 node[align=left,anchor=west]{\textit{\color{black!50}Transformer layers:}\\
 \textit{\color{black!50}(variable sparsity)}};
 \end{tikzpicture}
@@ -8072,37 +8108,69 @@ class FallaciesAnalysis:
 
 Model optimization involves counterintuitive interactions between techniques that appear independent. Engineers often assume strategies compose linearly and that theoretical metrics predict deployment performance, and those assumptions waste optimization effort, degrade accuracy, or miss deployment requirements despite substantial investment.
 
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Optimization techniques can be applied independently without considering their interactions.*
 
 Engineers assume optimization strategies compose additively: 50 percent pruning plus `{python} FallaciesAnalysis.int8_size_reduction_mult_str` quantization yields combined benefits. In reality, techniques interact nonlinearly and compound losses. In a representative BERT-style compression scenario, pruning to `{python} FallaciesAnalysis.pruning_target_str` sparsity may preserve most task performance, but applying INT8 quantization afterward can lose more accuracy than QAT on the pruned model. Knowledge distillation from heavily pruned teachers can also transfer degenerate attention patterns that reduce student accuracy compared with distilling from dense teachers. As @sec-model-compression-optimization-strategies-f2f6 demonstrates, successful optimization requires coordinated application where techniques are sequenced together. Organizations that apply aggressive combinations without measuring interactions waste weeks recovering lost accuracy.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Pitfall**: *Optimizing for theoretical metrics rather than actual deployment performance.*
 
 Teams reduce FLOPs by 60 percent and celebrate efficiency gains without profiling deployment hardware. A pruned model with `{python} FallaciesAnalysis.param_removal_str` percent fewer parameters shows irregular sparsity patterns that prevent vectorization, achieving only 12 percent latency reduction instead of the expected `{python} FallaciesAnalysis.param_removal_str` percent on ARM processors. INT8 quantization reduces a transformer from `{python} FallaciesAnalysis.bert_fp32_mb_str` to `{python} FallaciesAnalysis.bert_int8_mb_str`, but dequantization overhead on GPUs lacking low-precision acceleration increases latency by 15 percent despite the `{python} FallaciesAnalysis.int8_size_reduction_mult_str` size reduction. As shown in @sec-model-compression-profiling-opportunity-analysis-477f, memory bandwidth, cache behavior, and instruction-level parallelism determine actual performance, not operation counts. Production deployments require measuring wall-clock latency on target hardware.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Aggressive quantization maintains model performance with minimal accuracy loss.*
 
 Engineers assume quantization scales uniformly: if INT8 loses 1 percent, then INT4 loses 2 percent. In practice, precision reduction exhibits threshold effects where models collapse catastrophically. ResNet-50 quantized to INT8 maintains `{python} FallaciesAnalysis.resnet_int8_acc_str` vs. `{python} FallaciesAnalysis.resnet_fp32_acc_str` FP32 accuracy, but naive INT4 quantization drops accuracy by 5–15 percent depending on the method. Binary weights achieve only ~`{python} FallaciesAnalysis.resnet_binary_acc_str` on ImageNet. BERT with INT8 weights retains 99.1 percent of FP32 GLUE performance, but INT4 attention mechanisms cause numerical instability reducing scores by 8–12 percent. LayerNorm and Softmax require FP16 minimum precision; quantizing them to INT8 causes divergence. As @sec-model-compression-precision-reduction-strategies-db83 demonstrates, mixed-precision approaches maintain accuracy where uniform quantization fails.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Pitfall**: *Defaulting to FP32 everywhere to avoid quantization risk.*
 
 Engineers default to FP32 to avoid quantization risk, but for deep learning FP32 often hurts performance without improving convergence. FP32 consumes 2$\times$ the memory bandwidth of BF16 and roughly 4$\times$ the arithmetic energy of FP16-class tensor compute. Because neural networks are resilient to noise in the mantissa, the extra precision bits typically model random variance rather than signal: BERT and ResNet-50 retain over 99 percent of FP32 accuracy at FP16 or BF16 with no algorithmic intervention, and the speed and energy gains are immediate. The right framing is not "what precision is safe" but "what is the lowest precision that preserves accuracy on my evaluation distribution," with FP16/BF16 as the default starting point and FP32 reserved for the layers (LayerNorm, Softmax, accumulators) that empirically need it.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Posttraining optimization is enough when accuracy drops are small.*
 
 Teams apply post-training quantization (PTQ) to avoid retraining and accept a modest task-specific accuracy gap. However, quantization-aware training (QAT) can recover part of that gap through learned quantization parameters. Similarly, posttraining pruning and post-hoc distillation can underperform training-aware compression schedules when the target sparsity or bit width is aggressive. As detailed in @sec-model-compression-precision-reduction-strategies-db83, even small accuracy improvements from training-aware methods often determine whether models meet production thresholds.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Pitfall**: *Assuming compression ratios translate directly into proportional deployment gains.*
 
 Teams achieve `{python} FallaciesAnalysis.int8_size_reduction_mult_str` model size reduction through INT8 quantization and expect `{python} FallaciesAnalysis.int8_size_reduction_mult_str` memory savings in deployment. In practice, runtime overhead erodes compression gains. Dequantization kernels add `{python} FallaciesAnalysis.dequant_overhead_str` latency overhead converting INT8 weights back to FP16. Pruned models with irregular sparsity achieve only 12 percent latency reduction despite `{python} FallaciesAnalysis.param_removal_str` percent parameter removal because hardware cannot skip zeroed weights efficiently. As @sec-model-compression-profiling-opportunity-analysis-477f demonstrates, a BERT model pruned to 50 percent sparsity and quantized to INT8 achieves only a `{python} FallaciesAnalysis.actual_speedup_str` end-to-end improvement, or about 1.28$\times$ throughput, rather than the expected `{python} FallaciesAnalysis.expected_speedup_mult_str` theoretical speedup, because unstructured sparsity creates irregular memory access. Production workflows must profile deployed latency on target hardware, not extrapolate from compression ratios.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Sparse matrices always save memory.*
 
 Sparse formats add index-array metadata that erodes the savings at moderate densities. With FP32 values and INT32 indices, CSR storage breaks even at roughly 50 percent density and COO at roughly 33 percent density before row-pointer overhead is counted. The performance break-even is even stricter: generic sparse kernels typically need to exceed 90--95 percent sparsity to outrun dense kernels, because irregular index traversal defeats the regular memory access patterns that hardware optimizes for. Specialized formats like NVIDIA's 2:4 structured sparsity sidestep this by encoding sparsity in fixed-ratio bitmasks rather than explicit indices, but unstructured pruning that does not clear the density threshold delivers neither memory nor latency savings on commodity hardware (see @sec-model-compression-profiling-opportunity-analysis-477f).
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Pitfall**: *Choosing sparse storage before checking the density threshold.*
 
 Teams sometimes convert tensors to sparse formats as soon as pruning creates visible zeros. That conversion can make the system slower and larger if metadata, gather/scatter overhead, and poor cache locality outweigh the saved values. A production compression pass should measure the realized density, choose a sparse format only after the break-even point is crossed, and prefer structured sparsity when the target hardware has kernels that can exploit it.
+
+:::
 
 ## Summary {#sec-model-compression-summary-8229}
 

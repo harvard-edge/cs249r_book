@@ -124,6 +124,25 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 \usetikzlibrary{patterns}
 \usepackage{tikzpagenodes}  % TikZ positioning relative to page
 
+%fix the crop issue with tikzpagenodes
+\makeatletter
+\@ifpackageloaded{crop}{
+  \@ifpackagewith{crop}{center}
+    {
+    \def\current@textarea@left{%
+      (1in+\hoffset+\currentsidemargin+.5*(\paperwidth-\stockwidth))}
+    \def\current@textarea@top{%
+      (1in+\voffset+\topmargin+\headheight+\headsep-.5*(\stockheight-\paperheight))}
+    }
+    {
+    \def\current@textarea@top{%
+      (1in+\voffset+\topmargin+\headheight+\headsep-(\stockheight-\paperheight))}
+    }
+  }
+  {%
+}
+\makeatother
+
 % Code listings
 \usepackage{listings}       % Code highlighting
 
@@ -136,7 +155,7 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 % Pandoc/Quarto may emit its own \hypersetup later in the preamble, so defer
 % this override until the document begins.
 \AtBeginDocument{%
-  \hypersetup{citecolor=black}%
+  \hypersetup{allcolors=black}%
 }
 
 % Conditional logic
@@ -152,6 +171,53 @@ labelformat=mylabel,justification=raggedright,singlelinecheck=false,font={ninept
 % Lists
 \usepackage{enumitem}       % Customizable lists
 \usepackage{multicol}       % Multi-column layouts (used for glossary)
+
+% =========================================================
+% Crop marks toggle
+% =========================================================
+
+\newif\ifCropMarks
+
+% Use this for showing crop marks:
+\CropMarkstrue
+
+% Use this for hiding crop marks:
+% \CropMarksfalse
+
+\ifCropMarks
+
+% Crop marks
+\usepackage[cam,width=8.5in,height=10.5in,center]{crop}
+
+\makeatletter
+\renewcommand*\CROP@@info{{%
+    \global\advance\CROP@index\@ne%
+    \advance\paperwidth-20\p@
+    \dimen@4pt
+    \ifx\CROP@pagecolor\@empty%
+    \else
+        \advance\dimen@\CROP@overlap%
+    \fi
+    \hb@xt@\z@{%
+        \hss%
+        \vbox to\z@{%
+            \centering%
+            \hsize\paperwidth%
+            \vss%
+            \normalfont%
+            \tiny%
+            \expandafter\csname\CROP@font\endcsname{%
+                \raisebox{1.3mm}[0cm][0cm]{\the\year/\the\month/\the\day}%
+                \strut%
+            }%
+            \vskip\dimen@%
+        }%
+        \hss%
+    }%
+}}
+\makeatother
+
+\fi
 
 % Margin notes and sidenotes
 \usepackage{ifoddpage}      % Detect recto/verso for margin-side placement
@@ -774,17 +840,18 @@ minimum width=40mm,font={%
 \begin{tikzpicture}[remember picture,overlay]
 
 % Clean geometric background (original design)
-\coordinate(S1)at([yshift=-200mm]current page.north west);
+\coordinate(S1)at([yshift=-200mm,xshift=-3mm]current page.north west);
 \draw[draw=none,fill=BlueDD!7](S1)--++(45:16)coordinate(S2)-
-|(S2|-current page.north west)--(current page.north west)coordinate(S3)--(S1);
+|(S2|-current page.north west)|-
+([xshift=-3mm, yshift=3mm]current page.north west)coordinate(S3)--(S1);
 
 \coordinate(E1)at([yshift=-98mm]current page.north west);
-\draw[draw=none,fill=BlueDD!15](E1)--(current page.north west)coordinate(E2)
---++(0:98mm)coordinate(E3)--(E1);
 
-\coordinate(D1)at([yshift=15mm]current page.south west);
-\draw[draw=none,fill=BlueDD!40,opacity=0.5](D1)--++(45:5.5)coordinate(D2)
--|(D2|-current page.north west)--(current page.north west)coordinate(D3)--(D1);
+\draw[draw=none,fill=BlueDD!15](S3)--++(270:10.37)coordinate(E2)
+--++(45:146.7mm)coordinate(E3)--cycle;
+
+\coordinate(D1)at([yshift=15mm,xshift=-3mm]current page.south west);
+\draw[draw=none,fill=BlueDD!40,opacity=0.5](S3)--(D1)--++(45:6.0)coordinate(D2)|-cycle;
 
 % Subtle tech elements - positioned in white areas for better visibility
 % Upper right white area - more visible
@@ -822,6 +889,9 @@ minimum width=40mm,font={%
 align=center,font={\fontsize{40pt}{40}\selectfont}]
 (BGG) at (current page.center)  {\color{crimson}\MakeUppercase {#1}};
 
+%\fill[red] (D1)circle(2pt);
+%\fill[red] (D2)circle(2pt);
+%\fill[red] (S3)circle(2pt);
 \end{tikzpicture}
 \clearpage
 }
@@ -1030,30 +1100,71 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 
 \renewcommand{\chaptername}{Chapter}
 
-% Hook into \appendix to switch numbering and TOC prefix
+% Hook into \appendix to switch numbering and TOC behavior
 \let\mlsysOrigAppendix\appendix
 \renewcommand{\appendix}{%
+  \renewcommand{\chaptername}{Appendix}%
   \mlsysOrigAppendix
   \mlsysappendixtrue% Switch margin number from digits to letters
-  \renewcommand{\cftchappresnum}{\color{toccolor}Appendix~}%
+  % Runtime TOC prefix, in case any TOC material is printed after \appendix.
+  \renewcommand{\cftchappresnum}{\color{toccolor}Appendix\nobreakspace}%
+  % Write a marker into the .toc file so that, when the global TOC is read,
+  % appendix entries use "Appendix" instead of "Chapter" and only chapter-level
+  % appendix entries are shown.
+  \addtocontents{toc}{\protect\mlsysTocAppendixSetup}%
 }
 
 % =============================================================================
 % TABLE OF CONTENTS FORMATTING
 % =============================================================================
-\setcounter{tocdepth}{3}                      % Chapter + H2 (section) + H3 (subsection); MIT Press / H&P / CLRS convention
+\setcounter{tocdepth}{3}                      % Main text: show chapter + section + subsection + subsubsection
 
-% TOC spacing adjustments for number widths and indentation
-\setlength{\cftchapnumwidth}{2em}             % Chapter number width
+% TOC spacing adjustments for section levels
 \setlength{\cftsecnumwidth}{2.75em}           % Section number width
 \setlength{\cftsubsecnumwidth}{3.25em}        % Subsection number width
 \setlength{\cftsubsubsecnumwidth}{4em}        % Subsubsection number width
 \setlength{\cftsubsecindent}{4.25em}          % Subsection indent
 \setlength{\cftsubsubsecindent}{7.5em}        % Subsubsection indent
+% Reduce vertical space before chapter entries in the TOC
+\addtolength{\cftbeforechapskip}{-1pt}
 
 % Chapter entries in TOC: bold, colored per-volume via \toccolor
 \renewcommand{\cftchapfont}{\bfseries\color{toccolor}}
-\renewcommand{\cftchappresnum}{\color{toccolor}Chapter~}
+\renewcommand{\cftchappresnum}{\color{toccolor}Chapter\nobreakspace}
+
+% Publisher request:
+% Use an em space between chapter number and chapter title in the TOC,
+% rather than relying on a tab-like fixed number box.
+\makeatletter
+\renewcommand*{\l@chapter}[2]{%
+  \ifnum \c@tocdepth >\m@ne
+    \addpenalty{-\@highpenalty}%
+    \vskip \cftbeforechapskip
+    {%
+      \leftskip \cftchapindent\relax
+      \rightskip \@tocrmarg
+      \parfillskip -\rightskip
+      \parindent \cftchapindent\relax
+      \@afterindenttrue
+      \interlinepenalty\@M
+      \leavevmode
+      \begingroup
+        \renewcommand{\numberline}[1]{\cftchappresnum ##1\hspace{0.5em}}%
+        {\cftchapfont #1}\nobreak
+      \endgroup
+      \cftchapfillnum{#2}%
+    }%
+  \fi
+}
+\makeatother
+
+% TOC setup inserted into the .toc file when appendix begins:
+% - switch prefix from "Chapter" to "Appendix"
+% - show only appendix chapter-level entries (#), not appendix sections (##)
+\DeclareRobustCommand{\mlsysTocAppendixSetup}{%
+  \setcounter{tocdepth}{0}%
+  \renewcommand{\cftchappresnum}{\color{toccolor}Appendix\nobreakspace}%
+}
 
 % Custom formatting for division entries (styled like parts)
 \newcommand{\divisionchapter}[1]{%
@@ -1129,7 +1240,7 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
     \clearpage
     %\setcounter{lastRomanPage}{\value{page}}%
     \pagenumbering{roman}%
-    \setcounter{page}{15}%
+    \setcounter{page}{13}%
     \@firstunnumberedfalse%
   \fi
   \setcounter{sidenote}{1}
@@ -1296,6 +1407,16 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 \def\endlongtable{\ifmfxInCallout\expandafter\mfx@tbl@end\else
   \expandafter\mfx@orig@endlongtable\fi}
 }{}
+\makeatother
+
+% Booktabs-style rule at the bottom of continued longtable pages
+\makeatletter
+\let\mlsys@orig@endhead\endhead%
+\renewcommand{\endhead}{%
+  \mlsys@orig@endhead%
+  \midrule%
+  \endfoot%
+}
 \makeatother
 
 % =============================================================================
@@ -1583,13 +1704,18 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
 % Called from inject_parts.lua via \addtocontents{toc}{\protect\tocpartentry{…}}
 \newif\ifminitoc
 \minitocfalse
+\makeatletter
+\def\mlsys@tocpartwithcolon#1~#2~#3\@nil{#1~#2:\space #3}
 \DeclareRobustCommand{\tocpartentry}[1]{%
   \ifminitoc\else
     \par\addvspace{12pt}%
-    \noindent\hfil\bfseries\color{toccolor}#1\color{black}\hfil
+    \noindent\hfil\bfseries\color{toccolor}%
+      \mlsys@tocpartwithcolon#1\@nil
+      \color{black}\hfil
     \par\addvspace{6pt}%
   \fi
 }
+\makeatother
 
 % --- \tocdivisionentry: Division heading in TOC (global only) -----------------
 % Renders a centered crimson division heading (e.g. "Back Matter") in the
@@ -2275,3 +2401,5 @@ align=right,font={\fontsize{40pt}{40}\selectfont}]
   \renewcommand*\ShowFrameLinethickness{0.2pt}
   \renewcommand*\ShowFrameColor{\color{red!45}}
 \fi
+
+%\setcounter{chapter}{4}
