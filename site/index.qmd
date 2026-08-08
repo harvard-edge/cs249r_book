@@ -517,17 +517,17 @@ function mlsReady(fn) {
   }
 }
 
-// Count one figure up to its value. Only a plain digit string rolls: a label
-// like "August 2026", a country list, or a rounded "1,100+" is set outright,
-// because counting up to a value that is not a number reads as a glitch.
+// A figure moves only when it has actually moved. On a first visit, and on a
+// return where the value is unchanged, the number is simply shown: there is no
+// change for the motion to describe, and counting up from zero would assert a
+// readership the site does not have. The build already bakes the current figure
+// into the HTML, so a first-time reader sees the real number at first paint.
 const mlsReduceMotion = !!(window.matchMedia
   && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-// Each figure remembers what the reader last saw. A returning reader then
-// watches the number travel from that remembered value to the current one, so
-// the animation shows the growth since their last visit rather than replaying
-// the same sweep from zero. A first visit, or a visit where nothing moved,
-// still gets the full sweep.
+// Each figure remembers what the reader last saw, so a returning reader watches
+// the number travel from that value to the current one and the animation
+// measures the growth since their last visit.
 const MLS_CACHE_PREFIX = 'mlsysbook.stat.v1.';
 
 function mlsCacheGet(key) {
@@ -545,14 +545,13 @@ function mlsCacheSet(key, value) {
   try {
     window.localStorage.setItem(MLS_CACHE_PREFIX + key, String(value));
   } catch (err) {
-    /* quota or private mode: the roll still works, it just starts from zero */
+    /* quota or private mode: the figure simply shows without rolling */
   }
 }
 
-// Time the roll to the distance it travels, on a log scale. A jump of a few
-// hundred readers should tick over quickly; a full sweep from zero earns the
-// long version. Linear scaling would make every realistic delta indistinguishable
-// from instant, because a day of growth is a rounding error against the total.
+// Time the roll to the distance it travels, on a log scale. Linear scaling
+// would collapse every realistic delta to instant, because a day of growth is
+// a rounding error against the total.
 const MLS_ROLL_MIN_MS = 400;
 const MLS_ROLL_MAX_MS = 1400;
 
@@ -566,53 +565,122 @@ function mlsRollDuration(from, to) {
 }
 
 // Drop the width reservation taken for the animation. It is a pixel value
-// measured at one viewport, so leaving it behind would fight a later rotation
-// or resize; once the figure holds its final string it occupies exactly that
-// width on its own and needs no help.
+// measured at one viewport, so leaving it behind would fight a later rotation.
 function mlsRelease(el) {
   el.style.minWidth = '';
   el.style.display = '';
   el.style.textAlign = '';
 }
 
-function mlsRoll(el, from, to, final, duration) {
+// Where the wheel at place p sits for value v. The units wheel turns
+// continuously; every wheel above it holds its digit and snaps through only as
+// the wheel below completes its turn, the way a star-wheel counter does. At
+// rest each wheel therefore lands on a whole digit rather than between two.
+function mlsWheelPos(v, p) {
+  const scaled = v / Math.pow(10, p);
+  const fl = Math.floor(scaled);
+  const digit = ((fl % 10) + 10) % 10;
+  const frac = scaled - fl;
+  if (p === 0) return digit + frac;
+  const CARRY = 0.88;
+  return digit + (frac <= CARRY ? 0 : (frac - CARRY) / (1 - CARRY));
+}
+
+function mlsRoll(el, finalStr, from) {
+  const digits = finalStr.replace(/[^0-9]/g, '');
+  const target = Number(digits);
+  const n = digits.length;
+
+  // The digit window is the figure's own line box, so it is exactly as tall
+  // rolling as at rest and nothing below it moves.
+  const cs = window.getComputedStyle(el);
+  let cell = parseFloat(cs.lineHeight);
+  if (!Number.isFinite(cell)) cell = parseFloat(cs.fontSize) * 1.2;
+  cell = Math.round(cell);
+
+  el.textContent = '';
+  const sr = document.createElement('span');
+  sr.className = 'visually-hidden';
+  sr.textContent = finalStr;          // screen readers hear the value, not the wheels
+  const odo = document.createElement('span');
+  odo.className = 'mls-odo';
+  odo.setAttribute('aria-hidden', 'true');
+  el.appendChild(sr);
+  el.appendChild(odo);
+
+  const cols = [];
+  let digitIndex = 0;
+  for (let c = 0; c < finalStr.length; c++) {
+    const ch = finalStr[c];
+    if (ch < '0' || ch > '9') {
+      const sep = document.createElement('span');
+      sep.className = 'mls-odo-sep';
+      sep.textContent = ch;
+      odo.appendChild(sep);
+      continue;
+    }
+    const place = n - 1 - digitIndex++;
+    const col = document.createElement('span');
+    col.className = 'mls-odo-col';
+    col.style.height = cell + 'px';
+    const strip = document.createElement('span');
+    strip.className = 'mls-odo-strip';
+    // Eleven cells: 0-9 then 0 again, so a wheel passing nine runs onto an
+    // identical zero and the jump back to the top is invisible.
+    for (let k = 0; k <= 10; k++) {
+      const cellEl = document.createElement('span');
+      cellEl.className = 'mls-odo-cell';
+      cellEl.style.height = cell + 'px';
+      cellEl.style.lineHeight = cell + 'px';
+      cellEl.textContent = String(k % 10);
+      strip.appendChild(cellEl);
+    }
+    col.appendChild(strip);
+    odo.appendChild(col);
+    cols.push({ el: col, strip: strip, place: place });
+  }
+
+  const duration = mlsRollDuration(from, target);
   let started = null;
-  el.textContent = Math.round(from).toLocaleString();
+  let prev = from;
   function frame(now) {
     if (started === null) started = now;
     const p = Math.min(1, (now - started) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);   // easeOutCubic
+    const v = from + (target - from) * eased;
+    for (let j = 0; j < cols.length; j++) {
+      const col = cols[j];
+      col.strip.style.transform = 'translateY(' + (-mlsWheelPos(v, col.place) * cell) + 'px)';
+      // A wheel turning many times in one frame would strobe rather than spin,
+      // so blur it in proportion to how far it moved. That is what the eye sees
+      // on a real counter, and it turns aliasing into motion.
+      const turns = Math.abs(v - prev) / Math.pow(10, col.place);
+      const blur = turns < 0.12 ? 0 : Math.min(3.2, turns * 1.6);
+      col.el.style.filter = blur ? 'blur(' + blur.toFixed(2) + 'px)' : '';
+    }
+    prev = v;
     if (p < 1) {
-      // easeOutCubic: quick off the mark, then settles onto the figure.
-      const eased = 1 - Math.pow(1 - p, 3);
-      el.textContent = Math.round(from + (to - from) * eased).toLocaleString();
       requestAnimationFrame(frame);
     } else {
-      el.textContent = final;   // land on the exact published string
+      el.textContent = finalStr;   // collapse back to plain, selectable text
       mlsRelease(el);
     }
   }
   requestAnimationFrame(frame);
 }
 
-function mlsCountUp(el, text, from) {
+// Show a figure: roll it only if this reader has seen a different value before.
+function mlsPresent(el, text, from) {
   const final = String(text);
   const target = Number(final.replace(/,/g, ''));
   if (mlsReduceMotion || !/^[\d,]+$/.test(final.trim())
-      || !Number.isFinite(target) || target <= 0) {
+      || !Number.isFinite(target) || target <= 0
+      || from === null || from === target) {
     el.textContent = final;
-    mlsRelease(el);          // nothing animates, so hold no reservation
+    mlsRelease(el);
     return;
   }
-  const start = (Number.isFinite(from) && from >= 0) ? from : null;
-  if (start === null || start === target) {
-    // First visit, or nothing moved since the last one: play the full sweep so
-    // the figure still arrives rather than sitting there already finished.
-    mlsRoll(el, 0, target, final, MLS_ROLL_MAX_MS);
-  } else {
-    // Travel from what this reader last saw. Handles a decrease too, which is
-    // rare but real: a star can be withdrawn.
-    mlsRoll(el, start, target, final, mlsRollDuration(start, target));
-  }
+  mlsRoll(el, final, from);
 }
 
 mlsReady(function () {
@@ -656,7 +724,7 @@ mlsReady(function () {
       el.style.minWidth = width + 'px';
       el.style.textAlign = 'center';
     }
-    mlsCountUp(el, final, mlsCacheGet(key));
+    mlsPresent(el, final, mlsCacheGet(key));
     const value = Number(final.replace(/,/g, ''));
     if (/^[\d,]+$/.test(final.trim()) && Number.isFinite(value)) {
       mlsCacheSet(key, value);
