@@ -484,27 +484,121 @@ document.querySelectorAll('.mls-scroll-indicator').forEach(ind => {
 // The GitHub call stays separate and direct: the star count is public, needs
 // no credential, and should track the repo to the second rather than to the
 // last scheduled refresh.
-fetch('/stats.json?t=' + Date.now())
+//
+// The impact card is treated differently from the rest of the page. Its
+// figures are the ones a reader stops on, so they hold their build-time value
+// until the card scrolls into view and then count up to the fetched number.
+// The reader watches the reach arrive rather than finding it already sitting
+// there. Every other figure on the page is replaced quietly on load.
+
+// Both requests start now, in parallel with parsing, so the numbers are
+// already in hand by the time the card is scrolled to.
+const mlsStats = fetch('/stats.json?t=' + Date.now())
   .then(r => r.ok ? r.json() : Promise.reject(r.status))
-  .then(d => {
-    const display = (d && d.display) || {};
+  .then(d => (d && d.display) || {})
+  .catch(err => {
+    console.warn('[mlsysbook] stats refresh failed, showing build-time values:', err);
+    return {};
+  });
+
+const mlsStars = fetch('https://api.github.com/repos/harvard-edge/cs249r_book')
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(d => (d && d.stargazers_count) || null)
+  .catch(err => {
+    console.warn('[mlsysbook] star refresh failed, showing build-time value:', err);
+    return null;
+  });
+
+function mlsReady(fn) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fn);
+  } else {
+    fn();
+  }
+}
+
+// Count one figure up to its value. Only a plain digit string rolls: a label
+// like "August 2026", a country list, or a rounded "1,100+" is set outright,
+// because counting up to a value that is not a number reads as a glitch.
+const mlsReduceMotion = !!(window.matchMedia
+  && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+function mlsCountUp(el, text) {
+  const final = String(text);
+  const target = Number(final.replace(/,/g, ''));
+  if (mlsReduceMotion || !/^[\d,]+$/.test(final.trim())
+      || !Number.isFinite(target) || target <= 0) {
+    el.textContent = final;
+    return;
+  }
+  const duration = 1200;
+  let started = null;
+  el.textContent = '0';
+  function frame(now) {
+    if (started === null) started = now;
+    const p = Math.min(1, (now - started) / duration);
+    if (p < 1) {
+      // easeOutCubic: quick off the mark, then settles onto the figure.
+      el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))).toLocaleString();
+      requestAnimationFrame(frame);
+    } else {
+      el.textContent = final;   // land on the exact published string
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+mlsReady(function () {
+  const card = document.querySelector('.mls-impact-bottom');
+
+  // Quiet replacement for every figure outside the impact card.
+  mlsStats.then(display => {
     document.querySelectorAll('[data-stat]').forEach(el => {
+      if (card && card.contains(el)) return;
       const value = display[el.getAttribute('data-stat')];
       if (value) el.textContent = value;
     });
-  })
-  .catch(err => console.warn('[mlsysbook] stats refresh failed, showing build-time values:', err));
+  });
 
-fetch('https://api.github.com/repos/harvard-edge/cs249r_book')
-  .then(r => r.json())
-  .then(d => {
-    const stars = d.stargazers_count;
+  mlsStars.then(stars => {
     if (!stars) return;
     document.querySelectorAll('.gh-star-count, [data-stat="stars"]').forEach(el => {
+      if (card && card.contains(el)) return;
       el.textContent = stars.toLocaleString();
     });
-  })
-  .catch(err => console.warn('[mlsysbook] star refresh failed, showing build-time value:', err));
+  });
+
+  if (!card) return;
+
+  function rollCard() {
+    Promise.all([mlsStats, mlsStars]).then(([display, stars]) => {
+      card.querySelectorAll('[data-stat]').forEach(el => {
+        const key = el.getAttribute('data-stat');
+        const live = (key === 'stars' && stars) ? stars.toLocaleString() : display[key];
+        mlsCountUp(el, live != null ? live : el.textContent);
+      });
+      // If the build did not wrap the star count in a data-stat span, roll the
+      // element that carries it directly.
+      const starEl = card.querySelector('.gh-star-count');
+      if (starEl && stars && !starEl.querySelector('[data-stat]')) {
+        mlsCountUp(starEl, stars.toLocaleString());
+      }
+    });
+  }
+
+  if ('IntersectionObserver' in window) {
+    const observer = new IntersectionObserver((entries, obs) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        obs.unobserve(entry.target);   // roll once, not on every scroll past
+        rollCard();
+      });
+    }, { threshold: 0.35 });
+    observer.observe(card);
+  } else {
+    rollCard();                        // no observer support: just refresh
+  }
+});
 </script>
 ```
 
