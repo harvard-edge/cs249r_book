@@ -1216,10 +1216,10 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
 
   <div class="mls-reader-map">
     <div class="mls-looker-wrap">
-      <iframe src="https://lookerstudio.google.com/embed/reporting/e7192975-a8a0-453d-b6fe-1580ac054dbf/page/0pNbE" title="Global readership map — 314,493 readers across 204 countries and territories" allowfullscreen="allowfullscreen" loading="lazy" sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox">
+      <iframe src="https://lookerstudio.google.com/embed/reporting/e7192975-a8a0-453d-b6fe-1580ac054dbf/page/0pNbE" title="Global readership map — 314,517 readers across 204 countries and territories" allowfullscreen="allowfullscreen" loading="lazy" sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox">
       </iframe>
     </div>
-    <p class="mls-map-caption">Live readership — <span data-stat="readers_monthly">18,646</span> readers a month across <span data-stat="countries">204</span> countries and territories</p>
+    <p class="mls-map-caption">Live readership — <span data-stat="readers_monthly">18,666</span> readers a month across <span data-stat="countries">204</span> countries and territories</p>
     <p class="mls-map-countries"><span class="mls-map-countries-label">Top countries:</span> <span data-stat="top_countries">United States · India · Singapore · China · Vietnam</span></p>
   </div>
 
@@ -1231,7 +1231,7 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
          here than a rounded one. -->
     <dl class="mls-reach">
       <div class="mls-reach-item">
-        <dd class="mls-reach-value"><span data-stat="readers">314,493</span></dd>
+        <dd class="mls-reach-value"><span data-stat="readers">314,517</span></dd>
         <dt class="mls-reach-label">readers</dt>
       </div>
       <div class="mls-reach-item">
@@ -1239,7 +1239,7 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
         <dt class="mls-reach-label mls-reach-label-wrap">countries &amp;<br>territories</dt>
       </div>
       <div class="mls-reach-item">
-        <dd class="mls-reach-value"><span data-stat="readers_monthly">18,646</span></dd>
+        <dd class="mls-reach-value"><span data-stat="readers_monthly">18,666</span></dd>
         <dt class="mls-reach-label">a month</dt>
       </div>
     </dl>
@@ -1251,7 +1251,7 @@ gtag('config', 'G-M21L0CBCVN', { 'anonymize_ip': true});
         <svg width="18" height="18" viewbox="0 0 16 16" fill="currentColor" aria-hidden="true" focusable="false"><path d="M8 .25a.75.75 0 01.673.418l1.882 3.815 4.21.612a.75.75 0 01.416 1.279l-3.046 2.97.719 4.192a.75.75 0 01-1.088.791L8 12.347l-3.766 1.98a.75.75 0 01-1.088-.79l.72-4.194L.818 6.374a.75.75 0 01.416-1.28l4.21-.611L7.327.668A.75.75 0 018 .25z"></path></svg>
         Star on GitHub
       </span>
-      <span class="mls-star-cta-count gh-star-count"><span data-stat="stars">27,815</span></span>
+      <span class="mls-star-cta-count gh-star-count"><span data-stat="stars">27,816</span></span>
     </a>
 
     <p class="mls-impact-why">
@@ -1330,7 +1330,67 @@ function mlsReady(fn) {
 const mlsReduceMotion = !!(window.matchMedia
   && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
 
-function mlsCountUp(el, text) {
+// Each figure remembers what the reader last saw. A returning reader then
+// watches the number travel from that remembered value to the current one, so
+// the animation shows the growth since their last visit rather than replaying
+// the same sweep from zero. A first visit, or a visit where nothing moved,
+// still gets the full sweep.
+const MLS_CACHE_PREFIX = 'mlsysbook.stat.v1.';
+
+function mlsCacheGet(key) {
+  try {
+    const raw = window.localStorage.getItem(MLS_CACHE_PREFIX + key);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch (err) {
+    return null;        // storage blocked (private mode, disabled cookies)
+  }
+}
+
+function mlsCacheSet(key, value) {
+  try {
+    window.localStorage.setItem(MLS_CACHE_PREFIX + key, String(value));
+  } catch (err) {
+    /* quota or private mode: the roll still works, it just starts from zero */
+  }
+}
+
+// Time the roll to the distance it travels, on a log scale. A jump of a few
+// hundred readers should tick over quickly; a full sweep from zero earns the
+// long version. Linear scaling would make every realistic delta indistinguishable
+// from instant, because a day of growth is a rounding error against the total.
+const MLS_ROLL_MIN_MS = 400;
+const MLS_ROLL_MAX_MS = 1400;
+
+function mlsRollDuration(from, to) {
+  const delta = Math.abs(to - from);
+  if (delta === 0) return MLS_ROLL_MIN_MS;
+  const span = Math.max(Math.abs(to), 1);
+  const ratio = Math.log10(1 + delta) / Math.log10(1 + span);
+  return Math.round(MLS_ROLL_MIN_MS
+    + (MLS_ROLL_MAX_MS - MLS_ROLL_MIN_MS) * Math.min(1, Math.max(0, ratio)));
+}
+
+function mlsRoll(el, from, to, final, duration) {
+  let started = null;
+  el.textContent = Math.round(from).toLocaleString();
+  function frame(now) {
+    if (started === null) started = now;
+    const p = Math.min(1, (now - started) / duration);
+    if (p < 1) {
+      // easeOutCubic: quick off the mark, then settles onto the figure.
+      const eased = 1 - Math.pow(1 - p, 3);
+      el.textContent = Math.round(from + (to - from) * eased).toLocaleString();
+      requestAnimationFrame(frame);
+    } else {
+      el.textContent = final;   // land on the exact published string
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+function mlsCountUp(el, text, from) {
   const final = String(text);
   const target = Number(final.replace(/,/g, ''));
   if (mlsReduceMotion || !/^[\d,]+$/.test(final.trim())
@@ -1338,21 +1398,16 @@ function mlsCountUp(el, text) {
     el.textContent = final;
     return;
   }
-  const duration = 1200;
-  let started = null;
-  el.textContent = '0';
-  function frame(now) {
-    if (started === null) started = now;
-    const p = Math.min(1, (now - started) / duration);
-    if (p < 1) {
-      // easeOutCubic: quick off the mark, then settles onto the figure.
-      el.textContent = Math.round(target * (1 - Math.pow(1 - p, 3))).toLocaleString();
-      requestAnimationFrame(frame);
-    } else {
-      el.textContent = final;   // land on the exact published string
-    }
+  const start = (Number.isFinite(from) && from >= 0) ? from : null;
+  if (start === null || start === target) {
+    // First visit, or nothing moved since the last one: play the full sweep so
+    // the figure still arrives rather than sitting there already finished.
+    mlsRoll(el, 0, target, final, MLS_ROLL_MAX_MS);
+  } else {
+    // Travel from what this reader last saw. Handles a decrease too, which is
+    // rare but real: a star can be withdrawn.
+    mlsRoll(el, start, target, final, mlsRollDuration(start, target));
   }
-  requestAnimationFrame(frame);
 }
 
 mlsReady(function () {
@@ -1377,18 +1432,29 @@ mlsReady(function () {
 
   if (!card) return;
 
+  // Roll one figure from what this reader last saw, then remember the new
+  // value for their next visit.
+  function rollFigure(el, key, text) {
+    const final = String(text);
+    mlsCountUp(el, final, mlsCacheGet(key));
+    const value = Number(final.replace(/,/g, ''));
+    if (/^[\d,]+$/.test(final.trim()) && Number.isFinite(value)) {
+      mlsCacheSet(key, value);
+    }
+  }
+
   function rollCard() {
     Promise.all([mlsStats, mlsStars]).then(([display, stars]) => {
       card.querySelectorAll('[data-stat]').forEach(el => {
         const key = el.getAttribute('data-stat');
         const live = (key === 'stars' && stars) ? stars.toLocaleString() : display[key];
-        mlsCountUp(el, live != null ? live : el.textContent);
+        rollFigure(el, key, live != null ? live : el.textContent);
       });
       // If the build did not wrap the star count in a data-stat span, roll the
       // element that carries it directly.
       const starEl = card.querySelector('.gh-star-count');
       if (starEl && stars && !starEl.querySelector('[data-stat]')) {
-        mlsCountUp(starEl, stars.toLocaleString());
+        rollFigure(starEl, 'stars', stars.toLocaleString());
       }
     });
   }
