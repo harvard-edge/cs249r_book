@@ -348,32 +348,35 @@ def fetch_ga4() -> dict:
                 limit=limit,
             ))
 
-        # The headline figure counts first_visit events, not distinct users.
+        # The headline is totalUsers, and that choice is now evidence-based.
         #
         # Google estimates distinct-user metrics with HyperLogLog++ rather than
         # counting them, at a documented precision of 14 for Total Users, so
-        # totalUsers is re-approximated on every query and can come back lower
-        # than last time even though readership only ever grows. That is what
-        # produced a 0.27% drop in the published figure on 2026-08-09.
-        #
-        # newUsers is absent from Google's HLL++ list. Every reader fires
-        # first_visit exactly once, so an all-time query counts those events
-        # instead of approximating the size of a set. It is also the closer
-        # match to what the word on the card claims, which is how many people
-        # have ever read the book.
+        # this figure carries a residual error and can come back slightly lower
+        # than last time. That produced a 0.27% drop on 2026-08-09.
         #   https://developers.google.com/analytics/blog/2022/hll
-        totals = run(all_time, mets=("newUsers",))
+        #
+        # newUsers was tried as a replacement, on the reasoning that counting
+        # first_visit events avoids the approximation and that every user is new
+        # exactly once, so the two should agree. They do not: on 2026-08-09 the
+        # same property reported 313,674 total users and 309,653 new users, a
+        # gap of about 4,000. Readers who arrived before the property began
+        # recording first_visit are absent from the newer metric. Switching
+        # would have dropped the headline by that gap and then frozen it under
+        # the high-water rule for months while it climbed back.
+        #
+        # So the approximation is kept and its downside is handled instead: the
+        # high-water rule in main() absorbs the wobble, which is small enough
+        # (0.27% against a documented 1.6% bound) to recover within a run or two.
+        totals = run(all_time)
         if totals.rows:
             out["readers"] = int(totals.rows[0].metric_values[0].value)
 
-        # The old metric is still fetched and stored, unpublished, so the two
-        # can be compared over successive runs and this switch revisited on
-        # evidence rather than on argument. It is also the figure that
-        # reconciles with the "Total users" scorecard in Looker Studio, which
-        # is worth keeping visible somewhere.
-        legacy = run(all_time)
-        if legacy.rows:
-            out["diag_total_users"] = int(legacy.rows[0].metric_values[0].value)
+        # The rejected metric is still recorded, unpublished, so the gap between
+        # the two stays visible and this decision can be revisited if it closes.
+        alt = run(all_time, mets=("newUsers",))
+        if alt.rows:
+            out["diag_new_users"] = int(alt.rows[0].metric_values[0].value)
 
         monthly = run(last_30)
         if monthly.rows:
@@ -399,7 +402,7 @@ def fetch_ga4() -> dict:
         # Read defensively: this is diagnostic only and must never be the thing
         # that breaks a build.
         flags = []
-        for label, response in (("readers", totals), ("total_users", legacy),
+        for label, response in (("readers", totals), ("new_users", alt),
                                 ("readers_monthly", monthly), ("countries", by_country)):
             try:
                 meta = getattr(response, "metadata", None)
