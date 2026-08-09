@@ -54,6 +54,17 @@ GA4_PROPERTY_ID = os.environ.get("GA4_PROPERTY_ID", "419684623")
 # as marketing. Newsletter mockup copy keeps the rounded style.
 PLUS_STYLE = {"merged_prs", "subscribers"}
 
+# Figures that only ever grow in reality, whatever the measurement of them does.
+MONOTONIC_KEYS = ("readers", "countries")
+
+# When set, the figures currently on the live page are read back and used as the
+# floor for MONOTONIC_KEYS. The scheduled refresh publishes stats.json without
+# committing its cache, so the committed file can be days behind what the site
+# actually shows; without this the high-water check in main() would measure
+# against a stale figure and could still publish a number lower than the one
+# already on the page.
+PUBLISHED_STATS_URL = os.environ.get("PUBLISHED_STATS_URL", "").strip()
+
 warnings: list[str] = []
 
 
@@ -76,6 +87,44 @@ def floor_2sf(value: int) -> int:
         return value
     magnitude = 10 ** (len(str(value)) - 2)
     return (value // magnitude) * magnitude
+
+
+def seed_from_published(values: dict) -> None:
+    """Raise the baseline to whatever the live page is currently showing.
+
+    Only ever raises. A published figure that is somehow lower than the cached
+    one is ignored, so this can correct a stale baseline but never lower one.
+    Any failure leaves the committed cache as the baseline and is reported.
+    """
+    if not PUBLISHED_STATS_URL:
+        return
+    # The site sits behind Cloudflare, which answers urllib's default agent
+    # with a 403. Identify the same way the GitHub calls above do.
+    request = urllib.request.Request(PUBLISHED_STATS_URL, headers={
+        "User-Agent": "mlsysbook-site-stats",
+        "Accept": "application/json",
+        "Cache-Control": "no-cache",
+    })
+    try:
+        with urllib.request.urlopen(request, timeout=20) as response:
+            published = json.loads(response.read().decode("utf-8"))
+    except Exception as exc:  # noqa: BLE001 - degrade to the committed cache
+        warn(f"could not read published stats ({exc}); "
+             "using the committed cache as the baseline")
+        return
+
+    display = published.get("display", {})
+    for key in MONOTONIC_KEYS:
+        raw = display.get(key)
+        if not isinstance(raw, str):
+            continue
+        try:
+            live = int(raw.replace(",", ""))
+        except ValueError:
+            continue        # a "1,100+" style figure is not a hard baseline
+        current = values.get(key)
+        if not isinstance(current, int) or live > current:
+            values[key] = live
 
 
 def render(key: str, value: int) -> str:
@@ -299,14 +348,32 @@ def fetch_ga4() -> dict:
                 limit=limit,
             ))
 
-        # totalUsers is de-duplicated: one person reading from two countries
-        # counts once in the property total but appears in two rows of a
-        # country breakdown. Summing those rows OVER-counts, so the all-time
-        # total comes from an unfiltered report. That is also the only figure
-        # that reconciles with the "Total users" scorecard in Looker Studio.
-        totals = run(all_time)
+        # The headline figure counts first_visit events, not distinct users.
+        #
+        # Google estimates distinct-user metrics with HyperLogLog++ rather than
+        # counting them, at a documented precision of 14 for Total Users, so
+        # totalUsers is re-approximated on every query and can come back lower
+        # than last time even though readership only ever grows. That is what
+        # produced a 0.27% drop in the published figure on 2026-08-09.
+        #
+        # newUsers is absent from Google's HLL++ list. Every reader fires
+        # first_visit exactly once, so an all-time query counts those events
+        # instead of approximating the size of a set. It is also the closer
+        # match to what the word on the card claims, which is how many people
+        # have ever read the book.
+        #   https://developers.google.com/analytics/blog/2022/hll
+        totals = run(all_time, mets=("newUsers",))
         if totals.rows:
             out["readers"] = int(totals.rows[0].metric_values[0].value)
+
+        # The old metric is still fetched and stored, unpublished, so the two
+        # can be compared over successive runs and this switch revisited on
+        # evidence rather than on argument. It is also the figure that
+        # reconciles with the "Total users" scorecard in Looker Studio, which
+        # is worth keeping visible somewhere.
+        legacy = run(all_time)
+        if legacy.rows:
+            out["diag_total_users"] = int(legacy.rows[0].metric_values[0].value)
 
         monthly = run(last_30)
         if monthly.rows:
@@ -325,6 +392,27 @@ def fetch_ga4() -> dict:
             rows.sort(key=lambda r: r[1], reverse=True)
             out["countries"] = len(rows)
             out["top_countries"] = " · ".join(name for name, _ in rows[:5])
+
+        # The API says when it sampled a response or folded high-cardinality
+        # rows into "(other)". Recording it means a degraded run is visible in
+        # the cache afterwards instead of silently moving a published figure.
+        # Read defensively: this is diagnostic only and must never be the thing
+        # that breaks a build.
+        flags = []
+        for label, response in (("readers", totals), ("total_users", legacy),
+                                ("readers_monthly", monthly), ("countries", by_country)):
+            try:
+                meta = getattr(response, "metadata", None)
+                if getattr(meta, "sampling_metadatas", None):
+                    flags.append(f"{label}:sampled")
+                if getattr(meta, "data_loss_from_other_row", False):
+                    flags.append(f"{label}:other-row")
+            except Exception:  # noqa: BLE001 - diagnostics never block a build
+                pass
+        out["diag_ga4_quality"] = ", ".join(flags) if flags else "clean"
+        if flags:
+            warn("GA4 returned degraded data (" + ", ".join(flags)
+                 + "); figures may be less reliable this run")
 
         print(f"  GA4: {out.get('readers', 0):,} readers all-time, "
               f"{out.get('readers_monthly', 0):,} in the last 30 days, "
@@ -365,6 +453,12 @@ def main() -> int:
         cache = json.loads(CACHE_PATH.read_text(encoding="utf-8"))
     values: dict[str, int | str] = dict(cache.get("values", {}))
     source: dict[str, str] = dict(cache.get("source", {}))
+    # What the page is currently publishing, captured before this run starts
+    # overwriting it, so a figure that only ever grows can be held to that.
+    # Seeded from the live page first, because the committed cache is not
+    # necessarily what the site is showing.
+    seed_from_published(values)
+    previous: dict[str, int | str] = dict(values)
 
     def record(key: str, value, origin: str) -> None:
         """Store a value only when its source actually produced one.
@@ -401,6 +495,24 @@ def main() -> int:
 
     for key, value in fetch_ga4().items():
         record(key, value, "ga4")
+
+    # Cumulative readership and country reach only ever grow in reality. The
+    # measurement of them does not: a sampled response, or the residual error
+    # in an approximated metric, can return less than was published last time.
+    # Showing that would tell a visitor the book had lost readers, and would
+    # run the counter on the card backwards. Hold the high-water mark instead,
+    # and say in the cache that it was held.
+    #
+    # This is a safety net, not the fix. If it fires often, the metric feeding
+    # it is the thing to change; diag_total_users and diag_ga4_quality are
+    # there to show which.
+    for key in MONOTONIC_KEYS:
+        prior, fresh = previous.get(key), values.get(key)
+        if isinstance(prior, int) and isinstance(fresh, int) and fresh < prior:
+            warn(f"GA4 returned {key}={fresh:,}, below the published "
+                 f"{prior:,}; holding the higher figure")
+            values[key] = prior
+            source[key] = "ga4+highwater"
 
     record("subscribers", fetch_subscribers(), "buttondown")
 
