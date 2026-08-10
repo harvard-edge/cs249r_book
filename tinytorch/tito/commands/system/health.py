@@ -257,7 +257,7 @@ class HealthCommand(BaseCommand):
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "jupyter", "kernelspec", "list"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
             )
             if result.returncode == 0 and "tinytorch" in result.stdout:
                 return "[green]✅ Registered[/green]", "tinytorch kernel found"
@@ -283,7 +283,7 @@ class HealthCommand(BaseCommand):
             for kernel_name in ("tinytorch", "python3"):
                 result = subprocess.run(
                     [sys.executable, "-m", "jupyter", "kernelspec", "list", "--json"],
-                    capture_output=True, text=True, timeout=10
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
                 )
                 if result.returncode != 0:
                     return None

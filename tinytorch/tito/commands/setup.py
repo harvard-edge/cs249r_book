@@ -120,7 +120,7 @@ class SetupCommand(BaseCommand):
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "pip", "show", package_name],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
             )
             return result.returncode == 0
         except Exception:
@@ -178,7 +178,7 @@ class SetupCommand(BaseCommand):
                     try:
                         result = subprocess.run([
                             sys.executable, "-m", "pip", "install", "-q", pkg_spec
-                        ], capture_output=True, text=True, timeout=120)
+                        ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 
                         if result.returncode == 0:
                             progress.update(task, description=f"[green]✅ {pkg_name}[/green]")
@@ -215,7 +215,7 @@ class SetupCommand(BaseCommand):
                 try:
                     result = subprocess.run([
                         sys.executable, "-m", "pip", "install", "-q", "-e", "."
-                    ], cwd=self.config.project_root, capture_output=True, text=True, timeout=120)
+                    ], cwd=self.config.project_root, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=120)
 
                     if result.returncode == 0:
                         progress.update(task, description="[green]✅ Tiny🔥Torch installed[/green]")
@@ -238,7 +238,7 @@ class SetupCommand(BaseCommand):
                 "--user",
                 "--name", "tinytorch",
                 "--display-name", "TinyTorch (Python 3)"
-            ], capture_output=True, text=True, timeout=60)
+            ], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
 
             if result.returncode == 0:
                 self.console.print("[green]✅ Jupyter kernel 'tinytorch' registered[/green]")
@@ -304,7 +304,7 @@ class SetupCommand(BaseCommand):
                     # Check actual hardware
                     hw_check = sp.run(
                         ["sysctl", "-n", "machdep.cpu.brand_string"],
-                        capture_output=True, text=True
+                        capture_output=True, text=True, encoding="utf-8", errors="replace"
                     )
                     if "Apple" in hw_check.stdout:
                         self.console.print("[yellow]⚠️  Detected Apple Silicon but Python is running in Rosetta (x86_64)[/yellow]")
@@ -319,12 +319,12 @@ class SetupCommand(BaseCommand):
                 result = subprocess.run(
                     f'{python_exe} -m venv {venv_path}',
                     shell=True,
-                    capture_output=True, text=True
+                    capture_output=True, text=True, encoding="utf-8", errors="replace"
                 )
             else:
                 result = subprocess.run([
                     python_exe, "-m", "venv", str(venv_path)
-                ], capture_output=True, text=True)
+                ], capture_output=True, text=True, encoding="utf-8", errors="replace")
 
             if result.returncode != 0:
                 self.console.print(f"[red]Failed to create virtual environment: {result.stderr}[/red]")
@@ -339,7 +339,7 @@ class SetupCommand(BaseCommand):
             if venv_python.exists():
                 arch_check = subprocess.run(
                     [str(venv_python), "-c", "import platform; print(platform.machine())"],
-                    capture_output=True, text=True
+                    capture_output=True, text=True, encoding="utf-8", errors="replace"
                 )
                 if arch_check.returncode == 0:
                     venv_arch = arch_check.stdout.strip()
@@ -476,7 +476,7 @@ class SetupCommand(BaseCommand):
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "jupyter", "kernelspec", "list"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
             )
             return result.returncode == 0 and "tinytorch" in result.stdout
         except Exception:

@@ -296,7 +296,7 @@ export function getStreakMilestone(streak: number): string | null {
 
 // ─── Topic-Level Progress (NeetCode-style) ──────
 
-import { getTopics, getTopicsByArea, getCompetencyAreas, getQuestionsByFilter } from "./corpus";
+import { getTopics, getTopicsByArea, getCompetencyAreas, getQuestionsByFilter, getQuestions } from "./corpus";
 import { getTopicById } from "./taxonomy";
 
 export interface TopicProgress {
@@ -398,7 +398,6 @@ let _topicLookup: Record<string, string> | null = null;
 function buildTopicLookup(): Record<string, string> {
   if (!_topicLookup) {
     _topicLookup = {};
-    const { getQuestions } = require("./corpus") as typeof import("./corpus");
     for (const q of getQuestions()) {
       _topicLookup[q.id] = q.topic;
     }
