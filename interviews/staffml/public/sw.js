@@ -368,7 +368,9 @@ async function appNetworkFirstPage(event) {
   const cache = await caches.open(APP_PAGE_CACHE);
   try {
     const res = (await event.preloadResponse) || (await fetch(event.request));
-    if (res && res.ok) cache.put(event.request, res.clone());
+    // Keep the response promise pending until the page is durably cached.
+    // respondWith() extends the fetch event through this async function.
+    if (res && res.ok) await cache.put(event.request, res.clone());
     return res;
   } catch {
     const cached = await cache.match(event.request);
@@ -380,19 +382,28 @@ async function appNetworkFirstPage(event) {
   }
 }
 
-async function appStaleWhileRevalidate(request) {
+async function appStaleWhileRevalidate(event) {
+  const request = event.request;
   const cache = await caches.open(APP_ASSET_CACHE);
   const cached = await cache.match(request);
   const network = fetch(request)
-    .then((res) => {
+    .then(async (res) => {
       if (res && res.ok) {
-        cache.put(request, res.clone());
-        appTrimCache(APP_ASSET_CACHE, APP_ASSET_CACHE_LIMIT);
+        await cache.put(request, res.clone());
+        await appTrimCache(APP_ASSET_CACHE, APP_ASSET_CACHE_LIMIT);
       }
       return res;
     })
     .catch(() => undefined);
-  return cached || network.then((r) => r || Response.error());
+
+  // A cached response can return immediately, while waitUntil keeps the
+  // worker alive long enough to finish revalidation and cache maintenance.
+  if (cached) {
+    event.waitUntil(network);
+    return cached;
+  }
+
+  return network.then((r) => r || Response.error());
 }
 
 self.addEventListener("fetch", (event) => {
@@ -410,6 +421,6 @@ self.addEventListener("fetch", (event) => {
 
   const dest = request.destination;
   if (dest === "script" || dest === "style" || dest === "image" || dest === "font") {
-    event.respondWith(appStaleWhileRevalidate(request));
+    event.respondWith(appStaleWhileRevalidate(event));
   }
 });
