@@ -1,5 +1,16 @@
 # MLPerf EDU Independent Audit
 
+> **Superseded in part, 2026-08-04.** Recommendation moved from DLRM on Criteo
+> Terabyte to MLPerf Training v0.5 NCF on MovieLens-20M, reinforcement
+> learning moved from a CUDA and TensorFlow 1.x container to a PyTorch
+> adapter, and the timing protocol dropped from five runs to one. No
+> workload is environment-gated. Statements below about gated execution,
+> licensed Criteo data, or five-run promotion describe the state at the
+> time of the audit and are retained as a record rather than corrected.
+> Current state: [WORKLOAD_STATUS.md](WORKLOAD_STATUS.md) and
+> [MISS_DIAGNOSIS.md](MISS_DIAGNOSIS.md).
+
+
 ## Verdict
 
 The fourteen-workload portfolio is coherent and covers distinct systems
@@ -60,7 +71,7 @@ measured misses into passes.
   and core-file and open-file limits to its existing isolation. EDM rehashes
   the same open file immediately before deserialization. These controls are
   suitable for a controlled source-checkout preview, not an unattended
-  multi-tenant service. [SECURITY_REVIEW.md](SECURITY_REVIEW.md) records the
+  multi-tenant service. [SECURITY_REVIEW.md](../../SECURITY_REVIEW.md) records the
   production gates.
 - DLRM and MiniGo retain their full upstream contracts. They fail closed when
   the licensed data, memory, legacy runtime, or GPU environment is absent.

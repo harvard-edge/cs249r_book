@@ -467,12 +467,24 @@ def validate_summary_structure(
         raise ValueError(f"{path}: " + "; ".join(failures))
 
     runs = payload.get("runs")
+    # The registry declares how many timing runs a reference result needs. It
+    # used to be fixed at five here, which meant lowering the protocol to match
+    # the single-run acceptance rule broke the importer rather than relaxing it.
     expected_runs = case.measurement_protocol.get("outer_reference_runs")
-    if not isinstance(expected_runs, int) or expected_runs != 5:
-        raise ValueError(f"{case.case_id}: reference protocol must require five runs")
-    if not isinstance(runs, list) or len(runs) != expected_runs:
-        raise ValueError(f"{path}: expected exactly {expected_runs} runs")
-    if payload.get("seeds_requested") != [case.canonical_seed] * expected_runs:
+    if not isinstance(expected_runs, int) or expected_runs < 1:
+        raise ValueError(
+            f"{case.case_id}: reference protocol must declare a positive "
+            "outer_reference_runs"
+        )
+    # More repetitions than the protocol requires is stronger evidence, so the
+    # floor is checked rather than an exact count. Records measured under the
+    # earlier five-run protocol therefore remain importable unchanged.
+    if not isinstance(runs, list) or len(runs) < expected_runs:
+        raise ValueError(f"{path}: expected at least {expected_runs} runs")
+    seeds_requested = payload.get("seeds_requested")
+    if not isinstance(seeds_requested, list) or len(seeds_requested) != len(runs):
+        raise ValueError(f"{path}: seeds_requested must cover every run")
+    if any(seed != case.canonical_seed for seed in seeds_requested):
         raise ValueError(f"{path}: promotion runs must repeat the canonical seed")
 
     expected_cooldown_seconds = case.measurement_protocol.get(
@@ -496,7 +508,10 @@ def validate_summary_structure(
                 0.0 if position == 1 else float(expected_cooldown_seconds)
             ),
         }
-        for position in range(1, expected_runs + 1)
+        # Built over the runs actually supplied, not the declared minimum, so a
+        # record with more repetitions than the protocol requires still
+        # validates every execution it contains.
+        for position in range(1, len(runs) + 1)
     ]
     stabilization = payload.get("inter_execution_stabilization")
     if not isinstance(stabilization, dict):
@@ -509,7 +524,7 @@ def validate_summary_structure(
         ),
         "mode": "fixed-delay-between-fresh-processes",
         "execution_unit": "one fresh Python subprocess per repetition",
-        "process_execution_count": expected_runs,
+        "process_execution_count": len(runs),
         "configured_cooldown_seconds": float(expected_cooldown_seconds),
         "maximum_cooldown_seconds": 300.0,
         "first_execution_has_no_cooldown": True,
@@ -1158,8 +1173,10 @@ def validate_lineage_closure(
     quality_median = ((training.get("aggregate") or {}).get("quality") or {}).get(
         "median"
     )
-    if not isinstance(training_runs, list) or len(training_runs) != 5:
-        raise ValueError(f"{training_path}: causal training evidence lacks five runs")
+    # The timing protocol declares one run, so the binding needs a training
+    # record with at least one measurement rather than exactly five.
+    if not isinstance(training_runs, list) or not training_runs:
+        raise ValueError(f"{training_path}: causal training evidence has no runs")
 
     bindings: dict[str, dict[str, Any]] = {}
     shared_identity: tuple[str, str, str, str] | None = None

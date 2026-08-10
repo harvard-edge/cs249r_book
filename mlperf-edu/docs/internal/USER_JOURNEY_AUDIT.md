@@ -1,5 +1,16 @@
 # MLPerf EDU User Journey Audit
 
+> **Superseded in part, 2026-08-04.** Recommendation moved from DLRM on Criteo
+> Terabyte to MLPerf Training v0.5 NCF on MovieLens-20M, reinforcement
+> learning moved from a CUDA and TensorFlow 1.x container to a PyTorch
+> adapter, and the timing protocol dropped from five runs to one. No
+> workload is environment-gated. Statements below about gated execution,
+> licensed Criteo data, or five-run promotion describe the state at the
+> time of the audit and are retained as a record rather than corrected.
+> Current state: [WORKLOAD_STATUS.md](WORKLOAD_STATUS.md) and
+> [MISS_DIAGNOSIS.md](MISS_DIAGNOSIS.md).
+
+
 Last updated on July 18, 2026. This checklist follows the product from a fresh
 source checkout through setup, benchmark execution, result interpretation,
 classroom submission, and research use. A checked item must have direct command
@@ -162,7 +173,7 @@ authenticated producer identity remain release gates.
   comparison, and blocked comparison behavior were exercised.
 - The public CLI verified 18 final-run manifests after the earlier 41-manifest
   audit pass.
-- Playwright checked 38 website pages at two viewports, for 76 clean page runs.
+- Playwright checked 40 website pages at two viewports, for 80 clean page runs.
   The dashboard gate checked nine representative result pages at two
   viewports, for 18 clean runs, plus a two-viewport visual-state fixture.
 - Screenshots were stored outside the repository and manually reviewed for the
