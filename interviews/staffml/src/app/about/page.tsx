@@ -14,6 +14,8 @@ import {
   RELEASE_HASH,
   BUILD_DATE,
 } from "@/lib/stats";
+
+import RecentPapers from "@/components/RecentPapers";
 import PaperCitationCard from "@/components/PaperCitationCard";
 
 const PAPER_URL = "https://mlsysbook.ai/staffml/downloads/StaffML-Paper.pdf";
@@ -69,6 +71,9 @@ export default function AboutPage() {
             releaseHash={RELEASE_HASH}
             buildDate={BUILD_DATE}
           />
+          <div className="mt-4">
+            <RecentPapers />
+          </div>
         </section>
 
         {/* ─── Numbers banner ─── */}
