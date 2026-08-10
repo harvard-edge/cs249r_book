@@ -11,6 +11,12 @@ export default function StarGate({ onVerified }: { onVerified: () => void }) {
   const previouslyFocused = useRef<HTMLElement | null>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
   const primaryBtnRef = useRef<HTMLButtonElement>(null);
+  // Holds the 1.5s "thank-you → onVerified" timer so we can cancel it if
+  // the gate unmounts before it fires. Today's parent (practice/page.tsx)
+  // treats a post-unmount onVerified as a no-op, but a future caller could
+  // have onVerified mutate state on a stale tree — clearing on unmount
+  // makes the contract correct rather than accidentally correct.
+  const verifyTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -20,17 +26,27 @@ export default function StarGate({ onVerified }: { onVerified: () => void }) {
     return () => { cancelled = true; };
   }, []);
 
+  // Clear the verify-delay timer on unmount.
+  useEffect(() => {
+    return () => {
+      if (verifyTimeoutRef.current !== null) {
+        clearTimeout(verifyTimeoutRef.current);
+        verifyTimeoutRef.current = null;
+      }
+    };
+  }, []);
+
   const handleStar = () => {
     window.open(getStarUrl(), "_blank", "noopener,noreferrer");
     markVerified("starred");
     setRetired("starred");
-    setTimeout(onVerified, 1500);
+    verifyTimeoutRef.current = setTimeout(onVerified, 1500);
   };
 
   const handleAlreadyStarred = () => {
     markVerified("honor");
     setRetired("honor");
-    setTimeout(onVerified, 1500);
+    verifyTimeoutRef.current = setTimeout(onVerified, 1500);
   };
 
   const handleDismiss = useCallback(() => {

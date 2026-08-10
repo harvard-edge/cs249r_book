@@ -225,7 +225,6 @@ document.addEventListener('DOMContentLoaded', function() {
         if (currentUrl === linkUrl || currentPath === new URL(linkUrl).pathname) {
           link.classList.add('active');
           link.setAttribute('aria-current', 'page');
-          console.log('Setting active:', link.textContent.trim(), 'Current:', currentUrl, 'Link:', linkUrl);
         }
       }
     });
@@ -240,7 +239,10 @@ document.addEventListener('DOMContentLoaded', function() {
   // Fix quiz numbering: Remove chapter numbers from quiz callouts (HTML only)
   // Transform "Self-Check: Question 1.3" to "Self-Check: Question 3"
   function fixQuizNumbering() {
-    const quizCallouts = document.querySelectorAll('.callout-quiz-question, .callout-quiz-answer');
+    // Only visit callouts not already processed, so repeat passes are cheap
+    const quizCallouts = document.querySelectorAll(
+      '.callout-quiz-question:not([data-quiz-number-fixed]), .callout-quiz-answer:not([data-quiz-number-fixed])'
+    );
 
     quizCallouts.forEach(callout => {
       // Try multiple selectors to find the text element
@@ -256,8 +258,8 @@ document.addEventListener('DOMContentLoaded', function() {
         if (match) {
           const [, prefix, chapterNum, questionNum, suffix] = match;
           textElement.textContent = `${prefix} ${questionNum}${suffix}`;
-          console.log(`Fixed quiz numbering: "${originalText}" → "${textElement.textContent}"`);
         }
+        callout.setAttribute('data-quiz-number-fixed', 'true');
       }
     });
   }
@@ -267,9 +269,12 @@ document.addEventListener('DOMContentLoaded', function() {
     setTimeout(fixQuizNumbering, delay);
   });
 
-  // Also run on any dynamic content loads
+  // Also run on any dynamic content loads, coalescing mutation bursts
+  // (Bootstrap collapses, tooltips, math typesetting) into a single pass
+  let quizNumberingTimer = null;
   const observer = new MutationObserver(() => {
-    setTimeout(fixQuizNumbering, 100);
+    clearTimeout(quizNumberingTimer);
+    quizNumberingTimer = setTimeout(fixQuizNumbering, 100);
   });
 
   observer.observe(document.body, {

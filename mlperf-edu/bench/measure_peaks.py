@@ -15,8 +15,8 @@ Methodology:
 
 Run once: python3 bench/measure_peaks.py
 """
+
 import json
-import os
 import sys
 import time
 import hashlib
@@ -35,8 +35,9 @@ BW_BYTES = 256 * 1024 * 1024  # 256 MB; >> any consumer LLC
 
 def _hwfp_short() -> str:
     try:
-        from mlperf.hardware import profile_hardware
-        fp = profile_hardware()
+        from mlperf.fingerprint import detect_hardware
+
+        fp = detect_hardware()
     except Exception:
         fp = {"system": "unknown"}
     return hashlib.sha256(
@@ -63,7 +64,7 @@ def measure_peak_flops(device: str, n_warmup: int = 3, n_runs: int = 5) -> float
     """Best-of-N square fp32 matmul throughput."""
     a = torch.randn(GEMM_DIM, GEMM_DIM, device=device, dtype=torch.float32)
     b = torch.randn(GEMM_DIM, GEMM_DIM, device=device, dtype=torch.float32)
-    flops_per_iter = 2 * GEMM_DIM ** 3
+    flops_per_iter = 2 * GEMM_DIM**3
     for _ in range(n_warmup):
         torch.matmul(a, b)
     _sync()
@@ -72,7 +73,7 @@ def measure_peak_flops(device: str, n_warmup: int = 3, n_runs: int = 5) -> float
         _sync()
         t0 = time.perf_counter()
         for _ in range(10):
-            c = torch.matmul(a, b)
+            _ = torch.matmul(a, b)
         _sync()
         dt = time.perf_counter() - t0
         flops_per_sec = (10 * flops_per_iter) / dt
@@ -94,7 +95,7 @@ def measure_peak_bw(device: str, n_warmup: int = 2, n_runs: int = 5) -> float:
         _sync()
         t0 = time.perf_counter()
         for _ in range(5):
-            y = x.clone()
+            _ = x.clone()
         _sync()
         dt = time.perf_counter() - t0
         bw = (5 * bytes_per_iter) / dt / 1e9
@@ -115,9 +116,9 @@ def main() -> int:
 
     print(f"Measuring peak FLOPS ({GEMM_DIM}x{GEMM_DIM} fp32 matmul, best of 5)...")
     peak_flops = measure_peak_flops(device)
-    print(f"  peak_FLOPS = {peak_flops/1e12:.2f} TFLOPS")
+    print(f"  peak_FLOPS = {peak_flops / 1e12:.2f} TFLOPS")
 
-    print(f"Measuring peak BW (256 MB streaming clone, best of 5)...")
+    print("Measuring peak BW (256 MB streaming clone, best of 5)...")
     peak_bw = measure_peak_bw(device)
     print(f"  peak_BW    = {peak_bw:.2f} GB/s")
 
@@ -132,7 +133,7 @@ def main() -> int:
         "ridge_FLOPS_per_byte": ridge,
         "method": {
             "flops": f"best of 5 x 10-iter {GEMM_DIM}x{GEMM_DIM} fp32 matmul",
-            "bw": f"best of 5 x 5-iter clone of {BW_BYTES//1024//1024} MB tensor",
+            "bw": f"best of 5 x 5-iter clone of {BW_BYTES // 1024 // 1024} MB tensor",
         },
     }
     cache_path.write_text(json.dumps(payload, indent=2))

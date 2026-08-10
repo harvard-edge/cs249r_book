@@ -89,7 +89,7 @@ Module 01 (Tensor) → Module 02 (Activations) → Module 03 (Layers) → Module
 **Import Strategy**:
 This module imports directly from the TinyTorch package (`from tinytorch.core.*`).
 **Assumption**: Modules 01 (Tensor), 02 (Activations), and 03 (Layers) have been completed and exported to the package.
-If you see import errors, ensure you've run `tito export` after completing previous modules.
+If you see import errors, make sure you've run `tito module complete` for each previous module.
 """
 
 # %% nbgrader={"grade": false, "grade_id": "setup", "solution": true}

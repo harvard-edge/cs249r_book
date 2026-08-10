@@ -20,7 +20,7 @@
 
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { getQuestionFullDetail, type Question } from "../corpus";
 
 export type UseFullQuestionStatus = "loading" | "ready" | "error";
@@ -44,8 +44,17 @@ export function useFullQuestion(
   // `summary?.id` alone closes over a stale `summary` if the same-id record is
   // swapped for a richer one; depending on the whole `summary` object instead
   // would refetch on every render when a caller passes a fresh object.
+  //
+  // The sync itself runs in a layout effect (not directly in the render
+  // body) because writing to `ref.current` during render is unsafe under
+  // React's rules of hooks: it can leave stale values behind an interrupted
+  // or double-invoked (Strict Mode) render. useLayoutEffect fires
+  // synchronously right after render and before the fetch effect below runs
+  // on the same pass, so the ref is always current by the time it's read.
   const summaryRef = useRef(summary);
-  summaryRef.current = summary;
+  useLayoutEffect(() => {
+    summaryRef.current = summary;
+  });
 
   useEffect(() => {
     const current = summaryRef.current;

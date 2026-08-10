@@ -43,19 +43,8 @@ class OlympicsCommand(BaseCommand):
             help='Check your Olympics participation status'
         )
 
-    def run(self, args: Namespace) -> int:
-        """Show coming soon message with Olympics branding."""
-        console = self.console
-
-        # Handle subcommands
-        if hasattr(args, 'olympics_command') and args.olympics_command == 'logo':
-            print_olympics_logo(console)
-            return 0
-
-        # Build the content with logo inside the panel
-        # Olympic rings ASCII art with colors
-        # Blue (ring 1), White (ring 2), Red (ring 3) on top
-        # Yellow (ring 4), Green (ring 5) on bottom, interlocking
+    def _build_logo(self) -> Text:
+        """Build the Olympic rings ASCII art (blue/white/red on top, yellow/green on bottom, interlocking)."""
         logo_lines = ["",
             "[blue]⠀⠀⢀⣠⢖⠗⠟⠛⠛⠟⢶⢦⣀[/]⠀⠀⠀⠀⠀⠀⠀[bright_white]⣠⣶⡿⠿⠿⠿⣿⣷⣦⣄[/]⠀⠀⠀⠀⠀⠀⠀[red]⣄⡴⡳⠛⠛⠛⠟⢞⣦⣄[/]⠀⠀⠀",
             "[blue]⠀⣠⢾⠑⠁⠀⠀⠀⠀⠀⠀⠉⠫⣷⡀[/]⠀⠀⠀[bright_white]⣠⣾⡟⠉⠀⠀⠀⠀⠀⠀⠙⢻⣷⣄[/]⠀⠀⠀[red]⢠⢾⠕⠉⠀⠀⠀⠀⠀⠀⠈⠚⡷⡄[/]⠀",
@@ -70,8 +59,22 @@ class OlympicsCommand(BaseCommand):
             "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀[yellow]⠐⠕⡄⡀⠀⠀⠀⠀⠀⡀⠤⡊⠌[/]⠀⠀⠀⠀[green]⠑⢷⢤⡀⠀⠀⠀⠀⠀⢀⡤⣞⠕[/]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
             "⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀[yellow]⠈⠌⠊⡒⢔⠑⠌⠊⠂[/]⠀⠀⠀⠀⠀⠀⠀⠀[green]⠑⠫⠛⡖⡶⣙⠞⠝⠊[/]⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀⠀",
         ]
+        return Text.from_markup("\n".join(logo_lines) + "\n\n")
 
-        logo = Text.from_markup("\n".join(logo_lines) + "\n\n")
+    def run(self, args: Namespace) -> int:
+        """Show coming soon message with Olympics branding."""
+        console = self.console
+        logo = self._build_logo()
+
+        # Handle subcommands
+        if hasattr(args, 'olympics_command') and args.olympics_command == 'logo':
+            console.print(Panel(
+                Align.center(logo),
+                title="⚡ TINYTORCH OLYMPICS ⚡",
+                border_style="bright_yellow",
+                padding=(1, 2)
+            ))
+            return 0
 
         message = Text()
         message.append("🚧 COMING SOON 🚧\n\n", style="bold yellow")

@@ -102,10 +102,16 @@ class HarnessRunResult:
 def plan_batches(config: ScenarioConfig) -> list[list[HarnessSample]]:
     config = config.normalized()
     if config.scenario == "offline":
-        samples = [HarnessSample(id=i, index=i, scheduled_time_s=0.0) for i in range(config.sample_count)]
+        samples = [
+            HarnessSample(id=i, index=i, scheduled_time_s=0.0)
+            for i in range(config.sample_count)
+        ]
         return chunk_samples(samples, config.batch_size)
     if config.scenario == "single_stream":
-        return [[HarnessSample(id=i, index=i, scheduled_time_s=0.0)] for i in range(config.sample_count)]
+        return [
+            [HarnessSample(id=i, index=i, scheduled_time_s=0.0)]
+            for i in range(config.sample_count)
+        ]
     return [[sample] for sample in server_samples(config)]
 
 
@@ -121,13 +127,16 @@ def server_samples(config: ScenarioConfig) -> list[HarnessSample]:
     return samples
 
 
-def chunk_samples(samples: list[HarnessSample], batch_size: int) -> list[list[HarnessSample]]:
+def chunk_samples(
+    samples: list[HarnessSample], batch_size: int
+) -> list[list[HarnessSample]]:
     return [samples[i : i + batch_size] for i in range(0, len(samples), batch_size)]
 
 
 def run_harness(
     config: ScenarioConfig,
     query_handler: Callable[[list[HarnessSample]], Any],
+    response_validator: Callable[[HarnessSample, dict[str, Any]], bool] | None = None,
 ) -> HarnessRunResult:
     config = config.normalized()
     batches = plan_batches(config)
@@ -158,6 +167,12 @@ def run_harness(
                 latency_s = max(0.0, batch_completed_s - sample.scheduled_time_s)
             else:
                 latency_s = service_time_s
+            metadata = metadata_by_id[sample.id]
+            ok = (
+                bool(response_validator(sample, metadata))
+                if response_validator is not None
+                else bool(metadata)
+            )
             responses.append(
                 HarnessResponse(
                     sample_id=sample.id,
@@ -166,13 +181,15 @@ def run_harness(
                     started_at_s=batch_started_s,
                     completed_at_s=batch_completed_s,
                     latency_s=latency_s,
-                    ok=True,
-                    metadata=metadata_by_id.get(sample.id, {}),
+                    ok=ok,
+                    metadata=metadata,
                 )
             )
 
     completed = time.perf_counter()
-    duration_s = max((response.completed_at_s for response in responses), default=completed - started)
+    duration_s = max(
+        (response.completed_at_s for response in responses), default=completed - started
+    )
     metrics = harness_metrics(config, responses, duration_s)
     return HarnessRunResult(
         config=config,
@@ -183,14 +200,27 @@ def run_harness(
     )
 
 
-def normalize_handler_output(batch: list[HarnessSample], output: Any) -> dict[int, dict[str, Any]]:
+def normalize_handler_output(
+    batch: list[HarnessSample], output: Any
+) -> dict[int, dict[str, Any]]:
     if output is None:
-        return {}
+        raise ValueError("query handler returned no response")
     if isinstance(output, dict):
+        if not output:
+            raise ValueError("query handler returned an empty response")
         return {sample.id: dict(output) for sample in batch}
     if isinstance(output, list):
+        if len(output) != len(batch):
+            raise ValueError(
+                "query handler must return exactly one response per sample: "
+                f"expected {len(batch)}, received {len(output)}"
+            )
         rows: dict[int, dict[str, Any]] = {}
-        for sample, item in zip(batch, output):
+        for sample, item in zip(batch, output, strict=True):
+            if item is None or (isinstance(item, dict) and not item):
+                raise ValueError(
+                    f"query handler returned an empty response for sample {sample.id}"
+                )
             rows[sample.id] = dict(item) if isinstance(item, dict) else {"value": item}
         return rows
     return {sample.id: {"value": output} for sample in batch}
@@ -207,6 +237,7 @@ def harness_metrics(
         "scenario": config.scenario,
         "sample_count": len(responses),
         "ok_count": ok_count,
+        "failed_count": len(responses) - ok_count,
         "duration_seconds": float(duration_s),
         "throughput_qps": float(len(responses) / duration_s) if duration_s > 0 else 0.0,
         "latency_mean_s": float(sum(latencies) / len(latencies)) if latencies else 0.0,
