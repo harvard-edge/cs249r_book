@@ -411,7 +411,7 @@ format:
         sandbox="allow-storage-access-by-user-activation allow-scripts allow-same-origin allow-popups allow-popups-to-escape-sandbox">
       </iframe>
     </div>
-    <p class="mls-map-caption">Live readership — {{stats.readers_monthly}} readers a month across {{stats.countries}} countries and territories</p>
+    <p class="mls-map-caption">Live readership — {{stats.readers_monthly}} readers a month on average across {{stats.countries}} countries and territories</p>
     <p class="mls-map-countries"><span class="mls-map-countries-label">Top countries:</span> {{stats.top_countries}}</p>
   </div>
 
@@ -432,7 +432,7 @@ format:
       </div>
       <div class="mls-reach-item">
         <dd class="mls-reach-value">{{stats.readers_monthly}}</dd>
-        <dt class="mls-reach-label">a month</dt>
+        <dt class="mls-reach-label">avg. a month</dt>
       </div>
     </dl>
 
@@ -484,27 +484,293 @@ document.querySelectorAll('.mls-scroll-indicator').forEach(ind => {
 // The GitHub call stays separate and direct: the star count is public, needs
 // no credential, and should track the repo to the second rather than to the
 // last scheduled refresh.
-fetch('/stats.json?t=' + Date.now())
+//
+// The impact card is treated differently from the rest of the page. Its
+// figures are the ones a reader stops on, so they hold their build-time value
+// until the card scrolls into view and then count up to the fetched number.
+// The reader watches the reach arrive rather than finding it already sitting
+// there. Every other figure on the page is replaced quietly on load.
+
+// Both requests start now, in parallel with parsing, so the numbers are
+// already in hand by the time the card is scrolled to.
+const mlsStats = fetch('/stats.json?t=' + Date.now())
   .then(r => r.ok ? r.json() : Promise.reject(r.status))
-  .then(d => {
-    const display = (d && d.display) || {};
+  .then(d => (d && d.display) || {})
+  .catch(err => {
+    console.warn('[mlsysbook] stats refresh failed, showing build-time values:', err);
+    return {};
+  });
+
+const mlsStars = fetch('https://api.github.com/repos/harvard-edge/cs249r_book')
+  .then(r => r.ok ? r.json() : Promise.reject(r.status))
+  .then(d => (d && d.stargazers_count) || null)
+  .catch(err => {
+    console.warn('[mlsysbook] star refresh failed, showing build-time value:', err);
+    return null;
+  });
+
+function mlsReady(fn) {
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', fn);
+  } else {
+    fn();
+  }
+}
+
+// A figure moves only when it has actually moved. On a first visit, and on a
+// return where the value is unchanged, the number is simply shown: there is no
+// change for the motion to describe, and counting up from zero would assert a
+// readership the site does not have. The build already bakes the current figure
+// into the HTML, so a first-time reader sees the real number at first paint.
+const mlsReduceMotion = !!(window.matchMedia
+  && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+
+// Each figure remembers what the reader last saw, so a returning reader watches
+// the number travel from that value to the current one and the animation
+// measures the growth since their last visit.
+const MLS_CACHE_PREFIX = 'mlsysbook.stat.v1.';
+
+function mlsCacheGet(key) {
+  try {
+    const raw = window.localStorage.getItem(MLS_CACHE_PREFIX + key);
+    if (raw === null) return null;
+    const n = Number(raw);
+    return Number.isFinite(n) && n >= 0 ? n : null;
+  } catch (err) {
+    return null;        // storage blocked (private mode, disabled cookies)
+  }
+}
+
+function mlsCacheSet(key, value) {
+  try {
+    window.localStorage.setItem(MLS_CACHE_PREFIX + key, String(value));
+  } catch (err) {
+    /* quota or private mode: the figure simply shows without rolling */
+  }
+}
+
+// Time the roll to the distance it travels, on a log scale. Linear scaling
+// would collapse every realistic delta to instant, because a day of growth is
+// a rounding error against the total.
+const MLS_ROLL_MIN_MS = 400;
+const MLS_ROLL_MAX_MS = 1400;
+
+function mlsRollDuration(from, to) {
+  const delta = Math.abs(to - from);
+  if (delta === 0) return MLS_ROLL_MIN_MS;
+  const span = Math.max(Math.abs(to), 1);
+  const ratio = Math.log10(1 + delta) / Math.log10(1 + span);
+  return Math.round(MLS_ROLL_MIN_MS
+    + (MLS_ROLL_MAX_MS - MLS_ROLL_MIN_MS) * Math.min(1, Math.max(0, ratio)));
+}
+
+// Drop the width reservation taken for the animation. It is a pixel value
+// measured at one viewport, so leaving it behind would fight a later rotation.
+function mlsRelease(el) {
+  el.style.minWidth = '';
+  el.style.display = '';
+  el.style.textAlign = '';
+}
+
+// Where the wheel at place p sits for value v. The units wheel turns
+// continuously; every wheel above it holds its digit and snaps through only as
+// the wheel below completes its turn, the way a star-wheel counter does. At
+// rest each wheel therefore lands on a whole digit rather than between two.
+function mlsWheelPos(v, p) {
+  const scaled = v / Math.pow(10, p);
+  const fl = Math.floor(scaled);
+  const digit = ((fl % 10) + 10) % 10;
+  const frac = scaled - fl;
+  if (p === 0) return digit + frac;
+  const CARRY = 0.88;
+  return digit + (frac <= CARRY ? 0 : (frac - CARRY) / (1 - CARRY));
+}
+
+function mlsRoll(el, finalStr, from) {
+  const digits = finalStr.replace(/[^0-9]/g, '');
+  const target = Number(digits);
+  const n = digits.length;
+
+  // The digit window is the figure's own line box, so it is exactly as tall
+  // rolling as at rest and nothing below it moves.
+  const cs = window.getComputedStyle(el);
+  let cell = parseFloat(cs.lineHeight);
+  if (!Number.isFinite(cell)) cell = parseFloat(cs.fontSize) * 1.2;
+  cell = Math.round(cell);
+
+  el.textContent = '';
+  const sr = document.createElement('span');
+  sr.className = 'visually-hidden';
+  sr.textContent = finalStr;          // screen readers hear the value, not the wheels
+  const odo = document.createElement('span');
+  odo.className = 'mls-odo';
+  odo.setAttribute('aria-hidden', 'true');
+  el.appendChild(sr);
+  el.appendChild(odo);
+
+  const cols = [];
+  let digitIndex = 0;
+  for (let c = 0; c < finalStr.length; c++) {
+    const ch = finalStr[c];
+    if (ch < '0' || ch > '9') {
+      const sep = document.createElement('span');
+      sep.className = 'mls-odo-sep';
+      sep.textContent = ch;
+      odo.appendChild(sep);
+      continue;
+    }
+    const place = n - 1 - digitIndex++;
+    const col = document.createElement('span');
+    col.className = 'mls-odo-col';
+    col.style.height = cell + 'px';
+    const strip = document.createElement('span');
+    strip.className = 'mls-odo-strip';
+    // Eleven cells: 0-9 then 0 again, so a wheel passing nine runs onto an
+    // identical zero and the jump back to the top is invisible.
+    for (let k = 0; k <= 10; k++) {
+      const cellEl = document.createElement('span');
+      cellEl.className = 'mls-odo-cell';
+      cellEl.style.height = cell + 'px';
+      cellEl.style.lineHeight = cell + 'px';
+      cellEl.textContent = String(k % 10);
+      strip.appendChild(cellEl);
+    }
+    col.appendChild(strip);
+    odo.appendChild(col);
+    cols.push({ el: col, strip: strip, place: place });
+  }
+
+  const duration = mlsRollDuration(from, target);
+  let started = null;
+  let prev = from;
+  function frame(now) {
+    if (started === null) started = now;
+    const p = Math.min(1, (now - started) / duration);
+    const eased = 1 - Math.pow(1 - p, 3);   // easeOutCubic
+    const v = from + (target - from) * eased;
+    for (let j = 0; j < cols.length; j++) {
+      const col = cols[j];
+      col.strip.style.transform = 'translateY(' + (-mlsWheelPos(v, col.place) * cell) + 'px)';
+      // A wheel turning many times in one frame would strobe rather than spin,
+      // so blur it in proportion to how far it moved. That is what the eye sees
+      // on a real counter, and it turns aliasing into motion.
+      const turns = Math.abs(v - prev) / Math.pow(10, col.place);
+      const blur = turns < 0.12 ? 0 : Math.min(3.2, turns * 1.6);
+      col.el.style.filter = blur ? 'blur(' + blur.toFixed(2) + 'px)' : '';
+    }
+    prev = v;
+    if (p < 1) {
+      requestAnimationFrame(frame);
+    } else {
+      el.textContent = finalStr;   // collapse back to plain, selectable text
+      mlsRelease(el);
+    }
+  }
+  requestAnimationFrame(frame);
+}
+
+// Show a figure: roll it only if this reader has seen a different value before.
+// Increases animate; a decrease is set outright. The reach figures only grow,
+// but the monthly average is a windowed rate and legitimately falls, and a
+// counter visibly winding backwards reads as decline in a way the same number
+// sitting there does not. The figure shown is the current one either way; only
+// the motion is reserved for growth.
+function mlsPresent(el, text, from) {
+  const final = String(text);
+  const target = Number(final.replace(/,/g, ''));
+  if (mlsReduceMotion || !/^[\d,]+$/.test(final.trim())
+      || !Number.isFinite(target) || target <= 0
+      || from === null || from >= target) {
+    el.textContent = final;
+    mlsRelease(el);
+    return;
+  }
+  mlsRoll(el, final, from);
+}
+
+mlsReady(function () {
+  const card = document.querySelector('.mls-impact-bottom');
+
+  // Quiet replacement for every figure outside the impact card.
+  mlsStats.then(display => {
     document.querySelectorAll('[data-stat]').forEach(el => {
+      if (card && card.contains(el)) return;
       const value = display[el.getAttribute('data-stat')];
       if (value) el.textContent = value;
     });
-  })
-  .catch(err => console.warn('[mlsysbook] stats refresh failed, showing build-time values:', err));
+  });
 
-fetch('https://api.github.com/repos/harvard-edge/cs249r_book')
-  .then(r => r.json())
-  .then(d => {
-    const stars = d.stargazers_count;
+  mlsStars.then(stars => {
     if (!stars) return;
     document.querySelectorAll('.gh-star-count, [data-stat="stars"]').forEach(el => {
+      if (card && card.contains(el)) return;
       el.textContent = stars.toLocaleString();
     });
-  })
-  .catch(err => console.warn('[mlsysbook] star refresh failed, showing build-time value:', err));
+  });
+
+  if (!card) return;
+
+  // Roll one figure from what this reader last saw, then remember the new
+  // value for their next visit.
+  //
+  // Before counting up, reserve the width the finished figure needs. A count
+  // from 0 to 314,517 grows from one character to seven, and above the 560px
+  // breakpoint the three readings are sized by their content, so without this
+  // the row visibly shoves itself outward for the whole animation. Measuring
+  // the final string rather than guessing keeps the reservation exact at every
+  // clamp() font size, and it can never overflow a narrow column because the
+  // width measured is the width that figure occupies at rest anyway.
+  function rollFigure(el, key, text) {
+    const final = String(text);
+    el.textContent = final;
+    const width = el.getBoundingClientRect().width;
+    if (width > 0) {
+      el.style.display = 'inline-block';
+      el.style.minWidth = width + 'px';
+      el.style.textAlign = 'center';
+    }
+    mlsPresent(el, final, mlsCacheGet(key));
+    const value = Number(final.replace(/,/g, ''));
+    if (/^[\d,]+$/.test(final.trim()) && Number.isFinite(value)) {
+      mlsCacheSet(key, value);
+    }
+  }
+
+  function rollCard() {
+    Promise.all([mlsStats, mlsStars]).then(([display, stars]) => {
+      card.querySelectorAll('[data-stat]').forEach(el => {
+        const key = el.getAttribute('data-stat');
+        const live = (key === 'stars' && stars) ? stars.toLocaleString() : display[key];
+        rollFigure(el, key, live != null ? live : el.textContent);
+      });
+      // If the build did not wrap the star count in a data-stat span, roll the
+      // element that carries it directly.
+      const starEl = card.querySelector('.gh-star-count');
+      if (starEl && stars && !starEl.querySelector('[data-stat]')) {
+        rollFigure(starEl, 'stars', stars.toLocaleString());
+      }
+    });
+  }
+
+  if ('IntersectionObserver' in window) {
+    // threshold 0 with the root inset from the bottom, rather than a fraction
+    // of the card. A visible-fraction threshold silently never fires when the
+    // element is taller than the viewport can ever show that fraction of, which
+    // is a real risk on a short landscape phone. Insetting the root instead
+    // fires when the card's top reaches the upper three quarters of the
+    // viewport, at any card height.
+    const observer = new IntersectionObserver((entries, obs) => {
+      entries.forEach(entry => {
+        if (!entry.isIntersecting) return;
+        obs.unobserve(entry.target);   // roll once, not on every scroll past
+        rollCard();
+      });
+    }, { threshold: 0, rootMargin: '0px 0px -25% 0px' });
+    observer.observe(card);
+  } else {
+    rollCard();                        // no observer support: just refresh
+  }
+});
 </script>
 ```
 
