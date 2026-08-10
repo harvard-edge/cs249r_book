@@ -30,8 +30,12 @@ if (process.env.STAFFML_SKIP_LOCAL_CORPUS === "1") {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
-const which = spawnSync("which", ["vault"], { encoding: "utf8" });
-if (which.status !== 0 || !which.stdout.trim()) {
+// Probe by actually invoking `vault`, not by shelling out to `which` — `which`
+// doesn't exist on Windows (spawnSync just ENOENTs), so that probe always
+// reported "not installed" there even with a correctly-installed vault-cli,
+// silently skipping the local corpus rebuild on every Windows checkout.
+const probe = spawnSync("vault", ["--version"], { encoding: "utf8" });
+if (probe.error || probe.status !== 0) {
   console.log(
     "[build-local-corpus] `vault` CLI not on PATH; skipping local corpus rebuild.\n" +
     "  To enable full-content rendering against your local YAMLs, run:\n" +

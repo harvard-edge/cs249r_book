@@ -18,7 +18,14 @@ VIEWPORTS = ((1440, 1000, "desktop"), (390, 844, "narrow"))
 SCREENSHOT_PAGES = (
     "index.html",
     "getting-started.html",
+    "readiness.html",
+    "benchmarks/index.html",
     "benchmarks/language/causal-language-modeling.html",
+    "labs/index.html",
+    "guide/instructors.html",
+    "guide/research.html",
+    "guide/results.html",
+    "guide/troubleshooting.html",
     "reference/cli.html",
 )
 
@@ -128,7 +135,12 @@ def main() -> int:
                                   documentWidth: document.documentElement.scrollWidth,
                                   bodyWidth: document.body.scrollWidth,
                                   heading: document.querySelector('h1')?.innerText?.trim() || '',
-                                  mainPresent: Boolean(document.querySelector('main'))
+                                  mainPresent: Boolean(document.querySelector('main')),
+                                  wideTableCount: Array.from(document.querySelectorAll('main table'))
+                                    .filter((table) => table.scrollWidth > table.clientWidth + 1).length,
+                                  uncuedWideTableCount: Array.from(document.querySelectorAll('main table'))
+                                    .filter((table) => table.scrollWidth > table.clientWidth + 1)
+                                    .filter((table) => !getComputedStyle(table, '::before').content.includes('Swipe horizontally')).length
                                 })"""
                             )
                             if status != 200:
@@ -179,6 +191,15 @@ def main() -> int:
                                         label,
                                         "HORIZONTAL_PAGE_OVERFLOW",
                                         f"page is {overflow}px wider than its {viewport_width}px viewport",
+                                    )
+                                )
+                            if label == "narrow" and layout["uncuedWideTableCount"]:
+                                failures.append(
+                                    _failure(
+                                        relative_path,
+                                        label,
+                                        "TABLE_SCROLL_CUE",
+                                        f"{layout['uncuedWideTableCount']} of {layout['wideTableCount']} horizontally scrollable tables lack a visible cue",
                                     )
                                 )
 

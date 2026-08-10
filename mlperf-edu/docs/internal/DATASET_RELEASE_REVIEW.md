@@ -1,5 +1,16 @@
 # MLPerf EDU v0.1 Dataset Release Review
 
+> **Superseded in part, 2026-08-04.** Recommendation moved from DLRM on Criteo
+> Terabyte to MLPerf Training v0.5 NCF on MovieLens-20M, reinforcement
+> learning moved from a CUDA and TensorFlow 1.x container to a PyTorch
+> adapter, and the timing protocol dropped from five runs to one. No
+> workload is environment-gated. Statements below about gated execution,
+> licensed Criteo data, or five-run promotion describe the state at the
+> time of the audit and are retained as a record rather than corrected.
+> Current state: [WORKLOAD_STATUS.md](WORKLOAD_STATUS.md) and
+> [MISS_DIAGNOSIS.md](MISS_DIAGNOSIS.md).
+
+
 ## Policy
 
 Canonical runs fetch pinned assets from their authoritative upstream source.
@@ -60,8 +71,9 @@ HumanEval+, BFCL, Criteo Terabyte, CIFAR-10 EDM inputs, and MiniGo self-play are
 registered because their workload identities and upstream contracts are known.
 Every workload now has a fail-closed max runner for its complete canonical
 contract. HumanEval+, BFCL, and EDM consume their complete local evaluation
-assets. DLRM and MiniGo require external research environments and do not fall
-back to reduced substitutes. End-to-end RAG and ReAct agent datasets remain
+assets. DLRM and MiniGo currently require external research environments, and
+their planned local backends must not fall back to reduced substitutes.
+End-to-end RAG and ReAct agent datasets remain
 outside the portfolio because no stable upstream tuple fixes the complete task
 and evaluator without project choices.
 

@@ -1,15 +1,14 @@
 # MLPerf EDU Example Path
 
-Run these examples from the `mlperf-edu/` project directory. From the parent
-repository checkout, prepare the environment first.
+Set up first if you have not already. The [project README](../README.md) has
+the quickstart, and these examples additionally need the dev extra:
 
 ```bash
-cd mlperf-edu
 uv sync --locked --extra dev
 ```
 
-See [Getting Started](GETTING_STARTED.md) for platform checks and installation
-alternatives.
+Run everything below from the `mlperf-edu/` project directory. The
+[classroom guide](GETTING_STARTED.md) covers teaching context and grading.
 
 The numbered examples form one classroom sequence. They use registered
 workloads and product CLI artifacts rather than standalone toy measurements.
@@ -32,11 +31,12 @@ The separate `research/pro-collection` example uses the same plan mechanism for
 a research-facing study.
 
 Before choosing a `max` workload, read the
-[fourteen-workload readiness matrix](../READINESS.md#portfolio-status). It
-separates target-passing, target-gap, and research-environment workloads and
-states the next quality task for each. Instructors should publish course-machine
+[fourteen-workload readiness matrix](../docs/internal/STATUS.md). Every
+workload runs locally, but they separate into those that reproduce their
+inherited target and those recorded as a miss, and the matrix states the next
+quality task for each. Instructors should publish course-machine
 `max` runtime, memory, download, and disk budgets because those costs are
-hardware dependent. The initial [course-image budget](../COURSE_BUDGETS.md)
+hardware dependent. The initial [course-image budget](../docs/internal/COURSE_BUDGETS.md)
 already covers every functional `min` path on CPU and the available MPS paths.
 
 The three legacy `lab*.py` files remain standalone teaching experiments. They

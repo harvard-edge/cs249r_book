@@ -58,6 +58,17 @@ def test_cli_help():
     assert "--maturity" not in result.stdout
 
 
+def test_profile_help_describes_contract_depth_not_max_as_the_full_suite():
+    result = run_cli("run", "--help")
+
+    assert result.returncode == 0
+    normalized = " ".join(result.stdout.split())
+    assert (
+        "max=complete quality evaluation for the selected workload(s)" in normalized
+    )
+    assert "max=full suite" not in normalized
+
+
 def test_keyboard_interrupt_returns_shell_interrupt_status(monkeypatch, capsys):
     def interrupted(_args):
         raise KeyboardInterrupt
@@ -484,7 +495,13 @@ def test_doctor_json_marks_bad_selection_as_failure():
     assert data["selected_workloads"] == []
 
 
-def test_doctor_fails_closed_on_missing_recommendation_max_environment():
+def test_doctor_does_not_gate_recommendation_on_the_retired_dlrm_environment():
+    """Recommendation trains locally since the contract moved to NCF.
+
+    The preflight used to demand Criteo terms acceptance and DLRM paths, so it
+    reported a gated environment for a workload that runs, and told the reader
+    to set variables nothing consults. Preflight and runner must agree.
+    """
     result = run_cli(
         "doctor",
         "--workload",
@@ -498,57 +515,25 @@ def test_doctor_fails_closed_on_missing_recommendation_max_environment():
         },
     )
 
-    assert result.returncode == 1
-    assert "research environment is gated" in result.stdout
-    assert "MLPERF_EDU_DLRM_DATA_DIR" in result.stdout
+    assert "research environment is gated" not in result.stdout
+    assert "MLPERF_EDU_DLRM_DATA_DIR" not in result.stdout
+    assert "MLPERF_EDU_CRITEO_TERMS_ACCEPTED" not in result.stdout
 
 
-def test_doctor_json_emits_external_environment_handoffs():
-    recommendation_result = run_cli(
-        "doctor",
-        "--workload",
-        "recommendation",
-        "--profile",
-        "max",
-        "--format",
-        "json",
-        env_extra={
-            "MLPERF_EDU_CRITEO_TERMS_ACCEPTED": "",
-            "MLPERF_EDU_DLRM_DATA_DIR": "",
-            "MLPERF_EDU_DLRM_CHECKPOINT": "",
-        },
-    )
-    reinforcement_result = run_cli(
-        "doctor",
-        "--workload",
-        "reinforcement-learning",
-        "--profile",
-        "max",
-        "--format",
-        "json",
-        env_extra={
-            "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED": "",
-            "MLPERF_EDU_MINIGO_IMAGE": "",
-        },
-    )
+def test_doctor_emits_no_environment_handoffs():
+    """No workload hands off to another environment any more.
 
-    assert recommendation_result.returncode == 1
-    recommendation_checks = json.loads(recommendation_result.stdout)["checks"]
-    recommendation_handoff = next(
-        check["handoff"] for check in recommendation_checks if "handoff" in check
-    )
-    assert recommendation_handoff["workload"] == "recommendation"
-    assert recommendation_handoff["required_hardware"][
-        "recommended_host_memory_gib"
-    ] == 256
-
-    assert reinforcement_result.returncode == 1
-    reinforcement_checks = json.loads(reinforcement_result.stdout)["checks"]
-    reinforcement_handoff = next(
-        check["handoff"] for check in reinforcement_checks if "handoff" in check
-    )
-    assert reinforcement_handoff["workload"] == "reinforcement-learning"
-    assert reinforcement_handoff["required_hardware"]["accelerator"] == "NVIDIA GPU"
+    Recommendation left this set when its contract moved to NCF on
+    MovieLens-20M. Reinforcement learning left it when the PyTorch adapter
+    replaced the CUDA and TensorFlow 1.x MiniGo container. A handoff appearing
+    here again means a workload stopped running locally.
+    """
+    for workload_id in ("reinforcement-learning", "recommendation"):
+        result = run_cli(
+            "doctor", "--workload", workload_id, "--profile", "max", "--format", "json"
+        )
+        checks = json.loads(result.stdout)["checks"]
+        assert not any("handoff" in check for check in checks), workload_id
 
 
 def test_list_default_contains_canonical_language_modeling():
@@ -578,7 +563,7 @@ def test_list_discovery_subjects():
         row["profile"]: row["workloads"]
         for row in json.loads(profiles_json.stdout)["profiles"]
     }
-    assert profile_counts == {"min": 4, "max": 14, "pro": 9}
+    assert profile_counts == {"min": 4, "max": 14, "pro": 14}
 
 
 def test_info_profile_shows_default_selection():
@@ -724,7 +709,7 @@ def test_dashboard_derives_quality_results_and_target_attainment():
             },
             {
                 "workload": "quality-fail",
-                "status": "passed",
+                "status": "quality_failed",
                 "quality": {
                     "quality_required": True,
                     "metric": "fid",
@@ -747,7 +732,48 @@ def test_dashboard_derives_quality_results_and_target_attainment():
     assert "Target attainment" in html
     assert "112.5%" in html
     assert "99.4%" in html
+    assert "Target not met" in html
+    assert "Run failed" not in html
     assert "Functional Readiness" not in html
+
+
+def test_dashboard_keeps_nonpass_states_distinct():
+    report = {
+        "workloads": [
+            {
+                "workload": "environment-gated",
+                "status": "not_implemented",
+                "max_execution": "environment-gated-quality-conformance",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "skipped",
+                "status": "skipped",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "unsupported",
+                "status": "unsupported",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+            {
+                "workload": "execution-failed",
+                "status": "execution_failed",
+                "quality": {"quality_required": True, "metric": "accuracy"},
+                "metrics": {},
+            },
+        ]
+    }
+
+    html = edu_cli.quality_dashboard_html(report)
+
+    assert "Environment gated" in html
+    assert "Skipped" in html
+    assert "Unsupported" in html
+    assert "Run failed" in html
 
 
 def test_dashboard_uses_separate_meters_for_mixed_results():
@@ -905,6 +931,15 @@ def test_nanogpt_inference_lineage_excludes_source_promoted_results():
 
 def test_execution_lineage_distinguishes_pretrained_and_run_trained_models():
     workloads = load_registry()
+    inferred = {
+        "workload": "image-classification",
+        "profile": "max",
+        "quality": {},
+    }
+    enrich_report_for_display(inferred, workloads)
+    assert inferred["mode"] == "inference"
+    assert inferred["execution_lineage"]["mode"] == "inference"
+
     pretrained = {
         "workload": "code-generation",
         "profile": "max",
@@ -954,8 +989,37 @@ def test_show_workload():
     assert "min, max, pro" in result.stdout
     assert "public_status" in result.stdout
     assert "experimental" in result.stdout
+    assert "evaluator" in result.stdout
+    assert "cross_entropy_loss" in result.stdout
+    assert "default_mode" in result.stdout
+    assert "training" in result.stdout
+    assert "default_phase" in result.stdout
+    assert "full" in result.stdout
+    assert "quality_direction" in result.stdout
+    assert "lower" in result.stdout
+    assert "quality_tolerance" in result.stdout
+    assert "max_execution" in result.stdout
     assert "source_suite" not in result.stdout
     assert "maturity" not in result.stdout
+
+
+def test_no_workload_is_environment_gated():
+    """Every registered workload executes its contract on the target platform.
+
+    Two workloads used to be gated. Recommendation left when its contract moved
+    from DLRM on Criteo Terabyte to MLPerf v0.5 NCF on MovieLens-20M.
+    Reinforcement learning left when the PyTorch adapter replaced the CUDA and
+    TensorFlow 1.x MiniGo container. A workload reappearing here means the
+    suite stopped being runnable as shipped.
+    """
+    import yaml
+
+    for path in sorted((PROJECT_ROOT / "registry" / "suites").glob("*/*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        contract = spec.get("canonical_max_contract") or {}
+        assert contract.get("execution_status") != (
+            "environment-gated-quality-conformance"
+        ), f"{spec['id']} is environment-gated"
 
 
 def test_info_dataset_shows_asset_dossier():
@@ -1094,18 +1158,11 @@ def test_fetch_new_quality_assets_dry_run_discloses_authoritative_sources():
 
 
 def test_fetch_manual_quality_assets_returns_actionable_nonzero_status():
-    recommendation = run_cli(
-        "fetch", "--workload", "recommendation", "--profile", "max"
-    )
-    assert recommendation.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in recommendation.stdout
-    assert "unshuffled day 23" in recommendation.stdout
-
     reinforcement = run_cli(
         "fetch", "--workload", "reinforcement-learning", "--profile", "max"
     )
     assert reinforcement.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in reinforcement.stdout
+    assert "MANUAL ACTION REQUIRED" in " ".join(reinforcement.stdout.split())
     assert "professional-move inputs" in reinforcement.stdout
 
 
@@ -1211,6 +1268,18 @@ def test_health_dry_run_uses_all_registered_min_paths(tmp_path):
     assert not any(tmp_path.iterdir())
 
 
+def test_health_success_points_to_authoritative_quality_journey(monkeypatch, capsys):
+    monkeypatch.setattr(edu_cli, "cmd_validate", lambda _args: 0)
+    args = edu_cli.build_parser().parse_args(["health"])
+
+    assert edu_cli.cmd_health(args) == 0
+
+    output = " ".join(capsys.readouterr().out.split())
+    assert "Next: choose a workload" in output
+    assert "mlperf show <workload>" in output
+    assert "mlperf run --profile max" in output
+
+
 def test_suite_filtered_health_uses_the_selected_suite(tmp_path):
     result = run_cli(
         "health",
@@ -1259,6 +1328,7 @@ def test_validation_runner_exception_still_writes_failure_report(tmp_path, monke
     html = reports[0].with_suffix(".html").read_text()
     assert "Needs attention" in html
     assert "missing licensed benchmark environment" in html
+    assert "overflow-wrap:anywhere" in html
 
 
 def test_validate_release_dry_run_includes_min_max_and_research_pro(tmp_path):
@@ -1500,8 +1570,13 @@ def test_report_command_exports_json_csv_html(tmp_path):
     assert rows[0]["workload"] == "causal-language-modeling"
     assert rows[0]["suite"] == "language"
     assert rows[0]["profile"] == "min"
+    assert rows[0]["mode"] == "training"
+    assert rows[0]["phase"] == ""
+    assert rows[0]["scenario"] == "training"
     assert rows[0]["status"] == "passed"
     assert rows[0]["backend"] == "pytorch-cpu"
+    assert rows[0]["device_requested"] == "auto"
+    assert rows[0]["device_executed"] == "cpu"
     assert rows[0]["data_mode"] == "synthetic-deterministic"
     assert rows[0]["dataset"] == "tinyshakespeare"
     assert rows[0]["dataset_license_status"] == "mit-repository-public-domain-text"
@@ -2398,3 +2473,18 @@ def test_anomaly_detection_min_run_writes_verifiable_artifacts(tmp_path):
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
+
+
+def test_container_probe_matches_the_code_generation_runner():
+    """The preflight probe is duplicated on purpose; keep the two in step.
+
+    Importing the runner into the CLI would pull code_generation.py into the
+    measurement source-lock closure, and preflight is not a measurement input.
+    The cost of that separation is two definitions, so this pins them together:
+    if they ever disagree, doctor and the runner would give a user opposite
+    answers about whether a valid code-generation run is possible.
+    """
+    from mlperf import edu_cli
+    from mlperf.runners import code_generation
+
+    assert edu_cli.container_engine_available() == code_generation.docker_available()

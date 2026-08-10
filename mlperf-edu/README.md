@@ -1,42 +1,47 @@
 # MLPerf EDU
 
-MLPerf EDU is an independent preview of a locally executable, quality-gated
-benchmark specification for teaching and studying single-node ML systems. It
-adapts the reproducibility, verification, disclosure, and comparability
-discipline of mature benchmark suites to classroom-scale PyTorch workloads.
-It is not an official MLCommons benchmark and is not endorsed by MLCommons.
+A benchmark suite for ML systems that runs on a laptop without giving up the
+quality gate.
 
-The maintained [work checklist](WORK_CHECKLIST.md) shows what is complete, what
-still blocks full one-run coverage, and what is deliberately deferred to the
-stability or production phase.
-The [course-image budgets](COURSE_BUDGETS.md) provide measured one-run CPU and
-MPS functional planning ceilings without turning them into performance claims.
-[SECURITY_REVIEW.md](SECURITY_REVIEW.md) defines the controlled-preview
-boundary for generated code, upstream pickle files, and historical runtimes.
+Production benchmark suites teach a real discipline. They hold the task, the
+data, the metric, and the quality target fixed, so that two results can be
+compared at all. Their compute and submission requirements also put them out of
+reach of a course. The usual substitute is a folder of small models, which
+solves the resource problem and quietly throws away the gate.
 
-The v0.1 portfolio contains fourteen workloads. Twelve now have at least one
-complete authoritative quality result. Eight meet their declared target, and
-four record an honest target miss. The remaining two have complete,
-fail-closed runners and machine-readable handoffs for their external research
-environments. The promoted-evidence snapshot still covers nine workloads and
-twelve historical cases. MLPerf EDU contributes the thin PyTorch adapter,
-execution harness, measurement controls, provenance, and reports needed to
-move each definition through functional, quality-conformant,
-repeatability-verified, and promotion-ready stages.
+MLPerf EDU keeps both. Fourteen workloads run locally, and **no quality target
+is set by this project**. Every one is inherited from an upstream paper,
+leaderboard, or official evaluator, so the suite has no way to move a threshold
+it fails to reach. It reports its own misses, and it currently has six of them.
 
-## Install From the Checkout
+> This is an independent research project and a working name. It is not an
+> official MLCommons benchmark and is not endorsed by MLCommons.
 
-The review build uses Python 3.10 or newer and a locked `uv` environment.
+## Quickstart
+
+Python 3.10 or newer. A GPU is optional. Roughly five minutes.
 
 ```bash
 git clone https://github.com/harvard-edge/cs249r_book
 cd cs249r_book/mlperf-edu
-uv sync --locked --extra dev
-uv run mlperf doctor
+
+uv sync --locked                 # create the locked environment
+uv run mlperf doctor             # check this machine
+uv run mlperf init --profile min --output-dir submissions/first-run
 ```
 
-Fetch assets before measurement so network transfer is outside the timed
-region.
+`doctor` prints a table of your Python, PyTorch, device, caches, and registry.
+`init` then fetches what it needs and runs the four-workload `min` path, which
+is the fast functional check. It writes JSON, CSV, and HTML reports and
+verifies their provenance. Nothing opens a browser unless you ask.
+
+Look at what you produced:
+
+```bash
+uv run mlperf report submissions/first-run --format html --open
+```
+
+Then run something that carries a real quality gate:
 
 ```bash
 uv run mlperf fetch --workload image-classification --profile max
@@ -44,171 +49,131 @@ uv run mlperf run --workload image-classification --profile max \
   --output-dir submissions/image-review
 ```
 
-## Workload Portfolio
+That one loads the official MLPerf Tiny ResNet8 and its 200-example CIFAR-10
+accuracy set and grades the result against the inherited 85% top-1 target. It
+finishes in seconds.
 
-| **Workload** | **Authoritative Definition** | **Canonical Mode or Phase** | **Quality Contract** |
-|:---|:---|:---|:---|
-| `image-classification` | MLPerf Tiny float ResNet8 and its 200-sample CIFAR-10 accuracy set | inference | top-1 accuracy at least 0.85 |
-| `keyword-spotting` | MLPerf Tiny DS-CNN and the 1,000-example EEMBC accuracy set | inference | top-1 accuracy at least 0.90 |
-| `anomaly-detection` | MLPerf Tiny ToyADMOS autoencoder and the 248-recording ToyCar accuracy set | inference | ROC AUC at least 0.85 |
-| `visual-wake-words` | MLPerf Tiny MobileNetV1 0.25 and the 1,000-example EEMBC accuracy set | inference | top-1 accuracy at least 0.80 |
-| `causal-language-modeling` | nanoGPT Shakespeare character configuration and Tiny Shakespeare | training; full, prefill, and decode inference | validation cross-entropy at most 1.4697; every inference run passes its functional gate |
-| `text-classification` | Pinned DistilBERT SST-2 checkpoint and GLUE development split | inference | accuracy at least the exact verified model-index result of 0.9105504587155964 |
-| `information-retrieval` | Sentence Transformers CrossEncoder NanoBEIR example | inference | exact documented mean nDCG@10 |
-| `graph-node-classification` | Official OGB GCN recipe on `ogbn-arxiv` | training | test accuracy within the published GCN reference tolerance |
-| `time-series-forecasting` | Official PatchTST ETTm1 recipe and split | training | reproduce the published test MSE of 0.290; the current 0.292393 result misses |
-| `code-generation` | Qwen2.5-Coder and HumanEval+ | inference | published 0.573 HumanEval+ pass@1; first complete result reached 0.554878 and did not meet the unchanged target |
-| `function-calling` | Qwen3-1.7B and BFCL V4 Non-Live AST | inference | published 0.8292 AST accuracy; the complete 1,150-case result reached 0.785208 and did not meet the unchanged target |
-| `recommendation` | Meta DLRM and Criteo Terabyte | inference | published 0.8025 ROC AUC; complete runner ready, execution gated on licensed data and a 256-GB-class environment |
-| `image-generation` | NVIDIA EDM and the three-trial CIFAR-10 FID protocol | inference | published 1.79 minimum FID across three 50,000-image trials; the provenance-bound packet rescored at 1.801554 and did not meet the unchanged target |
-| `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | 0.40 professional-move prediction and the upstream playoff contract; complete resumable runner gated on a reviewed legacy GPU environment |
+## What Just Happened
 
-The [selection ledger](registry/selection-ledger.yaml) records the authority,
-rationale, laptop evidence, and quality-conformance blocker for every audited
-task. The five new workloads are now at quality conformance rather than bounded
-functional integration. They remain outside promotion until their complete
-authoritative runs meet the unchanged gates and their provenance verifies.
+The `min` run proved your install works. The `max` run produced a result that
+means something, because it was graded against a target this project did not
+choose.
 
-For the current quality-readiness milestone, one complete authoritative run is
-enough to accept or reject a quality target. The complete required evaluation
-set and every declared quality gate still apply. Repeated runs and timing
-variation remain part of the later promotion and stability phase.
+Three ideas explain most of the system.
 
-A max runner may rescore retained model outputs only through an explicit,
-hash-bound import packet. For BFCL, set `MLPERF_EDU_BFCL_IMPORT_PACKET` to a
-`mlperf-edu-bfcl-generation-evidence/0.1` JSON packet that binds the exact
-model and dataset revisions, generation backend, execution dtype, greedy
-decoding, and SHA-256 digest and count of every category result file. The
-runner rejects missing categories, changed bytes, task-order drift, model
-drift, and conflicts with an existing canonical sample file. The report labels
-the generation as imported and records whether the current invocation generated
-the model outputs. Importing evidence never turns a target miss into a pass.
+**A workload is a task, not a configuration.** `causal-language-modeling` is
+one workload whether you train it or run inference on it, and whether you batch
+it, compile it, or quantize it. Modes, phases, and optimizations are recorded
+in the report. They never create a new workload name, because if they did, no
+two results would be comparable.
 
-For EDM, `MLPERF_EDU_EDM_IMPORT_PACKET` accepts only a complete
-`mlperf-edu-edm-generation-evidence/0.1` packet. It binds the generator and
-evaluator source bytes, sampler precision, checkpoint, three exact seed ranges,
-source manifests, and source evaluations. The runner rehashes all 150,000 PNGs,
-recomputes all three FIDs with the pinned detector and reference statistics,
-and refuses the packet if a rescore differs by more than (10^{-6}).
+**A profile is why you ran it, not how hard it is.**
 
-## Workload Identity
-
-A workload ID names the stable learning task. Training and inference are
-modes. Full, prefill, and decode are inference phases. Batching, precision,
-quantization, compilation, scheduling, and serving behavior are configurations
-recorded in reports. They do not create new workload IDs.
-
-```bash
-uv run mlperf run --workload causal-language-modeling --profile max \
-  --mode training --output-dir submissions/causal-training
-
-uv run mlperf run --workload causal-language-modeling --profile max \
-  --mode inference --phase decode \
-  --output-dir submissions/causal-decode
-```
-
-## Profiles
-
-| **Profile** | **Purpose** | **Result Boundary** |
+| Profile | Use it for | What a result can claim |
 |:---|:---|:---|
-| `min` | Fast installation, teaching, and CI check | Functional only; never a public score or performance baseline |
-| `max` | Authoritative quality contract | Usually laptop-capable; DLRM and MiniGo require their declared single-node research environments |
-| `pro` | Extended single-node research envelope | Adds controlled configurations without changing workload identity or the quality target |
+| `min` | install checks, pre-labs, CI | functional only, never a score |
+| `max` | the comparable reference path | the inherited quality gate |
+| `pro` | ablations and research variants | only what its recorded configuration supports |
 
-The research envelope supports processors, memory systems, runtimes,
-compilers, and model execution. Distributed and datacenter-scale claims are
-outside v0.1. A profile describes contract depth rather than promising that
-every workload fits every student's machine.
+The workload, model, data, evaluator, and gate are identical across all three.
 
-The two environment-gated max workloads expose complete transfer contracts:
-
-```bash
-uv run mlperf doctor --workload recommendation --profile max --format json
-uv run mlperf doctor --workload reinforcement-learning --profile max --format json
-```
-
-The failing doctor check contains a machine-readable handoff with the required
-hardware, licensed or reviewed assets, exact source and checkpoint identity,
-environment variables, preflight, and run command. It does not claim that the
-quality run occurred on the current machine.
-
-## Evidence and Provenance
-
-The current twelve evidence cases consist of one canonical `max` case for each
-of the nine quality-evidence workloads plus full, prefill, and decode inference for
-`causal-language-modeling`. The draft snapshot in
-`provisional_results/index.json` contains six five-run verified records and six
-explicitly provisional records. Provisional records establish execution and
-gate passage only; they do not establish repeatability or qualify as promoted
-baselines.
-
-The five quality-conformance workloads are outside this importer by construction.
-Once each passes its authoritative quality contract, the full fourteen-workload
-portfolio will contain seventeen evidence cases.
-
-Promotion still requires five fresh processes at the canonical seed. Every run
-must pass its quality or functional gate, and the primary timing coefficient
-of variation must not exceed 5%. A future complete promoted index will be
-written under `reference_results/`. Both index forms bind each result to its
-SHA-256 digest, exact source revision, mode, phase, result role, metric
-aggregate, repeatability decision, and optional training lineage. Raw
-checkpoints and dataset-derived files remain in the local review handoff. They
-are not committed to the repository.
-
-Every run writes these review artifacts:
-
-| **Artifact** | **Purpose** |
-|:---|:---|
-| `*_report.json` | Complete metrics, quality status, configuration, and environment |
-| `*_report.csv` | Flat metrics for analysis |
-| `*_report.html` | Adaptive dashboard with functional readiness or quality-target results, configuration, model lineage, and provenance |
-| `*.provd.json` | Content-addressed provenance manifest |
+**Every run carries its own evidence.** Each produces a `*_report.json`, a CSV
+and HTML view, and a `*.provd.json` provenance manifest binding the source,
+assets, hardware, metrics, and any training checkpoint by SHA-256.
 
 ```bash
 uv run mlperf verify submissions/image-review/image-classification_max.provd.json
-uv run mlperf package submissions/image-review/image-classification_max.provd.json
-uv run mlperf report submissions/image-review --format html --open
 ```
 
-Verification checks recorded bytes and provenance. It does not authenticate
-the producer or imply MLCommons acceptance.
+Verification checks recorded bytes and lineage. It does not authenticate who
+produced them, and the framework says so rather than implying that a checksum
+prevents fraud.
 
-## Validation
+## Read the Paper
+
+[**mlperf-edu-paper.pdf**](paper/mlperf-edu-paper.pdf) explains the design, the
+workload selection, and the results in about fifteen pages. It is committed
+here so you can read it straight from a clone without installing TeX.
+
+Its numbers come from the same registry the CLI runs, regenerated on every
+build. If the paper and the suite ever disagreed, the build would fail rather
+than print a stale figure.
+
+## The Workloads
+
+Fourteen workloads, all of which run locally. Eight reproduce their inherited
+target and six are recorded misses.
+
+| Workload | Inherited From | Mode | Gate |
+|:---|:---|:---|:---|
+| `image-classification` | MLPerf Tiny ResNet8, 200-example CIFAR-10 set | inference | top-1 ≥ 0.85 |
+| `keyword-spotting` | MLPerf Tiny DS-CNN, 1,000-example EEMBC set | inference | top-1 ≥ 0.90 |
+| `anomaly-detection` | MLPerf Tiny ToyADMOS ToyCar, 248 recordings | inference | ROC AUC ≥ 0.85 |
+| `visual-wake-words` | MLPerf Tiny MobileNetV1 0.25, 1,000-example set | inference | top-1 ≥ 0.80 |
+| `causal-language-modeling` | nanoGPT Shakespeare | training; full, prefill, decode | val loss ≤ 1.4697 |
+| `text-classification` | DistilBERT SST-2 model card | inference | accuracy ≥ 0.91055 |
+| `information-retrieval` | Sentence Transformers CrossEncoder, NanoBEIR | inference | mean nDCG@10 ≥ 0.60716 |
+| `graph-node-classification` | Official OGB GCN on `ogbn-arxiv` | training | test acc ≥ 71.74% |
+| `time-series-forecasting` | Official PatchTST ETTm1 recipe | training | test MSE ≤ 0.290 · **miss** |
+| `recommendation` | MLPerf Training v0.5 NCF, MovieLens-20M | training | HR@10 ≥ 0.635 · **miss** |
+| `code-generation` | Qwen2.5-Coder, HumanEval+ | inference | pass@1 ≥ 0.573 · **miss** |
+| `function-calling` | Qwen3-1.7B, BFCL V4 non-live AST | inference | AST acc ≥ 82.92% · **miss** |
+| `image-generation` | NVIDIA EDM, three-trial CIFAR-10 FID | inference | FID ≤ 1.79 · **miss** |
+| `reinforcement-learning` | MLPerf Training v0.5 MiniGo | training | move prediction ≥ 0.40 · **miss** |
+
+The misses are the interesting part. Each one is a place where a laptop
+implementation of a real contract did not reach the published number, recorded
+rather than rescued. The [selection ledger](registry/selection-ledger.yaml)
+gives the authority, rationale, and evidence for every task, and
+[MISS_DIAGNOSIS.md](docs/internal/MISS_DIAGNOSIS.md) investigates each shortfall.
+
+Running locally is not the same as carrying committed reference evidence, and
+the difference matters when you cite a number. The retained evidence snapshot
+covers nine workloads across twelve evidence cases, counting training and the
+full, prefill, and decode inference phases of `causal-language-modeling`
+separately. The other five workloads execute their contract end to end but are
+held at a functional stage, so they produce results you can inspect and
+reproduce, not baselines you should quote. Every workload in the suite remains
+experimental until external review.
+
+## Where To Go Next
+
+| If you want to | Read |
+|:---|:---|
+| A guided setup with more detail | [Getting Started](site/getting-started.qmd) |
+| Understand suites, profiles, modes, and phases | [Running Benchmarks](site/guide/running.qmd) |
+| Fix a failing run | [Troubleshooting](site/guide/troubleshooting.qmd) |
+| Teach with it | [For Instructors](site/guide/instructors.qmd) |
+| Run controlled experiments | [Research Guide](site/guide/research.qmd) |
+| Work through a notebook | [Tutorial 01](tutorials/README.md) |
+| See classroom labs | [Examples](examples/README.md) |
+| Look up a command or variable | [CLI](site/reference/cli.qmd) · [Environment](site/reference/environment.qmd) |
+| Install without `uv` | [INSTALL.md](INSTALL.md) |
+
+The same pages render as a browsable site with `quarto render site`.
+
+## Alternate Installs
+
+The quickstart uses a locked `uv` environment from a source checkout, which is
+the supported path for classrooms and artifact evaluation. [INSTALL.md](INSTALL.md)
+covers the tool install, the wheel build, and the offline and air-gapped paths.
+No package-index release is published yet.
+
+## For Maintainers and Reviewers
 
 ```bash
 uv run pytest
 uv run mlperf validate smoke --output-dir submissions/smoke
-uv run mlperf validate pro --dry-run --output-dir submissions/pro-plan
-uv run python tools/export_flat_registry.py --check
-uv run python tools/sync_verified_baselines.py --check
-uv run python tools/check_taxonomy.py
-uv run python tools/check_reference_claims.py --check
 uv run python tools/generate_docs.py --check
+uv run python tools/export_flat_registry.py --check
 uv run make -C paper clean all check
-quarto render site
-uv run python tools/check_site_layout.py --build-dir site/_build --report-dir site-layout-report
-uv run python tools/build_wheel.py --out-dir /tmp/mlperf-edu-wheel
 ```
 
-The release workflow also installs the wheel in a clean Python environment,
-checks packaged registry and evidence resources, verifies portable archives,
-and builds the site and paper.
+- [Specification](SPEC.md) · [Public result rules](PUBLIC_RULES.md) · [Security boundary](SECURITY_REVIEW.md)
+- [Status and open blockers](docs/internal/STATUS.md) · [Quality target review](docs/internal/QUALITY_TARGET_REVIEW.md)
+- [Independent audit](docs/internal/INDEPENDENT_AUDIT.md) · [Dataset release review](docs/internal/DATASET_RELEASE_REVIEW.md)
+- [Miss diagnosis](docs/internal/MISS_DIAGNOSIS.md), which is where each recorded miss is investigated
 
-## Documentation and Review
-
-- [Specification](SPEC.md)
-- [Proposal](PROPOSAL.md)
-- [Public result rules](PUBLIC_RULES.md)
-- [Quality target review](QUALITY_TARGET_REVIEW.md)
-- [Independent audit](INDEPENDENT_AUDIT.md)
-- [Initial usability readiness](READINESS.md)
-- [Product readiness plan](PRODUCT_READINESS_PLAN.md)
-- [Dataset release review](DATASET_RELEASE_REVIEW.md)
-- [Release checklist](RELEASE_CHECKLIST.md)
-- [Generated benchmark site](site/benchmarks/index.qmd)
-- [Companion paper](paper/paper.tex)
-
-The component license, public package publication, dataset redistribution
-decisions, and MLCommons naming and governance decisions remain external
-release gates. The benchmark implementation and review artifacts fail closed
-while those decisions are pending.
+The component license, package publication, dataset redistribution, and
+MLCommons naming decisions remain external release gates. The implementation
+fails closed while they are pending.

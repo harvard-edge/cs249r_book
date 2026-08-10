@@ -10,7 +10,6 @@ import yaml
 from mlperf.registry import load_registry
 from tools import generate_docs
 
-
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -122,9 +121,8 @@ def test_selection_ledger_exactly_covers_registered_workloads():
     assert selected == set(workloads)
 
 
-def test_generated_workload_pages_disclose_indexed_reference_evidence(
-    generated_outputs,
-):
+def test_generated_workload_pages_send_readers_to_their_own_run(generated_outputs):
+    """The site explains and instructs. It is not a results scoreboard."""
     workload_pages = [
         content
         for path, content in generated_outputs.items()
@@ -132,15 +130,46 @@ def test_generated_workload_pages_disclose_indexed_reference_evidence(
     ]
 
     assert len(generate_docs.load_provisional_reference_results()) == 9
-    assert sum("## Draft Reference Results" in page for page in workload_pages) == 9
-    assert sum("## Draft Reference Results" not in page for page in workload_pages) == 5
+    assert len(workload_pages) == 14
+    for page in workload_pages:
+        assert "## Results" in page
+        assert "read your own report" in page
+
     combined = "\n".join(workload_pages)
-    assert "Five-run verified" in combined
-    assert "One-run provisional" in combined
-    assert "Two-run provisional" in combined
-    assert "None are MLCommons-verified results" in combined
-    assert "do not establish repeatability" in combined
-    assert "CV 5.19%; **diagnostic fail**" in combined
+    # Evidence taxonomy, repeatability statistics, and verdicts are properties
+    # of a run and belong to its artifact, not to a page every reader sees.
+    for banned in (
+        "## Draft Reference Results",
+        "## Measured Systems Regime",
+        "Five-run verified",
+        "One-run provisional",
+        "Two-run provisional",
+        "do not establish repeatability",
+        "CV 5.19%",
+    ):
+        assert banned not in combined, f"site must not publish {banned!r}"
+
+
+def test_illustrative_numbers_are_not_presented_as_targets_or_scores(
+    generated_outputs,
+):
+    """A single observation may calibrate the metric; it may not read as a score."""
+    page = generated_outputs[
+        ROOT / "site" / "benchmarks" / "tiny" / "anomaly-detection.qmd"
+    ]
+
+    assert "To make the metric concrete" in page
+    assert "not a target and not a score" in page
+    assert "your hardware will produce different" in page
+
+    # The superseded 0.292929 gate may appear only as the reviewer note
+    # recording why it was withdrawn. It must never reappear as a live target.
+    timeseries = generated_outputs[
+        ROOT / "site" / "benchmarks" / "timeseries" / "time-series-forecasting.qmd"
+    ]
+    assert "policy-derived gate was removed" in timeseries
+    assert "target ≤ 0.2929" not in timeseries
+    assert "0.2929; **pass**" not in timeseries
 
 
 def test_quality_conformance_pages_disclose_result_boundary(generated_outputs):
@@ -180,6 +209,36 @@ def test_consolidated_language_page_runs_training_before_inference():
     assert section.index(training) < section.index(prefill)
     assert section.count('--output-dir "$OUTPUT_DIR"') >= 4
     assert "nanogpt-prefill" not in section
+
+
+def test_no_workload_page_leads_with_a_preflight_instead_of_a_run():
+    """Every workload page can tell the reader to just run it.
+
+    This test used to assert the opposite for the gated set: that pages for
+    workloads which could not execute locally led with doctor and a handoff
+    rather than a max run. That set is now empty. Recommendation left it when
+    its contract moved to NCF on MovieLens-20M, and reinforcement learning left
+    it when the PyTorch adapter replaced the MiniGo container. The invariant
+    worth holding is the inverse, so a workload that stops running locally
+    fails here rather than quietly regrowing a preflight page.
+    """
+    workloads = load_registry(ROOT / "registry")
+    gated = [
+        workload_id
+        for workload_id, workload in workloads.items()
+        if (workload.raw.get("canonical_max_contract") or {}).get("execution_status")
+        == "environment-gated-quality-conformance"
+    ]
+    assert not gated, f"these workloads no longer run locally: {gated}"
+
+    for workload_id, workload in workloads.items():
+        section = generate_docs.section_how_to_run(workload)
+        assert "## Current Preflight and Handoff" not in section, workload_id
+        # Mode-bearing workloads spell the command as
+        # `run --workload X --mode training --profile max`, so match the two
+        # halves rather than one fixed string.
+        assert f"run --workload {workload_id}" in section, workload_id
+        assert "--profile max" in section, workload_id
 
 
 def test_site_install_commands_use_the_source_checkout(generated_outputs):

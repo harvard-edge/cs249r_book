@@ -10,7 +10,7 @@ fitted to make a local implementation pass.
 The draft evidence campaign is bound to clean source revision
 `163d42ee3df54ab122543469ccf2b6b3bd119455`. Exact run counts, values, evidence
 classes, and SHA-256 digests are generated from
-`provisional_results/index.json`. Six cases have complete five-run evidence;
+`provisional_results/index.json`. Six cases have complete repeated timing evidence;
 six remain explicitly provisional. This document reviews the target basis and
 acceptance logic rather than duplicating mutable result tables.
 
@@ -24,7 +24,7 @@ quality gate. A functional probe cannot satisfy this milestone.
 
 Repeated fresh-process runs, timing variation, and promotion evidence remain a
 later stabilization phase. The registry records `acceptance_runs: 1` for all
-fourteen workloads while retaining the five-run measurement protocol for that
+fourteen workloads while retaining the repeated-timing measurement protocol for that
 later phase.
 
 ## Target Design Standard
@@ -74,13 +74,22 @@ observations. Every workload now has a complete authoritative `max` runner.
 Some runs remain pending because their current result misses the target or the
 required external execution environment is unavailable.
 
+> **Tolerance convention.** When a source publishes a mean together with a
+> standard deviation, the contract carries both: the mean as the target and the
+> published deviation as the tolerance. Graph node classification does this with
+> the OGB leaderboard's 0.0029, and time-series forecasting now does it with
+> PatchTST's 0.002. Carrying a mean while discarding the spread stated beside it
+> makes a contract stricter than the source it inherits from. Applying the
+> convention never moves a recorded verdict; see
+> [MISS_DIAGNOSIS.md](MISS_DIAGNOSIS.md).
+
 | **Workload** | **Authoritative Target** | **Current Boundary** |
 |:---|:---|:---|
-| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | The complete 164-task run passed 91 tasks, or 0.554878. The unchanged gate requires at least 94. |
+| `code-generation` | Qwen2.5-Coder HumanEval+ pass@1 of 0.573 | 91 of 164 in the container and 92 on the host, against a 94-task gate. The evaluator self-check passes 163 of 164, so the gap is in generation. |
 | `function-calling` | Qwen3-1.7B BFCL V4 Non-Live AST accuracy of 0.8292 | The complete provenance-bound 1,150-case packet rescored at 0.785208 and did not meet the unchanged gate. |
-| `recommendation` | MLPerf Inference v1.0.1 DLRM Criteo Terabyte ROC AUC of 0.8025 | The complete historical accuracy adapter is ready. Execution requires licensed Criteo data, the roughly 90 GB checkpoint, a legacy runtime, and a 256-GB-class system. |
+| `recommendation` | MLPerf Training v0.5 NCF on MovieLens-20M, HR@10 of 0.635 | Trains locally in roughly half an hour. HR@10 peaks at 0.6232 on epoch 7 and declines after, so the shortfall is not an epoch budget. |
 | `image-generation` | NVIDIA EDM CIFAR-10 minimum FID of 1.79 across three trials | The complete packet binds and rehashes three independent 50,000-image trials and rescored at 1.8015540749997014, missing the unchanged gate. |
-| `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | The complete resumable self-play, training, and evaluation loop is ready. Execution requires a reviewed immutable legacy GPU image and a suitable NVIDIA system. |
+| `reinforcement-learning` | MiniGo professional-move prediction of 0.40 and upstream playoff rule | Runs locally through a PyTorch adapter over the pinned reference; only the network is replaced. No result is recorded yet beyond a smoke run. |
 
 ## Performance-Bearing Phase Gates
 
@@ -88,7 +97,7 @@ required external execution environment is unavailable.
 three cases report timing only after every run passes its functional contract.
 They do not introduce a second language-quality benchmark. All phases must use
 one content-addressed training package. Promotion requires the package to
-select the median-quality execution from a passing five-run training campaign;
+select the median-quality execution from a passing repeated-timing training campaign;
 the draft phases use the separately labeled provisional package.
 
 | **Phase** | **Primary Metric** | **Functional Requirement** |

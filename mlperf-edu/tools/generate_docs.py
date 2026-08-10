@@ -50,6 +50,7 @@ from mlperf.registry import (  # noqa: E402
     baseline_is_current_review_evidence,
     baseline_is_protocol_superseded,
     load_registry,
+    quality_target_satisfied,
 )
 
 GITHUB_BLOB = "https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu"
@@ -468,12 +469,43 @@ def section_execution_boundary(w: Workload) -> str:
 
 
 def section_how_to_run(w: Workload) -> str:
-    lines = ["## How to Run", "", "```bash"]
     target = (
         f"--workload {w.canonical_workload} --variant {w.variant}"
         if w.variant
         else f"--workload {w.id}"
     )
+    canonical = w.raw.get("canonical_max_contract") or {}
+    if canonical.get("execution_status") == "environment-gated-quality-conformance":
+        next_gate = ((w.raw.get("spiral") or {}).get("next_gate") or "").strip()
+        lines = [
+            "## Current Preflight and Handoff",
+            "",
+            "::: {.callout-warning}",
+            "**The quality path is not a general local run yet.** " + esc(next_gate),
+            "The `max` and `pro` runners fail closed until the declared assets, "
+            "hardware, and runtime are available. Use `doctor` to inspect the "
+            "machine-readable environment handoff.",
+            ":::",
+            "",
+            "```bash",
+            "# inspect the authoritative environment handoff",
+            f"{CHECKOUT_COMMAND} doctor {target} --profile max --format json",
+            "",
+            "# preview asset requirements without downloading",
+            f"{CHECKOUT_COMMAND} fetch {target} --profile max --dry-run",
+            "",
+            "# the bounded functional path runs on supported local hardware",
+            f"{CHECKOUT_COMMAND} run {target} --profile min",
+            "```",
+            "",
+            "A successful `min` result verifies the local plumbing only. It does not "
+            "evaluate the authoritative quality target. See the "
+            "[running guide](../../guide/running.qmd) for the current local-execution "
+            "boundary and recovery status.",
+        ]
+        return "\n".join(lines) + "\n"
+
+    lines = ["## How to Run", "", "```bash"]
     shared_checkpoint = w.raw.get("shared_checkpoint")
     max_execution = w.raw.get("max_execution") or {}
     implemented_modes = set(w.raw.get("implemented_modes") or [])
@@ -506,7 +538,7 @@ def section_how_to_run(w: Workload) -> str:
             "# checkpoint-backed benchmark run (reuses the same output directory)"
         )
         lines.append(
-            f'{CHECKOUT_COMMAND} run {target} --profile max --output-dir "$OUTPUT_DIR" --open-report'
+            f'{CHECKOUT_COMMAND} run {target} --profile max --output-dir "$OUTPUT_DIR"'
         )
     else:
         if max_execution.get("fetched_assets_used") is False:
@@ -516,9 +548,9 @@ def section_how_to_run(w: Workload) -> str:
             lines.append(f"{CHECKOUT_COMMAND} fetch {target} --profile max")
         lines.append("")
         lines.append(
-            "# benchmark run (writes JSON/HTML/CSV reports + .provd provenance)"
+            "# benchmark run (writes JSON/HTML/CSV reports + .provd.json provenance)"
         )
-        lines.append(f"{CHECKOUT_COMMAND} run {target} --profile max --open-report")
+        lines.append(f"{CHECKOUT_COMMAND} run {target} --profile max")
     lines.append("")
     lines.append("# quick smoke pass")
     lines.append(f"{CHECKOUT_COMMAND} run {target} --profile min")
@@ -672,19 +704,54 @@ def _result_number(value: Any) -> str:
     return f"{value:.4f}"
 
 
-def _quality_result(record: dict[str, Any]) -> str:
+def _quality_result(record: dict[str, Any], workload: Workload) -> str:
     quality = record.get("quality")
     if not isinstance(quality, dict):
         return "Performance-only case"
-    gate = quality.get("gate") or {}
-    direction = gate.get("direction")
+    source_gate = quality.get("gate") or {}
+    direction = workload.quality_direction
     comparison = "≥" if direction == "higher" else "≤" if direction == "lower" else "="
     mean = (quality.get("aggregate") or {}).get("mean")
-    target = gate.get("target")
-    status = "pass" if quality.get("all_runs_pass") else "fail"
+    target = workload.quality_value
+    tolerance = workload.quality_tolerance or 0.0
+    values = quality.get("values") or []
+    compatible_metric = quality.get("metric") == workload.quality_metric
+    status = "fail"
+    if (
+        compatible_metric
+        and isinstance(target, (int, float))
+        and direction in {"higher", "lower"}
+        and values
+    ):
+        status = (
+            "pass"
+            if all(
+                isinstance(value, (int, float))
+                and quality_target_satisfied(
+                    float(value),
+                    float(target),
+                    direction=direction,
+                    tolerance=float(tolerance),
+                )
+                for value in values
+            )
+            else "fail"
+        )
+    current_gate = {
+        "metric": workload.quality_metric,
+        "target": target,
+        "direction": direction,
+        "tolerance": tolerance,
+    }
+    source_gate_comparable = {key: source_gate.get(key) for key in current_gate}
+    disclosure = (
+        " *(recomputed with the current registry contract)*"
+        if source_gate_comparable != current_gate
+        else ""
+    )
     return (
-        f"`{quality.get('metric')}` {_result_number(mean)} mean; "
-        f"target {comparison} {_result_number(target)}; **{status}**"
+        f"`{workload.quality_metric}` {_result_number(mean)} mean; "
+        f"target {comparison} {_result_number(target)}; **{status}**{disclosure}"
     )
 
 
@@ -697,21 +764,23 @@ def _repeatability_result(record: dict[str, Any]) -> str:
     return f"CV {float(cv):.2%}; **{status}**"
 
 
-def section_reference_results(records: list[dict[str, Any]]) -> str:
+def section_reference_results(workload: Workload, records: list[dict[str, Any]]) -> str:
     if not records:
         return ""
     evidence_labels = {
-        "five-run-verified": "Five-run verified",
-        "single-run-provisional": "One-run provisional",
-        "two-run-provisional": "Two-run provisional",
+        "five-run-verified": "Repeated timing",
+        "single-run-provisional": "One measurement",
+        "two-run-provisional": "Two measurements",
     }
     lines = [
         "## Draft Reference Results",
         "",
         "These project-generated measurements demonstrate the current `max` paths on "
-        "the disclosed reference system. Five-run records passed the project quality "
-        "and repeatability checks. Provisional records establish execution and quality "
-        "only; they do not establish repeatability. None are MLCommons-verified results.",
+        "the disclosed reference system. Records measured more than once report a "
+        "timing spread; a single measurement is reported as one measurement and "
+        "makes no repeatability claim. Quality decisions are recomputed "
+        "against the current registry contract so a preserved historical target cannot "
+        "make a stale pass claim. None are MLCommons-verified results.",
         "",
         "| **Case** | **Evidence** | **Runs** | **Reference measurement** | **Quality** | **Repeatability** | **System** |",
         "|:---|:---|---:|:---|:---|:---|:---|",
@@ -732,14 +801,14 @@ def section_reference_results(records: list[dict[str, Any]]) -> str:
         )
         lines.append(
             f"| {esc(case)} | {evidence} | {measurement.get('run_count', '—')} "
-            f"| {reference} | {_quality_result(record)} "
+            f"| {reference} | {_quality_result(record, workload)} "
             f"| {_repeatability_result(record)} | {esc(system)} |"
         )
     lines += [
         "",
-        "> Five-run verified means eligible for the project's future promotion import. "
-        "One-run and two-run provisional records are not review eligible and make no "
-        "repeatability claim.",
+        "> Quality is accepted from one complete run. Timing is reported from the "
+        "measurements a case actually has, and repeated timing is reported where it "
+        "exists rather than treated as a separate class of result.",
     ]
     return "\n".join(lines) + "\n"
 
@@ -754,6 +823,60 @@ def section_calibration_observation(w: Workload) -> str:
         "review-eligible reference result.\n"
     )
     return f"## Local Calibration Observation\n\n{body}"
+
+
+def section_results_pointer(w: Workload, records: list[dict[str, Any]]) -> str:
+    """Show one illustrative measurement, then send the reader to their own run.
+
+    The site is not a scoreboard. It carries just enough of a number to make
+    the metric and the time cost concrete, explicitly labelled as one machine's
+    observation. Evidence classes, repeatability statistics, pass/fail verdicts,
+    and promotion eligibility belong to the run artifact, not to a page every
+    reader sees regardless of their hardware.
+    """
+    lines = ["## Results", ""]
+
+    example = next(
+        (r for r in records if (r.get("quality") or {}).get("aggregate")), None
+    )
+    if example is not None:
+        quality = example["quality"]
+        metric = esc(str(quality.get("metric") or w.quality_metric))
+        observed = _result_number((quality.get("aggregate") or {}).get("mean"))
+        measurement = example.get("measurement") or {}
+        cost_metric = esc(str(measurement.get("primary_metric") or ""))
+        cost = _result_number((measurement.get("aggregate") or {}).get("mean"))
+        chips = ", ".join((example.get("execution") or {}).get("hardware_chips") or [])
+
+        lines += [
+            "To make the metric concrete, one run of this benchmark on "
+            f"{esc(chips) or 'the project reference machine'} observed "
+            f"`{metric}` of {observed}, taking {cost} `{cost_metric}`.",
+            "",
+            "That is an illustration, not a target and not a score. It comes "
+            "from a single machine and your hardware will produce different "
+            "timing. The number that matters is the one your own run reports.",
+            "",
+        ]
+
+    lines += [
+        "Run the benchmark and read your own report:",
+        "",
+        "```bash",
+        f"{CHECKOUT_COMMAND} run --workload {w.id} --profile max",
+        "```",
+        "",
+        "Every run writes an HTML dashboard for reading, JSON for machine use, "
+        "CSV for spreadsheets, and a `.provd.json` provenance manifest. Those "
+        "artifacts carry the quality decision, timing distribution, hardware "
+        "and software fingerprint, asset digests, and model lineage for the run "
+        "you performed.",
+        "",
+        "See [Reading Results](../../guide/results.qmd) for how to interpret "
+        "them.",
+        "",
+    ]
+    return "\n".join(lines)
 
 
 def section_regime(w: Workload) -> str:
@@ -828,10 +951,11 @@ def render_workload_body(
         section_how_to_run(w),
         section_quality_target(w),
         section_performance_contract(w),
-        section_reference_results(reference_results.get(w.id, [])),
-        section_verified_baseline(w),
-        section_calibration_observation(w),
-        section_regime(w),
+        # Measurements are deliberately absent from the website. The site
+        # describes what a workload is and how to run it; every number belongs
+        # to the report a run produces on the reader's own machine. See
+        # section_results_pointer.
+        section_results_pointer(w, reference_results.get(w.id, [])),
         section_model_source(w),
         section_runner(w, source_paths),
     ]
