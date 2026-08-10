@@ -130,7 +130,8 @@ Input Image (5×5):     Kernel (3×3):      Output (3×3):
 │ 1  2  3  4  5 │
 └───────────────┘
 
-The kernel is multiplied by the subsection of the image for each valid place the kernel fits.
+At each valid position, the kernel and overlapping image patch are multiplied
+elementwise and summed.
 Sliding Window Process:
 
 Position (0,0): [1,2,3]      Position (0,1): [2,3,4]       Position (0,2): [3,4,5]
@@ -139,15 +140,16 @@ Position (0,0): [1,2,3]      Position (0,1): [2,3,4]       Position (0,2): [3,4,
                 = Output[0,0]                = Output[0,1]                 = Output[0,2]
 ```
 
-Each output pixel summarizes a local neighborhood, allowing the network to detect patterns spatial patterns like edges, corners, and textures which would be otherwise difficult for the network to comprehend if it were a fully connected MLP.
+Each output pixel summarizes a local neighborhood, allowing the network to
+detect edges, corners, and textures while preserving their spatial relationships.
 
 ### Why Spatial Operations Transform ML
 
 ```
 Without Convolution:                       With Convolution:
 32×32×3 image = 3,072 inputs               32×32×3 → Conv → 30×30×16
-        ↓                                             ↓                   
-Dense(3072 → 1000) = 3M parameters         Shared 3×3 kernel per color = 432 parameters
+        ↓                                             ↓
+Dense(3072 → 1000) = 3M parameters         16 shared 3×3×3 kernels = 432 weights
         ↓                                             ↓
 Memory explosion + no spatial awareness    Efficient + preserves spatial structure
 ```
@@ -181,14 +183,13 @@ Overlap:        Computation:
 └─────┘
 
 Step 3: Slide kernel and repeat
-Position (0,1):  Position (0,2):  
+Position (0,1):  Position (0,2):
    ┌─────┐          ┌─────┐
    │ 2 3 │          │ 3 4 │
    │ 6 7 │          │ 7 8 │
    └─────┘          └─────┘
    Result: 9        Result: 11
 
-    
 Position (1,0):  Position (1,1):  Position (1,2):
    ┌─────┐          ┌─────┐          ┌─────┐
    │ 5 6 │          │ 6 7 │          │ 7 8 │
@@ -201,6 +202,7 @@ Final Output:  ┌────────┐
                │ 5 7 9  │
                └────────┘
 </pre>
+
 ### The Mathematical Formula
 
 Suppose `n` is the kernel height (rows) and `m` the kernel width (columns).
@@ -290,7 +292,6 @@ for batch in range(B):          # Loop 1: Process each sample
                             result += input[...] * kernel[...]
 ```
 
-In this, we are looping over each sample, and then for each of the output channels, we take each row and column of the output as well as each row and column for the kernel, then finally using each input channel, we do the multiply-accumulate operation.
 Total operations: B × C_out × H_out × W_out × K_h × K_w × C_in
 
 For typical values (B=32, C_out=64, H_out=224, W_out=224, K_h=3, K_w=3, C_in=3):
@@ -331,15 +332,15 @@ def validate_4d_input(x, layer_name):
     if len(x.shape) == 3:
         raise ValueError(
             f"{layer_name} expected 4D input (batch, channels, height, width), got 3D: {x.shape}\n"
-            f"  Likely missing batch dimension\n"
+            f"  Missing batch dimension\n"
             f"  {layer_name} processes batches of images, not single images\n"
             f"  Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
         )
     elif len(x.shape) == 2:
         raise ValueError(
             f"{layer_name} expected 4D input (batch, channels, height, width), got 2D: {x.shape}\n"
-            f"  Got a matrix, expected a batched image tensor\n"
-            f"  {layer_name} needs spatial dimensions (height, width) for information per channel per batch\n"
+            f"  Got a matrix, expected an image tensor\n"
+            f"  {layer_name} needs spatial dimensions (height, width) plus batch and channels\n"
             f"  If this is a flattened image, reshape it: x.reshape(1, channels, height, width)"
         )
     else:
@@ -577,8 +578,9 @@ class Conv2dBackward(Function):
         else:
             grad_input = grad_input_padded
 
-        # Return gradients as numpy arrays (autograd system handles storage)
-        # Following TinyTorch protocol: return (grad_input, grad_weight, grad_bias)
+        # Tuple length must match saved_tensors: (x, weight) or (x, weight, bias).
+        if self.bias is None:
+            return grad_input, grad_weight
         return grad_input, grad_weight, grad_bias
 
 #| export
@@ -617,8 +619,6 @@ class Conv2d:
 
         HINT: Convert kernel_size to tuple if it's an integer
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         self.in_channels = in_channels
         self.out_channels = out_channels
@@ -1171,13 +1171,13 @@ Information Trade-off:
 Both pooling operations follow the same sliding window pattern:
 
 ```
-Sliding 2×2 window with stride=2 on a 4x4 matrix:
-Step 1:     Step 2:     Step 3:     Step 4:
-┌─────┐     ┌─────┐     ┌─────┐     ┌─────┐
-│▓▓│  |     │  │▓▓|     │  │  |     │  │  |
-├──┼──┤     ├──┼──┤     ├──┼──┤     ├──┼──┤ 
-|  |  |     |  |  |     |▓▓|  |     |  |▓▓|
-└─────┘     └─────┘     └─────┘     └─────┘
+Sliding 2×2 window with stride=2 on a 4×4 matrix:
+Step 1:       Step 2:       Step 3:       Step 4:
+┌──┬──┐       ┌──┬──┐       ┌──┬──┐       ┌──┬──┐
+│▓▓│  │       │  │▓▓│       │  │  │       │  │  │
+├──┼──┤       ├──┼──┤       ├──┼──┤       ├──┼──┤
+│  │  │       │  │  │       │▓▓│  │       │  │▓▓│
+└──┴──┘       └──┴──┘       └──┴──┘       └──┴──┘
 
 Non-overlapping windows → Each input pixel used exactly once
 Stride=2 → Output dimensions halved in each direction
@@ -1313,7 +1313,9 @@ class MaxPool2dBackward(Function):
 
         # Remove padding
         if self.padding > 0:
-            grad_input = grad_input_padded[:, :, self.padding:-self.padding, self.padding:-self.padding]
+            grad_input = grad_input_padded[:, :,
+                                          self.padding:-self.padding,
+                                          self.padding:-self.padding]
         else:
             grad_input = grad_input_padded
 
@@ -1348,8 +1350,6 @@ class MaxPool2d:
 
         HINT: Default stride equals kernel_size for non-overlapping windows
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         # Handle kernel_size as int or tuple
         if isinstance(kernel_size, int):
@@ -1758,8 +1758,6 @@ class AvgPool2d:
         2. Set stride to kernel_size if not provided
         3. Store padding parameter
         """
-        super().__init__()
-
         ### BEGIN SOLUTION
         # Handle kernel_size as int or tuple
         if isinstance(kernel_size, int):
@@ -2149,9 +2147,9 @@ class BatchNorm2d:
             if len(x.shape) == 3:
                 raise ValueError(
                     f"BatchNorm2d expected 4D input (batch, channels, height, width), got 3D: {x.shape}\n"
-                    f"  ❌ Likely missing batch dimension\n"
+                    f"  ❌ Missing batch dimension\n"
                     f"  💡 BatchNorm2d computes statistics over the batch dimension\n"
-                    f"  🔧 Suggested fix: add batch dim through x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
+                    f"  🔧 Add batch dim: x.reshape(1, {x.shape[0]}, {x.shape[1]}, {x.shape[2]})"
                 )
             elif len(x.shape) == 2:
                 raise ValueError(
@@ -2745,7 +2743,7 @@ Output: (batch, 10)           ← Class probabilities
 ```
 Feature Hierarchy Development:
 
-Raw RGB Images -> Simple features -> Complex combinations -> Identification
+Raw RGB images → simple features → complex combinations → class prediction
 
 Spatial Dimension Reduction:
 32×32 → 16×16 → 8×8
@@ -2756,6 +2754,27 @@ Channel Expansion:
 More feature types at each level
 ```
 
+#### Parameter Efficiency Demonstration
+
+```
+CNN vs Dense Comparison for 32×32×3 → 10 classes:
+
+CNN Approach:                    Dense Approach:
+┌────────────────────┐          ┌────────────────────┐
+│ Conv1: 3→16, 3×3   │          │ Input: 3072 values │
+│ Params: 448        │          │        ↓           │
+├────────────────────┤          │ Dense: 3072→512    │
+│ Conv2: 16→32, 3×3  │          │ Params: 1.57M      │
+│ Params: 4,640      │          ├────────────────────┤
+├────────────────────┤          │ Dense: 512→10      │
+│ Dense: 2048→10     │          │ Params: 5,120      │
+│ Params: 20,490     │          └────────────────────┘
+└────────────────────┘          Total: 1.58M params
+Total: 25,578 params
+
+CNN has 62× fewer parameters while preserving spatial structure!
+```
+
 #### Receptive Field Growth
 
 ```
@@ -2763,11 +2782,11 @@ How each layer sees progressively larger input regions:
 
 Layer 1 Conv (3×3):           Layer 2 Conv (3×3):
 Each output pixel sees        Each output pixel sees
-3×3 = 9 input pixels          5×5 = 25 input pixels
-                              (due to pooling+conv)
+3×3 = 9 input pixels          8×8 = 64 input pixels
+                              (after conv, pooling, and conv)
 
 Final Result: Layer 2 can detect complex patterns
-spanning 5×5 regions of original image!
+spanning 8×8 regions of original image!
 ```
 """
 
@@ -3210,7 +3229,7 @@ Congratulations! You've built the spatial processing foundation that powers comp
 ### Systems Insights Discovered
 - **Convolution Complexity**: Quadratic scaling with spatial size; kernel size significantly impacts cost
 - **Batch Normalization**: Train vs eval mode is critical (batch stats during training, running stats during inference)
-- **Memory Patterns**: Pooling provides quadratic memory reduction while preserving important features
+- **Memory Patterns**: Pooling provides 4× memory reduction while preserving important features
 - **Architecture Design**: Strategic spatial reduction enables parameter-efficient feature extraction
 - **Cache Performance**: Spatial locality in convolution benefits from optimal memory access patterns
 
