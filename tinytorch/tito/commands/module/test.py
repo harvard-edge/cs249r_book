@@ -109,6 +109,8 @@ class ModuleTestCommand(BaseCommand):
                 [sys.executable, str(module_file)],
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 cwd=self.config.project_root,
                 timeout=300,
             )
@@ -161,6 +163,8 @@ class ModuleTestCommand(BaseCommand):
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 cwd=self.config.project_root,
                 timeout=300,
             )
@@ -263,6 +267,8 @@ class ModuleTestCommand(BaseCommand):
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 cwd=self.config.project_root,
                 timeout=600,  # 10 minute timeout for integration tests
             )

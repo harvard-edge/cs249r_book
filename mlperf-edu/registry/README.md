@@ -20,5 +20,5 @@ measurement sidecar and SHA-256 digest pass `tools/check_taxonomy.py`.
 | `vision` | `image-classification` | `image-classification` | `experimental` |
 
 Promotion changes a workload's public status only after its canonical case is
-bound to accepted five-run evidence. The generated review packets and site
+bound to accepted timing evidence. The generated review packets and site
 then inherit that status from this registry.

@@ -495,7 +495,13 @@ def test_doctor_json_marks_bad_selection_as_failure():
     assert data["selected_workloads"] == []
 
 
-def test_doctor_fails_closed_on_missing_recommendation_max_environment():
+def test_doctor_does_not_gate_recommendation_on_the_retired_dlrm_environment():
+    """Recommendation trains locally since the contract moved to NCF.
+
+    The preflight used to demand Criteo terms acceptance and DLRM paths, so it
+    reported a gated environment for a workload that runs, and told the reader
+    to set variables nothing consults. Preflight and runner must agree.
+    """
     result = run_cli(
         "doctor",
         "--workload",
@@ -509,58 +515,25 @@ def test_doctor_fails_closed_on_missing_recommendation_max_environment():
         },
     )
 
-    assert result.returncode == 1
-    assert "research environment is gated" in result.stdout
-    assert "MLPERF_EDU_DLRM_DATA_DIR" in result.stdout
+    assert "research environment is gated" not in result.stdout
+    assert "MLPERF_EDU_DLRM_DATA_DIR" not in result.stdout
+    assert "MLPERF_EDU_CRITEO_TERMS_ACCEPTED" not in result.stdout
 
 
-def test_doctor_json_emits_external_environment_handoffs():
-    recommendation_result = run_cli(
-        "doctor",
-        "--workload",
-        "recommendation",
-        "--profile",
-        "max",
-        "--format",
-        "json",
-        env_extra={
-            "MLPERF_EDU_CRITEO_TERMS_ACCEPTED": "",
-            "MLPERF_EDU_DLRM_DATA_DIR": "",
-            "MLPERF_EDU_DLRM_CHECKPOINT": "",
-        },
-    )
-    reinforcement_result = run_cli(
-        "doctor",
-        "--workload",
-        "reinforcement-learning",
-        "--profile",
-        "max",
-        "--format",
-        "json",
-        env_extra={
-            "MLPERF_EDU_MINIGO_PRO_GAMES_REVIEWED": "",
-            "MLPERF_EDU_MINIGO_IMAGE": "",
-        },
-    )
+def test_doctor_emits_no_environment_handoffs():
+    """No workload hands off to another environment any more.
 
-    assert recommendation_result.returncode == 1
-    recommendation_checks = json.loads(recommendation_result.stdout)["checks"]
-    recommendation_handoff = next(
-        check["handoff"] for check in recommendation_checks if "handoff" in check
-    )
-    assert recommendation_handoff["workload"] == "recommendation"
-    assert (
-        recommendation_handoff["required_hardware"]["recommended_host_memory_gib"]
-        == 256
-    )
-
-    assert reinforcement_result.returncode == 1
-    reinforcement_checks = json.loads(reinforcement_result.stdout)["checks"]
-    reinforcement_handoff = next(
-        check["handoff"] for check in reinforcement_checks if "handoff" in check
-    )
-    assert reinforcement_handoff["workload"] == "reinforcement-learning"
-    assert reinforcement_handoff["required_hardware"]["accelerator"] == "NVIDIA GPU"
+    Recommendation left this set when its contract moved to NCF on
+    MovieLens-20M. Reinforcement learning left it when the PyTorch adapter
+    replaced the CUDA and TensorFlow 1.x MiniGo container. A handoff appearing
+    here again means a workload stopped running locally.
+    """
+    for workload_id in ("reinforcement-learning", "recommendation"):
+        result = run_cli(
+            "doctor", "--workload", workload_id, "--profile", "max", "--format", "json"
+        )
+        checks = json.loads(result.stdout)["checks"]
+        assert not any("handoff" in check for check in checks), workload_id
 
 
 def test_list_default_contains_canonical_language_modeling():
@@ -590,7 +563,7 @@ def test_list_discovery_subjects():
         row["profile"]: row["workloads"]
         for row in json.loads(profiles_json.stdout)["profiles"]
     }
-    assert profile_counts == {"min": 4, "max": 14, "pro": 9}
+    assert profile_counts == {"min": 4, "max": 14, "pro": 14}
 
 
 def test_info_profile_shows_default_selection():
@@ -1030,13 +1003,23 @@ def test_show_workload():
     assert "maturity" not in result.stdout
 
 
-def test_show_environment_gated_workload_discloses_next_gate():
-    result = run_cli("show", "recommendation")
-    assert result.returncode == 0, result.stdout + result.stderr
-    assert "environment-gated-quality-conformance" in result.stdout
-    assert "max_next_gate" in result.stdout
-    assert "256-GB-class environment" in result.stdout
-    assert "mlperf-inference-accuracy-dlrm" in result.stdout
+def test_no_workload_is_environment_gated():
+    """Every registered workload executes its contract on the target platform.
+
+    Two workloads used to be gated. Recommendation left when its contract moved
+    from DLRM on Criteo Terabyte to MLPerf v0.5 NCF on MovieLens-20M.
+    Reinforcement learning left when the PyTorch adapter replaced the CUDA and
+    TensorFlow 1.x MiniGo container. A workload reappearing here means the
+    suite stopped being runnable as shipped.
+    """
+    import yaml
+
+    for path in sorted((PROJECT_ROOT / "registry" / "suites").glob("*/*.yaml")):
+        spec = yaml.safe_load(path.read_text(encoding="utf-8"))
+        contract = spec.get("canonical_max_contract") or {}
+        assert contract.get("execution_status") != (
+            "environment-gated-quality-conformance"
+        ), f"{spec['id']} is environment-gated"
 
 
 def test_info_dataset_shows_asset_dossier():
@@ -1175,13 +1158,6 @@ def test_fetch_new_quality_assets_dry_run_discloses_authoritative_sources():
 
 
 def test_fetch_manual_quality_assets_returns_actionable_nonzero_status():
-    recommendation = run_cli(
-        "fetch", "--workload", "recommendation", "--profile", "max"
-    )
-    assert recommendation.returncode == 2
-    assert "MANUAL ACTION REQUIRED" in " ".join(recommendation.stdout.split())
-    assert "unshuffled day 23" in recommendation.stdout
-
     reinforcement = run_cli(
         "fetch", "--workload", "reinforcement-learning", "--profile", "max"
     )
@@ -2497,3 +2473,18 @@ def test_anomaly_detection_min_run_writes_verifiable_artifacts(tmp_path):
 
     verify = run_cli("verify", str(manifest_path))
     assert verify.returncode == 0, verify.stdout + verify.stderr
+
+
+def test_container_probe_matches_the_code_generation_runner():
+    """The preflight probe is duplicated on purpose; keep the two in step.
+
+    Importing the runner into the CLI would pull code_generation.py into the
+    measurement source-lock closure, and preflight is not a measurement input.
+    The cost of that separation is two definitions, so this pins them together:
+    if they ever disagree, doctor and the runner would give a user opposite
+    answers about whether a valid code-generation run is possible.
+    """
+    from mlperf import edu_cli
+    from mlperf.runners import code_generation
+
+    assert edu_cli.container_engine_available() == code_generation.docker_available()

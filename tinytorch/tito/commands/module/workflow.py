@@ -536,7 +536,9 @@ class ModuleWorkflowCommand(BaseCommand):
                 cwd=str(module_dir),
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
-                text=True
+                text=True,
+                encoding="utf-8",
+                errors="replace"
             )
 
             # Give Jupyter a moment to start and capture the URL
@@ -1032,6 +1034,33 @@ class ModuleWorkflowCommand(BaseCommand):
 
         # Parse pytest output
         tests_run = self._parse_pytest_output(result.stdout, result.stderr)
+
+        if not tests_run and result.returncode != 0:
+            # pytest itself errored (e.g. a collection-time import failure in
+            # the exported package) rather than legitimately having zero
+            # tests. Surface this as a failure instead of silently reporting
+            # "no integration tests for this module" -- except for two cases
+            # that are not real collection failures:
+            #   - exit code 5: pytest's own "no tests collected" signal
+            #   - exit code 4: a pytest.UsageError, which conftest.py raises
+            #     from _validate_package_exported() when core modules that
+            #     come *later* in the build order haven't been exported yet.
+            #     That check is unconditional (it requires every core file to
+            #     exist, not just the one under test), so it legitimately
+            #     trips for early modules during a progressive build.
+            error_msg = (result.stderr or result.stdout).strip()
+            is_no_tests_collected = result.returncode == 5
+            is_progressive_export_gate = (
+                result.returncode == 4
+                and "TINYTORCH PACKAGE NOT EXPORTED" in error_msg
+            )
+            if not is_no_tests_collected and not is_progressive_export_gate:
+                concise_error = '\n'.join(error_msg.split('\n')[:5]) if error_msg else "pytest exited with an error"
+                tests_run = [{
+                    'name': 'pytest_collection',
+                    'passed': False,
+                    'error': concise_error,
+                }]
 
         if verbose:
             for test in tests_run:

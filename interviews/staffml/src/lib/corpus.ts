@@ -842,25 +842,46 @@ const _detailsCache = new Map<string, Question>();
 // it caused those questions to re-fetch from the worker on every access.
 const _hydratedIds = new Set<string>();
 let _staticDetailsCache: Map<string, Question> | null = null;
+// In-flight fetch of the static corpus, shared across concurrent callers.
+// Without this, a batch hydration (e.g. Gauntlet's Promise.all over N
+// questions) sees `_staticDetailsCache` as null on every one of the N
+// concurrent calls before any of them finishes the first fetch, so each
+// independently re-fetches the full corpus.json instead of sharing one.
+let _staticCorpusPromise: Promise<Map<string, Question>> | null = null;
 
-async function getStaticFullDetail(id: string, summary: Question): Promise<Question | undefined> {
-  if (!_staticDetailsCache) {
+async function loadStaticCorpus(): Promise<Map<string, Question>> {
+  if (_staticDetailsCache) return _staticDetailsCache;
+  if (!_staticCorpusPromise) {
     // Fetch corpus.json from /data/corpus.json (served from public/). This
     // file is written by `vault build --local-json` and exists only in local
     // dev. Production deploys neither emit nor bundle it; the worker fetch
     // path handles those. If the file is missing at runtime the fetch fails
     // and the caller surfaces an error to the UI.
-    const res = await fetch("/data/corpus.json");
-    if (!res.ok) {
-      throw new Error(
-        `Static corpus.json not available at /data/corpus.json (status ${res.status}). ` +
-        "Run 'vault build --local-json' from the repo root to regenerate it.",
-      );
-    }
-    const data = (await res.json()) as Question[];
-    _staticDetailsCache = new Map(data.map((q) => [q.id, q]));
+    _staticCorpusPromise = fetch("/data/corpus.json")
+      .then(async (res) => {
+        if (!res.ok) {
+          throw new Error(
+            `Static corpus.json not available at /data/corpus.json (status ${res.status}). ` +
+            "Run 'vault build --local-json' from the repo root to regenerate it.",
+          );
+        }
+        const data = (await res.json()) as Question[];
+        const map = new Map(data.map((q) => [q.id, q]));
+        _staticDetailsCache = map;
+        return map;
+      })
+      .catch((err) => {
+        // Let a later call retry instead of caching a permanent rejection.
+        _staticCorpusPromise = null;
+        throw err;
+      });
   }
-  const full = _staticDetailsCache.get(id);
+  return _staticCorpusPromise;
+}
+
+async function getStaticFullDetail(id: string, summary: Question): Promise<Question | undefined> {
+  const cache = await loadStaticCorpus();
+  const full = cache.get(id);
   if (!full) return undefined;
   const merged: Question = {
     ...summary,

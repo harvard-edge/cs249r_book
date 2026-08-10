@@ -24,23 +24,28 @@ from mlperf.registry import load_registry  # noqa: E402
 
 INDEX_PATH = ROOT / "reference_results" / "index.json"
 PROVISIONAL_INDEX_PATH = ROOT / "provisional_results" / "index.json"
+# Documents that state counts or per-case values, and must therefore stay bound
+# to the committed evidence index.
+#
+# docs/internal/DIRECTION.md and docs/internal/STATUS.md are deliberately absent.
+# They carry no counts and no measurements, deferring every countable fact to the
+# registry, the evidence index, and tools/audit_workload_readiness.py. Requiring
+# them to restate an inventory would reintroduce exactly the duplication that
+# made published claims drift in the first place. A document that makes no
+# numeric claim has nothing for this gate to verify.
 PUBLIC_DOCUMENTS = (
     "README.md",
     "SPEC.md",
-    "PROPOSAL.md",
     "PUBLIC_RULES.md",
-    "QUALITY_TARGET_REVIEW.md",
-    "READINESS.md",
-    "RELEASE_CHECKLIST.md",
+    "docs/internal/QUALITY_TARGET_REVIEW.md",
+    "docs/internal/RELEASE_CHECKLIST.md",
 )
 WORKLOAD_DOCUMENTS = frozenset(
     {
         "README.md",
         "SPEC.md",
-        "PROPOSAL.md",
-        "QUALITY_TARGET_REVIEW.md",
-        "READINESS.md",
-        "RELEASE_CHECKLIST.md",
+        "docs/internal/QUALITY_TARGET_REVIEW.md",
+        "docs/internal/RELEASE_CHECKLIST.md",
     }
 )
 RETIRED_PUBLIC_IDS = frozenset(
@@ -425,7 +430,7 @@ def check_documents(
         if "eight retained" in lowered or "eight summaries" in lowered:
             errors.append(f"{name}: stale eight-summary claim remains")
         if (
-            name in {"QUALITY_TARGET_REVIEW.md", "RELEASE_CHECKLIST.md"}
+            name in {"docs/internal/QUALITY_TARGET_REVIEW.md", "docs/internal/RELEASE_CHECKLIST.md"}
             and source_sha not in text
         ):
             errors.append(f"{name}: full evidence source SHA is missing")
