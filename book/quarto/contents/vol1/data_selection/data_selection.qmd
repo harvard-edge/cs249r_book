@@ -2022,7 +2022,7 @@ Consider a medical imaging dataset: a hospital has `{python} ClinicalLabelingEco
 
 [^fn-labeling-economics]: **Clinical Labeling Economics**: A radiologist reviews approximately `{python} ClinicalLabelingEconomics.review_rate_range_str` chest X-rays per hour; labeling `{python} ClinicalLabelingEconomics.labeled_scans_str` scans from a pool of `{python} ClinicalLabelingEconomics.full_pool_scans_str` requires `{python} ClinicalLabelingEconomics.labeled_hours_range_str` of specialist time at `{python} ClinicalLabelingEconomics.hourly_rate_range_str`---a `{python} ClinicalLabelingEconomics.labeled_cost_range_str` investment. Full supervised labeling of all `{python} ClinicalLabelingEconomics.full_pool_scans_str` would cost `{python} ClinicalLabelingEconomics.full_cost_range_str` and require `{python} ClinicalLabelingEconomics.full_hours_range_str` radiologist-hours, or roughly `{python} ClinicalLabelingEconomics.full_weeks_range_str` of full-time work. Under this budget, the `{python} ClinicalLabelingEconomics.labeling_rate_pct_str` labeling threshold is not a pedagogical convenience but a reflection of healthcare economics: semi-supervised learning becomes attractive when expert labels are expensive and the unlabeled pool matches the deployment distribution. This cost structure generalizes--any domain requiring credentialed specialists (legal, financial, scientific) faces the same arithmetic. \index{Data Labeling!clinical economics}
 
-Active learning optimizes which samples to label but still requires human annotation for every selected example. **Semi-supervised learning**\index{Semi-Supervised Learning!definition} takes a more aggressive approach: rather than asking which samples to label, it asks whether we can extract learning signal from unlabeled data directly. It uses a small set of labeled examples to guide learning on a much larger unlabeled pool, typically achieving 80–95 percent of fully supervised accuracy with only 10–20 percent of the labels.
+Active learning optimizes which samples to label but still requires human annotation for every selected example. **Semi-supervised learning**\index{Semi-Supervised Learning!definition} takes a more aggressive approach: rather than asking which samples to label, it asks whether we can extract learning signal from unlabeled data directly. It uses a small set of labeled examples to guide learning on a much larger unlabeled pool, typically achieving over 90 percent of fully supervised accuracy with only a small fraction of the labels.
 
 The core insight behind semi-supervised learning is that unlabeled data, while it cannot directly teach the mapping from inputs to outputs, contains structural information about the input distribution $p(x)$ that constrains the hypothesis space. A decision boundary that cuts through dense regions of $p(x)$ is unlikely to generalize well because it would assign different labels to similar inputs. Semi-supervised methods use unlabeled data to push decision boundaries toward low-density regions, where class transitions are more likely to occur naturally.
 
@@ -3279,18 +3279,19 @@ For a concrete example, consider training a vision model:
 # │ How: Calculate total costs for raw data, labeling, storage, and training.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Infrastructure
 from mlsysim.core.units import GB, USD, count, hour, ureg
 from mlsysim.fmt import fmt_percent, fmt_usd, check, fmt_count, fmt_qty, fmt_time
 
 class CostBreakdown:
-    """ImageNet-scale training cost breakdown: data costs (~81%) dominate compute (~19%)."""
+    """ImageNet-scale training cost breakdown: data costs (~99%) dominate compute (~1%)."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     raw_data_cost = 50000 * USD  # scenario assumption: licensed dataset
     label_count = 1_200_000 * count  # scenario assumption: images to label
     cost_per_label = 0.05 * (USD / count)  # scenario assumption: crowd label cost
     storage_cost = 200 * USD  # scenario assumption: 150 GB for 12 months
-    train_compute_cost = 25000 * USD  # scenario assumption: GPU compute
+    gpu_hour_cost = Infrastructure.Pricing.Cloud.GpuTrainingPerHour.rate  # registry GPU-hour rate
     storage_size = 150 * GB  # scenario assumption: retained training data
     storage_duration = 12 * ureg.month  # scenario assumption: retention time
     train_epoch_count = 100
@@ -3298,6 +3299,8 @@ class CostBreakdown:
     train_duration = 24 * hour  # scenario assumption: training runtime
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    train_gpu_hours = train_gpu_count * train_duration
+    train_compute_cost = (train_gpu_hours * gpu_hour_cost).to(USD)
     label_cost = label_count * cost_per_label
     total_cost = raw_data_cost + label_cost + storage_cost + train_compute_cost
 
@@ -3698,7 +3701,7 @@ class DistributedOverheadCalc:
 
 :::
 
-::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: A coordinator node maintains the global embedding index (FAISS), merges local selections, and broadcasts final coreset indices. Worker nodes each process a shard of 150K images, computing local EL2N scores in parallel before forwarding `local_scores` to the coordinator." fig-alt="Architecture diagram with a coordinator node on top and three worker nodes below. Arrows labeled local_scores point from each worker to the coordinator."}
+::: {#fig-distributed-coreset-architecture fig-env="figure" fig-pos="htb" fig-cap="**Distributed Coreset Selection Architecture**: A coordinator node maintains the global embedding index (FAISS), merges local selections, and broadcasts final coreset indices. Worker nodes each process a shard of 160K images, computing local EL2N scores in parallel before forwarding `local_scores` to the coordinator." fig-alt="Architecture diagram with a coordinator node on top and three worker nodes below. Arrows labeled local_scores point from each worker to the coordinator."}
 
 ```{.tikz}
 \scalebox{0.85}{%
@@ -3724,19 +3727,19 @@ class DistributedOverheadCalc:
 \node[Box2,below=of B0.south] (W0){};
 \node[Box2,below=0pt of W0.north,minimum height=6mm,
 fill=GreenLine,text=white] (WW0){\textbf{Worker 1}};
-\node[align=center]at($(WW0.south)!0.5!(W0.south)$){150K images\\
+\node[align=center]at($(WW0.south)!0.5!(W0.south)$){160K images\\
     Local EL2N};
 % Worker 0
 \node[Box2,below=of B0.194] (W1){};
 \node[Box2,below=0pt of W1.north,minimum height=6mm,
 fill=GreenLine,text=white] (WW1){\textbf{Worker 0}};
-\node[align=center]at($(WW1.south)!0.5!(W1.south)$){150K images\\
+\node[align=center]at($(WW1.south)!0.5!(W1.south)$){160K images\\
     Local EL2N};
 % Worker N
 \node[Box2,below=of B0.346] (W2){};
 \node[Box2,below=0pt of W2.north,minimum height=6mm,
 fill=GreenLine,text=white] (WW2){\textbf{Worker N}};
-\node[align=center]at($(WW2.south)!0.5!(W2.south)$){150K images\\
+\node[align=center]at($(WW2.south)!0.5!(W2.south)$){160K images\\
     Local EL2N};
 %arrows
 \foreach \i in{0,1,2}{
@@ -4205,7 +4208,7 @@ The Chinchilla study\index{Chinchilla!compute-optimal training}[^fn-chinchilla-s
 
 The optimal balance defines a **compute-optimal frontier**\index{Compute-Optimal Frontier!Chinchilla scaling laws}: the best achievable performance at each compute budget when data and model size are properly balanced (@fig-compute-optimal-frontier).
 
-::: {#fig-compute-optimal-frontier fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Optimal Frontier**: For any training compute budget, there is a best achievable performance when data and model size are optimally balanced (green curve). Operating points below the frontier indicate inefficiency. Data-starved systems (orange) have compute capacity but insufficient quality data; the techniques in this chapter move them toward the frontier. Compute-starved systems (red) have quality data but insufficient training budget; more effective throughput, longer training, or distributed training helps here. The goal is to operate on the frontier, extracting maximum performance from available resources." fig-alt="A log-log plot with training compute on x-axis and model performance on y-axis. A green curve shows the optimal frontier. Orange point below curve labeled data-starved. Red point below curve labeled compute-starved. Purple point on curve labeled optimal."}
+::: {#fig-compute-optimal-frontier fig-env="figure" fig-pos="htb" fig-cap="**The Compute-Optimal Frontier**: For any training compute budget, there is a best achievable performance when data and model size are optimally balanced (green curve). Operating points below the frontier indicate inefficiency. Data-starved systems (orange) have compute capacity but insufficient quality data; the techniques in this chapter move them toward the frontier. Compute-starved systems (red) have quality data but insufficient training budget; more effective throughput, longer training, or distributed training helps here. The goal is to operate on the frontier, extracting maximum performance from available resources." fig-alt="A semi-log plot with logarithmic training compute on the x-axis and linear model performance on the y-axis. A green curve shows the optimal frontier. Orange point below curve labeled data-starved. Red point below curve labeled compute-starved. Purple point on curve labeled optimal."}
 
 ```{python}
 #| echo: false
@@ -4217,7 +4220,7 @@ The optimal balance defines a **compute-optimal frontier**\index{Compute-Optimal
 # │
 # │ Goal: Plot compute-optimal frontier curve; show data-starved vs compute-
 # │       starved operating points and arrows toward frontier.
-# │ Show: Log-log axes; green frontier curve; orange/red/purple points; labels.
+# │ Show: Semi-log axes; green frontier curve; orange/red/purple points; labels.
 # │ How: Exponential saturation curve; scatter + annotate; book_style.setup_plot().
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4718,7 +4721,7 @@ Aggressive coreset selection removes rare classes entirely because they contribu
 
 **Fallacy**: *Deduplicating training data is enough to make evaluation reliable.*
 
-Some standard language-modeling datasets have measurable train-test overlap; a deduplication study reports overlap affecting over 4 percent of validation examples in evaluated datasets [@lee2022]. Deduplicating only training data is therefore insufficient: evaluation sets must also be checked against the training corpus. @Sec-data-selection-data-deduplication-6c20 emphasizes joint deduplication for reliable evaluation. As noted in that section, deduplicated data can improve both efficiency and generalization, but teams should validate the effect because near-duplicate thresholds and domain distributions matter.
+Some standard language-modeling datasets have measurable train-test overlap; a deduplication study reports overlap affecting over 4 percent of validation examples in evaluated datasets [@lee2022]. Deduplicating only training data is therefore insufficient: evaluation sets must also be checked against the training corpus. As @sec-data-selection-data-deduplication-6c20 notes, deduplicated data can improve both efficiency and generalization, but teams should validate the effect because near-duplicate thresholds and domain distributions matter.
 
 :::
 
@@ -4735,7 +4738,7 @@ A subtler class of errors emerges when practitioners assume that benchmark resul
 
 **Fallacy**: *If a technique works on ImageNet, it will work on my dataset.*
 
-Benchmark papers report impressive results, but data selection effectiveness depends critically on dataset redundancy. CIFAR-10 is highly redundant: `{python} FpFallacyCalc.cifar10_coreset_pct_str` coresets retain `{python} FpFallacyCalc.cifar10_acc_retained_str` accuracy. ImageNet has moderate redundancy: the same coreset retains `{python} FpFallacyCalc.imagenet_acc_retained_str` accuracy. Domain-specific datasets (medical imaging, satellite imagery) have near-zero redundancy: `{python} FpFallacyCalc.cifar10_coreset_pct_str` coresets may retain only `{python} FpFallacyCalc.medical_acc_retained_str` accuracy because every sample captures unique diagnostic information. @Sec-data-selection-computeoptimal-frontier-24ba and @fig-ppd-curve show how the compute-optimal frontier varies by dataset structure. Start with conservative pruning (20–30 percent) and validate on held-out data before aggressive reduction; the "free lunch" ratios from benchmark papers rarely transfer directly.
+Benchmark papers report impressive results, but data selection effectiveness depends critically on dataset redundancy. CIFAR-10 is highly redundant: `{python} FpFallacyCalc.cifar10_coreset_pct_str` coresets retain `{python} FpFallacyCalc.cifar10_acc_retained_str` accuracy. ImageNet has moderate redundancy: the same coreset retains `{python} FpFallacyCalc.imagenet_acc_retained_str` accuracy. Domain-specific datasets (medical imaging, satellite imagery) have near-zero redundancy: `{python} FpFallacyCalc.cifar10_coreset_pct_str` coresets may retain only `{python} FpFallacyCalc.medical_acc_retained_str` accuracy because every sample captures unique diagnostic information. @Sec-data-selection-computeoptimal-frontier-24ba and @fig-ppd-curve show how to diagnose data-limited versus compute-limited training and where the returns from added data flatten. Start with conservative pruning (20–30 percent) and validate on held-out data before aggressive reduction; the "free lunch" ratios from benchmark papers rarely transfer directly.
 
 :::
 
@@ -4773,7 +4776,7 @@ Translating these techniques into production requires systems engineering: the S
 
 The techniques explored throughout this chapter (deduplication, coreset selection, curriculum learning, active learning, and synthetic generation) provide practitioners with a systematic toolkit for breaking through the data wall. Organizations that master these techniques gain compound advantages: reduced labeling budgets, faster iteration cycles, lower storage costs, and models that generalize better because they learn from higher-quality examples rather than redundant noise.
 
-The answer to the chapter's opening question is that most data is not where the learning is. A dataset can often shed 90 percent of its examples with no loss because they carried cost without carrying complexity: redundant examples consume compute, storage, and labeling budget while teaching the model nothing it did not already hold. Selection is the discipline of telling the two apart, keeping the examples that carry real signal and refusing the ones that carry only volume. Through D·A·M, this is data-algorithm co-design working upstream of everything else, because a sample that never enters training is a cost no optimization downstream ever has to fight. The most efficient computation a system can perform is the one that selection proves it never needed.
+The answer to the chapter's opening question is that most data is not where the learning is. A dataset can often shed half its examples with no measurable loss, and far more at a modest cost in accuracy, because those examples carried cost without carrying complexity: redundant examples consume compute, storage, and labeling budget while teaching the model nothing it did not already hold. Selection is the discipline of telling the two apart, keeping the examples that carry real signal and refusing the ones that carry only volume. Through D·A·M, this is data-algorithm co-design working upstream of everything else, because a sample that never enters training is a cost no optimization downstream ever has to fight. The most efficient computation a system can perform is the one that selection proves it never needed.
 
 ::: {.callout-chapter-connection title="From data to algorithms"}
 

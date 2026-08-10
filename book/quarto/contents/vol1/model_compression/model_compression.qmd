@@ -304,7 +304,8 @@ class ModelDeviceComparison:
     resnet_mem = 100 * MB  # scenario assumption: ~25M params × 4 bytes
     mobilenet_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
     mobilenet_int8_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
-    dscnn_mem = 500 * KB  # scenario assumption
+    dscnn_mem = Models.Tiny.DS_CNN.size_in_bytes(BYTES_FP32)
+    dscnn_int8_mem = Models.Tiny.DS_CNN.size_in_bytes(BYTES_INT8)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dlrm_mobile_overflow = _overflow_ratio(dlrm_mem, mobile_mem)
@@ -315,10 +316,12 @@ class ModelDeviceComparison:
     mobilenet_tiny_overflow = _overflow_ratio(mobilenet_mem, tiny_mem)
     mobilenet_int8_tiny_ratio = _overflow_ratio(mobilenet_int8_mem, tiny_mem)
     dscnn_tiny_overflow = _overflow_ratio(dscnn_mem, tiny_mem)
+    dscnn_int8_tiny_ratio = _overflow_ratio(dscnn_int8_mem, tiny_mem)
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    # DS-CNN always fits TinyML—sanity check
-    assert dscnn_tiny_overflow < 1, "DS-CNN must fit in TinyML device."
+    # DS-CNN misses TinyML at FP32 and fits at INT8—that misfit is the lesson
+    assert dscnn_tiny_overflow > 1, "DS-CNN at FP32 must exceed the TinyML envelope."
+    assert dscnn_int8_tiny_ratio < 1, "DS-CNN at INT8 must fit in TinyML device."
     assert gpt2_mobile_overflow < 1, "GPT-2 XL should fit in mobile memory for this simplified table."
     assert 6 <= mobilenet_int8_tiny_ratio <= 8, "MobileNetV2 INT8 should exceed TinyML by about 7x."
 
@@ -330,6 +333,8 @@ class ModelDeviceComparison:
     mobilenet_mb_str = fmt_memory(mobilenet_mem, unit=MB, commas=False)
     mobilenet_int8_mb_str = fmt_qty(mobilenet_int8_mem, MB, precision=1, commas=False)
     dscnn_kb_str = fmt_qty(dscnn_mem, KB, precision=0, commas=False)
+    dscnn_int8_kb_str = fmt_qty(dscnn_int8_mem, KB, precision=0, commas=False)
+    dscnn_tiny_overflow_mult_str = fmt_multiple(dscnn_tiny_overflow, precision=1, commas=False)
     cloud_cap_gb_str = fmt_qty_int(cloud_mem, GB, commas=False, approx=True)
     mobile_cap_gb_str = fmt_qty_int(mobile_mem, GB, commas=False, approx=True)
     tiny_cap_kb_str = fmt_qty(tiny_mem, KB, precision=1, commas=False, approx=True)
@@ -355,9 +360,10 @@ The **accuracy-efficiency trade-off**\index{Model Compression!accuracy-efficienc
 | **ResNet-50**          |     `{python} ModelDeviceComparison.resnet_mb_str`     |     `{python} ModelDeviceComparison.resnet_mb_str`     |                                 ok                                |                                  ok                                 |   no (`{python} ModelDeviceComparison.resnet_tiny_overflow_mult_str`)    |
 | **MobileNetV2**        |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |                                 ok                                |                                  ok                                 |  no (`{python} ModelDeviceComparison.mobilenet_tiny_overflow_mult_str`)  |
 | **MobileNetV2 (INT8)** | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` |                                 ok                                |                                  ok                                 | no (`{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`) |
-| **DS-CNN (KWS)**       |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |                                    ok                                    |
+| **DS-CNN (KWS)**       |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |   no (`{python} ModelDeviceComparison.dscnn_tiny_overflow_mult_str`)    |
+| **DS-CNN (KWS, INT8)** |   `{python} ModelDeviceComparison.dscnn_int8_kb_str`   |   `{python} ModelDeviceComparison.dscnn_int8_kb_str`   |                                 ok                                |                                  ok                                 |                                    ok                                    |
 
-: **The Deployment Gap**: Model memory requirements compared against typical device capacities. DLRM represents recommendation-model embedding pressure [@naumov2019deep]; DS-CNN represents the TinyML keyword-spotting case [@zhang2017hello]. Even MobileNetV2 quantized to INT8 exceeds the `{python} ModelDeviceComparison.tiny_cap_kb_str` TinyML envelope by `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`, while the purpose-built DS-CNN keyword spotter fits within it. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device tbl-colwidths="[20,15,15,15,15,20]"}
+: **The Deployment Gap**: Model memory requirements compared against typical device capacities. DLRM represents recommendation-model embedding pressure [@naumov2019deep]; DS-CNN represents the TinyML keyword-spotting case [@zhang2017hello]. Even MobileNetV2 quantized to INT8 exceeds the `{python} ModelDeviceComparison.tiny_cap_kb_str` TinyML envelope by `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`, while the purpose-built DS-CNN keyword spotter fits within it only after INT8 quantization. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device tbl-colwidths="[20,15,15,15,15,20]"}
 
 This tension manifests differently across deployment contexts. Training requires computational resources that scale with model size; inference demands strict latency and power constraints in real-time applications. Understanding where each optimization technique falls on the compression-accuracy Pareto frontier is essential for informed technique selection\index{Pareto Frontier!compression-accuracy}\index{Compression Ratio!accuracy trade-off}.
 
@@ -1336,7 +1342,7 @@ minimum width=27mm,minimum height=29mm,
 %\Iteration{#1}{#1}{#2}{#3}{#4}{#5}{#6}{#7}{#8}
 %%%%%%%%%%%%%%%%%%%%%%%
 \begin{scope}[local bounding box=ROW1,shift={(0,0)}]
-\Iteration{1,...,12}{3}{4}{0.995}{1,...,6}{5}{6}{1st Iteration}\Test{0.971}{0.992};
+\Iteration{1,...,12}{3}{4}{0.995}{1,...,6}{13}{14}{1st Iteration}\Test{0.971}{0.992};
 \end{scope}
 \begin{scope}[local bounding box=ROW2,shift={(0,-6)}]
 \Iteration{1,2,5,6,...,12}{3}{4}{0.992}{1,...,6}{3}{4}{2nd Iteration}\Test{0.956}{0.993};
@@ -2174,7 +2180,7 @@ LRMF applies to fully connected layers (large weight matrices) and convolutional
 (B)--(A) (F)--(E);
 \path [every edge/.append style={line width=0.75pt,draw=blue, |-|}](C)+(0,-7pt)coordinate (C2)
 edge [auto, text=blue, "$N$"']  (C2 -|G)
-(G) +(4.5pt,-4.5pt) coordinate (G2) edge [text=blue,"$K$"'] ([xshift=4.5pt,yshift=-4.5pt]D)
+(G) +(4.5pt,-4.5pt) coordinate (G2) edge [text=blue,"$T$"'] ([xshift=4.5pt,yshift=-4.5pt]D)
 (C) +(-7pt,0) coordinate (C1) edge [blue,"$M$"] (C1 |- B);
 \end{scope}
 
@@ -2288,7 +2294,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 (A3)--(E3)--(D3)--(G3)
 (B3)--(A3) (F3)--(E3);
 %
-\node[right=0.3 of $(G3)!0.5!(D3)$]{$X\in\mathbb{R}^{T\times R}$};
+\node[right=0.3 of $(G3)!0.5!(D3)$]{$W\in\mathbb{R}^{T\times R}$};
 \end{scope}
 
 %the threed small
@@ -2317,8 +2323,8 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 %
 \draw[BlueLine,fill=none,line width=0.75pt] (F3) -- (E3) -- cycle;% Right Face
 %
-\node[right=0.3 of $(G3)!0.5!(D3)$]{$X\in\mathbb{R}^{T\times R}$};
-\node[RedLine,left=2pt of $(MB3)!0.9!(MA3)$](UI){$\boldsymbol{x_i}$};
+\node[right=0.3 of $(G3)!0.5!(D3)$]{$W\in\mathbb{R}^{T\times R}$};
+\node[RedLine,left=2pt of $(MB3)!0.9!(MA3)$](UI){$\boldsymbol{w_i}$};
 \end{scope}
 
 %%%%%%%%%%%%%%%%%%%%%
@@ -3113,9 +3119,9 @@ Reducing numerical precision thus improves efficiency on two fronts: faster comp
 
 #### Performance gains {#sec-model-compression-performance-gains-0656}
 
-The practical payoff of quantization becomes concrete in @fig-quantization-impact. Compare the orange (FP32) and blue (INT8) segments in each stacked bar to see the gains when moving from FP32 to INT8. The magnitude of the gain varies by model: Inception_v3 and ResNet_v2 see a 1.5--5$\times$ reduction in both inference time and model size, while MobileNet_v1, designed for mobile-class INT8 hardware, sees an order-of-magnitude reduction. The pattern across architectures makes quantized models well suited for deployment in resource-constrained environments.
+The practical payoff of quantization becomes concrete in @fig-quantization-impact. Compare the orange (FP32) and blue (INT8) segments in each stacked bar to see the gains when moving from FP32 to INT8. Model size falls by exactly 4$\times$ for every architecture, because each weight shrinks from four bytes to one, while inference time falls by 4--8$\times$ depending on how well each architecture maps onto the target hardware's INT8 path. The pattern across architectures makes quantized models well suited for deployment in resource-constrained environments.
 
-::: {#fig-quantization-impact fig-env="figure" fig-pos="htb" fig-cap="**Quantization Impact**: Moving from FP32 to INT8 reduces both inference time and model size, with the magnitude of reduction depending on the model's architecture and the target hardware's INT8 acceleration. Inception_v3 and ResNet_v2 see modest gains; MobileNet_v1, designed for mobile-class INT8 paths, sees an order-of-magnitude reduction." fig-alt="Two stacked bar charts comparing FP32 and INT8. Left chart shows inference time in milliseconds for Inception_v3, MobileNet_v1, and ResNet_v2; right chart shows model size in megabytes. Orange segments mark FP32 values, blue segments mark INT8 values; INT8 is smaller and faster across all models."}
+::: {#fig-quantization-impact fig-env="figure" fig-pos="htb" fig-cap="**Quantization Impact**: Moving from FP32 to INT8 reduces both inference time and model size. Model size falls by exactly 4$\times$ for all three architectures because the weights themselves shrink from four bytes to one, while the inference-time gain ranges from 4$\times$ to 8$\times$ with the quality of each architecture's INT8 mapping and the target hardware's INT8 acceleration." fig-alt="Two stacked bar charts comparing FP32 and INT8. Left chart shows inference time in milliseconds for Inception_v3, MobileNet_v1, and ResNet_v2; right chart shows model size in megabytes. Orange segments mark FP32 values, blue segments mark INT8 values; INT8 is smaller and faster across all models."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -3171,8 +3177,8 @@ The practical payoff of quantization becomes concrete in @fig-quantization-impac
        every node near coord/.append style={xshift=26pt,
    /pgf/number format/assume math mode=true,
     font=\fontsize{6pt}{6}\selectfont\usefont{T1}{phv}{m}{n}, anchor=center}] coordinates {
-        ({Inception\_v3},500)
-        ({MobileNet\_v1},30)
+        ({Inception\_v3},160)
+        ({MobileNet\_v1},100)
         ({ResNet\_v2},70)};
 \end{axis}
  \end{scope}
@@ -3183,16 +3189,16 @@ The practical payoff of quantization becomes concrete in @fig-quantization-impac
   nodes near coords={\pgfmathprintnumber{\pgfplotspointmeta}~MB},
     ]
     \addplot [fill=WeightGradient!80,draw=none] coordinates {
-        ({Inception\_v3},135)
-        ({MobileNet\_v1},45)
+        ({Inception\_v3},136)
+        ({MobileNet\_v1},44)
         ({ResNet\_v2},24)};
     \addplot [fill=Activation!90,draw=none,
            every node near coord/.append style={xshift=26pt,
    /pgf/number format/assume math mode=true,
     font=\fontsize{6pt}{6}\selectfont\usefont{T1}{phv}{m}{n}, anchor=center}] coordinates {
-        ({Inception\_v3},71)
-        ({MobileNet\_v1},4)
-        ({ResNet\_v2},13)};
+        ({Inception\_v3},34)
+        ({MobileNet\_v1},11)
+        ({ResNet\_v2},6)};
 
 \legend{FP32,INT8}
 \coordinate (legend) at (axis description cs:0.85,0.9);
@@ -3741,7 +3747,7 @@ node [midway,above=5mm] {\textbf{16 bits}};
 
 INT8\index{INT8!efficiency gains}\index{Quantization!INT8 (8-bit integer)} precision offers more aggressive efficiency improvements for inference workloads. Many quantized models use INT8 for inference, reducing storage by 4$\times$ while accelerating computation by 4--8$\times$ on optimized hardware. INT8 is widely used in mobile and embedded AI, where energy constraints are significant.
 
-Binary and ternary networks\index{Quantization!binary networks}\index{Quantization!ternary networks} represent the extreme end of quantization, where weights and activations are constrained to one-bit (binary) or two-bit (ternary) values. This results in massive storage and energy savings, but model accuracy often degrades significantly unless specialized architectures are used. Our keyword-spotting lighthouse (@sec-network-architectures-efficient-architectures-keyword-spotting-0625) lives precisely in this regime, where extreme compression is required just to fit the 256 KB SRAM device budget. INT8 is often just the starting point; engineers push toward INT4 or even binary weights, trading further accuracy for the microwatt-scale power budgets that always-on acoustic models demand.
+Binary and ternary networks\index{Quantization!binary networks}\index{Quantization!ternary networks} represent the extreme end of quantization, where weights and activations are constrained to one-bit (binary) or two-bit (ternary) values. This results in massive storage and energy savings, but model accuracy often degrades significantly unless specialized architectures are used. Our keyword-spotting lighthouse (@sec-network-architectures-efficient-architectures-keyword-spotting-0625) lives precisely in this regime, where extreme compression is required just to fit the stricter 256 KB SRAM doorbell budget. INT8 is often just the starting point; engineers push toward INT4 or even binary weights, trading further accuracy for the microwatt-scale power budgets that always-on acoustic models demand.
 
 ```{python}
 #| echo: false
