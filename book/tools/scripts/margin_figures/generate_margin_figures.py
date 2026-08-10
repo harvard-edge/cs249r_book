@@ -467,7 +467,25 @@ def model_compression_quantization_roofline():
         "vol1/model_compression",
         "model_compression_quantization_roofline",
         ridge=60.0,
-        points=[("mem 2x", 8.0, MEM), ("comp 8x", 180.0, COMP)],
+        # Both points match the chapter's two adjacent worked examples:
+        # bandwidth-bound INT4-vs-FP16 = 2.9x; compute-bound A100 INT8-vs-FP16 = 2x.
+        points=[("mem 2.9x", 8.0, MEM), ("comp 2x", 180.0, COMP)],
+    )
+
+
+def model_compression_memory_ladder(candidate=None):
+    """Curated replacement for the generic first-pass vol1-model-compression-margin-001.
+
+    The generic ladder path parsed "175B" out of the top label as 1.75e11 and fell
+    back to powers of ten for the other two rungs, so the drawn bars encoded no
+    real memory magnitudes. Values below are in GB so one log axis spans all three.
+    """
+    make_ladder(
+        "vol1/model_compression",
+        "vol1_model_compression_margin_001",
+        [("175B FP16 350 GB", 350), ("Phone RAM 8 GB", 8), ("MCU RAM 524 KB", 0.000524288)],
+        domain="memory",
+        wall=False,
     )
 
 
@@ -726,7 +744,7 @@ def training_flash_attention_tile_ladder(candidate=None):
     make_ladder(
         "vol1/training",
         "vol1_training_margin_003",
-        [("Full 64 MB", 64), ("Tile 64 KB", 0.064)],
+        [("Full 67.1 MB", 67.1), ("Tile 65.5 KB", 0.0655)],
         domain="memory",
         wall=False,
     )
@@ -1830,7 +1848,7 @@ def _generic_sparkline(candidate):
     falling = any(tok in text for tok in ("decay", "drop", "drops", "fall", "falls", "degrad", "collapse", "lower"))
     saturating = any(tok in text for tok in ("saturat", "plateau", "diminishing"))
     positive = any(tok in text for tok in ("feedback", "throughput", "iteration", "payback", "accuracy rises", "capacity", "streaming"))
-    if "rises while" in text or "paired with" in text or "gain" in text and ("decay" in text or "falls" in text):
+    if "rises while" in text or "rising while" in text or "paired with" in text or "gain" in text and ("decay" in text or "falls" in text):
         make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), style="enddots", threat=True, endpoints=[(0.18, 0.82), (0.72, 0.30)])
     elif falling:
         make_sparkline(candidate["chapter"], curated_asset_name(candidate["id"]), style="enddots", threat=True, endpoints=[(0.84, 0.32), (0.28, 0.28)])
@@ -2004,6 +2022,8 @@ def _other_new(candidate):
         nn_computation_activation_logic_ladder(candidate)
     elif cid == "vol1-nn-computation-margin-004":
         nn_computation_mnist_roofline(candidate)
+    elif cid == "vol1-model-compression-margin-001":
+        model_compression_memory_ladder(candidate)
     elif cid == "vol1-frameworks-margin-001":
         frameworks_training_memory_ladder(candidate)
     elif cid == "vol1-frameworks-margin-002":
@@ -2129,6 +2149,7 @@ def generate_curated_margin_figures() -> None:
             "vol1-data-engineering-margin-004",
             "vol1-data-selection-margin-001",
             "vol1-data-selection-margin-003",
+            "vol1-model-compression-margin-001",
             "vol1-nn-computation-margin-001",
             "vol1-nn-computation-margin-002",
             "vol1-nn-computation-margin-003",

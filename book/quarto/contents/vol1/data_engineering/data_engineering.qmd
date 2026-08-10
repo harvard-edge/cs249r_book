@@ -199,13 +199,14 @@ $$ \text{Data Selection Gain} \propto \frac{\text{Information Entropy}}{\text{Da
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: "The Feeding Problem" section
 # │
-# │ Goal: Demonstrate the mismatch between accelerator compute and disk bandwidth.
-# │ Show: That a standard cloud disk causes 80%+ idle time for an A100.
-# │ How: Calculate required bandwidth for ResNet-50 inference at peak TFLOP/s.
+# │ Goal: Demonstrate the mismatch between pipeline demand and disk bandwidth.
+# │ Show: That a standard cloud disk costs roughly a tenth of the duty cycle.
+# │ How: Take the solver's overhead-limited image rate, multiply by the compressed
+# │      on-disk image size, and compare the result against baseline disk supply.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_int, fmt, check, fmt_qty, fmt_rate, fmt_percent
-from mlsysim.core.units import GB, MB, second, TFLOPs
+from mlsysim.core.units import GB, MB, KB, second, TFLOPs
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FeedingProblem:
@@ -222,9 +223,12 @@ class FeedingProblem:
     m = Models.Vision.ResNet50
     h = Hardware.Cloud.A100
 
-    # Image: 224x224x3 @ FP32
-    IMAGE_DIM_RESNET = Datasets.ImageNet.image_width
-    img_size_bytes = IMAGE_DIM_RESNET * IMAGE_DIM_RESNET * IMAGE_CHANNELS_RGB * 4  # FP32
+    # Storage-path payload: JPEG-compressed images, matching the scenario used
+    # in the storage-bandwidth budget. Decoding to tensors happens after the read,
+    # so decoded FP32 size never crosses the storage interface.
+    image_size_kb = 150
+    image_size = image_size_kb * KB
+    img_size_bytes = image_size.to(byte).magnitude
 
     # Standard Cloud Disk (e.g. AWS gp3 baseline)
     disk_profile = Systems.Storage.CloudBlockStorageBaseline
@@ -236,7 +240,7 @@ class FeedingProblem:
     # Step 1: Throughput using SingleNodeModel().solve() with 100% efficiency
     from mlsysim.solvers import SingleNodeModel
 
-    p = SingleNodeModel().solve(m, h, efficiency=1.0)
+    p = SingleNodeModel().solve(m, h, batch_size=1, efficiency=1.0)
     img_per_sec = p.throughput.to(1 / second).magnitude
 
     # Step 2: Required bandwidth (bytes/s)
@@ -251,12 +255,13 @@ class FeedingProblem:
     feeding_tax_pct = (1.0 - eta_feed) * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    req_bw_value = req_bw.to(GB / second).magnitude
-    check(req_bw > 1.0 * GB / second, f"Required bandwidth ({req_bw_value:.1f} GB/s) is lower than expected.")
-    check(feeding_tax_pct > 50, f"Feeding tax ({feeding_tax_pct:.1f}%) should be significant for standard disks.")
+    req_bw_value = req_bw.to(MB / second).magnitude
+    check(req_bw > 200 * MB / second, f"Required bandwidth ({req_bw_value:.0f} MB/s) is lower than expected.")
+    check(feeding_tax_pct > 5, f"Feeding tax ({feeding_tax_pct:.1f}%) should be material for standard disks.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    req_bw_gb_per_s_str = fmt_qty(req_bw, GB / second, precision=1, commas=False)
+    req_bw_mb_per_s_str = fmt_qty(req_bw, MB / second, precision=1, commas=False)
+    image_size_kb_str = fmt_qty(image_size, KB, precision=0, commas=False)
     disk_bw_mb_per_s_str = fmt_qty(data_res.supply_bw, MB / second, precision=0, commas=False)
     feeding_tax_pct_str = fmt_percent(feeding_tax_pct / 100, precision=1, commas=False, style='prose')
     img_per_s_str = fmt_rate(round(img_per_sec), 'img/s', precision=0, commas=True)
@@ -266,7 +271,7 @@ class FeedingProblem:
 
 Data gravity establishes the cost of moving the entire mass; **The Feeding Problem**\index{Feeding Problem!definition} establishes the cost of delivering it. In the Hennessy & Patterson tradition, we analyze this as a **Flow Rate**\index{Flow Rate!definition} problem: the struggle to saturate a high-throughput machine from a low-bandwidth data source.
 
-According to the iron law, the system is only as fast as its slowest term. If a high-throughput accelerator running an image model can process `{python} FeedingProblem.img_per_s_str`, but the storage pipeline delivers only `{python} FeedingProblem.disk_bw_mb_per_s_str`, the expensive silicon sits idle. We quantify this as **The Feeding Tax**\index{Feeding Tax!definition}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax can exceed `{python} FeedingProblem.feeding_tax_pct_str`, meaning the accelerator spends the majority of its time waiting for bits. This tax transforms the data pipeline from a simple storage concern into the primary regulator of the system's duty cycle. Feeding the reference accelerator in this example often requires `{python} FeedingProblem.req_bw_gb_per_s_str` transfer rates, forcing the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa. These physical properties also carry an energy cost: as data moves farther from the processor, movement increasingly dominates the budget.
+According to the iron law, the system is only as fast as its slowest term. Consider a small-batch image pipeline that sustains `{python} FeedingProblem.img_per_s_str`. That rate is not a statement about the accelerator's arithmetic peak; in this configuration the per-image fixed overhead dominates, so a much cheaper model or a much faster device would land within a few percent of the same number. What the rate does fix is the demand the storage path must satisfy. If that path delivers only `{python} FeedingProblem.disk_bw_mb_per_s_str`, the expensive silicon sits idle waiting on bits. We quantify this as **The Feeding Tax**\index{Feeding Tax!definition}: the wall-clock time lost to I/O wait, which directly reduces the system efficiency $(\eta_{\text{hw}})$\index{System Efficiency!feeding tax} term. For a standard cloud volume, the feeding tax here reaches `{python} FeedingProblem.feeding_tax_pct_str`, so nearly one accelerator-hour in ten is spent waiting rather than computing. This tax transforms the data pipeline from a simple storage concern into the primary regulator of the system's duty cycle. Feeding this pipeline requires a sustained `{python} FeedingProblem.req_bw_mb_per_s_str` even at `{python} FeedingProblem.image_size_kb_str` per compressed image, forcing the shift from traditional file systems to the specialized storage architectures we examine in @sec-data-engineering-ml-storage-systems-architecture-options-67fa. These physical properties also carry an energy cost: as data moves farther from the processor, movement increasingly dominates the budget.
 
 ```{python}
 #| echo: false
@@ -1016,7 +1021,7 @@ class KWSDesignSpaceTradeoffs:
 
 | **Design Choice**                   | **Quality Impact**                                                                 |                                                  **Latency Impact**                                                 |                                                                     **Cost Impact**                                                                     |                               **Memory Impact**                                |
 |:------------------------------------|:-----------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------:|:------------------------------------------------------------------------------:|
-| **16 kHz vs. 8 kHz sampling**       | +`{python} KWSDesignSpaceTradeoffs.sampling_accuracy_gain_pct_str` accuracy        |                         `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` storage                        |                                        `{python} KWSDesignSpaceTradeoffs.sampling_processing_mult_str` processing                                       | `{python} KWSDesignSpaceTradeoffs.sampling_feature_size_mult_str` feature size |
+| **16 kHz vs. 8 kHz sampling**       | +`{python} KWSDesignSpaceTradeoffs.sampling_accuracy_gain_pct_str` accuracy        |                      `{python} KWSDesignSpaceTradeoffs.sampling_processing_mult_str` processing                     |                                           `{python} KWSDesignSpaceTradeoffs.sampling_storage_mult_str` storage                                          | `{python} KWSDesignSpaceTradeoffs.sampling_feature_size_mult_str` feature size |
 | **13 vs. 40 MFCC coefficients**     | +`{python} KWSDesignSpaceTradeoffs.mfcc_accuracy_gain_pct_str` accuracy            |                   `{python} KWSDesignSpaceTradeoffs.mfcc_feature_compute_mult_str` feature compute                  |                                                                         Minimal                                                                         | `{python} KWSDesignSpaceTradeoffs.mfcc_feature_memory_mult_str` feature memory |
 | **1M vs. 10M training examples**    | +`{python} KWSDesignSpaceTradeoffs.data_volume_accuracy_gain_pct_str` accuracy     |                 `{python} KWSDesignSpaceTradeoffs.data_volume_training_time_mult_str` training time                 |                                   `{python} KWSDesignSpaceTradeoffs.data_volume_labeling_cost_mult_str` labeling cost                                   |    `{python} KWSDesignSpaceTradeoffs.data_volume_storage_mult_str` storage     |
 | **Clean vs. noisy training data**   | +`{python} KWSDesignSpaceTradeoffs.noisy_accuracy_gain_pct_str` real-world         |                                                       Minimal                                                       |                                    `{python} KWSDesignSpaceTradeoffs.noisy_collection_cost_mult_str` collection cost                                    |                                    Minimal                                     |
@@ -1141,7 +1146,7 @@ From @tbl-kws-design-space, the 64 KB memory limit eliminates two options:
 
 **Step 2**: Calculate budget allocation.
 
-The `{python} BudgetAllocation.total_budget_k_usd_str` budget splits across three cost categories at the unit rates established in @sec-data-engineering-scalability-cost-optimization-b9b3:
+The `{python} BudgetAllocation.total_budget_k_usd_str` budget splits across three cost categories:
 
 - **Labeling** (~`{python} BudgetAllocation.labeling_pct_str`): `{python} BudgetAllocation.labeling_k_usd_str` available
 - **Storage/Processing** (~`{python} BudgetAllocation.storage_pct_str`): `{python} BudgetAllocation.storage_k_usd_str`
@@ -1562,7 +1567,7 @@ Just as systems engineers memorize latency numbers, ML engineers should internal
 | **Cloud GPU training hour**  |                                  \$2–4                                  | Cloud spot pricing     |
 | **Human review hour**        |                                 \$15–50                                 | Depending on expertise |
 
-: **Data Engineering Cost Constants (2024)**: Per-unit costs that ML engineers should memorize in the same way systems engineers memorize latency numbers. Labeling commonly dominates storage and compute, so teams should reason from ratios rather than isolated prices. {#tbl-data-engineering-cost-constants tbl-colwidths="[43,30,37]"}
+: **Data Engineering Cost Constants (2024)**: Per-unit costs that ML engineers should memorize in the same way systems engineers memorize latency numbers. Labeling commonly dominates storage and compute, so teams should reason from ratios rather than isolated prices. {#tbl-data-engineering-cost-constants tbl-colwidths="[39,27,34]"}
 
 @Tbl-data-engineering-time-constants extends the picture with characteristic durations for labeling, training, and serving operations.
 
@@ -1608,7 +1613,7 @@ class DataEngineeringTimeConstants:
 | **Train ResNet-50 on ImageNet**    |  4–6 hours   | Compute (8$\times$ A100, optimized) |
 | **Feature store lookup**           |   1–10 ms    | Network + cache                     |
 
-: **Data Engineering Time Constants**: Characteristic durations for labeling, training, and serving operations span about `{python} DataEngineeringTimeConstants.span_orders_str` orders of magnitude. Human labeling sets the wall-clock floor for new datasets, making it the dominant scheduling constraint in production ML systems. {#tbl-data-engineering-time-constants tbl-colwidths="[40,34,36]"}
+: **Data Engineering Time Constants**: Characteristic durations for labeling, training, and serving operations span about `{python} DataEngineeringTimeConstants.span_orders_str` orders of magnitude. Human labeling sets the wall-clock floor for new datasets, making it the dominant scheduling constraint in production ML systems. {#tbl-data-engineering-time-constants tbl-colwidths="[36,31,33]"}
 
 ```{=latex}
 \endgroup
@@ -1727,7 +1732,7 @@ Crowdsourcing\index{Crowdsourcing!data labeling}\index{Crowdsourcing!annotation}
 
 Moving beyond human-generated data entirely, synthetic data generation\index{Synthetic Data!generation}\index{Data Augmentation!synthetic data}\index{Synthetic Data!scalability} changes the scaling constraint: examples can be generated algorithmically, but their value depends on whether the generator covers the deployment conditions that real collection would miss. This approach changes the economics of data acquisition by reducing human labor while increasing the burden on validation. The pipeline in @fig-synthetic-data shows how synthetic data merges with historical datasets, producing training sets of a size and diversity that would be impractical to collect manually.
 
-::: {#fig-synthetic-data fig-env="figure" fig-pos="htb" fig-cap="**Synthetic Data Augmentation**: A four-node pipeline where historical data and simulation outputs feed into a synthetic data generation process, producing an expanded combined training dataset with greater size and diversity than either source alone. Source: AnyLogic [@anylogic_synthetic]." fig-alt="Diagram showing historical data icon and simulation cloud icon both feeding into synthetic data generation process, producing an expanded combined training dataset."}
+::: {#fig-synthetic-data fig-env="figure" fig-pos="htb" fig-cap="**Synthetic Data Augmentation**: Two parallel sources feed one training run. A simulation model produces synthetic data while a real system supplies historical data; the two are combined and passed to an ML algorithm, yielding a trained ML model. Source: AnyLogic [@anylogic_synthetic]." fig-alt="Diagram with two parallel branches. A simulation model produces synthetic data; a real system produces historical data. The two datasets combine and flow into an ML algorithm, which produces a trained ML model."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
@@ -2248,7 +2253,7 @@ class KSTest:
 2.  **Calculate statistic** $(\mathcal{D}_{\text{KS}})$: Find the maximum absolute difference between the CDFs. Let $F_{P_0}(x)$ and $F_{P_t}(x)$ denote the cumulative distribution functions of the training baseline $(P_0)$ and current serving $(P_t)$ datasets.
     $$\mathcal{D}_{\text{KS}} = \max_x |F_{P_0}(x) - F_{P_t}(x)|$$
 
-3.  **Determine significance**: Compare $\mathcal{D}_{\text{KS}}$ to critical value $\mathcal{D}_{\text{crit}}$ based on training-baseline sample size $n_0$, serving sample size $n_t$, and confidence level $(\alpha = 0.05)$.
+3.  **Determine significance**: Compare $\mathcal{D}_{\text{KS}}$ to critical value $\mathcal{D}_{\text{crit}}$ based on training-baseline sample size $n_0$, serving sample size $n_t$, and significance level $(\alpha = 0.05)$.
     $$\mathcal{D}_{\text{crit}} \approx 1.36\sqrt{\frac{n_0 + n_t}{n_0 n_t}}$$
 **Result**: With sample sizes `{python} KSTest.sample_sizes_math`, the critical value is approximately `{python} KSTest.ks_dcrit_str`:
 $$\mathcal{D}_{\text{crit}} \approx 1.36\sqrt{(1000 + 1000)/(1000 \cdot 1000)}.$$
@@ -2593,7 +2598,7 @@ Recognizing the limitations of either approach alone, many production ML systems
 # │ How: Calculate daily processing costs for a 1M event/sec data stream.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_rate, fmt_time, fmt_qty, fmt_qty_int, check, fmt_multiple
+from mlsysim.fmt import fmt_int, fmt_usd, fmt, fmt_count, fmt_rate, fmt_time, fmt_qty, check, fmt_multiple
 from mlsysim.core.units import KB, GB, TB, second
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -2627,7 +2632,7 @@ class RealtimeCost:
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     throughput_gb_per_s_str = fmt_qty(throughput, GB / second, precision=0, commas=False)
-    hourly_tb_str = fmt_qty_int(hourly_data, TB, commas=False)
+    hourly_tb_str = fmt_qty(hourly_data, TB, precision=1, commas=False)
     stream_cost_str = fmt_usd(stream_cost_day, precision=0, commas=False, per="day")
     batch_cost_str = fmt_usd(batch_cost_day, precision=0, commas=False, per="day")
     cost_ratio_mult_str = fmt_multiple(cost_ratio, precision=0, commas=False)
@@ -3357,7 +3362,7 @@ Segmentation maps\index{Semantic Segmentation!pixel-level labels} provide the mo
 
 @Fig-labels contrasts five label granularities, and the choice depends on system requirements and resource constraints [@johnson-roberson2017]. Classification suffices for traffic counting, but autonomous vehicles need segmentation maps for precise navigation. Production systems often maintain hybrid annotations: a single camera frame might carry classification labels (scene type), bounding boxes (obstacle detection), and segmentation masks (path planning), with each label type serving distinct downstream models.
 
-::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data Annotation Granularity**: Five label types applied to the same image of a dog on a blanket: a classification label, a bounding box, a segmentation mask, a free-text caption, and an audio transcription. Each type progressively increases labeling cost and storage requirements while providing a richer training signal." fig-alt="Five-row figure showing label types for a dog on a blanket: classification (Dog, Blanket, No cat), a bounding box around the dog, a segmentation mask on the dog, a free-text caption, and a transcription."}
+::: {#fig-labels fig-env="figure" fig-pos="htb" fig-cap="**Data Annotation Granularity**: Five label types across two input modalities. Four apply to the same image of a dog on a blanket (a classification label, a bounding box, a segmentation mask, and a free-text caption); the fifth transcribes an audio clip. Each type progressively increases labeling cost and storage requirements while providing a richer training signal." fig-alt="Five-row figure of label types. Four rows use an image of a dog on a blanket: classification (Dog, Blanket, No cat), a bounding box around the dog, a segmentation mask on the dog, and a free-text caption. The fifth row shows an audio icon with a transcription."}
 
 ![](images/png/cs249r_labels_new.png){width="70%"}
 
@@ -3371,7 +3376,7 @@ In the labeling domain, label quality\index{Label Quality!consensus mechanisms} 
 
 Labeling failures arise from two distinct sources requiring different engineering responses. @Fig-hard-labels presents concrete examples of both failure modes. Some examples reflect degraded or ambiguous inputs where the correct label is difficult to infer from the data alone; others are visually clear but require domain knowledge, dataset-specific semantics, or expert judgment to label correctly. These different failure modes drive architectural decisions about annotator qualification, task routing, and consensus mechanisms: quality-based errors call for upstream data filtering, while expertise-based errors call for tiered annotator routing.
 
-::: {#fig-hard-labels fig-env="figure" fig-pos="htb" fig-cap="**Pervasive Label Errors**: Confidently mislabeled examples from widely used benchmarks, each showing the given label against the corrected ground truth (MNIST, CIFAR-10, CIFAR-100, Caltech-256, ImageNet, QuickDraw). Fine-grained confusions, such as lobster labeled crab or white stork labeled black stork, show that even curated datasets carry systematic errors, motivating careful quality control and expert annotation. Source: [@northcutt2021pervasive]." fig-alt="Six-panel grid of public-dataset label errors: MNIST digit (given 5, corrected 3); CIFAR-10 frog (given cat); CIFAR-100 crab (given lobster); Caltech-256 teapot (given ewer); ImageNet black stork (given white stork); QuickDraw eye (given tiger)."}
+::: {#fig-hard-labels fig-env="figure" fig-pos="htb" fig-cap="**Pervasive Label Errors**: Confidently mislabeled examples from widely used benchmarks, each showing the given label against the corrected ground truth (MNIST, CIFAR-10, CIFAR-100, Caltech-256, ImageNet, QuickDraw). Fine-grained confusions, such as a crab labeled lobster or a black stork labeled white stork, show that even curated datasets carry systematic errors, motivating careful quality control and expert annotation. Source: [@northcutt2021pervasive]." fig-alt="Six-panel grid of public-dataset label errors: MNIST digit (given 5, corrected 3); CIFAR-10 frog (given cat); CIFAR-100 crab (given lobster); Caltech-256 teapot (given ewer); ImageNet black stork (given white stork); QuickDraw eye (given tiger)."}
 
 ![](images/png/label-errors-examples_new.png)
 
@@ -3743,7 +3748,7 @@ Beyond the functional differences between storage systems, cost and performance 
 # │
 # │ Goal: Quantify the storage-cost trade-off where the KWS dataset is discussed.
 # │ Show: Object storage is cheaper, while NVMe buys a 50× loading advantage.
-# │ How: Compute rounded KWS raw-audio size, then compare storage costs and bandwidth.
+# │ How: Compute KWS raw-audio size from the corpus count, then compare storage costs and bandwidth.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -3765,7 +3770,7 @@ class KWSStorageEconomics:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_count = total_examples_count
     sample_duration_s = sample_duration.to(second).magnitude
     sample_rate_hz = sample_rate.to(1 / second).magnitude
     sample_width_bytes = sample_width.to(byte).magnitude
@@ -3778,12 +3783,12 @@ class KWSStorageEconomics:
     load_speedup = (nvme_bw / obj_bw).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(dataset_size_value - 736) < 1e-9, f"Rounded KWS storage example should be 736 GB, got {dataset_size_value:.1f} GB.")
+    check(abs(dataset_size_value - 748.8) < 0.05, f"KWS storage example should be 748.8 GB, got {dataset_size_value:.1f} GB.")
     check(storage_s3_cost < storage_nvme_low_cost, "Object storage should be cheaper than local NVMe.")
     check(abs(load_speedup - 50) < 1e-9, f"Expected 50x NVMe/object-store speedup, got {load_speedup:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    dataset_size_gb_str = fmt_memory(dataset_size, unit=GB, precision=0, commas=False)
+    dataset_size_gb_str = fmt_memory(dataset_size, unit=GB, precision=1, commas=False)
     storage_s3_cost_str = fmt_usd(storage_s3_cost, precision=1, commas=False, per="month")
     storage_nvme_low_cost_str = fmt_usd(storage_nvme_low_cost, precision=1, commas=False, per="month")
     storage_nvme_high_cost_str = fmt_usd(storage_nvme_high_cost, precision=1, commas=False, per="month")
@@ -3794,7 +3799,7 @@ class KWSStorageEconomics:
 
 | **Storage Tier**                         | **Cost (\$/TB/month)** | **Sequential Read** **Throughput** | **Random Read** **Latency** | **Typical ML Use Case**                       |
 |:-----------------------------------------|:----------------------:|:----------------------------------:|:---------------------------:|:----------------------------------------------|
-| **NVMe SSD (local)**                     |       \$100–300        |              5–7 GB/s              |          10–100 μs          | Training data loading, active feature serving |
+| **NVMe SSD (local)**                     |       \$100–300        |              3–7 GB/s              |          10–100 μs          | Training data loading, active feature serving |
 | **Object Storage (S3, GCS)**             |        \$20–25         |   100–500 MB/s (per connection)    |           10–50 ms          | Data lake raw storage, model artifacts        |
 | **Data Warehouse (BigQuery, Redshift)**  |        \$20–40         |      1–5 GB/s (columnar scan)      |  100–500 ms (query startup) | Training data queries, feature engineering    |
 | **In-Memory Cache (Redis, Memcached)**   |       \$500–1000       |             20–50 GB/s             |           1–10 μs           | Online feature serving, real-time inference   |
@@ -3802,7 +3807,7 @@ class KWSStorageEconomics:
 
 : **Storage Cost-Performance Trade-Offs**: Different storage tiers provide distinct cost-performance characteristics that determine their suitability for specific ML workloads. Training data loading requires high-throughput sequential access; @sec-appdx-machine-foundations-memory-hierarchy-2278 establishes the memory hierarchy this pattern must align with. Online serving needs low-latency random reads, while archival storage prioritizes cost over access speed for compliance and historical data. {#tbl-storage-performance tbl-colwidths="[26,15,19,19,21]"}
 
-[^fn-nvme-gpu-utilization]: **NVMe (Non-Volatile Memory Express)**: A storage protocol connecting directly to the PCIe bus with 64K command queues, delivering 5--7 GB/s sequential throughput and microsecond-scale latency. The contrast with SATA SSD (500 MB/s, single queue) is a 10$\times$ bandwidth gap that directly determines GPU utilization: at SATA speeds, a training pipeline reading 100 GB datasets spends more time waiting for storage than computing gradients, converting a \$15,000 accelerator into an expensive space heater. \index{NVMe!GPU utilization}
+[^fn-nvme-gpu-utilization]: **NVMe (Non-Volatile Memory Express)**: A storage protocol connecting directly to the PCIe bus with 64K command queues, delivering 3--7 GB/s sequential throughput and microsecond-scale latency. The contrast with SATA SSD (500 MB/s, single queue) is a 10$\times$ bandwidth gap that directly determines GPU utilization: at SATA speeds, a training pipeline reading 100 GB datasets spends more time waiting for storage than computing gradients, converting a \$15,000 accelerator into an expensive space heater. \index{NVMe!GPU utilization}
 
 ```{python}
 #| echo: false
@@ -3814,7 +3819,7 @@ class KWSStorageEconomics:
 # │
 # │ Goal: Contrast dataset loading times across storage tiers.
 # │ Show: The 50× speedup available when moving from object storage to NVMe.
-# │ How: Calculate total load time for the computed rounded KWS dataset.
+# │ How: Calculate total load time for the computed KWS dataset size.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -3833,7 +3838,7 @@ class StorageLoading:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_count = total_examples_count
     sample_duration_s = sample_duration.to(second).magnitude
     sample_rate_hz = sample_rate.to(1 / second).magnitude
     sample_width_bytes = sample_width.to(byte).magnitude
@@ -3935,7 +3940,7 @@ The iterative nature of ML development introduces versioning requirements\index{
 
 Large-scale training generates substantial intermediate data requiring storage systems to handle concurrent read/write operations efficiently. When training jobs use multiple accelerators, each processing unit works on different portions of data, requiring storage systems to handle many simultaneous reads and writes. The specific patterns depend on the parallelization strategy employed, which @sec-model-training examines in detail. From a storage perspective, systems must handle concurrent I/O at rates proportional to the number of processing units, with each potentially writing tens to hundreds of megabytes of intermediate results during model updates. For now, treat checkpoint files, optimizer-state snapshots, and explicit offload paths as large binary artifacts produced during training; @sec-model-training derives why those artifacts arise. Storage systems must provide low-latency access to support efficient coordination. If workers spend more time waiting for storage than performing computations, parallel processing becomes counterproductive regardless of the specific training approach used.
 
-The bandwidth hierarchy that drove the coordination tax in @sec-data-engineering-scaling-distributed-processing-cb9b constrains ML system design at every level, creating bottlenecks that no amount of compute optimization can overcome. While RAM delivers 50 to 200 gigabytes per second bandwidth on modern servers, network storage systems typically provide only one to ten gigabytes per second, and even high-end NVMe SSDs max out at one to seven gigabytes per second sequential throughput. Modern GPUs can process data faster than storage can supply it, creating scenarios where expensive accelerators idle waiting for data. Consider training an image classification model: loading 1,000 images per second at 150 KB each requires 150 MB/s sustained throughput from storage. When the GPU can process images faster than storage delivers them, the *data pipeline*, not the *model*, becomes the bottleneck. A 10-fold mismatch between GPU processing speed and storage bandwidth means expensive accelerators sit idle 90 percent of the time waiting for data. No amount of GPU optimization can overcome this I/O constraint.
+The bandwidth hierarchy that drove the coordination tax in @sec-data-engineering-scaling-distributed-processing-cb9b constrains ML system design at every level, creating bottlenecks that no amount of compute optimization can overcome. While RAM delivers 50 to 200 gigabytes per second bandwidth on modern servers, network storage systems typically provide only one to ten gigabytes per second, and even high-end NVMe SSDs max out at three to seven gigabytes per second sequential throughput. Modern GPUs can process data faster than storage can supply it, creating scenarios where expensive accelerators idle waiting for data. Consider training an image classification model: loading 1,000 images per second at 150 KB each requires 150 MB/s sustained throughput from storage. When the GPU can process images faster than storage delivers them, the *data pipeline*, not the *model*, becomes the bottleneck. A 10-fold mismatch between GPU processing speed and storage bandwidth means expensive accelerators sit idle 90 percent of the time waiting for data. No amount of GPU optimization can overcome this I/O constraint.
 
 Understanding these quantitative relationships enables informed architectural decisions about storage system selection and data pipeline optimization, which become even more critical during distributed training as examined in @sec-model-training. Training throughput is bounded by the minimum of compute capacity and data supply rate: when storage cannot keep the accelerator fed, the bottleneck shifts from silicon to I/O.
 
@@ -4013,7 +4018,7 @@ Designing for high-throughput training starts by matching storage throughput to 
 
 **Problem**: What storage configuration keeps a reference accelerator from being data-starved while training ResNet-50? @Sec-hardware-acceleration explains the device family later; here, the point is how a compute ceiling becomes a data-path budget.
 
-Start with the compute ceiling. The reference accelerator can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about eight GFLOPs for each forward pass, and including the backward training pass raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. The training chapter derives that backward-pass machinery; here, the combined per-image cost is the input to the storage budget. Dividing accelerator peak by model cost gives an upper bound of `{python} StorageBandwidth.max_img_per_s_str`.
+Start with the compute ceiling. The reference accelerator can deliver `{python} StorageBandwidth.a100_fp16_tflop_per_s_str` on dense FP16 operations. ResNet-50 costs about eight GFLOPs for each forward pass, and including the backward training pass raises the training-step cost to about `{python} StorageBandwidth.resnet_fwdbwd_gflop_str` per image. The training chapter derives that backward-pass machinery; here, the combined per-image cost is the input to the storage budget. Dividing accelerator peak by model cost gives a peak-FLOP training ceiling of `{python} StorageBandwidth.max_img_per_s_str`. That ceiling assumes perfect utilization and none of the per-request overhead that dominated the earlier feeding-tax pipeline, so it bounds the storage demand rather than describing an achievable rate.
 
 That compute ceiling becomes a storage requirement once each image must arrive from disk or object storage. With `{python} StorageBandwidth.image_size_kb_str` JPEG-compressed images, the data path must supply that many images per second times `{python} StorageBandwidth.image_size_kb_str` per image, or approximately `{python} StorageBandwidth.required_bw_gb_per_s_str`.
 
@@ -4102,7 +4107,7 @@ Here, $\eta_{\text{format}}$ is a dimensionless useful-byte fraction between 0 a
 
 **Row-oriented (CSV)** storage must read all `{python} FormatEfficiency.total_cols_str` columns to get the `{python} FormatEfficiency.needed_cols_str` needed, giving a useful-byte fraction of `{python} FormatEfficiency.eta_csv_str` and wasting `{python} FormatEfficiency.waste_pct_str` of disk bandwidth. **Column-oriented (Parquet)** storage reads only the needed columns, so $\eta_{\text{format}} \approx$ `{python} FormatEfficiency.eta_parquet_str` ignoring metadata overhead, and the pipeline gets `{python} FormatEfficiency.throughput_ratio_mult_str` higher effective throughput.
 
-**Systems insight**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a `{python} FormatEfficiency.throughput_ratio_mult_str` faster hard drive. The data foundations appendix quantifies serialization overhead and @sec-appdx-data-foundations-row-vs-columnar-formats-bca2 treats row vs. columnar storage layouts and the algebra of data operations (selection, projection, join) in depth.
+**Systems insight**: Switching from CSV to Parquet is not just a file change; it is mathematically equivalent to buying a `{python} FormatEfficiency.throughput_ratio_mult_str` faster hard drive. The data foundations appendix quantifies serialization overhead and @sec-appdx-data-foundations-row-vs-columnar-formats-bca2 treats row vs. columnar storage layouts in depth.
 
 :::
 
@@ -4319,7 +4324,7 @@ The preceding KWS scenario illustrates each of the four categories of data debt.
 
 The first category is **documentation debt**\index{Documentation Debt!data provenance}: data provenance, meaning, and quality characteristics go unrecorded. Datasets without datasheets or data cards [@gebru2021; @pushkarna2022], unlabeled columns, and undocumented transformations create debt that compounds when original authors leave organizations. @sambasivan2021 describe missing metadata, undocumented assumptions, and poor cross-organizational documentation as contributors to data cascades in high-stakes AI systems. The symptoms are unmistakable: columns whose meanings must be reverse-engineered from usage patterns, missing provenance records that block compliance audits, undocumented assumptions that cause silent failures when those assumptions change, and absent quality metrics that prevent informed dataset selection.
 
-The second category, **schema debt**\index{Schema Debt!workarounds}, emerges from accumulated schema workarounds and migrations. When upstream systems change data formats, quick fixes such as string parsing instead of proper type handling or NULL coercion instead of error handling accumulate into fragile transformation logic. Teams can diagnose schema debt by looking for telltale patterns: multiple date format handlers for the same logical field, defensive null checks scattered throughout pipeline code, version-specific parsing branches that grow with each upstream change, and undocumented enum value mappings that break when new values appear. In ML training, the crash site is inside the model graph: model input layers have fixed, compiled dimensions, so a schema change that adds a new categorical column or introduces a previously unseen embedding ID crashes the forward pass because the input tensor dimension no longer matches the first layer's weight matrix. The pipeline jungle example in @sec-data-engineering-four-foundational-pillars-c119 illustrates the upstream failure mode; the point is that the failure looks like a model bug until the data contract violation is traced back.
+The second category, **schema debt**\index{Schema Debt!workarounds}, emerges from accumulated schema workarounds and migrations. When upstream systems change data formats, quick fixes such as string parsing instead of proper type handling or NULL coercion instead of error handling accumulate into fragile transformation logic. Teams can diagnose schema debt by looking for telltale patterns: multiple date format handlers for the same logical field, defensive null checks scattered throughout pipeline code, version-specific parsing branches that grow with each upstream change, and undocumented enum value mappings that break when new values appear. In ML training, the crash site is inside the model graph: model input layers have fixed, compiled dimensions, so a schema change that adds a new categorical column or introduces a previously unseen embedding ID crashes the forward pass because the input tensor dimension no longer matches the first layer's weight matrix. The pipeline jungle example in @sec-data-engineering-data-cascades-systematic-foundations-matter-2efe illustrates the upstream failure mode; the point is that the failure looks like a model bug until the data contract violation is traced back.
 
 The third category, **quality debt**\index{Quality Debt!uncorrected errors}, consists of known data errors that remain uncorrected due to time or resource constraints. A dataset with 3 percent known label errors represents quality debt: each training run on this data produces models carrying those errors. Quality debt compounds through a particularly dangerous feedback loop, because models trained on erroneous data make predictions that become training data for downstream systems, amplifying the original errors across the ecosystem. Concrete indicators include known label error rates not yet corrected, documented biases not yet mitigated, identified duplicates not yet deduplicated, and detected drift not yet addressed through retraining.
 
@@ -4717,7 +4722,7 @@ class DataEngineeringSummaryRecap:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     kws_total_examples_count = kws_total_examples.to(count).magnitude
-    sample_count = round(kws_total_examples_count / MILLION) * MILLION
+    sample_count = kws_total_examples_count
     sample_duration_s = sample_duration.to(second).magnitude
     sample_rate_hz = sample_rate.to(1 / second).magnitude
     sample_width_bytes = sample_width.to(byte).magnitude
@@ -4744,7 +4749,7 @@ class DataEngineeringSummaryRecap:
         allow_fractional=True,
         label="audio sample",
     )
-    kws_dataset_size_gb_str = fmt_memory(kws_dataset_size, unit=GB, precision=0, commas=False)
+    kws_dataset_size_gb_str = fmt_memory(kws_dataset_size, unit=GB, precision=1, commas=False)
 ```
 
 ```{python}
@@ -4757,7 +4762,7 @@ class DataEngineeringSummaryRecap:
 # │
 # │ Goal: Recap NVMe vs. object-storage load speedup in the summary.
 # │ Show: 50× throughput gap between local NVMe and cloud object storage.
-# │ How: Recompute load times for the rounded 736 GB KWS corpus.
+# │ How: Recompute load times for the KWS corpus at its full sample count.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import *
@@ -4776,7 +4781,7 @@ class StorageLoadingRecap:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     total_examples_count = dataset.training_examples.to(count).magnitude
-    sample_count = round(total_examples_count / MILLION) * MILLION
+    sample_count = total_examples_count
     sample_duration_s = sample_duration.to(second).magnitude
     sample_rate_hz = sample_rate.to(1 / second).magnitude
     sample_width_bytes = sample_width.to(byte).magnitude

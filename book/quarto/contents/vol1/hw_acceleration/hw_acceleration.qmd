@@ -151,7 +151,7 @@ Hardware acceleration targets specific terms in the iron law of ML systems\index
 
 Amdahl's Law is not merely theoretical: it explains *why* many GPU upgrades disappoint in practice. The following heatmap (@fig-iron-law-heatmap) visualizes the *acceleration wall*\index{Acceleration Wall!diminishing returns}, the diminishing returns from faster hardware when serial bottlenecks persist. Unless a workload is highly parallelizable ($p > 0.99$), investing in faster hardware yields diminishing returns. The contour values are illustrative ranges for intuition.
 
-::: {#fig-iron-law-heatmap fig-env="figure" fig-pos="htb" fig-cap="**The Iron Law Heatmap**: Total system speedup as a function of accelerator gain ($G_{\text{accel}}$) and parallel fraction ($p$). High speedup appears only near the top-right corner, where both accelerator gain and parallel fraction are high. The acceleration wall is the low-$p$ region: if a workload is even slightly serial ($p < 0.9$), increasing hardware speed yields little benefit. Contours span roughly 1$\times$–500$\times$ speedup." fig-alt="Heatmap of speedup vs. accelerator gain and parallel fraction. High speedup in green and yellow appears near the top-right corner where parallel fraction is near 1.0 and accelerator gain is high; lower-parallel-fraction regions remain blue."}
+::: {#fig-iron-law-heatmap fig-env="figure" fig-pos="htb" fig-cap="**The Iron Law Heatmap**: Total system speedup as a function of accelerator gain ($G_{\text{accel}}$) and parallel fraction ($p$). High speedup appears only near the top-right corner, where both accelerator gain and parallel fraction are high. The acceleration wall is the low-$p$ region: if a workload is even slightly serial ($p < 0.9$), increasing hardware speed yields little benefit. Contours span roughly 1$\times$–500$\times$ speedup." fig-alt="Heatmap of speedup vs. accelerator gain and parallel fraction. High speedup in dark red appears near the top-right corner where parallel fraction is near 1.0 and accelerator gain is high; intermediate values shade through yellow, and lower-parallel-fraction regions remain blue."}
 
 ```{python}
 #| echo: false
@@ -796,7 +796,7 @@ Machine learning constitutes a computational domain with unique characteristics 
 ```{python}
 #| echo: false
 #| label: ml-accelerator-callout-calc
-from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate, fmt_multiple
 
 class MlAcceleratorCallout:
     """A100 throughput and bandwidth vs. server CPU for the ML accelerator callout."""
@@ -804,21 +804,28 @@ class MlAcceleratorCallout:
     # LOAD
     a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
     a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
+    cpu_bandwidth = Hardware.Cloud.ReferenceCPU.memory.bandwidth
+
+    # EXECUTE
+    bw_gap = (a100_bandwidth / cpu_bandwidth).to("").magnitude
 
     # GUARD
     check(a100_peak_flops > 0, "A100 peak FLOP/s must be positive")
     check(a100_bandwidth > 0, "A100 memory bandwidth must be positive")
+    check(30 <= bw_gap <= 60, f"Unexpected A100-vs-CPU bandwidth gap: {bw_gap:.1f}x")
 
     # OUTPUT
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
+    cpu_bw_gb_per_s_str = fmt_bandwidth(cpu_bandwidth, unit=GB / second, precision=0, commas=False)
+    bw_gap_mult_str = fmt_multiple(round(bw_gap), precision=0, commas=False)
 ```
 
 ::: {#dfn-hw-acceleration-ml-accelerator .callout-definition title="ML accelerator"}
 
 ***Machine Learning Accelerators***\index{ML Accelerator!definition}\index{Accelerator!ML} are domain-specific processors whose silicon is designed primarily for the dense matrix operations and regular data flow of neural networks, achieving high $R_{\text{peak}}$ and memory bandwidth utilization for these workloads by devoting die area to arithmetic units rather than to general-purpose control logic.
 
-1.  **Significance**: An ML accelerator's defining feature is not raw arithmetic but a balanced feed of data to that arithmetic. The A100's `{python} MlAcceleratorCallout.a100_bw_tb_per_s_str` of memory bandwidth, roughly a 10$\times$ gap over a server CPU's 200 GB/s, is what lets its `{python} MlAcceleratorCallout.a100_fp16_tflop_per_s_str` of FP16/BF16 throughput stay fed rather than starved [@NVIDIA2020; @choquette2021]. That balance is then specialized by workload: training accelerators size FLOP/s and bandwidth for bidirectional gradient flow and large activation footprints, while inference accelerators trade those for energy efficiency and deterministic single-request latency.
+1.  **Significance**: An ML accelerator's defining feature is not raw arithmetic but a balanced feed of data to that arithmetic. The A100's `{python} MlAcceleratorCallout.a100_bw_tb_per_s_str` of memory bandwidth, roughly a `{python} MlAcceleratorCallout.bw_gap_mult_str` gap over a server CPU's `{python} MlAcceleratorCallout.cpu_bw_gb_per_s_str`, is what lets its `{python} MlAcceleratorCallout.a100_fp16_tflop_per_s_str` of FP16/BF16 throughput stay fed rather than starved [@NVIDIA2020; @choquette2021]. That balance is then specialized by workload: training accelerators size FLOP/s and bandwidth for bidirectional gradient flow and large activation footprints, while inference accelerators trade those for energy efficiency and deterministic single-request latency.
 2.  **Distinction**: The accelerator's gains are conditional on the data flowing through it being parallel and regular. An ML accelerator processes thousands of independent arithmetic operations at once with predictable memory access, so it is orders of magnitude faster than a CPU on dense matrix multiplication but can be slower on irregular control flow such as tree traversal or dynamic programming, where there is no parallel data stream to feed.
 3.  **Common pitfall**: A frequent misconception is that ML accelerators always accelerate ML. An accelerator only delivers its peak throughput when the workload provides enough parallel work to saturate all arithmetic units simultaneously: a batch-1 autoregressive inference request may use only a small fraction of a large training accelerator's compute capacity because sequential token generation cannot fill thousands of parallel compute lanes.
 
@@ -2264,9 +2271,9 @@ The tile sizes are the lever. A larger tile reuses each loaded byte across more 
 ```
 
 ::: {.column-margin}
-![](images/svg/vol1_hw_acceleration_margin_001.svg){width="100%" fig-alt="An efficiency curve that holds high up to a tile width of 128, then drops sharply at 129 where a fringe tile appears; the region past the cliff is shaded red."}
+![](images/svg/vol1_hw_acceleration_margin_001.svg){width="100%" fig-alt="A curve that stays low and nearly flat along a green segment labeled safe, then turns upward and climbs steeply along a red segment labeled fringe."}
 
-*One extra dimension past the tile width tips utilization off a cliff.*
+*One extra dimension past the tile width sends wasted silicon work climbing.*
 :::
 
 The systolic array architecture achieves computational efficiency through synchronized data movement across a structured grid of processing elements. Systolic arrays organize computation around four components:
@@ -2956,7 +2963,7 @@ class TensorLifecycleCalc:
     kws_samples_str = fmt(kws_samples_value, precision=0, commas=True)
     kws_bytes_value_str = fmt_magnitude(BYTES_FP16, unit=byte, precision=0, commas=False)
     dram_energy_pj_bit_str = fmt_energy_per_bit(dram_energy_per_bit, precision=0, commas=False)
-    latency_hbm_ns_str = fmt_time(Hardware.Tech.Memory.DRAM.latency, unit=nanosecond, precision=0, commas=False)
+    latency_dram_ns_str = fmt_time(Hardware.Tech.Memory.DRAM.latency, unit=nanosecond, precision=0, commas=False)
     latency_l2_ns_str = fmt_time(Hardware.Tech.Memory.L2.latency, unit=nanosecond, precision=0, commas=False)
     latency_l1_ns_str = fmt_time(Hardware.Tech.Memory.L1.latency, unit=nanosecond, precision=0, commas=False)
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
@@ -2969,7 +2976,7 @@ Recall the Keyword Spotting lighthouse summarized in @tbl-ml-systems-lighthouse-
 
 1.  **DRAM (HBM)**: The tensor starts here.
     *   **Size**: `{python} TensorLifecycleCalc.kws_samples_str` samples $\times$ `{python} TensorLifecycleCalc.kws_bytes_value_str` bytes (FP16) = `{python} TensorLifecycleCalc.kws_tensor_kb_str`.
-    *   **Latency**: Fetching this from off-chip memory takes ~`{python} TensorLifecycleCalc.latency_hbm_ns_str` (plus queuing delay).
+    *   **Latency**: An off-chip DRAM-class access costs ~`{python} TensorLifecycleCalc.latency_dram_ns_str` (plus queuing delay).
     *   **Energy**: Cost is ~`{python} TensorLifecycleCalc.dram_energy_pj_bit_str`. High cost.
 2.  **L2 cache**: The GPU's DMA engine pulls it here.
     *   **Latency**: ~`{python} TensorLifecycleCalc.latency_l2_ns_str`.
@@ -3221,7 +3228,7 @@ The key pattern in @tbl-memory-hierarchy is that each step down the hierarchy tr
 | **L1/L2 Cache (SRAM)**\index{SRAM!on-chip cache} |      ~1--10 ns      |      High     |    KB--MB    | Caching frequently accessed activations and small weight blocks      |
 | **Scratchpad Memory**                            |      ~5--20 ns      |      High     |      MB      | Software-managed storage for intermediate computations               |
 | **High-Bandwidth Memory (HBM)**                  |       ~100 ns       |   Very High   |      GB      | Storing large model parameters and activations for high-speed access |
-| **Off-Chip DRAM (DDR, GDDR, LPDDR)**             |     ~50--150 ns     |    Moderate   |    GB--TB    | Storing entire model weights that do not fit on-chip                 |
+| **Off-Chip DRAM (DDR, GDDR, LPDDR)**             |       ~300 ns       |    Moderate   |    GB--TB    | Storing entire model weights that do not fit on-chip                 |
 | **Flash Storage (SSD/NVMe)**                     |    ~100 µs--1 ms    |      Low      |      TB      | Storing pretrained models and checkpoints for later loading          |
 
 : **Memory Hierarchy Trade-Offs**: AI accelerators use a multilevel memory hierarchy to balance performance and capacity. Each level provides distinct latency, bandwidth, and capacity characteristics that dictate how neural network components (weights, activations, and intermediate results) should be allocated to minimize bottlenecks and maximize throughput. {#tbl-memory-hierarchy tbl-colwidths="[23,18,15,13,35]"}
@@ -4372,7 +4379,7 @@ $$
 $$
 
 ::: {.column-margin}
-![](images/svg/vol1_hw_acceleration_margin_003.svg){width="100%" fig-alt="A line on a log scale rising steeply from a handful of choices at left to a billion-scale search space at right as loop dimensions grow."}
+![](images/svg/vol1_hw_acceleration_margin_003.svg){width="100%" fig-alt="Two curves rising from a common origin at the left: a red curve that climbs steeply and a blue curve that rises almost linearly, with the widening gap between them shaded pale red."}
 
 *Mapping choices explode combinatorially as loop dimensions grow.*
 :::

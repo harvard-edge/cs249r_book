@@ -1437,7 +1437,7 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(8, 3.5))
 # =============================================================================
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-t_dispatch, t_compute, n_ops = 10, 1, 5
+t_dispatch, t_compute, n_ops = 15, 1, 5
 
 # Eager execution: alternating dispatch and compute
 y_eager = 0.45
@@ -1452,7 +1452,7 @@ for i in range(n_ops):
 # Compiled execution: one dispatch, one fused kernel
 y_compiled = 0
 t_fused_compute = t_compute * n_ops * 0.8
-t_compiled_dispatch = 5
+t_compiled_dispatch = 15
 ax.barh(y_compiled, t_compiled_dispatch, left=0, height=bar_height, color=COLORS['RedLine'], alpha=0.6)
 ax.barh(y_compiled, t_fused_compute, left=t_compiled_dispatch, height=bar_height, color=COLORS['BlueLine'], alpha=0.8)
 
@@ -1771,7 +1771,7 @@ The training-step trace in @sec-ml-frameworks-putting-together-anatomy-training-
 # │ Context: Callout "The Dispatch Tax" comparing overhead-bound vs compute-bound
 # │
 # │ Goal: Demonstrate why compilation benefits small models disproportionately.
-# │ Show: That small MLPs are 92% overhead-bound, while GPT-3 is <0.05% overhead.
+# │ Show: That small MLPs are 97% overhead-bound, while GPT-3 is <0.05% overhead.
 # │ How: Calculate the software-to-hardware execution time ratio for both cases.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -1785,9 +1785,13 @@ class DispatchTaxSmallLarge:
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
+    from mlsysim.engine import calibration
+
     # Scenario 1: Small MLP (Overhead Bound)
     small_ops_count = 6
-    small_dispatch_us = 5.0
+    # Full host-side cost per launch (Python dispatch + kernel launch), not the
+    # kernel-launch component alone.
+    small_dispatch_us = calibration.KERNEL_LAUNCH_LATENCY_US
     small_hw_us = 2.6
 
     # Scenario 2: GPT-3 Layer (Compute Bound)
@@ -1838,7 +1842,7 @@ Summed over $N_{\text{ops}}$ operations, the per-operation dispatch cost $t_{\te
 *   **Hardware time**: $T_{\text{hw}} \approx$ `{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str` (mostly memory latency).
 *   **Software overhead**: $T_{\text{sw}} \approx$ `{python} DispatchTaxSmallLarge.dispatch_n_ops_str` $\times$ `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` = `{python} DispatchTaxSmallLarge.dispatch_sw_time_us_str`.
 *   **Ratio**: `{python} DispatchTaxSmallLarge.dispatch_sw_time_us_str`/`{python} DispatchTaxSmallLarge.dispatch_hw_time_us_str` ≈ `{python} DispatchTaxSmallLarge.dispatch_ratio_small_str`.
-*   **Small-model outcome**: The system spends `{python} DispatchTaxSmallLarge.dispatch_overhead_pct_str` of time in host-side dispatch and kernel-launch overhead. Compilation yields `{python} DispatchTaxSmallLarge.dispatch_compilation_speedup_mult_str` speedup.
+*   **Small-model outcome**: The system spends `{python} DispatchTaxSmallLarge.dispatch_overhead_pct_str` of time in host-side dispatch and kernel-launch overhead. Compilation yields at most `{python} DispatchTaxSmallLarge.dispatch_compilation_speedup_mult_str` speedup.
 
 **Scenario two: GPT-3 Layer (Compute Bound)**
 
@@ -1886,7 +1890,7 @@ class GPT3DispatchScale:
     gpt3_params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
 ```
 
-The principle's implication is that small models benefit disproportionately from compilation. A 100-parameter toy model might see 10$\times$ speedup from torch.compile, while a `{python} GPT3DispatchScale.gpt3_params_b_str`-parameter model sees only 1.3$\times$. This explains why compilation matters most for efficient inference on smaller, deployed models.
+The principle's implication is that small models benefit disproportionately from compilation. A 100-parameter toy model might see up to 10$\times$ speedup from torch.compile, while a `{python} GPT3DispatchScale.gpt3_params_b_str`-parameter model sees only 1.3$\times$. This explains why compilation matters most for efficient inference on smaller, deployed models.
 
 The dispatch tax analysis reveals that small operations are overhead-bound regardless of hardware capability. This observation matters most at the extreme edge of the deployment spectrum, where the entire Python runtime is itself an unacceptable overhead.
 
@@ -2292,7 +2296,7 @@ class ResNetMemory:
 *Training memory dwarfs inference memory.*
 :::
 
-For a network with $N_L$ layers, the system must save approximately $N_L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` in FP32) and processes batch size 64 with $224{\times}224$ images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} ResNetMemory.resnet_fp32_mb_str` (the same size as the parameters themselves), and Adaptive Moment Estimation (Adam) optimizer state contributes ~`{python} ResNetMemory.resnet_adam_mb_str` for its two momentum buffers per parameter. The total training footprint reaches `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str`, compared to just ~`{python} ResNetMemory.resnet_fp32_mb_str` for inference alone.
+For a network with $N_L$ layers, the system must save approximately $N_L$ activation tensors, one per layer, for the entire batch. Consider a concrete example: ResNet-50 has `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` in FP32) and processes batch size 64 with $224{\times}224$ images. The memory breakdown reveals the scale of this trade-off. Forward activations alone consume approximately 8--12 GB (varying by implementation and checkpointing strategy). Parameter gradients add another ~`{python} ResNetMemory.resnet_fp32_mb_str` (the same size as the parameters themselves), and Adaptive Moment Estimation (Adam) optimizer state contributes ~`{python} ResNetMemory.resnet_adam_mb_str` for its two momentum buffers per parameter. Once the CUDA context, workspace buffers, and allocator fragmentation are counted alongside those tensors, the total training footprint reaches `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str`, compared to just ~`{python} ResNetMemory.resnet_fp32_mb_str` for inference alone.
 
 This `{python} ResNetMemory.resnet_training_ratio_range_mult_str` ratio between training and inference memory quantifies why the Data Movement $(D_{\text{vol}})$ term dominates training latency in the iron law. During training, the framework must write all activations to memory during the forward pass and read them back during the backward pass, doubling the memory traffic compared to inference alone. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e derives the four-component training memory equation ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$) in full and works through examples at larger model scales.
 
@@ -4493,7 +4497,7 @@ The arithmetic-intensity column is the diagnostic column. Matrix multiplications
 # │ Context: Showing that small model training is overhead-bound, not compute-bound
 # │
 # │ Goal: On an A100, this small FP32 step's FLOPs and memory each take ~2 μs, but
-# │      Assume 12 ops × 5 μs dispatch = 60 μs overhead. The step is overhead-bound!
+# │      Assume 12 ops × 15 μs dispatch = 180 μs overhead. The step is overhead-bound!
 # │      This explains why torch.compile provides 2-3x speedup for small models.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4509,7 +4513,9 @@ class MnistTrainingStepCalc:
     _hidden = 256
     _output = 10
     n_ops = 12  # Illustrative launch-count assumption
-    us_per_op = 5  # 5 μs dispatch/op
+    from mlsysim.engine import calibration
+
+    us_per_op = calibration.KERNEL_LAUNCH_LATENCY_US  # 15 μs host-side per launch
     peak_flops = Hardware.Cloud.A100.compute.precision_flops["fp32"]
     mem_bw = Hardware.Cloud.A100.memory.bandwidth
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -4529,7 +4535,7 @@ class MnistTrainingStepCalc:
     mem_traffic = forward_mem + bwd_mem
     t_compute = (total_flops / peak_flops).to(microsecond)
     t_memory = (mem_traffic / mem_bw).to(microsecond)
-    t_overhead_us = n_ops * us_per_op  # 60 μs (dominant!)
+    t_overhead_us = n_ops * us_per_op  # 180 μs (dominant!)
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
         t_overhead_us > 10 * max(t_compute.to(microsecond).magnitude, t_memory.to(microsecond).magnitude),
@@ -4659,16 +4665,19 @@ class Model7BMemory:
     params = Models.Language.Llama2_7B.parameters
     a100_mem = Hardware.Cloud.A100.memory.capacity
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    # Subtract against the branded "80 GB" label the prose shows, not the raw
+    # binary magnitude, so the displayed arithmetic closes for the reader.
+    a100_mem_budget = a100_mem.to(GiB) * (GB / GiB)
     fp16 = params * BYTES_FP16  # 14 GB
-    remaining = a100_mem - fp16
+    remaining = a100_mem_budget - fp16
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
-        remaining.to(GiB).magnitude > 60,
-        f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining.to(GiB).magnitude:.1f} GiB.",
+        remaining.to(GB).magnitude > 60,
+        f"7-billion-parameter FP16 weights leave less A100 memory than expected: {remaining.to(GB).magnitude:.1f} GB.",
     )
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_7b_fp16_gb_str = fmt_memory(fp16, unit=GB, precision=0, commas=False)
-    a100_remaining_7b_gb_str = fmt_memory(remaining, unit=GB, precision=1, commas=False)
+    a100_remaining_7b_gb_str = fmt_memory(remaining, unit=GB, precision=0, commas=False)
     a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
 ```
 

@@ -285,7 +285,7 @@ class DeploymentOverviewTable:
     )
 ```
 
-| **Paradigm**  | **Where**        |                         **Latency**                         |                        **Power**                        | **Memory** | **Best For**                 |
+| **Paradigm**  | **Where**        |                       **Latency (ms)**                      |                        **Power**                        | **Memory** | **Best For**                 |
 |:--------------|:-----------------|:-----------------------------------------------------------:|:-------------------------------------------------------:|:----------:|:-----------------------------|
 | **Cloud ML**  | Data centers     |  `{python} DeploymentOverviewTable.cloud_latency_range_str` |                            MW                           |     TB     | Training, complex inference  |
 | **Edge ML**   | Local servers    |  `{python} DeploymentOverviewTable.edge_latency_range_str`  |                          100 W                          |     GB     | Real-time inference, privacy |
@@ -824,7 +824,7 @@ Physical constraints translate latency-vs-throughput trade-offs\index{Latency vs
 | **Same region**                  |    1–5 ms   | Edge servers viable                |
 | **Cross-region**                 |  50–150 ms  | Batch processing only              |
 | **ML Operations**                |             |                                    |
-| **Wake-word detection (TinyML)** |    100 μs   | Always-on feasible at <1 mW        |
+| **Wake-word detection (TinyML)** |   1–10 ms   | Always-on feasible at <1 mW        |
 | **Face detection (mobile)**      |   10–30 ms  | Real-time at 30 FPS                |
 | **GPT-4 first token**            |  200–500 ms | User notices delay                 |
 | **ResNet-50 training step**      |  200–400 ms | Throughput-optimized               |
@@ -842,7 +842,7 @@ Roofline analysis classifies bottlenecks by comparing a workload's arithmetic in
 The pipelined form of the iron law of ML systems from @sec-introduction-iron-law-ml-systems-c32a states that execution time is bounded by the dominant system bottleneck\index{System Bottleneck!dominant constraints}, as @eq-iron-law-extended formalizes:
 $$T = \max\left( \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}, \frac{D_{\text{vol}}}{\text{BW}}, \frac{D_{\text{vol}}}{\text{BW}_{\text{IO}}} \right) + L_{\text{lat}}$$ {#eq-iron-law-extended}
 
-Here, $O$ represents total operations, $R_{\text{peak}}$ is peak compute rate, $\eta_{\text{hw}}$ is hardware utilization efficiency, $D_{\text{vol}}$ is data volume, $\text{BW}$ is memory bandwidth, $\text{BW}_{\text{IO}}$ is I/O bandwidth (storage or network), and $L_{\text{lat}}$ is fixed overhead. The equation identifies which resource (compute, memory, or I/O) limits performance. The dominant term varies by paradigm, and that shift redraws the optimization strategy: cloud training is bound by compute throughput, so a faster accelerator raises performance, whereas LLM inference and edge inference are bound by memory bandwidth, where a faster accelerator yields nothing and only moving fewer bytes helps. @Tbl-ml-systems-paradigm-bottlenecks works through all five paradigms, and @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9\index{D·A·M Taxonomy!bottleneck diagnosis} maps each dominant term to the optimizations that work and the ones that are wasted, turning this diagnosis into an action plan.
+Here, $O$ represents total operations, $R_{\text{peak}}$ is peak compute rate, $\eta_{\text{hw}}$ is hardware utilization efficiency, $D_{\text{vol}}$ is data volume, $\text{BW}$ is memory bandwidth, $\text{BW}_{\text{IO}}$ is I/O bandwidth (storage or network), and $L_{\text{lat}}$ is fixed overhead. The equation identifies which resource (compute, memory, or I/O) limits performance. The dominant term varies by paradigm, and that shift redraws the optimization strategy: cloud training is bound by compute throughput, so a faster accelerator raises performance, whereas LLM inference and edge inference are bound by memory bandwidth, where a faster accelerator yields nothing and only moving fewer bytes helps. @Tbl-ml-systems-paradigm-bottlenecks works through all four paradigms, splitting cloud into training and LLM inference, and @sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9\index{D·A·M Taxonomy!bottleneck diagnosis} maps each dominant term to the optimizations that work and the ones that are wasted, turning this diagnosis into an action plan.
 
 ```{=latex}
 \begingroup
@@ -970,14 +970,15 @@ class ResnetCloud:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     p = SingleNodeModel().solve(m, h, batch_size=1, precision="fp16", efficiency=1.0)
     cloud_compute_ms_value = p.latency_compute.to(millisecond).magnitude
-    cloud_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).to(millisecond).magnitude
+    cloud_traffic_bytes = (p.latency_memory * p.peak_bw_actual).to(byte)
+    cloud_memory_ms_display = p.latency_memory.to(millisecond).magnitude
     cloud_ratio_x_value = cloud_memory_ms_display / cloud_compute_ms_value
-    cloud_ai_display = (m.inference_flops / p.memory_footprint).to(flop / byte).magnitude
+    cloud_ai_display = (m.inference_flops / cloud_traffic_bytes).to(flop / byte).magnitude
     resnet_flops_latex = sci_latex(m.inference_flops.to(flop))
-    resnet_fp16_bytes_latex = sci_latex(p.memory_footprint.to(byte))
+    cloud_traffic_bytes_latex = sci_latex(cloud_traffic_bytes)
     cloud_compute_frac = fmt_frac(resnet_flops_latex, sci_latex(p.peak_flops_actual.to(flop / second)), f"{cloud_compute_ms_value:.3f}", "ms")
-    cloud_memory_frac = fmt_frac(resnet_fp16_bytes_latex, sci_latex(p.peak_bw_actual.to(byte / second)), f"{cloud_memory_ms_display:.3f}", "ms")
-    cloud_ai_frac = fmt_frac(resnet_flops_latex, resnet_fp16_bytes_latex, f"{round(cloud_ai_display):.0f}", "FLOP/byte")
+    cloud_memory_frac = fmt_frac(cloud_traffic_bytes_latex, sci_latex(p.peak_bw_actual.to(byte / second)), f"{cloud_memory_ms_display:.3f}", "ms")
+    cloud_ai_frac = fmt_frac(resnet_flops_latex, cloud_traffic_bytes_latex, f"{round(cloud_ai_display):.0f}", "FLOP/byte")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     cloud_peak_tflop_per_s_str = fmt_flop_rate(p.peak_flops_actual, unit=TFLOPs / second, precision=0, commas=False)
@@ -989,7 +990,7 @@ class ResnetCloud:
 - Peak compute: `{python} ResnetCloud.cloud_peak_tflop_per_s_str` (FP16)
 - Memory bandwidth: `{python} ResnetCloud.cloud_bandwidth_tb_per_s_str`
 - Compute time: $T_{\text{comp}}$ = `{python} ResnetCloud.cloud_compute_frac`
-- Memory time: $T_{\text{mem}}$ = `{python} ResnetCloud.cloud_memory_frac`
+- Memory time (weights plus activations): $T_{\text{mem}}$ = `{python} ResnetCloud.cloud_memory_frac`
 - **Result**: Bottleneck = `{python} ResnetCloud.cloud_bottleneck_str` (`{python} ResnetCloud.cloud_ratio_mult_str` slower than compute)
 - **Analysis**: Compute per byte moved = `{python} ResnetCloud.cloud_ai_frac`. This ratio measures how much arithmetic the workload performs for each byte loaded. When the ratio exceeds the hardware's compute-to-bandwidth ratio $(R_{\text{peak}}/\text{BW})$, the workload is compute bound; below it, the workload is memory bound. For single-image inference, the low batch size yields limited reuse, explaining why even powerful accelerators can be memory bound at batch=1.
 
@@ -1025,19 +1026,20 @@ class ResnetMobile:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     p = SingleNodeModel().solve(m, h, batch_size=1, precision="int8", efficiency=1.0)
     p_cloud = SingleNodeModel().solve(m, h_cloud, batch_size=1, precision="fp16", efficiency=1.0)
-    cloud_memory_ms_display = (p_cloud.memory_footprint / p_cloud.peak_bw_actual).to(millisecond).magnitude
+    cloud_memory_ms_display = p_cloud.latency_memory.to(millisecond).magnitude
     mobile_compute_ms_display = (m.inference_flops / p.peak_flops_actual).to(millisecond).magnitude
-    mobile_memory_ms_display = (p.memory_footprint / p.peak_bw_actual).to(millisecond).magnitude
+    mobile_traffic_bytes = (p.latency_memory * p.peak_bw_actual).to(byte)
+    mobile_memory_ms_display = p.latency_memory.to(millisecond).magnitude
     mobile_ratio_x_value = mobile_memory_ms_display / mobile_compute_ms_display
     bw_advantage_x_value = h_cloud.memory.bandwidth / p.peak_bw_actual
     inference_speed_x_value = mobile_memory_ms_display / cloud_memory_ms_display
     resnet_flops_latex = sci_latex(m.inference_flops.to(flop))
     resnet_int8_ops_latex = f"{resnet_flops_latex} \\text{{ INT8 ops}}"
     mobile_npu_ops_latex = f"{sci_latex(p.peak_flops_actual.to(flop/second))} \\text{{ INT8 ops/s}}"
-    resnet_int8_bytes_latex = sci_latex(p.memory_footprint.to(byte))
+    mobile_traffic_bytes_latex = sci_latex(mobile_traffic_bytes)
     mobile_npu_bw_latex = sci_latex(p.peak_bw_actual.to(byte / second))
     mobile_compute_frac = fmt_frac(resnet_int8_ops_latex, mobile_npu_ops_latex, f"{mobile_compute_ms_display:.2f}", "ms")
-    mobile_memory_frac = fmt_frac(resnet_int8_bytes_latex, mobile_npu_bw_latex, f"{mobile_memory_ms_display:.2f}", "ms")
+    mobile_memory_frac = fmt_frac(mobile_traffic_bytes_latex, mobile_npu_bw_latex, f"{mobile_memory_ms_display:.2f}", "ms")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     mobile_tops_str = fmt_qty(p.peak_flops_actual, TOPS, precision=0, commas=False)
@@ -1052,7 +1054,7 @@ class ResnetMobile:
 - Memory bandwidth: ~`{python} ResnetMobile.mobile_bw_gb_per_s_str` (LPDDR5)
 - Model size: `{python} ResnetSetup.resnet_int8_mb_str` (INT8 quantized)
 - Compute time: $T_{\text{comp}}$ = `{python} ResnetMobile.mobile_compute_frac`
-- Memory time: $T_{\text{mem}}$ = `{python} ResnetMobile.mobile_memory_frac`
+- Memory time (weights plus activations): $T_{\text{mem}}$ = `{python} ResnetMobile.mobile_memory_frac`
 - **Result**: Bottleneck = `{python} ResnetMobile.mobile_bottleneck_str` (`{python} ResnetMobile.mobile_ratio_mult_str` slower than compute)
 
 **Systems insight**: Both platforms are memory bound for single-image inference. The A100's faster memory bandwidth (`{python} ResnetCloud.cloud_bandwidth_tb_per_s_str` vs. `{python} ResnetMobile.mobile_bw_gb_per_s_str` = `{python} ResnetMobile.bw_advantage_mult_str`) translates to roughly `{python} ResnetMobile.inference_speed_mult_str` faster inference; peak compute alone is not the limiting comparison. This explains why byte-reduction and lower-precision techniques can beat simply buying more peak FLOP/s for deployment.
@@ -1077,7 +1079,7 @@ Compression matters more, not less, as the hardware budget tightens. As systems 
 # │          and the deployment decision thresholds table that follows it.
 # │
 # │ Goal: Ground abstract deployment paradigms in concrete hardware specs for
-# │       TPU v4 Pod (Cloud), DGX Spark (Edge), and ESP32-CAM (TinyML).
+# │       TPU v4 Pod (Cloud), DGX Spark (Edge), and ESP32-S3 (TinyML).
 # │ Show: The roughly 8-order-of-magnitude power gap (MW cloud to sub-watt TinyML)
 # │       and 6-order-of-magnitude cost gap ($millions to $10) across tiers.
 # │ How: Read memory, power, and cost from MLSysIM platform and hardware registries.
@@ -1194,7 +1196,7 @@ The hardware spectrum\index{Hardware Spectrum!resource progression} turns that b
 | **Cloud ML**  |  Google TPU v4 Pod  | `{python} HardwareSpectrumSetup.tpu_chip_count_str`, `{python} HardwareSpectrumSetup.cloud_peak_eflop_per_s_str` |     `{python} HardwareSpectrumSetup.cloud_mem_tb_str` HBM2     |                          Cloud-scale (PB)                          |                                     ~`{python} HardwareSpectrumSetup.cloud_pwr_mw_str`                                     |                                          Cloud service (rental)                                          |
 | **Edge ML**   |   NVIDIA DGX Spark  |               GB10 Grace Blackwell, `{python} HardwareSpectrumSetup.edge_peak_pflop_per_s_str` AI                |    `{python} HardwareSpectrumSetup.edge_mem_gb_str` LPDDR5x    |       `{python} HardwareSpectrumSetup.edge_stor_tb_str` NVMe       |                                      ~`{python} HardwareSpectrumSetup.edge_pwr_w_str`                                      | ~`{python} HardwareSpectrumSetup.edge_price_min_str`–`{python} HardwareSpectrumSetup.edge_price_max_str` |
 | **Mobile ML** | Flagship Smartphone |                                           Mobile SoC (CPU + GPU + NPU)                                           | `{python} RepresentativeSystemsMobileRow.mobile_ram_range_str` | `{python} RepresentativeSystemsMobileRow.mobile_storage_range_str` |                               `{python} RepresentativeSystemsMobileRow.mobile_tdp_range_str`                               |                                                  \$999+                                                  |
-| **TinyML**    |      ESP32-CAM      |                                               Dual-core @ 240 MHz                                                |                           520 KB RAM                           |      `{python} HardwareSpectrumSetup.tiny_flash_mb_str` Flash      | `{python} HardwareSpectrumSetup.tiny_pwr_min_w_str`–`{python} HardwareSpectrumSetup.tiny_pwr_max_w_str` active board power |                           `{python} HardwareSpectrumSetup.tiny_price_usd_str`                            |
+| **TinyML**    |       ESP32-S3      |                                               Dual-core @ 240 MHz                                                |                           520 KB RAM                           |      `{python} HardwareSpectrumSetup.tiny_flash_mb_str` Flash      | `{python} HardwareSpectrumSetup.tiny_pwr_min_w_str`–`{python} HardwareSpectrumSetup.tiny_pwr_max_w_str` active board power |                           `{python} HardwareSpectrumSetup.tiny_price_usd_str`                            |
 
 : **Hardware Spectrum (Concrete Platforms)**\index{Hardware Spectrum!deployment platforms}\index{Workstation-Class Accelerators!edge deployment}: Representative devices that instantiate each deployment paradigm from @tbl-deployment-paradigms-overview. Where the conceptual table defines operating regimes, this table provides the specific processors, memory capacities, power envelopes, and price points that practitioners use to match workloads to hardware. The DGX Spark sits at the high end of the edge spectrum; most edge deployments use far smaller devices (for example, Jetson Orin Nano). We include it to illustrate the ceiling of noncloud deployment. NVIDIA's Jetson family itself spans a wide SKU spectrum, from Jetson Orin Nano (7--15 W) through Jetson Orin NX (10--25 W) to Jetson AGX Orin (15--60 W); throughout this book, Jetson power figures should be read against the specific SKU named in context. {#tbl-representative-systems tbl-colwidths="[12,14,22,13,11,14,14]"}
 
@@ -1296,7 +1298,7 @@ class DeploymentThresholdsTable:
     tiny_latency_range_str = MarkdownStr(Platforms.Tiny.latency_range_ms)
 ```
 
-| **Paradigm**  |                            **Compute**                            |                        **Memory bandwidth**                       |                                    **Power**                                     |                          **Latency**                          |
+| **Paradigm**  |                            **Compute**                            |                        **Memory bandwidth**                       |                                    **Power**                                     |                        **Latency (ms)**                       |
 |:--------------|:-----------------------------------------------------------------:|:-----------------------------------------------------------------:|:--------------------------------------------------------------------------------:|:-------------------------------------------------------------:|
 | **Cloud ML**  | `{python} DeploymentThresholdsTable.cloud_thresh_tflop_per_s_str` | `{python} DeploymentThresholdsTable.cloud_thresh_bw_gb_per_s_str` |                              MW class (PUE 1.1–1.3)                              |  `{python} DeploymentThresholdsTable.cloud_latency_range_str` |
 | **Edge ML**   |  `{python} DeploymentThresholdsTable.edge_thresh_pflop_per_s_str` |  `{python} DeploymentThresholdsTable.edge_thresh_bw_gb_per_s_str` |                                   100 W class                                    |  `{python} DeploymentThresholdsTable.edge_latency_range_str`  |
@@ -4199,7 +4201,7 @@ The `{python} MobilePowerFallacyCalc.high_power_w_str` workload can also trigger
 
 **Fallacy**: *TinyML represents scaled-down mobile ML.*
 
-The difference is qualitative, not just quantitative. As @sec-ml-systems-tinyml-advantages-operational-tradeoffs-2d40 establishes, TinyML microcontrollers provide 256 KB to 1 MB of memory vs. mobile devices with 8–16 GB, a 10,000$\times$ difference requiring entirely different algorithms. Mobile ML uses reduced-precision arithmetic with minimal accuracy loss; TinyML requires extreme precision reduction that sacrifices 10--15 percent accuracy for 32$\times$ memory reduction. Mobile devices run models with millions of parameters; TinyML models contain 10,000–100,000 parameters, demanding distinct architectural choices such as specialized lightweight operations designed to minimize multiply-accumulate counts. Power budgets show similar discontinuities: mobile inference consumes 1--5 W, while TinyML targets sub-1 mW for battery-free energy harvesting. These thousand-fold gaps make TinyML a distinct problem class, not a smaller version of mobile ML. Teams that apply mobile optimization techniques directly to TinyML projects discover that quantization from FP32 to INT8\index{FP32 to INT8!TinyML limits} is insufficient when models must fit in 64 KB, forcing complete architectural redesign.
+The difference is qualitative, not just quantitative. As @sec-ml-systems-tinyml-advantages-operational-tradeoffs-2d40 establishes, TinyML microcontrollers provide 256 KB to 1 MB of memory vs. mobile devices with 8–16 GB, a 10,000$\times$ difference requiring entirely different algorithms. Mobile ML uses reduced-precision arithmetic with minimal accuracy loss; TinyML requires extreme precision reduction that sacrifices 10--15 percent accuracy for 32$\times$ memory reduction. Mobile devices run models with millions of parameters; TinyML models contain 10,000–250,000 parameters, demanding distinct architectural choices such as specialized lightweight operations designed to minimize multiply-accumulate counts. Power budgets show similar discontinuities: mobile inference consumes 1--5 W, while TinyML targets sub-1 mW for battery-free energy harvesting. These thousand-fold gaps make TinyML a distinct problem class, not a smaller version of mobile ML. Teams that apply mobile optimization techniques directly to TinyML projects discover that quantization from FP32 to INT8\index{FP32 to INT8!TinyML limits} is insufficient when models must fit in 64 KB, forcing complete architectural redesign.
 
 :::
 

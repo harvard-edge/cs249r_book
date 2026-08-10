@@ -44,7 +44,7 @@ A single production decision can travel through the entire stack. A data pipelin
 
 - Synthesize core ML systems principles into a framework for reasoning across Data, Algorithm, and Machine constraints
 - Trace how data, architecture, compression, hardware, serving, operations, and governance decisions propagate constraints across an ML system
-- Apply lighthouse-model reasoning to diagnose bottlenecks across cloud, mobile, edge, recommendation, and TinyML deployments
+- Apply lighthouse-model reasoning to diagnose bottlenecks across cloud, edge, mobile, and TinyML deployments
 - Evaluate deployment trade-offs using latency budgets, memory movement, drift, responsibility, and sustainability constraints
 - Design a systems engineering posture for emerging contexts before fleet-scale coordination costs dominate
 
@@ -84,9 +84,9 @@ Once the substrate existed, the engineering problem shifted from building to ren
 Each chapter contributed a piece. The real lesson, however, lies not in any individual piece but in *how* the pieces constrain each other. An architecture choice enabled a compression choice, which enabled an acceleration choice, which shaped a serving constraint, which defined an operational requirement. MobileNetV2's depthwise-separable design targeted efficient mobile vision inference [@sandler2018], while integer-arithmetic quantization made INT8 deployment a practical inference path [@jacob2018]. That combination can enable mobile NPU deployment, shape a P99 latency constraint, and require drift monitoring across heterogeneous device populations. Every decision propagated forward, and the engineer who understands only one layer cannot predict how changes ripple through the rest.
 
 ::: {.column-margin}
-![](images/svg/vol1_conclusion_margin_001.svg){width="100%" fig-alt="Causal chain from architecture choice to INT8 quantization, P99 serving latency, and drift or governance obligations."}
+![](images/svg/vol1_conclusion_margin_001.svg){width="100%" fig-alt="Causal chain of four nodes joined by arrows: architecture choice, INT8 quantization, P99 serving latency, and drift."}
 
-*Architecture choices cascade into compression, serving, drift, and governance.*
+*Architecture choices cascade into compression, serving latency, and drift.*
 :::
 
 The Lighthouse Models now become a constraint map for reasoning about ML systems as wholes rather than as collections of parts. They trace the same interactions across chapters before the synthesis formalizes thirteen quantitative principles, including exact bounds and assumption-dependent diagnostic models, for reasoning about ML system behavior. Those principles then carry into three application domains, future directions where systems thinking will matter most, and the engineering responsibility that accompanies building systems of this power.
@@ -104,7 +104,7 @@ The five Lighthouse workloads expose distinct constraint regimes:
 - **GPT-2/Llama**\index{GPT-2!memory bandwidth}: Autoregressive language generation exposes the opposite wall, where every token reloads enough state that memory bandwidth, KV-cache growth, and model parallelism dominate serving cost.
 - **MobileNetV2**\index{MobileNetV2!efficiency under constraint}: Depthwise separable convolutions and INT8 quantization trade representational capacity for mobile NPU deployment in a power-constrained regime.
 - **DLRM**\index{DLRM!capacity-bound workload}: Terabyte-scale embedding tables shift the binding constraint from memory *bandwidth* to memory *capacity*, forcing engineers to design around where data physically resides and how sparse operations behave.
-- **Keyword spotting (KWS)/Wake Vision**\index{Keyword Spotting!sub-megabyte models}: Sub-megabyte models running on microcontrollers with always-on inference under milliwatt power budgets make every byte and every milliwatt matter.
+- **Keyword Spotting (KWS)**\index{Keyword Spotting!sub-megabyte models}: Sub-megabyte models running on microcontrollers with always-on inference under milliwatt power budgets make every byte and every milliwatt matter.
 
 Together, these five workloads span the full deployment spectrum from data center to microcontroller, probing the bottlenecks these principles diagnose and testing every optimization strategy the book has taught. The systems thinking we developed by tracing these Lighthouses across chapters, from architecture design through training, optimization, and deployment, is the integrated perspective that distinguishes ML systems engineering from isolated algorithm development.
 
@@ -677,7 +677,7 @@ class ConclusionRoofline:
         f"T_{{\\text{{mem}}}} = \\frac{{{dvol_gb_val:.0f} \\text{{ GB}}}}{{{h100_bw_gb_val:.0f} \\text{{ GB/s}}}} \\approx {t_mem_ms_val:.1f} \\text{{ ms}}"
     )
     t_comp_eq = fmt_math(
-        f"T_{{\\text{{comp}}}} = \\frac{{{compute_gflops_val:.0f} \\times 10^9}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}}}} = {t_comp_ms_val:.2f} \\text{{ ms}}"
+        f"T_{{\\text{{comp}}}} = \\frac{{{compute_gflops_val:.0f} \\times 10^9 \\text{{ FLOP}}}}{{{h100_peak_tflops_val:.0f} \\times 10^{{12}} \\text{{ FLOP/s}}}} \\approx {t_comp_ms_val:.2f} \\text{{ ms}}"
     )
 ```
 
@@ -789,7 +789,7 @@ The framework is most useful when it forecasts where constraints may bind next. 
 
 ### Applying principles to emerging deployment contexts { .unnumbered}
 
-Deployment diversity tests whether one quantitative framework can explain systems with contrasting resource regimes. The cloud offers abundant power and centralized hardware, edge and mobile devices operate under latency and battery budgets, and TinyML and embedded systems compress the same design problem into kilobytes and milliwatts. Generative AI is not a fourth deployment environment; it is a workload class that stresses all three.
+Deployment diversity tests whether one quantitative framework can explain systems with contrasting resource regimes. The cloud offers abundant power and centralized hardware, edge devices operate under latency budgets, mobile devices under battery and thermal budgets, and TinyML and embedded systems compress the same design problem into kilobytes and milliwatts. Generative AI is not a fifth deployment paradigm; it is a workload class that stresses all four.
 
 In the cloud regime, the binding decision is how to turn abundant hardware into useful throughput without letting data movement, capacity, or cost dominate. Dense workloads such as ResNet-50 chase GPU utilization through kernel fusion, mixed precision training, and gradient compression, while DLRM-style recommendation systems must also manage embedding-table capacity, placement, and sparse access patterns. @Sec-model-compression and @sec-model-training explored these techniques, demonstrating how they combine to balance performance optimization with cost efficiency at scale.
 
@@ -824,17 +824,20 @@ class EdgeReferenceRatios:
     # EXECUTE
     int8_peak_ratio = Hardware.Cloud.H100.compute.precision_flops["int8"] / mobile_int8_peak
     power_ratio = h_h100.tdp / mobile_power
-    memory_ratio = h_h100.memory.capacity / phone_ram
+    # Branded-label comparison: the book displays H100 memory as 80 GB and phone
+    # RAM as 8 GB, so the reader-facing ratio compares those branded magnitudes
+    # rather than mixing the stored binary capacity (80 GiB) with decimal GB.
+    memory_ratio = h_h100.memory.capacity.to(GiB).magnitude / phone_ram.to(GB).magnitude
 
     # GUARD
     check(int8_peak_ratio.to("").magnitude > 10, "Mobile edge example should be far below H100 throughput.")
-    check(memory_ratio.to("").magnitude > 5, "Mobile edge example should have meaningfully less memory headroom.")
+    check(memory_ratio > 5, "Mobile edge example should have meaningfully less memory headroom.")
     check(power_ratio.to("").magnitude > 100, "Mobile edge example should have a much smaller power envelope.")
 
     # OUTPUT
     int8_peak_ratio_mult_str = fmt_multiple(int8_peak_ratio.to("").magnitude, precision=1, commas=False)
     power_ratio_mult_str = fmt_multiple(power_ratio.to("").magnitude, precision=1, commas=False)
-    memory_ratio_mult_str = fmt_multiple(memory_ratio.to("").magnitude, precision=1, commas=False)
+    memory_ratio_mult_str = fmt_multiple(memory_ratio, precision=0, commas=False)
 ```
 
 In contrast, mobile and edge systems face stringent power, memory, and latency constraints that demand sophisticated hardware-software co-design\index{Hardware-Software Co-design!edge deployment}. Efficient architectures introduced in @sec-network-architectures (such as depthwise separable convolutions and neural architecture search) combined with compression techniques from @sec-model-compression (such as quantization and pruning) enable deployment on devices where the book's reference mobile NPU has about `{python} EdgeReferenceRatios.int8_peak_ratio_mult_str` lower INT8 peak throughput, about `{python} EdgeReferenceRatios.memory_ratio_mult_str` less memory headroom, and about `{python} EdgeReferenceRatios.power_ratio_mult_str` smaller power envelope than an H100-class accelerator. Edge deployment matters when latency, privacy, connectivity, energy, or per-request cost make centralized serving the wrong abstraction; in those regimes, efficiency becomes part of accessibility rather than a separate optimization[^fn-ai-democratization].
@@ -843,7 +846,7 @@ In contrast, mobile and edge systems face stringent power, memory, and latency c
 
 Autoregressive generative models, illustrated by the GPT-2/Llama Lighthouse family, stress the same constraints at token-serving scale. Autoregressive generation is inherently memory-bound because each token requires loading the model weights, making the arithmetic intensity law the governing constraint. Techniques such as model partitioning across devices (splitting one model across multiple accelerators), which extends the parallelism @sec-model-training previewed, and speculative decoding (@sec-model-serving) reshape the silicon contract by trading compute for latency, demonstrating how the principles adapt as workload structure changes.
 
-At the opposite extreme, TinyML and embedded systems, the domain of our KWS/Wake Vision Lighthouse, face kilobyte memory budgets, milliwatt power envelopes, and decade-long deployment lifecycles. Success in these contexts validates the full systems engineering approach: careful measurement reveals actual bottlenecks, hardware co-design maximizes efficiency, and planning for failure ensures reliability despite severe resource limitations. Mobile deployment constraints have driven efficient architecture families such as MobileNets [@howard2017mobilenets; @sandler2018] and EfficientNets [@tan2019efficientnet] that also inform broader model-efficiency practice, demonstrating how systems constraints can catalyze algorithmic innovation.
+At the opposite extreme, TinyML and embedded systems, the domain of our KWS Lighthouse, face kilobyte memory budgets, milliwatt power envelopes, and decade-long deployment lifecycles. Success in these contexts validates the full systems engineering approach: careful measurement reveals actual bottlenecks, hardware co-design maximizes efficiency, and planning for failure ensures reliability despite severe resource limitations. Mobile deployment constraints have driven efficient architecture families such as MobileNets [@howard2017mobilenets; @sandler2018] and EfficientNets [@tan2019efficientnet] that also inform broader model-efficiency practice, demonstrating how systems constraints can catalyze algorithmic innovation.
 
 The same physical bounds apply across these paradigms, while fitted statistical models and SLO policies remain deployment-specific. Success depends on checking those distinctions and applying the principles together rather than pursuing isolated optimizations. The more deployment contexts a system spans, the more failure surfaces it creates. Robustness, not coverage alone, therefore becomes a binding constraint at the next frontier.
 
