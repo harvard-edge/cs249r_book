@@ -1,5 +1,6 @@
 // Curated study plans + custom learning paths
 import { getQuestionsByFilter, getCompetencyAreas, Question } from './corpus';
+import { getAttempts } from './progress';
 
 export interface StudyPlan {
   id: string;
@@ -278,16 +279,12 @@ export function getPrepStats(path: CustomPath, questions: Question[]): PrepStats
   const dailyTarget = daysRemaining > 0 ? Math.ceil(remaining / daysRemaining) : remaining;
 
   const today = new Date().toISOString().split('T')[0];
-  let todayCompleted = 0;
-  try {
-    const { getAttempts } = require('./progress') as typeof import('./progress');
-    const attempts = getAttempts();
-    const completedSet = new Set(progress.completedIds);
-    todayCompleted = attempts.filter(a =>
-      new Date(a.timestamp).toISOString().split('T')[0] === today &&
-      completedSet.has(a.questionId)
-    ).length;
-  } catch {}
+  const attempts = getAttempts();
+  const completedSet = new Set(progress.completedIds);
+  const todayCompleted = attempts.filter(a =>
+    new Date(a.timestamp).toISOString().split('T')[0] === today &&
+    completedSet.has(a.questionId)
+  ).length;
 
   const daysSinceStart = Math.max(1, Math.ceil((Date.now() - (progress.startedAt || path.createdAt)) / 86400000));
   const pace = completed / daysSinceStart;
