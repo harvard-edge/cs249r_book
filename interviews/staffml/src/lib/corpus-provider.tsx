@@ -85,7 +85,14 @@ export function CorpusProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<VaultState>({ apiBase: null, ready: false });
 
   useEffect(() => {
-    // Static mode (local dev / offline): no worker to talk to.
+    // The service worker registers unconditionally: besides the vault cache
+    // it provides the app-shell/PWA offline layer (see public/sw.js), which
+    // must not depend on the vault API being configured or reachable —
+    // offline is exactly when the probe below fails. The vault section of
+    // the worker stays inert until it receives SET_VAULT_API_ORIGIN.
+    registerServiceWorker();
+
+    // Static mode (local dev / offline): no worker API to talk to.
     if (getVaultMode() === "static") {
       setState({ apiBase: null, ready: true });
       return;
@@ -99,14 +106,14 @@ export function CorpusProvider({ children }: { children: ReactNode }) {
 
     let cancelled = false;
     // Probe the API to confirm it's reachable before enabling worker-backed
-    // search + the offline service worker. On any failure we degrade to
-    // client-side search; per-question hydration in corpus.ts has its own
-    // resilient path.
+    // search + vault caching in the service worker. On any failure we
+    // degrade to client-side search; per-question hydration in corpus.ts
+    // has its own resilient path.
     vaultFetchJson(`${apiBase}/manifest`, { timeoutMs: 5_000, retries: 1 })
       .then(() => {
         if (cancelled) return;
         setState({ apiBase, ready: true });
-        registerVaultServiceWorker(apiBase);
+        sendVaultApiOrigin(apiBase);
       })
       .catch(() => {
         if (!cancelled) setState({ apiBase: null, ready: true });
@@ -125,7 +132,17 @@ export function CorpusProvider({ children }: { children: ReactNode }) {
 }
 
 /**
- * Register the offline service worker and tell it which API origin to cache.
+ * Register the service worker (vault cache + app-shell/PWA offline layer).
+ */
+function registerServiceWorker(): void {
+  if (!("serviceWorker" in navigator)) return;
+  navigator.serviceWorker
+    .register(`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/sw.js`)
+    .catch(() => {/* SW registration failure is non-fatal */});
+}
+
+/**
+ * Tell the service worker which vault API origin to cache.
  *
  * The message must go to an ACTIVE worker. On a first-ever registration the
  * worker is still installing, so `registration.active` is null — posting to it
@@ -133,11 +150,9 @@ export function CorpusProvider({ children }: { children: ReactNode }) {
  * `navigator.serviceWorker.ready` resolves only once a worker is active, so we
  * post through it.
  */
-function registerVaultServiceWorker(apiBase: string): void {
+function sendVaultApiOrigin(apiBase: string): void {
   if (!("serviceWorker" in navigator)) return;
-  navigator.serviceWorker
-    .register(`${process.env.NEXT_PUBLIC_BASE_PATH || ""}/sw.js`)
-    .then(() => navigator.serviceWorker.ready)
+  navigator.serviceWorker.ready
     .then((reg) => {
       reg.active?.postMessage({ type: "SET_VAULT_API_ORIGIN", origin: apiBase });
     })
