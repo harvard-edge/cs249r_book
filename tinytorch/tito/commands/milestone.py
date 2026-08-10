@@ -1005,7 +1005,7 @@ class MilestoneCommand(BaseCommand):
             result = subprocess.run(
                 [sys.executable, str(demo_path)],
                 capture_output=False,
-                text=True
+                text=True, encoding="utf-8", errors="replace"
             )
 
             if result.returncode == 0:
@@ -1302,7 +1302,7 @@ class MilestoneCommand(BaseCommand):
                 result = subprocess.run(
                     [sys.executable, script_file],
                     capture_output=False,
-                    text=True
+                    text=True, encoding="utf-8", errors="replace"
                 )
 
                 console.print("\n" + "━" * 80)

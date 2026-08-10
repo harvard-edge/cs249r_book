@@ -161,7 +161,7 @@ def convert_py_to_notebook(module_path: Path, venv_path: Path, console) -> bool:
         venv_jupytext = get_venv_bin_dir(venv_path) / "jupytext"
 
         if venv_jupytext.exists():
-            test_result = subprocess.run([str(venv_jupytext), "--version"], capture_output=True, text=True)
+            test_result = subprocess.run([str(venv_jupytext), "--version"], capture_output=True, text=True, encoding="utf-8", errors="replace")
             if test_result.returncode == 0:
                 jupytext_path = str(venv_jupytext)
                 console.print(f"[dim]🔧 Using venv jupytext: {venv_jupytext}[/dim]")
@@ -175,7 +175,7 @@ def convert_py_to_notebook(module_path: Path, venv_path: Path, console) -> bool:
         result = subprocess.run(
             [jupytext_path, "--to", "ipynb", str(dev_file), "--output", str(notebook_file)],
             capture_output=True,
-            text=True,
+            text=True, encoding="utf-8", errors="replace",
             cwd=project_root,
         )
 
