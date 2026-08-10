@@ -6,6 +6,7 @@ failures inside `save_async()` were silently swallowed and never surfaced
 to the caller. See:
 https://github.com/harvard-edge/cs249r_book/issues/1985
 """
+
 import asyncio
 
 import pytest
@@ -80,6 +81,30 @@ def test_wasm_save_failure_is_captured_not_silent(tmp_path, monkeypatch):
     assert ledger.save_pending is False
     assert ledger.last_save_error is not None
     assert "QuotaExceededError" in ledger.last_save_error
+
+
+def test_flush_observes_multiple_completed_saves(tmp_path, monkeypatch):
+    """flush() must retain and observe every save, even after tasks finish."""
+    ledger = _ledger_with_home(monkeypatch, tmp_path)
+    _force_wasm(monkeypatch, ledger)
+    completed = []
+
+    async def fake_save_async(self):
+        await asyncio.sleep(0)
+        completed.append(True)
+
+    monkeypatch.setattr(DesignLedger, "save_async", fake_save_async)
+
+    async def run():
+        first = ledger.save(step=1, design={"first": True})
+        second = ledger.save(step=2, design={"second": True})
+        await asyncio.gather(first, second)
+        assert ledger.save_pending is False
+        await ledger.flush()
+
+    asyncio.run(run())
+    assert len(completed) == 2
+    assert ledger._pending_save_tasks == set()
 
 
 def test_asave_raises_on_failure_directly(tmp_path, monkeypatch):

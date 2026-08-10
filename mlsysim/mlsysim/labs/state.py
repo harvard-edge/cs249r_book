@@ -4,14 +4,15 @@
 
 import json
 import sys
-from pathlib import Path
 from dataclasses import dataclass, asdict, field
+from pathlib import Path
 from typing import Optional, Dict, Any
 
 
 @dataclass
 class LedgerState:
     """The schema for the persistent student state."""
+
     track: Optional[str] = None
     current_step: int = 0
     history: Dict[int, Dict[str, Any]] = field(default_factory=dict)
@@ -31,8 +32,9 @@ class DesignLedger:
 
         self._state = LedgerState()
 
-        # Background WASM save task, if one is currently running.
-        self._pending_save_task = None
+        # WASM save tasks remain tracked until flush() observes them. Keeping
+        # completed tasks lets a later flush() re-raise persistence failures.
+        self._pending_save_tasks = set()
 
         # Error from the most recent failed background save.
         self._last_save_error: Optional[str] = None
@@ -49,11 +51,8 @@ class DesignLedger:
 
     @property
     def save_pending(self) -> bool:
-        """True while a WASM background save has not finished yet."""
-        return (
-            self._pending_save_task is not None
-            and not self._pending_save_task.done()
-        )
+        """True while at least one WASM background save is still running."""
+        return any(not task.done() for task in self._pending_save_tasks)
 
     @property
     def is_wasm(self) -> bool:
@@ -67,16 +66,10 @@ class DesignLedger:
         history_data = data.get("history", {})
 
         if isinstance(history_data, list):
-            return {
-                int(entry.get("step", 0)): entry.get("design", {})
-                for entry in history_data
-            }
+            return {int(entry.get("step", 0)): entry.get("design", {}) for entry in history_data}
 
         elif isinstance(history_data, dict):
-            return {
-                int(k) if str(k).isdigit() else k: v
-                for k, v in history_data.items()
-            }
+            return {int(k) if str(k).isdigit() else k: v for k, v in history_data.items()}
 
         return {}
 
@@ -200,9 +193,7 @@ class DesignLedger:
                 self._state = LedgerState(**data)
 
         except Exception as e:
-            print(
-                f"Failed to load from IndexedDB: {e}"
-            )
+            print(f"Failed to load from IndexedDB: {e}")
 
             self._state = LedgerState()
 
@@ -225,32 +216,18 @@ class DesignLedger:
         from pyodide.code import run_js
         from js import globalThis
 
-        # Serialize the current state to JSON.
-        state_json = json.dumps(
-            asdict(self._state)
-        )
+        state_json = json.dumps(asdict(self._state))
 
-        # Store the serialized state on the JS global object so
-        # IndexedDB can access it.
-        # NOTE: deliberately NOT double-underscore-prefixed. Any "__name"
-        # written inside a class body gets silently rewritten by Python's
-        # name mangling (e.g. to "_DesignLedger__mlsys_temp_state"), which
-        # previously desynced this Python-side assignment from the plain
-        # "__mlsys_temp_state" the JS string below reads -- causing a
-        # bogus, unmangled `undefined` to be persisted while save_async()
-        # still reported success. See PR #1988 for the full investigation.
+        # A double-underscore attribute is name-mangled inside this class.
+        # Keep this name in sync with the JavaScript reference below.
         globalThis._mlsys_temp_state = state_json
 
         js_code = """
         (async () => new Promise((resolve, reject) => {
-            const request = indexedDB.open(
-                "mlsys_ledger_db",
-                1
-            );
+            const request = indexedDB.open("mlsys_ledger_db", 1);
 
             request.onupgradeneeded = (e) => {
                 const db = e.target.result;
-
                 if (!db.objectStoreNames.contains("ledger")) {
                     db.createObjectStore("ledger");
                 }
@@ -260,57 +237,41 @@ class DesignLedger:
                 const db = e.target.result;
 
                 try {
-                    const tx = db.transaction(
-                        "ledger",
-                        "readwrite"
-                    );
+                    const tx = db.transaction("ledger", "readwrite");
 
-                    const store = tx.objectStore(
-                        "ledger"
-                    );
+                    tx.oncomplete = () => {
+                        db.close();
+                        resolve(true);
+                    };
 
-                    // Perform the write.
-                   store.put(
-    globalThis._mlsys_temp_state,
-    "mlsys_design_ledger"
-);
-
-tx.oncomplete = () => {
-    db.close();
-    resolve(true);
-};
-
-                    // Handle transaction errors.
                     tx.onerror = () => {
                         const error = tx.error
                             ? tx.error.message
                             : "unknown transaction error";
-
                         db.close();
-
                         reject(new Error(
                             "IndexedDB transaction failed: "
                             + error
                         ));
                     };
 
-                    // Handle transaction abortion.
                     tx.onabort = () => {
                         const error = tx.error
                             ? tx.error.message
                             : "transaction aborted";
-
                         db.close();
-
                         reject(new Error(
                             "IndexedDB transaction aborted: "
                             + error
                         ));
                     };
 
+                    tx.objectStore("ledger").put(
+                        globalThis._mlsys_temp_state,
+                        "mlsys_design_ledger"
+                    );
                 } catch (err) {
                     db.close();
-
                     reject(new Error(
                         "IndexedDB transaction failed: "
                         + err.message
@@ -318,15 +279,13 @@ tx.oncomplete = () => {
                 }
             };
 
-            // Handle failure to open IndexedDB.
             request.onerror = () => {
+                const error = request.error
+                    ? request.error.message
+                    : "unknown error";
                 reject(new Error(
                     "indexedDB.open failed: "
-                    + (
-                        request.error
-                            ? request.error.message
-                            : "unknown error"
-                    )
+                    + error
                     + " (storage may be disabled, full, "
                     + "or unavailable in private browsing)"
                 ));
@@ -334,19 +293,10 @@ tx.oncomplete = () => {
         }))()
         """
 
-        # Wait for the IndexedDB transaction to complete.
-        # If the transaction fails, this raises the exception.
         await run_js(js_code)
-
         return True
 
-    def _apply_pending_state(
-        self,
-        track,
-        step,
-        design,
-        chapter
-    ):
+    def _apply_pending_state(self, track, step, design, chapter):
         """
         Shared bookkeeping used by both save() and asave().
         """
@@ -354,11 +304,7 @@ tx.oncomplete = () => {
         if track:
             self._state.track = track
 
-        step_id = (
-            step
-            if step is not None
-            else chapter
-        )
+        step_id = step if step is not None else chapter
 
         if step_id is None:
             step_id = self._state.current_step
@@ -378,22 +324,10 @@ tx.oncomplete = () => {
         """
 
         try:
-            # task.result() re-raises any exception that occurred
-            # inside save_async().
             task.result()
-
-            # Save completed successfully.
-            self._last_save_error = None
-
         except Exception as e:
-            # Save failed.
             self._last_save_error = str(e)
-
-            message = (
-                "[DesignLedger] SAVE FAILED - "
-                "progress was NOT persisted: "
-                f"{e}"
-            )
+            message = f"[DesignLedger] SAVE FAILED - progress was NOT persisted: {e}"
 
             try:
                 from js import console
@@ -401,24 +335,9 @@ tx.oncomplete = () => {
                 console.error(message)
 
             except Exception:
-                print(
-                    message,
-                    file=sys.stderr
-                )
+                print(message, file=sys.stderr)
 
-        finally:
-            # Clear the task only if this is still the currently
-            # tracked save task.
-            if self._pending_save_task is task:
-                self._pending_save_task = None
-
-    def save(
-        self,
-        track: str = None,
-        step: int = None,
-        design: dict = None,
-        chapter: int = None
-    ):
+    def save(self, track: str = None, step: int = None, design: dict = None, chapter: int = None):
         """
         Persists the design decisions to storage.
 
@@ -426,49 +345,24 @@ tx.oncomplete = () => {
         Call flush() when the caller needs to wait for completion.
         """
 
-        self._apply_pending_state(
-            track,
-            step,
-            design,
-            chapter
-        )
+        self._apply_pending_state(track, step, design, chapter)
 
         if self.is_wasm:
             import asyncio
 
-            task = asyncio.ensure_future(
-                self.save_async()
-            )
-
-            task.add_done_callback(
-                self._on_save_task_done
-            )
-
-            self._pending_save_task = task
+            task = asyncio.ensure_future(self.save_async())
+            self._pending_save_tasks.add(task)
+            task.add_done_callback(self._on_save_task_done)
+            return task
 
         else:
             # Native/local filesystem persistence.
-            self.config_dir.mkdir(
-                exist_ok=True
-            )
+            self.config_dir.mkdir(exist_ok=True)
 
-            with open(
-                self.file_path,
-                "w"
-            ) as f:
-                json.dump(
-                    asdict(self._state),
-                    f,
-                    indent=2
-                )
+            with open(self.file_path, "w") as f:
+                json.dump(asdict(self._state), f, indent=2)
 
-    async def asave(
-        self,
-        track: str = None,
-        step: int = None,
-        design: dict = None,
-        chapter: int = None
-    ):
+    async def asave(self, track: str = None, step: int = None, design: dict = None, chapter: int = None):
         """
         Async variant of save() that awaits persistence.
 
@@ -477,61 +371,50 @@ tx.oncomplete = () => {
         fails.
         """
 
-        self._apply_pending_state(
-            track,
-            step,
-            design,
-            chapter
-        )
+        self._apply_pending_state(track, step, design, chapter)
 
         if self.is_wasm:
-            await self.save_async()
-
-            self._last_save_error = None
+            try:
+                await self.save_async()
+            except Exception as e:
+                self._last_save_error = str(e)
+                raise
+            else:
+                self._last_save_error = None
 
         else:
             # Native/local filesystem persistence.
-            self.config_dir.mkdir(
-                exist_ok=True
-            )
+            self.config_dir.mkdir(exist_ok=True)
 
-            with open(
-                self.file_path,
-                "w"
-            ) as f:
-                json.dump(
-                    asdict(self._state),
-                    f,
-                    indent=2
-                )
+            with open(self.file_path, "w") as f:
+                json.dump(asdict(self._state), f, indent=2)
 
     async def flush(self):
-        """
-        Await any in-flight background save scheduled by save().
-        """
+        """Await all background saves scheduled since the previous flush."""
+        import asyncio
 
-        task = self._pending_save_task
+        tasks = tuple(self._pending_save_tasks)
+        if not tasks:
+            return
 
-        if task is not None:
-            await task
+        try:
+            await asyncio.gather(*tasks)
+        except Exception:
+            raise
+        else:
+            self._last_save_error = None
+        finally:
+            self._pending_save_tasks.difference_update(task for task in tasks if task.done())
 
-    def get_design(
-        self,
-        step_id: int
-    ) -> Optional[Dict[str, Any]]:
+    def get_design(self, step_id: int) -> Optional[Dict[str, Any]]:
         """Retrieves the design dictionary for a specific step."""
-        return self._state.history.get(
-            step_id
-        )
+        return self._state.history.get(step_id)
 
     def get_track(self) -> str:
         """Returns the current track or NONE."""
         return self._state.track or "NONE"
 
-    def get_baseline(
-        self,
-        step_id: int
-    ) -> dict:
+    def get_baseline(self, step_id: int) -> dict:
         """
         Provides the 'Gold Standard' baseline if the student
         hasn't completed previous labs.
@@ -539,9 +422,4 @@ tx.oncomplete = () => {
         return {}
 
     def __repr__(self):
-        return (
-            f"DesignLedger("
-            f"track={self._state.track}, "
-            f"step={self._state.current_step}"
-            f")"
-        )
+        return f"DesignLedger(track={self._state.track}, step={self._state.current_step})"

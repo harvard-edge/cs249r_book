@@ -34,22 +34,21 @@ Requires Playwright with Chromium installed:
     pip install playwright
     python3 -m playwright install chromium
 """
+
 from __future__ import annotations
 
 import functools
 import http.server
-import socketserver
 import shutil
+import socketserver
 import threading
 from pathlib import Path
 
 import pytest
 
 STATE_PY = (
-    Path(__file__).resolve().parents[2]
-    / "mlsysim" / "mlsysim" / "labs" / "state.py"
+    Path(__file__).resolve().parents[2] / "mlsysim" / "mlsysim" / "labs" / "state.py"
 )
-PORT = 8766
 TRIALS = 5
 PYODIDE_CDN = "https://cdn.jsdelivr.net/pyodide/v0.28.3/full/pyodide.js"
 
@@ -83,13 +82,13 @@ DesignLedger = _mod.DesignLedger
 
 
 class _QuietHandler(http.server.SimpleHTTPRequestHandler):
-    def log_message(self, fmt, *args):  # noqa: A003 - stdlib override
+    def log_message(self, fmt, *args):
         return
 
 
-def _start_server(directory: Path, port: int):
+def _start_server(directory: Path):
     handler = functools.partial(_QuietHandler, directory=str(directory))
-    server = socketserver.TCPServer(("127.0.0.1", port), handler)
+    server = socketserver.TCPServer(("127.0.0.1", 0), handler)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()
     return server
@@ -104,9 +103,9 @@ def served_dir(tmp_path_factory):
     shutil.copy(STATE_PY, directory / "state.py")
     (directory / "index.html").write_text(PAGE_HTML, encoding="utf-8")
 
-    server = _start_server(directory, PORT)
+    server = _start_server(directory)
     try:
-        yield directory
+        yield directory, server.server_address[1]
     finally:
         server.shutdown()
         server.server_close()
@@ -123,6 +122,7 @@ def test_design_ledger_save_async_persists_in_real_indexeddb(served_dir):
     from playwright.sync_api import sync_playwright
 
     failures: list[int] = []
+    _, port = served_dir
 
     with sync_playwright() as p:
         browser = p.chromium.launch()
@@ -131,16 +131,21 @@ def test_design_ledger_save_async_persists_in_real_indexeddb(served_dir):
             for i in range(TRIALS):
                 page = context.new_page()
                 init_errors: list[str] = []
-                page.on("pageerror", lambda exc: init_errors.append(str(exc)))
+                page.on(
+                    "pageerror",
+                    lambda exc, errors=init_errors: errors.append(str(exc)),
+                )
 
-                page.goto(f"http://127.0.0.1:{PORT}/index.html")
+                page.goto(f"http://127.0.0.1:{port}/index.html")
                 page.wait_for_function(
                     "window.__ready === true || window.__initError",
                     timeout=30_000,
                 )
                 init_error = page.evaluate("window.__initError || null")
                 assert not init_error, f"Pyodide init failed: {init_error}"
-                assert not init_errors, f"Uncaught page errors during init: {init_errors}"
+                assert not init_errors, (
+                    f"Uncaught page errors during init: {init_errors}"
+                )
 
                 # Clear any prior IndexedDB state for a clean trial.
                 page.evaluate(
