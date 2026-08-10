@@ -56,10 +56,6 @@ Benchmarking brings together decisions already developed across hardware targeti
 
 A model quantized to INT8 may benchmark 2$\times$ faster on a synthetic workload but show no improvement under real traffic patterns with variable input sizes and concurrent requests. A pruned model may maintain accuracy on the test set but fail on edge cases the benchmark never covered. Every optimization arrives with a promise: data selection promises more efficient training, model compression promises smaller, faster models, and hardware acceleration promises higher throughput. Verifying that these claims hold in production is itself an engineering discipline.
 
-Benchmarking is where the physical laws those chapters established (the iron law, the conservation of complexity, the memory wall) face empirical reality. The **benchmark-production gap**\index{Benchmark-Production Gap} is not a failure of methodology but the measure of how much physical reality exceeds our models of it. Closing that gap by designing measurements that predict production behavior with quantitative fidelity is the core competency that distinguishes ML systems engineering from ML research. Benchmarking is the discipline's truth-telling function: the practice that converts theoretical claims into verified engineering knowledge.
-
-ML benchmarking operates across three interdependent dimensions that map directly to the components of any deployed system. **System benchmarking**\index{Benchmarking!system, definition} measures whether the hardware delivers promised performance under realistic workloads or whether memory bandwidth saturation and software dispatch overhead erode the gains. **Model benchmarking**\index{Model Benchmarking!definition} measures whether optimization techniques preserve model quality across the full input distribution, not just on curated test sets. **Data benchmarking**\index{Data Benchmarking!definition} measures whether the model generalizes to real-world data with all its noise, bias, and distributional shift. Each dimension can independently reveal problems invisible to the others, and a system that passes all three provides far stronger deployment confidence than one evaluated along any single axis.
-
 ```{python}
 #| echo: false
 
@@ -68,7 +64,7 @@ from mlsysim.core.units import *
 from mlsysim import Hardware, Engine, Models
 from mlsysim.solvers import EfficiencyModel
 from mlsysim.core.units import TFLOP, second
-from mlsysim.fmt import fmt_flop_rate, fmt_percent, fmt_time, fmt_multiple, check
+from mlsysim.fmt import fmt_flop_rate, fmt_percent, fmt_time, fmt_multiple, fmt_multiple_range, check
 
 class A100PeakBenchmark:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
@@ -84,6 +80,10 @@ class A100PeakBenchmark:
     # Calculate optimally tuned MFU (e.g. 50% MFU upper bound from literature)
     eff_tuned = EfficiencyModel().solve(m, h, workload_type="ffn", use_flash_attention=False, precision="fp16", efficiency=0.5)
 
+    # Sustained-to-peak gap = peak / sustained = 1 / MFU
+    gap_low = 1 / eff_tuned.mfu  # 50% MFU ceiling -> 2.0x
+    gap_high = 1 / eff_base.mfu  # 30% MFU floor -> 3.3x
+
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(eff_base.mfu == 0.3, "Base attention should be 30% MFU.")
     check(eff_tuned.mfu == 0.5, "FFN should be 50% MFU.")
@@ -94,17 +94,22 @@ class A100PeakBenchmark:
     mfu_tuned_pct_str = fmt_percent(eff_tuned.mfu, precision=0, commas=False, style="prose")
     achievable_base_tflop_str = fmt_flop_rate(eff_base.achievable_flops, unit=TFLOP / second, precision=1, commas=False)
     achievable_tuned_tflop_str = fmt_flop_rate(eff_tuned.achievable_flops, unit=TFLOP / second, precision=0, commas=False)
+    sustained_gap_range_mult_str = fmt_multiple_range(gap_low, gap_high, precision=(0, 1))
 ```
 
 ::: {#dfn-benchmarking-machine-learning-benchmarking .callout-definition title="Machine learning benchmarking"}
 
 ***Machine Learning Benchmarking***\index{Benchmarking!definition} is the empirical measurement of a system's end-to-end performance on representative ML workloads, designed to decouple marketed peak specifications from the sustained throughput and latency achievable under realistic operating conditions.
 
-1.  **Significance**: The gap between peak and sustained performance is large and structurally unavoidable. An A100 GPU delivers `{python} A100PeakBenchmark.a100_fp16_tflop_per_s_str` (BF16) at peak, but production transformer training runs typically sustain `{python} A100PeakBenchmark.achievable_base_tflop_str`--`{python} A100PeakBenchmark.achievable_tuned_tflop_str` (`{python} A100PeakBenchmark.mfu_base_pct_str`--`{python} A100PeakBenchmark.mfu_tuned_pct_str` MFU), about a 2--3.5$\times$ gap that exists even in optimally tuned systems due to memory stalls, pipeline bubbles, and kernel launch overhead. Benchmarking quantifies this $\eta_{\text{hw}}$ gap; vendor spec sheets do not.
+1.  **Significance**: The gap between peak and sustained performance is large and structurally unavoidable. An A100 GPU delivers `{python} A100PeakBenchmark.a100_fp16_tflop_per_s_str` (BF16) at peak, but production transformer training runs typically sustain `{python} A100PeakBenchmark.achievable_base_tflop_str`--`{python} A100PeakBenchmark.achievable_tuned_tflop_str` (`{python} A100PeakBenchmark.mfu_base_pct_str`--`{python} A100PeakBenchmark.mfu_tuned_pct_str` MFU), about a `{python} A100PeakBenchmark.sustained_gap_range_mult_str` gap that exists even in optimally tuned systems due to memory stalls, pipeline bubbles, and kernel launch overhead. Benchmarking quantifies this $\eta_{\text{hw}}$ gap; vendor spec sheets do not.
 2.  **Distinction**: Unlike micro-benchmarks, which measure individual kernel performance such as a general matrix multiply (GEMM) at peak matrix dimensions, ML benchmarks measure the full stack: data loading, preprocessing, forward pass, gradient computation, optimizer step, and checkpoint I/O—exposing bottlenecks that individual-component benchmarks will never reveal.
 3.  **Common pitfall**: A frequent misconception is that benchmark numbers are stable references. Both the workload (new model architectures) and the hardware (new GPU generations) evolve, so a result that leads a benchmark under one version often becomes the baseline under a later version, making year-over-year comparisons meaningful only when the benchmark version is held constant.
 
 :::
+
+Benchmarking is where the physical laws those chapters established (the iron law, the conservation of complexity, the memory wall) face empirical reality. The **benchmark-production gap**\index{Benchmark-Production Gap} is not a failure of methodology but the measure of how much physical reality exceeds our models of it. Closing that gap by designing measurements that predict production behavior with quantitative fidelity is the core competency that distinguishes ML systems engineering from ML research. Benchmarking is the discipline's truth-telling function: the practice that converts theoretical claims into verified engineering knowledge.
+
+ML benchmarking operates across three interdependent dimensions that map directly to the components of any deployed system. **System benchmarking**\index{Benchmarking!system, definition} measures whether the hardware delivers promised performance under realistic workloads or whether memory bandwidth saturation and software dispatch overhead erode the gains. **Model benchmarking**\index{Model Benchmarking!definition} measures whether optimization techniques preserve model quality across the full input distribution, not just on curated test sets. **Data benchmarking**\index{Data Benchmarking!definition} measures whether the model generalizes to real-world data with all its noise, bias, and distributional shift. Each dimension can independently reveal problems invisible to the others, and a system that passes all three provides far stronger deployment confidence than one evaluated along any single axis.
 
 Unlike traditional systems where benchmarks represent fixed specifications, ML benchmarks capture only a snapshot of a shifting reality. The gap between peak and sustained performance documented above is not fixed either: it shifts as both workloads and hardware generations evolve, making any single benchmark result time-stamped rather than universal.
 
@@ -301,6 +306,13 @@ MLPerf Power\index{MLPerf Power!energy efficiency measurement} extends the same 
 
 This historical progression, from general computing benchmarks through energy-aware measurement to domain-specific evaluation frameworks, provides the foundation for understanding ML benchmarking challenges. The lessons learned (representative workloads over synthetic tests, multi-objective over single metrics, integrated systems over isolated components) directly shape AI system evaluation. @Tbl-benchmark-evolution summarizes this progression and the key lessons each generation contributed.
 
+These lessons culminate in ML benchmarking suites, yet ML systems face an additional challenge absent from traditional benchmarks: inherent probabilistic variability\index{Benchmarking!probabilistic variability}. Unlike traditional workloads with deterministic behavior, ML systems must satisfy all three historical lessons (representative workloads, multi-objective evaluation, integrated measurement) while also accounting for stochastic outcomes that vary with training data, weight initialization, and even operation ordering. This additional dimension of variability demands measurement methodologies that account for stochastic outcomes.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.45}
+```
+
 | **Benchmark**  | **Year** | **Primary Focus**                   | **Key Metric(s)**                       | **Lesson for ML Benchmarking**                                               |
 |:---------------|:--------:|:------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------------|
 | **Whetstone**  |   1976   | Synthetic floating-point operations | MWIPS                                   | Gaming synthetic tests undermines evaluation validity                        |
@@ -312,7 +324,9 @@ This historical progression, from general computing benchmarks through energy-aw
 
 : **Benchmark Evolution**: Evolution of computing benchmarks from synthetic operations to ML-specific evaluation. Each generation addressed limitations of its predecessors, culminating in MLPerf's synthesis of representative workloads, multi-objective metrics, and integrated system measurement. {#tbl-benchmark-evolution tbl-colwidths="[12,9,23,20,36]"}
 
-These lessons culminate in ML benchmarking suites, yet ML systems face an additional challenge absent from traditional benchmarks: inherent probabilistic variability\index{Benchmarking!probabilistic variability}. Unlike traditional workloads with deterministic behavior, ML systems must satisfy all three historical lessons (representative workloads, multi-objective evaluation, integrated measurement) while also accounting for stochastic outcomes that vary with training data, weight initialization, and even operation ordering. This additional dimension of variability demands measurement methodologies that account for stochastic outcomes.
+```{=latex}
+\endgroup
+```
 
 Individual organizations learned these lessons independently, often painfully, but isolated measurements cannot drive an industry. When one team measures inference latency including preprocessing and another excludes it, when accuracy benchmarks use different data splits, or when power measurements draw different system boundaries, the resulting numbers are incommensurable. The transition from ad-hoc measurement to standardized benchmarking suites transforms benchmarking from an internal validation exercise into a shared language that enables hardware procurement, architecture comparison, and deployment decisions across organizations.
 
@@ -413,6 +427,9 @@ class StatisticalConfidenceTrap:
 
     **Measurement implication**: Both `{python} StatisticalConfidenceTrap.baseline_errors_str` and `{python} StatisticalConfidenceTrap.compressed_errors_str` fall inside the *same confidence interval*. A `{python} StatisticalConfidenceTrap.n_images_str`-sample test set *cannot reliably detect* a 1 percentage point accuracy drop. About `{python} StatisticalConfidenceTrap.one_prop_n_str` samples are enough to estimate a `{python} StatisticalConfidenceTrap.baseline_accuracy_pct_str` accuracy rate with a `{python} StatisticalConfidenceTrap.ci_confidence_pct_str` confidence interval of about ±`{python} StatisticalConfidenceTrap.target_margin_pp_str`; detecting a 1-point regression between two independently evaluated models requires a larger two-proportion power calculation.
 
+```{=latex}
+\vspace*{-2ex}
+```
 **Systems insight**: Small benchmarks exhibit what amounts to a laboratory fallacy. The test set, viewed as a measurement instrument, must be sized to match the precision of the change it is meant to detect.
 
 :::
@@ -420,6 +437,8 @@ class StatisticalConfidenceTrap:
 Beyond workload representativeness, the distinction between *statistical significance* and *practical significance* requires careful interpretation. A small performance improvement might achieve statistical significance across hundreds of trials but prove operationally irrelevant if it falls within measurement noise or costs exceed benefits. This creates what we call *the statistical confidence trap*, where seemingly rigorous evaluation still misleads.
 
 Statistical confidence is a measurement-capacity problem: the benchmark may be pointed at the right quantity, but the test set is too small to resolve the change. A second failure mode is metric alignment. Here the measurement can be precise and reproducible, yet still reward behavior that violates the deployed system's objective. The translation example makes that distinction concrete by showing how a BLEU improvement can come at the expense of latency.
+
+These measurement failures share a deeper limitation: a benchmark on a static dataset measures recognition under a fixed distribution, not the robustness to a shifting one that production demands. The data dimension of the framework developed later in this chapter confronts exactly that gap.
 
 ```{python}
 #| echo: false
@@ -474,7 +493,7 @@ class GoodhartBLEUCalc:
     latency_budget_ms_str = fmt_time(latency_budget_ms, 'millisecond', precision=0, commas=False)
 ```
 
-::: {#nbk-benchmarking-goodharts-law-action .callout-notebook title="Goodhart's Law in action"}
+::: {#exmp-benchmarking-goodharts-law-action .callout-example title="Goodhart's Law in action"}
 
 **Trap**: Optimizing for a single metric often degrades others.
 
@@ -483,17 +502,15 @@ class GoodhartBLEUCalc:
 *   **Original model**: BLEU = `{python} GoodhartBLEUCalc.original_bleu_str`, Inference = `{python} GoodhartBLEUCalc.original_latency_ms_str`.
 *   **Optimized model**: BLEU = `{python} GoodhartBLEUCalc.optimized_bleu_str` (a `{python} GoodhartBLEUCalc.bleu_gain_str`-point gain), Inference = `{python} GoodhartBLEUCalc.optimized_latency_ms_str` (`{python} GoodhartBLEUCalc.latency_slowdown_mult_str` slower).
 
-**Math**:
+**Analysis**:
 
 *   The `{python} GoodhartBLEUCalc.bleu_gain_str` BLEU gain comes from a larger beam search, which keeps the $k$ most promising partial translations at each decoding step instead of one (beam_size = `{python} GoodhartBLEUCalc.optimized_beam_size_str` vs. beam_size = `{python} GoodhartBLEUCalc.original_beam_size_str`).
 *   **Cost**: `{python} GoodhartBLEUCalc.candidate_ratio_mult_str` more candidate evaluations per step.
 *   **Result**: The optimized model wins the leaderboard while violating the deployed system's latency budget.
 
-**Systems insight**: Always constrain the optimization. Maximize Accuracy subject to Latency < `{python} GoodhartBLEUCalc.latency_budget_ms_str`.
+**Systems lesson**: Always constrain the optimization. Maximize Accuracy subject to Latency < `{python} GoodhartBLEUCalc.latency_budget_ms_str`.
 
 :::
-
-These measurement failures share a deeper limitation: a benchmark on a static dataset measures recognition under a fixed distribution, not the robustness to a shifting one that production demands. The data dimension of the framework developed later in this chapter confronts exactly that gap.
 
 The preceding measurement challenges motivate evaluating each dimension of the three-dimensional framework (system, model, and data) with distinct methodologies. The bulk of this chapter focuses on system benchmarking (training benchmarks, inference benchmarks, and power measurement) because these form the foundation of standardized evaluation through MLPerf. Model and data benchmarking require different methodologies and are treated in detail in @sec-benchmarking-model-data-benchmarking-e0ca after we establish system evaluation foundations.
 
@@ -507,7 +524,15 @@ Dave Patterson often refers to peak performance as "the performance the manufact
 
 :::
 
-The peak-vs.-sustained gap is structurally guaranteed by the memory wall\index{Memory Wall!impact on GPU utilization}, not an occasional anomaly that better engineering can avoid. Recognizing this structural nature reframes vendor evaluation from guesswork into a checklist of concrete criteria.
+For memory-bound workloads, the peak-vs.-sustained gap follows from the memory wall\index{Memory Wall!impact on GPU utilization}; compute-bound workloads may approach peak. This distinction reframes vendor evaluation from guesswork into a checklist of concrete criteria.
+
+The decision rule is to reject any benchmark claim whose workload boundary, precision, and excluded costs cannot be reconstructed. A headline throughput or latency number becomes useful only after the engineer can map it to the actual model, batch shape, data movement, sustained operating point, and power envelope.
+
+The underlying hardware infrastructure (CPUs, GPUs, Tensor Processing Units (TPUs)[^fn-bench-tpu], and ASICs[^fn-asic]) determines the speed, efficiency, and scalability of ML systems. System benchmarks establish standardized methodologies for evaluating hardware performance across AI workloads, measuring metrics including computational throughput, memory bandwidth, power efficiency, and scaling characteristics [@reddi2020; @mattson2020mlperf].
+
+[^fn-bench-tpu]: **TPU (Tensor Processing Unit)**: Google's custom ASIC for neural network workloads (architecture details in @sec-hardware-acceleration). A TPU v4 pod (4,096 chips) delivers 1.1 exaFLOP/s peak BF16, but benchmarking TPUs requires caution: their systolic-array architecture favors regular tensor operations, so peak FLOP/s overstate performance on irregular workloads like sparse attention or dynamic control flow. \index{TPU!benchmarking considerations}
+
+[^fn-asic]: **ASIC (Application-Specific Integrated Circuit)**: An ASIC's peak TOPS number applies only to the specific operators it was designed for. A single unsupported layer forces fallback to a general-purpose processor, potentially negating the entire efficiency advantage. This makes operator coverage the first question in any ASIC benchmark: the gap between peak and achieved throughput is not a hardware limitation but a workload-compatibility limitation. \index{ASIC!benchmarking trade-off}
 
 ::: {#chk-benchmarking-vendor-claims .callout-checkpoint title="Decoding vendor benchmark claims"}
 
@@ -539,14 +564,6 @@ When evaluating hardware or software based on vendor-reported benchmarks, check 
 \endgroup
 ```
 :::
-
-The decision rule is to reject any benchmark claim whose workload boundary, precision, and excluded costs cannot be reconstructed. A headline throughput or latency number becomes useful only after the engineer can map it to the actual model, batch shape, data movement, sustained operating point, and power envelope.
-
-The underlying hardware infrastructure (CPUs, GPUs, Tensor Processing Units (TPUs)[^fn-bench-tpu], and ASICs[^fn-asic]) determines the speed, efficiency, and scalability of ML systems. System benchmarks establish standardized methodologies for evaluating hardware performance across AI workloads, measuring metrics including computational throughput, memory bandwidth, power efficiency, and scaling characteristics [@reddi2020; @mattson2020mlperf].
-
-[^fn-bench-tpu]: **TPU (Tensor Processing Unit)**: Google's custom ASIC for neural network workloads (architecture details in @sec-hardware-acceleration). A TPU v4 pod (4,096 chips) delivers 1.1 exaFLOP/s peak BF16, but benchmarking TPUs requires caution: their systolic-array architecture favors regular tensor operations, so peak FLOP/s overstate performance on irregular workloads like sparse attention or dynamic control flow. \index{TPU!benchmarking considerations}
-
-[^fn-asic]: **ASIC (Application-Specific Integrated Circuit)**: An ASIC's peak TOPS number applies only to the specific operators it was designed for. A single unsupported layer forces fallback to a general-purpose processor, potentially negating the entire efficiency advantage. This makes operator coverage the first question in any ASIC benchmark: the gap between peak and achieved throughput is not a hardware limitation but a workload-compatibility limitation. \index{ASIC!benchmarking trade-off}
 
 System benchmarks serve two functions. For practitioners, they enable informed hardware selection by providing comparative data across configurations. For manufacturers, they quantify generational improvements and guide accelerator development. The co-evolution has been dramatic: as GPU adoption grew, accuracy improved rapidly, demonstrating that hardware and algorithmic advances drive progress in tandem.
 
@@ -586,16 +603,6 @@ class A100Roofline:
 
 Effective benchmark interpretation requires knowing the performance characteristics of target hardware. Whether a specific AI workload is compute bound or memory-bound provides essential insight for optimization decisions. Computational intensity, measured as FLOP/byte[^fn-flops-throughput], determines performance limits. Consider an NVIDIA A100 GPU\index{Accelerator!specifications, roofline analysis example} with `{python} A100Roofline.a100_fp16_tflop_per_s_str` of FP16 Tensor Core performance (FP32 is `{python} A100Roofline.a100_fp32_tflop_per_s_str`) and `{python} A100Roofline.a100_bw_tb_per_s_str` memory bandwidth (SXM variant). Dividing peak compute by peak bandwidth yields an arithmetic intensity threshold\index{Arithmetic Intensity!threshold for compute vs. memory bound} of `{python} A100Roofline.a100_ridge_str`. Workloads below this threshold are bottlenecked by memory bandwidth, while those above are bottlenecked by compute capacity. The roofline model in @sec-hardware-acceleration-roofline-model-42ff provides the architectural foundation for interpreting these benchmark results. @Sec-appdx-machine-foundations-roofline-model-2529 derives the roofline equation and the ridge-point threshold from first principles, so the arithmetic intensity bound used here can be reconstructed for any accelerator.
 
-::: {#dfn-benchmarking-machine-learning-system-benchmarks .callout-definition title="Machine learning system benchmarks"}
-
-***Machine Learning System Benchmarks***\index{ML System Benchmark!definition} are standardized evaluation protocols that hold the workload and quality target constant while varying the hardware-software stack, measuring $\eta_{\text{hw}} = R_{\text{sustained}} / R_{\text{peak}}$ and $L_{\text{lat}}$ to isolate infrastructure efficiency from algorithmic improvements.
-
-1.  **Significance**: The same ResNet-50 model can deliver very different throughput across hardware stacks, precision formats, batch sizes, and compiler configurations, yet still report the same ImageNet Top-1 accuracy. System benchmarks capture this implementation gap, which is invisible to algorithmic benchmarks that only report accuracy.
-2.  **Distinction**: Unlike algorithmic benchmarks (which vary model architectures and training procedures to improve convergence accuracy), system benchmarks hold the algorithm fixed and vary the implementation (kernel libraries, quantization formats, batch sizes, and hardware generations) to measure how efficiently the hardware-software stack executes the iron law's $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ term.
-3.  **Common pitfall**: A frequent misconception is that a system benchmark result generalizes across workloads. An accelerator that achieves high utilization on ResNet-50 (a compute-friendly vision workload) may achieve much lower utilization on a recommendation system (a memory-bandwidth-bound workload). System benchmarks are workload-specific; no single metric characterizes a hardware platform.
-
-:::
-
 ```{python}
 #| echo: false
 #| label: roofline-example-calc
@@ -633,7 +640,7 @@ class RooflineExamples:
 
     # BERT (Memory Bound at Batch=1)
     bert_model = Models.Language.BERT_Base
-    bert_weight = bert_model.size_in_bytes(BYTES_FP32)
+    bert_weight = bert_model.size_in_bytes(BYTES_FP16)
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     bert_ai_b1 = (bert_model.inference_flops / bert_weight).to(flop / byte).magnitude
@@ -650,7 +657,19 @@ class RooflineExamples:
 
 [^fn-flops-throughput]: **FLOP/s (Floating-Point Operations Per Second)**: The gap between advertised peak FLOP/s and achieved FLOP/s is the central tension in hardware benchmarking. The A100 advertises `{python} RooflineExamples.a100_fp16_tflop_per_s_str` FP16 Tensor Core, but real workloads achieve different fractions of peak depending on arithmetic intensity, memory access patterns, precision, and runtime overhead. Reporting peak FLOP/s without utilization context is the most common benchmarking distortion. \index{FLOP/s!peak vs. achieved}
 
-Roofline position[^fn-roofline-model] depends on the workload. In this worked A100 example, high-intensity operations such as dense matrix multiplications in a ResNet-50\index{ResNet-50!roofline analysis} forward pass at large batch sizes reach arithmetic intensities around ~`{python} RooflineExamples.resnet_ai_str`, above the A100 ridge, and therefore behave as compute-bound kernels [@he2016; @choquette2021]. Low-intensity operations fall far below the ridge into the memory-bound regime: a BERT inference\index{BERT!roofline analysis at batch 1} at batch size one, counting only weight-loading traffic, reaches only ~`{python} RooflineExamples.bert_ai_b1_str` arithmetic intensity and a small fraction of peak. Increasing the batch size moves that same workload across the ridge from memory-bound to compute-bound [@pope2023efficiently]. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the intensity-to-utilization calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the steps generalize to any model-hardware pair.
+Roofline position[^fn-roofline-model] depends on the workload. In this worked A100 example, high-intensity operations such as dense matrix multiplications in a ResNet-50\index{ResNet-50!roofline analysis} forward pass at large batch sizes reach arithmetic intensities around ~`{python} RooflineExamples.resnet_ai_str`, above the A100 ridge, and therefore behave as compute-bound kernels [@he2016; @choquette2021]. Low-intensity operations fall below the ridge into the memory-bound regime: a BERT inference\index{BERT!roofline analysis at batch 1} at batch size one, counting only weight-loading traffic, reaches ~`{python} RooflineExamples.bert_ai_b1_str` arithmetic intensity and a correspondingly reduced fraction of peak. Increasing the batch size moves that same workload across the ridge from memory-bound to compute-bound [@pope2023efficiently]. @Sec-appdx-machine-foundations-concrete-example-a100-analysis-5b30 works the intensity-to-utilization calculation end to end on the A100, contrasting a compute-bound GEMM against a memory-bound element-wise operation, so the steps generalize to any model-hardware pair.
+
+[^fn-roofline-model]: **Roofline Model**\index{Roofline Model!etymology and origin}: @williams2009 introduced the Berkeley model, named for the visual shape of its performance ceiling. Its ridge point (peak FLOP/s divided by peak bandwidth) separates memory-bound from compute-bound workloads, showing whether optimization should target data movement or arithmetic. \index{Roofline Model!origin}
+
+::: {#dfn-benchmarking-machine-learning-system-benchmarks .callout-definition title="Machine learning system benchmarks"}
+
+***Machine Learning System Benchmarks***\index{ML System Benchmark!definition} are standardized evaluation protocols that hold the workload and quality target constant while varying the hardware-software stack, measuring $\eta_{\text{hw}} = R_{\text{sustained}} / R_{\text{peak}}$ and $L_{\text{lat}}$ to isolate infrastructure efficiency from algorithmic improvements.
+
+1.  **Significance**: The same ResNet-50 model can deliver very different throughput across hardware stacks, precision formats, batch sizes, and compiler configurations, yet still report the same ImageNet Top-1 accuracy. System benchmarks capture this implementation gap, which is invisible to algorithmic benchmarks that only report accuracy.
+2.  **Distinction**: Unlike algorithmic benchmarks (which vary model architectures and training procedures to improve convergence accuracy), system benchmarks hold the algorithm fixed and vary the implementation (kernel libraries, quantization formats, batch sizes, and hardware generations) to measure how efficiently the hardware-software stack executes the iron law's $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ term.
+3.  **Common pitfall**: A frequent misconception is that a system benchmark result generalizes across workloads. An accelerator that achieves high utilization on ResNet-50 (a compute-friendly vision workload) may achieve much lower utilization on a recommendation system (a memory-bandwidth-bound workload). System benchmarks are workload-specific; no single metric characterizes a hardware platform.
+
+:::
 
 ::: {.column-margin}
 ```{=latex}
@@ -660,8 +679,6 @@ Roofline position[^fn-roofline-model] depends on the workload. In this worked A1
 
 *Larger batches push transformer inference from memory-bound to compute-bound.*
 :::
-
-[^fn-roofline-model]: [offset=-25mm] **Roofline Model**\index{Roofline Model!etymology and origin}: @williams2009 introduced the Berkeley model, named for the visual shape of its performance ceiling. Its ridge point (peak FLOP/s divided by peak bandwidth) separates memory-bound from compute-bound workloads, showing whether optimization should target data movement or arithmetic. \index{Roofline Model!origin}
 
 A worked BERT inference estimate\index{BERT!inference deployment prediction} shows how these roofline principles translate into concrete deployment predictions.
 
@@ -716,14 +733,14 @@ class BertRoofline:
     # Use SingleNodeModel to solve for both batch sizes
     from mlsysim.solvers import SingleNodeModel
 
-    p_b1 = SingleNodeModel().solve(m_bert, h_a100, batch_size=batch_1, precision="fp32", efficiency=1.0)
-    p_b32 = SingleNodeModel().solve(m_bert, h_a100, batch_size=batch_32, precision="fp32", efficiency=0.85)
+    p_b1 = SingleNodeModel().solve(m_bert, h_a100, batch_size=batch_1, precision="fp16", efficiency=1.0)
+    p_b32 = SingleNodeModel().solve(m_bert, h_a100, batch_size=batch_32, precision="fp16", efficiency=0.85)
 
     bert_params_m = m_bert.parameters.to(Mparam).magnitude
     bert_flops_g = m_bert.inference_flops.to(GFLOPs).magnitude
-    bert_weight = p_b1.memory_footprint
+    bert_weight = m_bert.size_in_bytes(BYTES_FP16)
 
-    ai_b1 = (m_bert.inference_flops / p_b1.memory_footprint).to(flop / byte).magnitude
+    ai_b1 = (m_bert.inference_flops / bert_weight).to(flop / byte).magnitude
     # Weights-only roofline prediction: perf = arithmetic intensity x bandwidth,
     # util = perf / peak. Displayed Step 3 equations are this identity, so the
     # displayed values must come from it (not Engine throughput, which models
@@ -732,15 +749,12 @@ class BertRoofline:
     util_b1 = (perf_b1 / h_a100.compute.peak_flops).to_base_units().magnitude * 100.0
 
     flops_b32 = bert_flops_g * batch_32
-    ai_b32 = (m_bert.inference_flops * batch_32 / p_b1.memory_footprint).to(flop / byte).magnitude
+    ai_b32 = (m_bert.inference_flops * batch_32 / bert_weight).to(flop / byte).magnitude
 
     # Is it compute bound now?
     is_compute_bound_b32 = p_b32.bottleneck == "Compute"
-    # Step 4 displays the compute-bound identity perf = util x peak using the FP16
-    # Tensor Core peak from Step 1 (312 TFLOP/s), matching "$$GPU utilization ~ 85%$$".
-    # Compute the displayed value from that identity, NOT p_b32.throughput: p_b32 is
-    # solved at fp32 (peak ~19.5 TFLOP/s), so throughput x flops gave 16.5 TFLOP/s,
-    # contradicting the displayed "85% x 312". This mirrors the Step 3 note above.
+    # Step 4 displays the compute-bound identity perf = util x FP16 peak,
+    # matching "$$GPU utilization ~ 85%$$".
     util_peak = 0.85
     perf_b32 = (util_peak * h_a100.compute.peak_flops).to(TFLOP / second)
     check(perf_b32 > perf_b1, "Step 4: batch-32 achievable perf must exceed batch-1 perf; guards the FP16/FP32 peak mismatch (old value 16.5 < 102).")
@@ -753,6 +767,7 @@ class BertRoofline:
     check(ai_b32 > ai_b1, "Batching must increase Arithmetic Intensity.")
     check(140 <= ridge_point <= 160, f"A100 FP16 ridge should be ~153 FLOP/byte, got {ridge_point:.0f}.")
     check(abs(ai_b1 - bert_flops_g * BILLION / (bert_weight.to(MB).magnitude * MILLION)) < 1.0, "Weights-only AI must match FLOPs ÷ weight bytes.")
+    check(200 <= bert_weight.to(MB).magnitude <= 240, "BERT-Base FP16 weights should be about 220 MB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     bert_params_m_str = fmt_params(m_bert.parameters, scale="M", precision=0, commas=False)
@@ -761,7 +776,7 @@ class BertRoofline:
     bert_weight_mb_value_str = fmt_magnitude(bert_weight, unit=MB, precision=0, commas=False)
     bert_weight_mb_str = fmt_memory(bert_weight, unit=MB, precision=0, commas=False)
 
-    bert_ai_b1_str = fmt_arithmetic_intensity((m_bert.inference_flops / p_b1.memory_footprint), unit=flop / byte, precision=0, commas=False)
+    bert_ai_b1_str = fmt_arithmetic_intensity((m_bert.inference_flops / bert_weight), unit=flop / byte, precision=0, commas=False)
     bert_perf_b1_tflop_per_s_str = fmt_flop_rate(perf_b1, unit=TFLOP / second, commas=False)
     bert_util_b1_str = fmt_percent(util_b1 / 100, precision=1, commas=False, style='prose')
     # "%"-glyph math form for the Step-3 worked-calc line; the prose twin (bert_util_b1_str) keeps the word.
@@ -769,9 +784,7 @@ class BertRoofline:
 
     bert_batch32_gflop_value_str = fmt_magnitude(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
     bert_batch32_gflop_str = fmt_flops(m_bert.inference_flops * batch_32, unit=GFLOPs, precision=0, commas=False)
-    bert_ai_b32_str = fmt_arithmetic_intensity(
-        (m_bert.inference_flops * batch_32 / p_b1.memory_footprint), unit=flop / byte, precision=0, commas=False
-    )
+    bert_ai_b32_str = fmt_arithmetic_intensity((m_bert.inference_flops * batch_32 / bert_weight), unit=flop / byte, precision=0, commas=False)
 
     bert_ai_eq_str = fmt_math(rf"({bert_gflop_value_str} \times 10^{{9}}) \div ({bert_weight_mb_value_str} \times 10^{{6}})")
     bert_b32_flops_eq_str = fmt_math(rf"{bert_gflop_value_str} \times 10^{{9}} \times {batch_32}")
@@ -804,22 +817,22 @@ Any workload with arithmetic intensity below `{python} BertRoofline.a100_ridge_s
 
 **Step 2**: BERT-base characteristics.
 
-- Parameters: `{python} BertRoofline.bert_params_m_str` = `{python} BertRoofline.bert_weight_mb_str` (FP32)
-
-```{=latex}
-\tcbbreak
-```
+- Parameters: `{python} BertRoofline.bert_params_m_str` = `{python} BertRoofline.bert_weight_mb_str` (FP16)
 - FLOPs per inference: ~`{python} BertRoofline.bert_gflop_str` (forward pass with sequence length $S=128$)
 - Data movement: ~`{python} BertRoofline.bert_weight_mb_str` (must load all weights from memory)
 - Arithmetic intensity: `{python} BertRoofline.bert_ai_eq_str` = `{python} BertRoofline.bert_ai_b1_str` (weights-only model; see note in main text)
 
 **Step 3**: Performance prediction.
 Since `{python} BertRoofline.bert_ai_b1_str` < `{python} BertRoofline.a100_ridge_str`, BERT at batch = `{python} BertRoofline.batch1_str` is memory bound:
+\begin{gather*}
+\text{Achievable perf = `{python} BertRoofline.bert_ai_b1_str` $\times$ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str`}
+\\
+\text{GPU utilization = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str` ÷ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_util_b1_pct_math`}
+\end{gather*}
 
-Achievable perf = `{python} BertRoofline.bert_ai_b1_str` $\times$ `{python} BertRoofline.a100_bw_tb_per_s_str` = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str`
-
-GPU utilization = `{python} BertRoofline.bert_perf_b1_tflop_per_s_str` ÷ `{python} BertRoofline.a100_fp16_tflop_per_s_str` = `{python} BertRoofline.bert_util_b1_pct_math`
-
+```{=latex}
+\tcbbreak
+```
 **Step 4**: Optimization via batching.
 Increase batch size to `{python} BertRoofline.batch32_str`:
 
@@ -927,7 +940,7 @@ Year,Y
 
 The ImageNet example demonstrates how hardware advances enable algorithmic breakthroughs. (We revisit this progression with model-specific architectural milestones in @sec-benchmarking-model-benchmarking-4847.) Effective system benchmarking, however, requires understanding the relationship between workload characteristics and hardware utilization. Modern AI systems rarely achieve theoretical peak performance due to interactions between computational patterns, memory hierarchies, and system architectures. This gap between theoretical and achieved performance shapes how we design meaningful system benchmarks.
 
-Realistic hardware utilization patterns are essential for actionable benchmark design. As the preceding roofline analysis demonstrated, GPU utilization varies dramatically with batch size and model architecture—from `{python} BertRoofline.utilization_peak_pct_str` for compute-bound workloads to `{python} BertRoofline.bert_util_b1_str` for memory-bound single-request inference. These patterns extend to memory bandwidth: parameter-heavy transformer inference and activation-heavy convolutional workloads stress different parts of the memory hierarchy, directly impacting achievable performance across different precision levels.
+Realistic hardware utilization patterns are essential for actionable benchmark design. As the preceding roofline analysis demonstrated, GPU utilization varies with batch size and model architecture—from `{python} BertRoofline.utilization_peak_pct_str` for compute-bound workloads to `{python} BertRoofline.bert_util_b1_str` for memory-bound single-request inference. These patterns extend to memory bandwidth: parameter-heavy transformer inference and activation-heavy convolutional workloads stress different parts of the memory hierarchy, directly impacting achievable performance across different precision levels.
 
 The consolidation across these factors is that effective system benchmarks must measure realistic utilization rather than peak theoretical capability, and several scope boundaries fall out of that requirement. Energy is one dimension: performance per watt varies by three orders of magnitude across platforms, and an underutilized accelerator consumes disproportionate power for its output, penalizing both operational cost and environmental impact. Distribution is another: multi-node training adds communication bottlenecks, network-topology effects, and coordination overhead that single-node benchmarks cannot capture and that warrant dedicated treatment beyond this book. Within the single-machine scope here, multi-GPU benchmarking instead focuses on intra-node communication, memory-bandwidth utilization across accelerators, and gradient-synchronization efficiency in shared-memory systems, where 4-8 GPUs on NVLink or PCIe deliver parallelism without the network challenges of multi-node clusters. Across all of these, a benchmark earns its value only when its operating point matches the deployment's, not the datasheet's.
 
@@ -987,7 +1000,7 @@ The optimization techniques from Part III operate at different granularities (ke
   \foreach \i [count=\c] in {0,...,\numexpr\rows-1} {
     \foreach \j  in {0,...,\numexpr\cols-1} {
       \pgfmathtruncatemacro{\newX}{\j + 1} %
-      % Pozicija kruga
+      % Circle position
       \pgfmathsetmacro\x{\j*(2*\r + \xgap)}
       \pgfmathsetmacro\y{-\i*(2*\r + \ygap)}
 \definecolor{cellcol}{RGB}{253,226,240}
@@ -1007,23 +1020,24 @@ The optimization techniques from Part III operate at different granularities (ke
            fill=BackColor!20,fit=(C11)(C34),line width=0.75pt](BB1){};
 \node[above=2pt of  BB1.north,anchor=south]{ML Layers};
 %%%
-\node[Box,below right =0.19 and 1.92 of BB1.north east](MA){Model A};
-\node[Box,above right =0.19 and 1.92 of BB1.south east](MB){Model B};
+\node[Box,below right =0.19 and 1.4 of BB1.north east](MA){Model A};
+\node[Box,above right =0.19 and 1.4 of BB1.south east](MB){Model B};
 \scoped[on background layer]
 \node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
            fill=BackColor!20,fit=(MA)(MB),line width=0.75pt](BB2){};
 \node[above=2pt of  BB2.north,anchor=south]{ML Model};
 %
-\node[Box2,right =2.35 of MA](T1){AI Task 1};
-\node[Box2, right =2.35  of MB](T2){Supporting Compute};
+\def\du{1.7}
+\node[Box2,right =\du of MA](T1){AI Task 1};
+\node[Box2, right =\du  of MB](T2){Supporting Compute};
 \scoped[on background layer]
 \node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
            fill=BackColor!20,fit=(T1)(T2),line width=0.75pt](BB3){};
 \node[above=2pt of  BB3.north,anchor=south]{AI Task};
 %
-\node[Box3,right =2.35  of T1](CN1){AI Compute Node};
+\node[Box3,right =\du  of T1](CN1){AI Compute Node};
 \node[Box4,right = 1.15 of CN1](NA1){Non-AI Compute Node};
-\node[Box3, right =2.35  of T2](CN2){AI Compute Node};
+\node[Box3, right =\du  of T2](CN2){AI Compute Node};
 \node[Box4,right = 1.15 of CN2](NA2){Non-AI Compute Node};
 \scoped[on background layer]
 \node[outer sep=0pt,draw=BackLine,inner xsep=3mm,inner ysep=2mm,yshift=0mm,
@@ -1101,9 +1115,9 @@ To avoid measuring hardware artifacts instead of kernel performance, follow the 
 
 A profiler turns these measurement rules into iron-law evidence by decomposing execution time into the terms introduced in @sec-introduction-iron-law-ml-systems-c32a: data movement, compute throughput, and latency overhead.
 
-::: {#nbk-benchmarking-measuring-iron-law-terms .callout-notebook title="Measuring the iron law terms"}
+::: {#psp-benchmarking-measuring-iron-law-terms .callout-perspective title="Measuring the iron law terms"}
 
-**From theory to trace**: How to map the iron law equation from @sec-introduction-iron-law-ml-systems-c32a to a profiler timeline (like Nsight Systems or PyTorch Profiler).
+Moving from theory to trace means mapping the iron law equation from @sec-introduction-iron-law-ml-systems-c32a onto a profiler timeline (like Nsight Systems or PyTorch Profiler).
 
 **Measuring the data term** $\left(\frac{D_{\text{vol}}}{\text{BW}}\right)$
 
@@ -1169,6 +1183,11 @@ Given the inherent specificity of end-to-end benchmarking, organizations typical
 
 @Tbl-benchmark-comparison reveals how different challenges emerge at different stages of an AI system's lifecycle. Each benchmarking approach provides unique insights: micro-benchmarks help engineers optimize specific components like GPU kernel implementations or data loading operations, macro-benchmarks guide model architecture decisions and algorithm selection, while end-to-end benchmarks reveal system-level bottlenecks in production environments.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Component**   | **Micro Benchmarks**                                      | **Macro Benchmarks**                                   | **End-to-End Benchmarks**                              |
 |:----------------|:----------------------------------------------------------|:-------------------------------------------------------|:-------------------------------------------------------|
 | **Focus**       | Individual operations                                     | Complete models                                        | Full system pipeline                                   |
@@ -1178,7 +1197,11 @@ Given the inherent specificity of end-to-end benchmarking, organizations typical
 | **Challenges**  | May miss interaction effects                              | Limited infrastructure insights                        | Complex to standardize, Often proprietary              |
 | **Typical Use** | Hardware selection, Operation optimization                | Model selection, Research comparison                   | Production system evaluation                           |
 
-: **Benchmarking Granularity Levels**: Different benchmark scopes target distinct stages of ML system development. Micro-benchmarks isolate individual operations for low-level optimization, macro-benchmarks evaluate complete models to guide architectural choices, and end-to-end benchmarks assess full system performance in production environments. {#tbl-benchmark-comparison tbl-colwidths="[11,30,30,29]"}
+: **Benchmarking Granularity Levels**: Different benchmark scopes target distinct stages of ML system development. Micro-benchmarks isolate individual operations for low-level optimization, macro-benchmarks evaluate complete models to guide architectural choices, and end-to-end benchmarks assess full system performance in production environments. {#tbl-benchmark-comparison tbl-colwidths="[11,28,32,29]"}
+
+```{=latex}
+\endgroup
+```
 
 Picking a single granularity level is rarely sufficient because a core tension exists between diagnostic precision and real-world fidelity. @Fig-benchmark-tradeoffs maps this trade-off, placing micro-benchmarks at the high-isolation end (precise but narrow) and end-to-end benchmarks at the high-representativeness end (realistic but harder to diagnose). No single point on this spectrum provides both: micro-benchmarks pinpoint exactly which kernel is slow but miss system-level bottlenecks, while end-to-end benchmarks capture production behavior but obscure root causes. The practical takeaway is that effective ML system evaluation requires combining insights from all three levels.
 
@@ -1192,7 +1215,7 @@ Picking a single granularity level is rarely sufficient because a core tension e
   point/.style={circle,fill,inner sep=1.75pt}
 }
 % Draw axes
-\draw[axis] (0,0) -- node[pos=.5, sloped, above=17pt]{\footnotesize Isolation/Diagnostic Power} (0,5);
+\draw[axis] (0,0) -- node[pos=.5, sloped, above=17pt]{\footnotesize Isolation/Diagnostic Power} (0,5.6);
 \draw[axis] (0,0) --node[below=10pt] {\footnotesize Real-World Representativeness} (8,0) ;
 % Draw grid lines
 \foreach \x in {1,2,3,4,5,6,7}
@@ -1250,7 +1273,7 @@ The essential components interconnect to form a complete evaluation pipeline. Th
    Box6/.style={Box, fill=BrownL!70,text width=17mm,minimum width=17mm, minimum height=9mm,draw=none},
    Box7/.style={Box6, fill=magenta!20},
    Box8/.style={Box6, fill=magenta!20,minimum width=27mm, minimum height=18mm},
-   Box9/.style={Box, node distance=0.2,fill=white,text width=23.5mm,minimum width=23.5mm,
+   Box9/.style={Box, node distance=0.2,fill=white,text width=22mm,minimum width=22mm,
                         minimum height=14mm,draw=none,font=\usefont{T1}{phv}{m}{n}\small},
    Trap/.style={trapezium, trapezium stretches = true, fill=GreenD,draw=none,
    minimum width=15mm,minimum height=10mm, draw=none, thick,rotate=270},
@@ -1469,7 +1492,7 @@ Evaluation metrics[^fn-metric-etymology] translate raw model behavior into numbe
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.25}
+\renewcommand{\arraystretch}{1.35}
 ```
 
 | **Category**   | **Metric**                   | **Unit**               | **Primary Use Case**   |
@@ -1578,6 +1601,8 @@ Code provenance completes the reproducibility chain. Contemporary benchmarks typ
 
 Producing benchmark numbers is the easy part; interpreting them correctly is where most engineers go wrong. A raw throughput figure or accuracy score is meaningless without understanding the conditions that produced it, the statistical confidence behind it, and the deployment context that determines whether the number matters. <!-- {#sec-benchmarking-benchmark-result-interpretation-framework-16a7} -->
 
+Before drawing conclusions from benchmark results, apply the vendor claim analysis framework introduced earlier (see the "Decoding Vendor Benchmark Claims" checklist) and extend it with two additional checks. First, the comparison must be fair: comparing ResNet-50 against MobileNet conflates architecture differences with optimization choices; precision differences (FP32 vs. INT8) alone can explain 2--4$\times$ performance gaps, and batch size, hardware generation, and software framework must all be controlled. Second, the statistics must be meaningful: reliable results require multiple runs, reported variance with confidence intervals, clear handling of outliers, and steady-state operation rather than cold-start effects. Applying these questions to a representative vendor claim illustrates how incomplete specifications obscure real performance.
+
 ```{python}
 #| echo: false
 #| label: mobilenet-tradeoff-calc
@@ -1591,7 +1616,7 @@ Producing benchmark numbers is the easy part; interpreting them correctly is whe
 # │          Raspberry Pi 4 wildlife-camera deployment.
 # │ Show:    Latency, accuracy, model size, derived speedup, size reduction,
 # │          accuracy drop, and frames-per-second for each precision.
-# │ How:     Direct ratios on the reported FP32 and INT8 measurements.
+# │ How:     Direct ratios on illustrative FP32 and INT8 scenario values.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models
@@ -1637,23 +1662,31 @@ class MobileNetTradeoffCalc:
 
 ::: {#exmp-benchmarking-benchmarking-vision-model-edge-deployment .callout-example title="Benchmarking a vision model for edge deployment"}
 
-**Scenario**: A team validates MobileNetV2 [@sandler2018] for a wildlife camera trap running on a Raspberry Pi 4.
+**Scenario**: A team evaluates MobileNetV2 [@sandler2018] for a wildlife camera trap on a Raspberry Pi 4 using the illustrative values below.
 
 The critical question is whether the accuracy cost of INT8 is acceptable for this deployment—@tbl-benchmarking-mobilenet-int8-tradeoff shows that quantization trades a modest accuracy drop for dramatic latency and size improvements:
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.2}
+```
 
 | **Precision** |                   **Latency (ms)**                   |              **Accuracy (Top-1)**             |                   **Model Size**                  |
 |:--------------|:----------------------------------------------------:|:---------------------------------------------:|:-------------------------------------------------:|
 | **FP32**      | `{python} MobileNetTradeoffCalc.latency_fp32_ms_str` | `{python} MobileNetTradeoffCalc.acc_fp32_str` | `{python} MobileNetTradeoffCalc.size_fp32_mb_str` |
 | **INT8**      | `{python} MobileNetTradeoffCalc.latency_int8_ms_str` | `{python} MobileNetTradeoffCalc.acc_int8_str` | `{python} MobileNetTradeoffCalc.size_int8_mb_str` |
 
-: **MobileNetV2 INT8 quantization trade-off**: Latency, accuracy, and model size for FP32 and INT8 precisions on MobileNetV2. {#tbl-benchmarking-mobilenet-int8-tradeoff}
+: **MobileNetV2 INT8 quantization trade-off**: Illustrative FP32 and INT8 latency, accuracy, and model-size values; not controlled Raspberry Pi measurements. {#tbl-benchmarking-mobilenet-int8-tradeoff}
+
+```{=latex}
+\endgroup
+\vspace*{-1.5ex}
+```
 
 **Systems insight**:
-The `{python} MobileNetTradeoffCalc.latency_speedup_mult_str` speedup and `{python} MobileNetTradeoffCalc.size_reduction_mult_str` size reduction from quantization come at a cost of `{python} MobileNetTradeoffCalc.acc_drop_str` of top-1 accuracy. For a battery-powered real-time system with this tolerance, INT8 is the clear choice, enabling about `{python} MobileNetTradeoffCalc.fps_int8_str` processing compared to about `{python} MobileNetTradeoffCalc.fps_fp32_str` with FP32.
+The `{python} MobileNetTradeoffCalc.latency_speedup_mult_str` speedup and `{python} MobileNetTradeoffCalc.size_reduction_mult_str` size reduction from quantization come at a cost of `{python} MobileNetTradeoffCalc.acc_drop_str` top-1 accuracy. Under these assumptions, INT8 enables about `{python} MobileNetTradeoffCalc.fps_int8_str` compared with `{python} MobileNetTradeoffCalc.fps_fp32_str`; deployment still requires controlled measurement.
 
 :::
-
-Before drawing conclusions from benchmark results, apply the vendor claim analysis framework introduced earlier (see the "Decoding Vendor Benchmark Claims" checklist) and extend it with two additional checks. First, the comparison must be fair: comparing ResNet-50 against MobileNet conflates architecture differences with optimization choices; precision differences (FP32 vs. INT8) alone can explain 2--4$\times$ performance gaps, and batch size, hardware generation, and software framework must all be controlled. Second, the statistics must be meaningful: reliable results require multiple runs, reported variance with confidence intervals, clear handling of outliers, and steady-state operation rather than cold-start effects. Applying these questions to a representative vendor claim illustrates how incomplete specifications obscure real performance.
 
 ```{python}
 #| echo: false
@@ -1678,16 +1711,16 @@ class H100TdpClaim:
 
 Beyond vendor claims, context determines which metrics matter most. A 1 percent accuracy improvement may be decisive for medical diagnostics but irrelevant for an application that prioritizes inference speed. Practitioners should also guard against *benchmark overfitting*, where models are excessively optimized for specific benchmark tasks at the expense of real-world generalization, by evaluating performance on related but distinct tasks and considering practical deployment scenarios.
 
-::: {#nbk-benchmarking-interpreting-benchmark-claim .callout-notebook title="Interpreting a benchmark claim"}
+::: {#psp-benchmarking-interpreting-benchmark-claim .callout-perspective title="Interpreting a benchmark claim"}
 
-**Problem**: A vendor claims "Our system achieves `{python} H100TdpClaim.vendor_claim_ips_str`/second on ResNet-50." Should this number be trusted for deployment planning?
+A vendor claims "Our system achieves `{python} H100TdpClaim.vendor_claim_ips_str`/second on ResNet-50." Taken alone, the number cannot support deployment planning because the conditions that determine its meaning are unstated.
 
-**Critical questions**:
+Four unstated conditions determine what the claim means:
 
-1. **What batch size?** Large batches often achieve high throughput but can violate latency targets; batch 1 achieves low latency but lower throughput.
-2. **What precision?** INT8 is 2--4$\times$ faster than FP32 on supported hardware but may have accuracy or calibration implications.
-3. **What is included?** Pure inference, or including preprocessing?
-4. **What accuracy?** Matching the original 76.1 percent Top-1, or degraded?
+1. **Batch size**: Large batches often achieve high throughput but can violate latency targets; batch 1 achieves low latency but lower throughput.
+2. **Precision**: INT8 is 2--4$\times$ faster than FP32 on supported hardware but may have accuracy or calibration implications.
+3. **Measurement boundary**: The claim must state whether it covers pure inference or includes preprocessing.
+4. **Accuracy**: The claim must state whether the model matches the original 76.1 percent Top-1 or a degraded level.
 
 **A complete specification**: "`{python} H100TdpClaim.vendor_claim_ips_str`/second on ResNet-50 at batch size `{python} H100TdpClaim.spec_batch_size_str`, INT8 precision, `{python} H100TdpClaim.spec_top1_pct_str` Top-1 accuracy, including JPEG decoding, on NVIDIA H100 at `{python} H100TdpClaim.h100_tdp_w_str` TDP."
 
@@ -1760,6 +1793,11 @@ Critically, acceleration factors vary dramatically across hardware platforms: sp
 
 Mobile and edge deployments\index{Edge Deployment!constraint triangle} face constraints radically different from cloud environments, requiring specialized benchmarking approaches that capture the unique trade-offs in resource-constrained settings. These constraints form an interdependent triangle of power consumption, inference latency, and model accuracy, where improving any two typically degrades the third. Edge deployment requires navigating trade-offs that cloud deployments can largely ignore, summarized in @tbl-edge-vs-cloud-constraints.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Constraint** | **Cloud Impact**               | **Edge Impact**               |
 |:---------------|:-------------------------------|:------------------------------|
 | **Power**      | Operational cost (~\$0.10/kWh) | Hard limit (battery capacity) |
@@ -1767,6 +1805,10 @@ Mobile and edge deployments\index{Edge Deployment!constraint triangle} face cons
 | **Accuracy**   | Primary optimization target    | Constrained by power/latency  |
 
 : **Edge vs. Cloud Deployment Constraints**: The same three constraints (power, latency, accuracy) carry fundamentally different meanings across deployment contexts. Cloud systems treat power as an operational cost and latency as a UX metric, leaving accuracy as the primary optimization target; edge systems must treat power and latency as hard physical limits, leaving accuracy as the residual variable to optimize. {#tbl-edge-vs-cloud-constraints}
+
+```{=latex}
+\endgroup
+```
 
 As a concrete example, a smartphone camera AI for real-time object detection may need to process video-rate inputs while staying inside a tight thermal envelope. In that setting, a MobileNet-family model can be the correct benchmark target even if a larger ResNet-family model reports higher accuracy in a cloud setting, because the edge benchmark must include sustained latency, power, and thermal behavior. A sustained edge benchmark exposes these gaps between marketed specifications and operational behavior. The peak-versus-sustained gap established in @sec-benchmarking-machine-learning-benchmarking-framework-70b8 turns acute at the edge for a physical reason absent in the data center: a passively cooled device cannot shed the heat of continuous inference indefinitely, so burst-mode numbers can degrade under thermal throttling. That thermal mechanism, not measurement sloppiness, makes edge benchmarking a categorically different exercise than cloud benchmarking.
 
@@ -1786,8 +1828,6 @@ As a concrete example, a smartphone camera AI for real-time object detection may
 **Systems insight**: The peak result is not the product reality. A user experience designed around burst throughput is broken from the start. Always benchmark sustained performance, not just peak.
 
 :::
-
-Thermal throttling in a constrained passive-cooling envelope can begin during sustained inference, making short burst benchmarks misleading for always-on applications. Any edge evaluation must therefore account for sustained power draw under thermal steady state, not burst-mode peaks, and must measure end-to-end latency including data transfer overhead.
 
 ::: {.column-margin}
 ![](images/svg/vol1_benchmarking_margin_003.svg){width="100%" fig-alt="FPS holds briefly then drops at thermal throttling knee."}
@@ -1846,6 +1886,8 @@ When evaluating edge hardware claims, four factors determine whether vendor numb
 4. **End-to-end vs. accelerator-only**: NPU benchmarks often exclude data transfer overhead. Moving image data from camera to NPU and back can exceed inference time for small models.
 
 :::
+
+Thermal throttling in a constrained passive-cooling envelope can begin during sustained inference, making short burst benchmarks misleading for always-on applications. Any edge evaluation must therefore account for sustained power draw under thermal steady state, not burst-mode peaks, and must measure end-to-end latency including data transfer overhead.
 
 #### Heterogeneous processor coordination {#sec-benchmarking-heterogeneous-processor-coordination-68cf}
 
@@ -1995,7 +2037,7 @@ MLPerf Training\index{MLPerf Training!standardized framework} [@mattson2020mlper
    axis line style={draw=none},
   /pgf/number format/.cd,
   width=163mm,
-  height=65mm,
+  height=60mm,
   legend style={at={(0.16,0.98)}, anchor=north},
   legend cell align=left,
   legend style={fill=BrownL!40,draw=BrownLine,row sep=-1.1pt,
@@ -2015,7 +2057,7 @@ MLPerf Training\index{MLPerf Training!standardized framework} [@mattson2020mlper
   ytick={1,2,4,8,16,32,64},
   yticklabels={1,2,4,8,16,32,64},
   ylabel={},
-  title={Relative performance - Best results - Closed, available, on premises},
+  title={Relative performance -- Best results -- Closed, available, on premises},
   grid=both,
   major grid style={black!60},
         tick label style={/pgf/number format/assume math mode=true},
@@ -2184,7 +2226,6 @@ From a systems perspective, training benchmarks assess how efficiently a model r
 #### Time and throughput {#sec-benchmarking-time-throughput-1252}
 
 One of the primary metrics for evaluating training efficiency is the time required to reach a predefined accuracy threshold\index{Time-to-Accuracy!training benchmark primary metric}. Training time $(T_{\text{train}})$ measures how long a model takes to converge to an acceptable performance level, reflecting the overall computational efficiency of the system. Let $\text{Accuracy}(t)$ be the model's accuracy at training time $t$, and let **target accuracy** be the benchmark-specific threshold (for example, 75.9 percent top-1 accuracy for ResNet-50 on ImageNet in MLPerf). @Eq-training-time-benchmark formally defines this metric, keeping the benchmark focused on how quickly a system achieves meaningful results:
-
 $$T_{\text{train}} = \operatorname{arg\,min}_{t} \big\{ \text{Accuracy}(t) \geq \text{target accuracy} \big\}$$ {#eq-training-time-benchmark}
 
 **Throughput**\index{Throughput!definition}[^fn-throughput-etymology], often expressed as the number of training samples processed per second, provides an additional measure of system performance. Let $N_{\text{samples}}$ be the total number of training samples processed and $T_{\text{train}}$ the training time from @eq-training-time-benchmark. @Eq-throughput-benchmark shows:
@@ -2197,10 +2238,6 @@ Throughput alone does not guarantee meaningful results, as a model may process a
 #### Scalability and parallelism {#sec-benchmarking-scalability-parallelism-1124}
 
 Scalability\index{Scalability!distributed training metric} measures how effectively training performance improves as resources are added. Ideally, doubling GPU count should halve training time. In practice, communication overhead, memory bandwidth limits, and parallelization inefficiencies constrain scaling well below linear.
-
-When training large-scale models such as GPT-3, OpenAI employed a large cluster of NVIDIA V100 GPUs in a distributed training setup [@brown2020language; @patterson2021carbon]. Google's TPU v4 systems demonstrate the same distributed-systems lesson at data center scale: adding computational resources provides more raw power, but performance and resiliency depend on network communication, topology, and operational management [@jouppi2023; @zu2024tpuv4]. Benchmarks such as MLPerf quantify how well a system scales across multiple accelerators, providing insights into where inefficiencies arise in distributed training.
-
-Parallelism in training is categorized into data parallelism\index{Data Parallelism!training strategy}, model parallelism\index{Model Parallelism!training strategy}, and pipeline parallelism\index{Pipeline Parallelism!training strategy} (see @sec-model-training), each presenting distinct challenges. Data parallelism, the most commonly used strategy, involves splitting the training dataset across multiple compute nodes. The efficiency of this approach depends on synchronization mechanisms and gradient communication overhead. In contrast, model parallelism partitions the neural network itself, requiring efficient coordination between processors. Benchmarks evaluate how well a system manages these parallelism strategies without degrading accuracy convergence. A key metric for evaluating parallelism is **scaling efficiency**\index{Scaling Efficiency!strong scaling definition}, which quantifies how much of the added computational capacity translates into actual speedup.
 
 ```{python}
 #| echo: false
@@ -2264,6 +2301,11 @@ With perfect scaling, `{python} ScalingEfficiencyCalc.n_gpus_str` would complete
 
 **Step 3**: Account for the efficiency loss. @Tbl-benchmarking-scaling-efficiency-loss decomposes the "missing" `{python} ScalingEfficiencyCalc.loss_str` into measurable overhead categories—gradient synchronization, memory copy, load imbalance, and batch-size effects—each measurable through a distinct profiling signal.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Source**                   | **Example Contribution** | **Measurement**                     |
 |:-----------------------------|:------------------------:|:------------------------------------|
 | **Gradient synchronization** |          10-15%          | AllReduce time per step             |
@@ -2273,6 +2315,10 @@ With perfect scaling, `{python} ScalingEfficiencyCalc.n_gpus_str` would complete
 
 : **Scaling Efficiency Loss Sources**: Illustrative decomposition of the missing efficiency budget into measurable overhead categories and the corresponding measurement signal used to attribute each loss. Actual percentages depend on model, interconnect, storage, batch schedule, and framework implementation. {#tbl-benchmarking-scaling-efficiency-loss}
 
+```{=latex}
+\endgroup
+```
+
 **Step 4**: The systems insight.
 <!-- lego-ok-block: typical strong-scaling efficiency ranges at different GPU counts -->
 Scaling efficiency decreases as $N_{\text{GPU}}$ grows because communication overhead scales with GPU count while per-GPU compute shrinks. In this worked example, eight GPUs reach 75 percent efficiency; at larger scales, the same arithmetic makes clear why sophisticated communication and input-pipeline optimization become necessary.
@@ -2281,6 +2327,10 @@ MLPerf reports both raw performance and scaling efficiency for this reason: a sy
 <!-- end lego-ok-block -->
 
 :::
+
+When training large-scale models such as GPT-3, OpenAI employed a large cluster of NVIDIA V100 GPUs in a distributed training setup [@brown2020language; @patterson2021carbon]. Google's TPU v4 systems demonstrate the same distributed-systems lesson at data center scale: adding computational resources provides more raw power, but performance and resiliency depend on network communication, topology, and operational management [@jouppi2023; @zu2024tpuv4]. Benchmarks such as MLPerf quantify how well a system scales across multiple accelerators, providing insights into where inefficiencies arise in distributed training.
+
+Parallelism in training is categorized into data parallelism\index{Data Parallelism!training strategy}, model parallelism\index{Model Parallelism!training strategy}, and pipeline parallelism\index{Pipeline Parallelism!training strategy} (see @sec-model-training), each presenting distinct challenges. Data parallelism, the most commonly used strategy, involves splitting the training dataset across multiple compute nodes. The efficiency of this approach depends on synchronization mechanisms and gradient communication overhead. In contrast, model parallelism partitions the neural network itself, requiring efficient coordination between processors. Benchmarks evaluate how well a system manages these parallelism strategies without degrading accuracy convergence. A key metric for evaluating parallelism is **scaling efficiency**\index{Scaling Efficiency!strong scaling definition}, which quantifies how much of the added computational capacity translates into actual speedup.
 
 #### Resource utilization {#sec-benchmarking-resource-utilization-336b}
 
@@ -2352,6 +2402,8 @@ For a training benchmark, reproducibility is therefore the full run envelope, no
 
 A comprehensive training benchmark considers multiple dimensions of system behavior because each dimension identifies a different way hardware investment can fail to become convergence. @Tbl-training-metrics summarizes the core categories and associated metrics commonly used to benchmark system-level training performance, providing a framework for understanding how training systems behave under different workloads and configurations.
 
+The dimensions in @tbl-training-metrics interact in ways that tables cannot capture. Higher throughput from reduced precision (for example, TF32) is meaningless if it increases the iterations required to reach target accuracy, making time-to-accuracy the essential corrective metric. Scaling efficiency can look nearly linear at small node counts but taper as gradient synchronization costs dominate. Resource utilization metrics reveal why: a BERT pretraining task with moderate GPU utilization may be bottlenecked by its data pipeline, not its accelerators. Checkpointing for fault tolerance introduces its own overhead, requiring balance between resilience and performance.
+
 | **Category**                            | **Key Metrics**                                                                                                              | **Example Benchmark Use**                                   |
 |:----------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------|:------------------------------------------------------------|
 | **Training Time and Throughput**        | Time-to-accuracy (seconds, minutes, hours); Throughput (samples/sec)                                                         | Comparing training speed across different GPU architectures |
@@ -2362,8 +2414,6 @@ A comprehensive training benchmark considers multiple dimensions of system behav
 | **Reproducibility and Standardization** | Variance across runs (percent difference in accuracy, training time); Framework consistency (TensorFlow vs. PyTorch vs. JAX) | Ensuring consistency in benchmark results across hardware   |
 
 : **Training Benchmark Dimensions**: Key categories and metrics for evaluating machine learning training systems beyond simple speed, covering resource efficiency, reproducibility, and overall performance trade-offs across different training approaches and infrastructure configurations. {#tbl-training-metrics tbl-colwidths="[18,52,29]"}
-
-The dimensions in @tbl-training-metrics interact in ways that tables cannot capture. Higher throughput from reduced precision (for example, TF32) is meaningless if it increases the iterations required to reach target accuracy, making time-to-accuracy the essential corrective metric. Scaling efficiency can look nearly linear at small node counts but taper as gradient synchronization costs dominate. Resource utilization metrics reveal why: a BERT pretraining task with moderate GPU utilization may be bottlenecked by its data pipeline, not its accelerators. Checkpointing for fault tolerance introduces its own overhead, requiring balance between resilience and performance.
 
 Across all dimensions, measurement accuracy depends on controlling for hardware variability. GPU boost clock[^fn-gpu-boost] behavior and thermal throttling[^fn-thermal-throttling] can shift results enough to swamp small claimed gains, making repeated runs and statistical rigor (as established earlier) essential for distinguishing genuine performance differences from noise.
 
@@ -2448,7 +2498,7 @@ Scaling inference workloads across cloud servers, edge platforms, mobile devices
 # │ Visualize the massive spread in power consumption across system types.
 from book.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.4))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.15))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 # All values in watts so the log axis is physically meaningful.
@@ -2513,8 +2563,6 @@ These measurements form the basis for Service Level Objectives (SLOs) and Servic
 
 The distinction matters in practice: engineering teams optimize toward SLOs while the business commits to SLAs. Choosing the wrong metric to optimize wastes engineering effort or violates customer guarantees.
 
-Tail latency's connection to user experience at scale becomes critical in production systems serving millions of users. Even small P99 latency degradations create compounding effects across large user bases: if 1 percent of requests experience 10$\times$ latency (for example, 1000 ms instead of 100 ms), this affects 10,000 users per million requests, potentially leading to timeout errors, poor user experience, and customer churn. Search engines and recommendation systems demonstrate this sensitivity: Google's search-latency experiments found measurable reductions in daily searches per user after 100--400 ms server-side delays [@brutlag2009speed], which is why interactive services often treat sub-100 ms response times as a practical design target.
-
 ::: {#chk-benchmarking-metric-selection .callout-checkpoint title="Metric selection"}
 
 The metric shapes the optimization.
@@ -2526,6 +2574,8 @@ Apply three rules before finalizing your metric selection:
 - [ ] **End-to-end**: List the preprocessing, model execution, and postprocessing stages included in the reported latency.
 
 :::
+
+Tail latency's connection to user experience at scale becomes critical in production systems serving millions of users. Even small P99 latency degradations create compounding effects across large user bases: if 1 percent of requests experience 10$\times$ latency (for example, 1000 ms instead of 100 ms), this affects 10,000 users per million requests, potentially leading to timeout errors, poor user experience, and customer churn. Search engines and recommendation systems demonstrate this sensitivity: Google's search-latency experiments found measurable reductions in daily searches per user after 100--400 ms server-side delays [@brutlag2009speed], which is why interactive services often treat sub-100 ms response times as a practical design target.
 
 Service level objectives (SLOs) in production systems therefore focus on tail latency rather than mean latency to ensure consistent user experience. Interactive services often define percentile-based latency objectives because occasional slow responses have disproportionate impact on user satisfaction. Large-scale systems may track even deeper tails, such as p99.9, when traffic spikes and infrastructure variation affect reliability.
 
@@ -2559,6 +2609,11 @@ A critical distinction in inference benchmarking is between component latency (t
 
 @Tbl-latency-breakdown gives an illustrative latency breakdown for an inference request. The model inference stage that vendors report as their "benchmark" number spans 5 to 100 ms, yet the queue wait time it sits behind ranges from 0 to over 1,000 ms: under load, the single component a benchmark measures is dwarfed by one it never sees, so the reported number can be a small slice of what the user actually experiences.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
 | **Component**              | **Example Range** | **Notes**                  |
 |:---------------------------|:-----------------:|:---------------------------|
 | **Network round-trip**     |     10–100 ms     | Varies by region           |
@@ -2570,6 +2625,10 @@ A critical distinction in inference benchmarking is between component latency (t
 | **Response serialization** |      0.1–1 ms     | JSON/protobuf              |
 
 : **Inference Latency Breakdown**: Different pipeline components contribute to end-to-end latency, and model inference (the number vendors typically report) can be only one part of total request time. Queue wait time can dominate under load, making end-to-end measurement essential for realistic performance assessment. Ranges are illustrative rather than universal. {#tbl-latency-breakdown}
+
+```{=latex}
+\endgroup
+```
 
 These component-level contributions explain why optimizing any single stage yields diminishing returns on end-to-end performance, an *optimization ceiling* formalized by Amdahl's Law\index{Amdahl's Law!optimization ceiling}.
 
@@ -2636,6 +2695,8 @@ class AmdahlBenchmarkCalc:
 
 Amdahl's ceiling highlights why rigorous benchmarking methodology matters. Comprehensive latency reporting requires specifying which components are included, measuring under realistic load conditions, and distinguishing component from end-to-end metrics. Before interpreting any benchmark result, verify that the measurement approach itself is sound.
 
+Throughput and batch efficiency measure whether a serving system can use available hardware without violating latency constraints. Throughput counts how many inference requests a system processes per second, typically expressed as queries per second\index{Queries per Second!inference throughput metric} (QPS) or frames per second (FPS). Single-instance systems process each input independently on arrival; batch systems process multiple inputs in parallel, exploiting hardware parallelism for higher efficiency.
+
 ::: {#chk-benchmarking-benchmarking-methodology .callout-checkpoint title="Benchmarking methodology"}
 
 Bad benchmarks optimize the wrong things.
@@ -2647,8 +2708,6 @@ Three practices distinguish rigorous benchmarks from misleading ones:
 - [ ] **Isolation**: Document the machine, competing workloads, and runtime configuration used during measurement.
 
 :::
-
-Throughput and batch efficiency measure whether a serving system can use available hardware without violating latency constraints. Throughput counts how many inference requests a system processes per second, typically expressed as queries per second\index{Queries per Second!inference throughput metric} (QPS) or frames per second (FPS). Single-instance systems process each input independently on arrival; batch systems process multiple inputs in parallel, exploiting hardware parallelism for higher efficiency.
 
 For example, cloud-based services handling millions of queries per second benefit from batch inference, where large groups of inputs are processed together to maximize computational efficiency. In contrast, applications like robotics, interactive AI, and augmented reality require low-latency single-instance inference, where the system must respond immediately to each new input. Benchmarks must consider both single-instance and **batch throughput**\index{Batch Throughput!definition} to provide a comprehensive understanding of inference performance across different deployment scenarios.
 
@@ -2676,7 +2735,7 @@ Unlike training, inference systems must process inputs and deliver predictions e
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.25}
+\renewcommand{\arraystretch}{1.35}
 ```
 
 | **Category**                    | **Key Metrics**                                                      | **Example Benchmark Use**                                |
@@ -2699,6 +2758,8 @@ These metrics interact through unavoidable trade-offs. Optimizing for high throu
 
 Deployment scenario determines the priority order among those metrics. The operational constraints and success criteria vary dramatically across contexts, so metric priorities help engineers focus benchmarking effort and interpret results within the right decision framework. @Tbl-metric-priorities illustrates how performance priorities shift across five major deployment contexts, revealing the systematic relationship between operational constraints and optimization targets.
 
+The key insight from @tbl-metric-priorities is that the same metric can be primary in one context and irrelevant in another. Latency ranks first for real-time applications (autonomous vehicles must process sensor data within strict timing deadlines) but tertiary for cloud services (which accept higher latency in exchange for cost efficiency per query). A smartphone AI assistant that improves throughput by 50 percent but increases power consumption by 30 percent represents a net regression since battery life directly impacts user satisfaction. Medical diagnostic systems prioritize accuracy as nonnegotiable—achieving 99.2 percent accuracy at 10 ms latency provides superior value compared to 98.8 percent at 5 ms. This context-dependence means that a 2$\times$ throughput improvement represents substantial value for cloud deployments but minimal benefit for battery-powered edge devices, where 20 percent power reduction delivers superior operational impact.
+
 | **Deployment Context**     | **Primary Priority**  | **Secondary Priority** | **Tertiary Priority** | **Key Design Constraint**                         |
 |:---------------------------|:----------------------|:-----------------------|:----------------------|:--------------------------------------------------|
 | **Real-Time Applications** | Latency (p95 < 50 ms) | Reliability (99.9%)    | Memory Footprint      | User experience demands immediate response        |
@@ -2707,9 +2768,7 @@ Deployment scenario determines the priority order among those metrics. The opera
 | **Training Workloads**     | Training Time         | GPU Utilization        | Memory Efficiency     | Research velocity enables faster experimentation  |
 | **Scientific/Medical**     | Accuracy              | Reliability            | Explainability        | Correctness cannot be compromised for performance |
 
-: **Performance Metric Priorities by Deployment Context**: Different operational environments demand distinct optimization focuses, reflecting varying constraints and success criteria. These priorities guide both benchmark selection and result interpretation. {#tbl-metric-priorities tbl-colwidths="[18,16,20,18,28]"}
-
-The key insight from @tbl-metric-priorities is that the same metric can be primary in one context and irrelevant in another. Latency ranks first for real-time applications (autonomous vehicles must process sensor data within strict timing deadlines) but tertiary for cloud services (which accept higher latency in exchange for cost efficiency per query). A smartphone AI assistant that improves throughput by 50 percent but increases power consumption by 30 percent represents a net regression since battery life directly impacts user satisfaction. Medical diagnostic systems prioritize accuracy as nonnegotiable—achieving 99.2 percent accuracy at 10 ms latency provides superior value compared to 98.8 percent at 5 ms. This context-dependence means that a 2$\times$ throughput improvement represents substantial value for cloud deployments but minimal benefit for battery-powered edge devices, where 20 percent power reduction delivers superior operational impact.
+: **Performance Metric Priorities by Deployment Context**: Different operational environments demand distinct optimization focuses, reflecting varying constraints and success criteria. These priorities guide both benchmark selection and result interpretation. {#tbl-metric-priorities tbl-colwidths="[18,19,18,17,28]"}
 
 Even with well-defined metrics, inference evaluations fail when the benchmark ignores the deployment constraint that dominates the serving system. The following pitfalls show where average latency, memory, energy, cold starts, and scaling assumptions can each invalidate an otherwise plausible result.
 
@@ -2930,26 +2989,26 @@ class EdgeTPUSpeedupCalc:
 
 ::: {#lhs-benchmarking-mobilenet-edgetpu .callout-lighthouse title="MobileNetV2 on EdgeTPU"}
 
-Completing our MobileNetV2 lighthouse example, we validate the hardware acceleration claims from @sec-hardware-acceleration using the scenario discipline that MLPerf applies to latency-focused edge inference [@reddi2020; @banbury2021mlperftiny].
+Completing our MobileNetV2 lighthouse example, we evaluate the hardware-acceleration claim from @sec-hardware-acceleration using an illustrative SingleStream-style edge-inference scenario [@reddi2020; @banbury2021mlperftiny].
 
-**Hardware acceleration claim**: In this illustrative edge-accelerator scenario, the accelerator achieves ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` inference for INT8 MobileNetV2, approximately `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` speedup over a Cortex-M-class CPU (~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str`). Actual results depend on operator coverage, clock frequency, thermal state, and implementation.
+**Hardware acceleration claim**: In this illustrative edge-accelerator scenario, assume INT8 MobileNetV2 inference takes ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` on the accelerator, approximately `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` faster than a Cortex-M-class CPU (~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str`). Actual results depend on operator coverage, clock frequency, thermal state, and implementation.
 
-@Tbl-benchmarking-edgetpu-validation reports the validation protocol under the SingleStream scenario.
+@Tbl-benchmarking-edgetpu-validation reports the illustrative SingleStream-style scenario assumptions.
 
-| **Metric**               |                **CPU (Cortex-M7)**                |                      **EdgeTPU**                      |                           **Claimed**                           |                            **Validated?**                           |
+| **Metric**               |                **CPU (Cortex-M7)**                |                      **EdgeTPU**                      |                        **Headline Ratio**                       |                        **System-Level Ratio**                       |
 |:-------------------------|:-------------------------------------------------:|:-----------------------------------------------------:|:---------------------------------------------------------------:|:-------------------------------------------------------------------:|
-| **Inference latency**    | ~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str` | ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` | `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` faster |                                  ✓                                  |
+| **Inference latency**    | ~`{python} EdgeTPUSpeedupCalc.cpu_latency_ms_str` | ~`{python} EdgeTPUSpeedupCalc.edgetpu_latency_ms_str` | `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` faster |                                  —                                  |
 | **End-to-end latency**   |   ~`{python} EdgeTPUSpeedupCalc.cpu_e2e_ms_str`   |   ~`{python} EdgeTPUSpeedupCalc.edgetpu_e2e_ms_str`   |                                —                                |      ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str` faster     |
 | **Power consumption**    |  ~`{python} EdgeTPUSpeedupCalc.cpu_power_mw_str`  |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_power_mw_str`  |                                —                                |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_power_ratio_mult_str` higher |
 | **Energy per inference** |  ~`{python} EdgeTPUSpeedupCalc.cpu_energy_mj_str` |  ~`{python} EdgeTPUSpeedupCalc.edgetpu_energy_mj_str` |                                —                                | ~`{python} EdgeTPUSpeedupCalc.energy_ratio_mult_str` more efficient |
 
-: **EdgeTPU vs. Cortex-M7 MobileNetV2 validation**: SingleStream-scenario measurements comparing inference latency, end-to-end latency, power, and energy per inference for INT8 MobileNetV2, showing how preprocessing overhead narrows the headline accelerator speedup. {#tbl-benchmarking-edgetpu-validation tbl-colwidths="[24,20,18,18,20]"}
+: **EdgeTPU vs. Cortex-M7 MobileNetV2 scenario**: Illustrative SingleStream-style inference latency, end-to-end latency, power, and energy values show how preprocessing overhead narrows the headline accelerator speedup; these are not controlled measurements. {#tbl-benchmarking-edgetpu-validation tbl-colwidths="[24,20,18,18,20]"}
 
-**What this reveals**: The `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` inference speedup is real, but end-to-end improvement is only ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str` because preprocessing (image capture, resize, normalize) runs on the CPU in both cases. EdgeTPU consumes more power but completes faster, yielding better energy efficiency per inference.
+**What this reveals**: Under these assumptions, the `{python} EdgeTPUSpeedupCalc.inference_speedup_mult_str` inference speedup narrows to ~`{python} EdgeTPUSpeedupCalc.e2e_speedup_mult_str` end to end because preprocessing runs on the CPU in both cases. EdgeTPU uses more active power but completes faster, yielding lower inference energy; deployment requires controlled measurement.
 
 **Deployment decision**: For battery-powered devices running infrequently, the active inference calculation alone favors EdgeTPU, but total battery impact depends on sleep power, wake-up energy, host-transfer overhead, and whether the accelerator adds idle leakage while the system waits. For continuous video operation, EdgeTPU's lower active energy per inference is much more likely to dominate.
 
-The SingleStream result illustrates why benchmarking requires matching the MLPerf scenario to the deployment context: SingleStream validates mobile applications, while Offline benchmarks would give different conclusions optimized for throughput rather than latency.
+The SingleStream result illustrates why benchmarking requires matching the MLPerf scenario to the deployment context: SingleStream emphasizes latency, while Offline benchmarks would give different conclusions optimized for throughput rather than latency.
 
 :::
 
@@ -3012,12 +3071,17 @@ This third dimension is critical because @sec-hardware-acceleration established 
 ```
 ![](images/svg/benchmarking_power_ladder.svg){width="100%" fig-alt="Vertical ladder of orange bars on a log scale spanning deployment power from a neural decision processor at 150 microwatts at the bottom up through a microcontroller at 25 milliwatts, a Raspberry Pi at 3.5 watts, an edge server at 80 watts, an ML server node at 400 watts, to an ML server rack at 10 kilowatts at the top."}
 
-*Deployment power spans ten orders of magnitude, µW to kW.*
+*Deployment power spans nearly eight orders, µW to kW.*
 :::
 
 However, measuring power consumption in machine learning systems presents challenges distinct from measuring time or throughput. Power varies with temperature, workload phase, and system configuration in ways that performance metrics do not. @Tbl-power quantifies how energy demands of ML models vary dramatically across deployment environments, spanning multiple orders of magnitude from TinyML devices consuming mere microwatts to data center racks requiring kilowatts. This wide spectrum illustrates the central challenge in creating standardized benchmarking methodologies [@henderson2020towards].
 
-Creating a unified methodology across this ten-orders-of-magnitude range requires careful consideration of each scale's unique characteristics: microwatt-level TinyML measurements demand different instrumentation than kilowatt-scale server rack monitoring. A comprehensive framework must accommodate these scales while maintaining consistency, fairness, and reproducibility.
+This range spans nearly eight orders and requires scale-specific measurement: microwatt-level TinyML demands different instrumentation than kilowatt-scale racks. A comprehensive framework must maintain consistency, fairness, and reproducibility across both.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.4}
+```
 
 | **Category** | **Device Type**                 | **Power Consumption** |
 |:-------------|:--------------------------------|:---------------------:|
@@ -3031,6 +3095,10 @@ Creating a unified methodology across this ten-orders-of-magnitude range require
 | **Cloud**    | ML Server Rack                  |        4-10 kW        |
 
 : **Power Consumption Spectrum**: The representative deployment points listed here span over seven orders of magnitude in power demands, from microwatt-scale TinyML devices (150 µW) to kilowatt-scale ML server racks (10 kW); @fig-power-differentials extends the same picture down to 5.6 µW at the TinyML floor and up to roughly 498 kW at the training-cluster ceiling, covering nearly eleven orders of magnitude. This enormous range explains why no single measurement technique or efficiency metric applies universally: benchmarking a 150 µW neural processor requires fundamentally different instrumentation than measuring a 10 kW server rack. {#tbl-power}
+
+```{=latex}
+\endgroup
+```
 
 ### Power measurement boundaries {#sec-benchmarking-power-measurement-boundaries-982c}
 
@@ -3181,6 +3249,8 @@ The diagram is organized into three categories, Tiny, Inference, and Training ex
 
 Where the boundary falls determines what counts as energy, but within any boundary the dominant term is rarely arithmetic. Decomposing inference energy into its physical sources shows why precision, not raw operation count, is the primary energy lever, and why a power benchmark that ignores data movement measures the wrong thing.
 
+System-level power measurement offers a more holistic view than measuring individual components in isolation. While component-level metrics (for example, accelerator or processor power) are valuable for performance tuning, real-world ML workloads involve intricate interactions between compute units, memory systems, and supporting infrastructure. For instance, analysis of Google's TensorFlow Mobile workloads shows that data movement accounts for 57.3 percent of total inference energy consumption [@boroumand2018], highlighting how memory-bound operations can dominate system power usage.
+
 ```{python}
 #| echo: false
 #| label: energy-per-op-constants
@@ -3195,7 +3265,7 @@ Where the boundary falls determines what counts as energy, but within any bounda
 # │ How:  Read Horowitz 2014 energy anchors from Hardware.Tech.Op / Hardware.Tech.Memory.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_multiple, fmt_qty, fmt_energy_per_flop
+from mlsysim.fmt import fmt, fmt_multiple, fmt_energy_per_byte, fmt_energy_per_flop
 from mlsysim.core.units import pJ, byte, flop
 
 class EnergyPerOp:
@@ -3205,9 +3275,9 @@ class EnergyPerOp:
     ENERGY_FLOP_FP32_PJ = Hardware.Tech.Op.FlopFp32.energy
     ENERGY_FLOP_FP16_PJ = Hardware.Tech.Op.FlopFp16.energy
     ENERGY_OP_INT8_PJ = Hardware.Tech.Op.OpInt8.energy
-    ENERGY_REG_PJ = Hardware.Tech.Memory.Register.energy_per_access
-    ENERGY_SRAM_L1_PJ = Hardware.Tech.Memory.L1.energy_per_access
-    ENERGY_SRAM_L2_PJ = Hardware.Tech.Memory.L2.energy_per_access
+    ENERGY_REG_PJ_PER_BYTE = Hardware.Tech.Movement.Register.energy_per_byte
+    ENERGY_SRAM_L1_PJ_PER_BYTE = Hardware.Tech.Movement.L1.energy_per_byte
+    ENERGY_SRAM_L2_PJ_PER_BYTE = Hardware.Tech.Movement.L2.energy_per_byte
     ENERGY_DRAM_PJ_PER_BYTE = Hardware.Tech.Memory.DRAM.energy_per_byte
 
     # ┌── 2. EXECUTE (The Compute) ───────────────────────────────────────────
@@ -3215,9 +3285,9 @@ class EnergyPerOp:
     _fp32_e = ENERGY_FLOP_FP32_PJ.to(pJ / flop).magnitude
     fp16_rel_value = ENERGY_FLOP_FP16_PJ.to(pJ / flop).magnitude / _fp32_e
     int8_rel_value = ENERGY_OP_INT8_PJ.to(pJ / flop).magnitude / _fp32_e
-    l1_rel_value = round(ENERGY_SRAM_L1_PJ.to(pJ).magnitude / ENERGY_REG_PJ.to(pJ).magnitude)
-    l2_rel_value = round(ENERGY_SRAM_L2_PJ.to(pJ).magnitude / ENERGY_REG_PJ.to(pJ).magnitude)
-    dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ.to(pJ).magnitude / 1000) * THOUSAND
+    l1_rel_value = round(ENERGY_SRAM_L1_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ_PER_BYTE.to(pJ / byte).magnitude)
+    l2_rel_value = round(ENERGY_SRAM_L2_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ_PER_BYTE.to(pJ / byte).magnitude)
+    dram_vs_reg_ratio_value = round(ENERGY_DRAM_PJ_PER_BYTE.to(pJ / byte).magnitude / ENERGY_REG_PJ_PER_BYTE.to(pJ / byte).magnitude)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     fp32_rel_mult_str = fmt_multiple(1, precision=0, commas=False)
@@ -3230,9 +3300,9 @@ class EnergyPerOp:
     energy_fp32_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP32_PJ, precision=1, commas=False)
     energy_fp16_pj_str = fmt_energy_per_flop(ENERGY_FLOP_FP16_PJ, precision=1, commas=False)
     energy_int8_pj_str = fmt_energy_per_flop(ENERGY_OP_INT8_PJ, precision=1, commas=False)
-    energy_reg_pj_str = fmt_qty(ENERGY_REG_PJ, pJ, precision=2, commas=False)
-    energy_l1_pj_str = fmt_qty(ENERGY_SRAM_L1_PJ, pJ, precision=1, commas=False)
-    energy_l2_pj_str = fmt_qty(ENERGY_SRAM_L2_PJ, pJ, precision=0, commas=False)
+    energy_reg_pj_str = fmt_energy_per_byte(ENERGY_REG_PJ_PER_BYTE, precision=1, commas=False)
+    energy_l1_pj_str = fmt_energy_per_byte(ENERGY_SRAM_L1_PJ_PER_BYTE, precision=0, commas=False)
+    energy_l2_pj_str = fmt_energy_per_byte(ENERGY_SRAM_L2_PJ_PER_BYTE, precision=0, commas=False)
     dram_vs_reg_ratio_mult_str = fmt_multiple(dram_vs_reg_ratio_value, precision=0, commas=True)
 ```
 
@@ -3294,7 +3364,7 @@ class EnergyBreakdownCalc:
 
 ```{=latex}
 \begin{minipage}{1\linewidth}
-\renewcommand{\arraystretch}{1.25}
+\renewcommand{\arraystretch}{1.37}
 ```
 Recall from @sec-hardware-acceleration that moving data costs far more energy than computing on it (the energy-movement invariant formalized in @sec-data-engineering and quantified by Horowitz's energy estimates [@horowitz2014]). Understanding *why* quantization reduces energy consumption\index{Quantization!INT8 energy savings} requires decomposing energy into its physical sources. Two dominant factors determine inference energy: compute operations and memory access.
 
@@ -3310,10 +3380,6 @@ Narrower datatypes generally require less switching and storage energy per opera
 
 An 8-bit multiplier uses ~`{python} EnergyPerOp.fp32_vs_int8_mult_str` less energy than a 32-bit floating-point multiplier in this energy model because narrower arithmetic reduces switching and storage work [@horowitz2014]. @Sec-appdx-machine-foundations-numbers-know-b531 catalogs the canonical per-operation energy figures behind these ratios and shows why the FP32-to-INT8 and data-movement-to-compute gaps stay stable across hardware generations.
 
-```{=latex}
-\end{minipage}
-```
-
 @Tbl-benchmarking-energy-memory-tier extends the picture to memory access, with energy cost per byte across each tier of the hierarchy:
 
 | **Memory Level** |                     **Energy per Byte**                     |                 **Relative Cost**                 |
@@ -3325,6 +3391,10 @@ An 8-bit multiplier uses ~`{python} EnergyPerOp.fp32_vs_int8_mult_str` less ener
 
 : **Memory access energy by tier**: Per-byte energy cost across the register-to-DRAM hierarchy, with relative cost normalized to a register read, exposing why off-chip memory traffic dominates inference energy budgets. Values follow the same canonical energy-estimate model used in @horowitz2014 and @sec-appdx-machine-foundations-numbers-know-b531. {#tbl-benchmarking-energy-memory-tier}
 
+```{=latex}
+\end{minipage}
+\tcbbreak
+```
 Memory access dominates: reading one byte from DRAM costs over `{python} EnergyPerOp.dram_vs_reg_ratio_mult_str` more energy than a register access.
 
 @Tbl-benchmarking-mobilenet-int8-energy combines the two effects for a MobileNetV2 inference, decomposing per-inference energy into model-load and compute terms at FP32 vs. INT8:
@@ -3337,11 +3407,9 @@ Memory access dominates: reading one byte from DRAM costs over `{python} EnergyP
 
 : **MobileNetV2 INT8 energy breakdown**: Per-inference energy decomposed into model-load and compute terms for FP32 vs. INT8, showing that INT8 quantization attacks DRAM-traffic energy as the dominant component. {#tbl-benchmarking-mobilenet-int8-energy}
 
-**Systems insight**: Memory access dominates FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` compute). INT8 quantization provides `{python} EnergyBreakdownCalc.load_savings_factor_mult_str` memory energy reduction and ~`{python} EnergyBreakdownCalc.compute_savings_factor_mult_str` compute energy reduction. The combined effect explains why quantized models on edge devices can improve battery life: they attack the dominant memory bottleneck while simultaneously accelerating compute.
+**Systems insight**: Memory access and arithmetic contribute about equally to FP32 energy consumption (~`{python} EnergyBreakdownCalc.e_fp32_load_mj_str` load vs. `{python} EnergyBreakdownCalc.e_fp32_compute_mj_str` compute). INT8 quantization provides `{python} EnergyBreakdownCalc.load_savings_factor_mult_str` memory energy reduction and ~`{python} EnergyBreakdownCalc.compute_savings_factor_mult_str` compute energy reduction. The combined effect explains why quantized models on edge devices can improve battery life: neither source is left untouched, and the deeper cut lands on arithmetic.
 
 :::
-
-System-level power measurement offers a more holistic view than measuring individual components in isolation. While component-level metrics (for example, accelerator or processor power) are valuable for performance tuning, real-world ML workloads involve intricate interactions between compute units, memory systems, and supporting infrastructure. For instance, analysis of Google's TensorFlow Mobile workloads shows that data movement accounts for 57.3 percent of total inference energy consumption [@boroumand2018], highlighting how memory-bound operations can dominate system power usage.
 
 Shared infrastructure presents additional challenges. In data centers, resources such as cooling systems and power delivery are shared across workloads, complicating attribution of energy use to specific ML tasks. Cooling alone can account for 20–30 percent of total facility power consumption, making it a major factor in energy efficiency assessments [@barroso2019]. Even at the edge, components like memory and I/O interfaces may serve both ML and non-ML functions, further blurring measurement boundaries.
 
@@ -3654,10 +3722,10 @@ This evolution is evident in the history of AI benchmarks. Early model benchmark
 
 Benchmark evolution extends beyond the addition of new tasks to encompass new dimensions of performance measurement. While traditional AI benchmarks emphasized accuracy and throughput, deployed applications demand evaluation across multiple criteria: fairness, robustness, scalability, and energy efficiency. @Fig-sciml-graph makes these disparate requirements concrete by mapping scientific applications across data rate and computation time. The visualization reveals a striking pattern: Large Hadron Collider sensors must process data at rates approaching $10^{14}$ bytes per second with nanosecond-scale computation times, while mobile applications operate at $10^{4}$ bytes per second with longer computational windows—a span of 10 orders of magnitude on each axis. This range of requirements necessitates specialized benchmarks. For example, edge AI applications benefit from benchmarks like MLPerf that evaluate performance under resource constraints, and scientific application domains need their own "Fast ML for Science" benchmarks [@duarte2022fastml].
 
-::: {#fig-sciml-graph fig-env="figure" fig-pos="htb" fig-cap="**Performance Spectrum**: Scientific applications and edge devices demand vastly different computational resources, spanning multiple orders of magnitude in data rates and latency requirements. Consequently, traditional benchmarks focused solely on accuracy are insufficient; specialized evaluation metrics and benchmarks like MLPerf become essential for optimizing AI systems across diverse deployment scenarios. Source: [@duarte2022fastml]." fig-alt="Log-scale scatter plot of data rate vs. computation time, showing scientific applications from LHC sensors at 10^14 bytes/s and microsecond-scale latency to mobile devices at 10^4 bytes/s and second-scale latency."}
+::: {#fig-sciml-graph fig-env="figure" fig-pos="htb" fig-cap="**Performance Spectrum**: Scientific applications and edge devices demand vastly different computational resources, spanning multiple orders of magnitude in data rates and latency requirements. Consequently, traditional benchmarks focused solely on accuracy are insufficient; specialized evaluation metrics and benchmarks like MLPerf become essential for optimizing AI systems across diverse deployment scenarios. Source: [@duarte2022fastml]." fig-alt="Log-scale scatter plot of data rate vs. computation time, showing scientific applications from LHC sensors at 10^14 bytes/s and nanosecond-scale latency to mobile devices at 10^4 bytes/s and second-scale latency."}
 
 ```{.tikz}
-\scalebox{0.85}{%
+\scalebox{0.77}{%
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
 \pgfplotsset{
   errorplot/.style n args={1}{
@@ -3994,9 +4062,10 @@ class MobileNetINT8Calc:
 ::: {#lhs-benchmarking-mobilenet-int8-compression .callout-lighthouse title="MobileNetV2 INT8 compression"}
 
 ```{=latex}
-\begin{minipage}{1\linewidth}
+\begingroup
+\renewcommand{\arraystretch}{1.4}
 ```
-Returning to our MobileNetV2 lighthouse example, consider a complete validation protocol for INT8 quantization, grounded in MobileNetV2's architecture [@sandler2018] and post-training quantization practice [@jacob2018]:
+Returning to our MobileNetV2 lighthouse example, consider an illustrative validation protocol for INT8 quantization, grounded in MobileNetV2's architecture [@sandler2018] and post-training quantization practice [@jacob2018]. The values below are assumed:
 
 **Precompression baseline**: MobileNetV2 achieves `{python} MobileNetINT8Calc.mv2_acc_fp32_prose_str` top-1 accuracy on ImageNet at `{python} MobileNetINT8Calc.mv2_params_m_str` parameters (`{python} MobileNetINT8Calc.mv2_size_fp32_mb_str` FP32).
 
@@ -4009,17 +4078,17 @@ Notice in @tbl-benchmarking-mobilenet-int8-validation that aggregate accuracy ba
 | **Calibration ECE**    | `{python} MobileNetINT8Calc.mv2_ece_fp32_str`  | `{python} MobileNetINT8Calc.mv2_ece_int8_str`  | ⚠ (degraded)                                                                                   |
 | **Edge-case accuracy** | `{python} MobileNetINT8Calc.mv2_edge_fp32_str` | `{python} MobileNetINT8Calc.mv2_edge_int8_str` | ⚠ (drop of `{python} MobileNetINT8Calc.mv2_edge_drop_tbl_str`)                                 |
 
-: **MobileNetV2 INT8 Postcompression Metrics**: FP32 vs. INT8 comparison across top-1 and top-5 accuracy, calibration error, and edge-case accuracy, revealing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[20,13,19,48]"}
+: **MobileNetV2 INT8 Postcompression Metrics**: Illustrative FP32 and INT8 values for top-1 and top-5 accuracy, calibration error, and edge-case accuracy, showing how aggregate accuracy can mask calibration and tail-case degradation. {#tbl-benchmarking-mobilenet-int8-validation tbl-colwidths="[20,13,19,48]"}
 
 **Edge-case definition**: Images with >`{python} MobileNetINT8Calc.edge_occlusion_pct_str` occlusion, <`{python} MobileNetINT8Calc.edge_lux_str` lighting, or >`{python} MobileNetINT8Calc.edge_rotation_deg_str`° rotation from training distribution (approximately `{python} MobileNetINT8Calc.real_world_edge_pct_str` of real-world inputs).
 
 ```{=latex}
-\end{minipage}
+\endgroup
 ```
 
-**What this reveals**: Average-case accuracy looks acceptable (`{python} MobileNetINT8Calc.mv2_acc_drop_str` drop), but calibration degraded significantly and edge-case accuracy dropped `{python} MobileNetINT8Calc.mv2_edge_drop_str`. If the deployment context uses confidence thresholds (for example, "only act if confidence > `{python} MobileNetINT8Calc.confidence_threshold_pct_str`") or encounters many edge cases (unusual lighting, partial occlusions), INT8 MobileNetV2 may fail despite passing aggregate benchmarks.
+**What this reveals**: Under these assumptions, average-case accuracy looks acceptable (`{python} MobileNetINT8Calc.mv2_acc_drop_str` drop), but calibration degrades and edge-case accuracy drops `{python} MobileNetINT8Calc.mv2_edge_drop_str`. If the deployment uses confidence thresholds (for example, "only act if confidence > `{python} MobileNetINT8Calc.confidence_threshold_pct_str`") or encounters many edge cases (unusual lighting, partial occlusions), INT8 MobileNetV2 could fail despite passing aggregate benchmarks.
 
-**Fix**: Apply temperature scaling\index{Temperature Scaling!calibration restoration} post-hoc to restore calibration [@guo2017calibration]. Temperature scaling learns a single scalar $T_{\text{cal}}$ to divide logits before softmax: $\text{softmax}(z_i/T_{\text{cal}})$. In parallel, add edge-case examples to the test set to monitor that specific failure mode continuously.
+**Fix**: Apply temperature scaling\index{Temperature Scaling!calibration restoration} post-hoc to improve calibration [@guo2017calibration]. Temperature scaling learns a single scalar $T_{\text{cal}}$ to divide logits before softmax: $\text{softmax}(z_i/T_{\text{cal}})$. In parallel, add edge-case examples to the test set to monitor that specific failure mode continuously.
 
 :::
 
@@ -4104,7 +4173,7 @@ Consider class balance\index{Class Balance!coverage metric}: a fraud detection d
 
 Feature coverage\index{Feature Coverage!deployment variation} presents an even harder challenge because it requires domain knowledge about what variations matter. A computer vision model trained exclusively on daytime images will fail on nighttime inputs; a natural language model trained on formal text will fail on colloquial language. Unlike class balance, which can be computed from labels alone, feature coverage requires understanding the deployment context. The lighting conditions the camera will encounter, the dialects users will speak, and the edge cases that exist in production but never appear in test sets all fall outside what labels alone can predict. These questions have no algorithmic answer; they demand collaboration between ML engineers and domain experts who understand the deployment environment.
 
-For applications affecting people, demographic representation becomes a coverage dimension with ethical implications. Training data must represent the deployment population across relevant dimensions: age, gender, ethnicity, geography, language. A facial recognition system trained predominantly on one demographic group will systematically underperform on others, even if aggregate accuracy metrics look acceptable. The challenge is that demographic metadata is often unavailable or unreliable, making representation gaps difficult to detect and measure.
+For applications affecting people, demographic representation becomes a coverage dimension with ethical implications. Training data must represent the deployment population across relevant dimensions: age, gender, ethnicity, geography, language. A facial recognition system trained predominantly on one demographic group may underperform on others, even if aggregate accuracy metrics look acceptable. The challenge is that demographic metadata is often unavailable or unreliable, making representation gaps difficult to detect and measure.
 
 #### Quality metrics {.unnumbered}
 
@@ -4122,7 +4191,7 @@ The final category of data benchmarking asks whether models will generalize from
 
 The standard assumption underlying held-out evaluation, that test data comes from the same distribution as training data, is routinely violated in practice. Test sets constructed years after training data may reflect distribution drift as the world changes. Test sets from different geographic regions may reflect population shift. A model with strong held-out accuracy can drop sharply when deployed to a region or time period the test set did not represent. Standard held-out evaluation overestimates deployment performance whenever the i.i.d. (independent and identically distributed) assumption fails.
 
-The true test is train-to-production alignment, and this is far harder to measure because production data differs from training data in ways that held-out test sets often fail to capture. Production images come from different cameras with different characteristics. Production users come from different populations with different behaviors. Production inputs include edge cases that curated test sets systematically exclude. The WILDS[^fn-wilds] benchmark [@koh2021wilds] was designed specifically to evaluate models under realistic distribution shifts: hospital systems with different patient populations, wildlife cameras at different locations, satellite imagery from different time periods. The results reveal a stark reality: models achieving 90 percent+ accuracy on in-distribution test sets may drop to 60 percent under these realistic shifts.
+The true test is train-to-production alignment, and this is far harder to measure because production data differs from training data in ways that held-out test sets often fail to capture. Production images come from different cameras with different characteristics. Production users come from different populations with different behaviors. Production inputs include edge cases that curated test sets systematically exclude. The WILDS[^fn-wilds] benchmark [@koh2021wilds] was designed specifically to evaluate models under realistic distribution shifts: hospital systems with different patient populations, wildlife cameras at different locations, satellite imagery from different time periods. The results reveal a stark reality: models achieving 97 percent accuracy on in-distribution test sets may drop to 70 percent under these realistic shifts.
 
 [^fn-wilds]: **WILDS**: Stanford's 2021 benchmark of ten datasets with real-world distribution shifts: hospital patient population changes (Camelyon17), wildlife camera location shifts (iWildCam), and satellite imagery temporal drift (PovertyMap). WILDS quantifies the deployment gap: models achieving 97 percent in-distribution accuracy can drop to 70 percent under these realistic shifts, demonstrating that standard held-out evaluation systematically overestimates production performance when the i.i.d. assumption\index{I.I.D. Assumption!held-out evaluation limitation} fails. \index{WILDS!distribution shift benchmark}
 
@@ -4133,156 +4202,163 @@ Distribution alignment challenges highlight a persistent tension in ML developme
 ::: {#fig-model-vs-data fig-env="figure" fig-pos="htb" fig-cap="**Development Paradigms**: Model-centric AI prioritizes architectural innovation with fixed datasets, while data-centric AI systematically improves dataset quality (annotations, diversity, and bias) with consistent model architectures to achieve performance gains. Modern research indicates that strategic data enhancement often yields greater improvements than solely refining model complexity." fig-alt="Side-by-side diagrams: model-centric AI shows data cylinders feeding CPU with feedback loop to model, data-centric AI shows feedback loop to data instead. Double arrow indicates complementary approaches."}
 
 ```{.tikz}
-
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}]
-
-\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3,
-draw, fill=white, minimum width=25mm,minimum height=11mm,line width=1pt},
-Line/.style={line width=1.0pt,black!50}
+\tikzset{Line/.style={line width=1.25pt,black!50,-{Latex[length=3mm,width=2mm]}}
 }
-
-\begin{scope}[node distance=-0.15,local bounding box = DATA]
-\node[mycylinder,fill=red!30] (A) {};
-\node[mycylinder, above=of A,fill=red!50] (C) {};
-\node[mycylinder, above=of C,fill=red!10] (B) {};
- \end{scope}
-
-%Padlock
-\begin{scope}[scale=0.3,shift={(1.3,8.5)}]
-\draw[fill=black](0,0)--(2.7,0)--++(270:1.6)to[out=270,in=0](1.85,-2.45)
-            --++(180:1.1)to[out=180,in=270](0,-1.3)--cycle;
-\draw[draw=none,fill=white](1.32,-0.9)+(230:0.3)
-           arc[start angle=230, end angle=-50, radius=0.3]--++(280:0.75)--++(180:0.62)--cycle;
-\path[red](0.27,0)circle(1pt)coordinate(K1);
-\path[red](0.57,0)circle(1pt)coordinate(K2);
-\path[red](2.10,0)circle(1pt)coordinate(K3);
-\path[red](2.4,0)circle(1pt)coordinate(K4);
-
-\path[green](K1)--++(90:0.6)coordinate(KK1);
-\path[green](K2)--++(90:0.5)coordinate(KK2);
-\path[green](K4)--++(90:0.6)coordinate(KK4);
-\path[green](K3)--++(90:0.5)coordinate(KK3);
-\draw[fill=black](K1)--(KK1)to[out=90,in=90,distance=37](KK4)--(K4)
---(K3)--(KK3)to[out=90,in=90,distance=29](KK2)--(K2)--cycle;
-\end{scope}
-
 %CPU
-\definecolor{CPU}{RGB}{0,120,176}
-\begin{scope}[local bounding box = CPU,shift={(4.5,1.1)}]
-\node[fill=CPU,minimum width=66, minimum height=66,
-            rounded corners=8,outer sep=2pt] (C1) {};
+\tikzset{%
+ pics/cpu/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=CPU\picname,scale=\scalefac, every node/.append style={transform shape}]
+\node[fill=\filllcolor,minimum width=66, minimum height=66,
+            rounded corners=2,outer sep=2pt] (C1) {};
 \node[fill=white,minimum width=54, minimum height=54] (C2) {};
-\node[fill=CPU!40,minimum width=44, minimum height=44] (C3) {CPU};
+\node[fill=\filllcolor!40,minimum width=44, minimum height=44] (C3) {\large CPU};
 
 \foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=3, minimum height=15,
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
            inner sep=0pt,anchor=south](GO\y)at($(C1.north west)!\x!(C1.north east)$){};
 }
 \foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=3, minimum height=15,
+\node[fill=\filllcolor,minimum width=3, minimum height=15,
            inner sep=0pt,anchor=north](DO\y)at($(C1.south west)!\x!(C1.south east)$){};
 }
 \foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=15, minimum height=3,
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
            inner sep=0pt,anchor=east](LE\y)at($(C1.north west)!\x!(C1.south west)$){};
 }
 \foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=15, minimum height=3,
+\node[fill=\filllcolor,minimum width=15, minimum height=3,
            inner sep=0pt,anchor=west](DE\y)at($(C1.north east)!\x!(C1.south east)$){};
 }
+ \end{scope}
+     }
+  }
+}
+%CPU
+\tikzset{mycylinder/.style={cylinder, shape border rotate=90, aspect=1.3, draw, fill=white,
+minimum width=25mm,minimum height=11mm,line width=\Linewidth,node distance=-0.15},
+pics/data/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[local bounding box=DATA\picname,scale=\scalefac, every node/.append style={transform shape}]
+\node[mycylinder,fill=\filllcolor!50] (A) {};
+\node[mycylinder, above=of A,fill=\filllcolor!30] (B) {};
+\node[mycylinder, above=of B,fill=\filllcolor!10] (C) {};
+\fill[\filllcolor!50!black]($(C.west)!0.12!(C.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(B.west)!0.12!(B.east)$)circle(3pt);
+\fill[\filllcolor!50!black]($(A.west)!0.12!(A.east)$)circle(3pt);
+ \end{scope}
+     }
+  }
+}
+%lokot
+\tikzset{
+pics/lokot/.style = {
+        code = {
+        \pgfkeys{/channel/.cd, #1}
+\begin{scope}[shift={($(0,0)+(0,0)$)},scale=\scalefac,every node/.append style={transform shape}]
+\fill[fill=\filllcolor](0,0)--(2.7,0)--++(270:1.6)to[out=270,in=0](1.85,-2.45)
+--++(180:1.1)to[out=180,in=270](0,-1.3)--cycle;
+\fill[fill=white](1.32,-0.9)+(230:0.3)
+arc[start angle=230, end angle=-50, radius=0.3]--++(280:0.75)--++(180:0.62)--cycle;
+\path[](0.27,0)circle(1pt)coordinate(K1);
+\path[](0.57,0)circle(1pt)coordinate(K2);
+\path[](2.10,0)circle(1pt)coordinate(K3);
+\path[](2.4,0)circle(1pt)coordinate(K4);
+%
+\path[](K1)--++(90:0.6)coordinate(KK1);
+\path[](K2)--++(90:0.5)coordinate(KK2);
+\path[](K4)--++(90:0.6)coordinate(KK4);
+\path[](K3)--++(90:0.5)coordinate(KK3);
+\fill[fill=\filllcolor](K1)--(KK1)to[out=90,in=90,distance=37](KK4)--(K4)
+--(K3)--(KK3)to[out=90,in=90,distance=29](KK2)--(K2)--cycle;
 \end{scope}
-\node[below=0.25of CPU](MO){Model};
-\path[red](MO)-|coordinate(D)(DATA);
+    }
+  }
+}
+\pgfkeys{
+  /channel/.cd,
+   Depth/.store in=\Depth,
+  Height/.store in=\Height,
+  Width/.store in=\Width,
+  filllcirclecolor/.store in=\filllcirclecolor,
+  filllcolor/.store in=\filllcolor,
+  drawcolor/.store in=\drawcolor,
+  drawcircle/.store in=\drawcircle,
+  scalefac/.store in=\scalefac,
+  Linewidth/.store in=\Linewidth,
+  picname/.store in=\picname,
+  filllcolor=BrownLine,
+  filllcirclecolor=violet!20,
+  drawcolor=black,
+  drawcircle=violet,
+  scalefac=1,
+  Linewidth=0.5pt,
+  Depth=1.3,
+  Height=0.8,
+  Width=1.1,
+  picname=C
+}
+
+%Data
+\pic[shift={(0,0)}] at  (0,0){data={scalefac=0.75,picname=1,filllcolor=RedLine, Linewidth=1.0pt}};
+%padlock
+\pic[shift={(0,0)}] at  (0.5,2){lokot={scalefac=0.22,picname=1,drawcolor=OrangeLine!70!,
+filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
+%CPU
+\pic[shift={(0,-0.2)}] at  (4.5,1){cpu={scalefac=0.6,picname=1,filllcolor=BlueLine, Linewidth=0.7pt}};
+\node[below=0.15 of DO3](MO){Model};
+\path[red](MO)-|coordinate(D)(A);
 \node[]at(D){Data};
-\draw[Line,-latex,shorten <=4pt,shorten >=4pt](DATA)--(CPU);
-\draw[Line,-latex](CPU.east)--++(0:1)--++(90:2.6)-|
-node[above,text=black](TXT){Systematically enhance the model}(CPU);
+\draw[Line,shorten <=4pt,shorten >=11pt](B.east)--++(0:25mm);
+\draw[Line,shorten <=8pt,shorten >=8pt,]($(DE3)!0.5!(DE4)$)--++(0:1)--++(90:1.8)-|
+node[above,text=black](TXT){Systematically enhance the model}($(GO3)!0.5!(GO4)$);
 %
 \scoped[on background layer]
 \node[draw=BackLine,inner xsep=5mm,inner ysep=5mm,
 yshift=2mm,
-fill=BackColor,fit=(D)(DATA)(CPU)(TXT),line width=0.75pt](BB){};
+fill=BackColor,fit=(D)(DATA1)(CPU1)(TXT),line width=0.75pt](BB){};
 \node[below=4pt of  BB.north,inner sep=0pt,xshift=3,
 anchor=north,fill=BackColor]{\textbf{Model-centric AI}};
 %%%%%%%%%%%%%%%%%
 %right
 %%%%%%%%%%%%%%%%%%%%
-\begin{scope}[node distance=-0.15,shift={(13,0)},local bounding box = 2DATA]
-\node[mycylinder,fill=red!30] (2A) {};
-\node[mycylinder, above=of 2A,fill=red!50] (2C) {};
-\node[mycylinder, above=of 2C,fill=red!10] (2B) {};
- \end{scope}
+\begin{scope}[node distance=-0.15,shift={(13.5,0)},local bounding box = 2DATA]
+\pic[shift={(0,0)}] at  (0,0){data={scalefac=0.75,picname=2,filllcolor=RedLine, Linewidth=1.0pt}};
+\pic[shift={(0,-0.2)}] at  (4.5,1){cpu={scalefac=0.6,picname=2,filllcolor=BlueLine, Linewidth=0.7pt}};
+\pic[shift={(0,0)}] at  (4.75,1.69){lokot={scalefac=0.22,picname=2,drawcolor=OrangeLine!70!,
+filllcolor=black!,Linewidth=0.7pt, filllcirclecolor=black}};
+%
+\draw[Line,shorten <=4pt,shorten >=11pt](B)--($(LE3)!0.5!(LE4)$);
 
-%CPU
-\definecolor{CPU}{RGB}{0,120,176}
-\begin{scope}[local bounding box = 2CPU,shift={(17.5,1.1)}]
-\node[fill=CPU,minimum width=66, minimum height=66,
-            rounded corners=8,outer sep=2pt] (2C1) {};
-\node[fill=white,minimum width=54, minimum height=54] (2C2) {};
-\node[fill=CPU!40,minimum width=44, minimum height=44] (2C3) {CPU};
-
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=3, minimum height=15,
-           inner sep=0pt,anchor=south](2GO\y)at($(2C1.north west)!\x!(2C1.north east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=3, minimum height=15,
-           inner sep=0pt,anchor=north](2DO\y)at($(2C1.south west)!\x!(2C1.south east)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=15, minimum height=3,
-           inner sep=0pt,anchor=east](2LE\y)at($(2C1.north west)!\x!(2C1.south west)$){};
-}
-\foreach \x/\y in {0.11/1,0.26/2,0.41/3,0.56/4,0.71/5,0.85/6}{
-\node[fill=CPU,minimum width=15, minimum height=3,
-           inner sep=0pt,anchor=west](2DE\y)at($(2C1.north east)!\x!(2C1.south east)$){};
-}
-\end{scope}
-%Padlock
-\begin{scope}[scale=0.3,shift={(60.3,8.5)}]
-\draw[fill=black](0,0)--(2.7,0)--++(270:1.6)to[out=270,in=0](1.85,-2.45)
-            --++(180:1.1)to[out=180,in=270](0,-1.3)--cycle;
-\draw[draw=none,fill=white](1.32,-0.9)+(230:0.3)
-           arc[start angle=230, end angle=-50, radius=0.3]--++(280:0.75)--++(180:0.62)--cycle;
-\path[red](0.27,0)circle(1pt)coordinate(K1);
-\path[red](0.57,0)circle(1pt)coordinate(K2);
-\path[red](2.10,0)circle(1pt)coordinate(K3);
-\path[red](2.4,0)circle(1pt)coordinate(K4);
-
-\path[green](K1)--++(90:0.6)coordinate(KK1);
-\path[green](K2)--++(90:0.5)coordinate(KK2);
-\path[green](K4)--++(90:0.6)coordinate(KK4);
-\path[green](K3)--++(90:0.5)coordinate(KK3);
-\draw[fill=black](K1)--(KK1)to[out=90,in=90,distance=37](KK4)--(K4)
-            --(K3)--(KK3)to[out=90,in=90,distance=29](KK2)--(K2)--cycle;
-\end{scope}
-
-\node[below=0.25of 2CPU](2MO){Model};
-\path[red](2MO)-|coordinate(2D)(2DATA);
+\node[below=0.15of CPU2](2MO){Model};
+\path[red](2MO)-|coordinate(2D)(DATA2);
 \node[]at(2D){Data};
-\draw[Line,-latex,shorten <=4pt,shorten >=4pt](2DATA)--(2CPU);
-\draw[Line,-latex](2CPU.east)--++(0:1)coordinate(DE)--++(90:2.6)-|
-           node[above,text=black,pos=0.25](2TXT){Systematically enhance the data}(2DATA);
+
+\draw[Line](CPU2.east)--++(0:1)coordinate(DE)--++(90:1.8)-|
+           node[above,text=black,pos=0.25](2TXT){Systematically enhance the data}(DATA2);
 %
 \scoped[on background layer]
 \node[draw=GreenLine,inner xsep=5mm,inner ysep=5mm,
-           yshift=2mm, fill=GreenL!50,fit=(2D)(2DATA)(2CPU)(2TXT)(DE),line width=0.75pt](2BB){};
+           yshift=2mm, fill=GreenL!50,fit=(2D)(DATA2)(CPU2)(2TXT)(DE),line width=0.75pt](2BB){};
 \node[below=4pt of  2BB.north,inner sep=0pt,xshift=3,
            anchor=north]{\textbf{Data-centric AI}};
+\end{scope}
 %%%%
-\node[double arrow, fill=red!80!black!90, xshift=48,
-           minimum width = 20pt, double arrow head extend=2pt,
-           minimum height=30mm](DA) at(BB.east){};
+\node[double arrow, fill=red!80!black!90,
+           minimum width = 10pt, double arrow head extend=4pt,
+           minimum height=35mm](DA) at($(BB.east)!0.5!(2BB.west)$){};
 \node[below=0.2of DA]{Complementary};
  \end{tikzpicture}
 
 ```
-
 :::
 
 Data-centric AI\index{Data-Centric AI!dataset enhancement paradigm} reflects an important shift in understanding that challenges the "more data is always better" assumption: *better* datasets, not just *larger* ones, produce more reliable and generalizable AI systems. Initiatives like DataPerf\index{DataPerf!data quality benchmark} [@mazumder2024dataperf] and DataComp\index{DataComp!data-centric benchmark}[^fn-datacomp] have emerged to systematically evaluate how dataset improvements affect model performance. For instance, DataComp [@beaumont2023] demonstrated that models trained on a carefully curated 30 percent subset of data achieved better results than those trained on the complete dataset, challenging the assumption that more data automatically leads to better performance.
 
-[^fn-datacomp]: **DataComp**: Introduced in 2023, DataComp inverts the standard benchmark by fixing the model and training code, letting participants compete on dataset curation alone. Results showed that a carefully filtered 30 percent subset matched models trained on 10$\times$ larger unfiltered data, quantifying a systems insight: for many workloads, engineering the data pipeline yields greater performance gains per dollar than scaling compute. \index{DataComp!data-centric benchmarking}
+[^fn-datacomp]: **DataComp**: Introduced in 2023, DataComp inverts the standard benchmark by fixing the model and training code, letting participants compete on dataset curation alone. Results showed that a carefully filtered 30 percent subset outperformed models trained on the full unfiltered pool, quantifying a systems insight: for many workloads, engineering the data pipeline yields greater performance gains per dollar than scaling compute. \index{DataComp!data-centric benchmarking}
 
 A persistent challenge in data benchmarking emerges from dataset saturation\index{Dataset Saturation!performance capability illusion}. When models achieve near-perfect accuracy on benchmarks like ImageNet, practitioners must distinguish whether performance gains represent genuine capability advances or merely optimization to existing test sets. As the timeline in @fig-dataset-saturation illustrates, widely tracked AI benchmarks have repeatedly crossed reported human baselines, making each corresponding benchmark less useful as a differentiator [@perrault2024artificial].
 
@@ -4428,11 +4504,16 @@ A system that passes all three benchmark categories can still fail in production
 
 Laboratory benchmarks establish what a system is capable of under ideal conditions. Production validation determines whether that system is performing correctly right now, under real conditions.
 
-This distinction matters because laboratory benchmarks assume conditions that production systematically violates. Silent degradation poses the most insidious challenge: models can produce plausible but incorrect outputs without obvious error signals, and a recommendation system returning "reasonable" but suboptimal suggestions has no built-in error indicator. Dynamic workloads present a different failure mode: a system benchmarked at steady 1,000 QPS may fail when flash traffic events spike to 10,000 QPS, revealing that benchmark "throughput" assumed uniform request arrival rather than bursty production patterns. Data distribution shift compounds these problems over time, as production data evolves and diverges from training distributions—an image classifier trained on professional photos degrades gradually as users submit smartphone images with different lighting, angles, and compression artifacts. Finally, production imposes multi-objective constraints that benchmarks treat independently: accuracy, latency, cost, and resource utilization must all be satisfied simultaneously, and optimizing any one at the expense of others leads to deployment failure.
+This distinction matters because laboratory benchmarks assume conditions that production systematically violates. Silent degradation poses the most insidious challenge: models can produce plausible but incorrect outputs without obvious error signals, and a recommendation system returning "reasonable" but suboptimal suggestions has no built-in error indicator. Dynamic workloads present a different failure mode: a system benchmarked at steady 1,000 QPS may fail when flash traffic events spike to 10,000 QPS, revealing that benchmark "throughput" assumed uniform request arrival rather than bursty production patterns. Data distribution shift compounds these problems over time, as production data evolves and diverges from training distributions—an image classifier trained on professional photos can degrade as users submit smartphone images with different lighting, angles, and compression artifacts. Finally, production imposes multi-objective constraints that benchmarks treat independently: accuracy, latency, cost, and resource utilization must all be satisfied simultaneously, and optimizing any one at the expense of others leads to deployment failure.
 
 ### Bridging benchmark to deployment {#sec-benchmarking-bridging-benchmark-deployment-7427}
 
 Before deployment, validate benchmarking conclusions against production-representative conditions. @Tbl-predeployment-checklist names the benchmark assumption, the production reality that violates it, and the validation step that closes the gap; the checkpoint that follows turns those rows into release-readiness actions.
+
+```{=latex}
+\begingroup
+%\renewcommand{\arraystretch}{1.4}
+```
 
 | **Benchmark Assumption**       | **Production Reality**       | **Validation Approach**                |
 |:-------------------------------|:-----------------------------|:---------------------------------------|
@@ -4443,6 +4524,16 @@ Before deployment, validate benchmarking conclusions against production-represen
 | **Fixed model version**        | A/B testing, gradual rollout | Establish baseline for comparison      |
 
 : **Predeployment Benchmark Checklist**: Each row pairs an assumption baked into laboratory benchmarks with the production reality that violates it and the validation step that closes the gap. A system that passes every laboratory benchmark can still fail in production unless each row of this table has been independently verified against representative operational conditions. {#tbl-predeployment-checklist}
+
+```{=latex}
+\endgroup
+```
+
+### Production monitoring as continuous benchmarking {#sec-benchmarking-production-monitoring-continuous-benchmarking-6ac8}
+
+Production monitoring\index{Production Monitoring!continuous benchmarking} extends benchmarking from a one-time gate to a continuous process. The same principles apply (standardized metrics, reproducible measurement, statistical rigor) but the context shifts from "will this work?" to "is this working?"
+
+Once a model is live, benchmarking becomes a rolling comparison against the baselines just established. The immediate checks stay concrete: whether the input distribution remains close to the benchmark distribution, whether latency and throughput stay inside the measured envelope, and whether model quality moves outside the expected range. Answering those checks requires the same measurement discipline as the offline benchmark, but now the measurements arrive continuously and under live traffic.
 
 ::: {#chk-benchmarking-predeployment-benchmark-checklist .callout-checkpoint title="Predeployment benchmark checklist"}
 
@@ -4455,12 +4546,6 @@ Before deploying a model based on benchmark results:
 - [ ] **Define rollback criteria**: Specify quantitative thresholds for reverting to the previous model version.
 
 :::
-
-### Production monitoring as continuous benchmarking {#sec-benchmarking-production-monitoring-continuous-benchmarking-6ac8}
-
-Production monitoring\index{Production Monitoring!continuous benchmarking} extends benchmarking from a one-time gate to a continuous process. The same principles apply (standardized metrics, reproducible measurement, statistical rigor) but the context shifts from "will this work?" to "is this working?"
-
-Once a model is live, benchmarking becomes a rolling comparison against the baselines just established. The immediate checks stay concrete: whether the input distribution remains close to the benchmark distribution, whether latency and throughput stay inside the measured envelope, and whether model quality moves outside the expected range. Answering those checks requires the same measurement discipline as the offline benchmark, but now the measurements arrive continuously and under live traffic.
 
 The MLOps chapter later turns this measurement loop into release and recovery machinery: staged rollouts, shadow evaluation [running the new model beside production without serving its outputs], continuous validation, and rollback. At this point, the handoff is narrower. Benchmarking defines the baselines and failure thresholds; operations keeps measuring against them after deployment.
 
@@ -4577,7 +4662,7 @@ class FallaciesPitfallsSetup:
     imagenet_error_2015_pct_str = fmt_percent(imagenet_error_2015_pct / 100, precision=2, commas=False, style='prose')
     imagenet_competition_end_year_str = fmt(imagenet_competition_end_year, precision=0, commas=False)
     imagenet_teams_above_95_str = fmt_count(imagenet_teams_above_95, label="team", commas=False)
-    imagenet_total_teams_str = fmt_count(imagenet_total_teams, label="team", commas=False)
+    imagenet_total_teams_str = fmt_count(imagenet_total_teams, commas=False)
     mnist_accuracy_pct_str = fmt_percent(mnist_accuracy_pct / 100, precision=1, commas=False, style='prose')
     edge_memory_constraint_mult_str = fmt_multiple(edge_memory_constraint_x, precision=0, commas=False)
     edge_power_constraint_mult_str = fmt_multiple(edge_power_constraint_x, precision=0, commas=False)
@@ -4605,9 +4690,13 @@ class FallaciesPitfallsSetup:
 
 Benchmarking creates false confidence when standardized measurement obscures deployment realities. Teams assume controlled evaluations predict production performance, but real systems face variability, resource constraints, and multi-objective trade-offs that benchmarks cannot capture, wasting engineering effort on systems optimized for evaluation rather than deployment.
 
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Benchmark performance directly translates to real-world application performance.*
 
 The seductive clarity of benchmark rankings\index{Benchmarking!fallacy of direct performance translation} leads teams to select systems as though leaderboard position predicts production behavior. It rarely does. As @sec-benchmarking-ml-measurement-challenges-60ea demonstrates, ML systems exhibit inherent variability from data quality issues, distribution shifts, and resource constraints absent in controlled evaluation. In a representative failure scenario, a language model achieving `{python} FallaciesPitfallsSetup.benchmark_accuracy_pct_str` benchmark accuracy drops to `{python} FallaciesPitfallsSetup.production_accuracy_range_str` accuracy in production when processing user-generated text with spelling errors, informal language, and domain-specific terminology. An inference system with `{python} FallaciesPitfallsSetup.benchmark_latency_mean_ms_str` mean latency on MLPerf experiences `{python} FallaciesPitfallsSetup.production_p99_range_str` p99 latency in production (`{python} FallaciesPitfallsSetup.latency_degradation_range_mult_str` degradation) due to concurrent load, garbage collection pauses, and network variability. Teams relying solely on benchmark rankings systematically underestimate deployment complexity, leading to failed launches and costly re-engineering.
+
+:::
 
 ::: {.column-margin}
 ```{=latex}
@@ -4618,25 +4707,45 @@ The seductive clarity of benchmark rankings\index{Benchmarking!fallacy of direct
 *Mean benchmark latency understates the production tail by an order of magnitude.*
 :::
 
+::: {.fallacy-pitfall}
+
 **Pitfall**: *Optimizing exclusively for benchmark metrics without considering broader system requirements.*
 
 Benchmark leaderboards incentivize aggressive optimization, but the optimizations that climb rankings often degrade the very characteristics production demands. As discussed in @sec-benchmarking-organizational-strategic-issues-d25a, this exemplifies Goodhart's Law: when benchmark scores become optimization targets, they cease to be meaningful measures of system quality. In one illustrative scenario, a team reduces inference latency from `{python} FallaciesPitfallsSetup.pre_quant_latency_ms_str` to `{python} FallaciesPitfallsSetup.post_quant_latency_ms_str` through aggressive quantization, improving MLPerf ranking by `{python} FallaciesPitfallsSetup.ranking_improvement_str` positions while degrading calibration such that prediction confidence scores become unreliable for downstream decision-making. Another team improves ImageNet accuracy by `{python} FallaciesPitfallsSetup.accuracy_improvement_pct_str` through extensive hyperparameter tuning but the optimized model consumes `{python} FallaciesPitfallsSetup.energy_increase_pct_str` more energy and exhibits `{python} FallaciesPitfallsSetup.ood_degradation_pct_str` worse performance on out-of-distribution images from production cameras. Organizations rewarding benchmark rankings over deployment success systematically produce systems that excel in evaluation but fail in production.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Fallacy**: *Single-metric evaluation provides sufficient insight into system performance.*
 
 A single number\index{Single-Metric Evaluation!fallacy} is seductively simple: this system is "94 percent accurate" or "1,200 QPS fast." But production success requires balancing multiple competing objectives that any single metric obscures. As established in @sec-benchmarking-inference-metrics-78d4, modern inference systems demand evaluation across accuracy, latency, throughput, energy, and robustness dimensions. In an illustrative trade-off, a recommendation model achieving `{python} FallaciesPitfallsSetup.rec_accuracy_pct_str` accuracy with `{python} FallaciesPitfallsSetup.rec_p99_latency_ms_str` p99 latency fails service-level objectives requiring p99 < `{python} FallaciesPitfallsSetup.slo_p99_requirement_ms_str` despite excellent accuracy. Conversely, a system optimized for `{python} FallaciesPitfallsSetup.high_throughput_qps_str` throughput achieves this rate while consuming `{python} FallaciesPitfallsSetup.high_power_w_str` vs. `{python} FallaciesPitfallsSetup.low_power_w_str` for a slightly slower system at `{python} FallaciesPitfallsSetup.low_throughput_qps_str` (`{python} FallaciesPitfallsSetup.power_ratio_mult_str` power difference). For battery-powered edge devices, the `{python} FallaciesPitfallsSetup.throughput_loss_pct_str` throughput loss enables `{python} FallaciesPitfallsSetup.battery_mult_str` longer operation time. Different stakeholders prioritize different metrics: ML engineers focus on accuracy, infrastructure teams on throughput and cost, product managers on latency percentiles. Single-metric optimization systematically produces systems that excel on one dimension while failing deployment requirements on others.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Pitfall**: *Using outdated benchmarks that no longer reflect deployment challenges and requirements.*
 
 Benchmarks have inertia\index{Benchmark Saturation!outdated benchmarks pitfall}: teams continue reporting on established benchmarks long after those benchmarks cease to provide meaningful discrimination. Saturation occurs when multiple approaches achieve near-identical performance, eliminating useful comparison. ImageNet top-5 classification error decreased from `{python} FallaciesPitfallsSetup.imagenet_error_2010_pct_str` in 2010 to `{python} FallaciesPitfallsSetup.imagenet_error_2015_pct_str` by 2015, with the competition ending in `{python} FallaciesPitfallsSetup.imagenet_competition_end_year_str`, at which point `{python} FallaciesPitfallsSetup.imagenet_teams_above_95_str` of `{python} FallaciesPitfallsSetup.imagenet_total_teams_str` exceeded 95 percent accuracy [@russakovsky2015; @beyer2020we]; further optimization beyond this threshold provides marginal value for most applications. Similarly, MNIST became saturated enough that improvements at the third decimal place are rarely deployment-relevant [@lecun1998]. As discussed in @sec-benchmarking-statistical-methodological-issues-7aa5, statistical confidence intervals around these measurements often exceed the claimed improvements. Changing deployment contexts compound the problem: benchmarks designed for server hardware become misleading for edge devices with `{python} FallaciesPitfallsSetup.edge_memory_constraint_mult_str` less memory and `{python} FallaciesPitfallsSetup.edge_power_constraint_mult_str` lower power budgets. Effective benchmarking requires retiring saturated benchmarks and developing evaluation frameworks matching target deployment realities.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Fallacy**: *Research benchmarks predict production behavior under real traffic.*
 
 Research benchmarks exist to compare algorithms under controlled conditions; production systems exist to serve users under chaotic ones. Applying the former to evaluate the latter systematically overestimates performance, because research benchmarks often assume ample computational resources, optimal data quality, and idealized conditions absent in production. As established in @sec-benchmarking-laboratorytodeployment-performance-gaps-16c8, production systems face concurrent user loads, varying input quality, network latency, and system failures that degrade performance. A system achieving `{python} FallaciesPitfallsSetup.isolated_throughput_qps_str` throughput in isolated benchmarks sustains only `{python} FallaciesPitfallsSetup.production_throughput_range_str` under production load with `{python} FallaciesPitfallsSetup.production_utilization_pct_str` utilization (`{python} FallaciesPitfallsSetup.throughput_degradation_pct_range_str` degradation) due to queue contention\index{Queue Contention!production latency overhead} and garbage collection pauses\index{Garbage Collection Pause!latency variability}. Research benchmarks report model inference time (`{python} FallaciesPitfallsSetup.model_inference_range_str`) while production end-to-end latency includes preprocessing, queuing, and postprocessing overhead totaling `{python} FallaciesPitfallsSetup.e2e_latency_range_str`. Production systems require `{python} FallaciesPitfallsSetup.availability_nines_str` availability (`{python} FallaciesPitfallsSetup.downtime_minutes_month_str` downtime per month) and graceful degradation under failures, characteristics research benchmarks ignore. Effective production evaluation requires operational metrics: sustained throughput under load, recovery time from failures, and complete latency breakdown.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Pitfall**: *Using research benchmarks as production release gates.*
 
 Teams sometimes promote a model because it passes the research benchmark, then discover only after launch that the benchmark never exercised the operational path. A release gate for a serving system must include load tests, tail-latency measurements, data-quality checks, failure drills, and rollback criteria. Research benchmarks remain useful for comparing algorithms, but production gates must measure the deployed system under the traffic, hardware, and failure conditions it will actually face.
+
+:::
 
 ## Summary {#sec-benchmarking-summary-5b23}
 
@@ -4680,7 +4789,7 @@ class PrecisionEnergySummary:
     s_total = (e_fp32_load + e_fp32_compute) / (e_int8_load + e_int8_compute)
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(5 < s_total < 6, f"Expected MobileNetV2 INT8 total-energy ratio near 5.4x, got {s_total:.1f}x.")
+    check(6 < s_total < 7, f"Expected MobileNetV2 INT8 total-energy ratio near 6.6x, got {s_total:.1f}x.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     total_savings_factor_mult_str = fmt_multiple(s_total, precision=1, commas=False)
@@ -4710,15 +4819,6 @@ What does a system that passes every benchmark fail to predict? Production reali
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
-
-::: {.callout-research-questions title="For further inquiry"}
-
-* What benchmark protocol makes comparisons fair across different hardware, models, data, and deployment assumptions?
-* When should micro, macro, and end-to-end benchmarks be combined, and what does each hide?
-* Which metric set prevents single-metric gaming across latency, tail latency, throughput, energy, accuracy, and calibration?
-* How should teams anticipate benchmark-production gaps from drift, dynamic load, thermal throttling, and input variation?
-
-:::
 
 ::: { .quiz-end }
 :::

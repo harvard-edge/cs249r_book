@@ -3321,7 +3321,10 @@ def _calculate_improvements(base_metrics: Dict[str, float], opt_metrics: Dict[st
 
     if 'accuracy' in base_metrics and 'accuracy' in opt_metrics:
         # Accuracy retention (higher is better)
-        improvements['accuracy_retention'] = opt_metrics['accuracy'] / base_metrics['accuracy']
+        if base_metrics['accuracy'] > 0:
+            improvements['accuracy_retention'] = opt_metrics['accuracy'] / base_metrics['accuracy']
+        else:
+            improvements['accuracy_retention'] = 1.0
 
     return improvements
     ### END SOLUTION

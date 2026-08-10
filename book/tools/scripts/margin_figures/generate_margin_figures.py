@@ -107,8 +107,10 @@ def clean(ax):
     ax.set_yticks([])
 
 
-def make_ladder(chapter, name, tiers, *, domain="memory", wall=False, style="bars", color=None):
+def make_ladder(chapter, name, tiers, *, domain="memory", wall=False, style="bars", color=None, figsize=None):
     fig, ax = new_fig("hierarchy-ladder")
+    if figsize is not None:
+        fig.set_size_inches(*figsize, forward=True)
     ladder(ax, tiers, domain=domain, wall=wall, style=style, color=color)
     write(fig, chapter, name)
 
@@ -1924,7 +1926,7 @@ def _nested_ml_system(candidate):
     rect(ax, 0.08, 0.14, 0.84, 0.66, "#E8ECEF", ec=GRID, lw=0.8)
     rect(ax, 0.36, 0.39, 0.28, 0.16, COMP, ec="white", lw=0.8)
     ax.text(0.50, 0.47, "ML code", ha="center", va="center", color="white", fontsize=4.0, fontweight="bold")
-    ax.text(0.50, 0.72, "System 95%", ha="center", va="center", color=INK, fontsize=5.0)
+    ax.text(0.50, 0.72, "System", ha="center", va="center", color=INK, fontsize=5.0)
     write(fig, candidate["chapter"], curated_asset_name(candidate["id"]))
 
 
@@ -2263,7 +2265,7 @@ def generate() -> None:
     make_ladder("vol1/frameworks", "frameworks_bandwidth_hierarchy", [("HBM 2039", 2039), ("NVLink 600", 600), ("PCIe 32", 32)], domain="bandwidth")
     make_sparkline("vol1/frameworks", "frameworks_dispatch_tax_divergence", threat=False, steep=1.9)
     make_dam("vol1/hw_acceleration", "hw_acceleration_dam_locator", focus=2, vol="vol1")
-    make_ladder("vol1/hw_acceleration", "hw_acceleration_energy_ladder", [("DRAM 640 pJ", 640), ("MAC 3.7 pJ", 3.7), ("SRAM 0.5 pJ", 0.5)], domain="energy")
+    make_ladder("vol1/hw_acceleration", "hw_acceleration_energy_ladder", [("DRAM 640 pJ", 640), ("FP32 mul 3.7 pJ", 3.7), ("SRAM 0.5 pJ", 0.5)], domain="energy")
     make_roofline("vol1/hw_acceleration", "hw_acceleration_roofline_elbow")
     make_ladder("vol1/introduction", "introduction_energy_hierarchy", [("DRAM 160 pJ", 160), ("FP16 1.1 pJ", 1.1), ("INT8 0.2 pJ", 0.2)], domain="energy")
     make_ironbar("vol1/introduction", "introduction_iron_law_bars", [("D", 0.58, MEM), ("C", 0.20, COMP), ("L", 0.22, NET)], dom=0)
@@ -2280,7 +2282,7 @@ def generate() -> None:
     latency_budget()
     list_dots("vol1/nn_architectures", "nn_architectures_inductive_bias", [("CNN", INK), ("Transformer", "#888888"), ("MLP", GRID)])
     make_dam("vol1/nn_architectures", "nn_architectures_algorithm_axis", focus=1, vol="vol1", style="boxes")
-    make_ladder("vol1/nn_architectures", "nn_architectures_arithmetic_intensity", [("ResNet 40", 40), ("MobileNet 21", 21), ("GPT-2 0.5", 0.5)], domain="compute", style="lollipop")
+    make_ladder("vol1/nn_architectures", "nn_architectures_arithmetic_intensity", [("ResNet 80", 80), ("MobileNet 43", 43), ("GPT-2 0.5", 0.5)], domain="compute", style="lollipop", figsize=(1.242246906, 1.75))
     make_knee("vol1/nn_architectures", "nn_architectures_attention_memory_wall", knee_frac=0.72)
     labeled_memory_bars("vol1/nn_architectures", "nn_architectures_capacity_wall", [("Item+User 102", 102), ("A100 80", 80), ("Item 51", 51)])
     labeled_memory_bars("vol1/nn_computation", "nn_computation_memory_explosion", [("GPT-2 6 GB", 6000), ("MNIST 438 KB", 0.438)], title="model memory")

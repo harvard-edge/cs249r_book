@@ -46,15 +46,48 @@ COLORS = {
 
 WEB_FIG_DPI = 120
 
+# Bundled Helvetica-metric font, registered at runtime so figures render in a
+# consistent Helvetica clone WITH A REAL BOLD on every platform (local macOS,
+# local Linux, CI container) regardless of installed system fonts. Without this,
+# matplotlib falls back per-platform (macOS Helvetica.ttc has no reachable bold
+# face; a bare Linux/CI box drops all the way to DejaVu Sans), so bold weight
+# and text metrics drift between local previews and the published build.
+_FONT_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "fonts")
+_BUNDLED_FONTS_REGISTERED = False
+
+
+def _register_bundled_fonts() -> None:
+    """Register the bundled TeX Gyre Heros faces with matplotlib (idempotent)."""
+    global _BUNDLED_FONTS_REGISTERED
+    if _BUNDLED_FONTS_REGISTERED or not _MATPLOTLIB_AVAILABLE:
+        return
+    try:
+        import matplotlib.font_manager as fm
+
+        if os.path.isdir(_FONT_DIR):
+            known = {getattr(f, "fname", None) for f in fm.fontManager.ttflist}
+            for name in sorted(os.listdir(_FONT_DIR)):
+                if name.lower().endswith((".otf", ".ttf")):
+                    path = os.path.join(_FONT_DIR, name)
+                    if path not in known:
+                        fm.fontManager.addfont(path)
+    except Exception:
+        # Never let a font-registration hiccup break figure generation;
+        # matplotlib will fall through the sans-serif stack below.
+        pass
+    _BUNDLED_FONTS_REGISTERED = True
+
 
 def set_book_style() -> None:
     """Apply the global MLSysBook matplotlib style."""
     if not _MATPLOTLIB_AVAILABLE:
         raise ImportError("matplotlib is required for plot generation.")
+    _register_bundled_fonts()
     plt.rcParams.update(
         {
             "font.family": "sans-serif",
             "font.sans-serif": [
+                "TeX Gyre Heros",  # bundled Helvetica-metric clone (has bold)
                 "Helvetica",
                 "Helvetica Neue",
                 "Arial",

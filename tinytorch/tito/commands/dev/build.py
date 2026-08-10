@@ -73,9 +73,23 @@ class DevBuildCommand(BaseCommand):
 
         console.print(f"[cyan]🔨 {config['label']}...[/cyan]")
 
-        result = subprocess.run(
-            config['command'],
-            cwd=str(cwd),
-        )
+        # `make` isn't bundled with Git Bash on Windows (unlike git/python,
+        # it has no equivalent auto-installed fallback), so this is a very
+        # reachable crash for any Windows user without WSL or a separate
+        # make install: subprocess.run raises FileNotFoundError with no
+        # indication of *why*, rather than something recognizable as
+        # "install this tool".
+        try:
+            result = subprocess.run(
+                config['command'],
+                cwd=str(cwd),
+            )
+        except FileNotFoundError:
+            console.print("[red]❌ 'make' is not installed or not on your PATH[/red]")
+            console.print("  This command needs GNU Make to run its build targets.")
+            console.print("  Windows: install via 'choco install make', WSL, or Git Bash's own")
+            console.print("           MinGW package manager.")
+            console.print("  macOS/Linux: usually preinstalled, or 'brew install make' / 'apt install make'.")
+            return 1
 
         return result.returncode

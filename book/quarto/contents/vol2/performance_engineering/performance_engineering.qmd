@@ -912,7 +912,7 @@ The roofline model establishes the physics that constrains all subsequent optimi
 
 ## Operator Fusion and Kernel Engineering {#sec-performance-engineering-fusion}
 
-Consider the simple sequence of operations $Y = \text{LayerNorm}(\text{GELU}(XW + b))$. In a naive implementation, the GPU writes the output of the matrix multiply back to main memory, reads it back for the GELU, writes it out again, and reads it one final time for the LayerNorm. This redundant data movement shatters performance. **Operator fusion**\index{Operator Fusion} eliminates these intermediate round-trips by keeping results in ultra-fast registers, executing the entire sequence in a single trip to memory.
+Consider the simple sequence of operations $\mathbf{Y} = \text{LayerNorm}(\text{GELU}(\mathbf{X}\mathbf{W} + \mathbf{b}))$. In a naive implementation, the GPU writes the output of the matrix multiply back to main memory, reads it back for the GELU, writes it out again, and reads it one final time for the LayerNorm. This redundant data movement shatters performance. **Operator fusion**\index{Operator Fusion} eliminates these intermediate round-trips by keeping results in ultra-fast registers, executing the entire sequence in a single trip to memory.
 
 ::: {#psp-performance-engineering-analogy-short-order-cook .callout-perspective title="Analogy: The short-order cook"}
 
@@ -926,7 +926,7 @@ Operator fusion assigns the recipe to a single chef who keeps the ingredients on
 
 Each GPU kernel launch involves overhead: the CPU must prepare launch parameters, dispatch to the GPU command queue, and the GPU must schedule thread blocks across its streaming multiprocessors (SMs). For a small element-wise operation on an accelerator such as an H100, this overhead can be 5--20 $\mu$s, a time during which a memory-bound kernel might have already completed its useful work. When a transformer layer comprises dozens of small operations (add, multiply, normalize, activate), the cumulative launch overhead becomes significant.
 
-Each unfused kernel must also materialize its output in HBM. Consider a sequence of three operations: $Y = \text{LayerNorm}(\text{GELU}(XW + b))$. Without fusion, this requires three passes through HBM:
+Each unfused kernel must also materialize its output in HBM. Consider a sequence of three operations: $\mathbf{Y} = \text{LayerNorm}(\text{GELU}(\mathbf{X}\mathbf{W} + \mathbf{b}))$. Without fusion, this requires three passes through HBM:
 
 1. **GEMM kernel**\index{GEMM!kernel}: Read $X$ and $W$ from HBM, compute $XW + b$, write result $Z_1$ to HBM.
 2. **GELU kernel**\index{GELU!kernel}: Read $Z_1$ from HBM, compute $\text{GELU}(Z_1)$, write $Z_2$ to HBM.
@@ -1018,7 +1018,7 @@ The combination of operator fusion (reducing the number of kernels) and CUDA Gra
 
 ### FlashAttention: Tiled attention as a system primitive {#sec-performance-engineering-flashattention}
 
-Standard self-attention computes $\text{Softmax}(QK^T / \sqrt{d_k})V$, where $Q$, $K$, and $V$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $S{\times}S$ attention matrix $A = QK^T$ in HBM, where $S$ is the sequence length. For $S = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head, so the quadratic score tensors run to several gigabytes per layer. The canonical accounting below makes this precise for a 64-head Llama-style layer, counting the score and probability traffic alongside the persistent $Q$, $K$, $V$, and output tensors.
+Standard self-attention computes $\text{Softmax}(\mathbf{Q}\mathbf{K}^T / \sqrt{d_k})\mathbf{V}$, where $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $S{\times}S$ attention matrix $\mathbf{A} = \mathbf{Q}\mathbf{K}^T$ in HBM, where $S$ is the sequence length. For $S = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head, so the quadratic score tensors run to several gigabytes per layer. The canonical accounting below makes this precise for a 64-head Llama-style layer, counting the score and probability traffic alongside the persistent $Q$, $K$, $V$, and output tensors.
 
 ```{python}
 #| echo: false
@@ -1281,7 +1281,7 @@ plt.close()
 
 :::
 
-FlashAttention reduces the memory wall within a single GPU by tiling across the SRAM-HBM boundary. For sequence lengths that exceed the memory capacity of a single GPU, the same tiling principle extends across multiple GPUs via Ring Attention\index{Ring Attention} [@liu2023ringAttention]. By distributing the sequence blocks across a ring of accelerators and overlapping communication with computation, Ring Attention enables context windows that would be impractical on single-GPU configurations. @Sec-distributed-training-systems-systems-tensor-parallelism-d76e examines the distributed mechanics of Ring Attention within the broader tensor-parallelism discussion.
+FlashAttention reduces the memory wall within a single GPU by tiling across the SRAM-HBM boundary. For sequence lengths that exceed the memory capacity of a single GPU, the same tiling principle extends across multiple GPUs via Ring Attention\index{Ring Attention} [@liu2023ringAttention]. Distributing the sequence blocks across a ring of accelerators and overlapping communication with computation enables Ring Attention to handle context windows that would be impractical on single-GPU configurations. @Sec-distributed-training-systems-systems-tensor-parallelism-d76e examines the distributed mechanics of Ring Attention within the broader tensor-parallelism discussion.
 
 ## Precision Engineering {#sec-performance-engineering-precision}
 
@@ -1329,7 +1329,7 @@ For Archetype C (Federated MobileNet), quantization is *a prerequisite for survi
 
 When a post-training recipe misses the quality budget, the precision decision shifts from calibration to training cost. The trade-off between **Post-Training Quantization (PTQ)**\index{Post-Training Quantization} and **Quantization-Aware Training (QAT)**\index{Quantization-Aware Training} centers on the balance between engineering agility and model fidelity. For a model like Llama-2-70B, PTQ is a common first choice for immediate deployment. Techniques like GPTQ or AWQ process the model layer-by-layer using a small calibration dataset (typically 128--1024 samples) to minimize reconstruction error. This process is computationally cheap, often requiring hours rather than a distributed training run for a 70B model. While PTQ is usually robust at INT8, aggressive quantization to INT4 or INT3 can incur a visible penalty: perplexity may degrade, and reasoning benchmarks such as Massive Multitask Language Understanding (MMLU) can drop several percentage points if the quantization recipe does not protect sensitive layers and outlier channels.
 
-When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. By simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator[^fn-ste-quantization] (STE), the network learns to adjust its weights to be robust to quantization.
+When PTQ fails to meet quality thresholds, QAT provides the remedy by integrating quantization noise directly into the training loop. Simulating low-precision rounding during the forward pass and approximating gradients during the backward pass via the straight-through estimator[^fn-ste-quantization] (STE) allows the network to adjust its weights to be robust to quantization.
 
 [^fn-ste-quantization]: **Straight-Through Estimator (STE)**\index{Straight-Through Estimator!quantization}: Discussed by @bengio2013estimating for hard stochastic neurons, the STE handles a fundamental calculus problem that also appears in quantization: the gradient of a rounding function is zero almost everywhere, making backpropagation through quantized layers impossible by standard rules. The STE passes the upstream gradient through the rounding step as a surrogate gradient, pretending the rounding did not happen. This approximation is useful in practice for training networks with discrete or quantized operations, but it is a heuristic rather than a general convergence guarantee for every QAT setup.
 
@@ -1828,7 +1828,7 @@ Speculative decoding pays off when the draft model is cheap and its proposed tok
 
 ### Mixture of experts {#sec-performance-engineering-moe}
 
-A 1-trillion parameter dense model delivers superior reasoning capabilities, but its latency and compute costs are prohibitive for most serving budgets. The Mixture-of-Experts (MoE)\index{MoE!performance engineering} architecture resolves this tension by training a massive model but activating only a small, relevant fraction of it for any given token. By routing inputs to specialized sub-networks, MoE breaks the iron link between model size and inference cost.
+A 1-trillion parameter dense model delivers superior reasoning capabilities, but its latency and compute costs are prohibitive for most serving budgets. The Mixture-of-Experts (MoE)\index{MoE!performance engineering} architecture resolves this tension by training a massive model but activating only a small, relevant fraction of it for any given token. Routing inputs to specialized sub-networks allows MoE to break the iron link between model size and inference cost.
 
 For performance engineering, the local question is whether active-parameter savings exceed the costs of routing and communication. Sparse activation improves the iron law budget only when inactive experts stay off the critical path and the router avoids creating a new AllToAll or load-imbalance bottleneck.
 
@@ -1994,7 +1994,7 @@ class OverlapCalc:
     nvlink_bw_gb_per_s_str = fmt_qty_int(nvlink_bw, GB / second, commas=False)
 ```
 
-Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` per direction. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. By the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` per direction. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. Per the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
 
 Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str`, a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. In that figure, each bar is normalized to the fixed compute budget of 100 units, and the bar height grows roughly fivefold across the x-axis because the exposed-communication segment stacked on top of that budget is precisely the portion of communication that overlap can no longer hide. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
@@ -2359,7 +2359,7 @@ class ProfilerDetective:
     non_gemm_share_pct_str = fmt_percent(round(non_gemm_share_pct) / 100, precision=0, commas=False, style='prose')
 ```
 
-::: {#nbk-performance-engineering-profiler-detective .callout-notebook title="The profiler detective"}
+::: {#exmp-performance-engineering-profiler-detective .callout-example title="The profiler detective"}
 
 **Problem**: A 7B parameter LLM runs on a single H100 and shows `{python} ProfilerDetective.observed_tps_tokens_per_s_str` during autoregressive generation at batch size 1. The pure FP16 weight-read roofline is higher, but after budgeting roughly `{python} ProfilerDetective.decode_traffic_gb_str` of total per-token traffic for weights, KV-cache reads, sampling, synchronization, and launch overhead, the bandwidth-limited full-decode ceiling is approximately `{python} ProfilerDetective.ceiling_tps_tokens_per_s_str`. Where is the remaining `{python} ProfilerDetective.hidden_performance_pct_str` of realizable decode-step performance hiding?
 
@@ -2422,7 +2422,7 @@ Optimizing a single node is a prerequisite, but the ultimate test of performance
 
 ### The fleet efficiency metric {#sec-performance-engineering-fleet-efficiency-metric-dff4}
 
-While Hardware Utilization reports how often GPUs are busy, it fails to distinguish between useful work and wasted cycles (such as activation recomputation or communication bubbles). Fleet measurement therefore needs a useful-work utilization metric. By focusing on the "useful" FLOPs required by the model architecture, this metric provides an invariant measure of system efficiency that remains comparable across different software stacks and parallelization strategies.
+While Hardware Utilization reports how often GPUs are busy, it fails to distinguish between useful work and wasted cycles (such as activation recomputation or communication bubbles). Fleet measurement therefore needs a useful-work utilization metric. Focusing on the "useful" FLOPs required by the model architecture allows this metric to provide an invariant measure of system efficiency that remains comparable across different software stacks and parallelization strategies.
 
 ::: {#dfn-performance-engineering-model-flops-utilization-mfu .callout-definition title="Model FLOPs utilization (MFU)"}
 
@@ -2448,7 +2448,7 @@ While Hardware Utilization reports how often GPUs are busy, it fails to distingu
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import calc_transformer_training_flops
-from mlsysim.fmt import check, MarkdownStr, fmt_count, fmt_percent, fmt_time
+from mlsysim.fmt import check, MarkdownStr, fmt_count, fmt_flop_rate, fmt_flops, fmt_percent, fmt_time
 
 class FleetEfficiencyCalc:
     """Calculates Fleet MFU and identifies the Scaling Tax."""
@@ -2469,6 +2469,7 @@ class FleetEfficiencyCalc:
     fleet_flops_per_step = calc_transformer_training_flops(Models.Language.Llama2_70B.parameters, fleet_tokens_per_step)
 
     # Step 2: MFU is useful FLOPs divided by peak cluster FLOPs over wall time
+    fleet_peak_flops_per_step = n_gpus * r_peak_per_gpu * t_fleet_step  # the fleet MFU denominator, surfaced in the callout
     local_mfu = (local_flops_per_step / (8 * r_peak_per_gpu * t_local_step)).to("").magnitude
     global_mfu = (fleet_flops_per_step / (n_gpus * r_peak_per_gpu * t_fleet_step)).to("").magnitude
 
@@ -2481,6 +2482,9 @@ class FleetEfficiencyCalc:
     fleet_params_b_str = MarkdownStr("70B")
     fleet_nodes_str = fmt_count(n_gpus, commas=False, label="GPU")
     fleet_t_step_ms_str = fmt_time(t_fleet_step, millisecond, precision=0, commas=False)
+    fleet_useful_flops_pflop_str = fmt_flops(fleet_flops_per_step, unit=PFLOP, commas=False)
+    fleet_r_peak_tflop_per_s_str = fmt_flop_rate(r_peak_per_gpu, unit=TFLOP / second, precision=0, commas=False)
+    fleet_peak_budget_pflop_str = fmt_flops(fleet_peak_flops_per_step, unit=PFLOP, commas=False)
     fleet_local_mfu_str = fmt_percent(round(local_mfu * 100) / 100, precision=0, commas=False, style='prose')
     fleet_global_mfu_str = fmt_percent(round(global_mfu * 100) / 100, precision=0, commas=False, style='prose')
     fleet_scaling_tax_str = fmt_percent(scaling_tax, precision=1, commas=False, style='prose')
@@ -2504,7 +2508,11 @@ With MFU defined as useful work rather than raw busyness, the next calculation s
 *   **Local node baseline**\index{Model FLOPs Utilization!local node baseline}: A single 8-GPU node achieves `{python} FleetEfficiencyCalc.fleet_local_mfu_str` MFU.
 *   **Fleet performance**\index{Model FLOPs Utilization!fleet performance}: At `{python} FleetEfficiencyCalc.fleet_nodes_str`, the step time increases to `{python} FleetEfficiencyCalc.fleet_t_step_ms_str`, dropping MFU to `{python} FleetEfficiencyCalc.fleet_global_mfu_str`.
 
-**Math**: Scaling tax is computed as $1 - \text{Fleet MFU}/\text{Local MFU}$, giving `{python} FleetEfficiencyCalc.fleet_scaling_tax_str`.
+**Math**: Both MFU figures come from the same ratio, the useful FLOPs a step performs divided by the FLOPs the cluster could execute at peak in that step's wall time:
+
+$$\text{MFU} = \frac{\text{FLOPs}_{\text{useful}}}{N \times R_{\text{peak}} \times t_{\text{step}}}$$
+
+For the fleet case, a step performs `{python} FleetEfficiencyCalc.fleet_useful_flops_pflop_str` of useful work, while `{python} FleetEfficiencyCalc.fleet_nodes_str` $\times$ `{python} FleetEfficiencyCalc.fleet_r_peak_tflop_per_s_str` per GPU $\times$ `{python} FleetEfficiencyCalc.fleet_t_step_ms_str` of wall time could execute `{python} FleetEfficiencyCalc.fleet_peak_budget_pflop_str` at peak; the quotient `{python} FleetEfficiencyCalc.fleet_useful_flops_pflop_str` ÷ `{python} FleetEfficiencyCalc.fleet_peak_budget_pflop_str` $\approx$ `{python} FleetEfficiencyCalc.fleet_global_mfu_str`. The same substitution on the single node yields `{python} FleetEfficiencyCalc.fleet_local_mfu_str`, and the scaling tax is $1 - \text{Fleet MFU}/\text{Local MFU}$, giving `{python} FleetEfficiencyCalc.fleet_scaling_tax_str`.
 
 **Systems insight**: The `{python} FleetEfficiencyCalc.fleet_scaling_tax_str` scaling tax represents the cost of inter-node communication (InfiniBand latency) and synchronization barriers. In a healthy fleet, this tax should remain stable; a sudden increase in the scaling tax signals a scaling regression\index{Scaling!regression}, typically caused by a misaligned parallelization strategy or a "gray failure" in the network fabric.
 
@@ -2753,15 +2761,6 @@ Operator fusion, precision reduction, graph compilation, and algorithmic innovat
 :::
 
 <!-- This is here to make sure that quizzes are inserted properly before a part begins. -->
-
-::: {.callout-research-questions title="For further inquiry"}
-
-* How should roofline and profiler evidence decide whether to optimize memory traffic, compute, launch overhead, or communication?
-* How do distributed-training and collective-communication costs limit the value of local kernel optimizations?
-* When does lower precision improve effective bandwidth without violating quality or latency requirements?
-* How should fusion, tiling, FlashAttention, and CUDA Graphs be evaluated when each shifts the next bottleneck?
-
-:::
 
 ::: { .quiz-end }
 :::
