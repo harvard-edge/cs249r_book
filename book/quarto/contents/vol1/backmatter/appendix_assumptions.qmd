@@ -4,7 +4,7 @@ engine: jupyter
 
 # System Assumptions {#sec-appdx-system-assumptions}
 
-## Purpose {.unnumbered .unlisted}
+## Purpose {.unnumbered}
 
 _What assumptions sit underneath the “napkin math” throughout the book?_
 
@@ -88,7 +88,9 @@ class NapkinMath:
     model_b_str = fmt_params(model_params_b * BILLION, precision=0, commas=False)
     bytes_per_param_value_str = fmt(bytes_per_param, precision=0, commas=False)
     train_mem_gb_str = fmt_memory(train_mem_q, unit=GB, precision=0, commas=False)
-    accel_mem_gb_str = fmt_memory(h100_mem_q, unit=GB, precision=1, commas=False)
+    # Display the vendor's nominal capacity in decimal GB; the registry may retain
+    # the same nameplate magnitude in GiB for internal capacity calculations.
+    accel_mem_gb_str = fmt_memory(h100_mem_q.magnitude * GB, unit=GB, precision=0, commas=False)
     a100_tdp_w_str = fmt_power(a100_tdp_q, unit=watt, precision=0, commas=False)
     gpt3_ops_math = fmt_math(sci_latex(gpt3_ops, precision=2))
     gpt3_days_str = fmt_time(gpt3_days, "day", precision=0, commas=False, style="word", approx=True)
@@ -122,7 +124,7 @@ The same accelerator can be compute rich and memory constrained. Arithmetic inte
 Estimate the memory needed to train a `{python} NapkinMath.model_b_str` model.
 
 **Variables**:
-Mixed-precision Adaptive Moment Estimation (Adam) stores BF16 weights, gradients, FP32 master weights, momentum, and variance. The optimizer state budget is `{python} NapkinMath.bytes_per_param_value_str` bytes per parameter.
+Mixed-precision Adaptive Moment Estimation (Adam) stores BF16 weights, gradients, FP32 master weights, momentum, and variance. The model state budget is `{python} NapkinMath.bytes_per_param_value_str` bytes per parameter.
 
 **Math**:
 For `{python} NapkinMath.model_b_str` parameters, model state is `{python} NapkinMath.napkin_model_b_digit_str` $\times 10^9 \times$ `{python} NapkinMath.bytes_per_param_value_str` bytes = `{python} NapkinMath.train_mem_gb_str`.
@@ -134,16 +136,16 @@ An H100 has `{python} NapkinMath.accel_mem_gb_str` of HBM, so the model state al
 Optimizer state, not weights alone, sets the floor for training memory. Capacity planning that starts from parameter bytes underestimates the real requirement.
 
 **Problem**:
-Estimate the electricity cost of a GPT-3-scale training run on the reference cluster.
+Estimate the accelerator-only electricity cost of the editorial GPT-3-scale scenario.
 
 **Variables**:
 Use `{python} NapkinMath.gpt3_accelerators_str` A100s, `{python} NapkinMath.a100_tdp_w_str` per accelerator, `{python} NapkinMath.gpt3_days_str` wall-clock, and `{python} NapkinMath.elec_rate_str` electricity.
 
 **Math**:
-The run requires roughly `{python} NapkinMath.gpt3_ops_math` FLOPs. The A100-equivalent energy estimate is `{python} NapkinMath.gpt3_days_str` wall-clock $\times$ `{python} NapkinMath.gpt3_accelerators_str` A100s $\times$ 24 h/day $\times$ `{python} NapkinMath.a100_kw_str` $\times$ `{python} NapkinMath.elec_rate_str` = `{python} NapkinMath.elec_cost_str`.
+The run requires roughly `{python} NapkinMath.gpt3_ops_math` FLOPs. The A100-equivalent electricity cost is `{python} NapkinMath.gpt3_days_str` wall-clock $\times$ `{python} NapkinMath.gpt3_accelerators_str` A100s $\times$ 24 h/day $\times$ `{python} NapkinMath.a100_kw_str` $\times$ `{python} NapkinMath.elec_rate_str` = `{python} NapkinMath.elec_cost_str`.
 
 **Result**:
-The electricity estimate is only a small fraction of total training cost, which is dominated by accelerator amortization. The original GPT-3 run used V100-era infrastructure; this is an A100-equivalent reference estimate, not a derivation of the run duration from peak FLOP/s alone.
+This accelerator-TDP-only estimate excludes host CPUs, networking, storage, cooling, and facility overhead. The original GPT-3 run used V100-era infrastructure; this is an editorial A100-equivalent scenario, not a reported configuration or a duration derived from peak FLOP/s alone.
 
 **Systems insight**:
 Energy is measurable from power and time, but full cost accounting must also include capital utilization, networking, storage, staffing, and failed or repeated runs.
@@ -163,6 +165,11 @@ from mlsysim.fmt import fmt, fmt_val, fmt_unit
 class AcceleratorConstants:
     """Formatted constants for Accelerator Specifications."""
 
+    @staticmethod
+    def _official_capacity_gb(capacity):
+        """Return a vendor nameplate capacity for student-facing decimal-GB tables."""
+        return capacity.magnitude * units.GB
+
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     a100_peak_fp16_val_str = fmt_val(Hardware.Cloud.A100.compute.peak_flops)
     a100_peak_fp16_unit_str = fmt_unit(Hardware.Cloud.A100.compute.peak_flops)
@@ -172,8 +179,8 @@ class AcceleratorConstants:
     a100_tf32_unit_str = fmt_unit(Hardware.Cloud.A100.compute.precision_flops["tf32"])
     a100_mem_bw_val_str = fmt_val(Hardware.Cloud.A100.memory.bandwidth)
     a100_mem_bw_unit_str = fmt_unit(Hardware.Cloud.A100.memory.bandwidth)
-    a100_mem_capacity_val_str = fmt_val(Hardware.Cloud.A100.memory.capacity)
-    a100_mem_capacity_unit_str = fmt_unit(Hardware.Cloud.A100.memory.capacity)
+    a100_mem_capacity_val_str = fmt_val(_official_capacity_gb(Hardware.Cloud.A100.memory.capacity))
+    a100_mem_capacity_unit_str = fmt_unit(_official_capacity_gb(Hardware.Cloud.A100.memory.capacity))
     a100_tdp_val_str = fmt_val(Hardware.Cloud.A100.tdp)
     a100_tdp_unit_str = fmt_unit(Hardware.Cloud.A100.tdp)
     a100_int8_tops_val_str = fmt_val(Hardware.Cloud.A100.compute.precision_flops["int8"])
@@ -184,12 +191,12 @@ class AcceleratorConstants:
     b200_fp8_unit_str = fmt_unit(Hardware.Cloud.B200.compute.precision_flops["fp8"])
     b200_mem_bw_val_str = fmt_val(Hardware.Cloud.B200.memory.bandwidth)
     b200_mem_bw_unit_str = fmt_unit(Hardware.Cloud.B200.memory.bandwidth)
-    b200_mem_capacity_val_str = fmt_val(Hardware.Cloud.B200.memory.capacity)
-    b200_mem_capacity_unit_str = fmt_unit(Hardware.Cloud.B200.memory.capacity)
+    b200_mem_capacity_val_str = fmt_val(_official_capacity_gb(Hardware.Cloud.B200.memory.capacity))
+    b200_mem_capacity_unit_str = fmt_unit(_official_capacity_gb(Hardware.Cloud.B200.memory.capacity))
     b200_tdp_val_str = fmt_val(Hardware.Cloud.B200.tdp)
     b200_tdp_unit_str = fmt_unit(Hardware.Cloud.B200.tdp)
-    b200_int4_tops_val_str = fmt_val(Hardware.Cloud.B200.compute.precision_flops["int4"])
-    b200_int4_tops_unit_str = fmt_unit(Hardware.Cloud.B200.compute.precision_flops["int4"])
+    b200_int4_tops_val_str = fmt_val(Hardware.Cloud.B200.compute.precision_flops["fp4"])
+    b200_int4_tops_unit_str = fmt_unit(Hardware.Cloud.B200.compute.precision_flops["fp4"])
     ref_cpu_fp32_flops_val_str = fmt_val(Hardware.Cloud.ReferenceCPU.compute.peak_flops)
     ref_cpu_fp32_flops_unit_str = fmt_unit(Hardware.Cloud.ReferenceCPU.compute.peak_flops)
     h100_peak_fp16_val_str = fmt_val(Hardware.Cloud.H100.compute.peak_flops)
@@ -202,8 +209,8 @@ class AcceleratorConstants:
     h100_tf32_unit_str = fmt_unit(Hardware.Cloud.H100.compute.precision_flops["tf32"])
     h100_mem_bw_val_str = fmt_val(Hardware.Cloud.H100.memory.bandwidth)
     h100_mem_bw_unit_str = fmt_unit(Hardware.Cloud.H100.memory.bandwidth)
-    h100_mem_capacity_val_str = fmt_val(Hardware.Cloud.H100.memory.capacity)
-    h100_mem_capacity_unit_str = fmt_unit(Hardware.Cloud.H100.memory.capacity)
+    h100_mem_capacity_val_str = fmt_val(_official_capacity_gb(Hardware.Cloud.H100.memory.capacity))
+    h100_mem_capacity_unit_str = fmt_unit(_official_capacity_gb(Hardware.Cloud.H100.memory.capacity))
     h100_tdp_val_str = fmt_val(Hardware.Cloud.H100.tdp)
     h100_tdp_unit_str = fmt_unit(Hardware.Cloud.H100.tdp)
     h100_int8_tops_val_str = fmt_val(Hardware.Cloud.H100.compute.precision_flops["int8"])
@@ -212,8 +219,8 @@ class AcceleratorConstants:
     mi300x_peak_fp16_unit_str = fmt_unit(Hardware.Cloud.MI300X.compute.peak_flops)
     mi300x_mem_bw_val_str = fmt_val(Hardware.Cloud.MI300X.memory.bandwidth)
     mi300x_mem_bw_unit_str = fmt_unit(Hardware.Cloud.MI300X.memory.bandwidth)
-    mi300x_mem_capacity_val_str = fmt_val(Hardware.Cloud.MI300X.memory.capacity)
-    mi300x_mem_capacity_unit_str = fmt_unit(Hardware.Cloud.MI300X.memory.capacity)
+    mi300x_mem_capacity_val_str = fmt_val(_official_capacity_gb(Hardware.Cloud.MI300X.memory.capacity))
+    mi300x_mem_capacity_unit_str = fmt_unit(_official_capacity_gb(Hardware.Cloud.MI300X.memory.capacity))
     mi300x_tdp_val_str = fmt_val(Hardware.Cloud.MI300X.tdp)
     mi300x_tdp_unit_str = fmt_unit(Hardware.Cloud.MI300X.tdp)
     mobile_npu_mem_bw_val_str = fmt_val(Hardware.Mobile.iPhone15Pro.memory.bandwidth)
@@ -250,17 +257,23 @@ class AcceleratorConstants:
     v100_fp32_unit_str = fmt_unit(Hardware.Cloud.V100.compute.precision_flops["fp32"])
     v100_mem_bw_val_str = fmt_val(Hardware.Cloud.V100.memory.bandwidth)
     v100_mem_bw_unit_str = fmt_unit(Hardware.Cloud.V100.memory.bandwidth)
-    v100_mem_capacity_val_str = fmt_val(Hardware.Cloud.V100.memory.capacity)
-    v100_mem_capacity_unit_str = fmt_unit(Hardware.Cloud.V100.memory.capacity)
+    v100_mem_capacity_val_str = fmt_val(_official_capacity_gb(Hardware.Cloud.V100.memory.capacity))
+    v100_mem_capacity_unit_str = fmt_unit(_official_capacity_gb(Hardware.Cloud.V100.memory.capacity))
     v100_tdp_val_str = fmt_val(Hardware.Cloud.V100.tdp)
     v100_tdp_unit_str = fmt_unit(Hardware.Cloud.V100.tdp)
 ```
 
 ## Accelerator Specifications {.unnumbered}
 
-These are the **accelerator assumptions**\index{Assumptions!accelerator} used in the book's roofline, training-memory, energy, and cost examples: peak throughput, memory bandwidth, memory capacity, and thermal design power (TDP) for each generation the chapters cite. Values are vendor datasheet peaks—ceilings for napkin math, not sustained utilization—drawn from NVIDIA product documentation and IEEE Micro architecture articles [@nvidia2017gpu; @NVIDIA2020; @choquette2021; @choquette2023; @nvidia2018t4; @nvidia2024blackwell], AMD MI300X documentation [@amd2023mi300x], Google TPU publications [@jouppi2023; @jouppi2021], and Google Cloud's current TPU v6e specification page [@googleCloudTpuV6eDocs]. Tables progress from @tbl-assumptions-v100 (Volta) and @tbl-assumptions-t4 (Turing) through current and forward-looking generations.
+These are the **accelerator assumptions**\index{Assumptions!accelerator} used in the book's roofline, training-memory, energy, and cost examples: peak throughput, memory bandwidth, memory capacity, and thermal design power (TDP) for each generation the chapters cite. Values are vendor datasheet peaks—ceilings for napkin math, not sustained utilization—drawn from NVIDIA product documentation and IEEE Micro architecture articles [@nvidia2017gpu; @NVIDIA2020; @choquette2021; @choquette2023; @nvidia2018t4; @nvidia2024blackwell], AMD MI300X documentation [@amd2023mi300x], Google TPU publications [@jouppi2023; @jouppi2021], and Google Cloud's current TPU v6e specification page [@googleCloudTpuV6eDocs]. Capacity rows preserve official decimal-GB nameplates. Tables progress from @tbl-assumptions-v100 (Volta) and @tbl-assumptions-t4 (Turing) through current and forward-looking generations.
 
 ### NVIDIA V100 {.unnumbered}
+
+```{=latex}
+\begingroup
+\vspace*{-2ex}
+\renewcommand{\arraystretch}{1.3}
+```
 
 | **Assumption**                     |                         **Value**                         |                          **Unit**                          |
 |:-----------------------------------|:---------------------------------------------------------:|:----------------------------------------------------------:|
@@ -274,6 +287,10 @@ These are the **accelerator assumptions**\index{Assumptions!accelerator} used in
 
 ### NVIDIA T4 {.unnumbered}
 
+```{=latex}
+\vspace*{-2ex}
+```
+
 | **Assumption**                   |                      **Value**                       |                        **Unit**                       |
 |:---------------------------------|:----------------------------------------------------:|:-----------------------------------------------------:|
 | Peak FP16 tensor throughput (T4) | `{python} AcceleratorConstants.t4_peak_fp16_val_str` | `{python} AcceleratorConstants.t4_peak_fp16_unit_str` |
@@ -283,9 +300,18 @@ These are the **accelerator assumptions**\index{Assumptions!accelerator} used in
 
 : **NVIDIA T4 (Turing)**: Peak specs from NVIDIA Tesla T4 product documentation [@nvidia2018t4]. A low-power inference accelerator widely deployed in cloud serving; its 70 W TDP is a canonical cost-per-inference anchor. {#tbl-assumptions-t4 tbl-colwidths="[34,33,33]"}
 
+```{=latex}
+\endgroup
+```
+
 ### NVIDIA A100 {.unnumbered}
 
 @Tbl-assumptions-a100 lists the Ampere-generation specs that anchor most training examples in the book.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.5}
+```
 
 | **Assumption**                     |                         **Value**                         |                          **Unit**                          |
 |:-----------------------------------|:---------------------------------------------------------:|:----------------------------------------------------------:|
@@ -301,7 +327,7 @@ These are the **accelerator assumptions**\index{Assumptions!accelerator} used in
 
 ### NVIDIA H100 {.unnumbered}
 
-@Tbl-assumptions-h_h100 adds Hopper-generation FP8 Tensor Cores and the Transformer Engine, driving "current generation" estimates.
+@Tbl-assumptions-h_h100 adds Hopper-generation FP8 Tensor Cores and the Transformer Engine for Hopper-era estimates.
 
 | **Assumption**                     |                         **Value**                         |                          **Unit**                          |
 |:-----------------------------------|:---------------------------------------------------------:|:----------------------------------------------------------:|
@@ -314,7 +340,7 @@ These are the **accelerator assumptions**\index{Assumptions!accelerator} used in
 | HBM capacity (H100)                | `{python} AcceleratorConstants.h100_mem_capacity_val_str` | `{python} AcceleratorConstants.h100_mem_capacity_unit_str` |
 | TDP (H100)                         |      `{python} AcceleratorConstants.h100_tdp_val_str`     |     `{python} AcceleratorConstants.h100_tdp_unit_str`      |
 
-: **NVIDIA H100 (Hopper)**: Peak specs from the Hopper architecture overview [@choquette2023]. FP8 Tensor Cores and the Transformer Engine drive current-generation training and serving estimates. {#tbl-assumptions-h_h100 tbl-colwidths="[50,20,30]"}
+: **NVIDIA H100 (Hopper)**: Peak specs from the Hopper architecture overview [@choquette2023]. FP8 Tensor Cores and the Transformer Engine drive Hopper-generation training and serving estimates. {#tbl-assumptions-h_h100 tbl-colwidths="[50,20,30]"}
 
 ### NVIDIA B200 {.unnumbered}
 
@@ -324,12 +350,16 @@ These are the **accelerator assumptions**\index{Assumptions!accelerator} used in
 |:-----------------------------------|:---------------------------------------------------------:|:----------------------------------------------------------:|
 | Peak FP16 tensor throughput (B200) |   `{python} AcceleratorConstants.b200_peak_fp16_val_str`  |  `{python} AcceleratorConstants.b200_peak_fp16_unit_str`   |
 | Peak FP8 tensor throughput (B200)  |      `{python} AcceleratorConstants.b200_fp8_val_str`     |     `{python} AcceleratorConstants.b200_fp8_unit_str`      |
-| Peak INT4 throughput (B200)        |   `{python} AcceleratorConstants.b200_int4_tops_val_str`  |  `{python} AcceleratorConstants.b200_int4_tops_unit_str`   |
+| Peak FP4 throughput (B200)         |   `{python} AcceleratorConstants.b200_int4_tops_val_str`  |  `{python} AcceleratorConstants.b200_int4_tops_unit_str`   |
 | HBM bandwidth (B200)               |    `{python} AcceleratorConstants.b200_mem_bw_val_str`    |    `{python} AcceleratorConstants.b200_mem_bw_unit_str`    |
 | HBM capacity (B200)                | `{python} AcceleratorConstants.b200_mem_capacity_val_str` | `{python} AcceleratorConstants.b200_mem_capacity_unit_str` |
 | TDP (B200)                         |      `{python} AcceleratorConstants.b200_tdp_val_str`     |     `{python} AcceleratorConstants.b200_tdp_unit_str`      |
 
 : **NVIDIA B200 (Blackwell)**: Peak specs from NVIDIA Blackwell product documentation [@nvidia2024blackwell]. Forward-looking capacity-planning examples use its HBM3e bandwidth and FP8 throughput. {#tbl-assumptions-b200 tbl-colwidths="[50,20,30]"}
+
+```{=latex}
+\endgroup
+```
 
 ### AMD Instinct MI300X {.unnumbered}
 
@@ -422,7 +452,7 @@ class ModelConstants:
 
 ## Model Specifications {.unnumbered}
 
-These are the **reference model assumptions**\index{Assumptions!reference models} behind training-cost, memory-footprint, and inference-workload examples: parameter counts, per-inference FLOP budgets, and published training-scale anchors. Published model sizes follow primary papers, model reports, and official model documentation [@devlin2019; @radford2019language; @brown2020language; @touvron2023llama; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs]. GPT-3 training FLOPs and duration follow [@brown2020language]. The GPT-4 parameter count and training GPU-days are public third-party MoE estimates [@semianalysisGPT4] because the GPT-4 technical report does not disclose architecture size. When a chapter estimates GPT-3-scale training time or 7B optimizer state, it uses @tbl-assumptions-models.
+These are the **reference model assumptions**\index{Assumptions!reference models} behind training-cost, memory-footprint, and inference-workload examples: parameter counts, per-inference FLOP budgets, and published training-scale anchors. Published model sizes follow primary papers, model reports, and official model documentation [@devlin2019; @radford2019language; @brown2020language; @touvron2023llama; @dubey2024llama; @he2016; @sandler2018; @ultralytics2023yolov8Docs]. ResNet-50 and MobileNetV2 count two FLOPs per multiply-add. GPT-3 training FLOPs follow [@brown2020language]; the 25-day, 1,024-A100 pairing is editorial. The GPT-4 parameter count and training GPU-days are public third-party MoE estimates [@semianalysisGPT4] because the GPT-4 technical report does not disclose architecture size. When a chapter estimates GPT-3-scale training time or 7B optimizer state, it uses @tbl-assumptions-models.
 
 | **Assumption**                          |                         **Value**                          |                           **Unit**                          |
 |:----------------------------------------|:----------------------------------------------------------:|:-----------------------------------------------------------:|
@@ -433,7 +463,7 @@ These are the **reference model assumptions**\index{Assumptions!reference models
 | Layers (GPT-2)                          |       `{python} ModelConstants.gpt2_layers_val_str`        |        `{python} ModelConstants.gpt2_layers_unit_str`       |
 | Parameters (GPT-2)                      |       `{python} ModelConstants.gpt2_params_val_str`        |        `{python} ModelConstants.gpt2_params_unit_str`       |
 | Parameters (GPT-3)                      |       `{python} ModelConstants.gpt3_params_val_str`        |        `{python} ModelConstants.gpt3_params_unit_str`       |
-| Reference training duration (GPT-3)     |  `{python} ModelConstants.gpt3_training_days_ref_val_str`  |  `{python} ModelConstants.gpt3_training_days_ref_unit_str`  |
+| Scenario duration (GPT-3 scale)         |  `{python} ModelConstants.gpt3_training_days_ref_val_str`  |  `{python} ModelConstants.gpt3_training_days_ref_unit_str`  |
 | Reference training FLOPs (GPT-3)        |    `{python} ModelConstants.gpt3_training_ops_val_str`     |     `{python} ModelConstants.gpt3_training_ops_unit_str`    |
 | Parameters (GPT-4, public MoE estimate) |       `{python} ModelConstants.gpt4_params_val_str`        |        `{python} ModelConstants.gpt4_params_unit_str`       |
 | Reference training GPU-days (GPT-4)     |  `{python} ModelConstants.gpt4_training_gpu_days_val_str`  |  `{python} ModelConstants.gpt4_training_gpu_days_unit_str`  |
@@ -447,7 +477,7 @@ These are the **reference model assumptions**\index{Assumptions!reference models
 
 ## Training Memory Conventions {.unnumbered}
 
-Training-memory napkin math assumes the **mixed-precision Adam**\index{Mixed-precision Adam!storage model} storage model used in the napkin-math callout and several training chapters: BF16 weights, BF16 gradients, and FP32 master weights plus Adam first- and second-moment buffers (12 bytes per parameter). This is a book convention aligned with common mixed-precision Adam training layouts [@kingma2014adam; @micikevicius2017mixed; @nvidia_tensors_fp16_2017], not a measured hardware constant. @Tbl-assumptions-training-memory lists per-component byte widths; multiplying bytes per parameter (mixed-precision Adam) by the parameter count gives optimizer-state footprint before activations.
+Training-memory napkin math assumes the **mixed-precision Adam**\index{Mixed-precision Adam!storage model} storage model used in the napkin-math callout and several training chapters: BF16 weights, BF16 gradients, and FP32 master weights plus Adam first- and second-moment buffers (12 bytes per parameter). This is a book convention aligned with common mixed-precision Adam training layouts [@kingma2014adam; @micikevicius2017mixed; @nvidia_tensors_fp16_2017], not a measured hardware constant. @Tbl-assumptions-training-memory lists per-component byte widths; multiplying bytes per parameter (mixed-precision Adam) by the parameter count gives model-state footprint before activations.
 
 ```{python}
 #| echo: false
@@ -459,18 +489,18 @@ class MemoryConstants:
     BYTES_FP16_unit_str = fmt_unit(BYTES_FP16)
     BYTES_FP32_val_str = fmt_val(BYTES_FP32)
     BYTES_FP32_unit_str = fmt_unit(BYTES_FP32)
-    BYTES_ADAM_STATE_val_str = fmt_val(BYTES_ADAM_STATE)
-    BYTES_ADAM_STATE_unit_str = fmt_unit(BYTES_ADAM_STATE)
-    ADAM_MIXED_PREC_TOTAL_val_str = fmt_val(BYTES_FP16 + BYTES_FP16 + BYTES_ADAM_STATE)
+    MASTER_PLUS_ADAM_val_str = fmt_val(BYTES_FP32 + BYTES_ADAM_STATE)
+    MASTER_PLUS_ADAM_unit_str = fmt_unit(BYTES_FP32 + BYTES_ADAM_STATE)
+    ADAM_MIXED_PREC_TOTAL_val_str = fmt_val(BYTES_FP16 + BYTES_FP16 + BYTES_FP32 + BYTES_ADAM_STATE)
     ADAM_MIXED_PREC_TOTAL_unit_str = fmt_unit(BYTES_FP16)
 ```
 
-| **Assumption**                                       |                        **Value**                         |                          **Unit**                         |
-|:-----------------------------------------------------|:--------------------------------------------------------:|:---------------------------------------------------------:|
-| Weight/gradient width (BF16)                         |      `{python} MemoryConstants.BYTES_FP16_val_str`       |       `{python} MemoryConstants.BYTES_FP16_unit_str`      |
-| Master weight and optimizer state width (FP32)       |      `{python} MemoryConstants.BYTES_FP32_val_str`       |       `{python} MemoryConstants.BYTES_FP32_unit_str`      |
-| Adam state per parameter (momentum + variance, FP32) |   `{python} MemoryConstants.BYTES_ADAM_STATE_val_str`    |    `{python} MemoryConstants.BYTES_ADAM_STATE_unit_str`   |
-| Bytes per parameter (mixed-precision Adam)           | `{python} MemoryConstants.ADAM_MIXED_PREC_TOTAL_val_str` | `{python} MemoryConstants.ADAM_MIXED_PREC_TOTAL_unit_str` |
+| **Assumption**                             |                        **Value**                         |                          **Unit**                         |
+|:-------------------------------------------|:--------------------------------------------------------:|:---------------------------------------------------------:|
+| Weight/gradient width (BF16)               |      `{python} MemoryConstants.BYTES_FP16_val_str`       |       `{python} MemoryConstants.BYTES_FP16_unit_str`      |
+| Master weight width (FP32)                 |      `{python} MemoryConstants.BYTES_FP32_val_str`       |       `{python} MemoryConstants.BYTES_FP32_unit_str`      |
+| Master + Adam states per parameter (FP32)  |   `{python} MemoryConstants.MASTER_PLUS_ADAM_val_str`    |    `{python} MemoryConstants.MASTER_PLUS_ADAM_unit_str`   |
+| Bytes per parameter (mixed-precision Adam) | `{python} MemoryConstants.ADAM_MIXED_PREC_TOTAL_val_str` | `{python} MemoryConstants.ADAM_MIXED_PREC_TOTAL_unit_str` |
 
 : **Training Memory Conventions**: Per-parameter storage for mixed-precision Adam (2 + 2 + 12 = 16 bytes before activations). Book convention for napkin math; see [@nvidia_tensors_fp16_2017] for mixed-precision training context. {#tbl-assumptions-training-memory tbl-colwidths="[50,20,30]"}
 
@@ -507,13 +537,13 @@ class EnergyConstants:
     ENERGY_DRAM_PJ_PER_BYTE_unit_str = fmt_unit(ENERGY_DRAM_PJ_PER_BYTE)
     ENERGY_DRAM_TO_REG_RATIO_mult_str = fmt_multiple(ENERGY_DRAM_ACCESS_PJ / ENERGY_REG_PJ, precision=0, commas=True)
     ENERGY_FLOP_FP16_PJ_val_str = fmt_val(ENERGY_FLOP_FP16_PJ)
-    ENERGY_FLOP_FP16_PJ_unit_str = fmt_unit(ENERGY_FLOP_FP16_PJ)
+    ENERGY_FLOP_FP16_PJ_unit_str = MarkdownStr("pJ/multiply")
     ENERGY_FLOP_FP32_PJ_val_str = fmt_val(ENERGY_FLOP_FP32_PJ)
-    ENERGY_FLOP_FP32_PJ_unit_str = fmt_unit(ENERGY_FLOP_FP32_PJ)
+    ENERGY_FLOP_FP32_PJ_unit_str = MarkdownStr("pJ/multiply")
     ENERGY_MOBILENET_INF_MJ_val_str = fmt_val(Models.Vision.MobileNetV2.inference_energy)
     ENERGY_MOBILENET_INF_MJ_unit_str = fmt_unit(Models.Vision.MobileNetV2.inference_energy)
     ENERGY_OP_INT8_PJ_val_str = fmt_val(ENERGY_OP_INT8_PJ)
-    ENERGY_OP_INT8_PJ_unit_str = MarkdownStr("pJ/MAC")
+    ENERGY_OP_INT8_PJ_unit_str = MarkdownStr("pJ/multiply")
     ENERGY_REG_PJ_val_str = fmt_val(ENERGY_REG_PJ)
     ENERGY_REG_PJ_unit_str = fmt_unit(ENERGY_REG_PJ)
     ENERGY_SRAM_L1_PJ_val_str = fmt_val(ENERGY_SRAM_L1_PJ)
@@ -526,22 +556,27 @@ class EnergyConstants:
 
 ## Energy Constants {.unnumbered}
 
-These energy assumptions (primarily from Horowitz's 45 nm table [@horowitz2014]) underpin the book's efficiency and sustainability discussions. @Tbl-assumptions-energy lists the hierarchy from register through DRAM—why data reuse dominates kernel design.
+These energy assumptions from Horowitz's 45 nm table [@horowitz2014] underpin the book's efficiency comparisons but are not process-independent. @Tbl-assumptions-energy lists the hierarchy from register through DRAM—why data reuse dominates kernel design.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.45}
+```
 
 | **Assumption**                           |                           **Value**                            |                             **Unit**                            |
 |:-----------------------------------------|:--------------------------------------------------------------:|:---------------------------------------------------------------:|
 | Register access energy                   |        `{python} EnergyConstants.ENERGY_REG_PJ_val_str`        |        `{python} EnergyConstants.ENERGY_REG_PJ_unit_str`        |
 | L1 SRAM access energy                    |      `{python} EnergyConstants.ENERGY_SRAM_L1_PJ_val_str`      |      `{python} EnergyConstants.ENERGY_SRAM_L1_PJ_unit_str`      |
 | L2 SRAM access energy                    |      `{python} EnergyConstants.ENERGY_SRAM_L2_PJ_val_str`      |      `{python} EnergyConstants.ENERGY_SRAM_L2_PJ_unit_str`      |
-| DRAM access energy (per access)          |    `{python} EnergyConstants.ENERGY_DRAM_ACCESS_PJ_val_str`    |    `{python} EnergyConstants.ENERGY_DRAM_ACCESS_PJ_unit_str`    |
+| DRAM access energy (32-bit)              |    `{python} EnergyConstants.ENERGY_DRAM_ACCESS_PJ_val_str`    |    `{python} EnergyConstants.ENERGY_DRAM_ACCESS_PJ_unit_str`    |
 | DRAM access energy (per byte)            |   `{python} EnergyConstants.ENERGY_DRAM_PJ_PER_BYTE_val_str`   |   `{python} EnergyConstants.ENERGY_DRAM_PJ_PER_BYTE_unit_str`   |
-| FP16 FLOP energy                         |     `{python} EnergyConstants.ENERGY_FLOP_FP16_PJ_val_str`     |     `{python} EnergyConstants.ENERGY_FLOP_FP16_PJ_unit_str`     |
-| FP32 FLOP energy                         |     `{python} EnergyConstants.ENERGY_FLOP_FP32_PJ_val_str`     |     `{python} EnergyConstants.ENERGY_FLOP_FP32_PJ_unit_str`     |
-| INT8 multiply-add energy                 |      `{python} EnergyConstants.ENERGY_OP_INT8_PJ_val_str`      |      `{python} EnergyConstants.ENERGY_OP_INT8_PJ_unit_str`      |
+| FP16 multiply energy (45 nm)             |     `{python} EnergyConstants.ENERGY_FLOP_FP16_PJ_val_str`     |     `{python} EnergyConstants.ENERGY_FLOP_FP16_PJ_unit_str`     |
+| FP32 multiply energy (45 nm)             |     `{python} EnergyConstants.ENERGY_FLOP_FP32_PJ_val_str`     |     `{python} EnergyConstants.ENERGY_FLOP_FP32_PJ_unit_str`     |
+| INT8 multiply energy (45 nm)             |      `{python} EnergyConstants.ENERGY_OP_INT8_PJ_val_str`      |      `{python} EnergyConstants.ENERGY_OP_INT8_PJ_unit_str`      |
 | MobileNetV2 inference energy (reference) |   `{python} EnergyConstants.ENERGY_MOBILENET_INF_MJ_val_str`   |   `{python} EnergyConstants.ENERGY_MOBILENET_INF_MJ_unit_str`   |
 | 5G transfer energy per MB                | `{python} EnergyConstants.NETWORK_5G_ENERGY_PER_MB_MJ_val_str` | `{python} EnergyConstants.NETWORK_5G_ENERGY_PER_MB_MJ_unit_str` |
 
-: **Energy per Operation and Access**: Energy hierarchy from register through DRAM [@horowitz2014]. The roughly `{python} EnergyConstants.ENERGY_DRAM_TO_REG_RATIO_mult_str` gap between a `{python} EnergyConstants.ENERGY_REG_PJ_val_str` pJ register access and a `{python} EnergyConstants.ENERGY_DRAM_ACCESS_PJ_val_str` pJ DRAM access explains why data reuse dominates ML kernel optimization. {#tbl-assumptions-energy tbl-colwidths="[50,20,30]"}
+: **Energy per Operation and Access**: 45 nm energy hierarchy from register through DRAM [@horowitz2014]. The roughly `{python} EnergyConstants.ENERGY_DRAM_TO_REG_RATIO_mult_str` gap between a `{python} EnergyConstants.ENERGY_REG_PJ_val_str` pJ register access and a `{python} EnergyConstants.ENERGY_DRAM_ACCESS_PJ_val_str` pJ DRAM access explains why data reuse dominates ML kernel optimization. {#tbl-assumptions-energy tbl-colwidths="[50,20,30]"}
 
 Energy costs operate at the chip level, but real ML systems also move data across interconnects—between accelerators, across racks, and over wide-area networks. The next section lists the bandwidth assumptions used when chapters estimate communication overhead.
 
@@ -572,8 +607,6 @@ class InterconnectConstants:
     ib_ndr_bw_unit_str = fmt_unit(Systems.Fabrics.InfiniBand_NDR.bandwidth)
     infiniband_xdr_bw_val_str = fmt_val(Systems.Fabrics.InfiniBand_XDR.bandwidth)
     infiniband_xdr_bw_unit_str = fmt_unit(Systems.Fabrics.InfiniBand_XDR.bandwidth)
-    infiniband_gxdr_bw_val_str = fmt_val(Systems.Fabrics.InfiniBand_GXDR.bandwidth)
-    infiniband_gxdr_bw_unit_str = fmt_unit(Systems.Fabrics.InfiniBand_GXDR.bandwidth)
     pcie_gen4_bw_val_str = fmt_val(Hardware.Cloud.A100.interconnect.bandwidth)
     pcie_gen4_bw_unit_str = fmt_unit(Hardware.Cloud.A100.interconnect.bandwidth)
     pcie_gen5_bw_val_str = fmt_val(Hardware.Cloud.H100.interconnect.bandwidth)
@@ -592,23 +625,22 @@ class InterconnectConstants:
 
 These **bandwidth assumptions**\index{Assumptions!bandwidth} apply when chapters reason about gradient synchronization, pipeline bubbles, checkpoint I/O, or cross–data center latency. NVLink and PCIe rates follow accelerator product documentation [@nvidia2017gpu; @NVIDIA2020; @choquette2023]; the InfiniBand architecture specification anchors the protocol family [@infiniband2000spec], while current high-speed product families and Ethernet roadmaps anchor modern link-rate examples [@nvidia2026quantumX800; @ethernetAlliance2025roadmap]; the speed-of-light-in-fiber floor is a physics identity. @Tbl-assumptions-interconnect lists NVLink, InfiniBand, PCIe, NVMe, Ethernet, and WAN latency anchors.
 
-| **Assumption**                  |                             **Value**                              |                               **Unit**                              |
-|:--------------------------------|:------------------------------------------------------------------:|:-------------------------------------------------------------------:|
-| NVLink bandwidth (V100)         |      `{python} InterconnectConstants.nvlink_v100_bw_val_str`       |       `{python} InterconnectConstants.nvlink_v100_bw_unit_str`      |
-| NVLink bandwidth (A100)         |      `{python} InterconnectConstants.nvlink_a100_bw_val_str`       |       `{python} InterconnectConstants.nvlink_a100_bw_unit_str`      |
-| NVLink bandwidth (H100)         |      `{python} InterconnectConstants.nvlink_h100_bw_val_str`       |       `{python} InterconnectConstants.nvlink_h100_bw_unit_str`      |
-| InfiniBand HDR link bandwidth   |         `{python} InterconnectConstants.ib_hdr_bw_val_str`         |         `{python} InterconnectConstants.ib_hdr_bw_unit_str`         |
-| InfiniBand NDR link bandwidth   |         `{python} InterconnectConstants.ib_ndr_bw_val_str`         |         `{python} InterconnectConstants.ib_ndr_bw_unit_str`         |
-| InfiniBand XDR link bandwidth   |     `{python} InterconnectConstants.infiniband_xdr_bw_val_str`     |     `{python} InterconnectConstants.infiniband_xdr_bw_unit_str`     |
-| InfiniBand GXDR link bandwidth  |    `{python} InterconnectConstants.infiniband_gxdr_bw_val_str`     |     `{python} InterconnectConstants.infiniband_gxdr_bw_unit_str`    |
-| PCIe Gen4 bandwidth (A100 host) |       `{python} InterconnectConstants.pcie_gen4_bw_val_str`        |        `{python} InterconnectConstants.pcie_gen4_bw_unit_str`       |
-| PCIe Gen5 bandwidth (H100 host) |       `{python} InterconnectConstants.pcie_gen5_bw_val_str`        |        `{python} InterconnectConstants.pcie_gen5_bw_unit_str`       |
-| NVMe sequential read bandwidth  |    `{python} InterconnectConstants.NVME_SEQUENTIAL_BW_val_str`     |     `{python} InterconnectConstants.NVME_SEQUENTIAL_BW_unit_str`    |
-| 10 GbE bandwidth                |      `{python} InterconnectConstants.NETWORK_10G_BW_val_str`       |       `{python} InterconnectConstants.NETWORK_10G_BW_unit_str`      |
-| 100 GbE bandwidth               |      `{python} InterconnectConstants.NETWORK_100G_BW_val_str`      |      `{python} InterconnectConstants.NETWORK_100G_BW_unit_str`      |
-| Speed of light in fiber         | `{python} InterconnectConstants.SPEED_OF_LIGHT_FIBER_KM_S_val_str` | `{python} InterconnectConstants.SPEED_OF_LIGHT_FIBER_KM_S_unit_str` |
+| **Assumption**                 |                             **Value**                              |                               **Unit**                              |
+|:-------------------------------|:------------------------------------------------------------------:|:-------------------------------------------------------------------:|
+| NVLink bandwidth (V100)        |      `{python} InterconnectConstants.nvlink_v100_bw_val_str`       |       `{python} InterconnectConstants.nvlink_v100_bw_unit_str`      |
+| NVLink bandwidth (A100)        |      `{python} InterconnectConstants.nvlink_a100_bw_val_str`       |       `{python} InterconnectConstants.nvlink_a100_bw_unit_str`      |
+| NVLink bandwidth (H100)        |      `{python} InterconnectConstants.nvlink_h100_bw_val_str`       |       `{python} InterconnectConstants.nvlink_h100_bw_unit_str`      |
+| InfiniBand HDR link rate       |         `{python} InterconnectConstants.ib_hdr_bw_val_str`         |         `{python} InterconnectConstants.ib_hdr_bw_unit_str`         |
+| InfiniBand NDR link rate       |         `{python} InterconnectConstants.ib_ndr_bw_val_str`         |         `{python} InterconnectConstants.ib_ndr_bw_unit_str`         |
+| InfiniBand XDR link rate       |     `{python} InterconnectConstants.infiniband_xdr_bw_val_str`     |     `{python} InterconnectConstants.infiniband_xdr_bw_unit_str`     |
+| PCIe Gen4 x16 rate             |       `{python} InterconnectConstants.pcie_gen4_bw_val_str`        |        `{python} InterconnectConstants.pcie_gen4_bw_unit_str`       |
+| PCIe Gen5 x16 rate             |       `{python} InterconnectConstants.pcie_gen5_bw_val_str`        |        `{python} InterconnectConstants.pcie_gen5_bw_unit_str`       |
+| NVMe sequential read bandwidth |    `{python} InterconnectConstants.NVME_SEQUENTIAL_BW_val_str`     |     `{python} InterconnectConstants.NVME_SEQUENTIAL_BW_unit_str`    |
+| 10 GbE link rate               |      `{python} InterconnectConstants.NETWORK_10G_BW_val_str`       |       `{python} InterconnectConstants.NETWORK_10G_BW_unit_str`      |
+| 100 GbE link rate              |      `{python} InterconnectConstants.NETWORK_100G_BW_val_str`      |      `{python} InterconnectConstants.NETWORK_100G_BW_unit_str`      |
+| Speed of light in fiber        | `{python} InterconnectConstants.SPEED_OF_LIGHT_FIBER_KM_S_val_str` | `{python} InterconnectConstants.SPEED_OF_LIGHT_FIBER_KM_S_unit_str` |
 
-: **Interconnect and Network Bandwidth**: Link-family bandwidths use vendor specs, the InfiniBand architecture specification, and current product/roadmap documentation [@infiniband2000spec; @nvidia2026quantumX800; @ethernetAlliance2025roadmap]. Speed of light in fiber sets the cross–data-center latency floor. {#tbl-assumptions-interconnect tbl-colwidths="[50,20,30]"}
+: **Interconnect and Network Bandwidth**: Link-family bandwidths use vendor specs, the InfiniBand architecture specification, and current product/roadmap documentation [@infiniband2000spec; @nvidia2026quantumX800; @ethernetAlliance2025roadmap]. NVLink rates are aggregate bidirectional; other link rates are nominal per direction. Speed of light in fiber sets the cross–data-center latency floor. {#tbl-assumptions-interconnect tbl-colwidths="[50,20,30]"}
 
 ```{python}
 #| echo: false
@@ -696,6 +728,10 @@ These **scale assumptions**\index{Assumptions!scale} anchor "how big is big?" in
 | Video frame rate (standard)   |     `{python} ScaleConstants.VIDEO_FPS_STANDARD_val_str`    |    `{python} ScaleConstants.VIDEO_FPS_STANDARD_unit_str`     |
 
 : **Production Scale and Data Rate References**: Order-of-magnitude public anchors for capacity planning (traffic volumes, sensor data rates, 1080p and 4K video parameters). {#tbl-assumptions-scale tbl-colwidths="[60,20,20]"}
+
+```{=latex}
+\endgroup
+```
 
 The assumptions above use the unit conventions in @tbl-assumptions-units—decimal data prefixes (KB $= 10^3$ bytes), separate FLOPs (work) and FLOP/s (throughput), and the aliases below.
 

@@ -2853,10 +2853,27 @@ class ValidateCommand:
         # See book-prose.md §5 ("Footnote Marker Placement").
         cite_then_fn_pat = re.compile(r"(\[@[^\]\s]+\])\s*(\[\^fn-[\w-]+\])")
 
+        # Div classes that are SPACING wrappers, not boxes. `footnote_in_div`
+        # exists because a footnote inside a box (tcolorbox callout, minipage,
+        # float) lands in a restricted mode where the sidenote breaks. A div
+        # that compiles to a bare \begingroup...\endgroup does not box its
+        # content, so a footnote inside it renders normally and must not be
+        # flagged.
+        #
+        # .fallacy-pitfall (filters/fallacy-pitfall.lua, added 2026-08 for the
+        # publisher's Fallacy/Pitfall spacing request) emits only
+        # \par\Needspace\addvspace\begingroup\setlength{\parindent}{0pt} ...
+        # \par\endgroup. Wrapping existing Fallacy prose in it swallowed a
+        # pre-existing footnote and produced a false positive.
+        footnote_safe_div_classes = {"fallacy-pitfall"}
+        div_class_pat = re.compile(r"^:{3,4}\s*\{([^}]*)\}")
+
         for file in files:
             lines = self._read_text(file).splitlines()
             div_depth = 0
             div_start_line = 0
+            # Parallel to div_depth: True where the enclosing div boxes content.
+            div_boxes: List[bool] = []
 
             def previous_list_item(line_index: int) -> Optional[Tuple[int, int]]:
                 """Return (line, indent) for the list item immediately before a block."""
@@ -2904,11 +2921,20 @@ class ValidateCommand:
                 # Track div nesting
                 if re.match(r"^:{3,4}\s*\{", stripped) or re.match(r"^:{3,4}\s+\w", stripped):
                     div_depth += 1
+                    attr_match = div_class_pat.match(stripped)
+                    classes = {
+                        token.lstrip(".")
+                        for token in (attr_match.group(1).split() if attr_match else [])
+                        if token.startswith(".")
+                    }
+                    div_boxes.append(not (classes & footnote_safe_div_classes))
                     if div_depth == 1:
                         div_start_line = idx
                 elif re.match(r"^:{3,4}\s*$", stripped):
                     if div_depth > 0:
                         div_depth -= 1
+                        if div_boxes:
+                            div_boxes.pop()
                         if div_depth == 0:
                             div_start_line = 0
 
@@ -3035,7 +3061,7 @@ class ValidateCommand:
                             )
 
                 # Div block check
-                if div_depth > 0 and div_start_line != idx:
+                if div_depth > 0 and div_start_line != idx and any(div_boxes):
                     for fn in footnotes:
                         issues.append(
                             ValidationIssue(
@@ -6581,6 +6607,7 @@ class ValidateCommand:
         "callout-notebook",
         "callout-perspective",
         "callout-principle",
+        "callout-research-questions",
         "callout-takeaways",
         "callout-theorem",
         "callout-tip",

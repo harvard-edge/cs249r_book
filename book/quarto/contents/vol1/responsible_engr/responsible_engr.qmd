@@ -43,7 +43,7 @@ Operations ensures the system runs reliably: low latency, high availability, acc
 ::: {.callout-learning-objectives}
 
 - Explain how optimized ML systems can amplify harm through proxies, feedback loops, and distribution shift
-- Apply Data-Algorithm-Machine diagnosis to localize responsibility failures in data, algorithm objectives, or monitoring infrastructure
+- Apply data-algorithm-machine diagnosis to localize responsibility failures in data, algorithm objectives, or monitoring infrastructure
 - Calculate fairness metrics from confusion matrices and compare trade-offs on the fairness-accuracy Pareto frontier
 - Design disaggregated evaluation, stress testing, and monitoring to expose subgroup-specific failures before deployment
 - Analyze total cost, inference dominance, and carbon impact as measurable responsibility constraints
@@ -90,6 +90,10 @@ The right intervention would have required multiple levels of change. Separate e
 
 The Amazon case demonstrates how optimization objectives diverge from organizational values. The system found genuine statistical patterns in historical hiring decisions and optimized them faithfully. Those patterns, however, reflected biased historical practices rather than job-relevant qualifications.
 
+The Amazon and COMPAS[^fn-compas-recidivism] cases share a troubling pattern: each system achieved its stated objective while producing outcomes that conflicted with the values the system was intended to serve. Conventional engineering success, it turns out, can coexist with profound system failures. The pattern raises two design questions: whether the loss function is a defensible proxy for the system's true goal, and whether error rates remain acceptable across the subgroups the system affects.
+
+[^fn-compas-recidivism]: **COMPAS (Correctional Offender Management Profiling for Alternative Sanctions)**\index{COMPAS!impossibility theorem}: COMPAS achieved calibration (a given score meant the same re-offense probability for any group), but because recidivism base rates differed between populations, that choice made disparate error rates follow from the chosen fairness criterion [@chouldechova2017; @kleinberg2016inherent]. No amount of testing for calibration alone would have surfaced this failure; the harm was encoded in the objective itself.
+
 ::: {#ws-responsible-engr-compas-recidivism-algorithm-audit .callout-war-story title="The COMPAS recidivism algorithm audit"}
 
 **Context**: COMPAS\index{COMPAS!recidivism algorithm audit} is a risk assessment tool\index{Risk Assessment!criminal justice} used in US courtrooms to predict re-offending. Judges use these scores to inform bail and sentencing decisions.
@@ -105,7 +109,7 @@ The Amazon case demonstrates how optimization objectives diverge from organizati
 
 :::
 
-The Amazon and COMPAS[^fn-compas-recidivism] cases share a troubling pattern: each system achieved its stated objective while producing outcomes that conflicted with the values the system was intended to serve. Conventional engineering success, it turns out, can coexist with profound system failures. The pattern raises two design questions: whether the loss function is a defensible proxy for the system's true goal, and whether error rates remain acceptable across the subgroups the system affects.
+Better testing would not catch these problems because they represent failures of problem specification, where the *technical objective* (minimizing prediction error on historical outcomes) diverges from the *desired social objective* (making fair and accurate predictions across demographic groups). Specification failures are difficult to detect precisely because the systems continue functioning normally by conventional engineering metrics. The deeper problem is clear: when a system appears healthy by every available metric, the harm it causes remains invisible to conventional monitoring.
 
 ::: {#chk-responsible-engr-responsible-design .callout-checkpoint title="Responsible design"}
 
@@ -121,10 +125,6 @@ Responsibility is a system property, not a model property.
 - [ ] **Pre-mortem**: Before deploying, ask: "If this system causes a scandal in six months, what likely went wrong?"
 
 :::
-
-[^fn-compas-recidivism]: **COMPAS (Correctional Offender Management Profiling for Alternative Sanctions)**\index{COMPAS!impossibility theorem}: COMPAS achieved calibration (a given score meant the same re-offense probability for any group), but because recidivism base rates differed between populations, that choice made disparate error rates follow from the chosen fairness criterion [@chouldechova2017; @kleinberg2016inherent]. No amount of testing for calibration alone would have surfaced this failure; the harm was encoded in the objective itself.
-
-Better testing would not catch these problems because they represent failures of problem specification, where the *technical objective* (minimizing prediction error on historical outcomes) diverges from the *desired social objective* (making fair and accurate predictions across demographic groups). Specification failures are difficult to detect precisely because the systems continue functioning normally by conventional engineering metrics. The deeper problem is clear: when a system appears healthy by every available metric, the harm it causes remains invisible to conventional monitoring.
 
 ### Silent failure modes {#sec-responsible-engineering-silent-failure-modes-e219}
 
@@ -150,26 +150,17 @@ This sepsis scenario illustrates a class of failure that traditional engineering
 
 The stationarity assumption underpins all supervised learning: training and deployment distributions must match. Distribution shift is often unequal: a model's accuracy on a minority subgroup can drop by over 30 percentage points while aggregate metrics barely change, masking the harm.
 
-Distribution shift\index{Distribution Shift!causes of model degradation} explains *why* models degrade over time (the operational detection and monitoring strategies for drift are covered in @sec-ml-operations). The failure is environmental: the world changed after the model was trained, and the model has no mechanism to notice. Retraining on fresh data can partially address this class of failure, but it cannot address a second mechanism for silent failure that operates even when the data distribution is perfectly stable. Metric misalignment occurs when the quantity the model optimizes diverges from the outcome the organization actually values. The dynamics of that divergence are made precise by Goodhart's Law: once a proxy becomes the optimization target, it stops tracking the goal it was chosen to represent.
-
 ::: {.column-margin}
 ![](images/svg/responsible_engr_scale_anchor_goodhart.svg){width="100%" fig-alt="A curve that stays flat then bends sharply upward at a red knee dot, with the region to the right of the knee shaded red to mark the danger zone."}
 
 *Past the knee, the proxy decouples from the goal.*
 :::
 
-::: {#nbk-responsible-engr-alignment-gap .callout-notebook title="The alignment gap"}
+::: {#psp-responsible-engr-alignment-gap .callout-perspective title="The alignment gap"}
 
-**Problem**: A model optimizes a proxy metric (Clicks) because the true metric (User Satisfaction) is unobservable. How much can they diverge?
+A model optimizes a proxy metric (Clicks) because the true metric (User Satisfaction) is unobservable, and the two can diverge sharply. Goodhart's Law\index{Goodhart's Law!metric optimization} states that optimizing a proxy eventually decouples it from the goal. A system might begin with $\text{Correlation}(\text{Clicks}, \text{Satisfaction}) = 0.8$; once a model is trained to maximize Clicks, it finds "Clickbait," items with high clicks but low satisfaction, and $\text{Correlation}(\text{Clicks}, \text{Satisfaction})$ drops to 0.2.
 
-**Physics**: Goodhart's Law\index{Goodhart's Law!metric optimization} states that optimizing a proxy eventually decouples it from the goal.
-
-*   **Initial state**: $\text{Correlation}(\text{Clicks}, \text{Satisfaction}) = 0.8$.
-*   **Optimization**: A model is trained to maximize Clicks.
-*   **Result**: The model finds "Clickbait," items with high clicks but low satisfaction.
-*   **Final state**: $\text{Correlation}(\text{Clicks}, \text{Satisfaction})$ drops to 0.2.
-
-**Math** (conceptual, assuming normalized metrics on a common scale): @eq-alignment-gap captures the gap:
+Conceptually, assuming normalized metrics on a common scale, @eq-alignment-gap captures the gap:
 $$ \text{Gap} = \mathbb{E}[\text{Proxy}] - \mathbb{E}[\text{True}] $$ {#eq-alignment-gap}
 
 If the model increases Clicks by 20 percent but decreases Satisfaction by 5 percent, the alignment gap has widened.
@@ -177,6 +168,8 @@ If the model increases Clicks by 20 percent but decreases Satisfaction by 5 perc
 **Systems insight**: Engineers cannot optimize what they cannot measure. If the true goal is unobservable, **Counterfactual Evaluation**\index{Counterfactual Evaluation!proxy recalibration} (random holdouts) is required to periodically re-calibrate the proxy.
 
 :::
+
+Distribution shift\index{Distribution Shift!causes of model degradation} explains *why* models degrade over time (the operational detection and monitoring strategies for drift are covered in @sec-ml-operations). The failure is environmental: the world changed after the model was trained, and the model has no mechanism to notice. Retraining on fresh data can partially address this class of failure, but it cannot address a second mechanism for silent failure that operates even when the data distribution is perfectly stable. Metric misalignment occurs when the quantity the model optimizes diverges from the outcome the organization actually values. The dynamics of that divergence are made precise by Goodhart's Law: once a proxy becomes the optimization target, it stops tracking the goal it was chosen to represent.
 
 The alignment gap\index{Alignment Gap!proxy metric divergence} illustrates a failure that originates in the algorithm axis: the optimization objective is misspecified, so even a model that generalizes flawlessly to new data can drive outcomes that conflict with organizational or societal goals. Distribution shift, by contrast, originates in the data axis: the inputs changed, and the learned mapping no longer reflects reality. Both failures are silent, but they demand different remediations (better objectives vs. better monitoring), and conflating the two wastes engineering effort on the wrong fix. The D·A·M taxonomy\index{D·A·M Taxonomy!responsibility diagnosis} introduced in @sec-introduction maps each failure to the axis it originates from (Data · Algorithm · Machine), which @sec-appdx-dam-taxonomy defines in full.
 
@@ -194,6 +187,11 @@ Locating the failure in the taxonomy identifies the correct remediation: better 
 
 While the D·A·M taxonomy helps diagnose *where* failures originate, engineers also need a framework for understanding *when* and *how* different failure types manifest. @Tbl-failure-modes complements that diagnostic framework by categorizing failures by detection time, spatial scope, and remediation requirements. Crashes and performance degradation trigger immediate alerts through existing infrastructure. Data quality issues, distribution shifts, and fairness violations require specialized detection mechanisms because the system continues operating normally from a technical perspective while producing increasingly problematic outputs.
 
+```{=latex}
+\begingroup
+%\renewcommand{\arraystretch}{1.25}
+```
+
 | **Failure Type**            | **Detection Time** | **Spatial Scope** | **Reversibility**        | **Example**                               |
 |:----------------------------|:-------------------|:------------------|:-------------------------|:------------------------------------------|
 | **Crash**                   | Immediate          | Complete          | Immediate                | Out of memory error                       |
@@ -202,7 +200,11 @@ While the D·A·M taxonomy helps diagnose *where* failures originate, engineers 
 | **Distribution Shift**      | Days–weeks         | Partial or all    | Requires retraining      | Population change due to new user segment |
 | **Fairness Violation**      | Weeks–months       | Subpopulation     | Requires redesign        | Bias amplification in historical patterns |
 
-: **ML System Failure Mode Taxonomy**: Different failure modes require different detection strategies and remediation approaches. Silent failures such as data quality issues, distribution shift, and fairness violations demand proactive monitoring because they do not trigger traditional alerts. {#tbl-failure-modes}
+: **ML System Failure Mode Taxonomy**: Different failure modes require different detection strategies and remediation approaches. Silent failures such as data quality issues, distribution shift, and fairness violations demand proactive monitoring because they do not trigger traditional alerts. {#tbl-failure-modes tbl-colwidths="[18,15,14,18,35]"}
+
+```{=latex}
+\endgroup
+```
 
 The YouTube recommendation feedback loop\index{Feedback Loop!recommendation amplification} (examined as a technical debt pattern in @sec-ml-operations-production-debt-patterns-ffdc) illustrates this pattern at scale [@ribeiro2020].[^fn-goodhart-proxy] @ribeiro2020 audited radicalization pathways on YouTube, finding migration from milder to more extreme channel categories and recommendation reachability between those categories. The broader systems lesson is that feedback loops can work exactly as designed while producing outcomes that conflict with societal values. From a responsibility perspective, the critical insight is that recommendation objectives must be tested against downstream harms, not only against engagement proxies.
 
@@ -234,7 +236,7 @@ Silent failure modes create profound testing challenges. Traditional software te
 
 ### When responsible engineering succeeds {#sec-responsible-engineering-responsible-engineering-succeeds-29e0}
 
-Each documented success shares the same structural move: a vague responsibility goal becomes an engineering constraint that can be specified, tested, communicated, and, when necessary, used to stop deployment. Following the findings of Gender Shades, a 2018 audit that exposed severe error-rate disparities in commercial facial recognition [@buolamwini2018gender], Microsoft invested in improving facial recognition\index{Facial Recognition!demographic disparities} performance across demographic groups\index{Bias!mitigation strategies}. Targeted data collection, model changes, and systematic disaggregated evaluation gave the team an explicit error-rate target, and Microsoft reported large error-rate reductions for darker-skinned subjects, bringing audited error rates below 2 percent [@raji2019]. The company published these improvements transparently, turning external audit results into measurable engineering targets.
+Each documented success shares the same structural move: a vague responsibility goal becomes an engineering constraint that can be specified, tested, communicated, and, when necessary, used to stop deployment. Following the findings of Gender Shades, a 2018 audit that exposed severe error-rate disparities in commercial gender classification [@buolamwini2018gender], Microsoft invested in improving gender-classification\index{Gender Classification!demographic disparities} performance across demographic groups\index{Bias!mitigation strategies}. Targeted data collection, model changes, and systematic disaggregated evaluation gave the team an explicit error-rate target, and Microsoft reported large error-rate reductions for darker-skinned subjects, bringing audited error rates below 2 percent [@raji2019]. The company published these improvements transparently, turning external audit results into measurable engineering targets.
 
 Twitter's automatic image cropping system\index{Image Cropping!racial bias} shows the same discipline under a different constraint. In 2020, users discovered racial bias in which faces appeared in preview thumbnails. Twitter characterized the problem quantitatively, published results for external review, and then removed automatic cropping entirely after determining that no technical solution could guarantee equitable outcomes across all contexts [@yee2021]. In that case, responsible engineering meant recognizing that the safe system design was feature removal\index{Feature Removal!principled design choice}, not a better threshold.
 
@@ -272,7 +274,7 @@ The trade-off between fairness and accuracy is not a sign that fairness is impra
 import numpy as np
 from book.tools.figures import style as book_style
 
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 5))
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
 
 # =============================================================================
 # PLOT: The Fairness-Accuracy Pareto Frontier
@@ -341,7 +343,7 @@ plt.close()
 # │ Context: @tbl-gender-shades-results and surrounding prose
 # │
 # │ Goal: Quantify error rate disparities across demographic groups.
-# │ Show: The 43× gap discovered by the Gender Shades study.
+# │ Show: The 43× dark-female/light-male ratio in the Face++ results.
 # │ How: Calculate error multiples between intersectional subgroups.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -377,7 +379,7 @@ class TestingConstraintAnchor:
 class GenderShadesDisparity:
     """
     Namespace for Gender Shades Error Disparity analysis.
-    Scenario: Quantifying bias across demographic groups in facial recognition.
+    Scenario: Quantifying bias across demographic groups in gender classification.
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
@@ -401,12 +403,12 @@ class GenderShadesDisparity:
     error_light_male_str = fmt_percent(err_light_male / 100, precision=1, commas=False, style='prose')
     error_light_male_tbl_str = fmt_percent(err_light_male / 100, precision=1, commas=False, style='symbol')
     error_light_female_str = fmt_percent(err_light_female / 100, precision=1, commas=False, style='symbol')
-    error_dark_male_str = fmt_percent(round(int(err_dark_male)) / 100, precision=0, commas=False, style='symbol')
+    error_dark_male_str = fmt_percent(err_dark_male / 100, precision=1, commas=False, style='symbol')
     error_dark_female_str = fmt_percent(err_dark_female / 100, precision=1, commas=False, style='prose')
     error_dark_female_tbl_str = fmt_percent(err_dark_female / 100, precision=1, commas=False, style='symbol')
     disparity_factor_mult_str = fmt_multiple(disparity_fold, precision=1, commas=False)
     disparity_light_female_factor_mult_str = fmt_multiple(disparity_light_female, precision=1, commas=False)
-    disparity_dark_male_factor_mult_str = fmt_multiple(int(disparity_dark_male), precision=0, commas=False)
+    disparity_dark_male_factor_mult_str = fmt_multiple(disparity_dark_male, precision=1, commas=False)
     acc_light_str = fmt_percent(acc_light_male / 100, precision=1, commas=False, style='prose')
     acc_dark_str = fmt_percent(acc_dark_female / 100, precision=1, commas=False, style='prose')
     # symbol-style variants for pipe-table cells (house style: tables use %)
@@ -414,31 +416,35 @@ class GenderShadesDisparity:
     acc_dark_pct_str = fmt_percent(acc_dark_female / 100, precision=1, commas=False, style='symbol')
 ```
 
-The frontier tells engineers what trade-off they may need to choose, but it cannot be plotted until subgroup performance is measured. Responsible properties become testable when engineers work with stakeholders to define criteria appropriate for specific applications. The Gender Shades project\index{Gender Shades Study!algorithmic audit methodology}[^fn-gender-shades-audit] demonstrated how **disaggregated evaluation**\index{Disaggregated Evaluation!definition}\index{Disaggregated Evaluation!demographic stratification} across demographic categories reveals disparities invisible in aggregate metrics [@buolamwini2018gender], exposing the subgroup failures that responsibility monitoring must catch before deployment. @Tbl-gender-shades-results shows the dramatic error-rate differences that commercial facial recognition systems produced across demographic groups. Concretely, a `{python} TestingConstraintAnchor.base_size_str`-sample test set that suffices for the majority group provides only `{python} TestingConstraintAnchor.minority_samples_str` samples for a minority subgroup representing `{python} TestingConstraintAnchor.minority_pct_str` of the population—effectively requiring `{python} TestingConstraintAnchor.multiplier_mult_str` more data than the majority group for high-confidence validation.
+The frontier tells engineers what trade-off they may need to choose, but it cannot be plotted until subgroup performance is measured. Responsible properties become testable when engineers work with stakeholders to define criteria appropriate for specific applications. The Gender Shades project\index{Gender Shades Study!algorithmic audit methodology}[^fn-gender-shades-audit] demonstrated how **disaggregated evaluation**\index{Disaggregated Evaluation!definition}\index{Disaggregated Evaluation!demographic stratification} across demographic categories reveals disparities invisible in aggregate metrics [@buolamwini2018gender], exposing the subgroup failures that responsibility monitoring must catch before deployment. @Tbl-gender-shades-results shows the dramatic error-rate differences that commercial gender-classification systems produced across demographic groups. Concretely, a `{python} TestingConstraintAnchor.base_size_str`-sample test set that suffices for the majority group provides only `{python} TestingConstraintAnchor.minority_samples_str` samples for a minority subgroup representing `{python} TestingConstraintAnchor.minority_pct_str` of the population—effectively requiring `{python} TestingConstraintAnchor.multiplier_mult_str` more data than the majority group for high-confidence validation.
 
-| **Demographic Group**     |                     **Error Rate (%)**                     |                             **Relative Disparity**                             |
-|:--------------------------|:----------------------------------------------------------:|:------------------------------------------------------------------------------:|
-| **Light-skinned males**   | `{python} GenderShadesDisparity.error_light_male_tbl_str`  |                             Baseline (1.0$\times$)                             |
-| **Light-skinned females** |  `{python} GenderShadesDisparity.error_light_female_str`   | `{python} GenderShadesDisparity.disparity_light_female_factor_mult_str` higher |
-| **Dark-skinned males**    |    `{python} GenderShadesDisparity.error_dark_male_str`    |  `{python} GenderShadesDisparity.disparity_dark_male_factor_mult_str` higher   |
-| **Dark-skinned females**  | `{python} GenderShadesDisparity.error_dark_female_tbl_str` |       `{python} GenderShadesDisparity.disparity_factor_mult_str` higher        |
+[^fn-gender-shades-audit]: **Gender Shades**\index{Gender Shades!disaggregated evaluation}: A 2018 study by Joy Buolamwini and Timnit Gebru (MIT Media Lab) that audited commercial gender-classification systems from Microsoft, IBM, and Face++ using the Fitzpatrick skin type scale---originally a dermatological classification developed by Thomas Fitzpatrick in 1975 for UV sensitivity and later validated for clinical use [@fitzpatrick1988], repurposed here as a demographic benchmark for algorithmic auditing. The study demonstrated the value of disaggregated evaluation; in the Face++ results reproduced below, the dark-female error rate is `{python} GenderShadesDisparity.disparity_factor_mult_str` the light-male rate. Microsoft's later reported reductions show how public audit results can motivate measurable remediation [@raji2019].
 
-: **Gender Shades Facial Recognition Error Rates**: Disaggregated evaluation reveals that aggregate accuracy metrics conceal severe performance disparities. Systems that appear highly accurate overall show error rates varying by more than `{python} GenderShadesDisparity.disparity_factor_mult_str` across demographic groups. Worst-case results across systems studied; source: @buolamwini2018gender. {#tbl-gender-shades-results tbl-colwidths="[34,33,33]"}
+| **Demographic Group**     |                     **Error Rate (%)**                     |                   **Relative to Light-Skinned Males**                   |
+|:--------------------------|:----------------------------------------------------------:|:-----------------------------------------------------------------------:|
+| **Light-skinned males**   | `{python} GenderShadesDisparity.error_light_male_tbl_str`  |                          Baseline (1.0$\times$)                         |
+| **Light-skinned females** |  `{python} GenderShadesDisparity.error_light_female_str`   | `{python} GenderShadesDisparity.disparity_light_female_factor_mult_str` |
+| **Dark-skinned males**    |    `{python} GenderShadesDisparity.error_dark_male_str`    |   `{python} GenderShadesDisparity.disparity_dark_male_factor_mult_str`  |
+| **Dark-skinned females**  | `{python} GenderShadesDisparity.error_dark_female_tbl_str` |        `{python} GenderShadesDisparity.disparity_factor_mult_str`       |
 
-[^fn-gender-shades-audit]: **Gender Shades**\index{Gender Shades!disaggregated evaluation}: A 2018 study by Joy Buolamwini and Timnit Gebru (MIT Media Lab) that audited facial recognition systems from Microsoft, IBM, and Face++ using the Fitzpatrick skin type scale---originally a dermatological classification developed by Thomas Fitzpatrick in 1975 for UV sensitivity and later validated for clinical use [@fitzpatrick1988], repurposed here as a demographic benchmark for algorithmic auditing. The study established disaggregated evaluation as the standard, demonstrating that a single aggregate accuracy number can conceal 43$\times$ error rate disparities across intersectional subgroups. Microsoft's later reported reductions show how public audit results can motivate measurable remediation [@raji2019].
+: **Gender Shades Face++ Error Rates**: The dark-female error rate is `{python} GenderShadesDisparity.disparity_factor_mult_str` the light-male rate. Source: [@buolamwini2018gender]. {#tbl-gender-shades-results tbl-colwidths="[34,33,33]"}
 
-As @tbl-gender-shades-results quantifies, disaggregated evaluation revealed what aggregate accuracy scores concealed. Systems reporting high overall accuracy simultaneously achieved error rates as low as `{python} GenderShadesDisparity.error_light_male_str` for light-skinned males and as high as `{python} GenderShadesDisparity.error_dark_female_str` for dark-skinned females (corresponding to accuracies of `{python} GenderShadesDisparity.acc_light_str` and `{python} GenderShadesDisparity.acc_dark_str` respectively). The aggregate metric provided no indication of this `{python} GenderShadesDisparity.disparity_factor_mult_str` disparity in error rates.
+As @tbl-gender-shades-results quantifies, disaggregated evaluation revealed what an aggregate score concealed. Face++ reported error rates of `{python} GenderShadesDisparity.error_light_male_str` for light-skinned males and `{python} GenderShadesDisparity.error_dark_female_str` for dark-skinned females (accuracies of `{python} GenderShadesDisparity.acc_light_str` and `{python} GenderShadesDisparity.acc_dark_str`). The aggregate metric gave no indication that the dark-female error rate was `{python} GenderShadesDisparity.disparity_factor_mult_str` the light-male rate.
 
-No universal threshold defines acceptable disparity, but engineering teams should establish explicit bounds before deployment. Common industry practices include error rate ratios below 1.25$\times$ between demographic groups for high-stakes applications, false positive rate differences under 5 percentage points for screening systems, and selection rate ratios\index{Disparate Impact!statistical threshold} of at least 0.8 relative to the highest group's rate (the four-fifths rule\index{Four-Fifths Rule!disparate impact threshold} from employment discrimination law).[^fn-disparate-impact-law][^fn-four-fifths-threshold] These thresholds serve as starting points for stakeholder discussion, not absolute standards. The key engineering discipline is defining measurable criteria before deployment rather than discovering problems after harm has occurred.
+No universal threshold defines acceptable disparity, but engineering teams should establish explicit bounds before deployment. A team might adopt an error-rate ratio below 1.25$\times$ or a false-positive-rate difference under 5 percentage points as an application-specific release policy. Selection rate ratios\index{Disparate Impact!statistical threshold} of at least 0.8 relative to the highest group's rate have a separate legal source in the four-fifths rule\index{Four-Fifths Rule!disparate impact threshold} from employment discrimination law.[^fn-disparate-impact-law][^fn-four-fifths-threshold] The key engineering discipline is defining and justifying measurable criteria before deployment rather than discovering problems after harm has occurred.
 
-[^fn-disparate-impact-law]: **Disparate Impact**\index{Disparate Impact!legal doctrine}: A legal doctrine from *Griggs v. Duke Power Co.* (1971), where the US Supreme Court held that practices "fair in form, but discriminatory in operation" violate civil rights law even absent intent [@griggs1971dukePower]. The distinction between *disparate impact* (unintentional statistical harm) and *disparate treatment* (intentional discrimination) is critical for ML: models trained on historical data can produce disparate impact through proxy variables, creating legal risk even when engineers never encoded protected attributes.
+[^fn-disparate-impact-law]: [offset=-110mm] **Disparate Impact**\index{Disparate Impact!legal doctrine}: A legal doctrine from *Griggs v. Duke Power Co.* (1971), where the US Supreme Court held that practices "fair in form, but discriminatory in operation" violate civil rights law even absent intent [@griggs1971dukePower]. The distinction between *disparate impact* (unintentional statistical harm) and *disparate treatment* (intentional discrimination) is critical for ML: models trained on historical data can produce disparate impact through proxy variables, creating legal risk even when engineers never encoded protected attributes.
 
-[^fn-four-fifths-threshold]: **Four-Fifths Rule**\index{Four-Fifths Rule!adverse impact threshold}: Codified in the 1978 Uniform Guidelines on Employee Selection Procedures, used by the EEOC, Department of Labor, and Department of Justice [@uniformguidelines1978]. A selection rate for any protected group below 80 percent of the highest group's rate constitutes prima facie evidence of adverse impact---for example, if 60 percent of one group passes, at least 48 percent of any other group must pass. For ML systems, this translates to automated monitoring that alerts when per-group selection ratios fall below 0.8, providing a concrete threshold where most fairness metrics remain qualitative.
+[^fn-four-fifths-threshold]: [offset=-40mm]  **Four-Fifths Rule**\index{Four-Fifths Rule!adverse impact threshold}: Codified in the 1978 Uniform Guidelines on Employee Selection Procedures, used by the EEOC, Department of Labor, and Department of Justice [@uniformguidelines1978]. A selection rate for any protected group below 80 percent of the highest group's rate is generally regarded as evidence of adverse impact, not a dispositive test---for example, if 60 percent of one group passes, the comparison rate is 48 percent. For ML systems, this translates to automated monitoring that alerts when per-group selection ratios fall below 0.8, providing a concrete threshold where most fairness metrics remain qualitative.
 
 Despite the inherent challenges, several concrete testing approaches can surface responsibility issues before deployment:
 
 - **Slice-based evaluation**: Partitions test data into meaningful subgroups and reports metrics separately for each slice, asking whether aggregate performance hides subgroup failure. A model may achieve 95 percent accuracy overall but only 78 percent accuracy on low-income applicants or users from rural areas, a disparity invisible in aggregate reporting.
 - **Invariance testing**\index{Invariance Testing!fairness verification}: Checks whether the model changes behavior for the wrong reasons. Replacing "John" with "Jamal" in a loan application should not change approval likelihood if the feature is not legitimate for the decision. Behavioral testing frameworks such as CheckList apply this idea by organizing tests around model capabilities and invariance-style expectations rather than accuracy alone [@ribeiro2020beyond].
+
+```{=latex}
+\newpage
+```
 - **Boundary and stress testing**: Probes regions where ordinary validation sets are least informative. Boundary testing evaluates model behavior at the edges of input distributions (unusual ages, extreme values, rare categories) where training data may be sparse and predictions unreliable. Stress testing extends boundary testing to adversarial conditions: corrupted inputs, distribution shift, adversarial examples, and edge cases designed to probe failure modes systematically. Stakeholder red-teaming\index{Red Teaming!stakeholder engagement} adds evidence from domain experts and affected community members, surfacing failure modes no automated test can discover because they require lived experience to imagine.
 
 Responsible testing strategies complement traditional software testing rather than replacing it. Each demands engineering judgment to select, configure, and interpret. A legal team cannot specify which demographic slices matter for a healthcare algorithm; a product manager cannot determine appropriate invariance tests for a loan model. The technical depth required to implement responsible testing points to a critical organizational truth: only engineers possess the knowledge to translate abstract fairness goals into measurable, testable properties. Responsibility ownership must therefore sit within engineering organizations, not outside them.
@@ -446,6 +452,8 @@ Responsible testing strategies complement traditional software testing rather th
 ### Engineering leadership on responsibility {#sec-responsible-engineering-engineering-leadership-responsibility-e03c}
 
 By the time Amazon's team tried to remediate the recruiting tool, the model had already learned proxy signals so deeply that the project was eventually scrapped. The intervention came too late because the technical decisions that created the problem, made months earlier by engineers, had already constrained every possible fix. Responsible AI engineering cannot be delegated exclusively to ethics boards or legal departments. These groups provide essential oversight but lack the technical access required to identify problems early in the development process.
+
+Legal or ethics review can identify a problem near deployment, but it cannot recover design options the system has already foreclosed. If the team trained the model without fairness constraints, chose an architecture that cannot support interpretability requirements, or built a data pipeline without the demographic attributes needed for monitoring, review can only accept, reject, or demand expensive redesign. Engineers therefore occupy a critical position in the ML development lifecycle because their choices define the solution space for all subsequent interventions: architecture determines which fairness constraints can apply, the optimization objective determines which patterns the system learns, and the data pipeline determines whether disaggregated evaluation is possible.
 
 ::: {#dfn-responsible-engr-responsible-ai-engineering .callout-definition title="Responsible AI engineering"}
 
@@ -457,8 +465,6 @@ By the time Amazon's team tried to remediate the recruiting tool, the model had 
 
 :::
 
-Legal or ethics review can identify a problem near deployment, but it cannot recover design options the system has already foreclosed. If the team trained the model without fairness constraints, chose an architecture that cannot support interpretability requirements, or built a data pipeline without the demographic attributes needed for monitoring, review can only accept, reject, or demand expensive redesign. Engineers therefore occupy a critical position in the ML development lifecycle because their choices define the solution space for all subsequent interventions: architecture determines which fairness constraints can apply, the optimization objective determines which patterns the system learns, and the data pipeline determines whether disaggregated evaluation is possible.
-
 An engineering-centered approach does not diminish the importance of diverse perspectives in identifying potential harms. Product managers, user researchers, affected communities, and policy experts contribute essential knowledge about how systems fail socially despite technical success. Engineers translate these concerns into measurable requirements and testable properties that can be verified throughout the development lifecycle. Effective responsibility requires engineers who both listen to stakeholder concerns and possess the technical capability to implement appropriate safeguards.
 
 Engineering teams do not operate in isolation. As @fig-governance-layers makes clear, engineering practices are nested within broader organizational, industry, and regulatory governance structures, each layer imposing constraints on the ones inside it. The key insight is that technical excellence at the innermost layer enables, but does not replace, compliance with requirements flowing inward from external governance.
@@ -466,6 +472,7 @@ Engineering teams do not operate in isolation. As @fig-governance-layers makes c
 ::: {#fig-governance-layers fig-env="figure" fig-pos="htb" fig-cap="**Responsible AI Governance Layers**: Nested governance structures surround engineering practice. At the center, engineering teams implement technical safeguards. Successive layers represent organizational safety culture, industry certification and external review, and government regulation. Technical excellence at the center enables compliance with requirements flowing inward from outer layers." fig-alt="Nested oval diagram showing governance layers from innermost to outermost: Team (reliable systems, software engineering), organization (safety culture, organizational design), industry (trustworthy certification, external reviews), and government regulation."}
 
 ```{.tikz}
+\scalebox{0.95}{%
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
 \definecolor{col1}{RGB}{249,240,241}
 \definecolor{col2}{RGB}{246,231,233}
@@ -536,12 +543,16 @@ Professional \\ societies};
 \coordinate(D)at ($(E1.south)+(45mm,-2mm)$);
 
 \draw[-latex,Txt1](L)--node[below=1pt]{Requirements flow inward; technical practices enable compliance}(D);
-\end{tikzpicture}
+\end{tikzpicture}}
 ```
 
 :::
 
 Those governance layers define who owns responsibility, but they do not yet account for the costs that ordinary performance metrics omit.
+
+Beyond ethical imperatives, responsible engineering delivers measurable business value through three reinforcing mechanisms. The most immediate is risk mitigation\index{Risk Mitigation!responsible engineering value}: ML system failures create legal and financial exposure that systematic responsibility practices reduce. Amazon's recruiting tool cancellation represented years of development investment lost to inadequate fairness consideration, and COMPAS-related litigation has cost jurisdictions millions in legal fees and settlements. Organizations implementing disaggregated evaluation, documentation, and monitoring reduce the probability of costly failures and demonstrate due diligence if problems emerge.
+
+A second mechanism is regulatory compliance\index{Regulatory Compliance!business value}, driven by legal requirements that vary by jurisdiction and application risk. The EU AI Act, for example, classifies high-risk AI applications\index{High-Risk AI!EU classification} and mandates technical requirements including risk assessment, data governance, transparency, and human oversight. Organizations that build responsibility into engineering practice can demonstrate compliance through existing documentation and monitoring rather than expensive retrofitting; the engineering lesson is that proactive controls are usually cheaper than reconstructing evidence after deployment.
 
 ::: {#psp-responsible-engr-full-cost-iron-law .callout-perspective title="The full cost of the iron law"}
 
@@ -550,10 +561,6 @@ The iron law of ML systems (principle \ref{pri-iron-law}) established in @sec-in
 A model quantized for edge deployment consumes less energy, but also produces outputs that may differ across demographic groups. A recommendation system optimized for engagement maximizes a business metric, but may amplify harmful content. Responsible engineering extends our accounting to include these broader impacts: the carbon cost of computation, the fairness cost of optimization choices, and the societal cost of deployment at scale. The iron law governs *how fast* our systems run; responsible engineering governs *how well* they serve.
 
 :::
-
-Beyond ethical imperatives, responsible engineering delivers measurable business value through three reinforcing mechanisms. The most immediate is risk mitigation\index{Risk Mitigation!responsible engineering value}: ML system failures create legal and financial exposure that systematic responsibility practices reduce. Amazon's recruiting tool cancellation represented years of development investment lost to inadequate fairness consideration, and COMPAS-related litigation has cost jurisdictions millions in legal fees and settlements. Organizations implementing disaggregated evaluation, documentation, and monitoring reduce the probability of costly failures and demonstrate due diligence if problems emerge.
-
-A second mechanism is regulatory compliance\index{Regulatory Compliance!business value}, driven by legal requirements that vary by jurisdiction and application risk. The EU AI Act, for example, classifies high-risk AI applications\index{High-Risk AI!EU classification} and mandates technical requirements including risk assessment, data governance, transparency, and human oversight. Organizations that build responsibility into engineering practice can demonstrate compliance through existing documentation and monitoring rather than expensive retrofitting; the engineering lesson is that proactive controls are usually cheaper than reconstructing evidence after deployment.
 
 Competitive differentiation\index{Trust!competitive differentiation} completes the business case. Trust can drive enterprise purchasing decisions for ML-powered services, and organizations that can demonstrate systematic responsibility practices through model cards, audit trails, and published evaluation results may qualify for deployments that competitors cannot. Apple's privacy positioning, Microsoft's responsible AI principles, and Anthropic's safety research illustrate responsibility as a strategic investment rather than a purely defensive cost.
 
@@ -569,6 +576,8 @@ Amazon's recruiting tool could have been caught before deployment by a structure
 
 Before a loan approval model reaches production, a team must determine the provenance of the training data, identify who is represented and who is missing, anticipate failure modes, and define recourse for affected users. @Tbl-predeployment-assessment structures this evaluation into five phases, distinguishing critical-path blockers from high-priority items that can proceed with documented risk acceptance.
 
+Critical Path items are deployment blockers: the system must not go to production until these questions are answered. High Priority items should be addressed but may proceed with documented risk acceptance and a remediation timeline. The distinction enables teams to ship responsibly without requiring perfection on every dimension before initial deployment.
+
 | **Phase**      | **Priority**  | **Key Questions**                                                                                                | **Documentation Required**                                                                           |
 |:---------------|:--------------|:-----------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
 | **Data**       | Critical Path | Where did this data come from? Who is represented? Who is missing? What historical biases might be encoded?      | Data provenance records, demographic composition analysis, collection methodology documentation      |
@@ -578,8 +587,6 @@ Before a loan approval model reaches production, a team must determine the prove
 | **Monitoring** | High          | How will we detect problems? Who reviews system behavior? What triggers intervention?                            | Monitoring dashboard specifications, alert thresholds, review schedules, escalation procedures       |
 
 : **Predeployment Assessment Framework**: Critical Path items block deployment until addressed. High Priority items should be completed before or shortly after launch. Systematic coverage of responsibility concerns throughout the ML lifecycle prevents overlooked risks. {#tbl-predeployment-assessment tbl-colwidths="[15,15,35,35]"}
-
-Critical Path items are deployment blockers: the system must not go to production until these questions are answered. High Priority items should be addressed but may proceed with documented risk acceptance and a remediation timeline. The distinction enables teams to ship responsibly without requiring perfection on every dimension before initial deployment.
 
 The Evaluation row in @tbl-predeployment-assessment raises the critical concern of whether performance holds across different user groups. Answering this question requires statistically valid test sets for each group, which can create surprisingly stringent data requirements when representation is uneven.
 
@@ -628,6 +635,12 @@ class RepresentationStats:
     repr_mult_str = fmt_multiple(int(multiplier), commas=False, precision=0)
 ```
 
+::: {.column-margin}
+![](images/svg/vol1_responsible_engr_margin_001.svg){width="100%" fig-alt="Random sampling versus targeted stratified evaluation for a 1 percent subgroup."}
+
+*Random sampling barely reaches small subgroups.*
+:::
+
 :::: {#nbk-responsible-engr-statistics-representation .callout-notebook title="The statistics of representation"}
 
 **Problem**: An engineering team needs to verify that a Face ID model works for a minority group representing `{python} RepresentationStats.repr_group_fraction_pct_str` of the user base. A worst-case binomial margin of error near `{python} RepresentationStats.repr_target_margin_pp_str` at `{python} RepresentationStats.repr_confidence_pct_str` confidence requires roughly `{python} RepresentationStats.repr_target_images_str` for this group.
@@ -638,17 +651,9 @@ $D_{\text{eval,total}}$ = `{python} RepresentationStats.repr_target_images_str` 
 **Stratified Sampling**\index{Stratified Sampling!fairness evaluation}: Specifically targeting this group (for example, via active learning or community outreach) requires only `{python} RepresentationStats.repr_target_images_str`.
 **Systems insight**: Relying on "natural distribution" data for fairness is prohibitively expensive under random sampling. Validating the minority group effectively requires `{python} RepresentationStats.repr_mult_str` more data than the majority group. Fairness requires intentional data engineering\index{Intentional Data Engineering!fairness evaluation}, not just more data.
 
-::: {.column-margin}
-![](images/svg/vol1_responsible_engr_margin_001.svg){width="100%" fig-alt="Random sampling versus targeted stratified evaluation for a 1 percent subgroup."}
-
-*Random sampling barely reaches small subgroups.*
-:::
-
 ::::
 
 Intentional data engineering addresses *what* the model sees during evaluation, but even a perfectly representative dataset cannot prevent harm at deployment if the system lacks adequate human oversight. The representation cost calculated above is a predeployment gate; the question that follows is what happens once the model is live and making decisions that affect people.
-
-For high-stakes applications, the deployment phase should specify where human oversight is required.\index{Safety!human oversight requirements} Human-in-the-loop (HITL) systems\index{Human-in-the-Loop!decision oversight} route uncertain, high-consequence, or flagged decisions to human reviewers rather than acting autonomously. Effective HITL design must specify four requirements: the review scope (which decisions require human review), the confidence thresholds that trigger escalation, the training reviewers receive, and the mechanisms for monitoring reviewer performance. HITL is not a catch-all solution: human reviewers can rubber-stamp automated decisions, introduce their own biases, or become overwhelmed by alert volume. Effective HITL design requires calibrating the human-machine boundary to the specific application risks and reviewer capabilities.
 
 :::: {#ws-responsible-engr-automation-paradox .callout-war-story title="The automation paradox (2018)"}
 
@@ -657,6 +662,8 @@ For high-stakes applications, the deployment phase should specify where human ov
 **Failure mode**: The automated driving system detected the pedestrian but repeatedly changed its classification and did not correctly predict her path. Uber had also disabled automatic emergency braking while the developmental system was active, relying on the vehicle operator to intervene. The operator was visually distracted and did not take control in time. The pedestrian was killed. The "human-in-the-loop" safeguard failed because the human had been conditioned by the system's reliability to disengage.
 
 **Systems lesson**: Adding a human backup to an unreliable system does not make it reliable; it creates a new system with complex failure modes. If the AI is 99 percent reliable, the human will eventually trust it 100 percent, making the "backup" useless precisely when it is needed most.
+
+::::
 
 ::: {.column-margin}
 ```{=latex}
@@ -667,7 +674,7 @@ For high-stakes applications, the deployment phase should specify where human ov
 *As automation grows more reliable, human vigilance decays.*
 :::
 
-::::
+For high-stakes applications, the deployment phase should specify where human oversight is required.\index{Safety!human oversight requirements} Human-in-the-loop (HITL) systems\index{Human-in-the-Loop!decision oversight} route uncertain, high-consequence, or flagged decisions to human reviewers rather than acting autonomously. Effective HITL design must specify four requirements: the review scope (which decisions require human review), the confidence thresholds that trigger escalation, the training reviewers receive, and the mechanisms for monitoring reviewer performance. HITL is not a catch-all solution: human reviewers can rubber-stamp automated decisions, introduce their own biases, or become overwhelmed by alert volume. Effective HITL design requires calibrating the human-machine boundary to the specific application risks and reviewer capabilities.
 
 The predeployment assessment framework parallels aviation preflight checklists, where pilots follow every item without exception to ensure comprehensive coverage of critical concerns despite time pressure. Production ML deployments require equivalent discipline and rigorous verification. Checklists ensure teams ask the right questions; documentation standards ensure the answers persist and travel with the model.
 
@@ -685,7 +692,7 @@ A concrete MobileNetV2 model card makes these abstract categories operational: @
 
 ```{=latex}
 \begingroup
-\renewcommand{\arraystretch}{1.25}
+\renewcommand{\arraystretch}{1.35}
 ```
 
 | **Section**                | **Content**                                                                                                                                                                                                                               |
@@ -716,38 +723,32 @@ In systems engineering, we rarely design for the "average" case; we design for t
 
 The flaw of averages gives the testing principle: aggregate metrics are not enough. The next question is which tails to expose. That answer depends on the workload archetype, because each archetype creates different opportunities for bias to enter and different metrics for detecting it.
 
-::: {#lhs-responsible-engr-fairness-concerns-by-archetype .callout-lighthouse title="Fairness concerns by archetype"}
-
-The dominant fairness risks differ by workload archetype (introduced in @sec-ml-systems), requiring different evaluation strategies. @Tbl-fairness-archetype maps each archetype to its primary risk and evaluation metric.
-
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.3}
-```
-
-| **Archetype**                 | **Primary Fairness Risk**                                                                       | **Key Evaluation Metric**                                                          | **Real-World Example**                                                                                                                                                                               |
-|:------------------------------|:------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **ResNet-50 (Compute Beast)** | Training data bias (underrepresentation of minority groups in ImageNet)                         | Disaggregated accuracy by demographic group                                        | Gender Shades: `{python} GenderShadesDisparity.acc_light_pct_str` accuracy on light-skinned males, `{python} GenderShadesDisparity.acc_dark_pct_str` on dark-skinned females [@buolamwini2018gender] |
-| **GPT-2 (Bandwidth Hog)**     | Corpus bias (overrepresentation of majority viewpoints in web text)                             | Toxicity rate by demographic prompt context; stereotype score                      | LLMs produce more toxic completions for prompts mentioning minority groups                                                                                                                           |
-| **DLRM (Sparse Scatter)**     | Feedback-loop amplification (popular items get more data)                                       | Share of recommendation impressions by item category and supplier or creator group | Filter bubbles: the system recommends similar content to similar users, reducing discovery of niche creators                                                                                         |
-| **DS-CNN (Tiny Constraint)**  | Deployment-context mismatch (trained on clean audio, deployed in noisy real-world environments) | False positive rate by acoustic environment and speaker accent                     | Voice assistants perform worse on accented speech; wake-word triggers on TV audio in some languages                                                                                                  |
-
-: **Fairness risk by ML archetype**: Fairness risks vary by archetype's data source and deployment context. {#tbl-fairness-archetype tbl-colwidths="[11,32,23,34]"}
-
-```{=latex}
-\vspace*{-1.5ex}
-\endgroup
-```
-
-**Systems insight**: Fairness evaluation must match the archetype's failure mode. Vision models require demographic stratification of accuracy; large language models (LLMs) require toxicity and stereotype probing; recommendation systems require exposure audits; TinyML requires acoustic environment diversity testing. The Lighthouse keyword spotting (KWS) system introduced in @sec-ml-systems as the Tiny Constraint lighthouse faces exactly this challenge for its DS-CNN, a depthwise-separable convolutional neural network (CNN): trained on clean studio audio, it must perform equitably across accents, background noise levels, and speaker demographics in production homes—a governance challenge we examine in @sec-responsible-engineering-data-governance-compliance-bd1a.
-
-:::
-
 The table turns the flaw of averages into an engineering workflow: a vision model fails differently than a recommendation system, so the fairness metrics must match the failure mode and the subgroup slices must come from the application context. For healthcare applications, demographic factors like race, age, and gender are essential. For content moderation, language and cultural context matter. For financial services, protected categories under fair lending laws require specific attention.
 
 Testing infrastructure should support stratified evaluation\index{Stratified Evaluation!population-based testing} where performance metrics are computed separately for each relevant subgroup, enabling comparison of error rates and error types across populations. Intersectional analysis\index{Intersectional Analysis!combined attribute testing} considers combinations of attributes because harms may concentrate at intersections not visible in single-factor analysis. Confidence intervals provide uncertainty quantification for subgroup metrics when small subgroup sizes may yield unreliable estimates. Temporal monitoring tracks subgroup performance over time, detecting drift that affects some populations before others.
 
 Tool choice matters only after the team has named the fairness metric, subgroup slices, and alert thresholds. Open-source libraries such as Fairlearn [@bird2020fairlearn], AI Fairness 360 [@bellamy2019], and Google's What-If Tool [@wexler2020whatif] lower the implementation cost of disaggregated and intersectional evaluation, but a library can only compute the metric the engineer asks for. It cannot decide which subgroup definition matters, which disparity threshold should page the team, or which fairness constraint is appropriate for the deployment context.
+
+::: {#lhs-responsible-engr-fairness-concerns-by-archetype .callout-lighthouse title="Fairness concerns by archetype"}
+
+The dominant fairness risks differ by workload archetype (introduced in @sec-ml-systems), requiring different evaluation strategies. @Tbl-fairness-archetype maps each archetype to its primary risk and evaluation metric.
+
+| **Archetype**                 | **Primary Fairness Risk**                                                                       | **Key Evaluation Metric**                                                          | **Real-World Example**                                                                                                     |
+|:------------------------------|:------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------|
+| **ResNet-50 (Compute Beast)** | Training data bias (underrepresentation of deployment-relevant groups)                          | Disaggregated accuracy by demographic group                                        | Evaluate the deployed classifier on application-specific demographic slices; Gender Shades values do not measure ResNet-50 |
+| **GPT-2 (Bandwidth Hog)**     | Corpus bias (overrepresentation of majority viewpoints in web text)                             | Toxicity rate by demographic prompt context; stereotype score                      | LLMs produce more toxic completions for prompts mentioning minority groups                                                 |
+| **DLRM (Sparse Scatter)**     | Feedback-loop amplification (popular items get more data)                                       | Share of recommendation impressions by item category and supplier or creator group | Filter bubbles: the system recommends similar content to similar users, reducing discovery of niche creators               |
+| **DS-CNN (Tiny Constraint)**  | Deployment-context mismatch (trained on clean audio, deployed in noisy real-world environments) | False positive rate by acoustic environment and speaker accent                     | Voice assistants perform worse on accented speech; wake-word triggers on TV audio in some languages                        |
+
+: **Fairness risk by ML archetype**: Fairness risks vary by archetype's data source and deployment context. {#tbl-fairness-archetype tbl-colwidths="[11,32,23,34]"}
+
+```{=latex}
+\vspace*{-1.5ex}
+```
+
+**Systems insight**: Fairness evaluation must match the archetype's failure mode. Vision models require demographic stratification of accuracy; large language models (LLMs) require toxicity and stereotype probing; recommendation systems require exposure audits; TinyML requires acoustic environment diversity testing. The Lighthouse keyword spotting (KWS) system introduced in @sec-ml-systems as the Tiny Constraint lighthouse faces exactly this challenge for its DS-CNN, a depthwise-separable convolutional neural network (CNN): trained on clean studio audio, it must perform equitably across accents, background noise levels, and speaker demographics in production homes—a governance challenge we examine in @sec-responsible-engineering-data-governance-compliance-bd1a.
+
+:::
 
 #### Worked example: Fairness analysis in loan approval {#sec-responsible-engineering-worked-example-fairness-analysis-loan-approval-2c72}
 
@@ -854,13 +855,6 @@ A loan approval model\index{Fairness Metrics!loan approval case study} reports `
 
 : **Confusion Matrix for Group A (Majority)**: Loan approval outcomes for `{python} LoanFairness.a_total_str` applicants from the majority demographic group. The `{python} LoanFairness.a_tpr_str` true positive rate (`{python} LoanFairness.a_tp_str` approved of `{python} LoanFairness.a_qualified_str` qualified) and `{python} LoanFairness.a_fpr_str` false positive rate establish the baseline for fairness comparison. {#tbl-confusion-group-a}
 
-|                        |          **Approved (pred)**          |          **Rejected (pred)**          |
-|:-----------------------|:-------------------------------------:|:-------------------------------------:|
-| **Repaid (actual)**    | `{python} LoanFairness.b_tp_str` (TP) | `{python} LoanFairness.b_fn_str` (FN) |
-| **Defaulted (actual)** | `{python} LoanFairness.b_fp_str` (FP) | `{python} LoanFairness.b_tn_str` (TN) |
-
-: **Confusion Matrix for Group B (Minority)**: Loan approval outcomes for `{python} LoanFairness.b_total_str` applicants from the minority demographic group. The `{python} LoanFairness.b_tpr_str` true positive rate (`{python} LoanFairness.b_tp_str` approved of `{python} LoanFairness.b_qualified_str` qualified) reveals a `{python} LoanFairness.tpr_disparity_str` disparity compared to Group A, indicating the model applies stricter criteria to minority applicants. {#tbl-confusion-group-b}
-
 Three standard fairness metrics\index{Fairness Metrics!confusion matrix analysis} computed from the confusion matrices in @tbl-confusion-group-a and @tbl-confusion-group-b reveal significant disparities.[^fn-fairness-metric-incompatibility]
 
 [^fn-fairness-metric-incompatibility]: **Fairness Metric Incompatibility**\index{Fairness Metrics!impossibility theorem}: The measured disparities in this worked example show how one set of confusion matrices can violate demographic parity, equal opportunity, and equalized odds. A separate impossibility theorem proves that when group base rates differ, multiple fairness criteria *cannot* generally be satisfied simultaneously [@chouldechova2017]. In those settings, optimizing for one metric, such as equal opportunity, can degrade another, such as predictive parity. A system designer must therefore make the trade-off explicit rather than assuming all guarantees can be achieved at once.
@@ -870,6 +864,13 @@ The three metrics test different definitions of equal treatment:
 - **Demographic parity**\index{Demographic Parity!definition}\index{Fairness Metrics!demographic parity}: Requires equal approval rates across groups. Group A receives approval at a rate of `{python} LoanFairness.a_approval_eq`, while Group B receives approval at `{python} LoanFairness.b_approval_eq`. The `{python} LoanFairness.dp_disparity_str` disparity indicates unequal treatment in approval decisions.
 - **Equal opportunity**\index{Equal Opportunity!definition}\index{Fairness Metrics!equal opportunity}: Requires equal true positive rates\index{True Positive Rate!fairness computation} among qualified applicants. Group A achieves a TPR of `{python} LoanFairness.a_tpr_eq`, meaning `{python} LoanFairness.a_tpr_str` of applicants who would repay receive approval. Group B achieves only `{python} LoanFairness.b_tpr_eq`. This `{python} LoanFairness.tpr_disparity_str` disparity means qualified applicants from Group B face substantially higher rejection rates than equally qualified applicants from Group A.
 - **Equalized odds**\index{Equalized Odds!definition}\index{Fairness Metrics!equalized odds}: Requires both equal true positive rates and equal false positive rates.[^fn-equalized-odds-postprocessing] Group A shows an FPR of `{python} LoanFairness.a_fpr_eq`, and Group B shows `{python} LoanFairness.b_fpr_eq`. While false positive rates are equal, the true positive rate disparity means equalized odds is violated.
+
+|                        |          **Approved (pred)**          |          **Rejected (pred)**          |
+|:-----------------------|:-------------------------------------:|:-------------------------------------:|
+| **Repaid (actual)**    | `{python} LoanFairness.b_tp_str` (TP) | `{python} LoanFairness.b_fn_str` (FN) |
+| **Defaulted (actual)** | `{python} LoanFairness.b_fp_str` (FP) | `{python} LoanFairness.b_tn_str` (TN) |
+
+: **Confusion Matrix for Group B (Minority)**: Loan approval outcomes for `{python} LoanFairness.b_total_str` applicants from the minority demographic group. The `{python} LoanFairness.b_tpr_str` true positive rate (`{python} LoanFairness.b_tp_str` approved of `{python} LoanFairness.b_qualified_str` qualified) reveals a `{python} LoanFairness.tpr_disparity_str` disparity compared to Group A, indicating the model applies stricter criteria to minority applicants. {#tbl-confusion-group-b}
 
 The metrics disagree because they encode different policy choices about which error rates matter most.
 
@@ -907,7 +908,7 @@ for metric in ["approval_rate", "tpr", "fpr"]:
 
 :::
 
-Automated monitoring achieves what manual auditing cannot at scale: continuous tracking of fairness metrics with immediate alerting when disparities emerge. The `{python} LoanFairness.tpr_disparity_str` TPR disparity far exceeds common industry thresholds of 5 percentage points for high-stakes applications, indicating the model requires fairness intervention before deployment. @Tbl-fairness-metrics-summary reveals the pattern across the computed metrics and disparities.
+Automated monitoring achieves what manual auditing cannot at scale: continuous tracking of fairness metrics with immediate alerting when disparities emerge. The `{python} LoanFairness.tpr_disparity_str` TPR disparity far exceeds this scenario's 5-percentage-point release threshold, indicating the model requires fairness intervention before deployment. @Tbl-fairness-metrics-summary reveals the pattern across the computed metrics and disparities.
 
 | **Metric**              |                **Group A**                 |                **Group B**                 | **Disparity**                                 |
 |:------------------------|:------------------------------------------:|:------------------------------------------:|:----------------------------------------------|
@@ -915,13 +916,14 @@ Automated monitoring achieves what manual auditing cannot at scale: continuous t
 | **True Positive Rate**  |   `{python} LoanFairness.a_tpr_tbl_str`    |   `{python} LoanFairness.b_tpr_tbl_str`    | `{python} LoanFairness.tpr_disparity_tbl_str` |
 | **False Positive Rate** |   `{python} LoanFairness.a_fpr_tbl_str`    |   `{python} LoanFairness.b_fpr_tbl_str`    | `{python} LoanFairness.fpr_disparity_str`     |
 
-: **Fairness Metrics Summary**: Comparison of fairness metrics across demographic groups reveals substantial disparities in how the model treats qualified applicants from each group. {#tbl-fairness-metrics-summary}
+: **Fairness Metrics Summary**: Comparison of fairness metrics across demographic groups reveals substantial disparities in how the model treats qualified applicants from each group. {#tbl-fairness-metrics-summary tbl-colwidths="[40,20,20,20]"}
 
 To understand why aggregate metrics hide these disparities, look closely at @fig-fairness-threshold. When a single threshold is applied to populations with different score distributions, the same decision boundary produces vastly different outcomes for each group [@barocas2016]. The figure exposes a fundamental tension: any fixed threshold is simultaneously "correct" for the combined population while being systematically wrong for each subpopulation.
 
 ::: {#fig-fairness-threshold fig-env="figure" fig-pos="htb" fig-cap="**Threshold Effects on Subgroup Outcomes**: A single classification threshold (vertical lines) applied to two subgroups with different score distributions produces disparate outcomes. Circles represent positive outcomes (loan repayment); plus markers represent negative outcomes (default). The 75 percent threshold approves most of Subgroup A but rejects most of Subgroup B, even when qualified individuals exist in both groups. The 81.25 percent threshold shows how threshold adjustment changes the fairness-accuracy trade-off. This visualization explains why aggregate accuracy can mask severe subgroup disparities." fig-alt="Diagram showing two subgroups A and B with different score distributions. Vertical threshold lines at 75 percent and 81.25 percent show how the same threshold produces different approval rates for each group."}
 
 ```{.tikz}
+\scalebox{0.8}{%
 \begin{tikzpicture}[line join=round,font=\small\usefont{T1}{phv}{m}{n}]
 \tikzset{%
 LineA/.style={line width=2.5pt,black!50,text=black},
@@ -933,13 +935,13 @@ circB/.style={draw=blue!70!black, fill=white,line width=2.5pt,circle, minimum si
   \tikz\draw[#1,scale=0.55,line width=3.5pt] (0,0) -- (1,0)(0.5,0.5) -- (0.5,-0.5);
 }
 \draw[LineA](0,0)coordinate(A1)node[left](SA){Subgroup A}--(12.5,0)coordinate(A2);
-\draw[LineA](0,-2.5)coordinate(B1)node[left]{Subgroup B}--(12.5,-2.5)coordinate(B2);
+\draw[LineA](0,-1.5)coordinate(B1)node[left]{Subgroup B}--(12.5,-1.5)coordinate(B2);
 \coordinate(D7G)at($(A1)!0.3!(A2)$);
 \coordinate(D8G)at($(A1)!0.63!(A2)$);
 \coordinate(D7D)at($(B1)!0.3!(B2)$);
 \coordinate(D8D)at($(B1)!0.63!(B2)$);
-\draw[LineD]($(D7G)+(0,1)$)node[above](SE){75\%}--($(D7D)+(0,-0.77)$);
-\draw[LineD]($(D8G)+(0,1)$)node[above]{81.25\%}--($(D8D)+(0,-0.77)$)coordinate(DO);
+\draw[LineD]($(D7G)+(0,1)$)node[above](SE){75\%}--($(D7D)+(0,-0.57)$);
+\draw[LineD]($(D8G)+(0,1)$)node[above]{81.25\%}--($(D8D)+(0,-0.57)$)coordinate(DO);
 
 \foreach \x in{0.25,0.35,0.42,0.49}{
 \node[circB,yshift=4mm]at($(A1)!\x!(A2)$){};
@@ -967,7 +969,7 @@ circB/.style={draw=blue!70!black, fill=white,line width=2.5pt,circle, minimum si
 \node[right=0pt of CI4]{Negative outcome};
 
 \node[below=20pt of FI.south]{\footnotesize Color indicates subgroup; marker shape indicates outcome.};
-\end{tikzpicture}
+\end{tikzpicture}}
 ```
 
 :::
@@ -1046,12 +1048,11 @@ class FairnessPrice:
     net_change_per_applicant = extra_tp_value - extra_fp_cost
     baseline_utility_per_applicant = group_b_tpr * positive_base_rate * hire_value - group_b_fpr * (1 - positive_base_rate) * bad_hire_cost
     loss_fraction_within_group = (-net_change_per_applicant / baseline_utility_per_applicant).to("").magnitude
-    utility_loss_fraction = loss_fraction_within_group * minority_group_share
-    utility_loss_pct = utility_loss_fraction * 100.0
+    population_average_loss = -net_change_per_applicant * minority_group_share
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(net_change_per_applicant < 0 * USD, "The fairness tax only exists when extra bad-hire cost exceeds extra hire value")
-    check(5.0 < utility_loss_pct < 7.0, f"Aggregate utility tax {utility_loss_pct:.1f}% no longer matches the stated assumptions.")
+    check(abs(loss_fraction_within_group - 0.20) < 1e-9, "Within-group utility loss should be 20% under the stated assumptions.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     # Typed formatters own currency, percent, and percentage-point display.
@@ -1062,7 +1063,11 @@ class FairnessPrice:
     group_a_tpr_pct_str = fmt_percent(group_a_tpr, precision=0, commas=False, style='prose')
     group_b_tpr_pct_str = fmt_percent(group_b_tpr, precision=0, commas=False, style='prose')
     aggregate_accuracy_pct_str = fmt_percent(aggregate_accuracy, precision=0, commas=False, style='prose')
-    utility_loss_str = fmt_percent(utility_loss_fraction, precision=0, commas=False, style='prose')  # computed from assumptions above
+    extra_tp_value_str = fmt_usd(extra_tp_value, precision=0, commas=True)
+    extra_fp_cost_str = fmt_usd(extra_fp_cost, precision=0, commas=True)
+    net_loss_str = fmt_usd(-net_change_per_applicant, precision=0, commas=True)
+    within_group_loss_str = fmt_percent(loss_fraction_within_group, precision=0, commas=False, style='prose')
+    population_average_loss_str = fmt_usd(population_average_loss, precision=0, commas=True)
     minority_share_str = fmt_percent(minority_group_share, precision=0, commas=False, style='prose')
     positive_base_rate_str = fmt_percent(positive_base_rate, precision=0, commas=False, style='prose')
 ```
@@ -1082,10 +1087,10 @@ class FairnessPrice:
 1.  Closing the `{python} FairnessPrice.tpr_gap_pp_str` TPR gap requires accepting a `{python} FairnessPrice.fp_increase_pp_str` increase in False Positives for the disadvantaged group: near the original threshold most remaining candidates do not meet the bar, so each additional qualified hire admits several unqualified ones.
 2.  If the value of a successful hire is `{python} FairnessPrice.hire_value_k_str` and the cost of a bad hire is `{python} FairnessPrice.bad_hire_cost_k_str`, both sides of the intervention must be counted:
     - $\Delta\text{Utility} = \Delta\text{TPR} \times \text{Base Rate} \times \text{Hire Value} - \Delta\text{FPR} \times (1 - \text{Base Rate}) \times \text{Bad Hire Cost}$.
-    - $\text{Aggregate Utility Tax} = \frac{-\Delta\text{Utility}}{\text{Baseline Utility}} \times \text{Group Share}$.
-    - Under the assumption that the disadvantaged group is `{python} FairnessPrice.minority_share_str` of the applicant pool and that the base rate of qualified applicants is `{python} FairnessPrice.positive_base_rate_str`, the added bad-hire cost outweighs the added hire value and the aggregate utility loss is `{python} FairnessPrice.utility_loss_str`.
+    - The added true-positive value is `{python} FairnessPrice.extra_tp_value_str` per Group B applicant, while the added false-positive cost is `{python} FairnessPrice.extra_fp_cost_str`, for a net loss of `{python} FairnessPrice.net_loss_str`.
+    - This is `{python} FairnessPrice.within_group_loss_str` of Group B's baseline utility. With Group B at `{python} FairnessPrice.minority_share_str` of applicants, the population-average loss is `{python} FairnessPrice.population_average_loss_str` per applicant; an aggregate percentage also requires the other group's baseline utility.
 
-**Systems insight**: The "Price of Fairness"\index{Price of Fairness!utility trade-off} in this system is a `{python} FairnessPrice.utility_loss_str` utility tax under the stated assumptions, a system constraint, not a bug. The tax is not automatic: when a TPR gap reflects a miscalibrated threshold, closing it can even raise net utility. It appears precisely when the baseline threshold is already near the utility optimum, so the marginal admits skew unqualified; the engineer's job is to present the Pareto frontier to stakeholders so they can choose the Utility/Fairness trade-off that aligns with organizational values.
+**Systems insight**: The "Price of Fairness"\index{Price of Fairness!utility trade-off} in this scenario is a `{python} FairnessPrice.within_group_loss_str` within-group utility loss, not a derivable aggregate percentage. The loss is not automatic: when a TPR gap reflects a miscalibrated threshold, closing it can raise net utility. It appears when the baseline threshold is near the utility optimum and marginal admissions skew unqualified. Engineers should present the Pareto frontier and its assumptions to stakeholders.
 
 :::
 
@@ -1093,11 +1098,16 @@ The calculation gives stakeholders a way to choose a point on the fairness-accur
 
 ### Explainability requirements {#sec-responsible-engineering-explainability-requirements-0b67}
 
-A loan applicant denied credit by an algorithmic system has a right to know *why*, not in aggregate statistical terms but in terms specific to her application. **Explainability**\index{Explainability!definition and purposes}[^fn-explainability-interpretability] provides this capability: it enables human oversight of automated decisions, supports debugging when problems emerge, and satisfies regulatory requirements for decision transparency\index{Transparency!regulatory requirements}.
+A loan applicant denied credit by an algorithmic system may be entitled under applicable law to reasons or specific adverse-action factors, not merely aggregate statistics. **Explainability**\index{Explainability!definition and purposes}[^fn-explainability-interpretability] supports this capability: it enables human oversight of automated decisions, supports debugging when problems emerge, and can satisfy applicable requirements for decision transparency\index{Transparency!regulatory requirements}.
 
-[^fn-explainability-interpretability]: **Explainability vs. Interpretability**\index{Explainability!architecture trade-off}: *Interpretability* is an intrinsic model property---the degree to which a human can understand internal mechanics (linear regression is interpretable; a 100-layer network is not). *Explainability* is a post-hoc capability added without changing the model (LIME, SHAP). The systems implication: interpretable models constrain architecture selection (simpler models, fewer features), while post-hoc explanations add a separate computation path whose cost depends on the method, model, and serving workflow. Regulations like the EU AI Act demand "meaningful information about the logic involved" without specifying which approach, leaving the latency-vs.-architecture trade-off to engineering teams.
+[^fn-explainability-interpretability]: **Explainability vs. Interpretability**\index{Explainability!architecture trade-off}: *Interpretability* is an intrinsic model property---the degree to which a human can understand internal mechanics (linear regression is interpretable; a 100-layer network is not). *Explainability* is a post-hoc capability added without changing the model (LIME, SHAP). The systems implication: interpretable models constrain architecture selection (simpler models, fewer features), while post-hoc explanations add a separate computation path whose cost depends on the method, model, and serving workflow. GDPR access and automated-decision provisions use the phrase "meaningful information about the logic involved" for covered processing [@gdpr2016], leaving the appropriate technical approach dependent on the decision and governing law.
 
 The level of explainability required varies by application context and regulatory environment. @Tbl-explainability-requirements maps common deployment scenarios to their explainability needs.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.35}
+```
 
 | **Application Domain** | **Explainability Level**        | **Typical Requirements**                                               |
 |:-----------------------|:--------------------------------|:-----------------------------------------------------------------------|
@@ -1108,6 +1118,10 @@ The level of explainability required varies by application context and regulator
 | **Fraud detection**    | Internal audit only             | Detailed explanations may enable adversarial gaming                    |
 
 : **Explainability Requirements by Domain**: Different applications require different levels of decision transparency. Credit and medical applications face regulatory requirements for individual explanations. Fraud detection may intentionally limit explainability to prevent gaming. The engineering challenge is matching explainability mechanisms to domain requirements. {#tbl-explainability-requirements tbl-colwidths="[18,24,58]"}
+
+```{=latex}
+\endgroup
+```
 
 Engineering teams should select explainability approaches based on these domain requirements:
 
@@ -1130,8 +1144,6 @@ The choice involves trade-offs between explanation fidelity, computational cost,
 [^fn-lime-shap-cost]: **LIME and SHAP**\index{SHAP!inference latency}: LIME [@ribeiro2016] fits a local interpretable model around each prediction---fast but potentially inconsistent across nearby inputs. SHAP [@lundberg2017unified] adapts Shapley values\index{Shapley Value!feature attribution} from cooperative game theory to compute feature contributions under a unified additive framework. Exact Shapley-value computation can be expensive, so practical SHAP implementations rely on approximations or model-specific algorithms. The systems trade-off is that explanation fidelity, latency, and implementation complexity must be budgeted explicitly rather than treated as free.
 
 The hospital shortcut shows why interpretability is a systems requirement rather than presentation polish: teams need enough visibility to catch shortcuts before deployment. @Fig-interpretability-spectrum arranges the resulting trade-offs along a single axis. On the left side, decision trees and linear regression offer direct auditability: an engineer can inspect every coefficient or branching rule that produced a prediction, at the cost of limited representational capacity. On the right side, deep neural networks and convolutional architectures achieve higher accuracy on complex tasks but resist human inspection, requiring post-hoc tools like LIME or SHAP to approximate explanations.
-
-The choice depends on the application's accountability requirements: high-stakes credit decisions subject to adverse action notice laws demand models near the interpretable end, while large-scale recommendation systems that face no per-decision regulatory scrutiny can tolerate opaque architectures. The spectrum does not imply "simple is always better," because a highly interpretable model that makes wrong predictions serves no one. The engineering challenge is selecting the most interpretable model that meets accuracy requirements for the application.
 
 ::: {#fig-interpretability-spectrum fig-env="figure" fig-pos="htb" fig-cap="**Model Interpretability Spectrum**: A horizontal spectrum arranges model architectures from most interpretable on the left (decision trees, linear regression, logistic regression) to least interpretable on the right (random forests, neural networks, convolutional neural networks). Models on the left allow direct inspection of decision logic, while those on the right require post-hoc explanation techniques such as LIME or SHAP. High-stakes regulatory requirements may constrain model selection toward the interpretable end of this spectrum." fig-alt="Horizontal spectrum showing model types from more interpretable (decision trees, linear regression, logistic regression) to less interpretable (random forest, neural network, convolutional neural network)."}
 
@@ -1446,20 +1458,22 @@ CNN/\\Transformer}{
 \pic[shift={(0.2,0)}] at  ($(T6)+(0,-16mm)$){CNN={scalefac=0.35,picname=1,drawcolor=myred, Linewidth=1.0pt}};
 %
 \draw[mybrown,line width=0.75pt,decoration={brace,amplitude=7pt},decorate]
-($(POG)+(0,4mm)$)--($(SRG)+(-2mm,4mm)$)
+($(POG)+(0,2mm)$)--($(SRG)+(-2mm,2mm)$)
 node [text=black,midway,above=2mm] {Intrinsically Interpretable};
 %
 \draw[mybrown,line width=0.75pt,decoration={brace,amplitude=7pt},decorate]
-($(SRG)+(2mm,4mm)$)--($(KRG)+(0mm,4mm)$)
+($(SRG)+(2mm,2mm)$)--($(KRG)+(0mm,2mm)$)
 node [text=black,midway,above=2mm] {Requires Post-Hoc Explanation};
 %
-\node[below=23mm of T2,Txt]{Inspect decision logic directly};
-\node[below=23mm of T5,Txt]{Use LIME, SHAP, or attention maps};
+\node[below=21mm of T2,Txt]{Inspect decision logic directly};
+\node[below=21mm of T5,Txt]{Use LIME, SHAP, or attention maps};
 \end{tikzpicture}
 
 ```
 
 :::
+
+The choice depends on the application's accountability requirements: high-stakes credit decisions subject to adverse action notice laws demand models near the interpretable end, while large-scale recommendation systems that face no per-decision regulatory scrutiny can tolerate opaque architectures. The spectrum does not imply "simple is always better," because a highly interpretable model that makes wrong predictions serves no one. The engineering challenge is selecting the most interpretable model that meets accuracy requirements for the application.
 
 The explainability requirements outlined earlier carry the force of law, not merely of engineering best practice. The EU AI Act, which entered into force on August 1, 2024 and applies in phases, imposes documentation, transparency, human-oversight, and risk-management obligations for high-risk systems [@euaiact2024]. US regulators also require adverse action notices in lending contexts, including when algorithmic tools contribute to credit decisions [@cfpb2022adverseactionalgorithms]. Regulations transform explainability from a design choice into a compliance requirement with concrete penalties for failure, making the technical mechanisms just described prerequisites for legal operation.
 
@@ -1487,7 +1501,7 @@ Contestability adds a second architectural requirement. GDPR\index{GDPR!Article 
 # │          human review requirements.
 # │
 # │ Goal:    Quantify the daily operational load of substantive human review.
-# │ Show:    One million daily decisions at a 0.1 percent error rate yield 1,000
+# │ Show:    One million daily decisions at a 0.1 percent appeal rate yield 1,000
 # │          review cases per day.
 # │ How:     Multiply daily decision volume by the review-rate fraction.
 # │
@@ -1514,7 +1528,7 @@ class GDPRReviewLoad:
     review_cases_str = fmt_rate(review_cases, "cases/day", precision=0, commas=True)
 ```
 
-[^fn-gdpr-automated-decisions]: **GDPR (General Data Protection Regulation) Articles 15 and 22**\index{GDPR!Article 22 requirements}: Article 22 restricts certain solely automated decisions with legal or similarly significant effects and, for specified exceptions, requires safeguards including human intervention, the ability to express a point of view, and the ability to contest the decision. Article 15(1)(h) contains the access right to meaningful information about the logic involved in such automated decision-making [@gdpr2016]. The European Data Protection Board's guidance emphasizes that required human oversight must be substantive and not merely a "rubber-stamping" exercise [@edpb2018automatedProfiling]. A system making `{python} GDPRReviewLoad.daily_decisions_str` daily decisions with a `{python} GDPRReviewLoad.review_rate_str` error rate requiring substantive review would generate `{python} GDPRReviewLoad.review_cases_str`, an operational load that is untenable without built-in summarization and audit tools.
+[^fn-gdpr-automated-decisions]: **GDPR (General Data Protection Regulation) Articles 15 and 22**\index{GDPR!Article 22 requirements}: Article 22 restricts certain solely automated decisions with legal or similarly significant effects and, for specified exceptions, requires safeguards including human intervention, the ability to express a point of view, and the ability to contest the decision. Article 15(1)(h) contains the access right to meaningful information about the logic involved in such automated decision-making [@gdpr2016]. The European Data Protection Board's guidance emphasizes that required human oversight must be substantive and not merely a "rubber-stamping" exercise [@edpb2018automatedProfiling]. If `{python} GDPRReviewLoad.review_rate_str` of `{python} GDPRReviewLoad.daily_decisions_str` daily decisions are appealed or escalated, the system must handle `{python} GDPRReviewLoad.review_cases_str`; this is a workload assumption, not a model-error rate.
 
 US sectoral law reaches the same capabilities through domain-specific evidence requirements. These regulations are less unified than the EU AI Act, but they force the same engineering posture through domain-specific duties. In the credit example, the Equal Credit Opportunity Act (ECOA) and its implementing Regulation B require specific reasons for adverse credit decisions even when complex algorithms contribute to the decision [@cfpb2022adverseactionalgorithms]. If consumer-report information or credit scores influence the decision, the Fair Credit Reporting Act (FCRA) adds notice obligations; if the same scoring machinery is used for housing, the Fair Housing Act (FHA) adds a discrimination-prohibition constraint. The technical consequence is practical rather than abstract: the system must connect model scores to reason codes, preserve the data sources used in the decision, support review, and monitor subgroup outcomes rather than relying on aggregate accuracy alone.
 
@@ -1541,7 +1555,7 @@ The engineering response to these regulatory requirements is proactive architect
 
 ### Monitoring and incident response {#sec-responsible-engineering-monitoring-incident-response-54f4}
 
-Zillow reported a \$304 million[^fn-zillow-dam] Q3 2021 Homes-segment inventory write-down after buying homes at prices above revised estimates of future selling prices [@zillow2021offers]. A systems diagnosis can interpret the failure as a combination of forecasting uncertainty, distribution shift, operational capacity limits, and insufficient circuit breakers. Planning for system failures before they occur is a core responsible engineering practice. Incident response\index{Incident Response!ML system failures} and monitoring\index{Monitoring!responsible operations} require preparation before the system fails. Building on the incident severity classification and response framework from @sec-ml-operations-incident-response-ml-systems-c637, @tbl-incident-response adapts that general framework to responsible deployment, where detection must surface fairness violations and demographic-slice degradation alongside ordinary outages. The five components are largely the standard incident-response arc; what makes the table actionable is its second column. The requirements state what each component must do, but the predeployment-verification column states what must be proven before launch: an alert threshold that has been tested, a rollback path that has been exercised, a contact list that is current. A requirement without a verified control is an intention, not a safeguard, so this column is the gate that decides whether the system is ready to deploy.
+Zillow reported a \$304 million[^fn-zillow-dam] Q3 2021 Homes-segment inventory write-down after buying homes at prices above revised estimates of future selling prices [@zillow2021offers]. A systems diagnosis can interpret the failure as a combination of forecasting uncertainty, distribution shift, operational capacity limits, and insufficient circuit breakers. Planning for system failures before they occur is a core responsible engineering practice. Incident response\index{Incident Response!ML system failures} and monitoring\index{Monitoring!responsible operations} require preparation before the system fails. Building on the incident severity classification and response framework from @sec-ml-operations-incident-response-ml-systems-c637, @tbl-incident-response adapts that general framework to responsible deployment, where detection must surface fairness violations and demographic-slice degradation alongside ordinary outages. The five components are largely the standard incident-response arc; what makes the table actionable is its last column. The requirements state what each component must do, but the predeployment-verification column states what must be proven before launch: an alert threshold that has been tested, a rollback path that has been exercised, a contact list that is current. A requirement without a verified control is an intention, not a safeguard, so this column is the gate that decides whether the system is ready to deploy.
 
 [^fn-zillow-dam]: **Zillow's D·A·M Failure**\index{Zillow!distribution shift failure}: Zillow's 2021 write-down is a useful systems case because the documented business failure combined forecast uncertainty with operational execution [@zillow2021offers]. A D·A·M diagnosis interprets the data axis as the mismatch between historical home-sale data and pandemic-era price volatility, the algorithm axis as the difficulty of pricing homes with reliable uncertainty estimates, and the machine axis as an automated iBuying pipeline that needed stronger capacity limits and circuit breakers. This is an engineering interpretation of Zillow's public disclosure, not a claim that Zillow identified one root technical cause.
 
@@ -1701,9 +1715,14 @@ Edge deployment scenarios\index{Edge Deployment!power constraints} make efficien
 | **Embedded Camera**    |  `{python} EdgeEfficiencyCalc.cam_power_w_str`  | `{python} EdgeEfficiencyCalc.cam_fps_str` (`{python} EdgeEfficiencyCalc.cam_latency_str`) | Real-time object detection, surveillance    |
 | **Wearable Device**    | `{python} EdgeEfficiencyCalc.wear_power_mw_str` |                       `{python} EdgeEfficiencyCalc.wear_latency_str`                      | Health monitoring, activity recognition     |
 
-: **Edge Deployment Constraints**: Power and latency requirements across four deployment contexts. Smartphones allow `{python} EdgeEfficiencyCalc.smart_power_w_str` and `{python} EdgeEfficiencyCalc.smart_latency_str` latency for photo enhancement and voice assistants. IoT sensors operate at `{python} EdgeEfficiencyCalc.iot_power_mw_str` with `{python} EdgeEfficiencyCalc.iot_latency_s_str` tolerance for anomaly detection. Embedded cameras require `{python} EdgeEfficiencyCalc.cam_power_w_str` at `{python} EdgeEfficiencyCalc.cam_latency_str` (`{python} EdgeEfficiencyCalc.cam_fps_str`) for real-time object detection. Wearables budget `{python} EdgeEfficiencyCalc.wear_power_mw_str` with `{python} EdgeEfficiencyCalc.wear_latency_str` latency for health monitoring. These concrete constraints transform abstract efficiency discussions into engineering requirements. {#tbl-edge-deployment-constraints tbl-colwidths="[17,16,24,43]"}
+: **Edge Deployment Constraints**: Power and latency requirements across four deployment contexts. Smartphones allow `{python} EdgeEfficiencyCalc.smart_power_w_str` and `{python} EdgeEfficiencyCalc.smart_latency_str` latency for photo enhancement and voice assistants. IoT sensors operate at `{python} EdgeEfficiencyCalc.iot_power_mw_str` with `{python} EdgeEfficiencyCalc.iot_latency_s_str` tolerance for anomaly detection. Embedded cameras require `{python} EdgeEfficiencyCalc.cam_power_w_str` at `{python} EdgeEfficiencyCalc.cam_latency_str` (`{python} EdgeEfficiencyCalc.cam_fps_str`) for real-time object detection. Wearables budget `{python} EdgeEfficiencyCalc.wear_power_mw_str` with `{python} EdgeEfficiencyCalc.wear_latency_str` latency for health monitoring. These concrete constraints transform abstract efficiency discussions into engineering requirements. {#tbl-edge-deployment-constraints tbl-colwidths="[20,14,23,43]"}
 
 The benchmarks in @tbl-model-efficiency-comparison provide actionable guidance for efficiency optimization. Techniques that enable deployment on power-constrained platforms (quantization, pruning, and efficient architectures) directly reduce environmental impact per inference regardless of deployment context. Power savings at inference time translate directly to financial savings when aggregated across millions of requests.
+
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.35}
+```
 
 | **Model**           |                  **Parameters**                 |               **Inference Power**               |                  **Latency**                   |                **Fits Smartphone?**               |                  **Fits IoT?**                  |
 |:--------------------|:-----------------------------------------------:|:-----------------------------------------------:|:----------------------------------------------:|:-------------------------------------------------:|:-----------------------------------------------:|
@@ -1713,6 +1732,10 @@ The benchmarks in @tbl-model-efficiency-comparison provide actionable guidance f
 | **TinyML Model**    | `{python} EdgeEfficiencyCalc.tiny_params_k_str` | `{python} EdgeEfficiencyCalc.tiny_power_mw_str` | `{python} EdgeEfficiencyCalc.tiny_latency_str` | `{python} EdgeEfficiencyCalc.tiny_fits_phone_str` | `{python} EdgeEfficiencyCalc.tiny_fits_iot_str` |
 
 : **Model Efficiency Comparison**: Model selection must account for deployment constraints. Larger models provide better accuracy but require more power and time. The smallest model that meets accuracy requirements minimizes both cost and environmental impact. {#tbl-model-efficiency-comparison tbl-colwidths="[20,15,20,10,25,10]"}
+
+```{=latex}
+\endgroup
+```
 
 For the wearable budget in @tbl-edge-deployment-constraints, the TinyML model leaves a `{python} EdgeEfficiencyCalc.tiny_wear_power_margin_factor_mult_str` power margin, while MobileNetV2 exceeds the same power budget by `{python} EdgeEfficiencyCalc.mv2_wear_power_overage_factor_mult_str` before accounting for sustained thermals. Fitting the device envelope is necessary but not sufficient: per-inference power compounds into lifetime serving cost once the model runs continuously at production scale.
 
@@ -1832,70 +1855,6 @@ Engineers should evaluate return on investment\index{Return on Investment!ML sys
 Quantifying environmental impact requires converting compute hours into carbon emissions\index{Carbon Footprint!compute to emissions conversion}, making carbon a first-class engineering metric alongside dollar cost. Engineers can estimate three-year total cost of ownership using a structured approach that separates training, inference, and operational costs into ledgers. Training is usually a one-time or periodic expense, inference recurs with every user request, and operations accumulate through monitoring, retraining, and incident response. The ledger methodology applies that structure to the recommendation system example in this section.
 
 ```{python}
-#| label: carbon-factor-calc
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CARBON FACTOR—GPU-HOUR BASELINE
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @sec-responsible-engineering-tco-calculation-methodology-7cb0
-# │          "The carbon cost of compute" callout-perspective bullets.
-# │
-# │ Goal:    Establish the scenario baseline that converts GPU-hours into
-# │          kg CO2e for downstream TCO calculations.
-# │ Show:    A 400 W GPU emitting 0.16 kg CO2e per hour implies a grid
-# │          intensity of 0.4 kg/kWh.
-# │ How:     Derive carbon intensity from per-GPU-hour emissions and TDP power.
-# │
-# │
-# │ Note:    Referenced by tco-calc cell to keep the carbon factor consistent.
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.core.units import watt, kilowatt, hour, kg, kWh
-from mlsysim import Hardware, Infrastructure
-from mlsysim.fmt import check, fmt_carbon_intensity, fmt_emissions, fmt_power, fmt_time
-
-class CarbonFactor:
-    """Scenario baseline for converting GPU-hours into carbon emissions."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    gpu_power = Hardware.Cloud.A100.tdp
-    carbon_per_gpu_hr = Infrastructure.Pricing.Fleet.CarbonPerGpuHr.rate
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    energy_per_gpu_hr = gpu_power * hour
-    carbon_intensity = (carbon_per_gpu_hr / energy_per_gpu_hr).to(kg / kWh)
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(abs(gpu_power.to(watt).magnitude - 400) < 1e-9, "A100 baseline power should be 400 W.")
-    check(abs(carbon_per_gpu_hr.to(kg).magnitude - 0.16) < 1e-9, "GPU-hour carbon factor should be 0.16 kg.")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    gpu_power_w_str = fmt_power(gpu_power, unit=watt, precision=0, commas=False)
-    gpu_power_kw_str = fmt_power(gpu_power, unit=kilowatt, precision=1, commas=False)
-    carbon_intensity_str = fmt_carbon_intensity(carbon_intensity, unit=kg / kWh, precision=1, commas=False)
-    carbon_per_gpu_hr_kg_str = fmt_emissions(carbon_per_gpu_hr, unit=kg, precision=2, commas=False)
-    gpu_hour_str = fmt_time(1 * hour, hour, precision=0, commas=False, style='word')
-```
-
-::: {#nbk-responsible-engr-carbon-cost-compute .callout-notebook title="The carbon cost of compute"}
-
-**Problem**: The TCO ledgers must convert "compute hours" into "kg CO~2~eq". What carbon factor does one GPU-hour carry under the scenario baseline?
-
-**Variables**:
-
-*   **Power**: `{python} CarbonFactor.gpu_power_w_str` per GPU (scenario baseline).
-*   **Intensity**: `{python} CarbonFactor.carbon_intensity_str` CO~2~eq (rounded grid baseline).
-
-**Math**: @Eq-carbon-footprint captures the standard conversion:
-$$ \text{Carbon} = \text{Energy (kWh)} \times \text{Carbon Intensity (kg/kWh)} $$ {#eq-carbon-footprint}
-
-Applying the baseline assumptions:
-(`{python} CarbonFactor.gpu_power_kw_str` $\times$ `{python} CarbonFactor.gpu_hour_str`) $\times$ `{python} CarbonFactor.carbon_intensity_str` = `{python} CarbonFactor.carbon_per_gpu_hr_kg_str` CO~2~eq per GPU-hour.
-
-**Systems insight**: This conversion factor lets the ledgers track "Carbon Cost" alongside "Dollar Cost", making emissions a first-class engineering metric across the downstream TCO tables.
-
-:::
-
-```{python}
 #| label: tco-calc
 #| echo: false
 # ┌─────────────────────────────────────────────────────────────────────────────
@@ -1937,7 +1896,7 @@ class TCOCalc:
     t_cycles_3yr = 12
     i_users = 10_000_000
     i_recs_per_user = 20
-    i_latency = 10 * ms  # scenario assumption
+    i_latency = 10 * ms  # dedicated accelerator service demand; illustrative unbatched, non-overlapped scenario
     o_monitor_yr = 50000.0 * USD  # scenario assumption
     o_oncall_yr = 100000.0 * USD  # scenario assumption
     o_incident_yr = 20000.0 * USD  # scenario assumption
@@ -2111,25 +2070,94 @@ Training costs include both initial development and ongoing retraining. @Tbl-tco
 | **Retraining frequency**        |      cycles/year $\times$ years      |    `{python} TCOCalc.t_cycles_calc_str`   | same multiplier (`{python} TCOCalc.t_cycles_str` cycles) |
 | **Total training cost**         |       subtotal $\times$ cycles       |   **`{python} TCOCalc.t_total_usd_str`**  |       **`{python} TCOCalc.t_total_carbon_kg_str`**       |
 
-: **Training Cost Calculation**: Training costs accumulate through initial development (`{python} TCOCalc.t_subtotal_usd_str` per cycle) and quarterly retraining over a three-year operational period. Data preparation, hyperparameter search, and final training consume GPU hours at `{python} TCOCalc.train_gpu_rate_str`, totaling `{python} TCOCalc.t_total_usd_str` across `{python} TCOCalc.t_cycles_str` training cycles. Despite appearing substantial, training represents only `{python} TCOCalc.p_train_str` of total cost of ownership. {#tbl-tco-training tbl-colwidths="[25,32,23,20]"}
+: **Training Cost Calculation**: Training costs accumulate through initial development (`{python} TCOCalc.t_subtotal_usd_str` per cycle) and quarterly retraining over a three-year operational period. Data preparation, hyperparameter search, and final training consume GPU hours at `{python} TCOCalc.train_gpu_rate_str`, totaling `{python} TCOCalc.t_total_usd_str` across `{python} TCOCalc.t_cycles_str` training cycles. Despite appearing substantial, training represents only `{python} TCOCalc.p_train_str` of total cost of ownership. {#tbl-tco-training tbl-colwidths="[24,30,21,25]"}
 
 ```{=latex}
 \endgroup
 ```
 
+```{python}
+#| label: carbon-factor-calc
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CARBON FACTOR—GPU-HOUR BASELINE
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @sec-responsible-engineering-tco-calculation-methodology-7cb0
+# │          "The carbon cost of compute" callout-perspective bullets.
+# │
+# │ Goal:    Establish the scenario baseline that converts GPU-hours into
+# │          kg CO2e for downstream TCO calculations.
+# │ Show:    A 400 W GPU emitting 0.16 kg CO2e per hour implies a grid
+# │          intensity of 0.4 kg/kWh.
+# │ How:     Derive carbon intensity from per-GPU-hour emissions and TDP power.
+# │
+# │
+# │ Note:    Referenced by tco-calc cell to keep the carbon factor consistent.
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim.core.units import watt, kilowatt, hour, kg, kWh
+from mlsysim import Hardware, Infrastructure
+from mlsysim.fmt import check, fmt_carbon_intensity, fmt_emissions, fmt_power, fmt_time
+
+class CarbonFactor:
+    """Scenario baseline for converting GPU-hours into carbon emissions."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    gpu_power = Hardware.Cloud.A100.tdp
+    carbon_per_gpu_hr = Infrastructure.Pricing.Fleet.CarbonPerGpuHr.rate
+
+    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
+    energy_per_gpu_hr = gpu_power * hour
+    carbon_intensity = (carbon_per_gpu_hr / energy_per_gpu_hr).to(kg / kWh)
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(abs(gpu_power.to(watt).magnitude - 400) < 1e-9, "A100 baseline power should be 400 W.")
+    check(abs(carbon_per_gpu_hr.to(kg).magnitude - 0.16) < 1e-9, "GPU-hour carbon factor should be 0.16 kg.")
+
+    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
+    gpu_power_w_str = fmt_power(gpu_power, unit=watt, precision=0, commas=False)
+    gpu_power_kw_str = fmt_power(gpu_power, unit=kilowatt, precision=1, commas=False)
+    carbon_intensity_str = fmt_carbon_intensity(carbon_intensity, unit=kg / kWh, precision=1, commas=False)
+    carbon_per_gpu_hr_kg_str = fmt_emissions(carbon_per_gpu_hr, unit=kg, precision=2, commas=False)
+    gpu_hour_str = fmt_time(1 * hour, hour, precision=0, commas=False, style='word')
+```
+
+::: {#nbk-responsible-engr-carbon-cost-compute .callout-notebook title="The carbon cost of compute"}
+
+**Problem**: The TCO ledgers must convert "compute hours" into "kg CO~2~eq". What carbon factor does one GPU-hour carry under the scenario baseline?
+
+**Variables**:
+
+*   **Power**: `{python} CarbonFactor.gpu_power_w_str` per GPU (scenario baseline).
+*   **Intensity**: `{python} CarbonFactor.carbon_intensity_str` CO~2~eq (rounded grid baseline).
+
+**Math**: @Eq-carbon-footprint captures the standard conversion:
+$$ \text{Carbon} = \text{Energy (kWh)} \times \text{Carbon Intensity (kg/kWh)} $$ {#eq-carbon-footprint}
+Applying the baseline assumptions:
+$$\text{%
+(`{python} CarbonFactor.gpu_power_kw_str` $\times$ `{python} CarbonFactor.gpu_hour_str`) $\times$ `{python} CarbonFactor.carbon_intensity_str` = `{python} CarbonFactor.carbon_per_gpu_hr_kg_str` CO~2~eq per GPU-hour.
+}$$
+**Systems insight**: This conversion factor lets the ledgers track "Carbon Cost" alongside "Dollar Cost", making emissions a first-class engineering metric across the downstream TCO tables.
+
+:::
+
 ##### Inference costs {#sec-responsible-engineering-inference-costs-3278}
 
-@Tbl-tco-inference walks the conversion chain that turns traffic into cost: daily queries become GPU-seconds, GPU-seconds become GPU-hours, and GPU-hours convert into both dollars and carbon. Carbon attaches only once the workload is expressed in GPU-hours, so the query and GPU-second rows leave the carbon column blank by design rather than omitting data. Following the chain to the bottom row shows why inference, not training, dominates total cost of ownership for production systems.
+@Tbl-tco-inference walks the conversion chain that turns traffic into cost: daily queries become GPU-seconds, GPU-seconds become GPU-hours, and GPU-hours convert into both dollars and carbon. Carbon attaches only once the workload is expressed in GPU-hours, so the query and GPU-second rows leave the carbon column blank by design rather than omitting data. Following the chain to the bottom row shows why inference, not training, dominates this scenario's total cost of ownership.
 
-| **Cost Component**        | **Calculation**                  |           **Financial Cost**           |           **Carbon (kg CO~2~)**           |
-|:--------------------------|:---------------------------------|:--------------------------------------:|:-----------------------------------------:|
-| **Daily queries**         | users $\times$ queries/user      | `{python} TCOCalc.i_daily_q_calc_str`  |                     -                     |
-| **GPU-seconds/day**       | queries $\times$ latency         | `{python} TCOCalc.i_gpu_sec_calc_str`  |                     -                     |
-| **GPU-hours/day**         | seconds ÷ SEC_PER_HOUR           |  `{python} TCOCalc.i_gpu_hr_day_str`   |  `{python} TCOCalc.i_daily_carbon_kg_str` |
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
+
+| **Cost Component**        |         **Calculation**          |           **Financial Cost**           |           **Carbon (kg CO~2~)**           |
+|:--------------------------|:--------------------------------:|:--------------------------------------:|:-----------------------------------------:|
+| **Daily queries**         |   users $\times$ queries/user    | `{python} TCOCalc.i_daily_q_calc_str`  |                     -                     |
+| **GPU-seconds/day**       | queries $\times$ service demand  | `{python} TCOCalc.i_gpu_sec_calc_str`  |                     -                     |
+| **GPU-hours/day**         |      seconds ÷ SEC_PER_HOUR      |  `{python} TCOCalc.i_gpu_hr_day_str`   |  `{python} TCOCalc.i_daily_carbon_kg_str` |
 | **Annual GPU cost**       | hours $\times$ 365 $\times$ rate |  `{python} TCOCalc.i_annual_calc_str`  | `{python} TCOCalc.i_annual_carbon_kg_str` |
-| **3-year inference cost** | annual $\times$ 3                | **`{python} TCOCalc.i_total_usd_str`** |   **`{python} TCOCalc.i_carbon_kg_str`**  |
+| **3-year inference cost** |        annual $\times$ 3         | **`{python} TCOCalc.i_total_usd_str`** |   **`{python} TCOCalc.i_carbon_kg_str`**  |
 
-: **Inference Cost Calculation**: Inference costs scale with query volume: `{python} TCOCalc.i_daily_queries_m_str` daily queries at `{python} TCOCalc.i_latency_ms_str` each require `{python} TCOCalc.i_gpu_hr_day_str` daily, totaling `{python} TCOCalc.i_annual_cost_k_str` annually and `{python} TCOCalc.i_total_m_usd_str` over three years. At `{python} TCOCalc.p_inf_str` of total cost, inference dominates for high-traffic systems and justifies aggressive per-query optimization through quantization, pruning, and efficient serving. {#tbl-tco-inference tbl-colwidths="[25,27,27,21]"}
+: **Illustrative Inference Cost Calculation**: In this unbatched, non-overlapped service model, `{python} TCOCalc.i_daily_queries_m_str` daily queries at `{python} TCOCalc.i_latency_ms_str` of dedicated accelerator demand require `{python} TCOCalc.i_gpu_hr_day_str` daily, totaling `{python} TCOCalc.i_annual_cost_k_str` annually and `{python} TCOCalc.i_total_m_usd_str` over three years. Real utilization, batching, and concurrency change this conversion. {#tbl-tco-inference tbl-colwidths="[25,27,27,21]"}
 
 ##### Operational costs {#sec-responsible-engineering-operational-costs-1d5f}
 
@@ -2166,7 +2194,7 @@ from mlsysim.core.units import metric_ton
 class TCOSummary:
     """
     Namespace for TCO Summary and Quantization ROI.
-    Scenario: Quantifying savings from a 20% latency reduction.
+    Scenario: Quantifying savings from a 20% accelerator-service-demand reduction.
     """
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
@@ -2207,7 +2235,11 @@ The stark breakdown in @tbl-tco-summary answers where the money goes: inference 
 | **Operations** |  `{python} TCOCalc.o_total_usd_str`  |  `{python} TCOCalc.p_ops_tbl_str`  |                     -                     |
 | **Total TCO**  | **`{python} TCOCalc.total_tco_str`** | **`{python} TCOCalc.p_total_str`** | **`{python} TCOCalc.total_carbon_t_str`** |
 
-: **Total Cost of Ownership Summary**: Three-year TCO breakdown: training, inference, and operations costs. The `{python} TCOSummary.inf_train_ratio_str`:1 ratio between inference and training costs is typical for production systems serving millions of daily users. A `{python} TCOSummary.quant_reduction_pct_str` reduction in inference latency through quantization saves about `{python} TCOSummary.quant_savings_str` and `{python} TCOSummary.quant_carbon_tonnes_str` of CO~2~, easily justifying the optimization engineering investment. {#tbl-tco-summary tbl-colwidths="[25,25,25,25]"}
+: **Total Cost of Ownership Summary**: In this illustrative service-demand scenario, the inference-to-training cost ratio is `{python} TCOSummary.inf_train_ratio_str`:1. A `{python} TCOSummary.quant_reduction_pct_str` reduction in per-query accelerator demand saves about `{python} TCOSummary.quant_savings_str` and `{python} TCOSummary.quant_carbon_tonnes_str` of CO~2~ under the same assumptions. {#tbl-tco-summary tbl-colwidths="[25,25,25,25]"}
+
+```{=latex}
+\endgroup
+```
 
 Those proportions turn efficiency from a tuning preference into a responsibility check.
 
@@ -2215,7 +2247,7 @@ Those proportions turn efficiency from a tuning preference into a responsibility
 
 Total cost of ownership reveals where responsible optimization has the most leverage.
 
-- [ ] **Inference dominance**: Can you explain why a `{python} TCOSummary.quant_reduction_pct_str` inference latency reduction delivers more savings than a `{python} TCOSummary.training_time_reduction_pct_str` training time reduction for a production system serving millions of users?
+- [ ] **Inference dominance**: Under this scenario's assumptions, can you explain why a `{python} TCOSummary.quant_reduction_pct_str` accelerator-service-demand reduction delivers more savings than a `{python} TCOSummary.training_time_reduction_pct_str` training time reduction?
 - [ ] **Carbon accounting**: Can you convert GPU-hours into kg CO~2~eq using the power-draw and carbon-intensity conversion, and explain why cloud region selection matters more than algorithm choice for carbon footprint?
 - [ ] **Sufficiency test**: For a given ML system, can you justify that the model size is appropriate for the task—or identify where a simpler model would deliver comparable accuracy at a fraction of the cost?
 
@@ -2224,6 +2256,15 @@ Total cost of ownership reveals where responsible optimization has the most leve
 #### Environmental impact {#sec-responsible-engineering-environmental-impact-0292}
 
 The preceding TCO analysis captures costs that appear on invoices, but computational resources carry costs that no invoice reflects. Environmental impact\index{Environmental Impact!carbon accounting} follows from computational efficiency: the same optimization techniques that reduce TCO also reduce carbon emissions. The optimization techniques from @sec-hardware-acceleration and @sec-model-compression reduce energy consumption per inference, directly lowering carbon footprint. Data-center electricity use\index{Data Center!energy consumption} makes cloud-region selection, workload timing, and model efficiency part of responsible engineering: the same ML workload can have different carbon footprints depending on power draw, runtime, and grid carbon intensity [@henderson2020towards]. Engineers can reduce this impact by selecting lower-carbon cloud regions, applying model efficiency techniques such as quantization, and scheduling intensive workloads during periods of abundant renewable energy\index{Carbon-Aware Scheduling!renewable energy}. The magnitude becomes clearer in a scale calculation for training a large foundation model.
+
+::: {.column-margin}
+```{=latex}
+\vspace*{-47mm}
+```
+![](images/svg/vol1_responsible_engr_margin_003.svg){width="100%" fig-alt="Model-training emissions versus one passenger-car year."}
+
+*Training one model can rival a car's annual carbon.*
+:::
 
 ```{python}
 #| label: carbon-scale-calc
@@ -2289,15 +2330,6 @@ class CarbonScaleCalc:
 
 **Systems insight**: Under the training-energy scenario above, the carbon footprint is equivalent to the annual emissions of `{python} CarbonScaleCalc.cars_eq_str` cars. At this scale, efficiency transforms from a technical preference into a responsibility constraint. Every 1 percent improvement in the efficiency $(\eta_{\text{hw}})$ of the training pipeline removes the equivalent of about `{python} CarbonScaleCalc.one_percent_improvement_cars_str`' annual emissions from the calculation.
 
-::: {.column-margin}
-```{=latex}
-\vspace*{-47mm}
-```
-![](images/svg/vol1_responsible_engr_margin_003.svg){width="100%" fig-alt="Model-training emissions versus one passenger-car year."}
-
-*Training one model can rival a car's annual carbon.*
-:::
-
 ::::
 
 The key insight is that efficiency optimization and environmental responsibility align: the techniques that reduce inference costs also reduce carbon emissions per prediction. More granular carbon accounting methodologies build on this foundation for organizations requiring detailed environmental impact analysis: lifecycle assessment tracks impacts across the system's full life, scope 1/2/3 emissions separate direct emissions, purchased electricity, and supply-chain or use-phase emissions, and carbon-aware scheduling shifts work toward lower-carbon times or regions.
@@ -2350,13 +2382,6 @@ The Meta fines make the governance question concrete: a system must prove why it
 
 The storage architectures examined in @sec-data-engineering are governance enforcement mechanisms\index{Data Governance!enforcement mechanisms} that determine who accesses data, how usage is tracked, and whether systems comply with regulatory requirements. Every architectural decision, from acquisition strategies through processing pipelines to storage design, carries governance implications that manifest when systems face regulatory audits, privacy violations, or ethical challenges. Data governance transforms from abstract policy into concrete engineering: access control systems that enforce who can read training data, audit infrastructure that tracks every data access for compliance, privacy-preserving techniques that protect individuals while enabling model training, and lineage systems that document how raw audio recordings become production models.
 
-Data governance encompasses four interconnected domains that make security, privacy, compliance, and lineage mutually dependent enforcement constraints:
-
-- **Security infrastructure**: Protects data assets through access control and encryption, establishing the perimeter within which all other governance operates.
-- **Privacy mechanisms**: Determine what information is exposed even to authorized users, respecting individual rights while enabling model training.
-- **Compliance frameworks**: Translate jurisdiction-specific regulatory requirements into architectural constraints that shape how data flows through the system.
-- **Lineage and audit systems**: Create the accountability trails that make the first three domains verifiable. Without them, security policies, privacy guarantees, and compliance claims are unenforceable assertions rather than demonstrable properties.
-
 ::: {#pri-responsible-engr-compliance-engineering .callout-principle title="Compliance as Engineering Constraint"}
 
 **Invariant**: Data governance obligations are engineering requirements, not optional policy overlays.
@@ -2365,6 +2390,13 @@ Data governance encompasses four interconnected domains that make security, priv
 
 :::
 
+Data governance encompasses four interconnected domains that make security, privacy, compliance, and lineage mutually dependent enforcement constraints:
+
+- **Security infrastructure**: Protects data assets through access control and encryption, establishing the perimeter within which all other governance operates.
+- **Privacy mechanisms**: Determine what information is exposed even to authorized users, respecting individual rights while enabling model training.
+- **Compliance frameworks**: Translate jurisdiction-specific regulatory requirements into architectural constraints that shape how data flows through the system.
+- **Lineage and audit systems**: Create the accountability trails that make the first three domains verifiable. Without them, security policies, privacy guarantees, and compliance claims are unenforceable assertions rather than demonstrable properties.
+
 The Lighthouse KWS system, the keyword-spotting voice assistant introduced in @sec-ml-systems as the Tiny Constraint lighthouse, illustrates how the fairness risks identified in @tbl-fairness-archetype intensify at the governance level. Always-listening devices continuously process audio in users' homes, feature stores maintain voice pattern histories across millions of users, and edge storage caches models derived from population-wide training data. These capabilities create governance obligations around consent management, data minimization, access auditing, and deletion rights.
 
 For the KWS system, the four domains become concrete enforcement questions. Security determines who may reach data through encryption at rest and in transit, role-based access controls, and audit logging of every query against the feature store. Privacy determines what the system may retain beyond its immediate training purpose through differential privacy and data minimization. Compliance determines which regulatory duties constrain data flow, translating GDPR and CCPA requirements into erasure pipelines and consent management APIs. Lineage and audit determine how the system proves what happened through documentation of data provenance, model lineage, and decision audit trails. @Fig-data-governance-pillars shows the broader operating model that supports these domains: organization, policies, data catalogs, data sourcing, data quality, data operations, data security, and shared definitions. The domains and this broader operating model must work together because a failure in any one undermines the others: encrypted data with no access controls is still vulnerable, and compliant storage without verifiable audit trails cannot survive a regulatory audit. In the context of the D·A·M taxonomy, governance provides the structural integrity for the data axis, ensuring that the fuel for our systems remains safe, compliant, and reliable across the entire data lifecycle.
@@ -2372,7 +2404,7 @@ For the KWS system, the four domains become concrete enforcement questions. Secu
 ::: {#fig-data-governance-pillars fig-env="figure" fig-pos="htb" fig-cap="**Data Governance Framework**: A comprehensive data governance framework weaves together many interconnected topical elements (Organization, Policies, Data catalogs, Data Sourcing, Data quality & master Data, Data Operations, Data Security, and Data & analytic definitions) that together deliver the obligations of privacy, security, compliance, and transparency across the data lifecycle." fig-alt="Circular diagram with 'Data Governance' at center, surrounded by eight topical elements: Organization, Policies, Data catalogs, Data & analytic definitions, Data Sourcing, Data quality & master Data, Data Operations, Data Security."}
 
 ```{.tikz}
-\resizebox{.8\textwidth}{!}{
+\resizebox{.75\textwidth}{!}{
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}]
 %Gear style
 % #1 number of teeths
@@ -2577,7 +2609,7 @@ arr/.style = {-{Triangle[length=3mm,width=6mm]}, color=#1,line width=3mm, shorte
 % Satellites around the planet
 \foreach \i [count=\k] in {red,cyan, purple, green!80!black!70!, orange, yellow,brown!80!,violet}
 {
-\node (s\k) [satellite=\i] at (\k*45:3.8) {};
+\node (s\k) [satellite=\i] at (\k*45:3.6) {};
 }
 % Arcs around satellites
 \def\ra{24mm}
@@ -2631,21 +2663,21 @@ Access control and encryption establish *who* can reach data and *how* it is pro
 
 ### Technical privacy protection methods {#sec-responsible-engineering-technical-privacy-protection-methods-4a74}
 
-A data scientist with legitimate access to training data does not need, and should not see, individual user records when aggregate statistics suffice. Privacy-preserving techniques\index{Privacy!technical protection methods}[^fn-privacy-techniques-hierarchy] address this gap by determining what information systems expose even to authorized users, adding a second layer of protection beyond access control. Differential privacy\index{Differential Privacy!formal guarantees} provides formal mathematical guarantees that individual training examples do not leak through model behavior. Implementing differential privacy in production requires careful engineering: adding calibrated noise\index{Differential Privacy!noise injection} during model development, tracking privacy budgets\index{Differential Privacy!epsilon budget} across all data uses, and validating that deployed models satisfy privacy guarantees through testing infrastructure that attempts to extract training data through membership inference attacks\index{Membership Inference Attack!privacy testing}.[^fn-membership-inference-privacy]
+A data scientist with legitimate access to training data does not need, and should not see, individual user records when aggregate statistics suffice. Privacy-preserving techniques\index{Privacy!technical protection methods}[^fn-privacy-techniques-hierarchy] address this gap by determining what information systems expose even to authorized users, adding a second layer of protection beyond access control. Differential privacy\index{Differential Privacy!formal guarantees} provides a formal bound on how much one record can affect the output distribution. Implementing differential privacy in production requires careful engineering: applying a mechanism with calibrated noise\index{Differential Privacy!noise injection}, tracking privacy budgets\index{Differential Privacy!epsilon budget} with a valid accountant across composed data uses, and testing the implementation. Membership inference attacks\index{Membership Inference Attack!privacy testing} can supplement these checks but cannot establish the formal guarantee.[^fn-membership-inference-privacy]
 
 [^fn-privacy-techniques-hierarchy]: **Privacy-Preserving Techniques**\index{Privacy!technique hierarchy}: Before differential privacy, the field relied on syntactic guarantees: k-anonymity [@sweeney2002] ensures each record is indistinguishable from $k-1$ others, l-diversity adds attribute variety within equivalence classes [@machanavajjhala2007ldiversity], and t-closeness bounds distribution distance [@li2007tcloseness]. These syntactic methods do not by themselves protect against all ML-specific leakage: a model trained on de-identified data can still memorize examples or reveal membership signal under some conditions [@shokri2017membership]. Differential privacy's semantic guarantee ($\epsilon$-bounded influence per record) is stronger against arbitrary side information, explaining why it displaced syntactic methods for many ML training settings despite its utility cost.
 
-[^fn-membership-inference-privacy]: **Membership Inference Attack**\index{Membership Inference Attack!privacy validation}: The attack exploits a model's higher prediction confidence on examples from its training set, a direct signal of overfitting [@shokri2017membership]. Membership inference provides a validation method for the privacy engineering described: if an attacker can determine that a specific record was used for training, the privacy guarantee is violated, even if the record's content is not exposed. The attack's measured success depends on overfitting, model access, data distribution, and defense assumptions.
+[^fn-membership-inference-privacy]: **Membership Inference Attack**\index{Membership Inference Attack!privacy validation}: The attack uses model behavior to infer whether a record appeared in training; overfitting can increase the signal [@shokri2017membership]. In practice, higher confidence on training samples can help distinguish members from nonmembers. Its measured success depends on model access, data distribution, and defense assumptions. A successful empirical attack reveals practical leakage, but it does not alone prove violation of a stated $(\epsilon, \delta)$ bound. Formal differential privacy comes from the mechanism and its accounting.
 
 KWS systems face particularly acute privacy challenges because the always-listening architecture requires processing audio continuously while minimizing data retention and exposure\index{Privacy!always-listening devices}. Production systems implement privacy through three architectural choices:
 
-- **On-device processing**: Ensures that wake word detection runs entirely locally, with audio never transmitted unless the wake word is detected.
-- **Federated learning**\index{Federated Learning!privacy preservation}: Allows devices to train on local audio and improve wake word detection while sharing only aggregated model updates, never raw recordings.[^fn-federated-learning-minimization]
+- **On-device processing**: Can keep wake word detection local, with audio transmitted only after detection under the stated design.
+- **Federated learning**\index{Federated Learning!privacy preservation}: Allows devices to train on local audio and share model updates rather than raw recordings; aggregation and privacy controls still matter.[^fn-federated-learning-minimization]
 - **Automatic deletion policies**: Ensure that detected wake word audio is retained only briefly for quality monitoring before being permanently removed from storage. Data lakes can implement lifecycle policies that delete voice samples after a stated retention period unless explicitly tagged for approved longer-term use, and feature stores can implement time-to-live (TTL) fields that cause user voice patterns to expire and be purged from online serving stores.
 
 Together, these choices minimize what leaves the device, what the server can reconstruct, and how long sensitive traces persist.
 
-[^fn-federated-learning-minimization]: **Federated Learning**\index{Federated Learning!data minimization}: From Latin *foedus* (treaty, covenant)---the name describes independent entities collaborating while retaining autonomy. @mcmahan2017communication introduced Federated Averaging\index{Federated Averaging!data minimization} (FedAvg): each device trains locally and shares only gradient updates, never raw data. The etymology explains the design: federated learning provides "data minimization by architecture." However, gradient updates can leak training data through reconstruction attacks [@zhu2019deep]\index{Reconstruction Attack!federated learning vulnerability}, motivating the combination of federated learning with differential privacy---a defense-in-depth pattern where neither mechanism alone suffices.
+[^fn-federated-learning-minimization]: **Federated Learning**\index{Federated Learning!data minimization}: From Latin *foedus* (treaty, covenant)---the name describes independent entities collaborating while retaining autonomy. @mcmahan2017communication introduced Federated Averaging\index{Federated Averaging!data minimization} (FedAvg): each device trains locally and shares model updates rather than raw data. The etymology explains the design: federated learning provides "data minimization by architecture." However, model updates can leak training data through reconstruction attacks [@zhu2019deep]\index{Reconstruction Attack!federated learning vulnerability}, motivating the combination of federated learning with differential privacy---a defense-in-depth pattern where neither mechanism alone suffices.
 
 ### Architecting for regulatory compliance {#sec-responsible-engineering-architecting-regulatory-compliance-eb56}
 
@@ -2704,7 +2736,7 @@ age range presentation. It can be used in conjunction with Open Images V6.};
 \scoped[on background layer]
 \node[draw=none,fit=(N11)(N13)](BB1){};
 %%%%%%%2
-\node[TextB2,below=of N11.south west,anchor=north west](N21){Authorship};
+\node[TextB2,below=8mm of N11.south west,anchor=north west](N21){Authorship};
 \node[TextBLUE,below=0mm of N21.south west,anchor=north west](N22){PUBLISHER(S)};
 \node[TextB3,below=0mm of N22.south west,anchor=north west](N23){Google LLC};
 \node[TextBLUE,right=16mm of N22.east,anchor=west](N24){INDUSTRY TYPE};
@@ -2714,7 +2746,7 @@ age range presentation. It can be used in conjunction with Open Images V6.};
 Susanna Ricco, Google, 2021 \\ Utsav Prabhu, Google, 2021 \\ Vittorio Ferrari, Google, 2021\\
 Caroline Pantofaru, Google, 2021};
 %
-\node[TextBLUE,below=16mm of N22.south west,anchor=north west](N28){PUBLISHER(S)};
+\node[TextBLUE,below=15mm of N22.south west,anchor=north west](N28){PUBLISHER(S)};
 \node[TextB3,below=0mm of N28.south west,anchor=north west](N29){Google LLC};
 \path[red](N28)-|coordinate(S21)(N25.south west);
 \node[TextBLUE,anchor=west](N24)at(S21){FUNDING TYPE};
@@ -2725,8 +2757,8 @@ Caroline Pantofaru, Google, 2021};
 xshift=1.5mm](N212){open-images-extended@google.com};
 %
 %%%% 3
-\node[TextB2,below=36mm of N21.south west,anchor=north west](N31){Motivations};
-\node[TextBLUE,below=1mm of N31.south west,anchor=north west](N32){DATASET PURPOSE(S)};
+\node[TextB2,below=34mm of N21.south west,anchor=north west](N31){Motivations};
+\node[TextBLUE,below=0mm of N31.south west,anchor=north west](N32){DATASET PURPOSE(S)};
 \node[TextB3,below=0mm of N32.south west,anchor=north west](N33){Research Purposes\\[1ex]
 Machine Learning};
 \node[TextF,below=0mm of N33.south west,anchor=north west](N33a){Training, testing, and validation};
@@ -2743,11 +2775,11 @@ and\\ fairness evaluation with respect   to person detection.};
 \node[TextBLUE,below=0mm of N37.south west,anchor=north west](N35){
 See accompanying article~\barrow};
 %
-\node[TextBLUE,below=18mm of N32.south west,anchor=north west](N38){};
+\node[TextBLUE,below=17mm of N32.south west,anchor=north west](N38){};
 \node[TextB3,below=0mm of N38.south west,anchor=north west](N39){};
 \path[red](N38)-|coordinate(S31)(N34.south west);
 \node[TextBLUE,anchor=west](N39)at(S31){PRIMARY MOTIVATION(S)};
-\node[TextF,below=0mm of N39.south west,anchor=north west,text width=50mm, align=flush left](N310){%
+\node[TextF,below=-1mm of N39.south west,anchor=north west,text width=50mm, align=flush left](N310){%
 \leftmargini=9pt\vspace*{-4mm}
 \begin{itemize} \itemsep=-3pt
 \item Provide more complete ground-truth for bounding boxes around people.
@@ -2756,15 +2788,15 @@ See accompanying article~\barrow};
 %
 \path[red](N38)-|coordinate(S32)(N35.south west);
 \node[TextBLUE,anchor=west](N34)at(S32){INTENDED AND/OR SUITABLE USE CASE(S)};
-\node[TextF,below=0mm of N34.south west,anchor=north west,text width=72mm, align=flush left](N310){%
+\node[TextF,below=-1mm of N34.south west,anchor=north west,text width=75mm, align=flush left](N310){%
 \leftmargini=9pt\vspace*{-4mm}
 \begin{itemize} \itemsep=-3pt
 \item \textbf{ML Model Evaluation for:} person detection, fairness evaluation
 \item \textbf{ML Model Training for:} person detection, Object detection
-\end{itemize}\vspace*{-1mm}
+\end{itemize}\vspace*{-2mm}
 Also: \\\vspace*{-2mm}
 \leftmargini=9pt
-\begin{itemize} \itemsep=-3pt
+\begin{itemize}\itemsep=-3pt\vspace*{-1mm}
 \item \textbf{Person detection:} Without specifying gender or age presentations\\
 \item \textbf{Fairness evaluations:} Over gender and age presentations\\
 \item \textbf{Fairness research:} Without building gender presentation or age classifiers
@@ -2772,7 +2804,7 @@ Also: \\\vspace*{-2mm}
 };
 \path[red](N38)-|coordinate(S32)(N36);
 %%%%%%%%%%4
-\node[TextB2,below=58mm of N31.south west,anchor=north west](N41){Use of Dataset};
+\node[TextB2,below=52mm of N31.south west,anchor=north west](N41){Use of Dataset};
 \node[TextBLUE,below=0mm of N41.south west,anchor=north west](N42){SAFETY OF USE};
 \node[TextB3,below=0mm of N42.south west,anchor=north west](N43){Conditional Use};
 \node[TextF,below=0mm of N43.south west,anchor=north west](N431){There are some known\\ unsafe applications.};
@@ -2788,7 +2820,7 @@ Also: \\\vspace*{-2mm}
 \node[TextBLUE,anchor=west](N46)at(S401){UNSAFE USE CASE(S)};
 \node[TextF,below=0mm of N46.south west,anchor=north west,text width=72mm](N47){This dataset should not be used to create gender or age classifiers. The intention of perceived gender and age labels is to capture gender and age presentation as assessed by a third party based on visual cues alone, rather than an individual's self-identified gender or actual age.};
 %
-\node[TextBLUE,below=15mm of N42.south west,anchor=north west](N48){CONJUNCTIONAL USE};
+\node[TextBLUE,below=14mm of N42.south west,anchor=north west](N48){CONJUNCTIONAL USE};
 \node[TextB3,below=0mm of N48.south west,anchor=north west](N49){Safe to use with\\ other datasets};
 \path[red](N48)-|coordinate(S41)(N44.south west);
 \node[TextBLUE,anchor=west](N44)at(S41){KNOWN CONJUNCTIONAL DATASET(S)};
@@ -2802,7 +2834,7 @@ Also: \\\vspace*{-2mm}
 \node[TextF,below=0mm of N411.south west,anchor=north west,
 ](N412){Analyzing bounding box annotations not annotated under\\ the Open Images V6 procedure.};
 %%%%%%%%%%%%%%%%5
-\node[TextBLUE,below=36mm of N41.south west,anchor=north west](N52){METHOD};
+\node[TextBLUE,below=35mm of N41.south west,anchor=north west](N52){METHOD};
 \node[TextB3,below=0mm of N52.south west,anchor=north west](N53){Object Detection};
 %
 \path[red](N52)-|coordinate(S50)(N44.south west);
@@ -2811,14 +2843,14 @@ Also: \\\vspace*{-2mm}
 %
 \path[red](N52)-|coordinate(S501)(N411.south west);
 \node[TextBLUE,anchor=west](N56)at(S501){KNOWN CAVEATS};
-\node[TextF,below=0mm of N56.south west,anchor=north west,text width=72mm](N57){
+\node[TextF,below=0mm of N56.south west,anchor=north west,text width=74mm](N57){
 If this dataset is used in conjunction with the original Open Images dataset, negative examples
-of people should only be pulled from images with an explicit negative person image level label.
-\medskip
+of people should only be pulled from images with an explicit negative person image level label.\\
+\smallskip
 The dataset does not contain any examples not annotated as containing at least one person
 by the original Open Images annotation procedure.};
 %
-\node[TextBLUE,below=19mm of N52.south west,anchor=north west](N58){METHOD};
+\node[TextBLUE,below=17mm of N52.south west,anchor=north west](N58){METHOD};
 \node[TextB3,below=0mm of N58.south west,anchor=north west](N59){Fairness Evaluation};
 \path[red](N58)-|coordinate(S51)(N54.south west);
 \node[TextBLUE,anchor=west](N54)at(S51){SUMMARY};
@@ -2826,7 +2858,7 @@ by the original Open Images annotation procedure.};
 of gender presentation and age presentation.};
 \path[red](N58)-|coordinate(S52)(N56.south west);
 \node[TextBLUE,anchor=west](N511)at(S52){KNOWN CAVEATS};
-\node[TextF,below=0mm of N511.south west,anchor=north west,text width=72mm](N512){There still
+\node[TextF,below=0mm of N511.south west,anchor=north west,text width=74mm](N512){There still
 exists a gender presentation skew towards unknown and predominantly masculine, as well as an
 age presentation range skew towards middle.};
 %
@@ -2834,7 +2866,7 @@ age presentation range skew towards middle.};
 \scoped[on background layer]
 \node[draw=BrownLine,inner xsep=0mm,inner ysep=0mm,yshift=0mm,
       fill=BrownL!10,fit=(BB1)(BB5),line width=0.75pt](BB){};
-\foreach \i in{0.097,0.298,0.60,0.80}{
+\foreach \i in{0.303,0.595,0.80}{
 \draw[BrownLine,line width=0.75pt]($(BB.north west)!\i!(BB.south west)$)--($(BB.north east)!\i!(BB.south east)$);
 }
 \foreach \i in{0.097}{
@@ -2847,7 +2879,7 @@ age presentation range skew towards middle.};
 
 ### Building data lineage infrastructure {#sec-responsible-engineering-building-data-lineage-infrastructure-3128}
 
-Data-card fields become operational checks once they enter the pipeline: provenance, intended use, risk, and retention metadata determine which datasets can train which models and which artifacts must be traced during an audit. Compliance obligations are only as credible as the infrastructure that demonstrates them. When a regulator asks "which training data produced this model?" or a user invokes their right to erasure, the organization must answer with engineering precision, not manual investigation. Data lineage provides this capability, transforming compliance documentation into operational infrastructure that powers governance across the ML lifecycle. Modern lineage systems like Apache Atlas and DataHub[^fn-data-lineage-compliance] integrate with pipeline orchestrators (Airflow, Kubeflow) to automatically capture relationships: when an Airflow directed acyclic graph (DAG) reads audio files from S3 and transforms them into spectrograms, the lineage system records each step, creating a graph that traces any feature back to its source audio file. Automated tracking proves essential for deletion requests. When a user invokes GDPR rights, the lineage graph identifies all derived artifacts (extracted features, computed embeddings, trained model versions) that must be removed or retrained.
+Data-card fields become operational checks once they enter the pipeline: provenance, intended use, risk, and retention metadata determine which datasets can train which models and which artifacts must be traced during an audit. Compliance obligations are only as credible as the infrastructure that demonstrates them. When a regulator asks "which training data produced this model?" or a user invokes an applicable right to erasure, the organization must answer with engineering precision, not manual investigation. Data lineage provides this capability, transforming compliance documentation into operational infrastructure that powers governance across the ML lifecycle. Modern lineage systems like Apache Atlas and DataHub[^fn-data-lineage-compliance] can integrate with pipeline orchestrators such as Airflow and Kubeflow to capture relationships automatically. When an Airflow directed acyclic graph (DAG) reads audio files from S3 and transforms them into spectrograms, the lineage system records each step, creating a graph that traces a feature back to its source audio file. Automated tracking also supports deletion requests. When a user invokes applicable erasure rights, the lineage graph identifies candidate derived artifacts---features, embeddings, and trained model versions---for the appropriate deletion, invalidation, restriction, unlearning, retraining, or legal-review workflow.
 
 [^fn-data-lineage-compliance]: **Data Lineage Systems**\index{Data Lineage!GDPR compliance}: Apache Atlas and LinkedIn's DataHub capture metadata about data flows automatically from pipeline execution logs, creating directed graphs where nodes are datasets and edges are transformations. GDPR Article 30 requires detailed records of processing activities [@gdpr2016], making automated lineage tracking essential: when a user invokes the right to erasure\index{Right to Erasure!data lineage requirement}, the lineage graph identifies candidate derived artifacts---features, embeddings, and trained model versions---that require deletion, retraining, or legal review, a task that is infeasible manually at production scale.
 
@@ -2861,9 +2893,9 @@ Production KWS systems implement lineage tracking across all stages of the data 
 *Audit logs grow without bound as decisions are retained.*
 :::
 
-Lineage tracks *what* data exists and *how* it transforms through the pipeline. Governance also requires knowing *who* accessed data and *when*: the accountability dimension that lineage alone cannot provide. Audit systems\index{Audit Trail!accountability logging} record these access events, creating accountability trails required by regulations like HIPAA and SOX\index{HIPAA!audit requirements}[^fn-audit-trail-scale]. Production ML systems generate enormous audit volumes, necessitating specialized infrastructure: immutable append-only storage that prevents tampering with historical records, efficient indexing that enables querying specific user or dataset accesses, and automated analysis that detects anomalous patterns indicating potential security breaches or policy violations.
+Lineage tracks *what* data exists and *how* it transforms through the pipeline. Governance also requires knowing *who* accessed data and *when*, an accountability dimension lineage alone cannot provide. Audit systems\index{Audit Trail!accountability logging} record these access events, creating accountability trails for obligations such as HIPAA and SOX\index{HIPAA!audit requirements} where applicable.[^fn-audit-trail-scale] Production ML systems generate enormous audit volumes, necessitating specialized infrastructure, including tamper-evident, access-controlled logs, efficient indexing that supports queries for specific user or dataset accesses, automated analysis that detects anomalous patterns, and retention/deletion rules matched to the governing obligation.
 
-[^fn-audit-trail-scale]: **Audit Trail**\index{Audit Trail!storage scale}: The append-only requirement (audit entries can be added but never modified or deleted) forces write-once storage architectures, typically implemented as append-only columnar stores (Apache Iceberg, Delta Lake) or cryptographic hash chains. A large platform may log billions of events daily; HIPAA's Security Rule also imposes multi-year documentation-retention obligations for required policies and procedures [@hhs2005hipaasecurity]. Storage cost therefore grows with deployment lifetime and retained decision volume, making audit-retention planning a first-class concern at deployment time, not an afterthought.
+[^fn-audit-trail-scale]: **Audit Trail**\index{Audit Trail!storage scale}: Audit integrity requires controls against unauthorized alteration, but retention and deletion duties vary by record type and law. Append-only object storage with retention controls, or cryptographic hash chains, can provide tamper evidence without creating a universal rule that records are never deleted. A large platform may log billions of events daily; HIPAA's Security Rule also imposes multi-year documentation-retention obligations for required policies and procedures [@hhs2005hipaasecurity]. Retention planning must distinguish records that must be preserved from personal data that must be minimized or deleted.
 
 KWS systems implement multi-tier audit architectures\index{Audit Trail!multi-tier logging} that balance granularity against performance and cost:
 
@@ -2873,7 +2905,7 @@ KWS systems implement multi-tier audit architectures\index{Audit Trail!multi-tie
 
 The tiers split audit work according to where evidence is generated, while preserving enough context to reconstruct access and deletion claims.
 
-Regulatory requirements extend audit responsibility to prediction-time behavior. Answering "why was this specific applicant denied a loan?" requires logs that capture not only who queried the model but the exact feature vector presented at inference time and the resulting prediction score or decision. Without inference-time logging, audit trails answer data-access questions but cannot reconstruct the causal chain from input features to a specific decision, which is exactly the chain that adverse-action notice laws and GDPR Article 22 contestability rights demand. Production audit infrastructure must therefore capture the full prediction context: input feature values, model version, decision threshold, and output, stored immutably and indexed by the entity identifier so that per-decision reconstruction is a query, not a manual investigation.\index{Audit Trail!inference-time logging}
+Regulatory requirements extend audit responsibility to prediction-time behavior. Answering "why was this specific applicant denied a loan?" requires enough context to reconstruct the decision, but not necessarily a permanent copy of every raw feature. Without inference-time logging, an audit trail may answer access questions without reconstructing which model, threshold, and evidence produced a specific decision. Production audit infrastructure should retain the minimum purpose-limited evidence required---for example, model version, decision threshold, output, reason codes, and selected input provenance---with access controls, retention limits, and identifiers appropriate to the governing rules. The goal is to make per-decision reconstruction a controlled query rather than a manual investigation.\index{Audit Trail!inference-time logging}
 
 Together, the four governance domains---security, privacy, compliance, and audit---form the enforcement layer that makes every other practice in this chapter durable. Data governance ensures that measurements are captured, actions are recorded, and commitments are verifiable under regulatory scrutiny. Without this infrastructure, responsible engineering remains aspirational; with it, responsibility becomes a demonstrable system property.
 
@@ -2881,11 +2913,13 @@ Together, the four governance domains---security, privacy, compliance, and audit
 
 Teams can still fail after assembling assessment frameworks, fairness metrics, explainability mechanisms, efficiency analyses, and governance infrastructure. A team may retrofit fairness after benchmark success, trust aggregate accuracy, or treat compliance evidence as paperwork rather than system behavior, drawing on intuitions from traditional software engineering where bugs are local and testing is deterministic. Recognizing these failure patterns early, before a fallacy shapes a design decision, is far cheaper than discovering it after deployment.
 
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Responsibility can be addressed after the system achieves technical objectives.*
 
 Teams assume fairness constraints can be retrofitted once models demonstrate strong benchmark performance. In production, early architectural decisions constrain what interventions remain feasible. Amazon's recruiting tool (see @sec-responsible-engineering-optimization-succeeds-systems-fail-1a22) illustrates this trap: remediation failed because the model had learned proxy signals, leading to project cancellation after considerable investment. Organizations deferring responsibility face expensive redesign, deployment with documented risks, or cancellation. Integrating fairness constraints at system inception is usually cheaper than retrofitting them after data contracts, monitoring, and release gates are already fixed.
 
-**Pitfall**: *Relying on aggregate metrics to assess fairness.*
+:::
 
 ```{python}
 #| label: fairness-pitfall-summary-anchor
@@ -2927,21 +2961,37 @@ class FairnessPitfallAnchor:
     fnr_ratio_mult_str = fmt_multiple(fnr_ratio, precision=0, commas=False)
 ```
 
-Engineers assume high overall accuracy indicates the system works well for all users. The Flaw of Averages (@sec-responsible-engineering-testing-across-populations-9f20) reveals this intuition fails: aggregate metrics conceal disparities exceeding 40$\times$ between demographic groups (@sec-responsible-engineering-testing-challenge-77b0). The loan approval analysis in @sec-responsible-engineering-worked-example-fairness-analysis-loan-approval-2c72 showed a `{python} FairnessPitfallAnchor.tpr_disparity_str` TPR gap, meaning qualified minority applicants faced `{python} FairnessPitfallAnchor.fnr_ratio_mult_str` higher rejection rates. These disparities persist for months undetected because standard monitoring tracks only aggregates. Production systems require disaggregated evaluation with alerts when subgroup disparity exceeds 1.25$\times$ error rate ratio or 5 percentage point TPR difference.
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Relying on aggregate metrics to assess fairness.*
+
+Engineers assume high overall accuracy indicates the system works well for all users. The Flaw of Averages (@sec-responsible-engineering-testing-across-populations-9f20) reveals this intuition fails: aggregate metrics can conceal large subgroup disparities (@sec-responsible-engineering-testing-challenge-77b0). The loan approval analysis in @sec-responsible-engineering-worked-example-fairness-analysis-loan-approval-2c72 showed a `{python} FairnessPitfallAnchor.tpr_disparity_str` TPR gap, meaning qualified minority applicants faced `{python} FairnessPitfallAnchor.fnr_ratio_mult_str` higher rejection rates. These disparities can persist undetected when standard monitoring tracks only aggregates. Production systems require disaggregated evaluation with application-specific thresholds, such as the 1.25$\times$ error-rate ratio or 5 percentage point TPR difference used in this example.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Fallacy**: *Removing sensitive attributes from training data eliminates bias.*
 
 Teams remove gender, race, and protected attributes\index{Bias!attribute removal fallacy} expecting this ensures fairness. Models reconstruct protected attributes through proxy variables\index{Proxy Variable!bias reconstruction} that correlate with sensitive characteristics. ZIP codes, purchase patterns, browsing history, college names, and language choices can all carry indirect demographic signal. Amazon's system (see @sec-responsible-engineering-optimization-succeeds-systems-fail-1a22) learned gender from college names and activity descriptions despite explicit removal. Healthcare algorithms excluded race but encoded unequal access through cost history; a population-health study found that correcting the bias would increase the share of Black patients receiving additional help from 17.7 percent to 46.5 percent [@obermeyer2019]. Feature removal without causal analysis creates false confidence while bias persists.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Pitfall**: *Treating documentation as sufficient accountability.*
 
 Teams invest effort in model cards, then consider responsibility requirements satisfied. Documentation provides transparency (@sec-responsible-engineering-model-documentation-standards-bef6) but not enforcement. A model card specifying "not validated for high-stakes decisions" has no effect when the system is repurposed for loan approvals without technical restrictions. Accountability requires operational integration: monitoring dashboards, documented subgroup-disparity alert thresholds, incident response procedures, and access controls preventing deployment beyond validated use cases.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Fallacy**: *Responsible AI is primarily a legal compliance issue.*
 
 Teams treat responsibility as external oversight rather than engineering practice. Engineering decisions made months before legal review constrain the solution space more than any compliance assessment. Architecture selection determines what fairness interventions are feasible, while data pipeline design establishes whether disaggregated evaluation is even possible. As @sec-responsible-engineering-engineering-leadership-responsibility-e03c establishes, systems designed with responsibility as an engineering objective enable efficient validation; systems where responsibility is added at late-stage review face redesign or deployment with documented risks.
 
-**Pitfall**: *Measuring the environmental impact of training but not inference.*
+:::
 
 ```{python}
 #| echo: false
@@ -2964,7 +3014,7 @@ class ResponsibleTcoRecap:
     t_cycles_3yr = 12
     i_users = 10_000_000
     i_recs_per_user = 20
-    i_latency = 10 * ms  # scenario assumption
+    i_latency = 10 * ms  # dedicated accelerator service demand; illustrative unbatched, non-overlapped scenario
     o_monitor_yr = 50000.0 * USD  # scenario assumption
     o_oncall_yr = 100000.0 * USD  # scenario assumption
     o_incident_yr = 20000.0 * USD  # scenario assumption
@@ -3004,25 +3054,35 @@ class ResponsibleTcoRecap:
     quant_carbon_tonnes_str = fmt_qty_int(savings_carbon, metric_ton, commas=False)
 ```
 
-Public discourse focuses on the carbon cost of training runs, and engineers naturally follow this framing when assessing environmental responsibility. The TCO analysis in @sec-responsible-engineering-total-cost-ownership-35c1 reveals why this focus is misplaced: inference-to-training cost ratios can exceed 40:1 over a model's operational lifetime. A model trained once but served millions of times daily has its environmental footprint dominated by inference, not training. For the recommendation system analyzed in @tbl-tco-summary, training accounts for just `{python} ResponsibleTcoRecap.p_train_str` of three-year costs while inference accounts for `{python} ResponsibleTcoRecap.p_inf_str`. The carbon ratio is even more lopsided in this example, with inference emitting about `{python} ResponsibleTcoRecap.carbon_train_ratio_str` times as much CO~2~ as training. Engineers who optimize training efficiency while ignoring per-query inference costs address the smaller term in a lopsided equation, leaving the dominant source of environmental impact unexamined.
+::: {.fallacy-pitfall}
+
+**Pitfall**: *Measuring the environmental impact of training but not inference.*
+
+Public discourse focuses on training-run carbon, and engineers often follow this framing when assessing environmental responsibility. The illustrative TCO analysis in @sec-responsible-engineering-total-cost-ownership-35c1 shows why this focus is incomplete: under its unbatched service-demand assumptions, the inference-to-training cost ratio is about 40:1. A model trained periodically but served millions of times daily can have a lifecycle footprint dominated by inference rather than training. For the recommendation system analyzed in @tbl-tco-summary, training accounts for `{python} ResponsibleTcoRecap.p_train_str` of three-year costs while inference accounts for `{python} ResponsibleTcoRecap.p_inf_str`. In this example, inference emits about `{python} ResponsibleTcoRecap.carbon_train_ratio_str` times as much CO~2~ as training. Engineers who optimize training efficiency while ignoring per-query inference demand can leave the larger term in this scenario unexamined. These values are scenario-dependent, but they show why lifecycle accounting must include both terms.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Fallacy**: *Model weights are exempt from data governance and deletion requests.*
 
 Teams often assume that once training data has been compiled into model weights, the data is gone and compliance obligations no longer apply. This assumption is wrong on technical grounds and risky on legal grounds. Models can memorize training data: membership inference attacks (@sec-responsible-engineering-technical-privacy-protection-methods-4a74) demonstrate that an attacker may determine whether a specific record appeared in the training set [@shokri2017membership], meaning model artifacts can carry privacy-relevant signal. When a user invokes the right to erasure under GDPR, a system that deletes the source records but leaves affected model artifacts unanalyzed may still have an unresolved governance obligation. The engineering response is to track which user data contributed to which model versions and to evaluate retraining, targeted machine unlearning, or compensating controls when deletion requests propagate through the artifact graph [@cao2015; @bourtoule2021]. Teams that treat model artifacts as outside the data governance perimeter create a compliance gap that grows with every deployment and cannot be closed after the fact.\index{Data Governance!model artifact compliance}\index{Model Weights!data governance obligations}
 
+:::
+
 ## Summary {#sec-responsible-engineering-summary-45cf}
 
 Responsible engineering is ML systems engineering done completely, not a separate discipline. The chapter traced a path from failure diagnosis through prevention to enforcement, beginning with the responsibility gap (the distance between technical performance and responsible outcomes) and demonstrating how proxy variables, feedback loops, and distribution shift cause systems to harm users while meeting every conventional metric. The engineering response includes checklists that systematize predeployment assessment, fairness metrics that make disparities measurable, explainability mechanisms that satisfy regulatory and stakeholder requirements, and monitoring infrastructure that detects silent failures before they accumulate harm.
 
-The key insight unifying these tools is that translating responsibility concerns into measurable properties\index{Measurable Property!responsibility requirements} makes them tractable. "Fairness gap <5 percent across groups" is actionable; "be fair" is not. This translation extends beyond fairness: efficiency becomes carbon accounting and TCO analysis, where a `{python} ResponsibleTcoRecap.quant_reduction_pct_str` latency reduction through quantization saves `{python} ResponsibleTcoRecap.quant_savings_str` and eliminates `{python} ResponsibleTcoRecap.quant_carbon_tonnes_str` of CO~2~. Documentation becomes model cards with explicit intended use and known limitations. Governance becomes access control, lineage tracking, and audit infrastructure that makes compliance demonstrable rather than aspirational. At every level, the same pattern holds: abstract ethical obligations become concrete engineering requirements that can be specified, tested, monitored, and enforced.
+The key insight unifying these tools is that translating responsibility concerns into measurable properties\index{Measurable Property!responsibility requirements} makes them tractable. "Fairness gap <5 percent across groups" is actionable; "be fair" is not. This translation extends beyond fairness: in the chapter's TCO scenario, a `{python} ResponsibleTcoRecap.quant_reduction_pct_str` accelerator-service-demand reduction saves `{python} ResponsibleTcoRecap.quant_savings_str` and eliminates `{python} ResponsibleTcoRecap.quant_carbon_tonnes_str` of CO~2~. Documentation becomes model cards with explicit intended use and known limitations. Governance becomes access control, lineage tracking, and audit infrastructure that makes compliance demonstrable rather than aspirational. At every level, the same pattern holds: abstract ethical obligations become concrete engineering requirements that can be specified, tested, monitored, and enforced.
 
 The responsible engineering practices developed in this chapter are integral components of complete engineering, not external constraints layered onto technical work. Systems that ignore fairness, efficiency, transparency, or governance are technically incomplete. The same rigor applied to latency budgets and memory constraints must extend to demographic parity, environmental impact, and regulatory compliance. Engineers who integrate these considerations from system inception build systems that are not only more ethical but more robust, more maintainable, and more likely to succeed in production.
 
 ::: {.callout-takeaways title="Reliable for whom?"}
 
-* **Aggregate correctness hides harm**: A model can report 95 percent accuracy while producing `{python} GenderShadesDisparity.disparity_factor_mult_str` error-rate disparities across demographic groups. Responsible evaluation therefore starts with disaggregated and intersectional slices, not aggregate accuracy alone.
+* **Aggregate correctness hides harm**: A model can report 95 percent accuracy while one subgroup's error rate is `{python} GenderShadesDisparity.disparity_factor_mult_str` another subgroup's rate, as in the Face++ Gender Shades audit. Responsible evaluation therefore starts with disaggregated and intersectional slices, not aggregate accuracy alone.
 * **Responsibility becomes testable through thresholds**: "Be fair" is not testable, but bounded disparity, documented intended use, and explainability requirements are. Translating values into measurable constraints lets teams place fairness, accuracy, latency, and cost on the same reviewable Pareto frontier.
-* **Efficiency is a social constraint**: A 4$\times$ more efficient model uses 4$\times$ less energy, costs 4$\times$ less, and broadens who can deploy it. Because inference dominates total cost by `{python} ResponsibleTcoRecap.inf_train_ratio_str`:1 over training, per-query optimization is responsible engineering.
+* **Efficiency is a social constraint**: An efficient model can reduce energy and cost and broaden who can deploy it. In the chapter's illustrative scenario, inference dominates total cost by `{python} ResponsibleTcoRecap.inf_train_ratio_str`:1 over training, making per-query optimization responsible engineering.
 * **Monitoring must watch outcomes**: Bias and privacy failures can continue with green uptime dashboards because harmful predictions look operationally normal. Production monitoring must track subgroup outcomes, data lineage, feedback loops, and incident paths with the same rigor as latency regressions.
 * **Governance has to be built in**: Model cards, datasheets, access controls, erasure workflows, human-review paths, and audit trails are technical infrastructure. Regulations such as GDPR require capabilities that cannot be retrofitted after a pipeline is already serving decisions.
 

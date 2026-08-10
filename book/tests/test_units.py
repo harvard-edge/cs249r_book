@@ -203,7 +203,7 @@ def test_flop_units():
     ok &= check("Mobile 35 TOPS", MOBILE_NPU_TOPS_INT8.to(TOPS).magnitude, 35.0)
 
     # Model FLOPs
-    ok &= check("ResNet 4.1 GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 4.1)
+    ok &= check("ResNet 8.2 GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 8.2)
     ok &= check("YOLOv8-nano 8.7 GFLOPs", YOLOV8_NANO_FLOPs.to(GFLOPs).magnitude, 8.7)
     return ok
 
@@ -237,7 +237,7 @@ def test_memory_bandwidth():
     ok &= check("A100 ~2 TB/s", A100_MEM_BW.to(TB / second).magnitude, 2.039)
     ok &= check("V100 900 GB/s", V100_MEM_BW.to(GB / second).magnitude, 900.0)
     ok &= check("H100 3350 GB/s", H100_MEM_BW.to(GB / second).magnitude, 3350.0)
-    ok &= check("Mobile 100 GB/s", MOBILE_NPU_MEM_BW.to(GB / second).magnitude, 100.0)
+    ok &= check("Mobile 51.2 GB/s", MOBILE_NPU_MEM_BW.to(GB / second).magnitude, 51.2)
     return ok
 
 
@@ -280,7 +280,7 @@ def test_derived_values():
 
     # Roofline analysis
     result = calc_bottleneck(RESNET50_FLOPs, fp16_bytes, A100_FLOPS_FP16_TENSOR, A100_MEM_BW)
-    ok &= check("A100 ResNet compute_ms small", result["compute_ms"], 0.013, tol=0.1)
+    ok &= check("A100 ResNet compute_ms small", result["compute_ms"], 0.026, tol=0.1)
     ok &= check("A100 ResNet memory_ms small", result["memory_ms"], 0.025, tol=0.1)
 
     return ok
@@ -420,7 +420,7 @@ def test_model_specs():
     ok &= check("MobileNetV2 3.5 Mparam", MOBILENETV2_PARAMS.to(Mparam).magnitude, 3.5)
     ok &= check("Llama3-8B 8030 Mparam", LLAMA3_8B_PARAMS.to(Mparam).magnitude, 8030.0)
     ok &= check("BERT 22 GFLOPs", BERT_BASE_FLOPs.to(GFLOPs).magnitude, 22.0)
-    ok &= check("MobileNetV2 0.3 GFLOPs", MOBILENETV2_FLOPs.to(GFLOPs).magnitude, 0.3)
+    ok &= check("MobileNetV2 0.6 GFLOPs", MOBILENETV2_FLOPs.to(GFLOPs).magnitude, 0.6)
     return ok
 
 
@@ -451,7 +451,7 @@ def test_formula_helpers():
 
     # fmt()
     ok &= check("fmt GB/s", float(fmt(A100_MEM_BW, "GB/s", precision=0, commas=False)), 2039.0)
-    ok &= check("fmt ms", float(fmt(RESNET50_FLOPs / A100_FLOPS_FP16_TENSOR, "ms", 3, commas=False)), 0.013, tol=0.1)
+    ok &= check("fmt ms", float(fmt(RESNET50_FLOPs / A100_FLOPS_FP16_TENSOR, "ms", 3, commas=False)), 0.026, tol=0.1)
 
     # fmt_unit()
     if fmt_unit(A100_FLOPS_FP16_TENSOR) != "TFLOP/s":

@@ -1,134 +1,82 @@
 from __future__ import annotations
 
+import csv
 import json
+import math
 import os
 import sys
 import time
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import torch
-import torch.nn.functional as F
-from torch.utils.data import DataLoader, TensorDataset
 
-from mlperf.assets import DatasetAsset, ensure_mnist, sha256_file
+from mlperf.assets import (
+    MLPERF_TINY_ANOMALY_ARCHIVE_MD5,
+    MLPERF_TINY_ANOMALY_COMMIT,
+    MLPERF_TINY_ANOMALY_FLOAT_MODEL_SHA256,
+    MLPERF_TINY_ANOMALY_INT8_MODEL_SHA256,
+    MLPERF_TINY_ANOMALY_MEMBER_MANIFEST_SHA256,
+    MLPERF_TINY_VWW_COMMIT,
+    MLPERF_TINY_VWW_FLOAT_MODEL_SHA256,
+    MLPERF_TINY_VWW_INT8_MODEL_SHA256,
+    ensure_mlperf_tiny_anomaly,
+    ensure_mlperf_tiny_kws,
+    ensure_mlperf_tiny_vww,
+    mlperf_tiny_anomaly_paths,
+    mlperf_tiny_kws_paths,
+    mlperf_tiny_vww_paths,
+)
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
+from mlperf.runners.common import (
+    configured_seed,
+    select_torch_device,
+    synchronize_device,
+)
 
 
-def run_anomaly_ae_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run a deterministic one-step anomaly autoencoder training smoke."""
-    root = find_project_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from reference.tiny.anomaly_detection_ae import AnomalyDetectionAE
-
-    seed = 42
-    torch.manual_seed(seed)
-    device = torch.device("cpu")
-    batch_size = 4
-    input_dim = 784
-
-    model = AnomalyDetectionAE(input_dim=input_dim, bottleneck_dim=8).to(device)
-    model.train()
-    inputs = torch.rand(batch_size, input_dim, device=device)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
-    start = time.perf_counter()
-    reconstruction, loss = model(inputs)
-    loss.backward()
-    optimizer.step()
-    duration = time.perf_counter() - start
-
-    scores = model.anomaly_score(inputs).detach().cpu()
-    n_params = sum(p.numel() for p in model.parameters())
-
-    output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "anomaly-ae-train_min_report.json").resolve()
-    manifest_path = (output_dir / "anomaly-ae-train_min.provd.json").resolve()
-    report = {
-        "schema": "mlperf-edu-report/0.1",
-        "id": workload.id,
-        "workload": workload.id,
-        "suite": workload.suite,
-        "profile": "min",
-        "status": "passed",
-        "backend": "pytorch-cpu",
-        "data_mode": "synthetic-deterministic",
-        "seed": seed,
-        "metrics": {
-            "reconstruction_mse": float(loss.item()),
-            "duration_seconds": float(duration),
-            "samples": batch_size,
-            "samples_per_second": float(batch_size / duration),
-            "n_params": int(n_params),
-            "input_shape": list(inputs.shape),
-            "reconstruction_shape": list(reconstruction.shape),
-            "anomaly_score_mean": float(scores.mean().item()),
-        },
-        "quality": {
-            "metric": workload.quality_metric,
-            "target": workload.quality_value,
-            "quality_required": False,
-            "note": "min profile validates autoencoder execution only; max profile owns MNIST reconstruction checks.",
-        },
-        "artifacts": {
-            "report": str(report_path),
-            "provenance": str(manifest_path),
-        },
-    }
-    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
-    manifest = build_provd(
-        workload=workload.id,
-        scenario="train",
-        division="open",
-        hardware_fingerprint=detect_hardware(),
-        report=report,
-        report_path=report_path,
-        dataset_name="synthetic-deterministic-vectors",
-        dataset_files=[],
-        rng_seed=seed,
-        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
-        repo_root=root,
+def _canonical_config_int(
+    workload: Workload,
+    key: str,
+    environment_variable: str,
+    fallback: int,
+) -> int:
+    """Resolve a runner knob from an override or the canonical registry config."""
+    canonical_config = (workload.raw.get("canonical_max_contract") or {}).get(
+        "config"
+    ) or {}
+    return int(
+        os.environ.get(environment_variable, str(canonical_config.get(key, fallback)))
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
-    return report
 
 
-def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run a deterministic one-step DS-CNN keyword-spotting smoke."""
+def run_keyword_spotting_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
+    """Run a deterministic smoke test of the MLPerf Tiny DS-CNN graph."""
     root = find_project_root()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.dscnn_kws import DSCNN
+    from mlperf.reference.tiny.mlperf_tiny_kws import MLPerfTinyKWS
 
-    seed = 42
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 4
+    model = MLPerfTinyKWS().to(device).eval()
+    inputs = torch.randn(batch_size, 1, 49, 10, device=device)
 
-    model = DSCNN(num_classes=12).to(device)
-    model.train()
-    inputs = torch.randn(batch_size, 1, 40, 101, device=device)
-    labels = torch.randint(0, 12, (batch_size,), dtype=torch.long, device=device)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     start = time.perf_counter()
-    logits, loss = model(inputs, targets=labels)
-    assert loss is not None
-    loss.backward()
-    optimizer.step()
+    with torch.inference_mode():
+        logits = model(inputs)
     duration = time.perf_counter() - start
-
-    accuracy = float((logits.detach().argmax(dim=1) == labels).float().mean().item())
-    n_params = sum(p.numel() for p in model.parameters())
+    n_params = sum(parameter.numel() for parameter in model.parameters())
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "dscnn-kws-train_min_report.json").resolve()
-    manifest_path = (output_dir / "dscnn-kws-train_min.provd.json").resolve()
+    report_path = (output_dir / f"{workload.id}_min_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_min.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
@@ -140,8 +88,6 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "data_mode": "synthetic-deterministic",
         "seed": seed,
         "metrics": {
-            "loss": float(loss.item()),
-            "accuracy": accuracy,
             "duration_seconds": float(duration),
             "samples": batch_size,
             "samples_per_second": float(batch_size / duration),
@@ -155,7 +101,10 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "metric": workload.quality_metric,
             "target": workload.quality_value,
             "quality_required": False,
-            "note": "min profile validates DS-CNN execution only; max profile will own Speech Commands quality checks.",
+            "note": (
+                "The min profile validates the pinned DS-CNN graph only. The max "
+                "profile owns the official 1,000-example accuracy contract."
+            ),
         },
         "artifacts": {
             "report": str(report_path),
@@ -165,7 +114,7 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "offline",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
@@ -176,42 +125,196 @@ def run_dscnn_kws_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
-def run_wake_vision_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run a deterministic one-step visual wake-word smoke."""
+def run_keyword_spotting_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
+    """Evaluate the official MLPerf Tiny DS-CNN through its PyTorch adapter."""
     root = find_project_root()
     if str(root) not in sys.path:
         sys.path.insert(0, str(root))
 
-    from reference.tiny.wake_vision_vww import MicroNet
+    from mlperf.reference.tiny.mlperf_tiny_kws import load_mlperf_tiny_kws
 
-    seed = 42
+    seed = configured_seed()
+    torch.manual_seed(seed)
+    device = select_torch_device()
+    batch_size = _canonical_config_int(
+        workload,
+        "batch_size",
+        "MLPERF_EDU_KEYWORD_SPOTTING_MAX_BATCH_SIZE",
+        64,
+    )
+    warmup_repetitions = _canonical_config_int(
+        workload,
+        "warmup_repetitions",
+        "MLPERF_EDU_KEYWORD_SPOTTING_MAX_WARMUP_REPETITIONS",
+        1000,
+    )
+    repetitions = _canonical_config_int(
+        workload,
+        "repetitions",
+        "MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS",
+        2000,
+    )
+    if batch_size < 1 or warmup_repetitions < 1 or repetitions < 1:
+        raise ValueError(
+            "keyword spotting requires positive batch size, warmup repetitions, "
+            "and measured repetitions"
+        )
+
+    asset = ensure_mlperf_tiny_kws(download=True)
+    paths = mlperf_tiny_kws_paths()
+    model, adapter = load_mlperf_tiny_kws(paths["float_model"], paths["int8_model"])
+    model = model.to(device).eval()
+    inputs, labels = _load_mlperf_tiny_kws_accuracy_set(
+        asset.root,
+        scale=float(adapter["input_scale"]),
+        zero_point=int(adapter["input_zero_point"]),
+    )
+    inputs = inputs.to(device)
+    labels = labels.to(device)
+
+    with torch.inference_mode():
+        for warmup_size in sorted({batch_size, len(inputs) % batch_size} - {0}):
+            model(inputs[:warmup_size])
+        for _ in range(warmup_repetitions):
+            for start_index in range(0, len(inputs), batch_size):
+                model(inputs[start_index : start_index + batch_size])
+    synchronize_device(device)
+    outputs: list[torch.Tensor] = []
+    start = time.perf_counter()
+    with torch.inference_mode():
+        for repetition in range(repetitions):
+            for start_index in range(0, len(inputs), batch_size):
+                logits = model(inputs[start_index : start_index + batch_size])
+                if repetition == 0:
+                    outputs.append(logits.detach())
+    synchronize_device(device)
+    duration = time.perf_counter() - start
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError(
+            "keyword-spotting inference duration must be finite and positive"
+        )
+
+    predictions = torch.cat(outputs).argmax(dim=1)
+    accuracy = float((predictions == labels).float().mean().item())
+    target = float(workload.quality_value or 0.90)
+    target_met = accuracy >= target
+    n_params = sum(parameter.numel() for parameter in model.parameters())
+    total_samples = len(inputs) * repetitions
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = (output_dir / f"{workload.id}_max_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_max.provd.json").resolve()
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "id": workload.id,
+        "workload": workload.id,
+        "suite": workload.suite,
+        "profile": "max",
+        "status": "passed" if target_met else "quality_failed",
+        "backend": f"pytorch-{device.type}",
+        "model": "mlperf-tiny-ds-cnn",
+        "data_mode": "real-preprocessed-mlperf-tiny-accuracy-set",
+        "dataset": {
+            "name": asset.name,
+            "source": asset.source,
+            "root": str(asset.root),
+            "sha256": asset.sha256,
+            "n_bytes": asset.n_bytes,
+        },
+        "model_source": adapter,
+        "seed": seed,
+        "measurement_protocol": workload.raw.get("measurement_protocol", {}),
+        "config": {
+            "batch_size": batch_size,
+            "warmup_repetitions": warmup_repetitions,
+            "repetitions": repetitions,
+            "samples": len(inputs),
+            "input_shape": [1, 49, 10],
+            "source_input_dtype": "int8",
+            "execution_dtype": "float32",
+            "adapter": "fused-tflite-weights-to-pytorch-v1",
+        },
+        "metrics": {
+            "top1_accuracy": accuracy,
+            "evaluation_samples": len(inputs),
+            "duration_seconds": duration,
+            "inference_seconds": duration,
+            "samples": total_samples,
+            "samples_per_second": total_samples / duration,
+            "n_params": n_params,
+        },
+        "quality": {
+            "metric": workload.quality_metric,
+            "metric_key": "top1_accuracy",
+            "target": target,
+            "direction": "higher",
+            "target_met": target_met,
+            "quality_required": True,
+            "override": False,
+        },
+        "artifacts": {
+            "report": str(report_path),
+            "provenance": str(manifest_path),
+            "weights": str(paths["float_model"]),
+            "source_float_model": str(paths["float_model"]),
+            "source_int8_model": str(paths["int8_model"]),
+        },
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    manifest = build_provd(
+        workload=workload.id,
+        scenario=workload.scenario or "offline",
+        division="open",
+        hardware_fingerprint=detect_hardware(),
+        report=report,
+        report_path=report_path,
+        weights_path=paths["float_model"],
+        weights_n_params=n_params,
+        weights_dtype="float32",
+        dataset_name=asset.name,
+        dataset_files=list(asset.files),
+        rng_seed=seed,
+        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
+        repo_root=root,
+    )
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
+    return report
+
+
+def run_anomaly_detection_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
+    """Run a deterministic smoke test of the MLPerf Tiny autoencoder graph."""
+    root = find_project_root()
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+
+    from mlperf.reference.tiny.mlperf_tiny_anomaly import (
+        MLPerfTinyAnomalyAutoencoder,
+    )
+
+    seed = configured_seed()
     torch.manual_seed(seed)
     device = torch.device("cpu")
     batch_size = 4
+    model = MLPerfTinyAnomalyAutoencoder().to(device).eval()
+    inputs = torch.randn(batch_size, 640, device=device)
 
-    model = MicroNet(num_classes=2).to(device)
-    model.train()
-    inputs = torch.randn(batch_size, 1, 96, 96, device=device)
-    labels = torch.randint(0, 2, (batch_size,), dtype=torch.long, device=device)
-
-    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-3)
     start = time.perf_counter()
-    logits = model(inputs)
-    loss = F.cross_entropy(logits, labels)
-    loss.backward()
-    optimizer.step()
+    with torch.inference_mode():
+        reconstructions = model(inputs)
     duration = time.perf_counter() - start
-
-    accuracy = float((logits.detach().argmax(dim=1) == labels).float().mean().item())
-    n_params = sum(p.numel() for p in model.parameters())
+    n_params = sum(parameter.numel() for parameter in model.parameters())
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "wake-vision-vww_min_report.json").resolve()
-    manifest_path = (output_dir / "wake-vision-vww_min.provd.json").resolve()
+    report_path = (output_dir / f"{workload.id}_min_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_min.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
@@ -223,22 +326,22 @@ def run_wake_vision_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "data_mode": "synthetic-deterministic",
         "seed": seed,
         "metrics": {
-            "loss": float(loss.item()),
-            "accuracy": accuracy,
             "duration_seconds": float(duration),
             "samples": batch_size,
             "samples_per_second": float(batch_size / duration),
             "n_params": int(n_params),
             "model_size_bytes_fp32": int(n_params * 4),
-            "model_size_bytes_int8": int(n_params),
             "input_shape": list(inputs.shape),
-            "logits_shape": list(logits.shape),
+            "reconstruction_shape": list(reconstructions.shape),
         },
         "quality": {
             "metric": workload.quality_metric,
             "target": workload.quality_value,
             "quality_required": False,
-            "note": "min profile validates MicroNet execution only; max profile will own Wake Vision quality checks.",
+            "note": (
+                "The min profile validates the pinned dense autoencoder graph only. "
+                "The max profile owns the complete 248-recording ROC AUC contract."
+            ),
         },
         "artifacts": {
             "report": str(report_path),
@@ -248,168 +351,123 @@ def run_wake_vision_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "offline",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        dataset_name="synthetic-deterministic-vww-images",
+        dataset_name="synthetic-deterministic-mel-windows",
         dataset_files=[],
         rng_seed=seed,
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
-def run_dscnn_kws_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run a synthetic micro-shard DS-CNN keyword-spotting training profile."""
+def run_anomaly_detection_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
+    """Evaluate the complete MLPerf Tiny ToyCar accuracy set in PyTorch."""
+    from sklearn.metrics import roc_auc_score
+
+    from mlperf.reference.tiny.mlperf_tiny_anomaly import load_mlperf_tiny_anomaly
+
     root = find_project_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from reference.tiny.dscnn_kws import DSCNN
-
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
+    seed = configured_seed()
     torch.manual_seed(seed)
-    device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
-    batch_size = int(os.environ.get("MLPERF_EDU_DSCNN_MAX_BATCH_SIZE", "8"))
-    train_batches = int(os.environ.get("MLPERF_EDU_DSCNN_MAX_BATCHES", "5"))
-    val_batches = int(os.environ.get("MLPERF_EDU_DSCNN_MAX_VAL_BATCHES", "2"))
-    lr = float(os.environ.get("MLPERF_EDU_DSCNN_MAX_LR", "0.001"))
-
-    train_loader, val_loader = _synthetic_classifier_loaders(
-        train_shape=(train_batches * batch_size, 1, 40, 101),
-        val_shape=(val_batches * batch_size, 1, 40, 101),
-        n_classes=12,
-        batch_size=batch_size,
-        seed=seed,
-    )
-    model = DSCNN(num_classes=12).to(device)
-    return _run_tiny_classifier_max(
+    device = select_torch_device()
+    batch_size = _canonical_config_int(
         workload,
-        output_dir,
-        root=root,
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        device=device,
-        seed=seed,
-        lr=lr,
-        max_train_batches=train_batches,
-        max_val_batches=val_batches,
-        dataset_name="synthetic-deterministic-speech-commands-microshard",
-        report_stem="dscnn-kws-train",
-        quality_note="max profile validates repeatable DS-CNN training and checkpointing on a synthetic micro-shard; Speech Commands quality is a future real-data check.",
+        "batch_size",
+        "MLPERF_EDU_ANOMALY_DETECTION_MAX_BATCH_SIZE",
+        512,
     )
-
-
-def run_wake_vision_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run a synthetic micro-shard visual wake-word training profile."""
-    root = find_project_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from reference.tiny.wake_vision_vww import MicroNet
-
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
-    torch.manual_seed(seed)
-    device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
-    batch_size = int(os.environ.get("MLPERF_EDU_WAKE_MAX_BATCH_SIZE", "8"))
-    train_batches = int(os.environ.get("MLPERF_EDU_WAKE_MAX_BATCHES", "5"))
-    val_batches = int(os.environ.get("MLPERF_EDU_WAKE_MAX_VAL_BATCHES", "2"))
-    lr = float(os.environ.get("MLPERF_EDU_WAKE_MAX_LR", "0.001"))
-
-    train_loader, val_loader = _synthetic_classifier_loaders(
-        train_shape=(train_batches * batch_size, 1, 96, 96),
-        val_shape=(val_batches * batch_size, 1, 96, 96),
-        n_classes=2,
-        batch_size=batch_size,
-        seed=seed,
-    )
-    model = MicroNet(num_classes=2).to(device)
-    return _run_tiny_classifier_max(
+    warmup_repetitions = _canonical_config_int(
         workload,
-        output_dir,
-        root=root,
-        model=model,
-        train_loader=train_loader,
-        val_loader=val_loader,
-        device=device,
-        seed=seed,
-        lr=lr,
-        max_train_batches=train_batches,
-        max_val_batches=val_batches,
-        dataset_name="synthetic-deterministic-wake-vision-microshard",
-        report_stem="wake-vision-vww",
-        quality_note="max profile validates repeatable MicroNet training and checkpointing on a synthetic micro-shard; Wake Vision quality is a future real-data check.",
+        "warmup_repetitions",
+        "MLPERF_EDU_ANOMALY_DETECTION_MAX_WARMUP_REPETITIONS",
+        1,
     )
-
-
-def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
-    """Run anomaly autoencoder on MNIST or an explicit local tensor shard."""
-    root = find_project_root()
-    if str(root) not in sys.path:
-        sys.path.insert(0, str(root))
-
-    from reference.tiny.anomaly_detection_ae import AnomalyDetectionAE, get_mnist_anomaly_dataloaders
-
-    seed = int(os.environ.get("MLPERF_EDU_MAX_SEED", 42))
-    torch.manual_seed(seed)
-    device = torch.device(os.environ.get("MLPERF_EDU_DEVICE", "cpu"))
-    batch_size = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_BATCH_SIZE", 64))
-    epochs = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_EPOCHS", 20))
-    batches_per_epoch = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_BATCHES_PER_EPOCH", 50))
-    val_batches = int(os.environ.get("MLPERF_EDU_ANOMALY_MAX_VAL_BATCHES", 50))
-    lr = float(os.environ.get("MLPERF_EDU_ANOMALY_MAX_LR", 1e-3))
-
-    shard_path = os.environ.get("MLPERF_EDU_ANOMALY_MAX_TENSOR_PATH")
-    if shard_path:
-        asset, train_loader, val_loader = _load_tensor_shard(Path(shard_path), batch_size)
-    else:
-        asset = ensure_mnist(download=True)
-        train_loader, val_loader = get_mnist_anomaly_dataloaders(
-            batch_size=batch_size,
-            data_dir=str(asset.root),
-            num_workers=0,
+    repetitions = _canonical_config_int(
+        workload,
+        "repetitions",
+        "MLPERF_EDU_ANOMALY_DETECTION_MAX_REPETITIONS",
+        10,
+    )
+    if batch_size < 1 or warmup_repetitions < 1 or repetitions < 1:
+        raise ValueError(
+            "anomaly detection requires positive batch size, warmup repetitions, "
+            "and measured repetitions"
         )
 
-    model = AnomalyDetectionAE(input_dim=784, bottleneck_dim=8).to(device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    asset = ensure_mlperf_tiny_anomaly(download=True)
+    paths = mlperf_tiny_anomaly_paths()
+    model = load_mlperf_tiny_anomaly(paths["float_model"]).to(device).eval()
+    inputs, labels, names = _load_mlperf_tiny_anomaly_accuracy_set(asset.root)
+    inputs = inputs.to(device)
 
-    train_losses: list[float] = []
-    val_losses: list[float] = []
-    epoch_times: list[float] = []
-    samples_seen = 0
+    with torch.inference_mode():
+        for warmup_size in sorted({batch_size, len(inputs) % batch_size} - {0}):
+            model(inputs[:warmup_size])
+        for _ in range(warmup_repetitions):
+            for start_index in range(0, len(inputs), batch_size):
+                model(inputs[start_index : start_index + batch_size])
+    synchronize_device(device)
+    first_errors: list[torch.Tensor] = []
     start = time.perf_counter()
-    for _epoch in range(epochs):
-        t0 = time.perf_counter()
-        train_loss, train_samples = _train_epoch(
-            model,
-            train_loader,
-            optimizer,
-            device,
-            max_batches=batches_per_epoch,
-        )
-        val_loss = _validate(model, val_loader, device, max_batches=val_batches)
-        samples_seen += train_samples
-        train_losses.append(train_loss)
-        val_losses.append(val_loss)
-        epoch_times.append(time.perf_counter() - t0)
+    with torch.inference_mode():
+        for repetition in range(repetitions):
+            for start_index in range(0, len(inputs), batch_size):
+                batch = inputs[start_index : start_index + batch_size]
+                reconstruction = model(batch)
+                if repetition == 0:
+                    first_errors.append(
+                        torch.mean((reconstruction - batch) ** 2, dim=1).cpu()
+                    )
+    synchronize_device(device)
     duration = time.perf_counter() - start
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError("anomaly-detection inference duration must be positive")
 
-    target = float(os.environ.get("MLPERF_EDU_ANOMALY_MAX_MSE_TARGET", workload.quality_value or 0.04))
-    final_reconstruction_mse = train_losses[-1]
-    target_met = final_reconstruction_mse <= target
-    n_params = sum(p.numel() for p in model.parameters())
+    errors = torch.cat(first_errors).reshape(len(labels), 196).mean(dim=1).numpy()
+    roc_auc = float(roc_auc_score(labels, errors))
+    per_id_auc = {
+        machine_id: float(
+            roc_auc_score(
+                [
+                    label
+                    for label, name in zip(labels, names, strict=True)
+                    if f"id_{machine_id}_" in name
+                ],
+                [
+                    score
+                    for score, name in zip(errors, names, strict=True)
+                    if f"id_{machine_id}_" in name
+                ],
+            )
+        )
+        for machine_id in ("01", "02", "03", "04")
+    }
+    target = float(workload.quality_value or 0.85)
+    target_met = roc_auc >= target
+    n_params = sum(parameter.numel() for parameter in model.parameters())
+    total_windows = len(inputs) * repetitions
+    model_source = {
+        "authority": "MLCommons MLPerf Tiny",
+        "repository": "https://github.com/mlcommons/tiny",
+        "commit": MLPERF_TINY_ANOMALY_COMMIT,
+        "float32_tflite_sha256": f"sha256:{MLPERF_TINY_ANOMALY_FLOAT_MODEL_SHA256}",
+        "int8_tflite_sha256": f"sha256:{MLPERF_TINY_ANOMALY_INT8_MODEL_SHA256}",
+        "source_archive_md5": f"md5:{MLPERF_TINY_ANOMALY_ARCHIVE_MD5}",
+        "selected_member_manifest_sha256": f"sha256:{MLPERF_TINY_ANOMALY_MEMBER_MANIFEST_SHA256}",
+        "adapter": "fused-tflite-weights-to-pytorch-v1",
+    }
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / "anomaly-ae-train_max_report.json").resolve()
-    manifest_path = (output_dir / "anomaly-ae-train_max.provd.json").resolve()
-    checkpoint_path = (output_dir / "anomaly-ae-train_max_checkpoint.pt").resolve()
-    torch.save(model.state_dict(), checkpoint_path)
-
+    report_path = (output_dir / f"{workload.id}_max_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_max.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
@@ -418,7 +476,8 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         "profile": "max",
         "status": "passed" if target_met else "quality_failed",
         "backend": f"pytorch-{device.type}",
-        "data_mode": "real" if not shard_path else "local-tensor-shard",
+        "model": "mlperf-tiny-toycar-autoencoder",
+        "data_mode": "real-preprocessed-mlperf-tiny-accuracy-set",
         "dataset": {
             "name": asset.name,
             "source": asset.source,
@@ -426,48 +485,58 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
             "sha256": asset.sha256,
             "n_bytes": asset.n_bytes,
         },
+        "model_source": model_source,
         "seed": seed,
+        "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
             "batch_size": batch_size,
-            "epochs": epochs,
-            "batches_per_epoch": batches_per_epoch,
-            "val_batches": val_batches,
-            "lr": lr,
+            "warmup_repetitions": warmup_repetitions,
+            "repetitions": repetitions,
+            "samples": len(labels),
+            "windows_per_sample": 196,
+            "input_shape": [640],
+            "source_input_dtype": "float32-little-endian",
+            "execution_dtype": "float32",
+            "feature_extractor": "librosa-0.11.0-upstream-recipe",
+            "adapter": "fused-tflite-weights-to-pytorch-v1",
         },
         "metrics": {
-            "final_reconstruction_mse": float(final_reconstruction_mse),
-            "final_val_reconstruction_mse": float(val_losses[-1]),
-            "duration_seconds": float(duration),
-            "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
-            "n_params": int(n_params),
-            "epoch_times": epoch_times,
-            "train_losses": train_losses,
-            "val_losses": val_losses,
+            "roc_auc": roc_auc,
+            "per_machine_id_roc_auc": per_id_auc,
+            "evaluation_samples": len(labels),
+            "evaluation_windows": len(inputs),
+            "duration_seconds": duration,
+            "inference_seconds": duration,
+            "samples": total_windows,
+            "samples_per_second": total_windows / duration,
+            "n_params": n_params,
         },
         "quality": {
             "metric": workload.quality_metric,
+            "metric_key": "roc_auc",
             "target": target,
-            "direction": "lower",
+            "direction": "higher",
             "target_met": target_met,
             "quality_required": True,
-            "override": "MLPERF_EDU_ANOMALY_MAX_MSE_TARGET" in os.environ,
+            "override": False,
         },
         "artifacts": {
             "report": str(report_path),
             "provenance": str(manifest_path),
-            "checkpoint": str(checkpoint_path),
+            "weights": str(paths["float_model"]),
+            "source_float_model": str(paths["float_model"]),
+            "source_int8_model": str(paths["int8_model"]),
         },
     }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "offline",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        weights_path=checkpoint_path,
+        weights_path=paths["float_model"],
         weights_n_params=n_params,
         weights_dtype="float32",
         dataset_name=asset.name,
@@ -476,253 +545,329 @@ def run_anomaly_ae_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
-def _synthetic_classifier_loaders(
-    *,
-    train_shape: tuple[int, ...],
-    val_shape: tuple[int, ...],
-    n_classes: int,
-    batch_size: int,
-    seed: int,
-) -> tuple[DataLoader, DataLoader]:
-    generator = torch.Generator().manual_seed(seed)
-    train_x = torch.randn(*train_shape, generator=generator)
-    val_x = torch.randn(*val_shape, generator=generator)
-    train_y = torch.arange(train_shape[0], dtype=torch.long) % n_classes
-    val_y = torch.arange(val_shape[0], dtype=torch.long) % n_classes
-    return (
-        DataLoader(TensorDataset(train_x, train_y), batch_size=batch_size, shuffle=True, drop_last=True),
-        DataLoader(TensorDataset(val_x, val_y), batch_size=batch_size, shuffle=False, drop_last=True),
-    )
+def run_visual_wake_words_min(workload: Workload, output_dir: Path) -> dict[str, Any]:
+    """Run a deterministic smoke test of the MLPerf Tiny VWW graph."""
+    root = find_project_root()
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
 
+    from mlperf.reference.tiny.mlperf_tiny_vww import MLPerfTinyVWW
 
-def _run_tiny_classifier_max(
-    workload: Workload,
-    output_dir: Path,
-    *,
-    root: Path,
-    model: torch.nn.Module,
-    train_loader: DataLoader,
-    val_loader: DataLoader,
-    device: torch.device,
-    seed: int,
-    lr: float,
-    max_train_batches: int,
-    max_val_batches: int,
-    dataset_name: str,
-    report_stem: str,
-    quality_note: str,
-) -> dict[str, Any]:
-    optimizer = torch.optim.AdamW(model.parameters(), lr=lr)
+    seed = configured_seed()
+    torch.manual_seed(seed)
+    device = torch.device("cpu")
+    batch_size = 4
+    model = MLPerfTinyVWW().to(device).eval()
+    inputs = torch.randn(batch_size, 3, 96, 96, device=device)
+
     start = time.perf_counter()
-    train_loss, train_accuracy, samples_seen = _train_classifier_epoch(
-        model,
-        train_loader,
-        optimizer,
-        device,
-        max_batches=max_train_batches,
-    )
-    val_loss, val_accuracy = _validate_classifier(model, val_loader, device, max_batches=max_val_batches)
+    with torch.inference_mode():
+        probabilities = model(inputs)
     duration = time.perf_counter() - start
-    n_params = sum(p.numel() for p in model.parameters())
+    n_params = sum(parameter.numel() for parameter in model.parameters())
 
     output_dir.mkdir(parents=True, exist_ok=True)
-    report_path = (output_dir / f"{report_stem}_max_report.json").resolve()
-    manifest_path = (output_dir / f"{report_stem}_max.provd.json").resolve()
-    checkpoint_path = (output_dir / f"{report_stem}_max_checkpoint.pt").resolve()
-    torch.save(model.state_dict(), checkpoint_path)
+    report_path = (output_dir / f"{workload.id}_min_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_min.provd.json").resolve()
+    report = {
+        "schema": "mlperf-edu-report/0.1",
+        "id": workload.id,
+        "workload": workload.id,
+        "suite": workload.suite,
+        "profile": "min",
+        "status": "passed",
+        "backend": "pytorch-cpu",
+        "data_mode": "synthetic-deterministic",
+        "seed": seed,
+        "metrics": {
+            "duration_seconds": float(duration),
+            "samples": batch_size,
+            "samples_per_second": float(batch_size / duration),
+            "n_params": int(n_params),
+            "model_size_bytes_fp32": int(n_params * 4),
+            "input_shape": list(inputs.shape),
+            "probabilities_shape": list(probabilities.shape),
+        },
+        "quality": {
+            "metric": workload.quality_metric,
+            "target": workload.quality_value,
+            "quality_required": False,
+            "note": (
+                "The min profile validates the pinned MobileNetV1 graph only. "
+                "The max profile owns the official 1,000-example accuracy contract."
+            ),
+        },
+        "artifacts": {
+            "report": str(report_path),
+            "provenance": str(manifest_path),
+        },
+    }
+    report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
+    manifest = build_provd(
+        workload=workload.id,
+        scenario=workload.scenario or "offline",
+        division="open",
+        hardware_fingerprint=detect_hardware(),
+        report=report,
+        report_path=report_path,
+        dataset_name="synthetic-deterministic-rgb-images",
+        dataset_files=[],
+        rng_seed=seed,
+        torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
+        repo_root=root,
+    )
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
+    return report
 
+
+def run_visual_wake_words_max(workload: Workload, output_dir: Path) -> dict[str, Any]:
+    """Evaluate the official MLPerf Tiny VWW model through its PyTorch adapter."""
+    root = find_project_root()
+    if str(root) not in sys.path:
+        sys.path.insert(0, str(root))
+
+    from mlperf.reference.tiny.mlperf_tiny_vww import load_mlperf_tiny_vww
+
+    seed = configured_seed()
+    torch.manual_seed(seed)
+    device = select_torch_device()
+    batch_size = _canonical_config_int(
+        workload,
+        "batch_size",
+        "MLPERF_EDU_VISUAL_WAKE_WORDS_MAX_BATCH_SIZE",
+        64,
+    )
+    warmup_repetitions = _canonical_config_int(
+        workload,
+        "warmup_repetitions",
+        "MLPERF_EDU_VISUAL_WAKE_WORDS_MAX_WARMUP_REPETITIONS",
+        5,
+    )
+    repetitions = _canonical_config_int(
+        workload,
+        "repetitions",
+        "MLPERF_EDU_VISUAL_WAKE_WORDS_MAX_REPETITIONS",
+        50,
+    )
+    if batch_size < 1 or warmup_repetitions < 1 or repetitions < 1:
+        raise ValueError(
+            "visual wake words requires positive batch size, warmup repetitions, "
+            "and measured repetitions"
+        )
+
+    asset = ensure_mlperf_tiny_vww(download=True)
+    paths = mlperf_tiny_vww_paths()
+    model = load_mlperf_tiny_vww(paths["float_model"]).to(device).eval()
+    inputs, labels = _load_mlperf_tiny_vww_accuracy_set(asset.root)
+    inputs = inputs.to(device)
+    labels = labels.to(device)
+
+    with torch.inference_mode():
+        for warmup_size in sorted({batch_size, len(inputs) % batch_size} - {0}):
+            model(inputs[:warmup_size])
+        for _ in range(warmup_repetitions):
+            for start_index in range(0, len(inputs), batch_size):
+                model(inputs[start_index : start_index + batch_size])
+    synchronize_device(device)
+    outputs: list[torch.Tensor] = []
+    start = time.perf_counter()
+    with torch.inference_mode():
+        for repetition in range(repetitions):
+            for start_index in range(0, len(inputs), batch_size):
+                probabilities = model(inputs[start_index : start_index + batch_size])
+                if repetition == 0:
+                    outputs.append(probabilities.detach())
+    synchronize_device(device)
+    duration = time.perf_counter() - start
+    if not math.isfinite(duration) or duration <= 0:
+        raise RuntimeError(
+            "visual-wake-words inference duration must be finite and positive"
+        )
+
+    predictions = torch.cat(outputs).argmax(dim=1)
+    accuracy = float((predictions == labels).float().mean().item())
+    target = float(workload.quality_value or 0.80)
+    target_met = accuracy >= target
+    n_params = sum(parameter.numel() for parameter in model.parameters())
+    total_samples = len(inputs) * repetitions
+    model_source = {
+        "authority": "MLCommons MLPerf Tiny",
+        "repository": "https://github.com/mlcommons/tiny",
+        "commit": MLPERF_TINY_VWW_COMMIT,
+        "float32_tflite_sha256": f"sha256:{MLPERF_TINY_VWW_FLOAT_MODEL_SHA256}",
+        "int8_tflite_sha256": f"sha256:{MLPERF_TINY_VWW_INT8_MODEL_SHA256}",
+        "adapter": "fused-tflite-weights-to-pytorch-v1",
+        "input_scaling": "RGB float32 divided by 255",
+    }
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+    report_path = (output_dir / f"{workload.id}_max_report.json").resolve()
+    manifest_path = (output_dir / f"{workload.id}_max.provd.json").resolve()
     report = {
         "schema": "mlperf-edu-report/0.1",
         "id": workload.id,
         "workload": workload.id,
         "suite": workload.suite,
         "profile": "max",
-        "status": "passed",
+        "status": "passed" if target_met else "quality_failed",
         "backend": f"pytorch-{device.type}",
-        "data_mode": "synthetic-microshard",
+        "model": "mlperf-tiny-mobilenet-v1-0.25-vww",
+        "data_mode": "real-preprocessed-mlperf-tiny-accuracy-set",
+        "dataset": {
+            "name": asset.name,
+            "source": asset.source,
+            "root": str(asset.root),
+            "sha256": asset.sha256,
+            "n_bytes": asset.n_bytes,
+        },
+        "model_source": model_source,
         "seed": seed,
+        "measurement_protocol": workload.raw.get("measurement_protocol", {}),
         "config": {
-            "batch_size": train_loader.batch_size,
-            "train_batches": max_train_batches,
-            "val_batches": max_val_batches,
-            "lr": lr,
+            "batch_size": batch_size,
+            "warmup_repetitions": warmup_repetitions,
+            "repetitions": repetitions,
+            "samples": len(inputs),
+            "input_shape": [3, 96, 96],
+            "source_input_dtype": "uint8-jpeg",
+            "execution_dtype": "float32",
+            "input_scaling": "divide-by-255",
+            "adapter": "fused-tflite-weights-to-pytorch-v1",
         },
         "metrics": {
-            "final_train_loss": float(train_loss),
-            "final_val_loss": float(val_loss),
-            "final_accuracy": float(val_accuracy),
-            "train_accuracy": float(train_accuracy),
-            "duration_seconds": float(duration),
-            "samples": int(samples_seen),
-            "samples_per_second": float(samples_seen / duration) if duration > 0 else 0.0,
-            "n_params": int(n_params),
-            "model_size_bytes_fp32": int(n_params * 4),
-            "model_size_bytes_int8": int(n_params),
+            "top1_accuracy": accuracy,
+            "correct_predictions": int((predictions == labels).sum().item()),
+            "evaluation_samples": len(inputs),
+            "duration_seconds": duration,
+            "inference_seconds": duration,
+            "samples": total_samples,
+            "samples_per_second": total_samples / duration,
+            "n_params": n_params,
         },
         "quality": {
             "metric": workload.quality_metric,
-            "target": workload.quality_value,
-            "quality_required": False,
-            "note": quality_note,
+            "metric_key": "top1_accuracy",
+            "target": target,
+            "direction": "higher",
+            "target_met": target_met,
+            "quality_required": True,
+            "override": False,
         },
         "artifacts": {
             "report": str(report_path),
             "provenance": str(manifest_path),
-            "checkpoint": str(checkpoint_path),
+            "weights": str(paths["float_model"]),
+            "source_float_model": str(paths["float_model"]),
+            "source_int8_model": str(paths["int8_model"]),
         },
     }
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
     manifest = build_provd(
         workload=workload.id,
-        scenario="train",
+        scenario=workload.scenario or "offline",
         division="open",
         hardware_fingerprint=detect_hardware(),
         report=report,
         report_path=report_path,
-        weights_path=checkpoint_path,
+        weights_path=paths["float_model"],
         weights_n_params=n_params,
         weights_dtype="float32",
-        dataset_name=dataset_name,
-        dataset_files=[],
+        dataset_name=asset.name,
+        dataset_files=list(asset.files),
         rng_seed=seed,
         torch_state_bytes=torch.get_rng_state().numpy().tobytes(),
         repo_root=root,
     )
-    manifest_path.write_text(json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n")
+    manifest_path.write_text(
+        json.dumps(manifest.to_dict(), indent=2, sort_keys=True) + "\n"
+    )
     return report
 
 
-def _train_classifier_epoch(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-    *,
-    max_batches: int,
-) -> tuple[float, float, int]:
-    model.train()
-    losses: list[float] = []
-    correct = 0
-    total = 0
-    for batch_idx, (inputs, labels) in enumerate(loader):
-        if batch_idx >= max_batches:
-            break
-        inputs = inputs.to(device)
-        labels = labels.to(device)
-        optimizer.zero_grad(set_to_none=True)
-        output = model(inputs)
-        if isinstance(output, tuple):
-            logits, loss = output
-            if loss is None:
-                loss = F.cross_entropy(logits, labels)
-        else:
-            logits = output
-            loss = F.cross_entropy(logits, labels)
-        loss.backward()
-        optimizer.step()
-        losses.append(float(loss.item()))
-        correct += int((logits.detach().argmax(dim=1) == labels).sum().item())
-        total += int(labels.numel())
-    avg_loss = sum(losses) / len(losses) if losses else float("inf")
-    accuracy = correct / total if total else 0.0
-    return avg_loss, accuracy, total
+def _load_mlperf_tiny_vww_accuracy_set(
+    dataset_root: Path,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    from PIL import Image
+
+    inputs: list[np.ndarray] = []
+    labels: list[int] = []
+    with (dataset_root / "y_labels.csv").open(newline="") as handle:
+        for row in csv.reader(handle):
+            if len(row) != 3:
+                raise ValueError(f"invalid MLPerf Tiny VWW label row: {row}")
+            stem = Path(row[0].strip()).stem
+            image_path = dataset_root / "images" / f"{stem}.jpg"
+            with Image.open(image_path) as image:
+                rgb = image.convert("RGB")
+                if rgb.size != (96, 96):
+                    raise ValueError(
+                        f"invalid MLPerf Tiny VWW image dimensions: {image_path}"
+                    )
+                inputs.append(
+                    np.asarray(rgb, dtype=np.float32).transpose(2, 0, 1) / 255.0
+                )
+            labels.append(int(row[2]))
+    if len(inputs) != 1000 or sum(labels) != 500:
+        raise ValueError(
+            "MLPerf Tiny VWW accuracy set must contain 1,000 balanced samples"
+        )
+    return torch.from_numpy(np.stack(inputs)), torch.tensor(labels, dtype=torch.long)
 
 
-@torch.no_grad()
-def _validate_classifier(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    *,
-    max_batches: int,
-) -> tuple[float, float]:
-    model.eval()
-    losses: list[float] = []
-    correct = 0
-    total = 0
-    for batch_idx, (inputs, labels) in enumerate(loader):
-        if batch_idx >= max_batches:
-            break
-        inputs = inputs.to(device)
-        labels = labels.to(device)
-        output = model(inputs)
-        if isinstance(output, tuple):
-            logits = output[0]
-        else:
-            logits = output
-        losses.append(float(F.cross_entropy(logits, labels).item()))
-        correct += int((logits.argmax(dim=1) == labels).sum().item())
-        total += int(labels.numel())
-    avg_loss = sum(losses) / len(losses) if losses else float("inf")
-    accuracy = correct / total if total else 0.0
-    return avg_loss, accuracy
+def _load_mlperf_tiny_anomaly_accuracy_set(
+    dataset_root: Path,
+) -> tuple[torch.Tensor, list[int], list[str]]:
+    inputs: list[np.ndarray] = []
+    labels: list[int] = []
+    names: list[str] = []
+    with (dataset_root / "y_labels.csv").open(newline="") as handle:
+        for row in csv.reader(handle):
+            if len(row) != 5 or row[1] != "2" or row[3:] != ["2560", "512"]:
+                raise ValueError(f"invalid MLPerf Tiny anomaly label row: {row}")
+            path = dataset_root / row[0]
+            values = np.fromfile(path, dtype="<f4")
+            if values.size != 200 * 128:
+                raise ValueError(f"invalid MLPerf Tiny anomaly input size: {path}")
+            windows = np.lib.stride_tricks.sliding_window_view(values, 640)[::128]
+            if windows.shape != (196, 640):
+                raise ValueError(f"invalid MLPerf Tiny anomaly windows: {path}")
+            inputs.append(windows.copy())
+            labels.append(int(row[2]))
+            names.append(row[0])
+    if len(inputs) != 248 or labels.count(0) != 140 or labels.count(1) != 108:
+        raise ValueError(
+            "MLPerf Tiny anomaly set must contain 140 normal and 108 anomalous samples"
+        )
+    return torch.from_numpy(np.concatenate(inputs)), labels, names
 
 
-def _load_tensor_shard(path: Path, batch_size: int) -> tuple[DatasetAsset, DataLoader, DataLoader]:
-    data = torch.load(path, map_location="cpu")
-    train_x = data["train"].float()
-    val_x = data["val"].float()
-    train_loader = DataLoader(TensorDataset(train_x), batch_size=batch_size, shuffle=True, drop_last=True)
-    val_loader = DataLoader(TensorDataset(val_x), batch_size=batch_size, shuffle=False, drop_last=True)
-    asset = DatasetAsset(
-        name="mnist-local-tensor-shard",
-        root=path.parent.resolve(),
-        files=(path.resolve(),),
-        sha256=f"sha256:{sha256_file(path)}",
-        n_bytes=path.stat().st_size,
-        source="local-tensor-shard",
-    )
-    return asset, train_loader, val_loader
-
-
-def _batch_inputs(batch, device: torch.device) -> torch.Tensor:
-    x = batch[0] if isinstance(batch, (tuple, list)) else batch
-    return x.to(device).view(x.size(0), -1)
-
-
-def _train_epoch(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    optimizer: torch.optim.Optimizer,
-    device: torch.device,
-    *,
-    max_batches: int,
-) -> tuple[float, int]:
-    model.train()
-    losses: list[float] = []
-    samples = 0
-    for batch_idx, batch in enumerate(loader):
-        if batch_idx >= max_batches:
-            break
-        x = _batch_inputs(batch, device)
-        reconstruction, _ = model(x)
-        loss = F.mse_loss(reconstruction, x)
-        optimizer.zero_grad(set_to_none=True)
-        loss.backward()
-        optimizer.step()
-        losses.append(float(loss.item()))
-        samples += int(x.size(0))
-    return (sum(losses) / len(losses), samples) if losses else (float("inf"), 0)
-
-
-@torch.no_grad()
-def _validate(
-    model: torch.nn.Module,
-    loader: DataLoader,
-    device: torch.device,
-    *,
-    max_batches: int,
-) -> float:
-    model.eval()
-    losses: list[float] = []
-    for batch_idx, batch in enumerate(loader):
-        if batch_idx >= max_batches:
-            break
-        x = _batch_inputs(batch, device)
-        reconstruction, _ = model(x)
-        losses.append(float(F.mse_loss(reconstruction, x).item()))
-    return sum(losses) / len(losses) if losses else float("inf")
+def _load_mlperf_tiny_kws_accuracy_set(
+    dataset_root: Path, *, scale: float, zero_point: int
+) -> tuple[torch.Tensor, torch.Tensor]:
+    inputs: list[np.ndarray] = []
+    labels: list[int] = []
+    with (dataset_root / "y_labels.csv").open(newline="") as handle:
+        for row in csv.reader(handle):
+            if len(row) != 3:
+                raise ValueError(f"invalid MLPerf Tiny KWS label row: {row}")
+            path = dataset_root / row[0]
+            values = np.fromfile(path, dtype=np.int8)
+            if values.size != 49 * 10:
+                raise ValueError(f"invalid MLPerf Tiny KWS input size: {path}")
+            inputs.append(
+                (values.astype(np.float32).reshape(1, 49, 10) - zero_point) * scale
+            )
+            labels.append(int(row[2]))
+    if len(inputs) != 1000:
+        raise ValueError(
+            f"MLPerf Tiny KWS accuracy set expected 1000 samples, found {len(inputs)}"
+        )
+    return torch.from_numpy(np.stack(inputs)), torch.tensor(labels, dtype=torch.long)

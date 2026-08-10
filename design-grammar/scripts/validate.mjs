@@ -15,6 +15,7 @@ import yaml from "js-yaml";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const YAML_PATH = path.join(__dirname, "..", "grammar.yml");
+const REWRITE_RULES_PATH = path.join(__dirname, "..", "rewrite-rules.yml");
 
 const doc = yaml.load(fs.readFileSync(YAML_PATH, "utf8"));
 const issues = [];
@@ -67,6 +68,33 @@ for (const [sym, count] of Object.entries(symCount)) {
   }
 }
 
+// known_collisions notes must actually match the primitives they describe.
+// Previously only `sym` presence was checked, so the free-text `note` field
+// (row/col call-outs) could drift from the real data with nothing to catch it.
+const byId = new Map(doc.primitives.map((e) => [e.id, e]));
+for (const c of doc.known_collisions || []) {
+  const cited = new Map();
+  const re = /#(\d+)[^)]*?row\s*(\d+)\s*col\s*(\d+)/g;
+  let m;
+  while ((m = re.exec(c.note || "")) !== null) {
+    cited.set(Number(m[1]), { layer: Number(m[2]), col: Number(m[3]) });
+  }
+  for (const id of c.ids || []) {
+    const actual = byId.get(id);
+    const claimed = cited.get(id);
+    if (!actual) {
+      issues.push(`known_collisions '${c.sym}': id ${id} does not exist`);
+    } else if (!claimed) {
+      issues.push(`known_collisions '${c.sym}': note does not cite row/col for #${id}`);
+    } else if (claimed.layer !== actual.layer || claimed.col !== actual.col) {
+      issues.push(
+        `known_collisions '${c.sym}': note claims #${id} is row ${claimed.layer} col ${claimed.col}, ` +
+        `but it is actually row ${actual.layer} col ${actual.col}`
+      );
+    }
+  }
+}
+
 // Expression resolution: every two-letter [A-Z][a-z] token in any expression must
 // resolve to a known primitive symbol.
 for (const section of doc.assemblies || []) {
@@ -77,6 +105,27 @@ for (const section of doc.assemblies || []) {
     while ((m = re.exec(cleaned)) !== null) {
       if (!knownSyms.has(m[1])) {
         issues.push(`Assembly "${item.name}" references unknown symbol '${m[1]}': ${item.expression}`);
+      }
+    }
+  }
+}
+
+// ── rewrite-rules.yml ────────────────────────────────────────────────────
+// Previously never read by this validator at all, so drift here was silent
+// and permanent. Check that every rule's `relieves` entries are drawn from
+// the file's own declared constraint vocabulary.
+if (!fs.existsSync(REWRITE_RULES_PATH)) {
+  issues.push(`rewrite-rules.yml not found at ${REWRITE_RULES_PATH}`);
+} else {
+  const rewriteDoc = yaml.load(fs.readFileSync(REWRITE_RULES_PATH, "utf8"));
+  const knownConstraints = new Set(rewriteDoc.constraints || []);
+  const rules = (rewriteDoc && rewriteDoc.rules) || [];
+  for (const rule of rules) {
+    for (const constraint of rule.relieves || []) {
+      if (!knownConstraints.has(constraint)) {
+        issues.push(
+          `rewrite-rules.yml rule '${rule.key}': relieves '${constraint}' is not in the declared constraint vocabulary`
+        );
       }
     }
   }

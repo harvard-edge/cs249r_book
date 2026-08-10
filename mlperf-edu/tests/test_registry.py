@@ -1,12 +1,17 @@
+import hashlib
+import json
 from collections import Counter
+from copy import deepcopy
+from dataclasses import replace
+from importlib import resources
 from pathlib import Path
+
+import pytest
 
 from mlperf.assets import asset_dossier, has_asset_dossier
 from mlperf.registry import (
     EDU_SCENARIOS,
     PROFILES,
-    QUALITY_TARGET_BASES,
-    REFERENCE_PROTOCOL_FIELDS,
     PUBLIC_RESULT_SCENARIOS,
     PUBLIC_STATUSES,
     STARTER_WORKLOAD_ORDER,
@@ -15,10 +20,13 @@ from mlperf.registry import (
     RESEARCH_WORKLOADS,
     STANDARD_WORKLOAD_ORDER,
     STANDARD_WORKLOADS,
+    baseline_lifecycle_issues,
     load_registry,
     public_contract_report,
     select_workloads,
+    validate_registry,
 )
+from mlperf.runners.tiny import _canonical_config_int
 
 
 def test_profiles_are_min_max_pro():
@@ -27,10 +35,44 @@ def test_profiles_are_min_max_pro():
 
 def test_registry_loads_current_workloads():
     workloads = load_registry()
-    assert len(workloads) >= 20
+    assert len(workloads) == 14
     assert STARTER_WORKLOADS.issubset(workloads)
     assert STANDARD_WORKLOADS.issubset(workloads)
     assert RESEARCH_WORKLOADS.issubset(workloads)
+
+
+def test_keyword_spotting_runner_uses_canonical_timing_defaults(monkeypatch):
+    workload = load_registry()["keyword-spotting"]
+
+    assert (
+        _canonical_config_int(
+            workload,
+            "warmup_repetitions",
+            "MLPERF_EDU_KEYWORD_SPOTTING_MAX_WARMUP_REPETITIONS",
+            1,
+        )
+        == 1000
+    )
+    assert (
+        _canonical_config_int(
+            workload,
+            "repetitions",
+            "MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS",
+            1,
+        )
+        == 2000
+    )
+
+    monkeypatch.setenv("MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS", "17")
+    assert (
+        _canonical_config_int(
+            workload,
+            "repetitions",
+            "MLPERF_EDU_KEYWORD_SPOTTING_MAX_REPETITIONS",
+            1,
+        )
+        == 17
+    )
 
 
 def test_packaged_registry_copy_matches_flat_registry():
@@ -38,107 +80,6 @@ def test_packaged_registry_copy_matches_flat_registry():
     flat = repo_root / "workloads.yaml"
     packaged = repo_root / "src" / "mlperf_edu" / "workloads.yaml"
     assert packaged.read_text() == flat.read_text()
-
-
-def test_registry_loads_native_suite_workload_variant_layout(tmp_path):
-    language = tmp_path / "suites" / "language"
-    language.mkdir(parents=True)
-    (language / "nanogpt-train.yaml").write_text(
-        """
-model: nanogpt-12m
-dataset: tinyshakespeare
-quality_target:
-  metric: cross_entropy_loss
-  value: 2.3
-scenario: single_stream
-public:
-  status: systems-only
-  rationale: Native flat workload fixture.
-runner:
-  min: mlperf.runners.nanogpt:run_min
-  max: mlperf.runners.nanogpt:run_max
-""".lstrip()
-    )
-
-    workload_dir = tmp_path / "suites" / "slm" / "smollm2-chat-inference"
-    variants = workload_dir / "variants"
-    variants.mkdir(parents=True)
-    (workload_dir / "workload.yaml").write_text(
-        """
-id: smollm2-chat-inference
-model: SmolLM2-135M-Instruct
-dataset: prompt-suite-local
-quality_target:
-  metric: generated_tokens
-  value: 8
-functional_check:
-  metric: generated_tokens
-  condition: generated_tokens >= 8
-scenario: single_stream
-public:
-  status: performance-bearing
-  rationale: Native canonical workload fixture.
-runner:
-  min: mlperf.runners.slm:run_decode_min
-  max: mlperf.runners.slm:run_decode_max
-""".lstrip()
-    )
-    (variants / "baseline.yaml").write_text(
-        """
-id: slm-decode
-default_variant: true
-""".lstrip()
-    )
-    (variants / "quantized-int8.yaml").write_text(
-        """
-id: slm-quantized-decode
-model: SmolLM2-135M-Instruct dynamic-int8
-runner:
-  min: mlperf.runners.slm:run_quantized_decode_min
-  max: mlperf.runners.slm:run_quantized_decode_max
-""".lstrip()
-    )
-
-    workloads = load_registry(tmp_path, validate=False)
-
-    assert sorted(workloads) == ["nanogpt-train", "slm-decode", "slm-quantized-decode"]
-    assert workloads["nanogpt-train"].suite == "language"
-    assert workloads["slm-decode"].canonical_workload == "smollm2-chat-inference"
-    assert workloads["slm-decode"].variant == "baseline"
-    assert workloads["slm-decode"].default_variant is True
-    assert workloads["slm-quantized-decode"].variant == "quantized-int8"
-    assert workloads["slm-quantized-decode"].raw["runner"]["max"] == "mlperf.runners.slm:run_quantized_decode_max"
-
-
-def test_canonical_workloads_and_variants_live_in_registry():
-    workloads = load_registry()
-
-    slm_variants = {
-        workload.variant: workload.id
-        for workload in workloads.values()
-        if workload.canonical_workload == "smollm2-chat-inference"
-    }
-    nanogpt_variants = {
-        workload.variant: workload.id
-        for workload in workloads.values()
-        if workload.canonical_workload == "nanogpt-inference"
-    }
-
-    assert slm_variants == {
-        "baseline": "slm-decode",
-        "quantized-int8": "slm-quantized-decode",
-        "batched-b4": "slm-batched-decode",
-        "long-context": "slm-long-context-decode",
-    }
-    assert nanogpt_variants == {
-        "prefill": "nanogpt-prefill",
-        "decode": "nanogpt-decode",
-        "fp32-b16": "nanogpt-decode-fp32-b16",
-        "fp16-b16": "nanogpt-decode-fp16-b16",
-        "speculative": "nanogpt-decode-spec",
-    }
-    assert workloads["slm-decode"].default_variant is True
-    assert workloads["nanogpt-decode"].default_variant is True
 
 
 def test_all_workloads_declare_min_and_max_runners():
@@ -156,113 +97,334 @@ def test_all_workloads_declare_public_contract_metadata():
     counts = Counter(workload.public_status for workload in workloads.values())
 
     assert set(counts).issubset(PUBLIC_STATUSES)
-    assert counts == {
-        "score-bearing": 5,
-        "performance-bearing": 4,
-        "systems-only": 21,
-    }
+    assert counts == {"experimental": 14}
     assert all(workload.public_rationale for workload in workloads.values())
+
+
+def test_all_execution_contracts_declare_result_roles():
+    workloads = load_registry()
+
+    for workload in workloads.values():
+        assert workload.raw["canonical_max_contract"]["result_role"] == "score-bearing"
+        assert (
+            workload.raw["canonical_max_contract"]["mode"]
+            in workload.raw["implemented_modes"]
+        )
+        phases = (
+            (workload.raw.get("mode_contracts") or {}).get("inference") or {}
+        ).get("phases", {})
+        for contract in phases.values():
+            assert contract["result_role"] == "performance-bearing"
+
+
+def test_all_measurement_contracts_pin_outer_execution_stabilization():
+    workloads = load_registry()
+
+    for workload in workloads.values():
+        protocols = [workload.raw["measurement_protocol"]]
+        phases = (
+            (workload.raw.get("mode_contracts") or {}).get("inference") or {}
+        ).get("phases", {})
+        protocols.extend(
+            contract["measurement_protocol"] for contract in phases.values()
+        )
+        for protocol in protocols:
+            # Timing repeatability was reduced from five runs to one so the
+            # timing protocol matches the single-run acceptance rule. The
+            # already-measured five-run records are retained as data.
+            assert protocol["outer_reference_runs"] == 1
+            assert isinstance(protocol["outer_preconditioning_runs"], int)
+            assert protocol["outer_preconditioning_runs"] >= 0
+            assert 0 <= protocol["outer_inter_execution_cooldown_seconds"] <= 300
+
+
+def test_all_quality_contracts_require_one_authoritative_acceptance_run():
+    workloads = load_registry()
+
+    assert all(workload.quality_acceptance_runs == 1 for workload in workloads.values())
+
+
+def test_all_quality_contracts_classify_the_target_kind():
+    workloads = load_registry()
+    expected_counts = {
+        "inherited_acceptance_gate": 6,
+        "published_reference_reproduction": 7,
+        "published_mean_with_tolerance": 1,
+    }
+    counts = Counter(workload.quality_target_kind for workload in workloads.values())
+
+    assert counts == expected_counts
+
+
+def test_functional_stage_workloads_separate_probe_from_quality_contract():
+    workloads = load_registry()
+    # Reinforcement learning is absent on purpose. It used to declare
+    # environment-gated-quality-conformance because the only runner was a
+    # CUDA and TensorFlow 1.x container. The PyTorch adapter executes the
+    # contract locally, so it no longer carries an execution_status at all.
+    expected_status = {
+        "code-generation": "quality-audited-target-not-met",
+        "function-calling": "quality-audited-target-not-met",
+        "image-generation": "quality-audited-target-not-met",
+    }
+
+    for workload_id, status in expected_status.items():
+        contract = workloads[workload_id].raw["canonical_max_contract"]
+        assert contract["data_mode"] != "functional-setup-probe"
+        assert contract["config"]
+        assert contract["functional_probe"]
+        assert contract["execution_status"] == status
+
+
+def test_new_quality_contracts_pin_complete_evaluation_boundaries():
+    workloads = load_registry()
+
+    code = workloads["code-generation"].raw["canonical_max_contract"]
+    assert code["config"]["evaluation_tasks"] == 164
+    assert code["config"]["minimum_passing_tasks"] == 94
+    assert code["config"]["prompt_format"] == "qwen2.5-coder-official-chatml"
+    assert code["config"]["max_new_tokens"] == 2048
+    assert "HumanEval-32" in code["config"]["evaluator_reference_self_check"]
+    assert len(code["model_revision"]) == 40
+    assert len(code["evaluator_revision"]) == 40
+    assert len(code["generation_recipe_revision"]) == 40
+
+    functions = workloads["function-calling"].raw["canonical_max_contract"]
+    assert functions["config"]["evaluation_examples"] == 1150
+    assert len(functions["config"]["categories"]) == 6
+    assert len(functions["model_revision"]) == 40
+    assert len(functions["dataset_revision"]) == 40
+    assert len(functions["evaluator_revision"]) == 40
+
+    recommendation = workloads["recommendation"].raw["canonical_max_contract"]
+    assert recommendation["split"] == "leave-one-out-999-negatives"
+    # The candidate count is part of the HR@10 definition, not a tuning knob.
+    assert recommendation["config"]["negatives_per_user_eval"] == 999
+    assert recommendation["config"]["predictive_factors"] == 64
+    assert (
+        workloads["recommendation"].raw["provenance"]["authority"]
+        == "MLCommons MLPerf Training v0.5 recommendation"
+    )
+
+    images = workloads["image-generation"].raw["canonical_max_contract"]
+    assert images["config"]["quality_trials"] == 3
+    assert images["config"]["generated_images_per_trial"] == 50_000
+    assert images["config"]["total_generated_images"] == 150_000
+    assert images["config"]["trial_seeds"] == [
+        "0-49999",
+        "50000-99999",
+        "100000-149999",
+    ]
+    assert images["config"]["network_evaluations_per_image"] == 35
+
+    reinforcement = workloads["reinforcement-learning"].raw["canonical_max_contract"]
+    assert reinforcement["config"]["self_play_games_per_generation"] == 2_000
+    assert reinforcement["config"]["playoff_games"] == 100
+    assert reinforcement["quality_gates"]["model_promotion_playoff"]["target"] == 0.55
 
 
 def test_public_result_workloads_use_educational_mlcommons_scenarios():
     workloads = load_registry()
 
-    assert {workload.scenario for workload in workloads.values()}.issubset(EDU_SCENARIOS)
+    assert {workload.scenario for workload in workloads.values()}.issubset(
+        EDU_SCENARIOS
+    )
     for workload in workloads.values():
         if workload.public_status in {"score-bearing", "performance-bearing"}:
             assert workload.scenario in PUBLIC_RESULT_SCENARIOS, workload.id
+        if workload.public_status == "score-bearing":
+            assert workload.scenario == "training", workload.id
+        if workload.public_status == "performance-bearing":
+            assert workload.scenario in {"single_stream", "offline", "server"}, (
+                workload.id
+            )
 
 
-def test_score_bearing_workloads_are_public_quality_contracts():
+def test_candidates_do_not_claim_reference_evidence_before_admission():
     workloads = load_registry()
-    selected = select_workloads(workloads, public_status="score-bearing")
+    selected = [
+        workload
+        for workload in workloads.values()
+        if workload.public_status in {"score-bearing", "performance-bearing"}
+    ]
 
-    assert {workload.id for workload in selected} == {
-        "anomaly-ae-train",
-        "micro-dlrm-train",
-        "mobilenetv2-train",
-        "nanogpt-train",
-        "resnet18-train",
-    }
-    for workload in selected:
-        assert workload.dataset, workload.id
-        assert workload.raw.get("dataset_source"), workload.id
-        assert has_asset_dossier(workload.dataset), workload.id
-        assert workload.quality_metric, workload.id
-        assert workload.quality_value is not None, workload.id
-        assert workload.quality_direction in {"higher", "lower"}, workload.id
-        assert workload.quality_target_basis in QUALITY_TARGET_BASES, workload.id
-        assert workload.quality_reference_runs, workload.id
-        assert workload.quality_variance_summary, workload.id
-        assert workload.quality_variance_summary["runs"] == workload.quality_reference_runs, workload.id
-        assert workload.quality_variance_summary["statistic"], workload.id
-        assert workload.quality_variance_summary["acceptance_rule"], workload.id
-        assert isinstance(workload.quality_reference_protocol, dict), workload.id
-        for field in REFERENCE_PROTOCOL_FIELDS:
-            assert workload.quality_reference_protocol.get(field), (workload.id, field)
-        assert len(workload.quality_reference_protocol["seeds"]) == workload.quality_reference_runs, workload.id
-        assert workload.quality_reviewer_notes, workload.id
-        assert workload.raw.get("verified_baseline"), workload.id
+    assert selected == []
+    assert all(
+        "verified_baseline" not in workload.raw for workload in workloads.values()
+    )
 
 
-def test_performance_bearing_workloads_have_functional_contracts():
+def test_systems_only_rows_do_not_claim_uncommitted_verified_baselines():
     workloads = load_registry()
-    selected = select_workloads(workloads, public_status="performance-bearing")
 
-    assert {workload.id for workload in selected} == {
-        "nanogpt-decode",
-        "nanogpt-prefill",
-        "slm-decode",
-        "slm-quantized-decode",
+    for workload in workloads.values():
+        if workload.public_status != "systems-only":
+            continue
+        assert "verified_baseline" not in workload.raw, workload.id
+        calibration = workload.raw.get("calibration_observation")
+        if calibration:
+            assert calibration.get("evidence_status") in {
+                "historical-unverified-no-committed-artifact",
+                "bounded-local-methodology-check",
+            }, workload.id
+
+
+def test_public_contract_report_withholds_experimental_candidates():
+    workloads = load_registry()
+    issues = public_contract_report(workloads)
+
+    experimental = {
+        workload.id
+        for workload in workloads.values()
+        if workload.public_status == "experimental"
     }
-    for workload in selected:
-        functional_check = workload.raw.get("functional_check")
-        assert isinstance(functional_check, dict), workload.id
-        assert functional_check.get("metric"), workload.id
-        assert functional_check.get("condition"), workload.id
-        assert workload.raw.get("model_source") or workload.raw.get("shared_checkpoint") or workload.dataset, workload.id
-        model_source = workload.raw.get("model_source")
-        if isinstance(model_source, dict):
-            assert model_source.get("license"), workload.id
-        if workload.raw.get("shared_checkpoint"):
-            assert workload.raw.get("quality_dependency"), workload.id
-        if workload.dataset:
-            assert workload.raw.get("dataset_source"), workload.id
-            assert has_asset_dossier(workload.dataset), workload.id
+    assert experimental
+    for workload_id in experimental:
+        expected = ["experimental workloads are not public-release-ready"]
+        if workload_id == "keyword-spotting":
+            expected.append(
+                "adapter conformance is quality-preserving but nonidentical; "
+                "public promotion is blocked"
+            )
+        assert issues[workload_id] == expected
 
 
-def test_public_contract_report_has_no_blockers():
-    issues = public_contract_report(load_registry())
+def test_keyword_spotting_conformance_is_audited_and_fails_closed():
+    workload = load_registry()["keyword-spotting"]
+    conformance = workload.raw["adapter_conformance"]
+    audit = conformance["audit"]
+    root = Path(__file__).resolve().parents[1]
+    artifact = root / audit["artifact"]
+    artifact_bytes = artifact.read_bytes()
+    payload = json.loads(artifact_bytes)
 
-    assert all(not workload_issues for workload_issues in issues.values())
+    assert conformance["status"] == "quality-preserving-nonidentical"
+    assert conformance["promotion_eligible"] is False
+    assert hashlib.sha256(artifact_bytes).hexdigest() == audit["sha256"].removeprefix(
+        "sha256:"
+    )
+    assert payload["schema"] == audit["schema"]
+    assert payload["source"]["git_sha"] == audit["source_git_sha"]
+    assert payload["source"]["git_dirty"] is False
+    assert payload["status"] == "failed"
+    assert payload["workloads"]["image-classification"]["status"] == "passed"
+    assert payload["workloads"]["keyword-spotting"]["status"] == "failed"
+    assert payload["workloads"]["visual-wake-words"]["status"] == "passed"
+    assert "model_path" not in artifact.read_text()
+    packaged = root / "src" / "mlperf_edu" / audit["artifact"]
+    assert packaged.read_bytes() == artifact_bytes
+    packaged_resource = resources.files("mlperf_edu").joinpath(audit["artifact"])
+    assert packaged_resource.is_file()
+
+
+def test_nonidentical_adapter_cannot_be_marked_promotion_eligible():
+    workloads = load_registry()
+    keyword_spotting = workloads["keyword-spotting"]
+    raw = deepcopy(keyword_spotting.raw)
+    raw["adapter_conformance"]["promotion_eligible"] = True
+    workloads["keyword-spotting"] = replace(keyword_spotting, raw=raw)
+
+    with pytest.raises(ValueError, match="nonidentical adapter cannot be promotion"):
+        validate_registry(workloads)
+
+
+def test_verified_baseline_lifecycle_state_machine_fails_closed():
+    status = "score-bearing"
+    valid_historical = {
+        "evidence_status": "committed-reference-summary",
+        "review_eligible": False,
+        "protocol_compatibility": "superseded",
+        "replacement_required": True,
+        "superseded_reason": "The protected measurement surface changed.",
+    }
+    assert baseline_lifecycle_issues(valid_historical, public_status=status) == [
+        "score-bearing verified_baseline uses a superseded protocol and requires "
+        "a replacement reference sweep"
+    ]
+
+    reviewable_history = {**valid_historical, "review_eligible": True}
+    missing_replacement = {**valid_historical, "replacement_required": False}
+    unexplained_history = {**valid_historical, "superseded_reason": ""}
+    orphan_replacement = {
+        "review_eligible": True,
+        "replacement_required": True,
+    }
+
+    assert any(
+        "review_eligible to false" in issue
+        for issue in baseline_lifecycle_issues(reviewable_history, public_status=status)
+    )
+    assert any(
+        "replacement_required to true" in issue
+        for issue in baseline_lifecycle_issues(
+            missing_replacement, public_status=status
+        )
+    )
+    assert any(
+        "superseded_reason" in issue
+        for issue in baseline_lifecycle_issues(
+            unexplained_history, public_status=status
+        )
+    )
+    assert any(
+        "only when protocol_compatibility is superseded" in issue
+        for issue in baseline_lifecycle_issues(orphan_replacement, public_status=status)
+    )
 
 
 def test_public_asset_dossiers_include_size_and_hash_policy():
     tiny = asset_dossier("tinyshakespeare")
-    movielens = asset_dossier("movielens-100k")
-    mnist = asset_dossier("mnist")
-    cifar = asset_dossier("cifar100")
+    cifar = asset_dossier("cifar10")
     fashion = asset_dossier("fashion-mnist")
     prompt = asset_dossier("prompt-suite-local")
+    anomaly = asset_dossier("mlperf-tiny-anomaly-eval")
+    vww = asset_dossier("mlperf-tiny-vww-eval")
+    humaneval = asset_dossier("humaneval-plus")
+    bfcl = asset_dossier("bfcl-v4-non-live-ast")
+    movielens = asset_dossier("movielens-20m")
+    minigo = asset_dossier("minigo-self-play")
 
     assert tiny["expected_download_bytes"] == 5_600_000
     assert tiny["expected_unpacked_bytes"] == 1_115_394
     assert tiny["hash_policy"]
-    assert tiny["license_status"] == "public-domain-us"
+    assert tiny["license_status"] == "mit-repository-public-domain-text"
     assert tiny["public_release_status"] == "public-ok-fetch-only"
-    assert movielens["expected_unpacked_bytes"] == 16_100_896
-    assert movielens["license_status"] == "noncommercial-research-education"
-    assert movielens["public_release_status"] == "restricted-needs-approval"
-    assert mnist["license_status"] == "cc-by-sa-3.0"
-    assert mnist["public_release_status"] == "public-ok-with-attribution"
     assert cifar["license_status"] == "source-citation-no-license"
     assert cifar["public_release_status"] == "needs-release-decision"
     assert fashion["license_status"] == "mit"
     assert fashion["license_spdx"] == "MIT"
     assert fashion["public_release_status"] == "public-ok-with-attribution"
+    assert fashion["public_result_use"] == (
+        "standalone educational lab asset; never a benchmark result"
+    )
+    assert anomaly["expected_download_bytes"] == 69_897_209
+    assert anomaly["expected_unpacked_bytes"] == 25_408_204
+    assert anomaly["license_spdx"] == "CC-BY-4.0"
+    assert anomaly["public_release_status"] == "public-ok-fetch-only"
     assert prompt["expected_download_bytes"] == 0
     assert prompt["public_result_use"] == "performance-bearing functional check"
     assert prompt["public_release_status"] == "public-ok-bundled"
+    assert vww["expected_download_bytes"] == 234_810_765
+    assert vww["expected_unpacked_bytes"] == 2_747_212
+    assert vww["public_release_status"] == "needs-release-decision"
+    assert humaneval["expected_unpacked_bytes"] == 7_714_666
+    assert humaneval["public_release_status"] == "public-ok-fetch-only"
+    assert bfcl["version"].startswith("bfcl-")
+    assert bfcl["public_release_status"] == "needs-release-decision"
+    assert movielens["public_release_status"] == "fetch-only"
+    assert movielens["expected_download_bytes"] == 198_702_078
+    assert minigo["type"] == "generated-dataset"
+
+
+def test_every_workload_dataset_has_a_structured_asset_dossier():
+    workloads = load_registry()
+
+    assert all(has_asset_dossier(workload.dataset) for workload in workloads.values())
+
+
+def test_retired_dataset_adapters_are_not_public_assets():
+    for dataset in ("movielens-100k", "mnist", "cifar100"):
+        assert not has_asset_dossier(dataset)
 
 
 def test_starter_selection_uses_workload_collection():
@@ -290,198 +452,164 @@ def test_research_selection_uses_workload_collection():
     assert [workload.id for workload in selected] == list(RESEARCH_WORKLOAD_ORDER)
 
 
-def test_nanogpt_train_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nanogpt-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.nanogpt:run_min"
-    assert runner["max"] == "mlperf.runners.nanogpt:run_max"
-
-
-def test_nano_moe_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nano-moe-train"].raw.get("runner", {})
-
-    assert workloads["nano-moe-train"].suite == "language"
-    assert runner["min"] == "mlperf.runners.extended:run_nano_moe_min"
-    assert runner["max"] == "mlperf.runners.extended:run_nano_moe_max"
-
-
-def test_small_research_training_workloads_declare_min_runners():
+def test_canonical_workloads_declare_exact_runners():
     workloads = load_registry()
     expected = {
-        "micro-bert-train": ("language", "mlperf.runners.extended:run_micro_bert_min"),
-        "micro-diffusion-train": ("vision", "mlperf.runners.extended:run_micro_diffusion_min"),
-        "micro-gnn-train": ("graph", "mlperf.runners.extended:run_micro_gnn_min"),
-        "micro-lstm-train": ("timeseries", "mlperf.runners.extended:run_micro_lstm_min"),
-        "micro-rl-train": ("rl", "mlperf.runners.extended:run_micro_rl_min"),
+        "causal-language-modeling": (
+            "language",
+            "mlperf.runners.nanogpt:run_causal_language_modeling_min",
+            "mlperf.runners.nanogpt:run_causal_language_modeling_max",
+        ),
+        "text-classification": (
+            "language",
+            "mlperf.runners.text:run_text_classification_min",
+            "mlperf.runners.text:run_text_classification_max",
+        ),
+        "information-retrieval": (
+            "language",
+            "mlperf.runners.retrieval:run_information_retrieval_min",
+            "mlperf.runners.retrieval:run_information_retrieval_max",
+        ),
+        "image-classification": (
+            "vision",
+            "mlperf.runners.vision:run_image_classification_min",
+            "mlperf.runners.vision:run_image_classification_max",
+        ),
+        "keyword-spotting": (
+            "tiny",
+            "mlperf.runners.tiny:run_keyword_spotting_min",
+            "mlperf.runners.tiny:run_keyword_spotting_max",
+        ),
+        "anomaly-detection": (
+            "tiny",
+            "mlperf.runners.tiny:run_anomaly_detection_min",
+            "mlperf.runners.tiny:run_anomaly_detection_max",
+        ),
+        "visual-wake-words": (
+            "tiny",
+            "mlperf.runners.tiny:run_visual_wake_words_min",
+            "mlperf.runners.tiny:run_visual_wake_words_max",
+        ),
+        "graph-node-classification": (
+            "graph",
+            "mlperf.runners.graph:run_graph_node_classification_min",
+            "mlperf.runners.graph:run_graph_node_classification_max",
+        ),
+        "time-series-forecasting": (
+            "timeseries",
+            "mlperf.runners.timeseries:run_time_series_forecasting_min",
+            "mlperf.runners.timeseries:run_time_series_forecasting_max",
+        ),
+        "code-generation": (
+            "language",
+            "mlperf.runners.functional_setup:run_code_generation_min",
+            "mlperf.runners.code_generation:run_code_generation_max",
+        ),
+        "function-calling": (
+            "language",
+            "mlperf.runners.functional_setup:run_function_calling_min",
+            "mlperf.runners.function_calling:run_function_calling_max",
+        ),
+        "recommendation": (
+            "recommendation",
+            "mlperf.runners.functional_setup:run_recommendation_min",
+            "mlperf.runners.ncf:run_recommendation_max",
+        ),
+        "image-generation": (
+            "vision",
+            "mlperf.runners.functional_setup:run_image_generation_min",
+            "mlperf.runners.image_generation:run_image_generation_max",
+        ),
+        "reinforcement-learning": (
+            "reinforcement",
+            "mlperf.runners.functional_setup:run_reinforcement_learning_min",
+            "mlperf.runners.minigo:run_reinforcement_learning_max",
+        ),
     }
 
-    for workload_id, (suite, runner_name) in expected.items():
-        assert workloads[workload_id].suite == suite
-        assert workloads[workload_id].raw.get("runner", {})["min"] == runner_name
-        assert workloads[workload_id].raw.get("runner", {})["max"] == runner_name.replace("_min", "_max")
+    assert set(workloads) == set(expected)
+    for workload_id, (suite, min_runner, max_runner) in expected.items():
+        workload = workloads[workload_id]
+        assert workload.suite == suite
+        assert workload.raw["runner"] == {"min": min_runner, "max": max_runner}
 
 
-def test_language_research_lora_and_serving_workloads_declare_min_runners():
+def test_functional_spiral_workloads_fail_closed_for_promotion():
     workloads = load_registry()
-    expected = {
-        "nano-lora-finetune": "mlperf.runners.extended:run_nano_lora_min",
-        "nanogpt-decode-fp32-b16": "mlperf.runners.extended:run_nanogpt_decode_fp32_min",
-        "nanogpt-decode-fp16-b16": "mlperf.runners.extended:run_nanogpt_decode_fp16_min",
-        "nanogpt-decode-spec": "mlperf.runners.extended:run_nanogpt_decode_spec_min",
+    functional = {
+        "code-generation",
+        "function-calling",
+        "recommendation",
+        "image-generation",
+        "reinforcement-learning",
     }
 
-    for workload_id, runner_name in expected.items():
-        assert workloads[workload_id].suite == "language"
-        assert workloads[workload_id].raw.get("runner", {})["min"] == runner_name
-        assert workloads[workload_id].raw.get("runner", {})["max"] == runner_name.replace("_min", "_max")
+    for workload_id in functional:
+        workload = workloads[workload_id]
+        assert workload.public_status == "experimental"
+        assert workload.raw["promotion_scope"] is False
+        spiral = workload.raw["spiral"]
+        expected_stage = (
+            "quality-conformance"
+            if workload_id
+            in {
+                "code-generation",
+                "function-calling",
+                "image-generation",
+                "recommendation",
+                "reinforcement-learning",
+            }
+            else "functional"
+        )
+        assert spiral["stage"] == expected_stage
+        assert spiral["functional_ready"] is True
+        assert spiral["quality_conformant"] is False
+        assert spiral["repeatability_verified"] is False
+        assert spiral["promotion_ready"] is False
+        assert spiral["next_gate"]
+        # execution_status marks a contract that cannot complete as written on
+        # the target platform. Reinforcement learning shed it when the PyTorch
+        # adapter replaced the container, so it is no longer required of every
+        # functional-spiral workload, only of those still blocked.
+        contract = workload.raw["canonical_max_contract"]
+        if workload_id != "reinforcement-learning":
+            assert contract["execution_status"]
 
 
-def test_nanogpt_prefill_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nanogpt-prefill"].raw.get("runner", {})
+def test_retrieval_declares_one_complete_evaluation_protocol():
+    workload = load_registry()["information-retrieval"]
+    config = workload.raw["canonical_max_contract"]["config"]
+    protocol = workload.raw["measurement_protocol"]
 
-    assert runner["min"] == "mlperf.runners.nanogpt:run_prefill_min"
-    assert runner["max"] == "mlperf.runners.nanogpt:run_prefill_max"
-
-
-def test_nanogpt_decode_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["nanogpt-decode"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.nanogpt:run_decode_min"
-    assert runner["max"] == "mlperf.runners.nanogpt:run_decode_max"
-
-
-def test_micro_dlrm_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["micro-dlrm-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.dlrm:run_min"
-    assert runner["max"] == "mlperf.runners.dlrm:run_max"
+    assert "warmup_evaluations" not in config
+    assert config["measurement_repetitions"] == 1
+    assert config["performance_aggregate"] == "single-complete-evaluation"
+    assert protocol["primary_metric"] == "inference_and_evaluation_seconds"
+    assert "one complete" in protocol["timing_scope"]
+    assert "warmup for each scoring batch shape" in " ".join(
+        protocol["excluded_phases"]
+    )
 
 
-def test_recommender_suite_declares_dram_runner():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="recommender")
-    dram_runner = workloads["micro-dlrm-dram-train"].raw.get("runner", {})
+def test_causal_language_modeling_declares_modes_and_phases():
+    workload = load_registry()["causal-language-modeling"]
 
-    assert [workload.id for workload in selected] == [
-        "micro-dlrm-train",
-        "micro-dlrm-dram-train",
-    ]
-    assert dram_runner["min"] == "mlperf.runners.dlrm:run_dram_min"
-    assert dram_runner["max"] == "mlperf.runners.dlrm:run_dram_max"
+    assert workload.raw["implemented_modes"] == ["training", "inference"]
+    assert workload.raw["phases"]["inference"] == ["full", "prefill", "decode"]
+    assert (
+        workload.raw["mode_contracts"]["inference"]["dataset"] == "prompt-suite-local"
+    )
 
 
-def test_distributed_suite_declares_ddp_runner():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="distributed")
-    distributed_runner = workloads["micro-dlrm-distributed"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == ["micro-dlrm-distributed"]
-    assert distributed_runner["min"] == "mlperf.runners.dlrm:run_distributed_min"
-    assert distributed_runner["max"] == "mlperf.runners.dlrm:run_distributed_max"
-
-
-def test_resnet18_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["resnet18-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.vision:run_resnet18_min"
-    assert runner["max"] == "mlperf.runners.vision:run_resnet18_max"
-
-
-def test_vision_suite_declares_mobilenet_min_runners():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="vision")
-    mobilenet = workloads["mobilenetv2-train"].raw.get("runner", {})
-    composed = workloads["mobilenet-cifar100-composed-fp16"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == [
-        "resnet18-train",
-        "mobilenetv2-train",
-        "mobilenet-cifar100-composed-fp16",
-        "micro-diffusion-train",
-    ]
-    assert mobilenet["min"] == "mlperf.runners.vision:run_mobilenetv2_min"
-    assert mobilenet["max"] == "mlperf.runners.vision:run_mobilenetv2_max"
-    assert composed["min"] == "mlperf.runners.vision:run_mobilenet_composed_min"
-    assert composed["max"] == "mlperf.runners.vision:run_mobilenet_composed_max"
-
-
-def test_anomaly_ae_declares_min_runner():
-    workloads = load_registry()
-    runner = workloads["anomaly-ae-train"].raw.get("runner", {})
-
-    assert runner["min"] == "mlperf.runners.tiny:run_anomaly_ae_min"
-    assert runner["max"] == "mlperf.runners.tiny:run_anomaly_ae_max"
-
-
-def test_tiny_suite_declares_min_runners():
+def test_tiny_suite_contains_canonical_mlperf_tiny_workloads():
     workloads = load_registry()
     selected = select_workloads(workloads, suite="tiny")
-    dscnn = workloads["dscnn-kws-train"].raw.get("runner", {})
-    wake = workloads["wake-vision-vww"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == ["anomaly-ae-train", "dscnn-kws-train", "wake-vision-vww"]
-    assert dscnn["min"] == "mlperf.runners.tiny:run_dscnn_kws_min"
-    assert dscnn["max"] == "mlperf.runners.tiny:run_dscnn_kws_max"
-    assert wake["min"] == "mlperf.runners.tiny:run_wake_vision_min"
-    assert wake["max"] == "mlperf.runners.tiny:run_wake_vision_max"
-
-
-def test_agent_suite_declares_min_runners():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="agent")
-    codegen = workloads["nano-codegen-agent"].raw.get("runner", {})
-    rag = workloads["nano-rag-agent"].raw.get("runner", {})
-    react = workloads["nano-react-agent"].raw.get("runner", {})
-    toolcall = workloads["nano-toolcall-agent"].raw.get("runner", {})
 
     assert [workload.id for workload in selected] == [
-        "nano-rag-agent",
-        "nano-codegen-agent",
-        "nano-react-agent",
-        "nano-toolcall-agent",
+        "keyword-spotting",
+        "anomaly-detection",
+        "visual-wake-words",
     ]
-    assert codegen["min"] == "mlperf.runners.agent:run_codegen_min"
-    assert codegen["max"] == "mlperf.runners.agent:run_codegen_max"
-    assert rag["min"] == "mlperf.runners.agent:run_rag_min"
-    assert rag["max"] == "mlperf.runners.agent:run_rag_max"
-    assert react["min"] == "mlperf.runners.agent:run_react_min"
-    assert react["max"] == "mlperf.runners.agent:run_react_max"
-    assert toolcall["min"] == "mlperf.runners.agent:run_toolcall_min"
-    assert toolcall["max"] == "mlperf.runners.agent:run_toolcall_max"
-
-
-def test_slm_decode_declares_transformers_runner():
-    workloads = load_registry()
-    selected = select_workloads(workloads, suite="slm")
-    runner = workloads["slm-decode"].raw.get("runner", {})
-    quantized_runner = workloads["slm-quantized-decode"].raw.get("runner", {})
-    batched_runner = workloads["slm-batched-decode"].raw.get("runner", {})
-    long_context_runner = workloads["slm-long-context-decode"].raw.get("runner", {})
-
-    assert [workload.id for workload in selected] == [
-        "slm-decode",
-        "slm-quantized-decode",
-        "slm-batched-decode",
-        "slm-long-context-decode",
-    ]
-    assert workloads["slm-decode"].suite == "slm"
-    assert workloads["slm-quantized-decode"].suite == "slm"
-    assert workloads["slm-batched-decode"].suite == "slm"
-    assert workloads["slm-long-context-decode"].suite == "slm"
-    assert runner["min"] == "mlperf.runners.slm:run_decode_min"
-    assert runner["max"] == "mlperf.runners.slm:run_decode_max"
-    assert quantized_runner["min"] == "mlperf.runners.slm:run_quantized_decode_min"
-    assert quantized_runner["max"] == "mlperf.runners.slm:run_quantized_decode_max"
-    assert batched_runner["min"] == "mlperf.runners.slm:run_batched_decode_min"
-    assert batched_runner["max"] == "mlperf.runners.slm:run_batched_decode_max"
-    assert long_context_runner["min"] == "mlperf.runners.slm:run_long_context_decode_min"
-    assert long_context_runner["max"] == "mlperf.runners.slm:run_long_context_decode_max"
 
 
 def test_unknown_workload_rejected():

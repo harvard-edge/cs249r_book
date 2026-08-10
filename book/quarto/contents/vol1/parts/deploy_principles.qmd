@@ -1,61 +1,59 @@
 # Deployment Principles {.unnumbered}
 
-The code is correct and the benchmarks are excellent, and yet the system fails. Part IV moves from controlled environments to the chaos of production, where ML systems face a threat that traditional software does not: silent decay. Unlike a program that crashes when its logic breaks, a machine learning system continues to produce outputs that are confident, well-formatted, and wrong as the world drifts away from its training distribution. At deployment, the data environment escapes the engineer's control, stressing the trained algorithm and the serving machine in ways no test set anticipated. Reliability is therefore a continuous control loop of D·A·M co-design rather than a one-time release gate. The principles here define the physics of that reliability.
+The code can be correct and the benchmarks excellent, and yet the system may fail. Part IV moves from controlled environments to the chaos of production, where ML systems face a threat that traditional software often does not: silent decay. Unlike a program that may crash when its logic breaks, a machine learning system can continue to produce outputs that are confident, well-formatted, and wrong as the world drifts away from its training distribution. At deployment, the data environment escapes the engineer's control and can stress the trained algorithm and the serving machine in ways no test set anticipated. Reliability is therefore a continuous control loop of D·A·M co-design rather than a one-time release gate. The principles here define the requirements and diagnostic models for that reliability.
 
 ::: {#pri-verification-gap .callout-principle title="The Verification Gap"}
 
-**Invariant**: In traditional software, verification uses unit tests (asserting that $f(x) = y$). In machine learning, verification uses statistical bounds:
-$$ \Pr(f(X) \approx Y) > 1 - \epsilon $$
-
+**Requirement**: Statistical verification must define a deployment population $P_{\text{deploy}}$, task distance $d$, tolerance $\tau$, target error $\epsilon$, and finite-sample confidence procedure:
+$$ \Pr_{(x,y)\sim P_{\text{deploy}}}\!\left[d(f(x),y) \leq \tau\right] \geq 1-\epsilon $$
 **Implication**: Deployment is not a one-way transfer; it is a control loop. Because no test suite can cover every possible real-world input, production systems must monitor their own uncertainty and fail gracefully when they drift outside their known performance envelope.
 
 :::
 
-The verification gap means correctness cannot be proven outright; it can only be bounded statistically. Those bounds erode as production data diverges from the data used to set them.
+The verification gap means finite evaluation can only estimate behavior on a defined population with uncertainty. Those bounds may erode as production data diverges from the data used to set them.
 
-::: {#pri-statistical-drift .callout-principle title="The Statistical Drift Invariant"}
+::: {#pri-statistical-drift .callout-principle title="The Statistical Drift Diagnostic"}
 
-**Invariant**: Accuracy degrades as the world drifts from the training distribution, governed by the degradation equation:
+**Local fitted model**: Over a measured deployment range, labeled outcomes may support the approximation:
 $$ \text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0) $$
-where $\text{Accuracy}_0$ is the model's performance at deployment, $\mathcal{D}(P_t \lVert P_0)$ is the statistical distance between the current data distribution and the training distribution, and $\lambda$ is the model's sensitivity to distributional shift. Consider a credit scoring model trained on 2020 borrower behavior. Two years later, inflation rises, interest rates change, and lending policies shift. The system still produces scores, but the statistical relationship between inputs and outcomes has moved, and real accuracy declines while conventional error logs remain quiet. Unlike many traditional software failures, which are often surfaced by crashes, exceptions, or explicit service-health signals, ML systems can fail silently because the *environment* changes even when the code and infrastructure remain unchanged. This first-order linearization captures the dominant effect for small distributional shifts; in practice, the relationship is model-dependent and may be nonlinear for large drift.
+where $\text{Accuracy}_0$ is the model's performance at deployment, $\mathcal{D}(P_t \lVert P_0)$ is the statistical distance between the current data distribution and the training distribution, and $\lambda$ is fitted from labeled outcomes rather than inferred from divergence alone. Consider a credit scoring model trained on 2020 borrower behavior. Two years later, inflation rises, interest rates change, and lending policies shift. The system still produces scores, but the statistical relationship between inputs and outcomes may have changed; labeled outcome monitoring determines whether real accuracy declined while conventional error logs remained quiet. Unlike many traditional software failures, which are often surfaced by crashes, exceptions, or explicit service-health signals, ML systems can fail silently because the *environment* changes even when the code and infrastructure remain unchanged. This first-order linearization applies only over the measured range; the relationship is model-dependent and may be nonlinear for large drift.
 
-**Implication**: Observability must shift from system metrics (latency, errors) to statistical metrics (distribution distance). Without data drift monitoring, a system can remain operational while its predictions become steadily less reliable.
+**Implication**: Observability must extend beyond system metrics (latency, errors) to combine statistical drift signals with labeled outcomes. A system can remain operational while prediction quality changes, but drift monitoring alone does not establish degradation.
 
 :::
 
 External drift is not the only threat. Even when the world holds still, the serving pipeline itself can diverge from the model validated offline.
 
-::: {#pri-training-serving-skew .callout-principle title="The Training-Serving Skew Law"}
+::: {#pri-training-serving-skew .callout-principle title="The Training-Serving Skew Diagnostic"}
 
-**Invariant**: If the function computed during serving ($f_{\text{serve}}$) differs from the function learned during training ($f_{\text{train}}$), the model's effective accuracy degrades proportionally to the divergence:
-$$ \Delta \text{Accuracy} \propto \mathbb{E}[|f_{\text{serve}}(x) - f_{\text{train}}(x)|] $$
-The exact relationship depends on the loss function, decision boundary geometry, and production distribution, but unexplained divergence invalidates the assumption that offline validation estimates production behavior and can cause silent accuracy loss. This divergence arises from inconsistent preprocessing logic, different library implementations, stale feature values, or environmental state changes between the two code paths.
+**Risk indicator**: Compare the training and serving functions on the same inputs:
+$$ S_{\text{skew}} = \mathbb{E}[|f_{\text{serve}}(x) - f_{\text{train}}(x)|] $$
+The exact relationship between $S_{\text{skew}}$ and accuracy depends on the loss function, decision boundary geometry, and production distribution. Unexplained divergence weakens the assumption that offline validation estimates production behavior and can cause silent accuracy loss, but $S_{\text{skew}}$ is not a universal accuracy-loss equation. This divergence arises from inconsistent preprocessing logic, different library implementations, stale feature values, or environmental state changes between the two code paths.
 
-**Implication**: Feature consistency is a hard architectural requirement, not a best practice. Feature stores are not caches; they are consistency engines that reduce skew by centralizing feature definitions and retrieval. Teams still need validation for freshness, point-in-time correctness, preprocessing, model-runtime, and postprocessing parity. Even subtle differences (PIL vs. OpenCV resize, FP64 vs. FP32 normalization) compound to produce silent accuracy degradation that standard monitoring will not detect.
+**Implication**: Feature consistency is an architectural requirement, not merely a best practice. Feature stores are more than caches; they can reduce skew by centralizing feature definitions and retrieval. Teams still need validation for freshness, point-in-time correctness, preprocessing, model-runtime, and postprocessing parity. Even subtle differences (PIL vs. OpenCV resize, FP64 vs. FP32 normalization) can compound to produce silent accuracy degradation that standard monitoring may not detect.
 
 :::
 
 Beneath all these reliability concerns lies a nonnegotiable constraint: time. A medical imaging system that detects tumors with 99 percent accuracy but takes 30 seconds per scan forces radiologists back to manual review. An autonomous vehicle perception model that classifies obstacles perfectly but responds in 200 ms instead of 50 ms cannot brake in time. Statistical correctness is worthless if it arrives too late. Every deployed model operates under a latency ceiling, and exceeding that ceiling is functionally equivalent to returning no prediction at all.
 
-::: {#pri-latency-budget .callout-principle title="The Latency Budget Invariant"}
+::: {#pri-latency-budget .callout-principle title="The Latency Budget Principle"}
 
-**Invariant**: In latency-sensitive serving, the hard constraint is a tail-latency SLO defined at P95, P99, P99.9, or an application-specific deadline; throughput is the variable to be optimized within that constraint. This is governed by the latency budget equation:
+**Requirement**: In latency-sensitive serving, the product selects a tail-latency SLO at P95, P99, P99.9, or an application-specific deadline; throughput is optimized within that constraint:
 $$ L_{\text{lat,total}} = L_{\text{lat,net}} + L_{\text{lat,pre}} + L_{\text{lat,infer}} + L_{\text{lat,post}} + L_{\text{lat,queue}} \leq \text{SLO} $$
-
 **Implication**: Serving systems must implement tail-tolerant designs (for example, dynamic batching, hedged requests). Serving systems must be willing to sacrifice overall throughput to meet the latency deadline of the oldest request in the queue.
 
 :::
 
 A system can satisfy every latency SLO, detect every distributional shift, and maintain perfect training-serving consistency while still causing systematic harm. The previous principles address silent failures in correctness and service quality; this one addresses a failure that degrades *equity*, through the same mechanism of silent amplification.
 
-::: {#pri-bias-feedback .callout-principle title="The Bias Feedback Invariant"}
+::: {#pri-bias-feedback .callout-principle title="The Bias Feedback Model"}
 
-**Invariant**: When a model's outputs influence the distribution of its future inputs, prediction errors can compound across decision cycles. For a simplified self-reinforcing feedback loop, the disparity for group $g$ after $k$ deployment cycles may grow as:
+**Scenario model**: When outputs influence future inputs, errors can compound. With an approximately constant measured feedback factor and no effective intervention, disparity for group $g$ may grow as:
 $$ \Delta_g(k) \approx \Delta_g(0) \cdot \alpha_{\text{fb}}^k $$
-where $\Delta_g(0)$ is the initial performance gap between groups and $\alpha_{\text{fb}}$ is the **amplification factor** determined by how strongly the model's decisions reshape downstream data. Consider a loan approval model that denies credit at higher rates to applicants from historically underserved communities. Denied applicants cannot build credit history, which makes future applications weaker, which increases future denial rates. The model's accuracy on its training distribution remains stable, but the population it serves has been reshaped by its own decisions. When $\alpha_{\text{fb}} > 1$, the feedback loop is self-reinforcing; when $\alpha_{\text{fb}} \leq 1$, the dynamics are stable or damped. Real deployments may also be nonlinear or saturating.
+where $\Delta_g(0)$ is the initial performance gap between groups and $\alpha_{\text{fb}}$ is a fitted **amplification factor**. Consider a loan approval model that denies credit at higher rates to applicants from historically underserved communities. Denied applicants cannot build credit history, which makes future applications weaker, which increases future denial rates. The model's accuracy on its training distribution remains stable, but the population it serves has been reshaped by its own decisions. When $\alpha_{\text{fb}} > 1$ under these assumptions, the feedback loop is self-reinforcing; when $\alpha_{\text{fb}} \leq 1$, the modeled dynamics are stable or damped. Real deployments may also be nonlinear, saturating, or changed by intervention.
 
 **Implication**: Fairness is not a postdeployment audit; it is a **stability constraint** on the deployment control loop. Systems must monitor **disaggregated performance metrics** across demographic groups with the same rigor applied to latency percentiles, because a bias regression is invisible to aggregate accuracy just as a tail-latency violation is invisible to mean latency.
 
 :::
 
-Part IV translates these five principles into production systems: serving infrastructure that meets latency budgets (the latency budget invariant), operational practices that detect drift and skew before users do (the verification gap, statistical drift, and training-serving skew principles), responsible engineering that treats fairness as a measurable deployment constraint (the bias feedback invariant). The synthesis that connects these deployment realities to the quantitative invariants established throughout the book closes the volume.
+Part IV translates these five requirements, diagnostics, and models into production systems: serving infrastructure that meets latency budgets (the latency-budget requirement), operational practices that detect drift and skew before users do (the verification requirement, statistical-drift diagnostic, and training-serving-skew diagnostic), and responsible engineering that treats fairness as a measurable deployment constraint (the bias-feedback model). The synthesis that connects these deployment realities to the quantitative bounds and models established throughout the book closes the volume.

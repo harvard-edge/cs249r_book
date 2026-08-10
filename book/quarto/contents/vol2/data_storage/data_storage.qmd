@@ -813,7 +813,7 @@ The data loader pipeline\index{Data Loader!pipeline architecture} that runs in h
 
 That final placement matters because pinned, or page-locked, memory (exposed in PyTorch as `pin_memory=True` on the `DataLoader`) prevents the operating system from paging out the buffer before the DMA transfer completes, allowing the NVMe controller to write directly into a physical address that the PCIe DMA engine can reach without an extra copy. Each stage runs concurrently, forming a pipeline that overlaps I/O, CPU computation, and data transfer. The efficiency of this pipeline determines whether host DRAM can keep up with the accelerator's appetite.
 
-Host DRAM's most critical function is serving as a **prefetch buffer**\index{Prefetch Buffer}. The CPU data loader reads data from lower tiers (NVMe or network storage), decodes compressed formats (JPEG, gzip), applies augmentations (random crops, flips, color jitter), and assembles tensors in host DRAM. By the time the accelerator finishes processing batch $i$, batch $i+1$ should already be assembled in host memory, ready for transfer to HBM. The depth of this prefetch buffer determines how much I/O variance the pipeline can absorb without stalling.
+Host DRAM's most critical function is serving as a **prefetch buffer**\index{Prefetch Buffer}. The CPU data loader reads data from lower tiers (NVMe or network storage), decodes compressed formats (JPEG, gzip), applies augmentations (random crops, flips, color jitter), and assembles tensors in host DRAM. When the accelerator finishes processing batch $i$, batch $i+1$ should already be assembled in host memory, ready for transfer to HBM. The depth of this prefetch buffer determines how much I/O variance the pipeline can absorb without stalling.
 
 Recommendation workloads place a different demand on host DRAM: hosting **embedding tables**\index{Embedding Table} that can exceed 100 GB, far too large for HBM. These tables reside in host DRAM and are accessed through lookups that fetch only the rows needed for the current batch. The bandwidth between host DRAM and HBM becomes the critical bottleneck for these workloads, which is *why* some systems use CPU-side DRAM with RDMA to serve embedding lookups across the network.
 
@@ -1802,7 +1802,7 @@ At the 10,000-GPU scale, the dataset is no longer a *static collection of files*
 
 [^fn-hash-cost]: **Hash Cost (SHA-256)**\index{Cryptographic Hash!validation cost}: Verifying the integrity of a `{python} HashValidationCost.dataset_tb_str` dataset using SHA-256 consumes approximately `{python} HashValidationCost.cpu_core_hours_str` under a pipeline-level throughput assumption of `{python} HashValidationCost.throughput_mb_per_s_str` per core. For a 30-day foundation model training run, this metadata validation step must be pipelined or performed during ingestion to avoid stalling the fleet's startup phase.
 
-At petabyte scale, the data pipeline has to make every transformation reproducible. Raw documents are cleaned, tokenized, packed into training examples, and sharded across storage tiers. Each stage writes an immutable artifact, and each artifact records the input version, code version, schema, and statistical checks it satisfied. Once those dependencies are explicit, the pipeline forms a Directed Acyclic Graph (DAG): later artifacts depend on earlier artifacts, and no stage is allowed to rewrite its own history. When a training job starts, the cluster manager verifies that each worker's local NVMe shards match the data snapshot declared for the run. By treating the data pipeline as a graph of versioned artifacts rather than a simple file transfer, the system eliminates the silent data drift that is a primary source of failure in foundation model training.
+At petabyte scale, the data pipeline has to make every transformation reproducible. Raw documents are cleaned, tokenized, packed into training examples, and sharded across storage tiers. Each stage writes an immutable artifact, and each artifact records the input version, code version, schema, and statistical checks it satisfied. Once those dependencies are explicit, the pipeline forms a Directed Acyclic Graph (DAG): later artifacts depend on earlier artifacts, and no stage is allowed to rewrite its own history. When a training job starts, the cluster manager verifies that each worker's local NVMe shards match the data snapshot declared for the run. Treating the data pipeline as a graph of versioned artifacts rather than a simple file transfer eliminates the silent data drift that is a primary source of failure in foundation model training.
 
 Beyond pipeline orchestration, a hardware optimization eliminates one of the most common bottlenecks: the CPU's role as intermediary between storage and accelerator.
 
@@ -2669,7 +2669,7 @@ With the checkpoint accounting now derived in full, the running example's storag
 ```{python}
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @nbk-data-storage-175b-models-storage-footprint
+# │ Context: @psp-data-storage-175b-models-storage-footprint
 from mlsysim import Models
 from mlsysim.fmt import fmt, fmt_memory, fmt_qty, fmt_count, fmt_ratio
 
@@ -2701,7 +2701,7 @@ class StorageFootprintTable:
     training_nodes_str = fmt_count(training_nodes, commas=False, label="node")
 ```
 
-::: {#nbk-data-storage-175b-models-storage-footprint .callout-notebook title="The 175B model's storage footprint"}
+::: {#psp-data-storage-175b-models-storage-footprint .callout-perspective title="The 175B model's storage footprint"}
 
 @Tbl-data-storage-175b-footprint assembles the complete storage picture for our running example, a 30-day training run of a 175B-parameter model on `{python} StorageFootprintTable.training_nodes_str`.
 
