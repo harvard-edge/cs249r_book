@@ -768,7 +768,7 @@ class NBGraderCommand(BaseCommand):
                 cwd=self.project_root,
                 check=False,
                 capture_output=capture_output,
-                text=True,
+                text=True, encoding="utf-8", errors="replace",
             )
         except FileNotFoundError as exc:
             return subprocess.CompletedProcess(cmd, 127, "", str(exc))

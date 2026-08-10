@@ -79,7 +79,13 @@ jobs:
   python:
     name: vault-cli (python)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # 25 min, not 10: actions/checkout intermittently stalls for 10+ minutes on
+    # this ~3 GB repo (3 of 8 checkouts in run 30787355750 on 2026-08-07). Jobs
+    # budgeted at 20-25 min absorbed 11-12.5 min stalls and passed; the two jobs
+    # still on a 10 min budget died inside `git fetch` before any step ran.
+    # This job keeps a full clone (fetch-depth: 0 below), so it cannot use the
+    # sparse-checkout mitigation the other staffml jobs do.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v6
         with: { fetch-depth: 0 }   # deep clone so append-only check has base ref
@@ -226,12 +232,21 @@ jobs:
   worker:
     name: staffml-vault-worker (vitest)
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    # See the timeout note on the `python` job above: full checkouts of this
+    # ~3 GB repo intermittently stall past 10 minutes. This job additionally
+    # uses a sparse checkout, which measured under 30 s across 11 samples in
+    # the same window that a full clone here hung for the full 10 min budget.
+    timeout-minutes: 25
     defaults:
       run:
         working-directory: interviews/staffml-vault-worker
     steps:
       - uses: actions/checkout@v6
+        with:
+          # The worker suite is self-contained: src/types.ts mirrors
+          # @staffml/vault-types rather than importing it, and nothing under
+          # src/ or tests/ reaches outside this directory.
+          sparse-checkout: interviews/staffml-vault-worker
 
       - name: Set up Node
         uses: actions/setup-node@v6

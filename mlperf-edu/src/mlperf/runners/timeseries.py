@@ -19,6 +19,7 @@ from mlperf.manifest import build_provd
 from mlperf.reference.timeseries.patchtst import PatchTST_backbone
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
+    TrainingProgress,
     configured_seed,
     select_torch_device,
     synchronize_device,
@@ -344,6 +345,7 @@ def run_time_series_forecasting_max(
     best_epoch = 0
     best_state: dict[str, torch.Tensor] | None = None
     stale_epochs = 0
+    progress = TrainingProgress(workload.id, int(config["epochs"]), unit="epoch")
     synchronize_device(device)
     measured_start = time.perf_counter()
     for epoch in range(config["epochs"]):
@@ -379,10 +381,21 @@ def run_time_series_forecasting_max(
             stale_epochs = 0
         else:
             stale_epochs += 1
-            if stale_epochs >= config["patience"]:
-                break
+        progress.update(
+            epoch + 1,
+            loss=training_losses[-1],
+            val_mse=validation["mse"],
+            best=best_validation_mse,
+            stale=stale_epochs,
+        )
+        # `stale_epochs` guards the comparison so this stays equivalent to the
+        # original in-else break even when patience is overridden to 0: an
+        # epoch that improved the best score never triggers early stopping.
+        if stale_epochs and stale_epochs >= config["patience"]:
+            break
     synchronize_device(device)
     train_and_eval_seconds = time.perf_counter() - measured_start
+    progress.close(f"best validation MSE {best_validation_mse:.4f} at epoch {best_epoch}")
     if best_state is None:
         raise RuntimeError("PatchTST training produced no best checkpoint")
     model.load_state_dict(best_state)
