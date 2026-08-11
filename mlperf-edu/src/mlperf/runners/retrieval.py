@@ -139,11 +139,33 @@ def run_information_retrieval_max(
     asset = ensure_nanobeir_reranking(download=True)
     snapshot = _snapshot_model(workload)
     model = CrossEncoder(str(snapshot), device=str(device))
-    # CrossEncoder wraps the transformer at .model. Dynamic quantization returns
-    # a new module rather than mutating in place, so the result is assigned back
-    # or the wrapper would keep scoring with the original float32 weights.
+    # CrossEncoder is a Sequential whose single stage is a Transformer wrapper,
+    # and both `.model` and `.transformers_model` are read-only properties that
+    # search the module hierarchy for the underlying PreTrainedModel. Assigning
+    # to either does not replace the model: nn.Module.__setattr__ registers the
+    # transformed module as a second Sequential stage, so the property keeps
+    # returning the original weights while the extra stage receives the previous
+    # stage's tokenizer output and raises a bare AttributeError. The Transformer
+    # wrapper's own attribute is the assignable one.
     precision = resolve_precision("MLPERF_EDU_INFORMATION_RETRIEVAL_PRECISION")
-    model.model, execution_dtype = apply_precision(model.model, precision, device)
+    transformer_stage = model[0]
+    stages_before = list(model._modules)
+    transformer_stage.model, execution_dtype = apply_precision(
+        transformer_stage.model, precision, device
+    )
+    if list(model._modules) != stages_before:
+        raise RuntimeError(
+            "applying the precision lever changed the CrossEncoder stage list "
+            f"from {stages_before} to {list(model._modules)}; the transformed "
+            "model was registered as an extra forward stage instead of "
+            "replacing the existing one"
+        )
+    if model.model is not transformer_stage.model:
+        raise RuntimeError(
+            "the precision lever did not reach the module the CrossEncoder "
+            "scores with; the run would have reported "
+            f"{precision!r} while executing the original weights"
+        )
     n_params = sum(parameter.numel() for parameter in model.model.parameters())
     batch_size = int(os.environ.get("MLPERF_EDU_RETRIEVAL_BATCH_SIZE", 32))
     rerank_k = 100
