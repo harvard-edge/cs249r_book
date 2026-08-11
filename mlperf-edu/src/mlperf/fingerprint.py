@@ -29,6 +29,10 @@ PERFORMANCE_ENVIRONMENT_ALLOWLIST = (
     "KMP_BLOCKTIME",
     "MKL_DYNAMIC",
     "MKL_NUM_THREADS",
+    # Read by runners/tiny.py. Its absence here meant two anomaly-detection runs
+    # at different precisions produced identical comparison fingerprints, so the
+    # lever would not have been visible in provenance at all.
+    "MLPERF_EDU_ANOMALY_DETECTION_PRECISION",
     "MLPERF_EDU_CAUSAL_LM_PRECISION",
     "MLPERF_EDU_DECODE_MAX_BATCH",
     "MLPERF_EDU_DECODE_MAX_PREFILL_CTX",
