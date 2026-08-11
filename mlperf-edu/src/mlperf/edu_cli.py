@@ -1420,7 +1420,24 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
         | set(experiment_api.RESERVED_ENVIRONMENT_KEYS)
         | set(experiment_api.IMMUTABLE_CONTRACT_KEYS)
     )
+    # Idle settle between cells. Back-to-back timing runs contaminate each
+    # other in two opposing directions: sustained load throttles the CPU, while
+    # an accelerator gets faster as its shader and kernel caches warm. Measured
+    # on text-classification at identical settings, the CPU arm ran 74 percent
+    # slower and the MPS arm 38 percent faster after eighty minutes of prior
+    # training, moving the reported speedup by 2.81x. A plan that does not
+    # settle between cells reports an order effect as a workload difference.
+    settle_seconds = float(os.environ.get("MLPERF_EDU_PLAN_SETTLE_SECONDS", 0) or 0)
+    if settle_seconds < 0:
+        raise ValueError("MLPERF_EDU_PLAN_SETTLE_SECONDS must be >= 0")
+
     for index, (run, workload, mode, phase) in enumerate(resolved_runs, start=1):
+        if settle_seconds and index > 1:
+            print(
+                f"settling {settle_seconds:.0f}s before {run['name']} "
+                "so the previous cell's thermal and cache state decays"
+            )
+            time.sleep(settle_seconds)
         run_dir = output_dir / "runs" / f"{index:02d}-{run['name']}"
         environment = dict(run["environment"])
         environment["MLPERF_EDU_PRO_REPETITIONS"] = str(run["repetitions"])
