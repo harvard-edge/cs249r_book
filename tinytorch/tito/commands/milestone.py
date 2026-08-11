@@ -1406,7 +1406,7 @@ class MilestoneCommand(BaseCommand):
             if next_id in MILESTONE_SCRIPTS:
                 next_milestone = MILESTONE_SCRIPTS[next_id]
                 console.print(f"\n[bold yellow]🎯 What's Next:[/bold yellow]")
-                console.print(f"[dim]Milestone {next_id}: {next_milestone['name']} ({next_milestone['year']})[/dim]")
+                console.print(f"[dim]Milestone {next_id}: {next_milestone['name']}[/dim]")
 
                 # Get completed modules for checking next milestone
                 progress_file = Path(".tito") / "progress.json"
@@ -1464,7 +1464,7 @@ class MilestoneCommand(BaseCommand):
 
         # Display detailed info
         info_text = (
-            f"[bold cyan]{milestone['emoji']} {milestone['name']} ({milestone['year']})[/bold cyan]\n\n"
+            f"[bold cyan]{milestone['emoji']} {milestone['name']}[/bold cyan]\n\n"
             f"[bold]{milestone['title']}[/bold]\n\n"
             f"[yellow]📚 Historical Context:[/yellow]\n"
             f"{milestone['historical_context']}\n\n"
