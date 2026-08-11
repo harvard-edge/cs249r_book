@@ -18,6 +18,8 @@ from mlperf.runners.common import (
     configured_seed,
     select_torch_device,
     synchronize_device,
+    apply_precision,
+    resolve_precision,
 )
 
 
@@ -137,6 +139,11 @@ def run_information_retrieval_max(
     asset = ensure_nanobeir_reranking(download=True)
     snapshot = _snapshot_model(workload)
     model = CrossEncoder(str(snapshot), device=str(device))
+    # CrossEncoder wraps the transformer at .model. Dynamic quantization returns
+    # a new module rather than mutating in place, so the result is assigned back
+    # or the wrapper would keep scoring with the original float32 weights.
+    precision = resolve_precision("MLPERF_EDU_INFORMATION_RETRIEVAL_PRECISION")
+    model.model, execution_dtype = apply_precision(model.model, precision, device)
     n_params = sum(parameter.numel() for parameter in model.model.parameters())
     batch_size = int(os.environ.get("MLPERF_EDU_RETRIEVAL_BATCH_SIZE", 32))
     rerank_k = 100
@@ -250,6 +257,8 @@ def run_information_retrieval_max(
             "rerank_k": rerank_k,
             "at_k": at_k,
             "batch_size": batch_size,
+            "execution_dtype": execution_dtype,
+            "requested_precision": precision,
             "always_rerank_positives": True,
             "measurement_repetitions": measurement_repetitions,
             "performance_aggregate": performance_aggregate,
@@ -297,7 +306,7 @@ def run_information_retrieval_max(
         weights_name=MODEL_ID,
         weights_revision=MODEL_REVISION,
         weights_n_params=n_params,
-        weights_dtype="float32",
+        weights_dtype=execution_dtype,
         dataset_name=asset.name,
         dataset_files=list(asset.files),
         rng_seed=seed,
