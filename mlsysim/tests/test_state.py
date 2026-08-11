@@ -1,4 +1,5 @@
-"""Tests for DesignLedger persistence (mlsysim/labs/state.py).
+"""
+Tests for DesignLedger persistence (mlsysim/labs/state.py).
 
 Covers the WASM background-save failure path fixed in #1985: previously
 `save()` used `asyncio.create_task(...)` fire-and-forget, so IndexedDB
@@ -122,3 +123,122 @@ def test_asave_raises_on_failure_directly(tmp_path, monkeypatch):
             await ledger.asave(step=2, design={"x": 1})
 
     asyncio.run(run())
+
+"""
+DesignLedger persistence — read-path error handling (#1994).
+
+DesignLedger.load() previously reset to a blank LedgerState() on any read
+failure -- missing file, corrupt JSON, permissions error -- with no way
+for calling code to distinguish "first run, nothing saved yet" (expected)
+from "a save file exists but couldn't be read" (real data loss). This
+mirrors the write-path fix in #1988/last_save_error: last_load_error now
+surfaces read failures instead of silently discarding them.
+
+This file covers the native/local-filesystem path only. The WASM/
+IndexedDB path is covered separately in labs/tests/test_wasm_persistence.py,
+since that failure mode requires a real browser and can't be meaningfully
+mocked here.
+
+Usage
+-----
+    python3 -m pytest mlsysim/tests/test_state.py -v
+"""
+import json
+from pathlib import Path
+
+import pytest
+
+from mlsysim.labs.state import DesignLedger, LedgerState
+
+
+@pytest.fixture
+def ledger(tmp_path, monkeypatch):
+    """A DesignLedger whose config_dir/file_path live under a throwaway
+    tmp_path instead of the real ~/.mlsys, so tests never touch (or race
+    against) a developer's actual saved progress."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    return DesignLedger()
+
+
+def test_init_does_not_raise(tmp_path, monkeypatch):
+    """Regression guard: last_load_error is a read-only @property backed
+    by _last_load_error. Assigning self.last_load_error = ... anywhere
+    (including __init__) raises AttributeError immediately, since the
+    property has no setter. This is the exact bug that would otherwise
+    only surface at runtime, not at review time."""
+    monkeypatch.setattr(Path, "home", lambda: tmp_path)
+    DesignLedger()  # must not raise
+
+
+def test_load_missing_file_is_not_an_error(ledger):
+    """First run for a student -- no ledger.json exists yet. This is
+    expected, not a failure, and must not populate last_load_error."""
+    state = ledger.load()
+    assert isinstance(state, LedgerState)
+    assert ledger.last_load_error is None
+
+
+def test_load_corrupt_file_sets_last_load_error(ledger):
+    """A save file exists but isn't valid JSON -- e.g. truncated by a
+    crash mid-write. Must fail safe (blank state, no crash) but the
+    failure must be visible via last_load_error, not silently discarded."""
+    ledger.config_dir.mkdir(exist_ok=True)
+    ledger.file_path.write_text("{not valid json")
+
+    state = ledger.load()
+
+    assert isinstance(state, LedgerState)
+    assert ledger.last_load_error is not None
+    assert "json" in ledger.last_load_error.lower() or "JSON" in ledger.last_load_error
+
+
+def test_load_corrupt_file_resets_to_blank_state(ledger):
+    """A corrupt file must not leave stale/partial in-memory state around
+    -- the fallback is a fresh LedgerState(), not a half-populated one."""
+    ledger.config_dir.mkdir(exist_ok=True)
+    ledger.file_path.write_text("{not valid json")
+
+    state = ledger.load()
+
+    assert state.track is None
+    assert state.current_step == 0
+    assert state.history == {}
+
+
+def test_load_valid_file_clears_previous_error(ledger):
+    """last_load_error must reset on a subsequent successful load --
+    it's a snapshot of the *most recent* attempt, not sticky forever."""
+    ledger.config_dir.mkdir(exist_ok=True)
+    ledger.file_path.write_text("{not valid json")
+    ledger.load()
+    assert ledger.last_load_error is not None
+
+    ledger.file_path.write_text(json.dumps({
+        "track": "edge",
+        "current_step": 3,
+        "history": {},
+        "last_updated": "2026-08-10T00:00:00",
+    }))
+    state = ledger.load()
+
+    assert ledger.last_load_error is None
+    assert state.track == "edge"
+    assert state.current_step == 3
+
+
+def test_load_valid_file_round_trips_history(ledger):
+    """Sanity check that the happy path (already-existing behavior)
+    wasn't broken by the error-handling changes."""
+    ledger.config_dir.mkdir(exist_ok=True)
+    ledger.file_path.write_text(json.dumps({
+        "track": "cloud",
+        "current_step": 5,
+        "history": {"1": {"choice": "gpu"}, "5": {"choice": "spot"}},
+        "last_updated": "2026-08-10T00:00:00",
+    }))
+
+    state = ledger.load()
+
+    assert ledger.last_load_error is None
+    assert state.history[1] == {"choice": "gpu"}
+    assert state.history[5] == {"choice": "spot"}
