@@ -47,10 +47,25 @@ def load_runs() -> list[dict[str, Any]]:
         metrics = report.get("metrics", {}) or {}
         metric_key = quality.get("metric_key") or quality.get("metric") or ""
         observed = metrics.get(f"{metric_key}_mean", metrics.get(metric_key))
+        # Some contracts can import a prior generation instead of executing it
+        # (MLPERF_EDU_EDM_IMPORT_PACKET, MLPERF_EDU_BFCL_IMPORT_PACKET). An
+        # imported cell is a valid artifact but it is not a measurement made
+        # here, so it must never enter a results table unlabelled.
+        source = str(config.get("generation_source", "") or "")
+        imported = "import" in source.lower()
+        # image-generation swaps sampler and state precision on MPS, so its
+        # accelerator cell is a variant of the reference path rather than the
+        # official one. The runner records this; carry it forward.
+        state_precision = str(config.get("state_precision", "") or "")
+        variant_path = "mps" in state_precision.lower()
         runs.append(
             {
                 "plan": plan,
                 "cell": re.sub(r"^\d+-", "", run_dir),
+                "imported": imported,
+                "generation_source": source,
+                "variant_path": variant_path,
+                "state_precision": state_precision,
                 "workload": report.get("workload") or report.get("id"),
                 "device": report.get("device_executed")
                 or (report.get("backend") or "").replace("pytorch-", ""),
@@ -206,6 +221,26 @@ def noise_floor(runs: list[dict[str, Any]]) -> list[str]:
     return lines or ["_No repeated configurations yet._"]
 
 
+def provenance_flags(runs: list[dict[str, Any]]) -> list[str]:
+    """Surface cells that are not straightforward local measurements."""
+    lines: list[str] = []
+    for run in runs:
+        if run.get("imported"):
+            lines.append(
+                f"- **IMPORTED, not executed here:** `{run['workload']}` / "
+                f"`{run['cell']}` (`generation_source={run['generation_source']}`). "
+                "Valid evidence, but it is not a measurement made by this run."
+            )
+        if run.get("variant_path"):
+            lines.append(
+                f"- **Variant execution path:** `{run['workload']}` / "
+                f"`{run['cell']}` ran `{run['state_precision']}`. This is not the "
+                "official reference path, so it is not like-for-like with a CPU "
+                "cell or with the published reference."
+            )
+    return lines or ["_All cells executed locally on the official path._"]
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--markdown", help="write the report to this path")
@@ -234,6 +269,10 @@ def main() -> int:
         "## Measured noise floor",
         "",
         *noise_floor(runs),
+        "",
+        "## Provenance flags",
+        "",
+        *provenance_flags(runs),
         "",
     ]
     text = "\n".join(out)
