@@ -152,6 +152,44 @@ MILESTONE_SCRIPTS = {
     }
 }
 
+# "What makes this special" bullets for the achievement panel, tailored to
+# what each milestone's required_modules actually cover. Previously every
+# milestone showed the same 3 lines including "Every gradient: YOUR
+# autograd", which was wrong for 01 and 02 (forward-pass only, no autograd
+# module required at all).
+MILESTONE_ACHIEVEMENT_HIGHLIGHTS = {
+    "01": [
+        "Every line of code: YOUR implementations",
+        "Every tensor operation: YOUR Tensor class",
+        "Every forward pass: YOUR Layers (no autograd needed yet)",
+    ],
+    "02": [
+        "Every line of code: YOUR implementations",
+        "Every tensor operation: YOUR Tensor class",
+        "The exact limitation Minsky & Papert proved in 1969",
+    ],
+    "03": [
+        "Every line of code: YOUR implementations",
+        "Every tensor operation: YOUR Tensor class",
+        "Every gradient: YOUR autograd",
+    ],
+    "04": [
+        "Every line of code: YOUR implementations",
+        "Every convolution: YOUR Conv2d",
+        "Every gradient: YOUR autograd",
+    ],
+    "05": [
+        "Every line of code: YOUR implementations",
+        "Every attention weight: YOUR MultiHeadAttention",
+        "Every gradient: YOUR autograd",
+    ],
+    "06": [
+        "Every line of code: YOUR implementations",
+        "Every byte saved: YOUR quantization and compression",
+        "Every gradient: YOUR autograd",
+    ],
+}
+
 
 MODULE_EXPORT_CHECKS = {
     1: [("tinytorch", "Tensor"), ("tinytorch.core.tensor", "Tensor")],
@@ -1340,14 +1378,20 @@ class MilestoneCommand(BaseCommand):
                     f"  ✅ {name}" for name, _, _ in scripts_to_run
                 )
 
+            default_highlights = [
+                "Every line of code: YOUR implementations",
+                "Every tensor operation: YOUR Tensor class",
+                "Every gradient: YOUR autograd",
+            ]
+            highlights = MILESTONE_ACHIEVEMENT_HIGHLIGHTS.get(milestone_id, default_highlights)
+            highlights_text = "\n".join(f"• {line}" for line in highlights)
+
             console.print(Panel(
                 f"[bold green]🏆 MILESTONE ACHIEVED![/bold green]\n\n"
                 f"[green]You completed Milestone {milestone_id}: {milestone['name']}[/green]\n"
                 f"[yellow]{milestone['title']}[/yellow]{parts_text}\n\n"
                 f"[bold]What makes this special:[/bold]\n"
-                f"• Every line of code: YOUR implementations\n"
-                f"• Every tensor operation: YOUR Tensor class\n"
-                f"• Every gradient: YOUR autograd\n\n"
+                f"{highlights_text}\n\n"
                 f"[cyan]Achievement saved locally![/cyan]",
                 title="✨ Achievement Unlocked ✨",
                 border_style="bright_green",
@@ -1362,7 +1406,7 @@ class MilestoneCommand(BaseCommand):
             if next_id in MILESTONE_SCRIPTS:
                 next_milestone = MILESTONE_SCRIPTS[next_id]
                 console.print(f"\n[bold yellow]🎯 What's Next:[/bold yellow]")
-                console.print(f"[dim]Milestone {next_id}: {next_milestone['name']} ({next_milestone['year']})[/dim]")
+                console.print(f"[dim]Milestone {next_id}: {next_milestone['name']}[/dim]")
 
                 # Get completed modules for checking next milestone
                 progress_file = Path(".tito") / "progress.json"
@@ -1420,7 +1464,7 @@ class MilestoneCommand(BaseCommand):
 
         # Display detailed info
         info_text = (
-            f"[bold cyan]{milestone['emoji']} {milestone['name']} ({milestone['year']})[/bold cyan]\n\n"
+            f"[bold cyan]{milestone['emoji']} {milestone['name']}[/bold cyan]\n\n"
             f"[bold]{milestone['title']}[/bold]\n\n"
             f"[yellow]📚 Historical Context:[/yellow]\n"
             f"{milestone['historical_context']}\n\n"

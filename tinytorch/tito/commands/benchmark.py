@@ -522,65 +522,70 @@ class BenchmarkCommand(BaseCommand):
         """Prompt user to submit benchmark results."""
         console = self.console
 
-        console.print("\n")
-        submit = Confirm.ask(
-            f"[cyan]Would you like to submit your {benchmark_type} benchmark results to the community?[/cyan]",
-            default=True
-        )
-
-        if submit:
-            # Collect submission configuration
-            console.print("\n[cyan]Submission Configuration:[/cyan]")
-
-            # Check if user is in community
-            community_data = self._get_community_data()
-            if not community_data:
-                console.print("[yellow]⚠️  You're not in the community yet.[/yellow]")
-                join = Confirm.ask("Would you like to join the community first?", default=True)
-                if join:
-                    console.print("\n[cyan]Run: [bold]tito community join[/bold][/cyan]")
-                    return
-
-            # Additional submission options
-            include_system_info = Confirm.ask(
-                "Include system information in submission?",
+        try:
+            console.print("\n")
+            submit = Confirm.ask(
+                f"[cyan]Would you like to submit your {benchmark_type} benchmark results to the community?[/cyan]",
                 default=True
             )
 
-            anonymous = Confirm.ask(
-                "Submit anonymously?",
-                default=False
-            )
+            if submit:
+                # Collect submission configuration
+                console.print("\n[cyan]Submission Configuration:[/cyan]")
 
-            # Create submission data
-            submission = {
-                "benchmark_type": benchmark_type,
-                "timestamp": results["timestamp"],
-                "metrics": results["metrics"],
-                "include_system_info": include_system_info,
-                "anonymous": anonymous
-            }
+                # Check if user is in community
+                community_data = self._get_community_data()
+                if not community_data:
+                    console.print("[yellow]⚠️  You're not in the community yet.[/yellow]")
+                    join = Confirm.ask("Would you like to join the community first?", default=True)
+                    if join:
+                        console.print("\n[cyan]Run: [bold]tito community login[/bold][/cyan]")
+                        return
 
-            if include_system_info:
-                submission["system_info"] = results.get("system_info", {})
+                # Additional submission options
+                include_system_info = Confirm.ask(
+                    "Include system information in submission?",
+                    default=True
+                )
 
-            # Save submission
-            submission_dir = Path(".tito") / "submissions"
-            submission_dir.mkdir(parents=True, exist_ok=True)
-            timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
-            submission_file = submission_dir / f"{benchmark_type}_submission_{timestamp_str}.json"
+                anonymous = Confirm.ask(
+                    "Submit anonymously?",
+                    default=False
+                )
 
-            with open(submission_file, 'w') as f:
-                json.dump(submission, f, indent=2)
+                # Create submission data
+                submission = {
+                    "benchmark_type": benchmark_type,
+                    "timestamp": results["timestamp"],
+                    "metrics": results["metrics"],
+                    "include_system_info": include_system_info,
+                    "anonymous": anonymous
+                }
 
-            console.print(f"\n[green]✅ Submission prepared: {submission_file}[/green]")
+                if include_system_info:
+                    submission["system_info"] = results.get("system_info", {})
 
-            # Stub: Try to submit to website
-            self._submit_to_website(submission)
+                # Save submission
+                submission_dir = Path(".tito") / "submissions"
+                submission_dir.mkdir(parents=True, exist_ok=True)
+                timestamp_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+                submission_file = submission_dir / f"{benchmark_type}_submission_{timestamp_str}.json"
 
-            config = self._get_config()
-            if not config.get("website", {}).get("enabled", False):
-                console.print("[cyan]💡 Submission saved locally. Community leaderboard coming soon![/cyan]")
+                with open(submission_file, 'w') as f:
+                    json.dump(submission, f, indent=2)
+
+                console.print(f"\n[green]✅ Submission prepared: {submission_file}[/green]")
+
+                # Stub: Try to submit to website
+                self._submit_to_website(submission)
+
+                config = self._get_config()
+                if not config.get("website", {}).get("enabled", False):
+                    console.print("[cyan]💡 Submission saved locally. Community leaderboard coming soon![/cyan]")
+        except EOFError:
+            console.print("\n[dim]Skipping submission (no interactive input available).[/dim]")
+        except KeyboardInterrupt:
+            console.print("\n[dim]Submission cancelled.[/dim]")
 
     def _get_community_data(self) -> Optional[Dict[str, Any]]:
         """Get user's community profile from ~/.tinytorch (flat structure)."""
