@@ -525,13 +525,16 @@ class ModuleWorkflowCommand(BaseCommand):
                 return None
             return pid
         except ImportError:
-            # No psutil available - fall back to os-level existence check only,
-            # which can't verify it's still actually a Jupyter process.
-            try:
-                os.kill(pid, 0)
-                return pid
-            except OSError:
-                return None
+            # No psutil available. Deliberately not falling back to an
+            # os.kill(pid, 0) "probe" here: on Windows, os.kill does not
+            # implement POSIX signal-0 semantics -- it calls TerminateProcess
+            # for any signal value, so "checking" whether the PID is alive
+            # would actually kill it. psutil is already a required project
+            # dependency (requirements.txt, tito setup), so this should only
+            # happen in a broken environment; treat it the same as "can't
+            # tell" and let the caller launch a fresh server. Worst case is
+            # a duplicate server, not silently killing a running one.
+            return None
         except Exception:
             return None
 
