@@ -501,6 +501,40 @@ class ModuleWorkflowCommand(BaseCommand):
 
         return self._open_jupyter(module_name)
 
+    def _jupyter_pid_file(self) -> Path:
+        return self.config.project_root / ".tito" / "jupyter.pid"
+
+    def _running_jupyter_pid(self) -> Optional[int]:
+        """Return the PID of a tito-launched Jupyter Lab server still running, if any."""
+        pid_file = self._jupyter_pid_file()
+        if not pid_file.exists():
+            return None
+        try:
+            pid = int(pid_file.read_text().strip())
+        except (ValueError, OSError):
+            return None
+
+        try:
+            import psutil
+            if not psutil.pid_exists(pid):
+                return None
+            proc = psutil.Process(pid)
+            cmdline = " ".join(proc.cmdline()).lower()
+            if "jupyter" not in cmdline:
+                # PID was recycled by an unrelated process since we last launched
+                return None
+            return pid
+        except ImportError:
+            # No psutil available - fall back to os-level existence check only,
+            # which can't verify it's still actually a Jupyter process.
+            try:
+                os.kill(pid, 0)
+                return pid
+            except OSError:
+                return None
+        except Exception:
+            return None
+
     def _open_jupyter(self, module_name: str) -> int:
         """Open Jupyter Lab for a module."""
         import time
@@ -524,6 +558,20 @@ class ModuleWorkflowCommand(BaseCommand):
                 else:
                     notebook_path = None
 
+            # If a tito-launched Jupyter Lab server is already running, reuse it
+            # instead of spawning another one. Without this, every tito module
+            # start/resume/view call launches its own untracked jupyter lab
+            # process that nothing ever stops, and they accumulate for the rest
+            # of the session.
+            existing_pid = self._running_jupyter_pid()
+            if existing_pid is not None:
+                self.console.print(f"\n[cyan]Jupyter Lab is already running (pid {existing_pid}).[/cyan]")
+                if notebook_path:
+                    self.console.print(f"[dim]Open {notebook_path.name} from the existing Jupyter Lab tab in your browser.[/dim]")
+                else:
+                    self.console.print("[dim]Switch to your existing Jupyter Lab browser tab.[/dim]")
+                return 0
+
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
 
             # Launch Jupyter Lab with the notebook file directly
@@ -540,6 +588,10 @@ class ModuleWorkflowCommand(BaseCommand):
                 encoding="utf-8",
                 errors="replace"
             )
+
+            pid_file = self._jupyter_pid_file()
+            pid_file.parent.mkdir(parents=True, exist_ok=True)
+            pid_file.write_text(str(process.pid))
 
             # Give Jupyter a moment to start and capture the URL
             time.sleep(2)
