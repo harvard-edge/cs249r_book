@@ -381,15 +381,15 @@ Thanks to these wonderful people who helped improve TinyTorch!
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/minhdang26403"><img src="https://avatars.githubusercontent.com/minhdang26403?v=4?s=80" width="80px;" alt="Dang Truong"/><br /><sub><b>Dang Truong</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/ngbolin"><img src="https://avatars.githubusercontent.com/u/9389997?v=4?v=4?s=80" width="80px;" alt="Ng Bo Lin"/><br /><sub><b>Ng Bo Lin</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=80" width="80px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/vedant-a-joshi"><img src="https://avatars.githubusercontent.com/u/77033374?v=4?v=4?s=80" width="80px;" alt="Vedant Joshi"/><br /><sub><b>Vedant Joshi</b></sub></a><br />🪲 🧑‍💻 ✍️ 🧪</td>
     </tr>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/didier-durand"><img src="https://avatars.githubusercontent.com/didier-durand?v=4?s=80" width="80px;" alt="Didier Durand"/><br /><sub><b>Didier Durand</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/rnjema"><img src="https://avatars.githubusercontent.com/rnjema?v=4?s=80" width="80px;" alt="rnjema"/><br /><sub><b>rnjema</b></sub></a><br />🧑‍💻 ✍️ 🛠️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/AndreaMattiaGaravagno"><img src="https://avatars.githubusercontent.com/u/22458187?v=4?v=4?s=80" width="80px;" alt="AndreaMattiaGaravagno"/><br /><sub><b>AndreaMattiaGaravagno</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Pratham-ja"><img src="https://avatars.githubusercontent.com/u/114498234?v=4?v=4?s=80" width="80px;" alt="Pratham Chaudhary"/><br /><sub><b>Pratham Chaudhary</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="asgalon"/><br /><sub><b>asgalon</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/bdub-1"><img src="https://avatars.githubusercontent.com/u/100250017?v=4?v=4?s=80" width="80px;" alt="bdub"/><br /><sub><b>bdub</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/vedant-a-joshi"><img src="https://avatars.githubusercontent.com/u/77033374?v=4?v=4?s=80" width="80px;" alt="Vedant Joshi"/><br /><sub><b>Vedant Joshi</b></sub></a><br />🪲 🧑‍💻 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/karthikdani"><img src="https://avatars.githubusercontent.com/karthikdani?v=4?s=80" width="80px;" alt="Karthik Dani"/><br /><sub><b>Karthik Dani</b></sub></a><br />🪲 🧑‍💻</td>
     </tr>
     <tr>
