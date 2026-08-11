@@ -525,29 +525,55 @@ class ModuleWorkflowCommand(BaseCommand):
         except (ValueError, OSError):
             return None
 
+        if not self._pid_is_running_jupyter(pid):
+            return None
+        return pid
+
+    @staticmethod
+    def _pid_is_running_jupyter(pid: int) -> bool:
+        """Check whether a PID is alive and looks like a Jupyter process.
+
+        Uses only the standard library (no psutil -- it isn't a project
+        dependency in pyproject.toml/requirements.txt). Windows needs its own
+        path: os.kill(pid, 0) does not implement POSIX signal-0 "probe only"
+        semantics there -- it calls TerminateProcess for any signal value, so
+        using it to "check" liveness would actually kill the process. Query
+        the process via the Win32 API instead, which never touches it.
+        """
+        if sys.platform == "win32":
+            import ctypes
+            from ctypes import wintypes
+
+            PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+            kernel32 = ctypes.windll.kernel32
+            handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+            if not handle:
+                return False
+            try:
+                buf = ctypes.create_unicode_buffer(260)
+                size = wintypes.DWORD(260)
+                if not kernel32.QueryFullProcessImageNameW(handle, 0, buf, ctypes.byref(size)):
+                    return False
+                return "jupyter" in buf.value.lower()
+            finally:
+                kernel32.CloseHandle(handle)
+
+        # POSIX: signal 0 really is just a liveness probe, no signal is sent.
         try:
-            import psutil
-            if not psutil.pid_exists(pid):
-                return None
-            proc = psutil.Process(pid)
-            cmdline = " ".join(proc.cmdline()).lower()
-            if "jupyter" not in cmdline:
-                # PID was recycled by an unrelated process since we last launched
-                return None
-            return pid
-        except ImportError:
-            # No psutil available. Deliberately not falling back to an
-            # os.kill(pid, 0) "probe" here: on Windows, os.kill does not
-            # implement POSIX signal-0 semantics -- it calls TerminateProcess
-            # for any signal value, so "checking" whether the PID is alive
-            # would actually kill it. psutil is already a required project
-            # dependency (requirements.txt, tito setup), so this should only
-            # happen in a broken environment; treat it the same as "can't
-            # tell" and let the caller launch a fresh server. Worst case is
-            # a duplicate server, not silently killing a running one.
-            return None
-        except Exception:
-            return None
+            os.kill(pid, 0)
+        except OSError:
+            return False
+
+        # Best-effort check that it's actually still Jupyter (guards against
+        # the PID being recycled by an unrelated process). /proc is Linux-
+        # specific with no portable stdlib equivalent on macOS/BSD; if it's
+        # not available, being alive is good enough to reuse it.
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as f:
+                cmdline = f.read().replace(b"\x00", b" ").decode(errors="replace").lower()
+            return "jupyter" in cmdline
+        except OSError:
+            return True
 
     def _open_jupyter(self, module_name: str) -> int:
         """Open Jupyter Lab for a module."""
