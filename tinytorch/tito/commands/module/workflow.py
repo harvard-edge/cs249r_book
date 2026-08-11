@@ -546,6 +546,22 @@ class ModuleWorkflowCommand(BaseCommand):
 
             PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
             kernel32 = ctypes.windll.kernel32
+
+            # HANDLE is pointer-width (64-bit on Win64). Without an explicit
+            # restype, ctypes defaults OpenProcess's return to a 32-bit
+            # signed int and truncates it -- harmless for the small handle
+            # values Windows actually hands out, but not correct per the
+            # Win32 API contract. Declare the real signatures instead of
+            # relying on that truncation happening to be safe.
+            kernel32.OpenProcess.argtypes = [wintypes.DWORD, wintypes.BOOL, wintypes.DWORD]
+            kernel32.OpenProcess.restype = wintypes.HANDLE
+            kernel32.QueryFullProcessImageNameW.argtypes = [
+                wintypes.HANDLE, wintypes.DWORD, wintypes.LPWSTR, ctypes.POINTER(wintypes.DWORD)
+            ]
+            kernel32.QueryFullProcessImageNameW.restype = wintypes.BOOL
+            kernel32.CloseHandle.argtypes = [wintypes.HANDLE]
+            kernel32.CloseHandle.restype = wintypes.BOOL
+
             handle = kernel32.OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
             if not handle:
                 return False
