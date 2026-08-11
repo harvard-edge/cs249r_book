@@ -1495,7 +1495,11 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                 "mode": mode,
                 "phase": phase,
                 "status": "execution_failed",
-                "note": str(exc),
+                # Qualified with the type because some libraries raise bare
+                # exceptions: transformers' BatchEncoding.__getattr__ raises
+                # AttributeError with no args, so str(exc) is the empty string
+                # and the recorded note said nothing about what broke.
+                "note": f"{type(exc).__name__}: {exc}" if str(exc) else type(exc).__name__,
                 "experiment_run": {
                     "plan_id": plan["id"],
                     "plan_source_sha256": plan["source_sha256"],
@@ -1508,7 +1512,9 @@ def cmd_run_plan(args: argparse.Namespace, workloads: dict[str, Workload]) -> in
                     "imported": bool(run.get("baseline_import")),
                 },
             }
-            console.print(f"[red]{run['name']} failed:[/red] {exc}")
+            console.print(
+                f"[red]{run['name']} failed:[/red] {report['note']}"
+            )
         finally:
             for key, value in previous.items():
                 if value is None:
@@ -1813,10 +1819,36 @@ def write_aggregate_report(
             report["artifacts"]["instructor_reference_plan"] = str(
                 experiment_reference_path
             )
+        # `complete` is answered against the runs the plan DECLARED, not against
+        # the runs that happened to produce a report. Deriving the denominator
+        # from produced reports let a plan that stopped early, or whose cells
+        # all failed, publish complete=true: a 12-cell sweep that executed 10
+        # reported expected=10, and a 2-cell plan where both cells failed
+        # reported expected=0. A reader of the manifest, or an aggregator keying
+        # on this field, would take either at face value.
+        failed_children = [
+            item
+            for item in workload_reports
+            if item.get("status") == "execution_failed"
+        ]
+        planned_runs = len(experiment_plan.get("runs") or [])
         report["experiment_evidence"] = {
+            "planned_runs": planned_runs,
+            "executed_runs": len(workload_reports),
+            "failed_runs": len(failed_children),
             "expected_child_manifests": len(expected_children),
             "verified_child_manifests": len(child_manifest_paths),
-            "complete": len(child_manifest_paths) == len(expected_children),
+            # Retained as the narrower claim it always was: every run that did
+            # succeed emitted a verified manifest.
+            "manifests_verified_for_successful_runs": (
+                len(child_manifest_paths) == len(expected_children)
+            ),
+            "complete": (
+                planned_runs > 0
+                and len(workload_reports) == planned_runs
+                and not failed_children
+                and len(child_manifest_paths) == len(expected_children)
+            ),
         }
     attach_run_fingerprints(report, hardware=hardware)
     report_path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n")
