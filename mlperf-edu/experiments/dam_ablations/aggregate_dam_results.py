@@ -126,11 +126,23 @@ def algorithm_lens(runs: list[dict[str, Any]]) -> list[str]:
 
 def factorial(runs: list[dict[str, Any]]) -> list[str]:
     """D x A x M factorial with the interaction contrast."""
-    cells = {
-        (r["epochs"], r["hidden"], r["device"]): r
+    # Prefer cells from the factorial plans. A speedup contrast is only valid
+    # between runs executed under the same plan and host conditions; mixing in
+    # the standalone machine-lens run shifted the D=500 A=256 ratio from 2.38x
+    # to 2.30x purely because it was a different invocation.
+    candidates = [
+        r
         for r in runs
         if r["workload"] == "graph-node-classification" and r["epochs"] and r["hidden"]
-    }
+    ]
+    factorial_runs = [r for r in candidates if "factorial" in r["plan"]]
+    preferred = factorial_runs or candidates
+    cells: dict[tuple, dict[str, Any]] = {}
+    for run in preferred:
+        cells.setdefault((run["epochs"], run["hidden"], run["device"]), run)
+    # Backfill any cell the factorial plans have not produced yet.
+    for run in candidates:
+        cells.setdefault((run["epochs"], run["hidden"], run["device"]), run)
     lines = [
         "| D (epochs) | A (hidden) | CPU (s) | MPS (s) | Speedup |",
         "|---:|---:|---:|---:|---:|",
