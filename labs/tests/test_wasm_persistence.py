@@ -46,6 +46,8 @@ from pathlib import Path
 
 import pytest
 
+import json
+
 STATE_PY = (
     Path(__file__).resolve().parents[2] / "mlsysim" / "mlsysim" / "labs" / "state.py"
 )
@@ -205,3 +207,145 @@ await ledger.save_async()
         f"from #1985 / PR #1988. A mocked test cannot catch this; only a "
         f"real Pyodide + IndexedDB check like this one can."
     )
+
+def test_load_async_corrupt_record_sets_last_load_error(served_dir):
+    """A stored record exists but is corrupt JSON -- json.loads() raising
+    is a Python-side failure independent of the JS resolve/reject shape,
+    so last_load_error must be populated regardless of #1988's status."""
+    from playwright.sync_api import sync_playwright
+
+    _, port = served_dir
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context()
+        try:
+            page = context.new_page()
+            init_errors: list[str] = []
+            page.on(
+                "pageerror",
+                lambda exc, errors=init_errors: errors.append(str(exc)),
+            )
+
+            page.goto(f"http://127.0.0.1:{port}/index.html")
+            page.wait_for_function(
+                "window.__ready === true || window.__initError", timeout=30_000
+            )
+            init_error = page.evaluate("window.__initError || null")
+            assert not init_error, f"Pyodide init failed: {init_error}"
+            assert not init_errors, f"Uncaught page errors during init: {init_errors}"
+
+            page.evaluate(
+                """
+                () => new Promise((resolve) => {
+                    const req = indexedDB.deleteDatabase("mlsys_ledger_db");
+                    req.onsuccess = req.onerror = req.onblocked = () => resolve();
+                })
+                """
+            )
+
+            # Seed a corrupt record directly at the storage layer.
+            page.evaluate(
+                """
+                () => new Promise((resolve, reject) => {
+                    const req = indexedDB.open("mlsys_ledger_db", 1);
+                    req.onupgradeneeded = (e) => {
+                        const db = e.target.result;
+                        if (!db.objectStoreNames.contains("ledger")) {
+                            db.createObjectStore("ledger");
+                        }
+                    };
+                    req.onsuccess = (e) => {
+                        const db = e.target.result;
+                        const tx = db.transaction("ledger", "readwrite");
+                        tx.objectStore("ledger").put("{not valid json", "mlsys_design_ledger");
+                        tx.oncomplete = () => { db.close(); resolve(); };
+                        tx.onerror = () => { db.close(); reject(tx.error); };
+                    };
+                    req.onerror = () => reject(req.error);
+                })
+                """
+            )
+
+            result = page.evaluate(
+                """
+                async () => {
+                    const pyodide = window.__pyodide;
+                    return await pyodide.runPythonAsync(`
+import json
+ledger = DesignLedger()
+await ledger.load_async()
+json.dumps({"error": ledger.last_load_error})
+`);
+                }
+                """
+            )
+            page.close()
+        finally:
+            context.close()
+            browser.close()
+
+    parsed = json.loads(result)
+    assert parsed["error"] is not None, (
+        "load_async() must surface a corrupt-JSON read failure via "
+        "last_load_error instead of silently returning a blank LedgerState()."
+    )
+
+
+def test_load_async_synchronous_indexeddb_open_throw_sets_last_load_error(served_dir):
+    """indexedDB.open() throwing synchronously must reject the Promise
+    (per the Promise constructor spec) and propagate to last_load_error --
+    true today even against the pre-#1988 resolve(null)-style onerror
+    handlers, since this never reaches those handlers at all."""
+    from playwright.sync_api import sync_playwright
+
+    _, port = served_dir
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch()
+        context = browser.new_context()
+        try:
+            page = context.new_page()
+            init_errors: list[str] = []
+            page.on(
+                "pageerror",
+                lambda exc, errors=init_errors: errors.append(str(exc)),
+            )
+
+            page.goto(f"http://127.0.0.1:{port}/index.html")
+            page.wait_for_function(
+                "window.__ready === true || window.__initError", timeout=30_000
+            )
+            init_error = page.evaluate("window.__initError || null")
+            assert not init_error, f"Pyodide init failed: {init_error}"
+            assert not init_errors, f"Uncaught page errors during init: {init_errors}"
+
+            page.evaluate(
+                """() => {
+                    window.indexedDB.open = () => {
+                        throw new Error('Simulated synchronous IndexedDB failure');
+                    };
+                }"""
+            )
+
+            result = page.evaluate(
+                """
+                async () => {
+                    const pyodide = window.__pyodide;
+                    return await pyodide.runPythonAsync(`
+import json
+ledger = DesignLedger()
+await ledger.load_async()
+json.dumps({"error": ledger.last_load_error})
+`);
+                }
+                """
+            )
+            page.close()
+        finally:
+            context.close()
+            browser.close()
+
+    parsed = json.loads(result)
+    assert parsed["error"] is not None
+    assert "Simulated synchronous IndexedDB failure" in parsed["error"]
