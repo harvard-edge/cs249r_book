@@ -139,6 +139,7 @@ CANONICAL = [
     ("mtbf_component", 50000, 0.02, "Systems.Reliability.Gpu.mttf_hours"),
     ("gddr6x",         760,   0.02, "Hardware.Tech.Memory.GDDR6X.bandwidth (GB/s; '500-700' ranges contradicted canon)"),
     ("tpu_v5p_bw",     2760,  0.02, "Hardware.Cloud.TPUv5p.memory.bandwidth (GB/s; chapter had 2,765)"),
+    ("tpu_v5p_vmem_mib", 128, 0.02, "Hardware.Cloud.TPUv5p.memory.sram_capacity (MiB per chip)"),
     ("ds_cnn_params",  200000, 0.02, "Models.Tiny.DS_CNN.parameters ('500 KB model' matched no precision)"),
     ("gpt4_params_t",  1.76,  0.05, "Models.Language.GPT4.parameters (in T; 'hundreds of billions' understated it)"),
     ("lenet_1_params", 10000, 0.02, "Models.Vision.LeNet1.parameters ('~9.8K' was a chapter-local competing value)"),

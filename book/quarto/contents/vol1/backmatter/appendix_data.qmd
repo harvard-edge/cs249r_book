@@ -154,7 +154,7 @@ class SerializationCost:
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     # Categorical labels are non-numeric table values.
     csv_speed_mb_per_s_str = fmt_qty(csv_speed, MB / second, precision=0, commas=False, approx=True)
-    parquet_speed_mb_per_s_str = fmt_qty(parquet_speed, MB / second, precision=0, commas=True, lower_bound=True)
+    parquet_speed_mb_per_s_str = fmt_qty(parquet_speed, MB / second, precision=0, commas=True, approx=True)
     csv_cycles_str = MarkdownStr("High")
     parquet_cycles_str = MarkdownStr("Low")
     proto_speed_mb_per_s_str = fmt_qty(proto_speed, MB / second, precision=0, commas=False, approx=True)
@@ -177,7 +177,7 @@ Even after data arrives at the machine, we face one final hurdle: the serializat
 
 The choice of file format determines the "physics" of how the data is read. Row-oriented formats such as CSV and JSON store data record-by-record, so reading the `age` field still requires parsing each row. This suits appended logs but not analytics on selected features. Parquet stores compressed column chunks on disk, while Arrow provides a columnar in-memory and IPC format. Parquet readers can use **projection pushdown**\index{Projection pushdown} to fetch selected column chunks, and both formats support **vectorized processing**\index{Vectorized processing!columnar data}. Compare the two arrangements in @fig-row-vs-col to see why columnar access avoids scanning unnecessary bytes.
 
-::: {#fig-row-vs-col fig-env="figure" fig-pos="htb" fig-cap="**Storage Layouts**: Row-oriented formats pack data together by record (good for transactions). Column-oriented formats pack data by feature (good for analytics)." fig-alt="Diagram contrasting a row store with a column store. The row store lays out the ID, Age, and Loc fields of record 1 side by side, then the same three fields of record 2, and a scan reads all fields. The column store lays out the same six values as three field rows, ID, Age, and Loc, each holding both records, with the Age row highlighted because a scan reads only that field."}
+::: {#fig-row-vs-col fig-env="figure" fig-pos="htb" fig-cap="**Storage Layouts**: Row-oriented formats pack data together by record (good for transactions). Column-oriented formats pack data by feature (good for analytics)." fig-alt="Diagram contrasting row and column stores. The row store groups ID, Age, and Loc values by record and reads every column. The column store groups values by column and reads only Age."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
   \tikzset{
@@ -280,7 +280,7 @@ This layout difference becomes a systems issue whenever accelerator utilization 
 
 ::: {#psp-appendix-data-accelerator-starvation-problem .callout-perspective title="The accelerator starvation problem"}
 
-The choice of file format determines whether a system is I/O bound or compute bound. As @fig-row-vs-col shows, the serialization tax compounds with storage layout: row-oriented formats force full-row scans while columnar formats enable projection pushdown, reading only the bytes the model needs. The result is that the "Data Movement" term in the iron law can silently become the bottleneck that leaves expensive accelerators idling.
+The choice of file format determines whether a system is I/O bound or compute bound. As @tbl-serialization-cost shows, the serialization tax compounds with storage layout: row-oriented formats force full-row scans while columnar formats enable projection pushdown, reading only the bytes the model needs. The result is that the "Data Movement" term in the iron law can silently become the bottleneck that leaves expensive accelerators idling.
 
 :::
 
@@ -326,14 +326,14 @@ class DataAlgebra:
 Feature engineering turns raw records into the columns a model can learn from, and that transformation is usually a dataflow problem before it is a modeling problem. A pipeline first narrows the population, then chooses the features, then attaches context from other tables. Those three moves correspond to three Structured Query Language (SQL) primitives, and their computational cost determines whether the feature job stays local, scans unnecessary bytes, or turns into a network shuffle.
 
 1.  **Selection ($\sigma$)**: Filtering rows (for example, `WHERE age > 30`).
-    *   **Cost**: $\mathcal{O}(\log N + K)$ if an index lookup returns $K$ rows; $\mathcal{O}(N)$ for a full scan.
+    *   **Cost**: $\mathcal{O}(\log N + K)$ if a B-tree index lookup returns $K$ rows; $\mathcal{O}(N)$ for a full scan.
 2.  **Projection ($\pi$)**: Selecting columns (for example, `SELECT age`).
     *   **Cost**: Selected chunks plus decoding and metadata in columnar formats. This row-format example reads `{python} DataAlgebra.row_size_kb_str` for a `{python} DataAlgebra.int_size_bytes_value_str`-byte integer, wasting `{python} DataAlgebra.waste_pct_str` of the read.
 3.  **Join ($\bowtie$)**: Combining tables. The most expensive operation.
     *   **Shuffle Join**: Both tables are partitioned by key and exchanged over the network.
         *   **Cost**: Reshuffling both `{python} DataAlgebra.join_table_tb_str` tables moves about `{python} DataAlgebra.join_network_tb_str`; partitioning and locality can reduce this.
     *   **Broadcast Join**: One small table is sent to all workers.
-        *   **Cost**: $S_{\text{tbl}}(W-1)$ bytes; the $S_{\text{tbl}}$-byte table must fit on each of $W$ workers.
+        *   **Cost**: $S(W-1)$ bytes; the $S$-byte table must fit on each of $W$ workers.
 
 Understanding data formats, serialization costs, and algebraic primitives tells us how to *move* data efficiently. Even a perfectly engineered pipeline, however, can silently fail if the data it carries changes character over time. Detecting that change—and quantifying how much it matters—requires a different set of tools: probability and statistics.
 
@@ -380,7 +380,7 @@ class LongTailScale:
 
 ### Distributions and the long tail {#sec-appdx-data-foundations-distributions-long-tail-901f}
 
-In systems, the mean is often misleading. Latency distributions are often long-tailed, and user-visible services are commonly governed by high-percentile behavior rather than mean response time [@dean2013]. A "P99" (99th percentile) latency of 500 ms means 1 percent of requests experience that tail latency; with many requests per session, the fraction of users who see at least one slow request can be much higher. At scale (`{python} LongTailScale.n_users_str` users), even a 1 percent affected-user rate would affect `{python} LongTailScale.n_unhappy_str`.
+In systems, the mean is often misleading. Latency distributions are often long-tailed, and user-visible services are commonly governed by high-percentile behavior rather than mean response time [@dean2013]. A "P99" (99th percentile) latency of 500 ms means at most 1 percent of requests take longer than 500 ms; with many requests per session, the fraction of users who see at least one slow request can be much higher. At scale (`{python} LongTailScale.n_users_str` users), even a 1 percent affected-user rate would affect `{python} LongTailScale.n_unhappy_str`.
 
 ```{python}
 #| echo: false
@@ -636,9 +636,9 @@ class LogitOverflowExample:
     logit_val_str = fmt(logit_val, precision=0, commas=False)
 ```
 
-Neural networks output *logits*[^fn-logit] (unnormalized scores), not probabilities. We convert them using Softmax:
+Neural-network classifiers commonly output *logits*[^fn-logit] (unnormalized scores), which the softmax function converts to probabilities:
 
-[^fn-logit]: **Logit**: From *log* + *unit*, coined by Joseph Berkson in 1944. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(p) = \log(p/(1-p))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
+[^fn-logit]: **Logit**: Joseph Berkson coined the term in 1944 by analogy with *probit*. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(p) = \log(p/(1-p))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
 $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
 
 The problem is that if $z_i$ is large (for example, `{python} LogitOverflowExample.logit_val_str`), the exponential $e^{z_i}$ overflows common training and inference formats such as FP32, BF16, and FP16. FP64 can represent this specific value, but production ML kernels rarely use FP64 for softmax. The solution is to compute in log-space: the "Log-Sum-Exp" trick allows us to compute $\log\left(\sum e^{z_j}\right)$ without ever calculating the massive exponentials directly, preserving numerical precision.[^fn-logsumexp]

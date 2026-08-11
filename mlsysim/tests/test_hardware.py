@@ -37,6 +37,10 @@ def test_tpuv4_is_not_alias_to_tpuv5p():
     assert Hardware.Cloud.TPUv4.compute.peak_flops == (275 * ureg.TFLOPs / ureg.second)
 
 
+def test_tpuv5p_vmem_capacity():
+    assert Hardware.Cloud.TPUv5p.memory.sram_capacity == (128 * ureg.MiB)
+
+
 def test_nvlink_on_cloud_gpus():
     """NVLink bandwidth lives on HardwareNode, not loose constants."""
     from mlsysim.core.units import GB, second
