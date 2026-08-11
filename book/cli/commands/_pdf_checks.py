@@ -26,7 +26,7 @@ RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
 BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
 LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
 MALFORMED_OBJECT_NUMBER = re.compile(
-    r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|War Story|"
+    r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|Case Study|"
     r"Systems Perspective)\s+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
 )
 TABLE_CAPTION = re.compile(r"\bTable\s+(\d+\.\d+):\s+([^\n]+)")

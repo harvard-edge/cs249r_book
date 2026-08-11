@@ -471,7 +471,7 @@ class ValidateCommand:
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
             Scope("callout-schema", "_run_callout_schema", default=False,
-                  note="per-type bold-label structure (war-story = Context/Failure mode/Systems lesson)"),
+                  note="per-type bold-label structure (case-study = Context/Failure mode/Systems lesson)"),
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
@@ -6611,7 +6611,7 @@ class ValidateCommand:
         "callout-takeaways",
         "callout-theorem",
         "callout-tip",
-        "callout-war-story",
+        "callout-case-study",
         "callout-warning",
     }
     _CALLOUT_TITLE_OPTIONAL_CLASSES = {"callout-learning-objectives"}
@@ -6708,13 +6708,13 @@ class ValidateCommand:
     # (.callout-example, .callout-perspective carry many valid shapes) and are
     # not schema-enforced. "«term»" is the sentinel for a ***Term*** head.
     #
-    # War-stories come in three compact archetypes: a short disaster where the
+    # Case studies come in three compact archetypes: a short disaster where the
     # damage folds into Failure mode (Context / Failure mode / Systems lesson),
     # a failure with a distinct downstream impact (**Consequence**), and a
     # constraint-response story where the engineering fix stays visible as
     # **Resolution**.
     _CALLOUT_LABEL_SCHEMAS = {
-        "callout-war-story": (
+        "callout-case-study": (
             ("Context", "Failure mode", "Systems lesson"),
             ("Context", "Failure mode", "Consequence", "Systems lesson"),
             ("Context", "Failure mode", "Resolution", "Systems lesson"),
@@ -6726,7 +6726,7 @@ class ValidateCommand:
         """Enforce a uniform bold-label structure per callout type.
 
         Some callout types carry a fixed narrative schema: every
-        ``.callout-war-story`` is Context / Failure mode / Systems lesson, and
+        ``.callout-case-study`` is Context / Failure mode / Systems lesson, and
         every ``.callout-definition`` opens with a single ``***Term***`` head.
         This scope flags any instance of an enforced type whose bold
         paragraph-lead labels deviate, keeping the structure consistent across
@@ -6802,7 +6802,7 @@ class ValidateCommand:
 
         return ValidationRunResult(
             name="callout-schema",
-            description="Per-type bold-label structure (war-story, definition)",
+            description="Per-type bold-label structure (case-study, definition)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),

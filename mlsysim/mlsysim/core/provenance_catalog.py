@@ -163,6 +163,13 @@ HOROWITZ_ENERGY = _lit(
     "Horowitz (2014), \"Computing's Energy Problem (and what we can do about it)\", ISSCC — 45 nm per-operation/per-byte energies",
     url="https://ieeexplore.ieee.org/document/6757323",
 )
+ON_CHIP_MEMORY_ACCESS_ENERGY_ANCHORS = Provenance(
+    id="prov:on-chip-memory-access-energy-anchors",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="MLSysIM illustrative register, L1, and L2 access-energy anchors",
+    verified="2026-08-11",
+    notes="Pedagogical hierarchy anchors, not values reported by Horowitz (2014).",
+)
 MEMORY_LATENCY_HIERARCHY = _conv(
     "prov:memory-latency-hierarchy",
     "MLSysIM memory/interconnect access-latency hierarchy (order-of-magnitude class figures)",
@@ -265,6 +272,14 @@ GOOGLE_TPU_V5P = _ds(
     "prov:google-tpu-v5p",
     "Google Cloud TPU v5p documentation",
     "https://cloud.google.com/tpu/docs/v5p",
+)
+GOOGLE_TPU_V5P_WITH_VMEM = Provenance(
+    id="prov:google-tpu-v5p-with-vmem",
+    kind=ProvenanceKind.DERIVED,
+    ref="Google Cloud TPU v5p specifications and JAX TPU hardware reference",
+    url="https://docs.jax.dev/en/latest/pallas/tpu/hardware.html",
+    verified="2026-08-11",
+    notes="The 128 MiB VMEM capacity is derived from two TensorCores per chip and 64 MiB of VMEM per TensorCore; other fields follow the Google Cloud v5p specification.",
 )
 
 GOOGLE_TPU_V6 = _ds(
@@ -387,6 +402,14 @@ SANDLER_MOBILENETV2 = _lit(
     "prov:sandler-mobilenetv2-2018",
     "Sandler et al. (2018), MobileNetV2: Inverted Residuals and Linear Bottlenecks",
     url="https://arxiv.org/abs/1801.04381",
+)
+MOBILENETV2_WITH_ENERGY_ANCHOR = Provenance(
+    id="prov:mobilenetv2-with-energy-anchor",
+    kind=ProvenanceKind.ILLUSTRATIVE,
+    ref="Sandler et al. (2018) MobileNetV2 architecture with an illustrative book energy anchor",
+    url="https://arxiv.org/abs/1801.04381",
+    verified="2026-08-11",
+    notes="Alpha=1.0, 1000-class ImageNet classifier. The paper reports about 300M multiply-adds, represented here as 600 MFLOP under the book's convention that one multiply-accumulate is two FLOPs. The 0.1 mJ inference-energy value is an illustrative book anchor, not a measurement reported by Sandler et al. (2018).",
 )
 
 YOLOV8 = _ds(

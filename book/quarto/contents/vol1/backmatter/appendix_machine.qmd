@@ -90,7 +90,8 @@ class NumbersToKnow:
     # Step 1: Physics Constants (Eternal)
     speed_of_light = SPEED_OF_LIGHT_FIBER_KM_S.to(km / ms)
 
-    # Step 2: Reference energy ratios (45 nm anchors; not process-invariant)
+    # Step 2: Reference energy ratios. DRAM and arithmetic use Horowitz's
+    # 45 nm measurements; L1/register is an illustrative hierarchy anchor.
     dram_vs_compute = int((ENERGY_DRAM_ACCESS_PJ / ENERGY_FLOP_FP16_PJ).to_base_units().magnitude)
     fp32_vs_int8 = int((ENERGY_FLOP_FP32_PJ / ENERGY_OP_INT8_PJ).to_base_units().magnitude)
     fp32_vs_fp16 = round((ENERGY_FLOP_FP32_PJ / ENERGY_FLOP_FP16_PJ).to_base_units().magnitude, 1)
@@ -200,8 +201,8 @@ These relationships mix physical or arithmetic bounds with technology-specific m
 | Distance           | Round-Trip Latency | Implication                   |
 |:-------------------|:------------------:|:------------------------------|
 | Same data center   |       ~1 ms        | Distributed training feasible |
-| Cross-country (US) |       ~40 ms       | Edge needed for <100 ms apps  |
-| Cross-Atlantic     |       ~60 ms       | CDN required for global users |
+| Cross-country (US) |       ~40 ms       | Reduces the remaining request budget |
+| Cross-Atlantic     |       ~60 ms       | Further reduces the request budget   |
 | Cross-Pacific      |      ~100 ms       | Data locality is critical     |
 
 : **Speed of Light Reference**: Light in fiber travels ~200 km/ms. These approximate round trips include reducible overhead; only propagation is irreducible. {#tbl-speed-of-light-ref tbl-colwidths="[33,33,33]"}
@@ -210,16 +211,16 @@ These relationships mix physical or arithmetic bounds with technology-specific m
 
 @Tbl-energy-ratios-ref quantifies the energy cost of data movement vs. computation—the fundamental reason why arithmetic intensity dominates ML performance optimization.[^fn-horowitz-energy-app]
 
-| Relationship                  |                  45 nm Reference Ratio                   | Interpretation                                            |
-|:------------------------------|:--------------------------------------------------------:|:----------------------------------------------------------|
-| DRAM access vs. FP16 multiply | ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` | Wire capacitance scales with distance                     |
-| FP32 vs. INT8 energy          |  ~`{python} NumbersToKnow.fp32_vs_int8_ratio_mult_str`   | Bit width determines switching energy                     |
-| FP32 vs. FP16 energy          |  ~`{python} NumbersToKnow.fp32_vs_fp16_ratio_mult_str`   | Narrower arithmetic reduces switching and datapath energy |
-| L1 SRAM vs. register          |    ~`{python} NumbersToKnow.l1_vs_reg_ratio_mult_str`    | Distance to ALU                                           |
+| Relationship                  |                    Reference Ratio                       | Source and Interpretation                                                        |
+|:------------------------------|:--------------------------------------------------------:|:---------------------------------------------------------------------------------|
+| DRAM access vs. FP16 multiply | ~`{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` | Horowitz 45 nm; wire capacitance scales with distance                             |
+| FP32 vs. INT8 energy          |  ~`{python} NumbersToKnow.fp32_vs_int8_ratio_mult_str`   | Horowitz 45 nm; bit width determines switching energy                             |
+| FP32 vs. FP16 energy          |  ~`{python} NumbersToKnow.fp32_vs_fp16_ratio_mult_str`   | Horowitz 45 nm; narrower arithmetic reduces switching and datapath energy         |
+| L1 SRAM vs. register          |    ~`{python} NumbersToKnow.l1_vs_reg_ratio_mult_str`    | Illustrative on-chip hierarchy anchor; distance to the arithmetic unit            |
 
-: **The Energy Wall (45 nm)**: A 32-bit DRAM read uses about `{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` the energy of one FP16 multiply. The ratio varies by technology. {#tbl-energy-ratios-ref tbl-colwidths="[35,10,55]"}
+: **Energy Reference Ratios**: The first three ratios use Horowitz's 45 nm measurements; the L1/register ratio is an illustrative on-chip hierarchy anchor. {#tbl-energy-ratios-ref tbl-colwidths="[35,10,55]"}
 
-[^fn-horowitz-energy-app]: **Energy Hierarchy Source**: Energy numbers come from @horowitz2014 (45 nm). The headline ratio compares a 32-bit DRAM access with a 16-bit floating-point multiply. Both the absolute values and the ratio vary with process, circuit, memory technology, and operand width; wire distance helps explain why movement remains expensive.
+[^fn-horowitz-energy-app]: **Energy Hierarchy Sources**: The DRAM and arithmetic values come from @horowitz2014 (45 nm). The L1 SRAM/register ratio is an illustrative hierarchy anchor, not a Horowitz measurement. The headline ratio compares a 32-bit DRAM access with a 16-bit floating-point multiply. Both the absolute values and the ratio vary with process, circuit, memory technology, and operand width; wire distance helps explain why movement remains expensive.
 
 #### Memory hierarchy {.unnumbered}
 
@@ -254,15 +255,14 @@ These relationships mix physical or arithmetic bounds with technology-specific m
 | Training memory (Adam)        |            16 bytes$\times$ parameters             |             7B params → 112 GB             |
 | Inference FLOPs (transformer) |          ~2$\times$ parameters per token           |        7B model → ~14 GFLOPs/token         |
 | Training FLOPs                |        ~6$\times$ parameters$\times$ tokens        | 7B on 1T tokens → $4 \times 10^{22}$ FLOPs |
-| Data center vs. edge compute  | ~`{python} NumbersToKnow.dc_mobile_ratio_mult_str` |   Compute per watt$\times$ power budget    |
 
-: **Scaling Rules**: These are arithmetic rather than hardware-specific, except the last row, whose data-center-to-edge ratio depends on current FP16 and INT8 hardware constants. Training memory includes FP16 weights (2 bytes), FP16 gradients (2 bytes), FP32 master weights (4 bytes), and Adam optimizer states (8 bytes for momentum + variance). {#tbl-scaling-rules-ref tbl-colwidths="[33,33,33]"}
+: **Scaling Rules**: These are arithmetic, not hardware-specific. Training memory includes FP16 weights (2 bytes), FP16 gradients (2 bytes), FP32 master weights (4 bytes), and Adam optimizer states (8 bytes for momentum + variance). {#tbl-scaling-rules-ref tbl-colwidths="[33,33,33]"}
 
 [^fn-training-memory]: **Training Memory (Adam)**: The 16 bytes/parameter rule assumes mixed-precision training with Adam. ZeRO optimization can reduce per-accelerator memory by sharding optimizer states across accelerators, but the total memory across all accelerators remains ~16$\times$ parameters.
 
-### Latency budgets: The nonnegotiables {.unnumbered}
+### Illustrative Latency Budgets {.unnumbered}
 
-These budgets are set by physics (safety) or psychology (human perception)—not by engineering choice. Unlike hardware specs that improve each generation, these are *constraints* your system must meet (@tbl-latency-targets-ref).
+Latency budgets depend on application-specific safety requirements, user expectations, and service-level objectives. @Tbl-latency-targets-ref lists illustrative targets rather than universal limits.
 
 | Application        |   Budget   | Constraint                           |
 |:-------------------|:----------:|:-------------------------------------|
@@ -272,11 +272,11 @@ These budgets are set by physics (safety) or psychology (human perception)—not
 | Video streaming    |    <1 s    | Buffer tolerance                     |
 | Batch training     | hours–days | Throughput dominates latency         |
 
-: **Latency Targets**: Miss these and the application fails, regardless of accuracy. {#tbl-latency-targets-ref tbl-colwidths="[33,33,33]"}
+: **Illustrative Latency Targets**: Production requirements depend on the application and its service-level objectives. {#tbl-latency-targets-ref tbl-colwidths="[33,33,33]"}
 
 ### Current hardware reference (c. 2024) {.unnumbered}
 
-These numbers reflect the current generation. Use them for back-of-envelope calculations, but expect them to improve ~2$\times$ every 2–3 years.
+These numbers reflect the current generation. Use them for back-of-envelope calculations and recheck them against current hardware.
 
 #### Memory latency and bandwidth {.unnumbered}
 
@@ -381,7 +381,7 @@ The **ridge point** determines the hardware's balance. If a workload's intensity
 For matrix multiplications, arithmetic intensity scales with the batch dimension. When you compute $\mathbf{Y} = \mathbf{X}\mathbf{W}$ where $\mathbf{X}$ is $(B\times d_{\text{in}})$ and $\mathbf{W}$ is $(d_{\text{in}}\times d_{\text{out}})$:
 
 - **FLOPs**: $2 \times B \times d_{\text{in}} \times d_{\text{out}}$ (multiply-adds)
-- **Bytes**: Moving $\mathbf{X}$, $\mathbf{W}$, and $\mathbf{Y}$ costs approximately $s_{\text{elem}}(B d_{\text{in}} + d_{\text{in}}d_{\text{out}} + B d_{\text{out}})$ bytes.
+- **Bytes**: Moving $X$, $W$, and $Y$ costs approximately $s_{\text{elem}}(B d_{\text{in}} + d_{\text{in}}d_{\text{out}} + B d_{\text{out}})$ bytes.
 
 Doubling $B$ doubles FLOPs while weight traffic stays nearly constant when weights dominate, increasing arithmetic intensity. This is why batching often helps inference serving, although activation traffic, cache behavior, shape, precision, and the ridge point determine whether it reaches the compute ceiling.
 
@@ -720,22 +720,12 @@ Where:
 *   **$R_{\text{peak}}$**: Peak FLOP/s of one accelerator.
 *   **$\eta_{\text{hw}}$**: Hardware utilization, typically 30 percent–50 percent in this training estimate.
 
-**Example**: Training a `{python} TrainingTimeRef.p_params_str` parameter model on `{python} TrainingTimeRef.d_tokens_str` tokens using `{python} TrainingTimeRef.n_gpus_str` A100 (`{python} TrainingTimeRef.a100_fp16_tflop_per_s_str`) at `{python} TrainingTimeRef.u_mfu_pct_str` utilization.
+**Example**: Training a `{python} TrainingTimeRef.p_params_str` parameter model on `{python} TrainingTimeRef.d_tokens_str` using `{python} TrainingTimeRef.n_gpus_str` A100 (`{python} TrainingTimeRef.a100_fp16_tflop_per_s_str`) at `{python} TrainingTimeRef.u_mfu_pct_str` utilization.
 `{python} TrainingTimeRef.total_flops_eq`
 `{python} TrainingTimeRef.throughput_eq`
 `{python} TrainingTimeRef.time_eq`
 
 The computed result is `{python} TrainingTimeRef.T_seconds_str` (≈ `{python} TrainingTimeRef.T_minutes_str`, or about `{python} TrainingTimeRef.T_days_str`).
-
-:::
-
-Before moving from scaling laws to queueing, pause on the consequences of these models for concrete design choices.
-
-::: {#chk-appendix-machine-performance-models .callout-checkpoint title="Check your understanding: Performance models"}
-
-1. A new accelerator doubles compute throughput but keeps memory bandwidth the same. For a workload that is **memory-bound** on the current hardware, how much speedup do you expect? What about a **compute-bound** workload?
-2. Your training pipeline has 10 percent serial overhead. Using Amdahl's Law, what is the maximum possible speedup regardless of how many accelerators you add? Using Gustafson's Law with 256 accelerators, what is the scaled speedup?
-3. An inference service sustains 500 QPS at 100 ms average time in system. What average population follows from Little's Law? If each in-flight request simultaneously needs 2 GB of accelerator state, what memory does that imply?
 
 :::
 
@@ -799,11 +789,21 @@ To see this in practice, consider sustaining `{python} LittlesLawExample.lambda_
 
 This sizes worker pools, but memory needs another assumption. If every in-system request simultaneously holds `{python} LittlesLawExample.mem_per_req_gb_str` of device state, the average population implies `{python} LittlesLawExample.total_mem_gb_str`; queued requests may instead stay in host memory or share batched state. If `{python} LittlesLawExample.max_concurrent_str` device slots each remain occupied for `{python} LittlesLawExample.w_latency_ms_str`, their throughput proxy is `{python} LittlesLawExample.max_throughput_eq`; Little's Law alone sets no physical maximum.
 
+With all four models in place, pause on their consequences for concrete design choices.
+
+::: {#chk-appendix-machine-performance-models .callout-checkpoint title="Check your understanding: Performance models"}
+
+1. A new accelerator doubles compute throughput but keeps memory bandwidth the same. For a workload that is **memory-bound** on the current hardware, how much speedup do you expect? What about a **compute-bound** workload?
+2. Your training pipeline has 10 percent serial overhead. Using Amdahl's Law, what is the maximum possible speedup regardless of how many accelerators you add? Using Gustafson's Law with 256 accelerators, what is the scaled speedup?
+3. An inference service sustains 500 QPS at 100 ms average time in system. What average population follows from Little's Law? If each in-flight request simultaneously needs 2 GB of accelerator state, what memory does that imply?
+
+:::
+
 These physics-based models---Roofline, Amdahl, Gustafson, and Little---diagnose *where* bottlenecks lie. Translating those diagnoses into actionable optimizations, however, requires understanding the concrete hardware structures that impose them: caches, memory buses, and interconnects.
 
 ## Computer Architecture Essentials {#sec-appdx-machine-foundations-computer-architecture-essentials-10c2}
 
-A GPU advertises 1,000 TFLOP/s, yet your kernel achieves only 30 TFLOP/s. The missing 97 percent is not a software bug—it is the cost of moving data through a memory hierarchy that spans five orders of magnitude in latency. While physics sets theoretical performance bounds, computer architecture defines the machinery that determines how close a real workload can get. The following discussion covers the latency, bandwidth, and energy trade-offs that shape system design.
+A GPU advertises 1,000 TFLOP/s, yet your kernel achieves only 30 TFLOP/s. The gap may reflect data movement, insufficient parallelism, synchronization, launch overhead, or software inefficiency. While physics sets theoretical performance bounds, computer architecture defines the machinery that determines how close a real workload can get. The following discussion covers the latency, bandwidth, and energy trade-offs that shape system design.
 
 ```{python}
 #| echo: false
@@ -811,7 +811,7 @@ A GPU advertises 1,000 TFLOP/s, yet your kernel achieves only 30 TFLOP/s. The mi
 # ┌── LEGO ───────────────────────────────────────────────
 # │ Context: @tbl-latency-hierarchy, @tbl-hardware-cheatsheet, @tbl-physical-hierarchy-ref
 # │ Goal: Latency analogy, H100/TPUv5p specs, hierarchy energy/bandwidth table
-from mlsysim.core.units import pJ, flop, second, minute, hour, day
+from mlsysim.core.units import pJ, flop, second, minute, hour, day, GiB, MiB
 from mlsysim.fmt import fmt_flop_rate, fmt_qty, fmt_bandwidth, fmt_multiple, fmt_time
 
 class ArchReferenceTables:
@@ -834,7 +834,7 @@ class ArchReferenceTables:
     LATENCY_NVME_SSD = Hardware.Tech.Storage.NvmeGen4.latency
     LATENCY_INFINIBAND = round(Systems.Fabrics.InfiniBand_NDR.latency.to(nanosecond).magnitude) * nanosecond  # µs→ns, round to exact 5000
     h100_l2 = Hardware.Cloud.H100.memory.l2_cache
-    tpuv5_l2 = Hardware.Cloud.TPUv5p.memory.l2_cache
+    tpuv5_sram = Hardware.Cloud.TPUv5p.memory.sram_capacity
     register_ns_value = LATENCY_REGISTER_REF.to(nanosecond).magnitude
     analogy_base_seconds = 10
     analogy_seconds_per_ns = analogy_base_seconds / register_ns_value
@@ -860,7 +860,7 @@ class ArchReferenceTables:
 
     tpuv5_flops = Hardware.Cloud.TPUv5p.compute.peak_flops
     tpuv5_bw = Hardware.Cloud.TPUv5p.memory.bandwidth
-    tpuv5_cap = 95 * GB  # vendor nominal capacity label
+    tpuv5_cap = Hardware.Cloud.TPUv5p.memory.capacity
     tpuv5_ici = Hardware.Cloud.TPUv5p.nvlink.bandwidth
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
@@ -892,9 +892,9 @@ class ArchReferenceTables:
 
     tpuv5_flops_tflop_per_s_str = fmt_flop_rate(tpuv5_flops, unit=TFLOPs / second, precision=0, commas=False)
     tpuv5_bw_tb_per_s_str = fmt_bandwidth(tpuv5_bw, unit=TB / second, precision=2, commas=False)
-    tpuv5_cap_gb_str = fmt_qty(tpuv5_cap, GB, precision=0, commas=False)
+    tpuv5_cap_gib_str = fmt_qty(tpuv5_cap, GiB, precision=0, commas=False)
     tpuv5_ici_gb_per_s_str = fmt_bandwidth(tpuv5_ici, unit=GB / second, precision=0, commas=False)
-    tpuv5_l2_mb_str = fmt_qty(tpuv5_l2, MB, precision=0, commas=False)
+    tpuv5_sram_mib_str = fmt_qty(tpuv5_sram, MiB, precision=0, commas=False)
 
     bw_hbm_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.memory.bandwidth, unit=GB / second, precision=0)
     bw_nvlink_gb_per_s_str = fmt_bandwidth(Hardware.Cloud.H100.nvlink.bandwidth, unit=GB / second, precision=0)
@@ -929,13 +929,13 @@ While latency tells us how long we wait for the *first* byte, bandwidth tells us
 
 | **Spec**             |                      **NVIDIA H100 (SXM)**                       |                                  **Google TPU v5p**                                  | **System Impact**                     |
 |:---------------------|:----------------------------------------------------------------:|:------------------------------------------------------------------------------------:|:--------------------------------------|
-| **FP16/BF16 Peak**   |    `{python} ArchReferenceTables.h100_flops_tflop_per_s_str`     |              `{python} ArchReferenceTables.tpuv5_flops_tflop_per_s_str`              | The "Speed Limit" ($R_{\text{peak}}$) |
+| **BF16 Peak**        |    `{python} ArchReferenceTables.h100_flops_tflop_per_s_str`     |              `{python} ArchReferenceTables.tpuv5_flops_tflop_per_s_str`              | The "Speed Limit" ($R_{\text{peak}}$) |
 | **Memory Bandwidth** |       `{python} ArchReferenceTables.h100_bw_tb_per_s_str`        |                 `{python} ArchReferenceTables.tpuv5_bw_tb_per_s_str`                 | The "Width of the Pipe" ($\text{BW}$) |
-| **HBM Capacity**     |          `{python} ArchReferenceTables.h100_cap_gb_str`          |                   `{python} ArchReferenceTables.tpuv5_cap_gb_str`                    | Max Model Size ($P$)/Batch Size ($B$) |
-| **L2/SRAM Cache**    |          `{python} ArchReferenceTables.h100_l2_mb_str`           |                   ~`{python} ArchReferenceTables.tpuv5_l2_mb_str`                    | Critical for Operator Fusion          |
+| **HBM Capacity**     |          `{python} ArchReferenceTables.h100_cap_gb_str`          |                   `{python} ArchReferenceTables.tpuv5_cap_gib_str`                   | Max Model Size ($P$)/Batch Size ($B$) |
+| **On-chip SRAM**     |          `{python} ArchReferenceTables.h100_l2_mb_str` L2        |          `{python} ArchReferenceTables.tpuv5_sram_mib_str` VMEM/chip                 | Critical for Operator Fusion          |
 | **Interconnect**     | `{python} ArchReferenceTables.h100_nvlink_gb_per_s_str` (NVLink) | `{python} ArchReferenceTables.tpuv5_ici_gb_per_s_str` (Inter-Chip Interconnect, ICI) | Determines Model Parallelism Scaling  |
 
-: **Reference Specs**: Key constants for quantitative analysis. Always check specific datasheets; HBM uses vendor GB labels, and interconnect bandwidth is aggregate bidirectional, so topology and direction matter. {#tbl-hardware-cheatsheet tbl-colwidths="[22,23,20,35]"}
+: **Reference Specs**: Key constants for quantitative analysis. Always check specific datasheets; HBM capacity follows vendor units, and interconnect bandwidth is aggregate bidirectional, so topology and direction matter. {#tbl-hardware-cheatsheet tbl-colwidths="[22,23,20,35]"}
 
 ### The memory hierarchy {#sec-appdx-machine-foundations-memory-hierarchy-2278}
 
@@ -1034,7 +1034,7 @@ $$ T = L_{\text{lat}} + \frac{D_{\text{vol}}}{\text{BW}} $$
 The crossover point is the transfer size where the two terms are equal:
 $$ D_{\text{vol,cross}} = L_{\text{lat}} \times \text{BW} $$
 
-For transfers below $D_{\text{vol,cross}}$ (for example, single-token inference), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
+For transfers below $D_{\text{vol,cross}}$ (for example, small request or control messages), latency dominates. For transfers above it (for example, loading weights), bandwidth dominates.
 
 ```{python}
 #| echo: false
@@ -1223,11 +1223,11 @@ The choice of numerical format is a direct application of the iron law of ML sys
 Quantization maps continuous floating-point values to discrete integers, typically INT8. The key challenge is choosing how to map the floating-point range to integers. Two approaches dominate.
 
 Symmetric quantization centers the mapping at zero:
-$$ x_{\text{int}} = \text{round}\left(\frac{x}{s_{\text{sym}}} \times 127\right) $$
-where $s_{\text{sym}}$ is the scale factor (typically the maximum absolute value). This works well for weight distributions centered around zero.
+$$ x_{\text{int}} = \text{round}\left(\frac{x}{s_{\text{quant}}} \times 127\right) $$
+where $s_{\text{quant}}$ is the scale factor (typically the maximum absolute value). This works well for weight distributions centered around zero.
 
-Asymmetric quantization handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. A common activation variant maps to an unsigned 8-bit code. If $x_{\min}$ is the minimum of the range and $s_{\text{asym}}$ is the range width ($x_{\max} - x_{\min}$):
-$$ x_{\text{uint8}} = \text{round}\left(\frac{x - x_{\min}}{s_{\text{asym}}} \times 255\right) $$
+Asymmetric quantization handles distributions that are not centered (common after ReLU, which produces only nonnegative values) by shifting the range before scaling. A common activation variant maps to an unsigned 8-bit code. If $x_{\min}$ is the minimum of the range and $s_{\text{quant}}$ is the range width ($x_{\max} - x_{\min}$):
+$$ x_{\text{uint8}} = \text{round}\left(\frac{x - x_{\min}}{s_{\text{quant}}} \times 255\right) $$
 
 The choice between symmetric and asymmetric quantization depends on your tensor's distribution and has measurable accuracy implications.
 
