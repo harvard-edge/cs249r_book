@@ -672,13 +672,19 @@ class MilestoneCommand(BaseCommand):
         milestone_system = MilestoneSystem(self.config)
         status = milestone_system.get_milestone_status()
 
-        # Show header with overall progress
+        # Show header with overall progress. Note: status['overall_progress']
+        # is unlock-based (it also drives the timeline progress bar elsewhere,
+        # where that's the correct meaning), so it isn't used here -- showing
+        # it next to "Milestones Achieved" would be contradictory (e.g. "0/6
+        # achieved" beside "100%"). This header's percentage is achievement-
+        # based instead, to actually match the achieved count shown above it.
         total_milestones = len(milestone_system.MILESTONES)
+        achievement_progress = (status['total_completed'] / total_milestones) * 100 if total_milestones > 0 else 0
         console.print(Panel(
             f"[bold cyan]🎮 TinyTorch Milestone Progress[/bold cyan]\n\n"
             f"[bold]Capabilities Unlocked:[/bold] {status['total_unlocked']}/{total_milestones} milestones\n"
             f"[bold]Milestones Achieved:[/bold] {status['total_completed']}/{total_milestones} milestones\n"
-            f"[bold]Overall Progress:[/bold] {status['overall_progress']:.0f}%\n\n"
+            f"[bold]Overall Progress:[/bold] {achievement_progress:.0f}%\n\n"
             f"[dim]Transform from student to ML Systems Engineer![/dim]",
             title="🚀 Your Epic Journey",
             border_style="bright_blue"
