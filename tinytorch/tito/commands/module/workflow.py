@@ -323,9 +323,15 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
 
         # Prerequisites met! Check if module needs to be created from src/
-        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
+        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config).
+        # Check for the notebook file itself, not just the directory: a directory
+        # can exist but be empty if a previous conversion attempt failed partway
+        # (e.g. jupytext wasn't on PATH yet), and directory-existence alone would
+        # then make this look already done, silently skipping regeneration.
         module_dir = self.config.project_root / "modules" / module_name
-        if not module_dir.exists():
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_file = module_dir / f"{short_name}.ipynb"
+        if not notebook_file.exists():
             # Create module from src/ using export
             src_dir = self.config.project_root / "src" / module_name
             if not src_dir.exists():
@@ -407,10 +413,15 @@ class ModuleWorkflowCommand(BaseCommand):
             return 1
 
         module_name = module_mapping[normalized]
-        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
+        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config).
+        # Check for the notebook file itself, not just the directory: see the
+        # matching comment in start_module for why directory-existence alone is
+        # not a reliable signal that a notebook actually exists.
         module_dir = self.config.project_root / "modules" / module_name
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_file = module_dir / f"{short_name}.ipynb"
 
-        if not module_dir.exists():
+        if not notebook_file.exists():
             self.console.print(f"[yellow]⚠️  Module {normalized} not started yet[/yellow]")
             self.console.print(f"💡 Run: [bold cyan]tito module start {normalized}[/bold cyan]")
             return 1
