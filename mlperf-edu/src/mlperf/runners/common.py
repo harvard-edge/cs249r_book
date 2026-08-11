@@ -187,7 +187,23 @@ def apply_precision(model, precision, device):
         quantized = torch.ao.quantization.quantize_dynamic(
             model, {torch.nn.Linear}, dtype=torch.qint8
         )
-        return quantized, f"int8-dynamic-qint8-{engine}-{before}linear"
+        # The count is taken from the RETURNED module, not the one passed in, so
+        # the tag is evidence that the transform happened rather than a
+        # restatement of what was requested. quantize_dynamic returns a new
+        # module; a caller that assigns it to a read-only property or discards
+        # it keeps executing float32, and an input-side count would still have
+        # produced a confident "38linear" tag on that run.
+        after = sum(
+            1
+            for m in quantized.modules()
+            if type(m).__name__ == "Linear" and "quantized" in type(m).__module__
+        )
+        if before and not after:
+            raise RuntimeError(
+                f"dynamic quantization replaced none of the {before} Linear "
+                "modules; the model would execute float32 while reporting int8"
+            )
+        return quantized, f"int8-dynamic-qint8-{engine}-{after}linear"
     raise ValueError(f"unsupported precision {precision!r}")
 
 
