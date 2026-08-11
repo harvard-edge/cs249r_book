@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import functools
 import http.server
+import json
 import shutil
 import socketserver
 import threading
@@ -46,7 +47,6 @@ from pathlib import Path
 
 import pytest
 
-import json
 
 STATE_PY = (
     Path(__file__).resolve().parents[2] / "mlsysim" / "mlsysim" / "labs" / "state.py"
@@ -207,6 +207,7 @@ await ledger.save_async()
         f"from #1985 / PR #1988. A mocked test cannot catch this; only a "
         f"real Pyodide + IndexedDB check like this one can."
     )
+
 
 def test_load_async_corrupt_record_sets_last_load_error(served_dir):
     """A stored record exists but is corrupt JSON -- json.loads() raising
