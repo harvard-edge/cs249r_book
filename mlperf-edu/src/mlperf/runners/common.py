@@ -189,3 +189,71 @@ def apply_precision(model, precision, device):
         )
         return quantized, f"int8-dynamic-qint8-{engine}-{before}linear"
     raise ValueError(f"unsupported precision {precision!r}")
+
+
+TRAINING_PRECISIONS = ("float32", "float16", "bfloat16")
+
+
+def resolve_training_precision(env_var: str) -> str:
+    """Read and validate a runner's mixed-precision training lever.
+
+    Deliberately excludes int8. Dynamic quantization leaves no trainable
+    parameters, so an int8 training request is a category error rather than a
+    configuration to honour.
+    """
+    precision = os.environ.get(env_var, "float32").lower()
+    if precision not in TRAINING_PRECISIONS:
+        raise ValueError(
+            f"{env_var} must be one of {', '.join(TRAINING_PRECISIONS)}; "
+            f"got {precision!r}. Quantized training is not supported: a "
+            "dynamically quantized module has no trainable parameters."
+        )
+    return precision
+
+
+def training_autocast(precision: str, device):
+    """Return (context_factory, grad_scaler_or_None, recorded_dtype).
+
+    Mixed-precision training is not a cast of the model. The weights stay in
+    float32 and only the forward pass runs in reduced precision, which is why
+    this is a different mechanism from the inference precision lever rather than
+    a variation on it.
+
+    float16 additionally needs loss scaling: gradients underflow to zero in
+    fp16's narrow exponent range, and a run without a scaler trains quietly
+    wrong rather than failing. bfloat16 keeps float32's exponent range and needs
+    no scaler.
+    """
+    import contextlib
+
+    import torch
+
+    if precision == "float32":
+        return (contextlib.nullcontext, None, "float32")
+
+    dtype = torch.float16 if precision == "float16" else torch.bfloat16
+    device_type = device.type
+
+    if device_type == "cpu" and precision == "float16":
+        # CPU autocast supports bfloat16; float16 autocast on CPU is not a
+        # supported path and would silently fall back or error mid-training.
+        raise ValueError(
+            "float16 autocast is not supported on CPU; use bfloat16 for "
+            "mixed-precision training on the CPU backend"
+        )
+
+    def _context():
+        return torch.autocast(device_type=device_type, dtype=dtype)
+
+    scaler = None
+    if precision == "float16":
+        # GradScaler is device-scoped in current torch; MPS has no scaler, so a
+        # float16 request there is rejected rather than run unscaled.
+        if device_type == "cuda":
+            scaler = torch.amp.GradScaler("cuda")
+        else:
+            raise ValueError(
+                f"float16 training requires a gradient scaler, which is not "
+                f"available on the {device_type!r} backend; use bfloat16"
+            )
+    return (_context, scaler, f"autocast-{precision}")
