@@ -23,6 +23,8 @@ from mlperf.runners.common import (
     select_torch_device,
     synchronize_device,
     training_measurement_protocol,
+    apply_precision,
+    resolve_precision,
 )
 
 
@@ -948,10 +950,19 @@ def _load_max_nanogpt_model(
     state = torch.load(checkpoint, map_location=device)
     model.load_state_dict(state)
     model.eval()
+    # Precision is applied after the checkpoint loads so the weights are
+    # verified against the source manifest in float32 first, then cast. The
+    # executed dtype is threaded back through lineage so every inference path
+    # (prefill, decode, full) records what actually ran rather than assuming
+    # float32.
+    precision = resolve_precision("MLPERF_EDU_CAUSAL_LM_PRECISION")
+    model, execution_dtype = apply_precision(model, precision, device)
     metrics = source_report.get("metrics") or {}
     lineage = {
         "checkpoint_path": str(checkpoint),
         "checkpoint_sha256": checkpoint_sha256,
+        "execution_dtype": execution_dtype,
+        "requested_precision": precision,
         "source_workload": "causal-language-modeling",
         "source_report_path": str(source_report_path),
         "source_report_sha256": f"sha256:{sha256_file(source_report_path)}",
