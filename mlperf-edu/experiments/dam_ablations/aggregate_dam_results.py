@@ -31,6 +31,36 @@ ROOT = os.path.dirname(os.path.dirname(_HERE))  # the mlperf-edu project root
 SUBMISSIONS = os.path.join(ROOT, "submissions", "research")
 
 
+def _resolve_seconds(metrics: dict[str, Any]) -> float | None:
+    """Find a run's wall-clock, whatever the runner chose to call it.
+
+    Runners name their timing metric after the phase they measure:
+    duration_seconds for in-process inference, train_and_eval_seconds for
+    training loops, self_play_and_training_seconds for the containerized
+    reinforcement runner, wall_time_seconds as a fallback. Keying only on
+    duration_seconds silently dropped MiniGo from the Machine lens, which
+    looked like a missing run rather than a naming difference.
+    """
+    preferred = (
+        "duration_seconds_mean",
+        "duration_seconds",
+        "train_and_eval_seconds_mean",
+        "self_play_and_training_seconds_mean",
+        "generation_and_evaluation_seconds_mean",
+        "inference_seconds",
+        "wall_time_seconds",
+    )
+    for key in preferred:
+        value = metrics.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+    # Last resort: any mean-aggregated seconds metric, chosen deterministically.
+    for key in sorted(metrics):
+        if key.endswith("_seconds_mean") and isinstance(metrics[key], (int, float)):
+            return float(metrics[key])
+    return None
+
+
 def load_runs() -> list[dict[str, Any]]:
     """Collect every completed run report with its lever settings."""
     runs: list[dict[str, Any]] = []
@@ -69,8 +99,7 @@ def load_runs() -> list[dict[str, Any]]:
                 "workload": report.get("workload") or report.get("id"),
                 "device": report.get("device_executed")
                 or (report.get("backend") or "").replace("pytorch-", ""),
-                "seconds": metrics.get("duration_seconds_mean")
-                or metrics.get("duration_seconds"),
+                "seconds": _resolve_seconds(metrics),
                 "observed": observed,
                 "target": quality.get("target"),
                 "target_met": quality.get("target_met"),
@@ -86,10 +115,20 @@ def load_runs() -> list[dict[str, Any]]:
 
 def machine_lens(runs: list[dict[str, Any]]) -> list[str]:
     """CPU-versus-MPS ratio per workload, using the pinned baseline settings."""
+    # Draw only from plans whose purpose is Machine-lens measurement. Without
+    # this the table silently changed as unrelated runs accumulated: adding the
+    # precision sweep moved text-classification from 44.08/10.09 (4.37x) to
+    # 76.73/6.25 (12.28x), because the selector took whichever cell it saw
+    # first. Same workload, same config, headline number 2.8x apart. A ratio is
+    # only meaningful between runs taken under the same conditions, so the lens
+    # pins its source plans and names them in the output.
+    machine_plans = ("dam-machine-lens-fast", "dam-machine-lens-gcn",
+                     "dam-machine-lens-basis")
     by_workload: dict[str, dict[str, dict[str, Any]]] = defaultdict(dict)
     for run in runs:
-        # Only the pinned-contract cells belong in the Machine lens; the
-        # factorial's reduced-lever cells would otherwise contaminate the ratio.
+        if run["plan"] not in machine_plans:
+            continue
+        # Only the pinned-contract cells belong in the Machine lens.
         if run["hidden"] not in (None, 256) or run["epochs"] not in (None, 500):
             continue
         if run["requested_precision"] not in (None, "float32"):
@@ -99,8 +138,8 @@ def machine_lens(runs: list[dict[str, Any]]) -> list[str]:
             by_workload[run["workload"]][device] = run
 
     lines = [
-        "| Workload | CPU (s) | MPS (s) | Speedup | Quality | Target met |",
-        "|:---|---:|---:|---:|---:|:---|",
+        "| Workload | CPU (s) | MPS (s) | Speedup | Quality | Target met | Source plan |",
+        "|:---|---:|---:|---:|---:|:---|:---|",
     ]
     for workload in sorted(by_workload):
         arms = by_workload[workload]
@@ -114,8 +153,10 @@ def machine_lens(runs: list[dict[str, Any]]) -> list[str]:
         ref = cpu or mps
         obs = f"{ref['observed']:.4f}" if ref and isinstance(ref["observed"], float) else "n/a"
         met = "yes" if ref and ref["target_met"] else ("no" if ref else "n/a")
+        plans = sorted({r["plan"] for r in (cpu, mps) if r})
         lines.append(
-            f"| {workload} | {cpu_s} | {mps_s} | {speedup} | {obs} | {met} |"
+            f"| {workload} | {cpu_s} | {mps_s} | {speedup} | {obs} | {met} "
+            f"| {', '.join(p.replace('dam-machine-lens-', '') for p in plans)} |"
         )
     return lines
 
