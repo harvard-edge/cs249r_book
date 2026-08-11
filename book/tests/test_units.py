@@ -351,7 +351,7 @@ def test_extended_gpu_specs():
     # B200
     ok &= check("B200 FP16", B200_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 2250.0)
     ok &= check("B200 BW", B200_MEM_BW.to(TB / second).magnitude, 8.0)
-    ok &= check("B200 Mem", B200_MEM_CAPACITY.to(GiB).magnitude, 192.0)
+    ok &= check("B200 Mem", B200_MEM_CAPACITY.to(GB).magnitude, 180.0)
 
     # MI300X
     ok &= check("MI300X FP16", MI300X_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 1307.0, tol=0.01)
@@ -363,7 +363,7 @@ def test_extended_gpu_specs():
 
     # TPUv6
     ok &= check("TPUv6 BF16", TPUV6_FLOPS_BF16.to(TFLOPs / second).magnitude, 918.0)
-    ok &= check("TPUv6 BW", TPUV6_MEM_BW.to(GB / second).magnitude, 1600.0)
+    ok &= check("TPUv6 BW", TPUV6_MEM_BW.to(GB / second).magnitude, 1638.0)
 
     # T4
     ok &= check("T4 TDP", T4_TDP.to(watt).magnitude, 70.0)

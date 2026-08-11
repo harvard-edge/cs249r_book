@@ -71,7 +71,7 @@ CANONICAL = [
     ("hbm_access",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
     ("h200_mem_gb",    141,   0.05, "Hardware.Cloud.H200.memory.capacity"),
     ("h200_mem_tbs",   4.8,   0.02, "Hardware.Cloud.H200.memory.bandwidth (TB/s)"),
-    ("b200_mem_gb",    192,   0.05, "Hardware.Cloud.B200.memory.capacity"),
+    ("b200_mem_gb",    180,   0.05, "Hardware.Cloud.B200.memory.capacity"),
     ("b200_mem_tbs",   8,     0.05, "Hardware.Cloud.B200.memory.bandwidth (TB/s)"),
 
     # GPU power (W)

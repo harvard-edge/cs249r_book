@@ -51,7 +51,7 @@ export default function HardwareConfigurator({ onStateChange, initialState }: Co
             <option value="T4">NVIDIA T4 (16GB)</option>
             <option value="A100">NVIDIA A100 (40GB)</option>
             <option value="H100">NVIDIA H100 (80GB)</option>
-            <option value="B200">NVIDIA B200 (192GB)</option>
+            <option value="B200">NVIDIA B200 (180GB)</option>
           </select>
         </div>
 
