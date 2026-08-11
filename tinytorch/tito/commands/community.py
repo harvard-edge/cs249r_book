@@ -103,7 +103,7 @@ class CommunityCommand(BaseCommand):
             self.console.print(Panel(
                 "[yellow]You are currently not logged in.[/yellow]\n\n"
                 "To join the leaderboard and sync progress:\n"
-                "  [bold green]tito login[/bold green]",
+                "  [bold green]tito community login[/bold green]",
                 title="❌ Not Authenticated",
                 border_style="red",
                 box=box.ROUNDED
@@ -118,7 +118,7 @@ class CommunityCommand(BaseCommand):
         'tito community sync' to push their current progress.json at any time.
         """
         if not auth.is_logged_in():
-            self.console.print("[yellow]You are not logged in.[/yellow] Run [bold green]tito login[/bold green] first, then sync.")
+            self.console.print("[yellow]You are not logged in.[/yellow] Run [bold green]tito community login[/bold green] first, then sync.")
             return 1
 
         handler = SubmissionHandler(self.config, self.console)
