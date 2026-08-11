@@ -80,16 +80,30 @@ jobs:
   python:
     name: vault-cli (python)
     runs-on: ubuntu-latest
-    # 25 min, not 10: actions/checkout intermittently stalls for 10+ minutes on
-    # this ~3 GB repo (3 of 8 checkouts in run 30787355750 on 2026-08-07). Jobs
-    # budgeted at 20-25 min absorbed 11-12.5 min stalls and passed; the two jobs
-    # still on a 10 min budget died inside `git fetch` before any step ran.
-    # This job keeps a full clone (fetch-depth: 0 below), so it cannot use the
-    # sparse-checkout mitigation the other staffml jobs do.
-    timeout-minutes: 25
+    # 10 min, not 25: this job used to take a full clone (fetch-depth: 0) of
+    # this ~3 GB repo and stalled inside `git fetch` past even a 25 min budget
+    # (run 31432404409, 2026-08-10: 25m0s, zero steps executed, run cancelled,
+    # README badge red). It now uses the same sparse checkout as every other
+    # staffml job. actions/checkout adds --filter=blob:none whenever
+    # `sparse-checkout` is set, so the fetch skips the ~0.9 GB of tip-tree
+    # blobs this job never reads. The append-only check needs a single file
+    # from origin/main, supplied by the targeted shallow fetch further down
+    # rather than by cloning all 289 branches and 63 tags.
+    timeout-minutes: 10
     steps:
       - uses: actions/checkout@v6
-        with: { fetch-depth: 0 }   # deep clone so append-only check has base ref
+        with:
+          # The cone must cover every path the steps below read: the corpus and
+          # id-registry (VAULT_DIR), the CLI plus its scripts (VAULT_CLI_DIR),
+          # and the generated TS types that `vault codegen --check` diffs
+          # (see codegen.py's GENERATED list). Reading a path outside the cone
+          # triggers a lazy per-blob fetch under the partial clone, which is
+          # slower than the bulk transfer it replaced — so extend this list
+          # whenever a step starts touching a new directory.
+          sparse-checkout: |
+            ${{ env.VAULT_DIR }}
+            ${{ env.VAULT_CLI_DIR }}
+            interviews/staffml-vault-types
 
       - name: Set up Python (PINNED for hash stability)
         uses: actions/setup-python@v6
@@ -201,6 +215,19 @@ jobs:
               exit 1
           fi
           echo "all question YAMLs under $VAULT_DIR/questions are git-tracked"
+
+      - name: Fetch base ref for the append-only check
+        # check_registry_append_only.py compares interviews/vault/id-registry.yaml
+        # against origin/main — one file from one ref, which does not justify the
+        # full-history clone this job used to take. The rev-parse is not
+        # decoration: the script returns 0 when `git show` fails (it treats a
+        # missing file at base as "first commit landing it"), so a base ref that
+        # silently failed to fetch would turn this invariant into a green no-op.
+        # Fail here instead, where the cause is obvious.
+        run: |
+          set -euo pipefail
+          git fetch --depth=1 origin main:refs/remotes/origin/main
+          git rev-parse --verify origin/main >/dev/null
 
       - name: id-registry append-only invariant
         run: python3 "$VAULT_CLI_DIR/scripts/check_registry_append_only.py"
