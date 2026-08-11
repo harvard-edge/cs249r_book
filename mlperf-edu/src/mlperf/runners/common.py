@@ -127,3 +127,65 @@ def training_measurement_protocol(workload) -> dict:
             f"{workload.id} does not declare a training measurement protocol"
         )
     return deepcopy(protocol)
+
+
+SUPPORTED_PRECISIONS = ("float32", "float16", "bfloat16", "int8")
+
+
+def resolve_precision(env_var: str) -> str:
+    """Read and validate a runner's precision lever."""
+    precision = os.environ.get(env_var, "float32").lower()
+    if precision not in SUPPORTED_PRECISIONS:
+        raise ValueError(
+            f"{env_var} must be one of {', '.join(SUPPORTED_PRECISIONS)}; "
+            f"got {precision!r}"
+        )
+    return precision
+
+
+def apply_precision(model, precision, device):
+    """Cast or quantize a model for the Algorithm-lens precision lever.
+
+    Returns the model and a dtype tag for the report, so a manifest records the
+    precision that actually executed rather than the one that was requested.
+
+    The tag carries the number of modules that were swapped for int8. Dynamic
+    quantization only replaces Linear layers, so a convolutional network sees
+    almost none and the saving is far smaller than a naive four-times estimate.
+    Reporting the count makes a near-no-op visible instead of letting a run
+    claim int8 while executing float32 arithmetic nearly everywhere.
+    """
+    import torch
+
+    if precision == "float32":
+        return model, "float32"
+    if precision == "float16":
+        return model.half(), "float16"
+    if precision == "bfloat16":
+        return model.to(torch.bfloat16), "bfloat16"
+    if precision == "int8":
+        if device.type != "cpu":
+            raise ValueError(
+                "dynamic INT8 quantization is CPU-only in PyTorch; "
+                f"requested on device {device.type!r}"
+            )
+        # PyTorch ships the quantized engine unselected on Apple Silicon, so
+        # quantize_dynamic fails with NoQEngine unless a backend is chosen. The
+        # engine is recorded because int8 numerics are backend-dependent.
+        engine = torch.backends.quantized.engine
+        if engine == "none":
+            supported = list(torch.backends.quantized.supported_engines)
+            preferred = [name for name in ("qnnpack", "fbgemm") if name in supported]
+            if not preferred:
+                raise RuntimeError(
+                    "no PyTorch quantized engine is available on this host; "
+                    f"supported_engines={supported}"
+                )
+            engine = preferred[0]
+            torch.backends.quantized.engine = engine
+        before = sum(1 for m in model.modules() if isinstance(m, torch.nn.Linear))
+        quantized = torch.ao.quantization.quantize_dynamic(
+            model, {torch.nn.Linear}, dtype=torch.qint8
+        )
+        return quantized, f"int8-dynamic-qint8-{engine}-{before}linear"
+    raise ValueError(f"unsupported precision {precision!r}")

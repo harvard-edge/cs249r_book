@@ -15,7 +15,9 @@ from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
+    apply_precision,
     configured_seed,
+    resolve_precision,
     select_torch_device,
     synchronize_device,
 )
@@ -29,53 +31,6 @@ DISTILBERT_HASHES = {
     "tokenizer_config.json": "5ab9097b4149371c5fd52b2d6e26cb6f9c07c0d19fcfdda895b1adad6b57c3e0",
     "vocab.txt": "07eced375cec144d27c900241f3e339478dec958f92fddbc551f295c992038a3",
 }
-
-
-_SUPPORTED_PRECISIONS = {"float32", "float16", "bfloat16", "int8"}
-
-
-def apply_precision(model: Any, precision: str, device: Any) -> tuple[Any, str]:
-    """Cast or quantize a model for the Algorithm-lens precision lever.
-
-    Returns the transformed model and the dtype string that belongs in the
-    report, so the manifest records the precision that actually executed rather
-    than the precision that was requested. Weight-only dynamic INT8 runs on CPU
-    only; asking for it on an accelerator is a configuration error rather than
-    something to silently downgrade, because a silent downgrade would let a
-    submission claim INT8 while executing float32.
-    """
-    if precision == "float32":
-        return model, "float32"
-    if precision == "float16":
-        return model.half(), "float16"
-    if precision == "bfloat16":
-        return model.to(torch.bfloat16), "bfloat16"
-    if precision == "int8":
-        if device.type != "cpu":
-            raise ValueError(
-                "dynamic INT8 quantization is CPU-only in PyTorch; "
-                f"requested on device {device.type!r}"
-            )
-        # PyTorch ships with the quantized engine unselected on Apple Silicon,
-        # so quantize_dynamic fails with NoQEngine unless a supported backend is
-        # chosen explicitly. Record the engine in the returned tag; INT8 numerics
-        # are backend-dependent and a result is not interpretable without it.
-        engine = torch.backends.quantized.engine
-        if engine == "none":
-            supported = list(torch.backends.quantized.supported_engines)
-            preferred = [name for name in ("qnnpack", "fbgemm") if name in supported]
-            if not preferred:
-                raise RuntimeError(
-                    "no PyTorch quantized engine is available on this host; "
-                    f"supported_engines={supported}"
-                )
-            engine = preferred[0]
-            torch.backends.quantized.engine = engine
-        quantized = torch.ao.quantization.quantize_dynamic(
-            model, {torch.nn.Linear}, dtype=torch.qint8
-        )
-        return quantized, f"int8-dynamic-qint8-linear-{engine}"
-    raise ValueError(f"unsupported precision {precision!r}")
 
 
 def _model_file_records(snapshot: Path) -> list[dict[str, Any]]:
@@ -183,15 +138,7 @@ def run_text_classification_max(workload: Workload, output_dir: Path) -> dict[st
         os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_REPETITIONS", 5)
     )
     max_length = int(os.environ.get("MLPERF_EDU_TEXT_CLASSIFICATION_MAX_LENGTH", 128))
-    precision = os.environ.get(
-        "MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION", "float32"
-    ).lower()
-    if precision not in _SUPPORTED_PRECISIONS:
-        raise ValueError(
-            "text classification precision must be one of "
-            + ", ".join(sorted(_SUPPORTED_PRECISIONS))
-            + f"; got {precision!r}"
-        )
+    precision = resolve_precision("MLPERF_EDU_TEXT_CLASSIFICATION_PRECISION")
     if batch_size < 1 or repetitions < 1 or max_length < 1:
         raise ValueError(
             "text classification requires positive batch, repetition, and length values"
