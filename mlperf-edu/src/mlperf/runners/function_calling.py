@@ -840,7 +840,24 @@ def run_function_calling_max(workload: Workload, output_dir: Path) -> dict[str, 
     if not math.isfinite(evaluation_seconds) or evaluation_seconds <= 0:
         raise RuntimeError("function-calling evaluation duration must be positive")
     score = float(evaluation["non_live_ast_accuracy"])
-    target = float(workload.quality_value or TARGET_ACCURACY)
+    # The target is inherited from the contract, never substituted. A
+    # missing contract target used to fall back to the constant below,
+    # which would have silently replaced an inherited target with one
+    # baked into this runner. That is exactly the discretion the suite
+    # exists to remove, so it raises instead. `is None` rather than a
+    # truthiness test, because a legitimate target of 0.0 is falsy.
+    if workload.quality_value is None:
+        raise ValueError(
+            "function-calling has no inherited quality target in its contract; "
+            "refusing to substitute the runner constant TARGET_ACCURACY"
+        )
+    target = float(workload.quality_value)
+    if abs(target - TARGET_ACCURACY) > 1e-9:
+        raise ValueError(
+            "function-calling contract target "
+            f"{target} disagrees with the pinned reference TARGET_ACCURACY; "
+            "resolve which is authoritative before recording a verdict"
+        )
     tolerance = float(workload.quality_tolerance or 0.0)
     target_met = score + tolerance >= target
     report = {
