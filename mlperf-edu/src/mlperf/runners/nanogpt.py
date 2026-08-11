@@ -15,6 +15,7 @@ from torch.utils.data import DataLoader, Dataset
 from mlperf.assets import ensure_tinyshakespeare, sha256_file
 from mlperf.fingerprint import detect_hardware
 from mlperf.manifest import build_provd, verify_provd
+from mlperf.harness import percentile as harness_percentile
 from mlperf.registry import Workload, find_project_root
 from mlperf.runners.common import (
     TrainingProgress,
@@ -1071,11 +1072,13 @@ def _aggregate_decode_results(results: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def _percentile(values: list[float], quantile: float) -> float:
-    ordered = sorted(float(value) for value in values)
-    if not ordered:
-        return float("nan")
-    index = max(0, min(len(ordered) - 1, int(len(ordered) * quantile + 0.999999) - 1))
-    return ordered[index]
+    """Adapter onto the project's single percentile estimator.
+
+    Kept as a thin quantile-taking wrapper so the many call sites in this module
+    stay readable, but the arithmetic now lives in harness.percentile so a field
+    named p99 means the same thing in every report.
+    """
+    return harness_percentile(values, quantile * 100.0)
 
 
 def _read_tokens(path: Path) -> torch.Tensor:
