@@ -2361,6 +2361,8 @@ In this equation, $\mathbf{Q}$ (queries), $\mathbf{K}$ (keys), and $\mathbf{V}$ 
 
 [^fn-attention-qkv]: **Query-Key-Value (QKV)**: The terminology is borrowed from information retrieval, explaining why the equation uses three distinct learned projections to calculate pairwise scores. Creating these projections requires three independent weight matrices, costing $3 \times d_{\text{model}}^2$ parameters per layer. The direct systems consequence is the "KV cache" for autoregressive inference: all prior Key and Value vectors must be stored for the next token, causing memory to grow linearly ($\mathcal{O}(S)$) with sequence length and potentially dominate serving memory at long contexts or high concurrency. \index{Attention Mechanism!query-key-value}\index{Query-Key-Value}\index{QKV!KV cache}
 
+The attention operation involves several key steps. First, it computes query, key, and value projections for each position in the sequence. In @fig-attention, each cell in the $S{\times}S$ attention matrix represents a query-key interaction, and the color intensity reveals which positions attend most strongly to which others. Finally, these attention weights combine value vectors to produce the output.
+
 ::: {#fig-attention fig-env="figure" fig-pos="htb" fig-cap="**Query-Key-Value Attention Mechanism**: For a 6-token sequence, queries (cyan) match against keys (red) to produce a $6{\times}6$ attention matrix with $\mathcal{O}(S^2)$ entries. Color intensity indicates attention weight: darker cells show stronger relationships. Each output position aggregates information from all values (green) weighted by its attention row. The matrix structure reveals both the computational pattern (thirty-six similarity computations) and the naive memory bottleneck (storing $S^2$ attention weights). Source: Transformer Explainer [@cho2025]." fig-alt="6-by-6 attention matrix with gradient coloring from blue to red indicating attention weights. Cyan query vectors enter from left, red key vectors from top, green value vectors from below. Output vectors exit right, showing weighted aggregation pattern."}
 
 ```{.tikz}
@@ -2481,8 +2483,6 @@ In this equation, $\mathbf{Q}$ (queries), $\mathbf{K}$ (keys), and $\mathbf{V}$ 
 ```
 
 :::
-
-The attention operation involves several key steps. First, it computes query, key, and value projections for each position in the sequence. In @fig-attention, each cell in the $S{\times}S$ attention matrix represents a query-key interaction, and the color intensity reveals which positions attend most strongly to which others. Finally, these attention weights combine value vectors to produce the output.
 
 Unlike the fixed weight matrices found in previous architectures, attention weights are computed dynamically for each input. Follow the matrix dimensions in @fig-attention-weightcalc to see this dynamic computation unfold: the embedding matrix multiplies with QKV weight matrices in a single batched operation, and the resulting projections change for every new input sequence.
 
@@ -2972,6 +2972,10 @@ Attention mechanisms exhibit significant redundancy (many heads learning similar
 
 This information-theoretic interpretation reveals why attention is effective for selective processing. The mechanism balances two competing objectives: focusing probability mass on high-scoring positions while preserving enough entropy to avoid a brittle hard selection. This smooth weighting helps transformers handle long sequences and complex dependencies.
 
+Self-attention learns dynamic activation patterns across the input sequence. Unlike CNNs which apply fixed filters or RNNs which use fixed recurrence patterns, attention learns which elements should activate together based on their content. This creates a form of adaptive connectivity where the effective network topology changes for each input. Recent research has shown that attention heads in trained models often specialize in detecting specific linguistic or semantic patterns [@clark2019], suggesting that the mechanism naturally discovers interpretable structural regularities in data. The encoder-decoder diagram in @fig-transformer places this mechanism inside the residual, normalization, and feed-forward scaffolding that makes the full architecture trainable.
+
+The transformer architecture applies this self-attention mechanism within a broader structure that typically includes feed-forward layers, layer normalization\index{Layer Normalization!Transformer}, and residual connections\index{Residual Connection!Transformer}. @Fig-transformer shows input tokens entering repeated attention and feed-forward blocks, each wrapped with residual connections and normalization, and emerging as contextualized representations. Because all positions can be processed in parallel rather than sequentially, the architecture trades recurrent state for large matrix operations that map well to accelerator training.
+
 ::: {#fig-transformer fig-env="figure" fig-pos="htb" fig-cap="**Transformer Architecture (Encoder-Decoder)**: Complete architecture. The encoder (left, repeated $N_L$ times) consists of multi-head attention followed by feed-forward layers, each with residual connections (arrows bypassing blocks) and layer normalization. The decoder (right) adds masked attention to prevent attending to future tokens during autoregressive generation. Positional encodings (sine waves) inject sequence order information absent from the permutation-invariant attention operation. This design enables training parallelism across all positions while the decoder maintains autoregressive causality during inference. Source: [@vaswani2017]." fig-alt="Encoder-decoder architecture. Encoder: multi-head attention, add-norm, feed-forward, add-norm, repeated N_L times. Decoder adds masked attention. Positional encoding sine waves at inputs. Skip connections bypass sublayers. Linear and softmax at top."}
 
 ```{.tikz}
@@ -3108,13 +3112,117 @@ This information-theoretic interpretation reveals why attention is effective for
 
 :::
 
-Self-attention learns dynamic activation patterns across the input sequence. Unlike CNNs which apply fixed filters or RNNs which use fixed recurrence patterns, attention learns which elements should activate together based on their content. This creates a form of adaptive connectivity where the effective network topology changes for each input. Recent research has shown that attention heads in trained models often specialize in detecting specific linguistic or semantic patterns [@clark2019], suggesting that the mechanism naturally discovers interpretable structural regularities in data. The encoder-decoder diagram in @fig-transformer places this mechanism inside the residual, normalization, and feed-forward scaffolding that makes the full architecture trainable.
-
-The transformer architecture applies this self-attention mechanism within a broader structure that typically includes feed-forward layers, layer normalization\index{Layer Normalization!Transformer}, and residual connections\index{Residual Connection!Transformer}. @Fig-transformer shows input tokens entering repeated attention and feed-forward blocks, each wrapped with residual connections and normalization, and emerging as contextualized representations. Because all positions can be processed in parallel rather than sequentially, the architecture trades recurrent state for large matrix operations that map well to accelerator training.
-
 ### Computational mapping {#sec-network-architectures-computational-mapping-aea3}
 
-While transformer self-attention builds upon the basic attention mechanism, it introduces distinct computational patterns that set it apart. @Lst-self_attention_layer presents a typical implementation, showing how self-attention derives queries, keys, and values from the same input sequence.
+Despite these computational costs, the effectiveness of attention has driven sustained engineering effort to push context limits ever further. @Fig-context-explosion is a point-in-time schematic: early widely used transformer reports exposed context windows around 512--2K tokens for BERT, GPT-2, and GPT-3-style models [@devlin2019; @radford2019language; @brown2020language], while later product and technical announcements reported much larger windows such as GPT-4 Turbo (128K), Claude 2.1 (200K), and Gemini 1.5 (1M+) [@openai2023devday; @anthropic2023claude21; @google2024gemini15]. Treat these product names as dated scale anchors: the durable systems lesson is that longer contexts trade external retrieval and chunking complexity for larger attention and KV-cache budgets. Techniques like FlashAttention [@dao2022], sparse attention, and architectural innovations make that trade-off less expensive but do not repeal the memory scaling.
+
+::: {#fig-context-explosion fig-env="figure" fig-pos="htb" fig-cap="**Context Window Explosion**: Model context capacity (tokens, log scale) from early models (512 to 2K tokens) to modern long-context architectures (128K to 1M+ tokens). As context scales $1,000\times$, naive attention memory grows $1,000,000\times$ ($\mathcal{O}(S^2)$), driving the development of FlashAttention, sparse attention, and linear attention mechanisms." fig-alt="Timeline from 2018 to 2024 showing context window capacity growing exponentially from 512 tokens (BERT) to 1,000,000+ tokens (Gemini 1.5). Key models labeled along log-scale axis."}
+
+```{python}
+#| echo: false
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ CONTEXT WINDOW EXPLOSION (FIGURE)
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @fig-context-explosion—context window scaling from BERT to Gemini
+# │
+# │ Goal: Plot log-scale context capacity over time; show exponential rise
+# │       and annotate key systems milestones (FlashAttention, RingAttention).
+# │ Show: Log10 scale (512 to 2M); point markers with labels; annotation callouts.
+# │ How: matplotlib scatter + annotate; book_style.setup_plot().
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
+import numpy as np
+from book.tools.figures import style as book_style
+
+fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.0))
+
+# ┌── 2. DATA ──────────────────────────────────────────────────────────────────
+models = [
+    (2018.8, 512, "BERT", "above"),
+    (2019.1, 1024, "GPT-2", "below"),
+    (2020.4, 2048, "GPT-3", "above"),
+    (2022.3, 4096, "LLaMA", "below"),
+    (2023.2, 32768, "Mistral-7B", "above"),
+    (2023.8, 128000, "GPT-4 Turbo", "below"),
+    (2023.9, 200000, "Claude 2.1", "above"),
+    (2024.1, 1000000, "Gemini 1.5", "below"),
+    (2024.4, 2000000, "Llama 3.1", "above"),
+]
+
+years = [m[0] for m in models]
+tokens = [m[1] for m in models]
+
+# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
+ax.plot(
+    years,
+    tokens,
+    'o-',
+    color=COLORS['BlueLine'],
+    linewidth=2.5,
+    markersize=7,
+    markerfacecolor='white',
+    markeredgewidth=2,
+    markeredgecolor=COLORS['BlueLine'],
+)
+
+# Shaded background regions for context eras
+ax.axhspan(100, 2048, alpha=0.08, color=COLORS['grid'], label='Standard Era (512–2K)')
+ax.axhspan(2048, 32768, alpha=0.08, color=COLORS['BlueL'], label='Extended Era (4K–32K)')
+ax.axhspan(32768, 3000000, alpha=0.08, color=COLORS['VioletL'], label='Million-Token Era (128K–2M+)')
+
+# ┌── 4. ANNOTATIONS ───────────────────────────────────────────────────────────
+for yr, tok, name, pos in models:
+    offset = (0, 10) if pos == "above" else (0, -14)
+    va = "bottom" if pos == "above" else "top"
+
+    # Format token count nicely
+    if tok >= 1000000:
+        tok_lbl = f"{tok/1000000:.0f}M"
+    elif tok >= 1000:
+        tok_lbl = f"{tok/1000:.0f}K"
+    else:
+        tok_lbl = str(tok)
+
+    ax.annotate(
+        f"{name} ({tok_lbl})",
+        (yr, tok),
+        xytext=offset,
+        textcoords="offset points",
+        ha="center",
+        va=va,
+        fontsize=7.5,
+        fontweight="bold",
+        color=COLORS.get("text", "black"),
+        bbox=dict(boxstyle="round,pad=0.15", facecolor="white", edgecolor="none", alpha=0.85),
+    )
+
+# Key systems milestones (vertical dashed lines)
+ax.axvline(2022.4, color=COLORS['RedLine'], linestyle=':', alpha=0.7, linewidth=1.5)
+ax.text(2022.45, 800, "FlashAttention\n(IO-aware)", fontsize=7, color=COLORS['RedLine'], fontweight='bold', va='bottom')
+
+ax.axvline(2023.8, color=COLORS['VioletLine'], linestyle=':', alpha=0.7, linewidth=1.5)
+ax.text(2023.85, 800, "RingAttention /\nLinear Attention", fontsize=7, color=COLORS['VioletLine'], fontweight='bold', va='bottom')
+
+# ┌── 5. DECORATE ──────────────────────────────────────────────────────────────
+ax.set_yscale('log')
+ax.set_xlabel('Year')
+ax.set_ylabel('Context Window (Tokens, log scale)')
+ax.set_xlim(2018.3, 2024.8)
+ax.set_ylim(200, 5000000)
+
+ax.set_yticks([512, 2048, 8192, 32768, 128000, 1000000])
+ax.set_yticklabels(['512', '2K', '8K', '32K', '128K', '1M'])
+
+ax.legend(loc='upper left', fontsize=7.5, frameon=True, facecolor='white', framealpha=0.9)
+
+plt.show()
+plt.close()
+```
+
+:::
+
+@Lst-self_attention_layer presents a typical implementation, showing how self-attention derives queries, keys, and values from the same input sequence.
 
 ::: {#lst-self_attention_layer lst-cap="**Self-Attention and Multi-Head Attention**: Self-attention (top) derives $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ from the same input $\mathbf{X}$ through three projections, then computes attention as before. Multi-head attention (bottom) runs $N_{\text{heads}}$ parallel attention heads with dimension $d_k = d_{\text{model}}/N_{\text{heads}}$, then concatenates and projects. For GPT-2 (768-dim, 12 heads), each head operates on 64 dimensions, reducing per-head attention memory while enabling diverse relationship patterns."}
 
@@ -3296,148 +3404,6 @@ The **KV Cache**\index{KV Cache!linear growth}[^fn-kv-cache-depth] grows linearl
 [^fn-kv-cache-depth]: **KV Cache Memory Scaling**: For a 7-billion-parameter transformer in FP16, model weights consume ~14 GB. A single request's cache requires `{python} KVCacheSizing.layers_str` layers $\times$ `{python} KVCacheSizing.kv_tensors_str` (K,V) $\times$ `{python} KVCacheSizing.heads_str` heads $\times$ `{python} KVCacheSizing.seq_len_str` positions $\times$ `{python} KVCacheSizing.head_dim_str` dimensions $\times$ `{python} KVCacheSizing.bytes_per_elem_str` bytes, or about `{python} KVCacheSizing.per_request_gb_str`. At 8 concurrent users, the cache is ~`{python} KVCacheSizing.concurrent_8_gb_str`, a substantial addition to the weights, and grows linearly with context and concurrency. Scaling throughput therefore forces choices such as grouped-query attention [@ainslie2023], shorter contexts, or KV paging and offloading [@kwon2023]. Paging and offloading preserve model outputs, whereas grouped-query attention changes the architecture and shorter contexts change the information available to the model. \index{KV Cache!memory scaling}
 
 This implementation reveals three key computational characteristics. Self-attention enables parallel processing across all positions in a full sequence. Dense score computation grows quadratically with sequence length, creating a long-sequence bottleneck. Autoregressive decoding adds a sequential dependency and can become bandwidth bound at small batch sizes.
-
-::: {#fig-context-explosion fig-env="figure" fig-pos="htb" fig-cap="**The Context Explosion**: Maximum supported context window (tokens) over time (log scale). Values are representative public specifications at the time of announcement, not stable product guarantees. The transition from the standard era (2k) to the long-context era (100k) and beyond (1000k) represents a fundamental shift in how ML systems handle long-range dependencies: more of the relevant context can remain inside the model's attention window, but the attention and KV-cache budgets grow with sequence length." fig-alt="Step plot showing context windows growing from 0.5k (BERT) to 1M+ (Gemini 1.5). The log scale highlights the orders-of-magnitude leap in 2023 – 2024."}
-
-```{python}
-#| echo: false
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ CONTEXT EXPLOSION (FIGURE)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: @fig-context-explosion—attention and long-context section
-# │
-# │ Goal: Plot context window growth from BERT (512) to Gemini 1.5 (1M+);
-# │       show Standard Era vs RAG Era vs Massive Era.
-# │ Show: Step plot; log-scale y; model annotations; era labels.
-# │ How: Hardcoded (year, tokens, model) data; ax.step; book_style.setup_plot().
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-# ┌── 1. CANVAS ────────────────────────────────────────────────────────────────
-# │ Plot context window growth from BERT (512) to Gemini 1.5 (1M+);
-import numpy as np
-from book.tools.figures import style as book_style
-
-fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.3))
-
-# =============================================================================
-# DATA
-# =============================================================================
-
-# ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
-data = [
-    (2018, 512, "BERT"),
-    (2019, 1024, "GPT-2"),
-    (2020, 2048, "GPT-3"),
-    (2023.2, 128000, "GPT-4 Turbo"),
-    (2023.5, 200000, "Claude 2.1"),
-    (2024.1, 1000000, "Gemini 1.5"),
-]
-years = [d[0] for d in data]
-context = [d[1] for d in data]
-labels = [d[2] for d in data]
-
-# =============================================================================
-# PLOT: The Context Explosion
-# =============================================================================
-ax.step(years, context, where='post', color=COLORS['VioletLine'], linewidth=2.5, zorder=2)
-
-# ┌── 3. RENDER ────────────────────────────────────────────────────────────────
-ax.scatter(years, context, color=COLORS['VioletLine'], s=60, zorder=3, edgecolors='white')
-
-# Individual label settings for each model to avoid overlap and improve readability
-label_styles = {
-    "BERT": {
-        "xytext": (1, -15),
-        "ha": "left",
-        "va": "bottom",
-    },
-    "GPT-2": {
-        "xytext": (3, -13),
-        "ha": "left",
-        "va": "bottom",
-    },
-    "GPT-3": {
-        "xytext": (3, -13),
-        "ha": "left",
-        "va": "bottom",
-    },
-    "GPT-4 Turbo": {
-        "xytext": (-7, -5),
-        "ha": "right",
-        "va": "bottom",
-    },
-    "Claude 2.1": {
-        "xytext": (2, 6),
-        "ha": "right",
-        "va": "bottom",
-    },
-    "Gemini 1.5": {
-        "xytext": (2, 6),
-        "ha": "right",
-        "va": "bottom",
-    },
-}
-
-default_label_style = {
-    "xytext": (5, 5),
-    "ha": "left",
-    "va": "bottom",
-    "fontsize": 8,
-    "fontweight": "bold",
-    "color": COLORS["VioletLine"],
-    "bbox": dict(facecolor="white", alpha=0.8, edgecolor="none", pad=0.5),
-}
-
-for y, c, l in zip(years, context, labels):
-    style = default_label_style.copy()
-    style.update(label_styles.get(l, {}))
-
-    c_label = f"{int(c/THOUSAND)}k" if c >= THOUSAND else f"{c/THOUSAND:.1f}k"
-
-    ax.annotate(
-        f"{l} ({c_label})",
-        (y, c),
-        xytext=style["xytext"],
-        textcoords="offset points",
-        fontsize=style.get("fontsize", 8),
-        fontweight=style.get("fontweight", "bold"),
-        color=style.get("color", COLORS["VioletLine"]),
-        ha=style["ha"],
-        va=style["va"],
-        bbox=style.get("bbox", None),
-    )
-
-# ┌── 4. DECORATE ──────────────────────────────────────────────────────────────
-ax.set_yscale('log')
-ax.set_xlabel('Year')
-ax.set_ylabel('Context Window (Tokens)')
-ax.set_ylim(100, 5000000)
-
-ax.axhline(2000, linestyle='--', color=COLORS['grid'], alpha=0.5)
-ax.text(
-    2017.8,
-    2600,
-    "Standard Era (2k)",
-    color=COLORS['grid'],
-    fontsize=8,
-    fontweight='semibold',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3),
-)
-ax.axhline(100000, linestyle='--', color=COLORS['grid'], alpha=0.5)
-ax.text(
-    2017.8,
-    130000,
-    "RAG Era (100k+)",
-    color=COLORS['grid'],
-    fontsize=8,
-    fontweight='semibold',
-    bbox=dict(facecolor='white', alpha=0.8, edgecolor='none', pad=0.3),
-)
-plt.show()
-plt.close()
-```
-
-:::
 
 Despite these computational costs, the effectiveness of attention has driven sustained engineering effort to push context limits ever further. @Fig-context-explosion is a point-in-time schematic: early widely used transformer reports exposed context windows around 512--2K tokens for BERT, GPT-2, and GPT-3-style models [@devlin2019; @radford2019language; @brown2020language], while later product and technical announcements reported much larger windows such as GPT-4 Turbo (128K), Claude 2.1 (200K), and Gemini 1.5 (1M+) [@openai2023devday; @anthropic2023claude21; @google2024gemini15]. Treat these product names as dated scale anchors: the durable systems lesson is that longer contexts trade external retrieval and chunking complexity for larger attention and KV-cache budgets. Techniques like FlashAttention [@dao2022], sparse attention, and architectural innovations make that trade-off less expensive but do not repeal the memory scaling.
 
