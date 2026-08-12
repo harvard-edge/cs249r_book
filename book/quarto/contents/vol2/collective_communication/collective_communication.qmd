@@ -30,9 +30,9 @@ engine: jupyter
 \mlfleetstack{20}{55}{100}{30}{10}{0}{0}{0}
 \end{marginfigure}
 
-_Why does communication between machines become the fundamental constraint that governs large-scale machine learning systems?_
+_Why does communication between machines constrain large-scale machine learning systems?_
 
-Computation scales by adding processors; communication scales by moving data between them. These scale differently: adding a processor increases aggregate compute linearly, but coordinating that processor with all others moves more total data and, for the most general synchronization patterns, multiplies the logical connections among workers quadratically. At sufficient scale, the time spent exchanging gradients, activations, and parameters exceeds the time spent computing them. This crossover point is not a bug to be fixed but a fundamental property of distributed systems that determines which parallelization strategies work, which model sizes are trainable, and which organizations can operate at the largest scales. The physics of light-speed delays, bandwidth limits, and energy costs of data movement constrains communication as firmly as transistor physics constrains computation, yet communication is far less intuitive to reason about, making it the hidden bottleneck that undermines systems designed by those who understand only the compute side. In C³ terms, collective communication forms the instruction set of the fleet: the physical operations that govern how compute is penalized by communication.
+Computation scales by adding processors; communication scales by moving data between them. These scale differently. Adding a processor increases aggregate compute linearly, but coordinating that processor with others moves more total data and, for the most general synchronization patterns, multiplies the logical connections among workers quadratically. At sufficient scale, the time spent exchanging gradients, activations, and parameters exceeds the time spent computing them. This crossover determines which parallelization strategies work and which model sizes are trainable. Light-speed delays, bandwidth limits, and the energy cost of data movement constrain communication as firmly as transistor physics constrains computation. In C³ terms, collective communication forms the instruction set of the fleet, defining the physical operations through which communication limits compute.
 
 ::: {.content-visible when-format="pdf"}
 
@@ -58,7 +58,7 @@ When 10,000 GPUs need to apply one weight update, the splits created by data, te
 
 The 3D Parallelism Cube assumes that replicas, shards, stages, and experts can exchange gradients, activations, parameters, and tokens quickly enough for the optimizer to see one coherent training run. That assumption is the handoff from parallelism to communication: every way of splitting the model relocates work onto the network.
 
-The gap between that assumption and the wire reveals a fundamental asymmetry in *how* computation and communication scale. Computation is local: each GPU works on its own data, so aggregate compute grows with the number of GPUs. Communication is global: keeping the fleet synchronized requires information to cross physical links with finite latency, bandwidth, topology, and energy. The central case is gradient synchronization; from there the mechanics become concrete through alpha-beta cost models, collective primitives, AllReduce schedules, topology-aware routing, compression, and overlap.
+The gap between that assumption and the wire reveals an asymmetry in how computation and communication scale. Computation is local because each GPU works on its own data, so aggregate compute grows with the number of GPUs. Communication is global because keeping the fleet synchronized requires information to cross physical links with finite latency, bandwidth, topology, and energy. Gradient synchronization provides the central case; alpha-beta cost models, collective primitives, AllReduce schedules, topology-aware routing, compression, and overlap make its mechanics concrete.
 
 ```{python}
 #| echo: false
@@ -1792,7 +1792,7 @@ Naively discarding small gradients creates a systematic bias. If a parameter con
 
 The problem is not merely practical; it is a fundamental mathematical obstacle. Without correction, sparsified SGD is a *biased estimator* of the true gradient, and biased gradient descent can converge to arbitrarily wrong solutions. The same problem afflicts aggressive quantization: rounding gradients to INT8 or 1-bit introduces a systematic rounding error that accumulates across training steps. Error feedback addresses this accumulation for quantized gradients [@seide2014] and for sparsified gradients [@stich2018sparsified; @karimireddy2019error].
 
-### Error feedback: The memory of the journey {#sec-communication-collective-operations-error-feedback}
+### Error feedback and residual accumulation {#sec-communication-collective-operations-error-feedback}
 
 We solve the conflict between compression and convergence with error feedback. The system applies the compressor immediately to recover bandwidth, then stores the discarded residual in a local accumulator and re-injects it into the next gradient. *The error is deferred, not destroyed.* We maintain a local error accumulator $e_t$ that stores the compression residual.
 
@@ -2347,7 +2347,7 @@ The Collective Primitives (AllReduce, AllGather/ReduceScatter, AllToAll) map dir
 
 The Ring and Tree AllReduce algorithms occupy opposite ends of the latency-bandwidth trade-off, with the log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ determining which is optimal for a given configuration. Hierarchical AllReduce and Rail-Optimized Routing exploit the bandwidth hierarchy of GPU clusters to multiply effective inter-node bandwidth, while in-network reduction (SHARP) reduces host-visible communication by performing part of the aggregation inside network switches.
 
-When even the fastest wires are not enough, gradient compression provides the final squeeze. Quantization, sparsification, and compression-aware optimizers like 1-bit Adam reduce communication volume by 4--1000$\times$. Error feedback ensures that while the journey may be compressed or delayed, no vital information is permanently lost, preserving the mathematical truth of the model's convergence. Finally, communication-computation overlap through layer-by-layer pipelining and bucket fusion hides the remaining communication time behind useful computation, reducing the effective communication overhead to 5--15 percent of total step time in well-configured systems.
+When even the fastest wires are not enough, gradient compression provides another lever. Quantization, sparsification, and compression-aware optimizers like 1-bit Adam reduce communication volume by 4--1000$\times$. Error feedback preserves residual information across steps under the assumptions developed above. Communication-computation overlap through layer-by-layer pipelining and bucket fusion can then hide remaining communication behind useful computation, reducing effective overhead to 5--15 percent of total step time in well-configured systems.
 
 The communication traffic patterns differ fundamentally across the Lighthouse Archetypes.
 
@@ -2363,13 +2363,13 @@ The "Travel Manifest" for a gradient depends on the system's objective function 
 
 : **Archetype-to-collective mapping**: Each lighthouse archetype's communication pattern is determined by its dominant bottleneck. {#tbl-archetype-collective-mapping}
 
-The key insight is that the archetypes face different communication bottlenecks even when they all train neural networks. Archetype A (GPT-4/Llama-3) is bandwidth-bound and benefits from hierarchical AllReduce combined with communication-computation overlap. Archetype B (DLRM at Scale) is latency-bound and benefits from low-latency switches and topology-aware AllToAll routing. Archetype C (Federated MobileNet) is constrained by intermittent connectivity and small devices, so aggressive quantization and error feedback matter more than data-center topology. Applying the wrong optimization to the wrong archetype wastes engineering effort without improving performance.
+The archetypes face different communication bottlenecks even though they all train neural networks. Archetype A (GPT-4/Llama-3) is bandwidth-bound and benefits from hierarchical AllReduce combined with communication-computation overlap. Archetype B (DLRM at Scale) is latency-bound and benefits from low-latency switches and topology-aware AllToAll routing. Archetype C (Federated MobileNet) is constrained by intermittent connectivity and small devices, so aggressive quantization and error feedback matter more than data-center topology. Applying the wrong optimization to the wrong archetype wastes engineering effort without improving performance.
 
 :::
 
 The compression and error-feedback mechanisms developed in this chapter also matter outside data centers: for Archetype C and similar intermittent or bandwidth-poor settings, the dominant cost may be the ability to send any useful update at all rather than saturating a high-speed fabric.
 
-The communication patterns established in this chapter reveal that distributed training is fundamentally a network engineering problem disguised as a machine learning problem. The $\alpha$-$\beta$ model provides the analytical framework for reasoning about this problem: every communication design decision, from algorithm selection to compression to overlap, can be evaluated in terms of its effect on the latency and bandwidth terms. Understanding these models and techniques transforms practitioners from users of distributed frameworks into engineers who can diagnose bottlenecks, optimize topology configurations, and achieve the scaling efficiency that determines whether trillion-parameter training runs complete in weeks or months.
+Distributed training is as much a network engineering problem as a machine learning problem. The $\alpha$-$\beta$ model provides a framework for evaluating communication decisions, from algorithm selection to compression and overlap, through their effects on latency and bandwidth. These models help engineers diagnose bottlenecks, optimize topology configurations, and reach the scaling efficiency that determines whether trillion-parameter training runs complete in weeks or months.
 
 ::: {.callout-takeaways title="Every byte has a travel cost"}
 
@@ -2383,11 +2383,11 @@ The communication patterns established in this chapter reveal that distributed t
 
 :::
 
-If parallelism decides what must be communicated, this chapter is about what that communication actually costs. Every collective (AllReduce, AllGather, AllToAll) is an instruction in the fleet's real instruction set, and its price is set by the α-β model: a fixed latency to begin and a per-byte bandwidth to finish. The engineering is in lowering both, choosing a ring where bandwidth binds and a tree where latency does, collapsing the slow inter-node hop into a fast local one, and above all overlapping the transfer with computation so the fleet pays for it in time it would have spent anyway. Communication is the penalty compute pays to act as one machine, and this chapter is how that penalty is kept small enough to be worth paying.
+If parallelism decides what must be communicated, this chapter measures what that communication costs. Each collective (AllReduce, AllGather, AllToAll) is an instruction in the fleet's instruction set, priced by the α-β model through a fixed startup latency and a per-byte transfer time. Engineers lower that cost by choosing a ring where bandwidth binds and a tree where latency does, reducing payloads before a slow inter-node hop, and overlapping transfers with computation. Communication is the price compute pays to act as one machine.
 
 ::: {.callout-chapter-connection title="From logic to resilience"}
 
-The fleet now has its *logic* (Parallelism) and its *traffic patterns* (Communication). The map is drawn and the vehicles are built. In production, however, hardware fails as a statistical certainty: GPUs overheat, networks drop packets, and nodes fail mid-calculation. In fault tolerance (@sec-fault-tolerance-reliability), we examine how to maintain the illusion of a perfect supercomputer on imperfect hardware. We move from the logic of movement to the mechanics of survival, exploring checkpointing, recovery, and elastic training.
+The fleet now has its *logic* (Parallelism) and its *traffic patterns* (Communication). In production, however, GPUs overheat, networks drop packets, and nodes fail mid-calculation. @Sec-fault-tolerance-reliability examines how checkpointing, recovery, and elastic training maintain a coherent computation on imperfect hardware.
 
 :::
 
