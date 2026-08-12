@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """LLM coherence review for LEGO inline-python prose.
 
-Extracts prose lines that reference ``{python} Class.field`` exports (with
+Extracts prose lines that reference ``{python} Class.field`` outputs (with
 values substituted from cell exec), groups them by LEGO class, and asks an LLM
 whether each snippet reads coherently in context.
 
@@ -69,7 +69,7 @@ def _lego_cell_lines(qmd: Path) -> dict[str, dict]:
         if in_cell and CELL_END.match(line):
             in_cell = False
             code = "\n".join(buf)
-            if not (LEGO_MARK.search(code) or "Exports:" in code):
+            if not LEGO_MARK.search(code):
                 continue
             goal_m = GOAL.search(code)
             goal = goal_m.group(1).strip() if goal_m else ""

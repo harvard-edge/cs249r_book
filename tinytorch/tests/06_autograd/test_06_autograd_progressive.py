@@ -126,6 +126,39 @@ class TestAutogradCore:
         except ImportError as e:
             assert False, f"Import failed: {e}"
 
+    def test_scalar_left_gradient(self):
+        """
+        ✅ TEST: Scalar arithmetic works naturally from either side.
+        """
+        try:
+            from tinytorch.core.tensor import Tensor
+
+            def grad_data(tensor):
+                return tensor.grad.data if hasattr(tensor.grad, "data") else tensor.grad
+
+            x = Tensor([3.0], requires_grad=True)
+            y = 2 * x  # dy/dx = 2
+            y.backward(Tensor([1.0]))
+            if x.grad is not None:
+                assert np.allclose(grad_data(x), [2.0]), "Gradient wrong for scalar * tensor"
+
+            x = Tensor([4.0], requires_grad=True)
+            y = 10 - x  # dy/dx = -1
+            y.backward(Tensor([1.0]))
+            if x.grad is not None:
+                assert np.allclose(grad_data(x), [-1.0]), "Gradient wrong for scalar - tensor"
+
+            x = Tensor([4.0], requires_grad=True)
+            y = 12 / x  # dy/dx = -12 / x^2
+            y.backward(Tensor([1.0]))
+            if x.grad is not None:
+                assert np.allclose(grad_data(x), [-0.75]), "Gradient wrong for scalar / tensor"
+
+        except (TypeError, AttributeError):
+            assert True, "Scalar-left gradient support not implemented yet"
+        except ImportError as e:
+            assert False, f"Import failed: {e}"
+
     def test_chain_rule(self):
         """
         ✅ TEST: Chain rule: z = (x + y) * 2

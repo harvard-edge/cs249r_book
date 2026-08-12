@@ -19,11 +19,13 @@ test-engine: ## Level 2: Headless cell execution via app.run()
 test-widget: ## Level 3: Widget structure and prediction-reveal flow
 	python3 -m pytest tests/test_widget.py -v -k widget
 
-test-wasm: ## Smoke test: export 3 representative labs to WASM HTML
-	@echo "Smoke-testing WASM export for 3 representative labs..."
-	@mkdir -p /tmp/wasm-smoke
+test-wasm: ## Smoke test: export representative labs to WASM HTML
+	@echo "Smoke-testing WASM export for representative labs..."
+	@mkdir -p /tmp/wasm-smoke/wheels
+	@cp ../wheels/mlsysim-*.whl /tmp/wasm-smoke/wheels/
+	@if ls ../wheels/mlsysbook_labs-*.whl >/dev/null 2>&1; then cp ../wheels/mlsysbook_labs-*.whl /tmp/wasm-smoke/wheels/; fi
 	@PASS=0; FAIL=0; \
-	for lab in vol1/lab_00_introduction.py vol1/lab_01_ml_intro.py vol2/lab_01_introduction.py; do \
+	for lab in vol1/lab_00_introduction.py vol1/lab_01_ml_intro.py vol2/lab_01_introduction.py vol2/lab_06_collective_communication.py; do \
 		name=$$(basename "$$lab" .py); \
 		if marimo export html-wasm "$$lab" -o "/tmp/wasm-smoke/$$name/index.html" --mode run --no-show-code 2>/dev/null; then \
 			SIZE=$$(wc -c < "/tmp/wasm-smoke/$$name/index.html"); \

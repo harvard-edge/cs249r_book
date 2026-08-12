@@ -5,19 +5,28 @@ import { RELEASE_ID, RELEASE_HASH, BUILD_DATE } from "../lib/stats";
 /**
  * Page-end footer with a stable cross-link back to the ML Systems textbook.
  *
- * Per-question book links are deferred until mlsysbook.ai URLs stabilize. In
- * the meantime the site-level cross-link to the book homepage — which cannot
- * 404 — gives every StaffML page a closing funnel back to the textbook. The
+ * Per-question book links now ship via BookRefCard (topic → chapter, derived
+ * from schema/topic_chapter_map.yaml and build-link-checked against live
+ * mlsysbook.ai chapter URLs). This footer remains the site-level funnel: the
  * top-of-page EcosystemBar covers discovery; this footer covers intent (the
  * user finished reading and wants to learn more).
  *
  * Intentionally minimal: one attribution row, low contrast, no dropdowns.
  */
 export default function Footer() {
+  // Format the build date in UTC (not the viewer's local timezone). With
+  // Next's static export the HTML is generated at build time and hydrates
+  // on the client whenever the user visits — without `timeZone: "UTC"` the
+  // build server and the client format the same ISO instant differently
+  // near day/year boundaries (e.g. `2026-12-31T23:30:00Z` reads as
+  // "Dec 31, 2026" on a UTC build server and "Jan 1, 2027" in a UTC+1
+  // client), producing a hydration mismatch warning AND a wrong label.
+  // Same fix as PR #1843 for PaperCitationCard.
   const buildLabel = new Date(BUILD_DATE).toLocaleDateString("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    timeZone: "UTC",
   });
   const shortHash = RELEASE_HASH.slice(0, 7);
   return (

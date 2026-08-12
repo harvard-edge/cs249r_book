@@ -123,7 +123,7 @@ CONSTANTS_PHYSICS_ALLOWLIST = frozenset(
         "BYTES_FP16", "BYTES_FP32", "BYTES_FP8", "BYTES_ADAM_STATE", "BYTES_FP32",
         "GB", "GiB", "TB", "MB", "KB", "KiB", "byte", "second", "watt", "USD",
         "TFLOPs", "PFLOPs", "Gbps", "Gparam", "Bparam", "param", "count",
-        "ureg", "kilowatt", "NVME_SEQUENTIAL_BW",
+        "ureg", "kilowatt",
     }
 )
 
@@ -142,9 +142,46 @@ HARDCODED_DATASET = re.compile(
     re.I,
 )
 
+# Hardcoded hardware-spec literals that belong in Hardware.Cloud.* (the registry
+# is the single source of truth). Each entry is a name+value pair caught in a real
+# drift incident; banning it keeps the rendered prose pinned to the registry so a
+# spec update propagates instead of silently diverging. Add a new alternation here
+# whenever a hardcoded hardware spec is found in a LEGO cell.
+#   2026-05-29 (no-constant-specs reconciliation): H100 L2 / register file /
+#   shared memory / SM count / HBM access latency + energy.
+HARDCODED_HARDWARE = re.compile(
+    r"\bl2_cache(?:_mb)?\s*=\s*50\b|"
+    r"\bregister_total_mb\s*=\s*33\b|"
+    r"\bsm_count\s*=\s*132\b|"
+    r"\b(?:reg(?:ister)?_(?:file_)?per_sm)(?:_kib|_kb)?\s*=\s*256\b|"
+    r"\b(?:shared_mem(?:ory)?)(?:_per_sm)?(?:_kib|_kb)?\s*=\s*228\b|"
+    r"\bhbm_latency(?:_ns)?\s*=\s*300\b|"
+    r"\bhbm_(?:access_)?energy(?:_pj)?\s*=\s*640\b",
+    re.I,
+)
+
 # Hardcoded literature/infrastructure scalars that belong in registries.
+#   2026-06-03 (Oura/MobileNetV2 source-of-truth audit): Oura case-study
+#   accuracy anchors belong in ReferenceStats.OuraSleepStudy; MobileNetV2 alpha
+#   profile parameter counts belong in Models.Vision.*.
+#   2026-06-07 (LEGO verify hardening audit): GPT-2/GPT-4 training anchors were
+#   chapter-local literals in training.qmd; they now live in
+#   Models.Language.GPT2 (training_ops, inference_flops, layers) and
+#   ReferenceStats.TrainingCostAnchors (Gpt2Cost2019, Gpt4CostEstimate).
+#   2026-06-10 (audit campaign): GPT-2 Small specs live in
+#   Models.Language.GPT2_Small (parameters/layers/hidden_dim/heads); the registry
+#   value itself is guarded in test_physics_bounds.py::test_transformer_*.
 HARDCODED_REGISTRY = re.compile(
+    r"\bgpt2_small_params\s*=\s*124_?000_?000\b|"
+    r"\bgpt2_small_hidden(?:_dim)?\s*=\s*768\b|"
+    r"\bgpt2_small_heads\s*=\s*12\b|"
+    r"\bgpt2_small_layers\s*=\s*12\b|"
     r"\b(?:scaling_factor|cf_scaling_factor|training_flops_per_token_param)\s*=\s*6\b|"
+    r"\bgpt2_total_flops\s*=\s*1e\d+\b|"
+    r"\bgpt2_fwd_flops\s*=\s*3e9\b|"
+    r"\bgpt2_cost_2019\s*=\s*50_?000\b|"
+    r"\bgpt4_cost_est\s*=\s*100\s*\*\s*MILLION|"
+    r"\bckpt_layers\s*=\s*48\b|"
     r"\b(?:psi_threshold)\s*=\s*0\.2\b|"
     r"\b(?:pue)\s*=\s*1\.2\b|"
     r"\b(?:mfu|case2_mfu)\s*=\s*0\.45\b|"
@@ -163,7 +200,14 @@ HARDCODED_REGISTRY = re.compile(
     r"\bgpu_cost_per_hour\s*=\s*3\b|"
     r"\bn_gpus\s*=\s*8192\b|"
     r"\bmoe_(?:total|active)_params_b\s*=\s*(?:671|37)\b|"
-    r"\bsmartphone_ram_gb\s*=\s*8\b",
+    r"\bsmartphone_ram_gb\s*=\s*8\b|"
+    r"\bmobilenetv2_alpha10_params\s*=\s*3_?504_?872\b|"
+    r"\bmobilenetv2_alpha05_total_params\s*=\s*1_?968_?680\b|"
+    r"\bmobilenetv2_alpha05_feature_params\s*=\s*687_?680\b|"
+    r"\baccel_only_accuracy\s*=\s*0\.57\b|"
+    r"\benhanced_accuracy\s*=\s*0\.79\b|"
+    r"\bscorer_agreement_low\s*=\s*0\.82\b|"
+    r"\bscorer_agreement_high\s*=\s*0\.83\b",
     re.I,
 )
 
@@ -244,6 +288,11 @@ def check_file(path: Path) -> list[str]:
                 issues.append(
                     f"cell {idx}: forbidden constants.{sym} — use registry path"
                 )
+        if HARDCODED_HARDWARE.search(block):
+            issues.append(
+                f"cell {idx}: hardcoded hardware spec literal — use Hardware.Cloud.* "
+                f"(registry is the single source of truth; keeps prose pinned to it)"
+            )
         if HARDCODED_GRID.search(block):
             issues.append(
                 f"cell {idx}: hardcoded grid carbon intensity — use Infrastructure.Grids.*"
@@ -268,12 +317,23 @@ def main() -> int:
         help="QMD files (default: all chapter contents)",
     )
     args = parser.parse_args()
-    paths = args.paths or sorted(CONTENTS.rglob("*.qmd"))
+    paths: list[Path] = []
+    if args.paths:
+        for path in args.paths:
+            p = path if path.is_absolute() else REPO_ROOT / path
+            if p.is_dir():
+                paths.extend(sorted(p.rglob("*.qmd")))
+            elif p.suffix == ".qmd":
+                paths.append(p)
+    else:
+        paths = sorted(CONTENTS.rglob("*.qmd"))
     failures = 0
+    checked = 0
     for path in paths:
         p = path if path.is_absolute() else REPO_ROOT / path
         if not p.exists() or p.suffix != ".qmd":
             continue
+        checked += 1
         issues = check_file(p)
         if issues:
             failures += 1
@@ -283,7 +343,7 @@ def main() -> int:
     if failures:
         print(f"\n{failures} file(s) with registry source violations")
         return 1
-    print(f"OK registry sources ({len(paths)} QMD files checked)")
+    print(f"OK registry sources ({checked} QMD files checked)")
     return 0
 
 

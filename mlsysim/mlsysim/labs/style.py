@@ -11,7 +11,7 @@
 #   --success     GreenLine #008F45   target met, correct answer, success
 #   --danger      RedLine   #CB202D   constraint violated, wrong, OOM
 #   --warning     OrangeLine #CC5500  caution, prediction lock, secondary
-#   --surface-0   #0f172a             dark header backgrounds
+#   --surface-0   #0f172a             dark diagnostic surfaces
 #   --surface-1   #1e293b             card backgrounds (dark)
 #   --surface-2   #f8fafc             card backgrounds (light)
 #   --border      #e2e8f0             standard separator
@@ -79,6 +79,8 @@ LAB_CSS = mo.Html(f"""
     --radius-lg:      16px;
     --font-mono:      'SF Mono', 'Fira Code', 'Cascadia Code', monospace;
     --font-sans:      'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    --readable-width:  720px;
+    --panel-width:     840px;
 }}
 
 /* ── BASE ── */
@@ -86,6 +88,158 @@ body, .lab-body {{
     font-family: var(--font-sans);
     color: var(--text-primary);
     line-height: 1.6;
+}}
+
+/* ── READING MEASURE ──
+   Narrative blocks should read like an academic worksheet, not stretch across
+   the whole browser. Plots and controls are left unconstrained. */
+.lab-readable,
+.concept-block,
+.check-block,
+.stakeholder-card,
+.prediction-lock-preview,
+.orientation-complete,
+.lab-hud,
+marimo-accordion,
+marimo-callout-output {{
+    display: block !important;
+    width: min(var(--readable-width), 100%) !important;
+    max-width: min(var(--readable-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}}
+
+/* Published labs should show course-owned navigation and submission affordances,
+   not Marimo runtime chrome. */
+div[class~="fixed"][class~="bottom-0"][class~="right-0"][class~="z-50"],
+div[class~="fixed"][class~="right-0"][class~="top-0"][class~="z-50"],
+div[class~="fixed"][class~="right-8"][class~="z-10000"],
+div[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"],
+ol[class~="fixed"][class~="top-0"][class~="z-100"][class~="max-h-screen"] {{
+    display: none !important;
+}}
+
+/* Keep ordinary Markdown/HTML narrative cells in the worksheet column while
+   leaving charts, tables, and live controls free to use wider space. */
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) {{
+    width: min(var(--panel-width), 100%) !important;
+    max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}}
+
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) p,
+.output.block > div:not(:has(svg, canvas, iframe, table, marimo-ui-element, .js-plotly-plot, .plotly)) li {{
+    max-width: min(var(--readable-width), 100%) !important;
+}}
+
+marimo-tabs,
+div[style*="border-left:4px solid"][style*="border-radius:0 10px"],
+div[style*="border-left: 4px solid"][style*="border-radius: 0 10px"],
+div[style*="border-left:4px solid"][style*="border-radius:0px 10px"],
+div[style*="border-left: 4px solid"][style*="border-radius: 0px 10px"] {{
+    display: block !important;
+    width: min(var(--panel-width), 100%) !important;
+    max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}}
+
+marimo-tabs {{
+    overflow-x: auto !important;
+    overflow-y: visible !important;
+}}
+
+/* ── LEGACY LAB HEADER MODERNIZATION ──
+   Older notebooks used inline dark gradient hero banners. The selector below
+   keeps those notebooks release-ready without hand-editing every header cell. */
+div[style*="linear-gradient(135deg, #0f172a"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] {{
+    background: #ffffff !important;
+    color: var(--text-primary) !important;
+    border: 1px solid #cbd5e1 !important;
+    border-left: 6px solid #A51C30 !important;
+    border-radius: 8px !important;
+    box-shadow: 0 2px 10px rgba(15, 23, 42, 0.06) !important;
+    padding: 1.5rem 1.75rem !important;
+    max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"] h1,
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] h1 {{
+    color: var(--text-primary) !important;
+    font-size: clamp(2rem, 3vw, 2.65rem) !important;
+    letter-spacing: 0 !important;
+    margin-bottom: 0.55rem !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"] div[style*="font-size: 2.0rem"],
+div[style*="linear-gradient(135deg, #0f172a"] div[style*="font-size:2.0rem"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="font-size: 2.0rem"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="font-size:2.0rem"] {{
+    color: var(--text-primary) !important;
+    letter-spacing: 0 !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"] div[style*="font-weight: 800"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="font-weight: 800"],
+div[style*="linear-gradient(135deg, #0f172a"] div[style*="color: rgb(241, 245, 249)"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="color: rgb(241, 245, 249)"] {{
+    color: var(--text-primary) !important;
+    letter-spacing: 0 !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"] p,
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] p {{
+    color: var(--text-secondary) !important;
+    max-width: 760px !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"] div[style*="letter-spacing:0.22em"],
+div[style*="linear-gradient(135deg, #0f172a"] div[style*="letter-spacing: 0.22em"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="letter-spacing:0.22em"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="letter-spacing: 0.22em"],
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] div[style*="letter-spacing: 0.18em"] {{
+    color: #64748b !important;
+    letter-spacing: 0.12em !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"] span,
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"] span {{
+    box-shadow: none !important;
+}}
+
+div[style*="linear-gradient(135deg, #0f172a"]::after,
+div[style*="linear-gradient(135deg, rgb(15, 23, 42)"]::after {{
+    content: "MLSysBook Labs v1.0.0 · MLSysIM 0.1.2 · Browser lab";
+    display: block;
+    margin-top: 16px;
+    padding-top: 12px;
+    border-top: 1px solid #e2e8f0;
+    color: #64748b;
+    font-size: 0.76rem;
+    font-weight: 650;
+    letter-spacing: 0.04em;
+}}
+
+/* First-pass width cap for the common inline briefing panels used across the
+   generated labs. The selector is intentionally narrow so charts and simulator
+   surfaces keep their available width. */
+div[style*="border-left: 4px solid"][style*="box-shadow: 0 1px 4px"],
+div[style*="border-left:4px solid"][style*="box-shadow:0 1px 4px"],
+div[style*="border-left: 4px solid"][style*="background: white"][style*="border-radius: 0 12px 12px 0"],
+div[style*="border-left:4px solid"][style*="background:white"][style*="border-radius:0 12px 12px 0"],
+div[style*="border-left: 4px solid"][style*="box-shadow"][style*="border-radius: 0px 12px 12px 0px"] {{
+    max-width: min(var(--panel-width), 100%) !important;
+    margin-left: auto !important;
+    margin-right: auto !important;
+}}
+
+div[style*="font-style:italic"][style*="line-height:1.65"],
+div[style*="font-style: italic"][style*="line-height: 1.65"] {{
+    max-width: min(var(--readable-width), 100%);
 }}
 
 /* ── CARDS ── */
@@ -341,18 +495,21 @@ body, .lab-body {{
     gap: 28px;
     align-items: center;
     padding: 12px 24px;
-    background: var(--surface-0);
+    background: #ffffff;
     border-radius: var(--radius-md);
     margin-top: 32px;
     font-family: var(--font-mono);
     font-size: 0.8rem;
-    border: 1px solid var(--surface-1);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+    flex-wrap: wrap;
 }}
 
 .hud-label  {{ color: var(--text-muted); font-weight: 600; letter-spacing: 0.06em; }}
-.hud-value  {{ color: #e2e8f0; }}
-.hud-active {{ color: #4ade80; }}
-.hud-none   {{ color: #f87171; }}
+.hud-value  {{ color: var(--text-secondary); }}
+.hud-active {{ color: var(--success); }}
+.hud-none   {{ color: var(--danger); }}
 
 /* ── DEPLOYMENT REGIME CARDS ── */
 .regime-cloud  {{ border-color: #c7d2fe; }}

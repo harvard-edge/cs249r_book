@@ -18,7 +18,7 @@ draft: true
   `news push` will auto-inject this tag if missing, but keeping it here
   makes the convention obvious to humans and LLMs reading the source.
 
-  See AIConfigs/projects/MLSysBook/newsletter/AGENTS.md for Buttondown gotchas.
+  See the project's internal newsletter authoring notes for Buttondown gotchas.
 
   Categories (pick one):
     "essay"     — Original essays on the shifts reshaping AI engineering

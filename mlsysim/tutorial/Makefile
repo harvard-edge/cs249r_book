@@ -6,7 +6,8 @@
 #   make svgs         Convert all SVGs to PDFs
 #   make slides       Build slides only (assumes SVGs already converted)
 #   make clean        Remove build artifacts
-#   make check        Verify all SVG source files exist
+#   make check        Build slides and fail on layout warnings
+#   make check-tools  Verify SVG source files and local tools
 #
 # Prerequisites:
 #   - xelatex (TeX Live or MacTeX)
@@ -24,8 +25,10 @@ PDF_IMG_DIR := $(SLIDES_DIR)/images/pdf
 BUILD_DIR   := _build
 
 # Source files
-PART1   := $(SLIDES_DIR)/tutorial_part1.tex
-PART2   := $(SLIDES_DIR)/tutorial_part2.tex
+MOD1    := $(SLIDES_DIR)/tutorial_module1.tex
+MOD2    := $(SLIDES_DIR)/tutorial_module2.tex
+MOD3    := $(SLIDES_DIR)/tutorial_module3.tex
+MOD4    := $(SLIDES_DIR)/tutorial_module4.tex
 RELATED := $(SLIDES_DIR)/related_work.tex
 
 # All SVG sources (auto-detected)
@@ -45,7 +48,7 @@ SVG2PDF := $(shell command -v inkscape >/dev/null 2>&1 && echo "inkscape --expor
 # TARGETS
 # =============================================================================
 
-.PHONY: all slides svgs clean check help
+.PHONY: all slides svgs clean check check-tools help
 
 all: svgs slides  ## Build everything (SVGs → PDFs → slide deck)
 
@@ -75,29 +78,55 @@ $(PDF_IMG_DIR):
 # --- Slide compilation ---
 # Build both decks. Each .tex is compiled twice so cross-references resolve.
 # The output is BUILD_DIR/<name>.pdf (xelatex -output-directory writes there).
-slides: $(BUILD_DIR)/tutorial_part1.pdf $(BUILD_DIR)/tutorial_part2.pdf  ## Build both tutorial deck PDFs
+slides: $(BUILD_DIR)/tutorial_module1.pdf $(BUILD_DIR)/tutorial_module2.pdf $(BUILD_DIR)/tutorial_module3.pdf $(BUILD_DIR)/tutorial_module4.pdf  ## Build all tutorial deck PDFs
 
-$(BUILD_DIR)/tutorial_part1.pdf: $(PART1) $(RELATED) $(PDFS) | $(BUILD_DIR)
-	@echo "Building tutorial Part 1 (Parts 0-4)..."
+$(BUILD_DIR)/tutorial_module1.pdf: $(MOD1) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 1..."
 	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
-	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part1.tex
-	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part1.tex
-	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_part1.pdf $@
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module1.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module1.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module1.pdf $@
 	@echo "  ✓ $@"
 
-$(BUILD_DIR)/tutorial_part2.pdf: $(PART2) $(RELATED) $(PDFS) | $(BUILD_DIR)
-	@echo "Building tutorial Part 2 (Parts 5-9)..."
+$(BUILD_DIR)/tutorial_module2.pdf: $(MOD2) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 2..."
 	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
-	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part2.tex
-	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_part2.tex
-	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_part2.pdf $@
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module2.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module2.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module2.pdf $@
+	@echo "  ✓ $@"
+
+$(BUILD_DIR)/tutorial_module3.pdf: $(MOD3) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 3..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module3.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module3.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module3.pdf $@
+	@echo "  ✓ $@"
+
+$(BUILD_DIR)/tutorial_module4.pdf: $(MOD4) $(RELATED) $(PDFS) | $(BUILD_DIR)
+	@echo "Building tutorial Module 4..."
+	@mkdir -p $(SLIDES_DIR)/$(BUILD_DIR)
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module4.tex
+	@cd $(SLIDES_DIR) && $(LATEX) $(LATEX_FLAGS) tutorial_module4.tex
+	@cp $(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module4.pdf $@
 	@echo "  ✓ $@"
 
 $(BUILD_DIR):
 	@mkdir -p $@
 
 # --- Utilities ---
-check:  ## Verify SVG sources and dependencies
+check: slides  ## Build slides and fail on layout warnings
+	@echo "Checking slide logs for layout warnings..."
+	@logs="$(SLIDES_DIR)/$(BUILD_DIR)/tutorial_module*.log"; \
+	if grep -E 'Overfull \\[hv]box|Underfull \\[hv]box|Frame text is shrunk' $$logs; then \
+		echo ""; \
+		echo "ERROR: slide layout warnings found."; \
+		exit 1; \
+	fi; \
+	echo "  ✓ No overfull, underfull, or shrink warnings"
+
+check-tools:  ## Verify SVG sources and dependencies
 	@echo "SVG figures found: $(words $(SVGS))"
 	@for svg in $(SVGS); do echo "  ✓ $$svg"; done
 	@echo ""
@@ -107,10 +136,11 @@ check:  ## Verify SVG sources and dependencies
 	@command -v rsvg-convert >/dev/null 2>&1 && echo "  ✓ rsvg-convert" || echo "  ⚠ rsvg-convert not found"
 	@echo ""
 	@echo "Slide sources:"
-	@wc -l $(PART1) $(PART2) $(RELATED) 2>/dev/null || echo "  Some files missing"
+	@wc -l $(MOD1) $(MOD2) $(MOD3) $(MOD4) $(RELATED) 2>/dev/null || echo "  Some files missing"
 
 clean:  ## Remove all build artifacts
 	@rm -rf $(BUILD_DIR)
+	@rm -rf $(SLIDES_DIR)/$(BUILD_DIR)
 	@rm -f $(PDF_IMG_DIR)/*.pdf
 	@rm -f $(SLIDES_DIR)/*.aux $(SLIDES_DIR)/*.log $(SLIDES_DIR)/*.nav
 	@rm -f $(SLIDES_DIR)/*.out $(SLIDES_DIR)/*.snm $(SLIDES_DIR)/*.toc

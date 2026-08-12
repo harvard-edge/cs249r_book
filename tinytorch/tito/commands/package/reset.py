@@ -304,7 +304,7 @@ class ResetCommand(BaseCommand):
 
         console.print(Panel(
             "[green]✅ Module progress reset![/green]\n\n"
-            "You can re-complete modules with:\\n"
+            "You can re-complete modules with:\n"
             "[cyan]tito module complete XX[/cyan]",
             title="🔄 Progress Reset",
             border_style="green"
@@ -355,7 +355,7 @@ class ResetCommand(BaseCommand):
 
         console.print(Panel(
             "[green]✅ Milestone achievements reset![/green]\n\n"
-            "You can re-run milestones with:\\n"
+            "You can re-run milestones with:\n"
             "[cyan]tito milestone run XX[/cyan]",
             title="🔄 Milestones Reset",
             border_style="green"

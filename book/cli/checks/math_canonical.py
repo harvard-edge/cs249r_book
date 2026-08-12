@@ -2,12 +2,14 @@
 """
 Math canonical check — fmt-family and suffix discipline for LEGO cells.
 
-Enforces the canonical math-rendering convention (see ``.claude/rules/math.md``):
+Enforces the canonical math-rendering convention (see the project math rules):
 
   1. Every ``*_str`` / ``*_math`` / ``*_eq`` / ``*_frac`` assignment in a
      ``{python}`` cell must use ``mlsysim.fmt`` helpers or ``MarkdownStr``.
   2. Every inline ``{python} X`` reference must use a name ending in one of
      those suffixes.
+  3. ``fmt()``/``fmt_int()`` outputs must use helper-level
+     ``prefix=``/``suffix=`` instead of manual string concatenation.
 
 Invoked by::
 
@@ -20,6 +22,7 @@ wrapper around this module for ad-hoc runs.
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 import sys
@@ -44,10 +47,22 @@ PLAIN_ASSIGN = re.compile(r"^\s*([A-Za-z_]\w*)\s*=\s*([^=].*)$")
 
 # Pattern: matches calls to canonical formatter helpers on the RHS.
 CANONICAL_STR_CALL = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_percent|fmt_val|fmt_unit|fmt_sci|MarkdownStr)\s*\("
+    r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_percent|fmt_pp|fmt_multiple|fmt_count"
+    r"|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range|fmt_count_range"
+    r"|fmt_usd_range|fmt_time|fmt_rate|fmt_fps|fmt_val|fmt_unit|fmt_sci|fmt_sci_qty"
+    r"|fmt_magnitude|fmt_text|fmt_display_math"
+    r"|fmt_percent_range|fmt_multiple_range"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat"
+    r"|fmt_memory_capacity"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
+    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_op|fmt_energy_per_byte|fmt_energy_per_bit"
+    r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
+    r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
+    r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
+    r"|MarkdownStr)\s*\("
 )
 CANONICAL_MATH_CALL = re.compile(
-    r"\b(fmt_math|MarkdownStr)\s*\("
+    r"\b(fmt_math|fmt_display_math|MarkdownStr)\s*\("
 )
 CANONICAL_FRAC_CALL = re.compile(r"\b(fmt_frac|MarkdownStr)\s*\(")
 
@@ -70,7 +85,7 @@ CELL_END = re.compile(r"^```\s*$")
 #   fmt(MarkdownStr(label), precision=0)                        # MarkdownStr
 #   fmt(gpt3_params_b_str, precision=0, suffix=" billion")      # MarkdownStr
 DOUBLE_WRAP_CALL = re.compile(
-    r"\b(?:fmt|fmt_percent|fmt_sci|fmt_val|fmt_unit)\(\s*(?:"
+    r"\b(?:fmt|fmt_usd|fmt_percent|fmt_sci|fmt_val|fmt_unit)\(\s*(?:"
     r"fmt[a-z_]*\(|"          # fmt(fmt_*(...))
     r"sci_latex\(|"           # fmt(sci_latex(...))
     r"MarkdownStr\(|"         # fmt(MarkdownStr(...))
@@ -108,7 +123,18 @@ IMPLICIT_INT_CAST_FMT = re.compile(
 # Pattern: fmt-family helper names used as calls in a cell body. Any of these
 # requires a matching `from mlsysim.fmt import ...` line in the file.
 FMT_FAMILY_USE = re.compile(
-    r"\b(fmt|fmt_qty|fmt_int|fmt_math|fmt_percent|fmt_val|fmt_unit|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
+    r"\b(fmt|fmt_qty|fmt_qty_int|fmt_int|fmt_usd|fmt_eur|fmt_math|fmt_percent|fmt_pp|fmt_multiple"
+    r"|fmt_count|fmt_ratio|fmt_range|fmt_qty_range|fmt_time_range"
+    r"|fmt_count_range|fmt_usd_range|fmt_time|fmt_rate|fmt_fps|fmt_val|fmt_unit"
+    r"|fmt_magnitude|fmt_text|fmt_display_math"
+    r"|fmt_power|fmt_energy|fmt_emissions|fmt_bandwidth|fmt_memory|fmt_latency|fmt_area|fmt_heat_flux|fmt_specific_heat"
+    r"|fmt_memory_capacity"
+    r"|fmt_params|fmt_tokens|fmt_flop_rate|fmt_flops|fmt_ops_rate"
+    r"|fmt_sci_flops|fmt_energy_per_flop|fmt_energy_per_op|fmt_energy_per_byte|fmt_energy_per_bit"
+    r"|fmt_decibel|fmt_illuminance|fmt_temperature|fmt_temperature_rate"
+    r"|fmt_arithmetic_intensity|fmt_compute_efficiency|fmt_length"
+    r"|fmt_carbon_intensity|fmt_water|fmt_water_rate|fmt_water_intensity"
+    r"|fmt_sci|fmt_frac|sci_latex|MarkdownStr|check)\s*\("
 )
 
 # Pattern: `from mlsysim.fmt import ...` block (possibly multi-line in parens
@@ -121,14 +147,44 @@ MLSYSIM_STAR_IMPORT = re.compile(r"\bfrom\s+mlsysim\s+import\s+\*")
 
 # Names exported by `from mlsysim import *` that belong to the fmt family.
 MLSYSIM_STAR_FMT_NAMES = frozenset({
-    "fmt", "fmt_qty", "fmt_int", "fmt_percent", "fmt_val", "fmt_unit", "fmt_sci",
-    "fmt_frac", "fmt_math", "MarkdownStr", "check", "sci_latex",
+    "fmt", "fmt_qty", "fmt_qty_int", "fmt_int", "fmt_usd", "fmt_eur", "fmt_percent", "fmt_pp", "fmt_multiple",
+    "fmt_count", "fmt_ratio", "fmt_range", "fmt_qty_range", "fmt_time_range",
+    "fmt_count_range", "fmt_usd_range", "fmt_time", "fmt_rate", "fmt_fps", "fmt_val",
+    "fmt_unit", "fmt_sci", "fmt_sci_qty", "fmt_magnitude", "fmt_text",
+    "fmt_frac", "fmt_math", "fmt_display_math", "MarkdownStr", "check",
+    "fmt_percent_range", "fmt_multiple_range",
+    "sci_latex",
+    "fmt_power", "fmt_energy", "fmt_emissions", "fmt_bandwidth", "fmt_memory",
+    "fmt_latency", "fmt_area", "fmt_heat_flux", "fmt_specific_heat", "fmt_memory_capacity",
+    "fmt_params", "fmt_tokens", "fmt_flop_rate", "fmt_compute_efficiency",
+    "fmt_flops", "fmt_ops_rate", "fmt_arithmetic_intensity", "fmt_length",
+    "fmt_sci_flops", "fmt_energy_per_flop", "fmt_energy_per_op", "fmt_energy_per_byte",
+    "fmt_energy_per_bit",
+    "fmt_decibel", "fmt_illuminance", "fmt_temperature",
+    "fmt_temperature_rate",
+    "fmt_carbon_intensity", "fmt_water", "fmt_water_rate",
+    "fmt_water_intensity",
 })
 
 # Pattern: fmt_percent(..., suffix=...) — fmt_percent does not accept suffix=.
 # This would raise a TypeError at render time.
 FMT_PERCENT_SUFFIX = re.compile(
     r"\bfmt_percent\([^)]*\bsuffix\s*="
+)
+
+# Pattern: manual string assembly around formatter helpers that already support
+# prefix=/suffix=. These are line-local on purpose; the `str(fmt(...))` branch
+# catches the multi-line bug class where a separate line does
+# `"\\$" + str(fmt(...))`.
+DECORATABLE_FMT_CALL = r"(?:fmt|fmt_int)"
+MANUAL_FMT_STR_WRAP = re.compile(
+    rf"\bstr\s*\(\s*{DECORATABLE_FMT_CALL}\s*\("
+)
+MANUAL_FMT_SUFFIX_CONCAT = re.compile(
+    rf"\b{DECORATABLE_FMT_CALL}\s*\([^#\n]*\)\s*\+\s*(?:[rRuUbBfF]*)?[\"']"
+)
+MANUAL_FMT_PREFIX_CONCAT = re.compile(
+    rf"(?:[rRuUbBfF]*)?[\"'][^#\n]*[\"']\s*\+\s*(?:str\s*\(\s*)?{DECORATABLE_FMT_CALL}\s*\("
 )
 
 
@@ -182,7 +238,7 @@ def _audit_python_cells(qmd_path: Path) -> list[Violation]:
 
         # Skip when RHS itself is a function call to a canonical helper.
         if suffix == "_str":
-            if CANONICAL_STR_CALL.search(rhs):
+            if CANONICAL_STR_CALL.search(rhs) or CANONICAL_MATH_CALL.search(rhs):
                 continue
         elif suffix in ("_math", "_eq"):
             if CANONICAL_MATH_CALL.search(rhs):
@@ -208,7 +264,10 @@ def _audit_python_cells(qmd_path: Path) -> list[Violation]:
                 code=code,
                 message=(
                     f"`{varname}` (suffix `{suffix}`) is not built via the "
-                    f"canonical helper family (fmt/fmt_math/fmt_frac/MarkdownStr). "
+                    f"canonical helper family (fmt/fmt_int/fmt_usd/fmt_percent/"
+                    f"fmt_pp/fmt_multiple/fmt_count/fmt_ratio/fmt_range/fmt_qty/fmt_qty_int/"
+                    f"fmt_*_range/fmt_time/fmt_rate/domain fmt helpers/fmt_math/fmt_frac/"
+                    f"MarkdownStr). "
                     f"Use the appropriate helper from mlsysim.fmt so the value "
                     f"renders correctly inside math mode."
                 ),
@@ -561,10 +620,10 @@ def _audit_missing_fmt_imports(qmd_path: Path) -> list[Violation]:
 def _audit_fmt_percent_suffix(qmd_path: Path) -> list[Violation]:
     """Flag ``fmt_percent(..., suffix=...)`` calls.
 
-    ``fmt_percent()`` does not accept a ``suffix=`` keyword argument — it
-    returns the bare percentage number.  Passing ``suffix=`` raises
-    ``TypeError`` at render time.  Use ``fmt(x * 100, precision=N,
-    suffix=...)`` instead.
+    ``fmt_percent()`` does not accept a ``suffix=`` keyword argument.  The
+    percent glyph is owned by the formatter via ``style=`` (``'prose'`` →
+    "85 percent", ``'symbol'`` → "85%", ``'number'`` → "85").  Passing
+    ``suffix=`` raises ``TypeError`` at render time.
     """
     out: list[Violation] = []
     lines = qmd_path.read_text(encoding="utf-8").splitlines()
@@ -586,10 +645,141 @@ def _audit_fmt_percent_suffix(qmd_path: Path) -> list[Violation]:
                     line=i,
                     code="fmt_percent_suffix",
                     message=(
-                        "fmt_percent() does not accept suffix=; "
-                        "use fmt(x * 100, precision=N, suffix=...) instead"
+                        "fmt_percent() does not accept suffix=. The percent "
+                        "glyph is owned by the formatter: pass style='prose' "
+                        "(\"85 percent\") or style='symbol' (\"85%\") instead "
+                        "of a suffix."
                     ),
                     context=line.strip()[:160],
+                )
+            )
+    return out
+
+
+def _audit_manual_fmt_string_assembly(qmd_path: Path) -> list[Violation]:
+    """Flag manual prefix/suffix assembly around fmt-family outputs.
+
+    `fmt()` and `fmt_int()` return MarkdownStr and already support
+    `prefix=`/`suffix=`. Manually wrapping them with `str(...)` or
+    concatenating literal strings recreates the old escape-hatch style and is
+    easy to break in Quarto math/prose contexts.
+    """
+    out: list[Violation] = []
+    lines = qmd_path.read_text(encoding="utf-8").splitlines()
+    rel = str(qmd_path)
+    in_cell = False
+    for i, line in enumerate(lines, 1):
+        if CELL_START.match(line):
+            in_cell = True
+            continue
+        if in_cell and CELL_END.match(line):
+            in_cell = False
+            continue
+        if not in_cell:
+            continue
+        if line.strip().startswith("#"):
+            continue
+
+        if MANUAL_FMT_STR_WRAP.search(line):
+            reason = "str(fmt(...))"
+        elif MANUAL_FMT_SUFFIX_CONCAT.search(line):
+            reason = "fmt(...) + literal"
+        elif MANUAL_FMT_PREFIX_CONCAT.search(line):
+            reason = "literal + fmt(...)"
+        else:
+            continue
+
+        out.append(
+            Violation(
+                file=rel,
+                line=i,
+                code="manual_fmt_string_assembly",
+                message=(
+                    f"Manual formatter string assembly detected ({reason}). "
+                    "Use `prefix=` and/or `suffix=` on fmt()/fmt_int() "
+                    "instead of concatenating or coercing the formatter output."
+                ),
+                context=line.strip()[:160],
+            )
+        )
+    return out
+
+
+def _extract_python_cells(lines: list[str]):
+    """Yield ``(fence_line, source)`` for each Python cell in a QMD file."""
+    in_cell = False
+    start = 0
+    body: list[str] = []
+    for i, line in enumerate(lines, 1):
+        if not in_cell and CELL_START.match(line):
+            in_cell = True
+            start = i
+            body = []
+            continue
+        if in_cell and CELL_END.match(line):
+            yield start, "\n".join(body)
+            in_cell = False
+            body = []
+            continue
+        if in_cell:
+            body.append(line)
+
+
+def _call_name(node: ast.AST) -> str:
+    if isinstance(node, ast.Name):
+        return node.id
+    if isinstance(node, ast.Attribute):
+        return node.attr
+    return ""
+
+
+def _string_template(node: ast.AST) -> str:
+    """Return literal text with formatted slots replaced by ``{}``."""
+    if isinstance(node, ast.Constant) and isinstance(node.value, str):
+        return node.value
+    if isinstance(node, ast.JoinedStr):
+        parts: list[str] = []
+        for value in node.values:
+            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                parts.append(value.value)
+            else:
+                parts.append("{}")
+        return "".join(parts)
+    if isinstance(node, ast.BinOp) and isinstance(node.op, ast.Add):
+        return _string_template(node.left) + _string_template(node.right)
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute):
+        # Preserve the common MarkdownStr((rf"$...$").replace(...)) shape.
+        return _string_template(node.func.value)
+    return ""
+
+
+def _audit_manual_markdown_math(qmd_path: Path) -> list[Violation]:
+    """Flag MarkdownStr("$...$") and MarkdownStr("$$...$$") math wrappers."""
+    out: list[Violation] = []
+    lines = qmd_path.read_text(encoding="utf-8").splitlines()
+    rel = str(qmd_path)
+    for fence_line, src in _extract_python_cells(lines):
+        try:
+            tree = ast.parse(src)
+        except SyntaxError:
+            continue
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call) or _call_name(node.func) != "MarkdownStr" or not node.args:
+                continue
+            template = _string_template(node.args[0]).strip()
+            if not (template.startswith("$") and template.endswith("$")):
+                continue
+            helper = "fmt_display_math" if template.startswith("$$") else "fmt_math"
+            out.append(
+                Violation(
+                    file=rel,
+                    line=fence_line + node.lineno,
+                    code="manual_markdownstr_math",
+                    message=(
+                        f"Manual MarkdownStr math wrapper detected. Use `{helper}(...)` "
+                        "so math rendering goes through the canonical formatter API."
+                    ),
+                    context=(ast.get_source_segment(src, node) or "").replace("\n", " ")[:160],
                 )
             )
     return out
@@ -611,6 +801,8 @@ def audit(paths: list[Path]) -> list[Violation]:
             all_violations.extend(_audit_implicit_int_cast_precision_zero(f))
             all_violations.extend(_audit_missing_fmt_imports(f))
             all_violations.extend(_audit_fmt_percent_suffix(f))
+            all_violations.extend(_audit_manual_fmt_string_assembly(f))
+            all_violations.extend(_audit_manual_markdown_math(f))
     return all_violations
 
 

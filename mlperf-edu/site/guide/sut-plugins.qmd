@@ -1,0 +1,85 @@
+---
+title: "Lab 2 SUT Interface"
+---
+
+MLPerf EDU includes an educational `mlperf.sut.SUT_Interface`, but its current
+integration is deliberately narrow. **Lab 2 is the only shipped lab that
+implements this interface.** It constructs the SUT directly and drives it from
+the lab script so students can compare naïve and KV-cache decoding while
+checking token-for-token output parity.
+
+The supported product command, `uv run mlperf run`, dispatches workloads that
+are registered in the repository. It does not expose a generic `--sut` option
+and does not discover or load arbitrary student plugin files. A Lab 2 result is
+therefore a standalone classroom experiment, not a canonical MLPerf EDU result
+or a plugin submission accepted by the product CLI.
+
+## The Interface Used by Lab 2
+
+Lab 2 defines a class that inherits `mlperf.sut.SUT_Interface` and implements
+the interface's constructor and asynchronous query method:
+
+```python
+from mlperf.sut import SUT_Interface
+
+class StudentNanoGPTSUT(SUT_Interface):
+    def __init__(self, config):
+        # load the lab model and prepare its execution device
+        ...
+
+    async def process_queries(self, samples):
+        # run the selected decode implementation and return measurements
+        ...
+```
+
+The lab creates deterministic `QuerySample` inputs, calls `process_queries`
+locally, and records latency, throughput, and output-parity evidence. This is a
+useful teaching seam, but it is not wired into the generated benchmark runner
+or release-validation path.
+
+## Scope of the Three Labs
+
+The repository ships three independent exercises under
+[`examples/`](https://github.com/harvard-edge/cs249r_book/tree/main/mlperf-edu/examples):
+
+| **Lab** | **File** | **Current execution model** |
+|:---|:---|:---|
+| Lab 1 | `lab1_optimization.py` | Standalone training-loop experiment; does not implement `SUT_Interface` |
+| Lab 2 | `lab2_inference_sut.py` | Standalone inference experiment that implements and locally drives `SUT_Interface` |
+| Lab 3 | `lab3_arch_comparison.py` | Standalone dense-versus-sparse training experiment; does not implement `SUT_Interface` |
+
+Run their network-free smoke paths from a source checkout:
+
+```bash
+uv run python examples/lab1_optimization.py --smoke
+uv run python examples/lab2_inference_sut.py --smoke
+uv run python examples/lab3_arch_comparison.py --smoke
+```
+
+Each command executes real model operations on deterministic synthetic inputs.
+A passing smoke validates that educational entry point; it is not benchmark
+quality evidence.
+
+## Producing Canonical Artifacts
+
+Use registered workload commands when you need reports and provenance that the
+benchmark validation tools understand. For the inference path closest to Lab 2:
+
+```bash
+OUTPUT_DIR="submissions/causal-language-modeling-max"
+uv run mlperf fetch --workload causal-language-modeling --mode training --profile max
+uv run mlperf run --workload causal-language-modeling --mode training --profile max \
+  --output-dir "$OUTPUT_DIR"
+uv run mlperf run --workload causal-language-modeling --mode inference --phase decode --profile max \
+  --output-dir "$OUTPUT_DIR"
+```
+
+The inference command requires the passing training report, provenance manifest,
+and checkpoint produced in the same output directory. Fetching assets alone does
+not create a quality-approved checkpoint.
+
+The candidate public-result contract distinguishes score-bearing,
+performance-bearing, and systems-only workloads. See
+[`PUBLIC_RULES.md`](https://github.com/harvard-edge/cs249r_book/blob/main/mlperf-edu/PUBLIC_RULES.md)
+and run `uv run mlperf audit --policy public` before treating a registered result
+as a public candidate.

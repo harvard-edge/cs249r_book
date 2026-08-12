@@ -57,6 +57,13 @@ $PYTHON book/tools/audit/fmt/audit_lego_cells.py \
 $PYTHON book/tools/audit/fmt/audit_lego_html.py \
   --report book/tools/audit/artifacts/lego_html_verify_report.json
 
+echo ""
+echo "══════════════════════════════════════════════════════════════════════"
+echo "Phase 3 — per-chapter rendered prose (optional; run verify_lego_chapter.sh for full PASS)"
+echo "══════════════════════════════════════════════════════════════════════"
+echo "  ./book/tools/audit/run_all_lego_chapters.sh"
+echo "  or: ./book/tools/audit/verify_lego_chapter.sh vol1 introduction"
+
 if [[ "$SKIP_LLM" -eq 0 ]]; then
   echo ""
   echo "══════════════════════════════════════════════════════════════════════"

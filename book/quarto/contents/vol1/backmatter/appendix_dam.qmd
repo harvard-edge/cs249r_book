@@ -2,15 +2,13 @@
 engine: jupyter
 ---
 
-# The D·A·M Taxonomy {#sec-dam-taxonomy}
+# The D·A·M Taxonomy {#sec-appdx-dam-taxonomy}
 
 ## Purpose {.unnumbered}
 
 _When an ML system fails, where should you look first: the data path, the algorithm, or the machine?_
 
-In production, “it’s slow” and “it’s wrong” are rarely informative symptoms. A serving stack can miss its latency Service Level Objective (SLO) because the accelerator is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). Without a taxonomy, teams often optimize the wrong thing—buying faster accelerators to fix a slow input pipeline, or rewriting kernels when the model is simply too large for the latency budget.
-
-This appendix provides a compact diagnostic framework—**Data · Algorithm · Machine (D·A·M)**—and shows how to map symptoms and measurements to the term of the iron law that dominates. It serves as a “first response” checklist before committing to deeper optimization.
+In production, "it is slow" and "it is wrong" are rarely informative symptoms. A serving stack can miss its latency objective because the accelerator is idle (data starvation), because the model is doing unnecessary work (algorithmic overhead), or because the accelerator is genuinely saturated (machine-bound). Without a taxonomy, teams often optimize the wrong thing, buying faster accelerators to fix a slow input pipeline or rewriting kernels when the model is simply too large for the latency budget. This appendix provides a compact diagnostic framework, Data, Algorithm, and Machine, and shows how to map symptoms and measurements to the term of the iron law that dominates. D·A·M is the first-response checklist before committing to deeper optimization.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -18,86 +16,207 @@ This appendix is designed as a reference. Start with the scorecard-style metrics
 
 When training is slow, check accelerator utilization, data wait time, and Model FLOPs Utilization (MFU), then map each to its Data, Algorithm, or Machine axis. When serving misses a Service Level Objective (SLO), identify whether the regime is latency-bound (overhead), memory-bound (weight/KV movement), or compute bound. When cost is exploding, use the D·A·M rubric to ensure that effort targets the dominant term, not a nonbottleneck.
 
-::: {.callout-learning-objectives}
+The **Data · Algorithm · Machine (D·A·M) taxonomy** is a primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, the diagnostic task is to identify *where the flow is blocked*. This taxonomy helps practitioners form and test hypotheses about the dominant bottleneck using three interacting axes[^fn-mece], while recognizing that real systems often involve boundary cases where two or more axes interact.
 
-- Classify an ML system bottleneck by its dominant Data, Algorithm, or Machine axis, while recognizing cross-axis interactions
-- Map optimization techniques to their D·A·M intersection zone to understand which axes they span
-- Apply the iron law equation to quantitatively diagnose performance problems
-- Distinguish between memory-bound and compute-bound workloads using Arithmetic Intensity
-- Select appropriate profiling tools and optimization strategies for each D·A·M axis
-- Evaluate system health using the D·A·M Scorecard metrics (I/O Overhead, Active Params, MFU)
+[^fn-mece]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting requiring that categories do not overlap and together cover every possibility. D·A·M is not strictly MECE because its diagnostic axes overlap. It uses the categories as first-pass lenses, so the most useful diagnosis may name a dominant axis together with a boundary effect such as queueing, runtime overhead, or memory-bound execution.
 
-:::
+## Diagnostic Summary {#sec-appdx-dam-taxonomy-diagnostic-summary-9f73}
 
-The **Data · Algorithm · Machine (D·A·M) taxonomy** is the primary diagnostic framework for ML systems engineering. It formalizes the interdependence between information flow, mathematical logic, and physical execution. When performance stalls or behavior degrades, the diagnostic task is to identify *where the flow is blocked*. This taxonomy helps practitioners isolate the dominant bottleneck among three collectively exhaustive axes[^fn-mece], while recognizing that real systems often involve boundary cases where two or more axes interact.
+The taxonomy maps directly to the iron law of ML systems established in @sec-introduction-iron-law-ml-systems-c32a. @Tbl-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
 
-[^fn-mece]: **MECE (Mutually Exclusive, Collectively Exhaustive)**: A classification principle from management consulting (popularized by McKinsey) requiring that categories do not overlap and together cover every possibility. D·A·M uses the exhaustive part as a first-pass diagnostic: every bottleneck should be explainable through Data, Algorithm, Machine, or their interactions, even when the cleanest diagnosis names a dominant axis plus a boundary effect.
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
 
-## Diagnostic Summary {#sec-dam-taxonomy-diagnostic-summary-9f73}
+| **Axis**          |          **Role**          |    **Physical Constraint**    | **High-Leverage Optimization**                     |
+|:------------------|:--------------------------:|:-----------------------------:|:---------------------------------------------------|
+| **Data (D)**      | **Information** (The Fuel) | Volume, quality, arrival rate | Data Selection (@sec-data-selection)               |
+| **Algorithm (A)** | **Logic** (The Blueprint)  |  Operations and dependencies  | Model Compression (@sec-model-compression)         |
+| **Machine (M)**   |  **Physics** (The Engine)  |      Compute, memory, I/O     | Hardware Acceleration (@sec-hardware-acceleration) |
 
-The taxonomy maps directly to the **iron law of ML systems** established in @sec-introduction-iron-law-ml-systems-c32a. @Tbl-dam-components-ref summarizes the role, primary physical constraint, and core optimization pathway for each axis.
+: **D·A·M Axis Reference**: Each axis maps to a constraint class and optimization strategy. Form a hypothesis, confirm it with measurements, then follow the chapter pointer. {#tbl-dam-components-ref tbl-colwidths="[13,23,30,34]"}
 
-| **Axis**          |          **Role**          |    **Physical Constraint**     | **High-Leverage Optimization**                     |
-|:------------------|:--------------------------:|:------------------------------:|:---------------------------------------------------|
-| **Data (D)**      | **Information** (The Fuel) |    Bandwidth ($\text{BW}$)     | Data Selection (@sec-data-selection)               |
-| **Algorithm (A)** | **Logic** (The Blueprint)  |        Operations ($O$)        | Model Compression (@sec-model-compression)         |
-| **Machine (M)**   |  **Physics** (The Engine)  | Throughput ($R_{\text{peak}}$) | Hardware Acceleration (@sec-hardware-acceleration) |
+```{=latex}
+\endgroup
+```
 
-: **D·A·M Axis Reference**: Each axis maps to a distinct physical constraint and a high-leverage optimization strategy. Start diagnosis here: identify which constraint is binding, then follow the optimization pointer to the relevant chapter. {#tbl-dam-components-ref tbl-colwidths="[13,23,25,39]"}
+This first-pass separation is useful, but production systems rarely suffer from a single axis-centered bottleneck. More often, the problem sits at the *boundary* between two axes—a data format choice that determines whether the GPU can be saturated, or a pruning strategy that changes the memory access pattern. To handle these cases, we need to map the intersections.
 
-This clean separation is useful as a first diagnostic step, but production systems rarely suffer from a single pure-axis bottleneck. More often, the problem sits at the *boundary* between two axes—a data format choice that determines whether the GPU can be saturated, or a pruning strategy that changes the memory access pattern. To handle these cases, we need to map the intersections.
-
-## Intersection Landscape {#sec-dam-taxonomy-intersection-landscape-0d6e}
+## Intersection Landscape {#sec-appdx-dam-taxonomy-intersection-landscape-0d6e}
 
 Real systems engineering lives at the *boundaries* between axes. @Fig-dam-venn maps the intersection landscape: what concepts and techniques emerge when two or three axes overlap.
 
-::: {#fig-dam-venn fig-env="figure" fig-pos="htb" fig-cap="**The D·A·M Intersection Landscape**: Each circle represents a pure domain: Data (information), Algorithm (logic), and Machine (physics). The pairwise intersections capture techniques that require reasoning about two domains simultaneously. The center---where all three converge---is ML Systems Engineering itself: the discipline of balancing data flow, algorithmic complexity, and hardware constraints within a single system." fig-alt="Venn diagram with three overlapping circles labeled data, algorithm, and machine. Pairwise intersections are labeled: Data-Algorithm shows data selection and curriculum learning; Data-Machine shows I/O bandwidth and data formats; Algorithm-Machine shows quantization and kernel fusion. The center intersection is labeled ML systems engineering with iron law and roofline."}
-![](images/dam_venn.svg)
+::: {#fig-dam-venn fig-env="figure" fig-pos="htb" fig-cap="**The D·A·M Intersection Landscape**: Each circle is a diagnostic lens: Data (information), Algorithm (logic), and Machine (physics). Pairwise intersections span two lenses. The center is ML Systems Engineering, balancing data flow, algorithmic complexity, and hardware constraints." fig-alt="Venn diagram with three overlapping circles labeled data, algorithm, and machine. Pairwise intersections are labeled: Data-Algorithm shows data selection and curriculum learning; Data-Machine shows I/O bandwidth and data formats; Algorithm-Machine shows quantization and kernel fusion. The center intersection is labeled ML systems engineering with iron law and roofline."}
+```{.tikz}
+\begin{tikzpicture}[line join=round,outer sep=0pt,inner sep=3pt]
+\tikzset{%
+  TxtC/.style={font=\usefont{T1}{phv}{b}{n}\small,text=datacol,align=center},
+  TxtIT/.style={font=\usefont{T1}{phv}{m}{it}\fontsize{8}{11}\selectfont,text=black!70,align=center},
+  TxtSM/.style={font=\fontsize{7}{9}\selectfont\usefont{T1}{phv}{m}{n},text=black,align=center},
+  TxtJM/.style={font=\fontsize{6}{8}\selectfont\usefont{T1}{phv}{m}{it},text=black!70,align=center},
+   TxtCOL/.style={font=\fontsize{8}{11}\selectfont\usefont{T1}{phv}{m}{n},text=violet!70!black,align=center}, 
+  LineA/.style={black!50,line width=1.0pt,{Circle[black!70,length=3.5pt]}-},
+    Box/.style={align=flush center,
+    inner xsep=3pt,
+    node distance=0.54,
+    draw=mybrown,
+    line width=0.75pt,
+    fill=mybrown!05,
+    font=\fontsize{7}{9}\selectfont\usefont{T1}{phv}{m}{n},
+    text width=41mm,
+    minimum width=41mm, %minimum height=28mm
+  },
+}
+%------------------------------------------------
+% Colors
+%------------------------------------------------
+\definecolor{datacol}{RGB}{173,32,52}      % tamno crvena
+\definecolor{algocol}{RGB}{0,82,170}       % plava
+\definecolor{machcol}{RGB}{36,145,85}      % zelena
+\definecolor{mutecol}{RGB}{90,90,90}       % siva za sitan tekst
+\definecolor{lightdat}{RGB}{244,226,229}
+\definecolor{lightalg}{RGB}{225,234,245}
+\definecolor{lightmach}{RGB}{226,242,232}
+%------------------------------------------------
+% Centri krugova
+%------------------------------------------------
+\coordinate (D) at (0,2.6);
+\coordinate (A) at (-2.02,-0.55);
+\coordinate (M) at (2.02,-0.55);
+
+\def\R{3.35}
+
+%------------------------------------------------
+% Circles
+%------------------------------------------------
+\fill[lightdat,opacity=0.55] (D) circle (\R);
+\fill[lightalg,opacity=0.55] (A) circle (\R);
+\fill[lightmach,opacity=0.55] (M) circle (\R);
+
+\draw[datacol,line width=0.9pt] (D) circle (\R);
+\draw[algocol,line width=0.9pt] (A) circle (\R);
+\draw[machcol,line width=0.9pt] (M) circle (\R);
+%------------------------------------------------
+% Gornji krug: Data
+%------------------------------------------------
+\node[TxtC,text=datacol](DA) at (0,5.15) {Data};
+\node[TxtIT,below=0pt of DA](TFI) {The Fuel --- Information};
+\node[TxtSM,below=0pt of TFI](STO) {Storage formats, data quality\\Distribution properties, labeling};
+\node[TxtJM,below=0pt of STO](CH1) {Ch: Data Engineering};
+%------------------------------------------------
+% Levi krug: Algorithm
+%------------------------------------------------
+\node[TxtC,text=algocol](AL) at (-3.2,-0.8) {Algorithm};
+\node[TxtIT,below=0pt of AL](TFI1) {The Blueprint --- Logic};
+\node[TxtSM,below=0pt of TFI1](STO1) {Loss functions, architectures\\Optimization math, gradients};
+\node[TxtJM,below=0pt of STO1](CH2) {Ch: DL Primer, DNN Arch};
+%------------------------------------------------
+% Desni krug: Machine
+%------------------------------------------------
+\node[TxtC,text=machcol] at (3.1,-0.8)(MA) {Machine};
+\node[TxtIT,below=0pt of MA](TFI2) {The Engine --- Physics};
+\node[TxtSM,below=0pt of TFI2](STO2) {Silicon, memory hierarchy\\Peak FLOP/s, power envelope};
+\node[TxtJM,below=0pt of STO2](CH3) {Ch: Hardware Acceleration};
+%------------------------------------------------
+% Levi presek D ∩ A
+%------------------------------------------------
+\node[TxtC,text=black!75](PDA) at (-2.17,2.2) {D $\cap$ A};
+\node[TxtCOL,below=0pt of PDA](WLF) {What to Learn\\ From};
+\draw[LineA](WLF.150)--++(150:3.85)coordinate(TXT1);
+\node[Box,anchor = south]at(TXT1){Data selection, curriculum learning\\
+Active learning, augmentation\\Compute-optimal scaling
+\\[1ex]{\usefont{T1}{phv}{m}{it}\fontsize{6}{8}\selectfont \textcolor{black!80}{Ch: Data Selection, Training}}};
+%------------------------------------------------
+% Desni presek D ∩ M
+%------------------------------------------------
+\node[TxtC,text=black!75] at (1.95,2.45)(PDM) {D $\cap$ M};
+\node[TxtCOL,below=0pt of PDM](HMI) {How to Move\\ Information};
+\draw[LineA](HMI.20)--++(30:3.85)coordinate(TXT1);
+\node[Box,anchor = south]at(TXT1){I/O bandwidth, prefetching\\
+Memory hierarchy, data formats\\Data Gravity, Energy-Movement
+\\[1ex]{\usefont{T1}{phv}{m}{it}\fontsize{6}{8}\selectfont \textcolor{black!80}{Ch: Data Eng, HW Accel}}};
+%------------------------------------------------
+% Donji presek A ∩ M
+%------------------------------------------------
+\node[TxtC,text=black!75](PAM) at (0,-1.2) {A $\cap$ M};
+\node[TxtCOL,below=0pt of PAM](HEE) {How to Execute\\ Efficiently};
+\draw[LineA](HEE.260)--++(270:1.9)coordinate(TXT1);
+\node[Box,anchor = north]at(TXT1){Quantization, pruning, kernel fusion\\
+Comp. graphs, mixed precision\\Operator scheduling, Tensor Cores
+\\[1ex]{\usefont{T1}{phv}{m}{it}\fontsize{6}{8}\selectfont \textcolor{black!80}{Ch: Frameworks, Model Compression}}};
+%------------------------------------------------
+% Centralni presek D ∩ A ∩ M
+%------------------------------------------------
+\node[TxtC,text=datacol] at (0,0.8) (DAM){D $\cap$ A $\cap$ M};
+\node[TxtCOL,below=0pt of DAM,text=datacol](MLS) {ML Systems\\Engineering};
+\draw[LineA]([yshift=-1mm]MLS.260)--++(170:6.2)coordinate(TXT1);
+\node[Box,anchor = east,    text width=25mm,
+    minimum width=25mm,]at(TXT1){Iron Law - Roofline\\Training - Serving};
+%------------------------------------------------
+% Donja linija i fusnota
+%------------------------------------------------
+\draw[gray!55,line width=0.5pt] (-6.3,-5.85) -- (6.3,-5.85);
+
+\node[align=center,font=\usefont{T1}{phv}{m}{n} \fontsize{7}{10}\selectfont,text=black!70] at (0,-6.125)
+  {The center --- where Data, Algorithm, and Machine converge --- is ML Systems Engineering itself.};
+\end{tikzpicture}
+
+```
 :::
 
 @Tbl-dam-intersections provides a scannable reference for each zone.
 
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.4}
+```
+
+| **Zone**                                    | **Name**                   | **Key Techniques**                                           | **Book Coverage**                                          |
+|:--------------------------------------------|:---------------------------|:-------------------------------------------------------------|:-----------------------------------------------------------|
+| **Data**                                    | Information                | Storage formats, data quality, distributions                 | @sec-data-engineering                                      |
+| **Algorithm**                               | Logic                      | Loss functions, architectures, gradients                     | @sec-neural-computation, @sec-network-architectures        |
+| Data $\cap$ Algorithm                       | What to Learn From         | Data selection, curriculum learning, compute-optimal scaling | @sec-data-selection, @sec-model-training                   |
+| Data $\cap$ Machine                         | How to Move Information    | I/O bandwidth, prefetching, data formats                     | @sec-data-engineering, @sec-hardware-acceleration          |
+| Algorithm $\cap$ Machine                    | How to Execute Efficiently | Quantization, pruning, kernel fusion, mixed precision        | @sec-ml-frameworks, @sec-model-compression                 |
+| **Machine**                                 | Physics                    | Silicon, memory hierarchy, peak FLOP/s                       | @sec-hardware-acceleration                                 |
+| Data $\cap$ Algorithm $\cap$ Machine        | ML Systems Engineering     | Iron law, Roofline, training loops, serving                  | @sec-model-training, @sec-model-serving, @sec-benchmarking |
+
+: **D·A·M Intersection Reference**: Each zone maps specific techniques to the axes they span and the chapters that cover them. The pairwise intersections require reasoning about two domains simultaneously; the center requires all three. {#tbl-dam-intersections tbl-colwidths="[17,25,37,21]"}
+
+```{=latex}
+\endgroup
+```
+
 In the D·A·M acronym, Data, Algorithm, and Machine are taxonomy axes. They are not mathematical variables; formal quantities still follow the notation chapter, where $D$ denotes dataset size or training tokens.
 
-| **Zone**                                                      | **Name**                   | **Key Techniques**                                           | **Book Coverage**                                          |
-|:--------------------------------------------------------------|:---------------------------|:-------------------------------------------------------------|:-----------------------------------------------------------|
-| **Data** (pure)                                               | Information                | Storage formats, data quality, distributions                 | @sec-data-engineering                                      |
-| **Algorithm** (pure)                                          | Logic                      | Loss functions, architectures, gradients                     | @sec-neural-computation, @sec-network-architectures        |
-| $\mathsf{Data} \cap \mathsf{Algorithm}$                       | What to Learn From         | Data selection, curriculum learning, compute-optimal scaling | @sec-data-selection, @sec-model-training                   |
-| $\mathsf{Data} \cap \mathsf{Machine}$                         | How to Move Information    | I/O bandwidth, prefetching, data formats                     | @sec-data-engineering, @sec-hardware-acceleration          |
-| $\mathsf{Algorithm} \cap \mathsf{Machine}$                    | How to Execute Efficiently | Quantization, pruning, kernel fusion, mixed precision        | @sec-ml-frameworks, @sec-model-compression                 |
-| **Machine** (pure)                                            | Physics                    | Silicon, memory hierarchy, peak FLOP/s                       | @sec-hardware-acceleration                                 |
-| $\mathsf{Data} \cap \mathsf{Algorithm} \cap \mathsf{Machine}$ | ML Systems Engineering     | iron law, Roofline, training loops, serving                  | @sec-model-training, @sec-model-serving, @sec-benchmarking |
+The axis-centered zones contain concepts that belong primarily to one axis: storage formats and distributions emphasize Data, loss functions and gradients emphasize Algorithm, and silicon physics and peak FLOP/s emphasize Machine. Single-domain expertise can introduce them, but deployed behavior may still depend on the other axes.
 
-: **D·A·M Intersection Reference**: Each zone maps specific techniques to the axes they span and the chapters that cover them. The pairwise intersections require reasoning about two domains simultaneously; the center requires all three. {#tbl-dam-intersections tbl-colwidths="[12,25,36,27]"}
-
-The pure zones contain concepts that belong entirely to one axis: storage formats and distribution properties are purely Data concerns, loss functions and gradient computations are purely Algorithm, and silicon physics and peak FLOP/s are purely Machine. These are the topics where single-domain expertise suffices.
-
-The pairwise intersections are where systems thinking begins. $\mathsf{Data} \cap \mathsf{Algorithm}$ (*What to Learn From*) encompasses data selection, curriculum learning, active learning, and scaling laws like Chinchilla ($D \approx 20P$)---all requiring joint reasoning about information content and algorithmic capacity. Adding data without considering whether the model can learn from it wastes compute; choosing architectures without considering data availability wastes engineering time. $\mathsf{Data} \cap \mathsf{Machine}$ (*How to Move Information*) covers I/O bandwidth, prefetching strategies, data formats, and the energy-movement invariant. This intersection is where data gravity manifests: the physical cost of moving bytes through the memory hierarchy determines whether the machine can be fed fast enough. $\mathsf{Algorithm} \cap \mathsf{Machine}$ (*How to Execute Efficiently*) spans quantization, pruning, kernel fusion, mixed precision, and computational graph optimization. A pruning strategy that reduces FLOPs but destroys memory access patterns can *slow down* execution on real hardware.
+The pairwise intersections are where systems thinking begins. $\mathsf{Data} \cap \mathsf{Algorithm}$ (*What to Learn From*) encompasses data selection, curriculum learning, active learning, and scaling laws like Chinchilla ($D \approx 20P$ for the dense autoregressive language-model regime studied) [@hoffmann2022chinchilla]---all requiring joint reasoning about information content and algorithmic capacity. Adding data without considering whether the model can learn from it wastes compute; choosing architectures without considering data availability wastes engineering time. $\mathsf{Data} \cap \mathsf{Machine}$ (*How to Move Information*) covers I/O bandwidth, prefetching strategies, data formats, and the energy-movement invariant. This intersection is where data gravity manifests: the physical cost of moving bytes through the memory hierarchy determines whether the machine can be fed fast enough. $\mathsf{Algorithm} \cap \mathsf{Machine}$ (*How to Execute Efficiently*) spans quantization, pruning, kernel fusion, mixed precision, and computational graph optimization. A pruning strategy that reduces FLOPs but destroys memory access patterns can *slow down* execution on real hardware.
 
 The center---$\mathsf{Data} \cap \mathsf{Algorithm} \cap \mathsf{Machine}$---is where all three axes converge. The iron law, the Roofline Model, end-to-end training loops, serving pipelines, and holistic benchmarking all require simultaneous reasoning about data flow, algorithmic complexity, and hardware utilization. This center is not a single technique; it is the discipline itself.
 
 Understanding the landscape reveals *where* a technique lives. The next step is quantifying *which axis dominates* for a given workload---and for that, we need the iron law.
 
-## Iron Law Mapping {#sec-dam-taxonomy-iron-law-mapping-05db}
+## Iron Law Mapping {#sec-appdx-dam-taxonomy-iron-law-mapping-05db}
 
 The performance of any ML task is governed by the distribution of work across the D·A·M axes. The iron law mapping reveals which component's variables dominate the execution time:
-$$ T = \underbrace{ \frac{D_{\text{vol}}}{\text{BW}} }_{\text{Data (D)}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm (A) / Machine (M)}} + \underbrace{ L_{\text{lat}} }_{\text{Overhead}} $$
+$$ T = \underbrace{ \frac{D_{\text{vol}}}{\text{BW}} }_{\text{Data/Machine}} + \underbrace{ \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} }_{\text{Algorithm/Machine}} + \underbrace{ L_{\text{lat}} }_{\text{Cross-axis overhead}} $$
 
-Algorithm and Machine share the compute term, separated by which variable the engineer controls. Reducing the total operations ($O$) is an **Algorithm** lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a **Machine** lever.
+Algorithm and Machine share the compute term, separated by which variable the engineer controls. Reducing the total operations ($O$) is an Algorithm lever, while improving the hardware's peak throughput ($R_{\text{peak}}$) or utilization ($\eta_{\text{hw}}$) is a Machine lever.
 
-This equation transforms performance debugging from a qualitative guessing game into a quantitative engineering problem. Every bottleneck hides in one of these terms. A slow system is one that is moving too much data ($D_{\text{vol}}$), lacking bandwidth ($\text{BW}$), executing too many operations ($O$), or failing to use the hardware's peak capability ($\eta_{\text{hw}}$). The levers below map specific optimizations to the variable they improve.
+This equation transforms performance debugging from a qualitative guessing game into a quantitative engineering problem. The dominant measured cost appears in one of these terms. A slow system may move too much data ($D_{\text{vol}}$), lack bandwidth ($\text{BW}$), execute too many operations ($O$), fail to use the hardware's peak capability ($\eta_{\text{hw}}$), or pay cross-axis overhead ($L_{\text{lat}}$). The levers below map specific optimizations to the variables they improve.
 
-### Component levers {#sec-dam-taxonomy-component-levers-d441}
+### Component levers {#sec-appdx-dam-taxonomy-component-levers-d441}
 
-*   **Data Lever**: Reducing the volume of data ($D_{\text{vol}}$) through deduplication or curriculum learning, or increasing I/O bandwidth ($\text{BW}$).
-*   **Algorithm Lever**: Reducing total arithmetic operations ($O$) through pruning, quantization, or architectural refinement.
+*   **Data Lever**: Reducing moved bytes ($D_{\text{vol}}$) through deduplication, selection, or lower-precision representation, or increasing I/O bandwidth ($\text{BW}$).
+*   **Algorithm Lever**: Reducing operations ($O$) through pruning or architectural refinement. Quantization narrows representation and may raise hardware throughput; it does not generally reduce operation count.
 *   **Machine Lever**: Increasing the denominator of the compute term by improving peak throughput ($R_{\text{peak}}$) or increasing the utilization factor ($\eta_{\text{hw}}$) via kernel fusion.
 
-### D·A·M coordination: From sum to max {#sec-dam-taxonomy-dam-coordination-sum-max-92bb}
+### D·A·M coordination: From sum to max {#sec-appdx-dam-taxonomy-dam-coordination-sum-max-92bb}
 
-The additive iron law represents **sequential execution**---the worst case where Data, Algorithm, and Machine take turns. Skilled systems engineering, however, transforms the sum into a max:
-$$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} = \max\left(\frac{D_{\text{vol}}}{\text{BW}}, \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}} $$
+The additive iron law represents **sequential execution**\index{Sequential execution!D·A·M coordination}. Overlap can move the sum toward a max, but dependencies, contention, and incomplete overlap keep measured time above this ideal lower bound:
+$$ T_{\text{sequential}} = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} \quad \xrightarrow{\text{overlap}} \quad T_{\text{pipelined}} \geq \max\left(\frac{D_{\text{vol}}}{\text{BW}}, \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}\right) + L_{\text{lat}} $$
 
 The systems engineer's job is to make these components run in parallel, not in series. @Tbl-dam-overlap summarizes key D·A·M Coordination techniques:
 
@@ -108,340 +227,185 @@ The systems engineer's job is to make these components run in parallel, not in s
 | **Async Gradient Sync** | M (communication) overlaps A | Overlap bucketed AllReduce with remaining backward computation |
 | **Double Buffering**    | D overlaps M                 | Fill buffer N+1 while computing on buffer N                    |
 
-: **D·A·M Overlap Techniques**: Each technique allows one D·A·M axis to execute while another is in flight, converting the iron law's additive terms into overlapped terms. The payoff is transforming $T = a + b$ into $T = \max(a, b)$, which can cut latency nearly in half when the terms are balanced. {#tbl-dam-overlap}
+: **D·A·M Overlap Techniques**: Each technique overlaps work across axes, moving part of $T = a + b$ toward the ideal lower bound $T = \max(a, b)$. Dependencies and contention limit realized overlap. {#tbl-dam-overlap tbl-colwidths="[19,27,54]"}
 
-Overlap only helps when the D·A·M axes are reasonably balanced. If one term dominates (for example, severely memory bound), overlapping the smaller term with the larger yields negligible gain—the max is still dominated by the same bottleneck. Overlap provides the greatest benefit when $D_{\text{vol}}/\text{BW} \approx O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$. The latency term is the important exception.
+Overlap provides the greatest relative speedup when the D·A·M time terms are reasonably balanced. If one term dominates (for example, severely memory bound), overlapping the smaller term with the larger yields negligible gain—the max is still dominated by the same bottleneck. This balance occurs near $D_{\text{vol}}/\text{BW} \approx O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$. The latency term is the important exception.
 
-::: {.callout-warning title="The overhead that cannot hide"}
+::: {#psp-appendix-dam-overhead-cannot-hide .callout-perspective title="The overhead that cannot hide"}
 
-The latency term $L_{\text{lat}}$ (kernel launch, synchronization barriers, Python dispatch) typically cannot be overlapped—it represents serialization points where all components must wait. This is why **kernel fusion** is so powerful: it eliminates $L_{\text{lat}}$ by combining operations, not just by speeding up any single component.
+The unhidden latency term $L_{\text{lat}}$ (kernel launch, synchronization barriers, Python dispatch) contains serialization points that cannot be fully overlapped. **Kernel fusion** can reduce this term by combining operations, but it does not eliminate all launch, scheduling, or synchronization overhead.
 
 :::
 
-The iron law tells the engineer *how much* time each axis consumes. One critical question remains: when the bottleneck sits at the boundary between Data and Machine, which side is binding? The answer lies in a single ratio.
+The iron law tells the engineer *how much* time each term consumes. One critical question remains: does data movement or arithmetic throughput set the active ceiling? The answer lies in a single ratio.
 
-## Arithmetic Intensity Boundary {#sec-dam-taxonomy-arithmetic-intensity-boundary-7f5e}
+## Arithmetic Intensity Boundary {#sec-appdx-dam-taxonomy-arithmetic-intensity-boundary-7f5e}
 
-The boundary between **Data** (memory bound) and **Machine** (compute bound) is not arbitrary; it is defined mathematically by **arithmetic intensity**[^fn-arith-intensity] ($I$) of the workload.
+The boundary between the *Data/Machine* memory term and the *Algorithm/Machine* compute term is not arbitrary; it is defined mathematically by **arithmetic intensity**[^fn-arith-intensity] ($I$) of the workload.
 
-[^fn-arith-intensity]: **Arithmetic Intensity**: The ratio of floating-point operations to bytes transferred (FLOP/byte), introduced by @williams2009 as the key parameter in the Roofline Model. It determines whether a workload is memory bound or compute bound by comparison against the hardware's *ridge point* ($R_{\text{peak}}/\text{BW}$).
+[^fn-arith-intensity]: **Arithmetic Intensity**: This book uses the term for floating-point operations per byte transferred. @williams2009 calls the measured DRAM quantity *operational intensity* in the Roofline Model. Comparing the workload ratio with the hardware ridge point ($R_{\text{peak}}/\text{BW}$) gives an upper-bound diagnosis of memory- versus compute-bound execution.
 
-@Sec-machine-foundations-roofline-model-2529 provides rigorous definitions of arithmetic intensity and the roofline model. Use that model to quantitatively distinguish between Data and Machine bottlenecks before applying the optimizations below.
+@Sec-appdx-machine-foundations-roofline-model-2529 provides rigorous definitions of arithmetic intensity and the roofline model. Use that model to quantitatively distinguish memory- from compute-bound execution before applying the optimizations below.
 
-The Roofline Model provides exact answers when there is time to profile. In the middle of a production incident, however, a faster heuristic is needed---a set of quick thresholds that points to the right axis within seconds.
+The Roofline Model provides an upper performance bound when traffic and achieved rates are measured consistently. In the middle of a production incident, faster screening heuristics can point to the measurements to collect next.
 
-## Rules of Thumb {#sec-dam-taxonomy-rules-thumb-f94f}
+## Rules of Thumb {#sec-appdx-dam-taxonomy-rules-thumb-f94f}
 
-In the heat of a production outage, there is rarely time to solve the full iron law equation. Veteran systems engineers instead rely on these quantitative heuristics to quickly narrow the search space; the thresholds below serve as a first line of defense.
+In the heat of a production outage, there is rarely time to solve the full iron law equation. Veteran systems engineers instead rely on quantitative heuristics to quickly narrow the search space; the thresholds below are screening signals that should be checked against profiler traces and hardware counters.
 
-*   **If accelerator utilization $<$ 80 percent**: The workload is likely data bound (or CPU bound). The accelerator is starving.
-*   **If accelerator utilization $>$ 95 percent**: The workload is likely machine bound. The accelerator is fully saturated.
-*   **If batch size is one**: The workload is likely latency bound (algorithm overhead dominates).
-*   **If arithmetic intensity $<$ 100 FLOP/byte**: The workload is likely memory bound (Data/Machine boundary). This threshold is approximate for current-generation accelerators; compute the hardware's specific ridge point ($R_{\text{peak}}/\text{BW}$) for a precise boundary.
-*   **If the system works in dev but fails in prod**: Suspect data drift (Data component).
+*   **Low accelerator utilization** ($<$ 80 percent): Screen for data, CPU, or launch starvation. Confirm with input-pipeline wait, host CPU saturation, memory-bandwidth counters, and trace gaps.
+*   **High accelerator utilization** ($>$ 95 percent): Treat this as machine bound only if compute units are busy and memory bandwidth is not saturated. If memory bandwidth is saturated, the bottleneck is still on the Data/Machine boundary.
+*   **If batch size is one**: Treat this as a warning that latency or launch overhead may matter; confirm with traces before labeling the algorithm itself the bottleneck.
+*   **Low arithmetic intensity** (below the hardware ridge point): The workload is likely memory bound (Data/Machine boundary). The precise boundary is $R_{\text{peak}}/\text{BW}$ and depends on hardware and precision.
+*   **If the system works in dev but fails in prod**: Treat data drift as one hypothesis alongside configuration, load, dependency, and runtime differences.
 
-Common industry labels map to D·A·M components as follows: memory bound typically indicates a **Data** bottleneck (information cannot reach the accelerator fast enough), compute bound indicates a **Machine** bottleneck (the accelerator is fully saturated), and latency bound indicates an **Algorithm** bottleneck (serial operation depth or overhead dominates).
+Common industry labels cross the axes. Memory-bound execution sits on the Data/Machine boundary because both bytes moved and available bandwidth matter. Compute-bound execution couples Algorithm work with Machine throughput. Latency-bound execution may reflect algorithmic serial depth, runtime dispatch, synchronization, or queueing.
 
-### Bottleneck diagnostic {#sec-dam-taxonomy-bottleneck-diagnostic-3fc9}
+### Bottleneck diagnostic {#sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9}
 
 Once the bottleneck is identified, @tbl-bottleneck-actions shows which optimizations help and which ones are wasted:
 
-| **If the workload is...** | **Dominant Term**                            | **Optimization That Works**                                       | **Optimization That is Wasted**                    |
-|:--------------------------|:---------------------------------------------|:------------------------------------------------------------------|:---------------------------------------------------|
-| **Memory-Bound**          | $D_{\text{vol}}/\text{BW}$                   | Quantization, pruning, batching, kernel fusion                    | Faster accelerator (more FLOP/s will not help)     |
-| **Compute-Bound**         | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster accelerator, lower precision | More memory bandwidth (not the binding term)       |
-| **Latency-Bound**         | $L_{\text{lat}}$                             | Batching requests, kernel fusion, async dispatch                  | Neither compute nor bandwidth (overhead dominates) |
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{1.3}
+```
 
-: **What Works vs. What Is Wasted**: Optimizing the wrong term yields exactly zero improvement. A memory-bound large language model (LLM) will not speed up from a faster accelerator; the accelerator will simply idle faster while waiting for memory. {#tbl-bottleneck-actions tbl-colwidths="[17,17,33,33]"}
+| **If the workload is...** |              **Dominant Term**               | **Optimization That Works**                                               | **Optimization That is Wasted**                             |
+|:--------------------------|:--------------------------------------------:|:--------------------------------------------------------------------------|:------------------------------------------------------------|
+| **Memory-Bound**          |          $D_{\text{vol}}/\text{BW}$          | Quantization, pruning, batching, kernel fusion                            | Faster accelerator (more FLOP/s will not help)              |
+| **Compute-Bound**         | $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ | Better kernels, Tensor Cores, faster accelerator, lower precision         | More memory bandwidth (not the binding term)                |
+| **Latency-Bound**         |               $L_{\text{lat}}$               | Reduce serial depth; fuse or dispatch asynchronously; batch within budget | More compute or bandwidth unless the trace shows it binding |
+
+: **What Works vs. What Is Wasted**: Optimizing a nonbinding term yields little or no end-to-end improvement. A memory-bound large language model will not benefit from additional peak FLOP/s alone, though an accelerator with more memory bandwidth may help. {#tbl-bottleneck-actions tbl-colwidths="[19,17,32,32]"}
+
+```{=latex}
+\endgroup
+```
 
 Knowing what works also means recognizing what does not. In practice, teams under deadline pressure repeatedly fall into the same traps—optimizing the wrong axis with confidence. These failure modes are common enough to deserve their own names.
 
-## Anti-Patterns {#sec-dam-taxonomy-antipatterns-72e1}
+## Anti-Patterns {#sec-appdx-dam-taxonomy-antipatterns-72e1}
 
 Diagnosing systems is often a process of elimination. Before committing to complex kernel optimizations, watch for these common traps that waste engineering cycles.
 
-*   **The hardware crutch**: Buying faster accelerators (**Machine**) to fix a slow Python data loader (**Data**). The new hardware will just idle faster.
-*   **The model twiddle**: Changing neural architectures (**Algorithm**) when the bottleneck is actually network bandwidth or disk I/O.
-*   **The premature optimizer**: Writing custom CUDA kernels (**Machine**) before verifying if the Algorithm is simply doing too many unnecessary operations.
+*   **The hardware crutch**: Buying faster accelerators (*Machine*) to fix a slow Python data loader (*Data*). The new hardware will just idle faster.
+*   **The model twiddle**: Changing neural architectures (*Algorithm*) when the bottleneck is actually network bandwidth or disk I/O.
+*   **The premature optimizer**: Writing custom CUDA kernels (*Machine*) before verifying if the Algorithm is simply doing too many unnecessary operations.
 
 Each anti-pattern follows the same root cause: acting before diagnosing. The following case studies show what proper diagnosis looks like—starting from a confusing symptom and systematically narrowing to the dominant D·A·M axis.
 
-## D·A·M Case Studies {#sec-dam-taxonomy-dam-case-studies-593f}
+## D·A·M Case Studies {#sec-appdx-dam-taxonomy-dam-case-studies-593f}
 
-Theoretical constraints often manifest as confusing symptoms in production. These real-world scenarios illustrate how to apply the taxonomy.
+Theoretical constraints often manifest as confusing symptoms in production. These representative scenarios illustrate how to apply the taxonomy. Each case follows the same three diagnostic moves: symptom, diagnosis, and fix.
 
-### Case 1: The starving accelerator (Data) {#sec-dam-taxonomy-case-1-starving-accelerator-data-9a56}
+### Case 1: The starving accelerator (Data) {#sec-appdx-dam-taxonomy-case-1-starving-accelerator-data-9a56}
 
-#### Symptom {.unnumbered}
+A team provisions a large A100 GPU instance to speed up training, but training time hardly improves and `nvidia-smi` shows GPU utilization fluctuating between 10 percent and 40 percent. The pattern suggests accelerator starvation but does not identify its cause. If traces show input-wait gaps with storage or CPU decoding saturation, the data path is binding. The useful intervention is then upstream of the model. Optimize the extract, transform, load (ETL) path by moving from raw JPEGs with heavy CPU decoding to sequential formats such as TFRecords or WebDataset, increasing data-loader parallelism, and prefetching batches into accelerator memory.
 
-A team provisions a large A100 GPU instance to speed up training, but training time hardly improves. `nvidia-smi` shows GPU utilization fluctuating between 10 percent and 40 percent.
+### Case 2: The latency cliff (Cross-axis) {#sec-appdx-dam-taxonomy-case-2-latency-cliff-algorithm-8ee2}
 
-#### Diagnosis {.unnumbered}
+A real-time recommendation service fails to meet a 20 ms latency service-level agreement (SLA), while accelerator utilization is low and the batch size is one. That combination suggests launch overhead, memory traffic, or serial model depth rather than a saturated chip. If a trace confirms that the sequential layer path dominates, adding more hardware will not remove it, so pruning or knowledge distillation can reduce model work. If weight traffic dominates instead, quantization can reduce moved bytes by using INT8 where accuracy allows. The measurements select the remedy.
 
-The **Data** component cannot supply the **Machine** fast enough. The workload is I/O bound.
+### Case 3: The compute wall (Machine) {#sec-appdx-dam-taxonomy-case-3-compute-wall-machine-3a0a}
 
-#### The fix {.unnumbered}
-
-This is not a model or hardware problem. You must optimize the extract, transform, load (ETL) pipeline: move from raw JPEGs (CPU decoding heavy) to TFRecords or WebDataset (sequential reads), increase the number of data loader workers, and prefetch batches to GPU memory.
-
-### Case 2: The latency cliff (Algorithm) {#sec-dam-taxonomy-case-2-latency-cliff-algorithm-8ee2}
-
-#### Symptom {.unnumbered}
-
-Your real-time recommendation system fails to meet the 20 ms latency SLA. The accelerator utilization is low, and the batch size is 1.
-
-#### Diagnosis {.unnumbered}
-
-The **Algorithm** is too computationally deep for the sequential deadline. You are latency-bound by serial operations.
-
-#### The fix {.unnumbered}
-
-Throwing more hardware (Machine) will not help because latency is limited by the serial execution of layers. You must change the Algorithm:
-
-*   **Quantization**: Switch to INT8 to reduce memory fetch time.
-*   **Pruning**: Remove redundant heads or channels.
-*   **Knowledge Distillation**: Train a smaller student model.
-
-### Case 3: The compute wall (Machine) {#sec-dam-taxonomy-case-3-compute-wall-machine-3a0a}
-
-#### Symptom {.unnumbered}
-
-Accelerator utilization is pinned at 99 percent. Memory bandwidth is unsaturated. Training is stable but takes three weeks.
-
-#### Diagnosis {.unnumbered}
-
-The system has successfully kept the accelerator fed. It is compute bound.
-
-#### The fix {.unnumbered}
-
-You have hit the physical limits of the single chip.
-
-*   **Scale Up**: Move to a newer generation GPU (for example, A100 to H100).
-*   **Scale Out**: Distribute training across multiple accelerators (Data Parallelism).
-*   **Lower Precision**: Switch from FP32/TF32 training to BF16 where numerically safe; on NVIDIA Tensor Core paths, BF16 peak throughput is typically about 2$\times$ TF32 peak, with realized speedup depending on kernels and bottlenecks.
+Accelerator utilization is pinned at 99 percent, memory bandwidth remains unsaturated, and training is stable but takes three weeks. If profiler counters also show high compute-pipeline occupancy and MFU, the workload is compute bound. The data path is keeping the accelerator fed, so the next step must change the compute term in the iron law. The team can scale up from an A100 to an H100-class accelerator, scale out through data parallelism, or lower precision from FP32/TF32 to BF16 where numerically safe. On NVIDIA Tensor Core paths, BF16 peak throughput is typically about 2$\times$ TF32 peak, with realized speedup depending on kernels and bottlenecks [@choquette2023].
 
 Taken together, the three cases show why the same utilization number can imply different next steps depending on loss behavior, batch size, and memory pressure.
 
 ::: {#chk-appendix-dam-diagnosis-check .callout-checkpoint title="D·A·M diagnosis check"}
 
-1. A training job shows 95 percent accelerator utilization but loss has plateaued for two epochs. Which D·A·M axis should you investigate, and why?
-2. Your colleague suggests adding more data loader workers to a job where `nvidia-smi` shows 98 percent GPU utilization. Using the iron law, explain why this will not help.
-3. An inference server meets its latency SLO at batch size 1 but fails at batch size 16. Which term in the iron law changed, and what does this tell you about the bottleneck regime?
+1. A training job shows 95 percent accelerator utilization but loss has plateaued for two epochs. Which D·A·M axes could be responsible, and why is utilization alone insufficient to distinguish them?
+2. Your colleague suggests adding more data loader workers to a job where `nvidia-smi` shows 98 percent GPU utilization. What trace evidence is needed before deciding whether this will help?
+3. An inference server meets its latency SLO at batch size 1 but fails at batch size 16. Which iron-law terms and queueing effects may have changed, and which measurements identify the binding regime?
 
 :::
 
-These three cases illustrate clean, single-axis bottlenecks. Production incidents are rarely so tidy—symptoms often overlap, and the dominant axis can shift during debugging. The next section provides a systematic troubleshooting matrix for the messier scenarios encountered in practice.
+These three cases illustrate bottlenecks that can cross axes. Production incidents are rarely so tidy—symptoms often overlap, and the dominant axis can shift during debugging. The next section provides a systematic troubleshooting matrix for the messier scenarios encountered in practice.
 
-## Production Troubleshooting {#sec-dam-taxonomy-production-troubleshooting-02fb}
+## Production Troubleshooting {#sec-appdx-dam-taxonomy-production-troubleshooting-02fb}
 
 Identifying the root cause of performance bottlenecks requires systematic elimination. @Tbl-dam-troubleshooting provides a diagnostic matrix for common failure modes observed in production deployments.
 
-| **Symptom**                     | **Likely D·A·M Culprit** | **Diagnostic Question**                                            | **Recommended Action**                                 |
-|:--------------------------------|:-------------------------|:-------------------------------------------------------------------|:-------------------------------------------------------|
-| **Low Accelerator Utilization** | **Data**                 | Is the data loader keeping up with the accelerator?                | Implement prefetching and use binary formats.          |
-| **High Latency (P99)**          | **Algorithm**            | Is the model depth or width exceeding the latency budget?          | Apply quantization (INT8) or structured pruning.       |
-| **High Training Cost**          | **Machine**              | Is the hardware utilization ($\eta_{\text{hw}}$) below 30 percent? | Optimize CUDA kernels or use spot instances.           |
-| **Silent Accuracy Drift**       | **Data**                 | Has the statistical distribution ($P_t$) shifted from $P_0$?       | Trigger retraining and update active learning filters. |
-| **Out-of-Memory (OOM)**         | **Algorithm/Machine**    | Does the model state fit in available VRAM?                        | Use gradient checkpointing or reduce batch size.       |
+| **Symptom**                     | **Hypothesis**             | **Confirm With**                                  | **Act After Confirmation**                    |
+|:--------------------------------|:---------------------------|:--------------------------------------------------|:----------------------------------------------|
+| **Low Accelerator Utilization** | Data/host starvation       | Trace gaps; loader, CPU, storage, launch counters | Prefetch, parallelize, or cut launches.       |
+| **High Latency (P99)**          | Algorithm/runtime/queue    | Phase p99 and queue depth                         | Optimize the dominant phase.                  |
+| **High Training Cost**          | Low useful-work efficiency | MFU, communication, idle time                     | Reduce the largest loss or resize.            |
+| **Silent Accuracy Drift**       | Data distribution change   | $P_t$ versus $P_0$ plus delayed labels            | Retrain or update filters.                    |
+| **Out-of-Memory (OOM)**         | Algorithm/Machine fit      | Peak weights, states, activations                 | Checkpoint, shard, quantize, or shrink batch. |
 
-: **D·A·M Diagnostic Matrix**: Root cause identification and remediation strategies for common ML systems failures. Each row connects a user-visible symptom to the D·A·M axis most likely responsible, reducing the search space before a profiler is needed. {#tbl-dam-troubleshooting tbl-colwidths="[25,21,29,25]"}
+: **D·A·M Diagnostic Matrix**: First hypotheses and measurements for common failures. Confirm the binding component before intervening. {#tbl-dam-troubleshooting tbl-colwidths="[25,21,29,25]"}
 
 The diagnostic matrix indicates *what* to suspect. The next question is *how* to confirm that suspicion with evidence---which requires the right profiling tools.
 
-## Tooling Map {#sec-dam-taxonomy-tooling-map-e09b}
+## Tooling Map {#sec-appdx-dam-taxonomy-tooling-map-e09b}
 
 Once a hypothesis exists (for example, "the workload appears Machine-bound"), evidence is needed to confirm it. Abstract concepts must be measured with concrete utilities. @Tbl-dam-tooling connects the theoretical components to the specific Linux and Python profiling tools that confirm them.
 
-| **Axis**      | **Key Metric**                        | **Primary Tool**        | **Secondary Tool**             |
-|:--------------|:--------------------------------------|:------------------------|:-------------------------------|
-| **Data**      | Batch Load Time                       | `tqdm` (iterations/sec) | `iotop`, `dstat` (Disk I/O)    |
-| **Algorithm** | FLOPs, Model Depth                    | PyTorch Profiler        | DeepSpeed Flops Profiler       |
-| **Machine**   | Accelerator Utilization, SM Occupancy | `nvidia-smi`            | Nsight Compute, Nsight Systems |
+| **Axis**      | **Key Metric**                        | **Primary Tool**         | **Secondary Tool**            |
+|:--------------|:--------------------------------------|:-------------------------|:------------------------------|
+| **Data**      | Batch Load and Wait Time              | Framework profiler trace | `iostat`, `pidstat` (I/O/CPU) |
+| **Algorithm** | FLOPs, Model Depth                    | PyTorch Profiler         | DeepSpeed Flops Profiler      |
+| **Machine**   | Accelerator Utilization, SM Occupancy | Nsight Compute           | `nvidia-smi`, Nsight Systems  |
 
 : **D·A·M Tooling Map**: Profiling utilities for diagnosing bottlenecks along each D·A·M axis. Start with the primary tool for quick triage; use secondary tools for deep-dive analysis when the primary tool's output is inconclusive. {#tbl-dam-tooling tbl-colwidths="[12,37,20,31]"}
 
-Profiling tools generate raw numbers---utilization percentages, FLOP counts, bandwidth measurements. Raw numbers, however, only become actionable when compared against a standard. The D·A·M Scorecard provides that standard: a set of efficiency thresholds that distinguish healthy systems from those that need intervention.
+Profiling tools generate raw numbers---utilization percentages, FLOP counts, and bandwidth measurements. They become actionable only in workload and hardware context. The D·A·M Scorecard provides screening signals rather than universal standards, narrowing which measurements and interventions deserve attention.
 
-## D·A·M Scorecard {#sec-dam-taxonomy-dam-scorecard-94e9}
+## D·A·M Scorecard {#sec-appdx-dam-taxonomy-dam-scorecard-94e9}
 
-To move beyond qualitative guessing, the efficiency ratios in @tbl-dam-scorecard grade a system's performance against its theoretical limit. This report-card view standardizes what "good" looks like, anchored by **MFU**[^fn-mfu-scorecard]—the single most important metric for large-scale training.
+To move beyond qualitative guessing, the efficiency indicators in @tbl-dam-scorecard help decide what to investigate next. This report-card view aids the first comparison, but no row provides a universal grade. **MFU**[^fn-mfu-scorecard] is especially useful for large-model training.
 
-[^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: The ratio of achieved model FLOP/s to the hardware's theoretical peak FLOP/s, introduced in the PaLM paper [@chowdhery2022palm]. Unlike raw accelerator utilization (which counts any work the accelerator performs), MFU measures only *useful* model computation rate, excluding overhead like gradient synchronization and memory management. @sec-benchmarking covers MFU in depth.
+[^fn-mfu-scorecard]: **MFU (Model FLOPs Utilization)**: The ratio of achieved model FLOP/s to the hardware's theoretical peak FLOP/s, introduced in the PaLM paper [@chowdhery2022palm]. Unlike raw accelerator utilization (which counts any work the accelerator performs), MFU measures model computation rate relative to peak hardware throughput, so non-model work and system overhead are not counted as achieved model FLOPs. @Sec-benchmarking covers MFU in depth.
 
-| **Axis**      | **Metric**        | **Definition**                                            |  **Failing Grade**  |    **Passing Grade**    |
-|:--------------|:------------------|:----------------------------------------------------------|:-------------------:|:-----------------------:|
-| **Data**      | **I/O Overhead**  | $\frac{\text{Data Wait Time}}{\text{Total Step Time}}$    |    $>$ 10 percent   |      $<$ 1 percent      |
-| **Algorithm** | **Active Params** | $\frac{\text{Nonzero Params}}{\text{Total Params}}$       | 100 percent (Dense) | $<$ 50 percent (Sparse) |
-| **Machine**   | **MFU**           | $\frac{\text{Achieved model FLOP/s}}{\text{Peak FLOP/s}}$ |    $<$ 30 percent   |      $>$ 50 percent     |
+```{=latex}
+\begingroup
+\renewcommand{\arraystretch}{3}
+```
 
-: **The D·A·M Efficiency Rubric**: These three numbers characterize any ML system's maturity. A system that passes all three thresholds has exhausted its easy optimizations; further gains require architectural changes or hardware upgrades. {#tbl-dam-scorecard tbl-colwidths="[25,25,25,25]"}
+| **Axis**      | **Metric**         |                       **Definition**                       |    **Investigate**     |   **Strong Signal**   |
+|:--------------|:-------------------|:----------------------------------------------------------:|:----------------------:|:---------------------:|
+| **Data**      | **I/O Overhead**   |  $\dfrac{\text{Data Wait Time}}{\text{Total Step Time}}$   |    $>$ 10% (screen)    |    $<$ 1% (strong)    |
+| **Algorithm** | **Avoidable Work** |      Profiler or ablation finds redundant operations       |  Redundant work found  | End-to-end work falls |
+| **Machine**   | **MFU**            | $\dfrac{\text{Achieved model FLOP/s}}{\text{Peak FLOP/s}}$ | $<$ 30% (large models) | $>$ 50% (same regime) |
 
-The Scorecard and the Roofline Model both answer efficiency questions, but at different scales. The Scorecard grades the current system against known thresholds. Scaling laws and the information roofline address a more strategic question: what happens as the system scales *beyond* its current size?
+: **D·A·M Screening Indicators**: Context-dependent signals for investigation, not universal grades. {#tbl-dam-scorecard tbl-colwidths="[25,25,25,25]"}
 
-## Scaling Laws vs. Roofline {#sec-dam-taxonomy-scaling-laws-vs-roofline-b290}
+```{=latex}
+\endgroup
+```
+
+The Scorecard and the Roofline Model both answer efficiency questions, but at different scales. The Scorecard screens the current system using context-dependent indicators. Scaling laws and the information-roofline metaphor ask what may happen as the system scales *beyond* its current size.
+
+## Scaling Laws vs. Roofline {#sec-appdx-dam-taxonomy-scaling-laws-vs-roofline-b290}
 
 Systems engineering requires distinguishing between *growth trajectories* and *fundamental limits*.
 
-### Scaling laws (the journey) {#sec-dam-taxonomy-scaling-laws-journey-4085}
+### Scaling laws (the journey) {#sec-appdx-dam-taxonomy-scaling-laws-journey-4085}
 
-Scaling laws[^fn-scaling-laws] are empirical power laws that predict *how fast* model performance improves as we increase resources. The two landmark results are Kaplan Scaling [@kaplan2020scaling], which showed that performance improves predictably with parameter count ($P$), data ($D$), and total operations ($O$), and Chinchilla Scaling [@hoffmann2022chinchilla], which refined this insight by defining the *optimal ratio* of these resources (for example, $D \approx 20P$ tokens per parameter).
+Scaling laws[^fn-scaling-laws] are empirical power laws that predict how held-out loss changes as resources increase within the fitted regime. Two landmark results are Kaplan Scaling [@kaplan2020scaling], which studied loss against parameter count ($P$), data ($D$), and total operations ($O$), and Chinchilla Scaling [@hoffmann2022chinchilla], which estimated a compute-optimal balance for the dense autoregressive language-model regime studied, often summarized as roughly 20 training tokens per parameter ($D \approx 20P$).
 
-[^fn-scaling-laws]: **Scaling Laws**: Empirical relationships, typically power laws of the form $\mathcal{L}(x) \propto x^{-\alpha}$, that predict model loss as a function of dataset size, parameter count, or compute budget. @kaplan2020scaling studied these relationships for neural language models at OpenAI; @hoffmann2022chinchilla later refined the compute-optimal training tradeoff with the Chinchilla result. @sec-model-training discusses scaling laws in detail.
+[^fn-scaling-laws]: **Scaling Laws**: Empirical relationships, typically power laws with a fitted negative exponent, that predict model loss as a function of dataset size, parameter count, or compute budget. @kaplan2020scaling studied these relationships for neural language models at OpenAI; @hoffmann2022chinchilla later estimated the compute-optimal training trade-off for its studied dense language-model regime. @Sec-data-selection-computeoptimal-frontier-24ba develops the compute-optimal frontier and its data-starvation diagnostic in detail.
 
-As economic guides, these laws summarize the tradeoff this way: "If I double my compute budget, my error rate should drop by $X$ percent." They assume the information is there to be learned.
+As economic guides, these fits estimate how held-out loss changes with compute inside the observed regime. They do not guarantee a task error-rate reduction or extrapolate unchanged across architectures and data distributions.
 
-### Information roofline (the destination) {#sec-dam-taxonomy-information-roofline-destination-6426}
+### Information roofline (the destination) {#sec-appdx-dam-taxonomy-information-roofline-destination-6426}
 
-The information roofline is the theoretical limit of what *can* be learned from the data, regardless of scale. Three quantities define it: the *ceiling* is the Bayes Error Rate[^fn-bayes-error] (the irreducible error inherent in the data); the *slope* is the information density, or signal-to-noise ratio, of the training distribution; and the *bottleneck* appears when data has low information density---as with noisy financial tickers---causing the system to hit the "Data Quality Wall" long before the compute wall.
+The *information roofline* is used here as a diagnostic metaphor rather than a standard quantitative law. Its destination image points to limits on what can be learned from the available data. For classification under a fixed data distribution and loss, the Bayes Error Rate[^fn-bayes-error] is an irreducible error *floor*, not a ceiling. Noise, label ambiguity, coverage gaps, and distribution shift can create data-quality limits, but they do not define one universal slope or breakpoint.
 
-[^fn-bayes-error]: **Bayes Error Rate**: The lowest achievable error rate for any classifier on a given data distribution, determined by the overlap between class-conditional distributions. Named after Thomas Bayes (1701–1761). No amount of data, parameters, or compute can reduce error below this theoretical floor.
+[^fn-bayes-error]: **Bayes Error Rate**: The lowest achievable error rate under 0–1 loss for any classifier on a given data distribution, determined by class priors and the overlap between class-conditional distributions [@goodfellow2016deep]. No amount of data, parameters, or compute can reduce error below this theoretical floor.
 
-The diagnostic lesson is this: Scaling laws predict the *slope* of improvement, while the information roofline predicts the *ceiling*. If a loss curve flattens *before* the scaling law prediction, the system has hit the information roofline. Adding more accelerators (Machine) or parameters (Algorithm) at this point is futile; Data quality is the only lever left.
+The diagnostic lesson is narrower. Scaling laws describe a fitted improvement trajectory, while the information-roofline metaphor prompts a search for data-quality limits. If a loss curve flattens relative to the fitted trend, investigate optimization, capacity, evaluation noise, and data quality; flattening alone does not identify which cause dominates. The Bayes floor describes the best achievable classifier for the specified distribution. Adding accelerators or parameters is futile only after measurements establish that data quality is binding. Whether debugging a training step, evaluating hardware utilization, or planning a scaling campaign, measure which axis is binding before choosing a lever.
 
-This distinction closes the loop on the D·A·M taxonomy. Whether the task is debugging a single training step (iron law), evaluating hardware utilization (Roofline), or planning a multi-million-dollar scaling campaign (scaling laws), the diagnostic question is always the same: *which axis dominates, and what lever moves it?*
+## Summary {#sec-appdx-dam-taxonomy-summary-1521}
 
-## Summary {#sec-dam-taxonomy-summary-1521}
-
-The D·A·M taxonomy provides a systematic framework for diagnosing ML systems bottlenecks. Each axis maps to a distinct physical constraint: Data is bounded by bandwidth, Algorithm by total operations, and Machine by peak throughput. The iron law quantifies these constraints, enabling systematic diagnosis. Use arithmetic intensity to determine the Data/Machine boundary, and the D·A·M Scorecard to evaluate system maturity. In practice, this sequence turns diagnosis into a short set of first questions.
+The D·A·M taxonomy provides a systematic framework for diagnosing ML systems bottlenecks. Each axis highlights a primary class of constraints rather than a distinct physical bucket. Data volume meets machine bandwidth, algorithmic work meets realized throughput, and runtime overhead can cross all three. The iron law quantifies these interacting terms. Use arithmetic intensity to investigate the Data/Machine boundary and the scorecard as a context-dependent screen. In practice, this sequence turns diagnosis into a short set of first questions.
 
 ::: {.callout-takeaways title="Where to look first"}
 
-* **Every bottleneck lives in one of three places**: Data, Algorithm, or Machine. Identify the dominant axis before optimizing.
-* **Profile arithmetic intensity before optimizing**: Arithmetic intensity determines whether the regime is Data-bound or Machine-bound.
-* **Diagnose the D·A·M axis before proposing solutions**: Optimizing the wrong term yields zero improvement.
-* **Grade the system with the D·A·M Scorecard**: Use I/O Overhead < 1 percent, Active Params < 50 percent, and MFU > 50 percent before investing in optimizations.
+* **Start with three interacting lenses**: Data, Algorithm, and Machine narrow the search, while boundary effects and runtime overhead may span them.
+* **Profile arithmetic intensity before optimizing**: Comparing intensity with the hardware ridge point helps distinguish memory- from compute-bound regimes.
+* **Diagnose the binding term first**: Optimizing a nonbinding term yields little or no end-to-end improvement.
+* **Use the scorecard as a screen**: Interpret I/O overhead, avoidable work, and MFU against the workload and hardware rather than universal pass/fail thresholds.
 
 :::
-
-## Exercises {#sec-dam-taxonomy-exercises-135b}
-
-```{python}
-#| echo: false
-from mlsysim import *
-from mlsysim.core.constants import *
-#| label: appendix-dam-exercises
-from mlsysim.physics import calc_transformer_decode_flops
-from mlsysim.fmt import fmt_int, fmt, check, MarkdownStr
-
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: @sec-dam-taxonomy-exercises-135b — D·A·M diagnostic exercises
-# │ Goal: GPU starvation, iron-law decode, scaling-law, hardware-upgrade scenarios
-# │ Exports: ex1_*, ex2_*, ex3_*, ex4_* formatted strings and equations
-class DAMTaxonomy:
-    """Namespace for D·A·M Taxonomy diagnostic exercises."""
-
-    # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
-    from mlsysim import Models, Hardware
-
-    m = Models.Language.Llama2_7B
-    h = Hardware.Cloud.H100
-
-    ex1_gpu_util_pct = 25
-    ex1_disk_sat_pct = 100
-
-    ex2_params = m.parameters
-    ex2_latency_s = 0.050
-    h100_fp16_tflops_peak = h.peak_flops.m_as(TFLOPs/second)
-
-    ex3_params_start = 125 * MILLION
-    ex3_params_end = 1 * BILLION
-    ex3_loss_start = 0.45
-    ex3_loss_end = 0.42
-    ex3_scaling_baseline_pred_pct = 15
-
-    ex4_gpu_old_n = 4
-    ex4_gpu_new_n = 8
-    ex4_cost_k = 200
-
-    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
-    ex2_flops_per_pass = calc_transformer_decode_flops(ex2_params).m_as(TFLOPs)
-    ex2_achieved_tflops = ex2_flops_per_pass/ex2_latency_s
-    ex2_util = (ex2_achieved_tflops/h100_fp16_tflops_peak) * 100
-    ex2_model_size_gb = (ex2_params * 2 * ureg.byte).m_as(GB)
-
-    ex3_scale_factor = ex3_params_end / ex3_params_start
-    ex3_imp_pct = (ex3_loss_start - ex3_loss_end) / ex3_loss_start * 100
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(ex2_util < 10, f"Batch-1 utilization ({ex2_util:.1f}%) unexpectedly high.")
-    check(ex3_scale_factor == 8, f"Exercise 3 scale factor ({ex3_scale_factor}) should be 8x.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    ex1_gpu_util_str = fmt(ex1_gpu_util_pct, precision=0, commas=False, suffix=' percent')
-    ex1_disk_sat_str = fmt(ex1_disk_sat_pct, precision=0, commas=False, suffix=' percent')
-
-    ex2_params_str = fmt(ex2_params.m_as(param) / BILLION, precision=0, commas=False, suffix="B")
-    ex2_flops_per_pass_str = fmt(ex2_flops_per_pass, precision=3, commas=False)
-    ex2_latency_ms_str = fmt_int(ex2_latency_s * THOUSAND, commas=False, suffix=' ms')
-    ex2_latency_s_str = fmt(ex2_latency_s, precision=3, commas=False)
-    ex2_achieved_str = fmt(ex2_achieved_tflops, precision=2, commas=False, suffix=' TFLOP/s')
-    ex2_util_str = fmt(ex2_util, precision=2, commas=False, suffix=' percent')
-    h100_fp16_tflops_str = fmt(h100_fp16_tflops_peak, precision=0, commas=False, suffix=' TFLOP/s')
-    ex2_model_size_gb_str = fmt(ex2_model_size_gb, precision=0, commas=False, suffix=' GB')
-
-    ex2_achieved_eq = MarkdownStr(
-        f"$$\\text{{Achieved FLOP/s}} = \\frac{{{ex2_flops_per_pass_str} \\text{{ TFLOPs}}}}"
-        f"{{{ex2_latency_s_str} \\text{{ s}}}} = {ex2_achieved_str} \\text{{ TFLOP/s}}$$"
-    )
-    ex2_util_eq = MarkdownStr(
-        f"$$\\eta_{{\\text{{hw}}}} = \\frac{{{ex2_achieved_str}}}{{{h100_fp16_tflops_str}}} \\approx {ex2_util_str}\\%$$"
-    )
-
-    ex3_params_start_str = fmt(ex3_params_start / MILLION, precision=0, commas=False, suffix="M")
-    ex3_params_end_str = fmt(ex3_params_end / BILLION, precision=0, commas=False, suffix="B")
-    ex3_scale_factor_str = fmt(ex3_scale_factor, precision=0, commas=False)
-    ex3_loss_start_str = fmt(ex3_loss_start, precision=2, commas=False)
-    ex3_loss_end_str = fmt(ex3_loss_end, precision=2, commas=False)
-    ex3_imp_str = fmt(ex3_imp_pct, precision=1, commas=False, suffix=' percent')
-    ex3_scaling_baseline_pred_str = fmt(ex3_scaling_baseline_pred_pct, precision=0, commas=False, suffix=' percent')
-
-    ex4_gpu_old_str = fmt(ex4_gpu_old_n, precision=0, commas=False, suffix="$\\times$ A100")
-    ex4_gpu_new_str = fmt(ex4_gpu_new_n, precision=0, commas=False, suffix="$\\times$ H100")
-    ex4_cost_str = fmt(ex4_cost_k, precision=0, commas=False, prefix="$", suffix="K")
-```
-
-### Exercise one: Component identification {.unnumbered}
-
-A production image classification service runs on an A100 GPU. The `nvidia-smi` output shows `{python} DAMTaxonomy.ex1_gpu_util_str` GPU utilization, while `iotop` reveals the disk is saturated at `{python} DAMTaxonomy.ex1_disk_sat_str`. Which D·A·M axis is the bottleneck? What are two specific optimizations you would recommend? <!-- lego-ok: GPU is part of "GPU utilization", not a unit -->
-
-**Answer**: The bottleneck is **Data**. The disk at `{python} DAMTaxonomy.ex1_disk_sat_str` saturation while GPU sits at `{python} DAMTaxonomy.ex1_gpu_util_str` utilization is the classic "starving GPU" pattern. The Machine (GPU) has capacity to spare, but the Data pipeline cannot feed it fast enough. Two optimizations: (1) Convert raw images (JPEG/PNG) to a sequential binary format like TFRecords or WebDataset to reduce CPU decoding overhead and enable sequential disk reads. (2) Increase DataLoader workers and implement prefetching to overlap I/O with computation, ensuring the next batch is ready before the GPU finishes the current one.
-
-### Exercise two: Iron law analysis {.unnumbered}
-
-Consider a decoder-only transformer model with `{python} DAMTaxonomy.ex2_params_str` parameters generating one token in the autoregressive decode phase at batch size 1. Using the 2 FLOPs-per-parameter rule of thumb, the decode step requires `{python} DAMTaxonomy.ex2_flops_per_pass_str` TFLOP. On an H100 GPU (`{python} DAMTaxonomy.h100_fp16_tflops_str` peak FP16 Tensor Core throughput), the measured latency is `{python} DAMTaxonomy.ex2_latency_ms_str`. Calculate the achieved utilization ($\eta_{\text{hw}}$). Is this system Data-bound, Algorithm-bound, or Machine-bound? Justify your answer.
-
-**Answer**: First, calculate achieved throughput:
-
-`{python} DAMTaxonomy.ex2_achieved_eq`
-
-Then calculate utilization:
-
-`{python} DAMTaxonomy.ex2_util_eq`
-
-Computed values: Achieved = `{python} DAMTaxonomy.ex2_achieved_str`, Utilization = `{python} DAMTaxonomy.ex2_util_str`.
-
-These numbers prove **low Machine utilization**, but they do not by themselves prove a saturated HBM path. At batch size 1, each layer performs a matrix-vector multiply (GEMV) rather than a general matrix multiply (GEMM). The model's `{python} DAMTaxonomy.ex2_params_str` parameters (~`{python} DAMTaxonomy.ex2_model_size_gb_str` in FP16) must be loaded for every forward pass, so the workload has low arithmetic intensity and is a strong **Data-bottleneck candidate**. To classify it as memory-bound rather than overhead/latency-bound, confirm with profiling evidence such as near-peak HBM bandwidth or most time attributed to weight reads.
-
-The fix targets the **Data/Algorithm boundary**: increasing the batch size transforms GEMV into GEMM, dramatically raising arithmetic intensity and pushing the workload toward compute bound. Other effective strategies include quantization (INT8 halves the bytes moved per parameter, directly reducing the $D_{\text{vol}}/\text{BW}$ term) or speculative decoding to amortize weight loads across multiple tokens.
-
-### Exercise three: Scaling law vs. information roofline {.unnumbered}
-
-A team has been training a sentiment analysis model. After scaling from `{python} DAMTaxonomy.ex3_params_start_str` to `{python} DAMTaxonomy.ex3_params_end_str` parameters (`{python} DAMTaxonomy.ex3_scale_factor_str`$\times$ increase), validation loss improved from `{python} DAMTaxonomy.ex3_loss_start_str` to `{python} DAMTaxonomy.ex3_loss_end_str` (`{python} DAMTaxonomy.ex3_imp_str` improvement). Assume a scaling-law baseline predicts a ~`{python} DAMTaxonomy.ex3_scaling_baseline_pred_str` improvement for this scaling intervention. What does this discrepancy suggest? Which D·A·M axis should be investigated first, and why?
-
-**Answer**: The discrepancy points to the **Information Roofline**---the ceiling imposed by data quality rather than model capacity. Scaling laws predict the *slope* of improvement assuming sufficient information in the data. When actual improvement (`{python} DAMTaxonomy.ex3_imp_str`) falls well short of the assumed baseline (`{python} DAMTaxonomy.ex3_scaling_baseline_pred_str`), the model has likely extracted most learnable signal from the training distribution.
-
-Investigate the **Data** component first. Specifically: (1) Measure the noise level in the labels---sentiment is subjective and inter-annotator agreement may be low. (2) Check for class imbalance or distribution gaps. (3) Evaluate whether the dataset covers the linguistic patterns in the target domain. Adding more parameters (Algorithm) or faster hardware (Machine) will not help when the system is hitting the Bayes error rate for this data. The path forward is better data: cleaner labels, more diverse examples, or domain-specific fine-tuning data.
-
-### Exercise four: Anti-pattern detection {.unnumbered}
-
-A colleague proposes upgrading from `{python} DAMTaxonomy.ex4_gpu_old_str` to `{python} DAMTaxonomy.ex4_gpu_new_str` because training is "too slow." Before approving the `{python} DAMTaxonomy.ex4_cost_str` hardware purchase, what three diagnostic questions would you ask? Map each question to the D·A·M axis it investigates.
-
-**Answer**: Before spending `{python} DAMTaxonomy.ex4_cost_str`, ask:
-
-1. **"What is the current GPU utilization during training?"** → *Machine*. If utilization is below 80 percent, faster GPUs will just idle faster. The bottleneck is elsewhere.
-
-2. **"What percentage of each training step is spent waiting for data?"** → *Data*. Run `torch.profiler` or check if `DataLoader` time exceeds 10 percent of step time. If data loading dominates, the fix is pipeline optimization (binary formats, more workers, prefetching), not new GPUs.
-
-3. **"Can the batch size scale with 2$\times$ more GPUs without degrading convergence?"** → *Algorithm*. Doubling GPUs typically requires doubling batch size to maintain efficiency. If the model already uses the maximum stable batch size, or if larger batches hurt convergence, additional GPUs provide diminishing returns. Check the scaling efficiency: if four GPUs achieve only 3$\times$ speedup over one GPU, the communication overhead suggests eight GPUs might achieve only 4--5$\times$ speedup.
-
-Only if all three answers are favorable—high utilization, minimal data wait, and batch size headroom—does the hardware upgrade make sense.

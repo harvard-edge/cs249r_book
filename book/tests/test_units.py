@@ -32,10 +32,10 @@ _mlsysim_project = os.path.join(_repo_root, "mlsysim")    # contains the package
 sys.path.insert(0, _mlsysim_project)
 sys.path.insert(0, _book_dir)
 
-from mlsysim.core.constants import *
+from mlsysim.core.units import *
 from mlsysim.physics import *
 from mlsysim.fmt import fmt, fmt_sci, fmt_unit
-from mlsysim import Hardware, Models, Systems
+from mlsysim import Hardware, Models, Systems, Literature, ReferenceStats
 
 # Legacy aliases for unit tests (hardware/model specs live in registries).
 _a100 = Hardware.Cloud.A100
@@ -113,8 +113,11 @@ PCIE_GEN5_BW = _h100.interconnect.bandwidth
 INFINIBAND_HDR_BW = Systems.Fabrics.InfiniBand_HDR.bandwidth
 INFINIBAND_NDR_BW = Systems.Fabrics.InfiniBand_NDR.bandwidth
 
-GPT3_TRAINING_OPS = (
-    TRANSFORMER_TRAINING_FLOPS_PER_PARAM_TOKEN * _gpt3.parameters * _gpt3.training_tokens
+# Via the canonical helper so the result carries the [flop] dimension
+# (2026-06-06 dimension split: a bare params x tokens product is a count,
+# not compute work, and no longer divides by a FLOP rate).
+GPT3_TRAINING_OPS = calc_transformer_training_flops(
+    _gpt3.parameters, _gpt3.training_tokens
 )
 
 FAILURES = []
@@ -200,7 +203,7 @@ def test_flop_units():
     ok &= check("Mobile 35 TOPS", MOBILE_NPU_TOPS_INT8.to(TOPS).magnitude, 35.0)
 
     # Model FLOPs
-    ok &= check("ResNet 4.1 GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 4.1)
+    ok &= check("ResNet 8.2 GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 8.2)
     ok &= check("YOLOv8-nano 8.7 GFLOPs", YOLOV8_NANO_FLOPs.to(GFLOPs).magnitude, 8.7)
     return ok
 
@@ -220,8 +223,8 @@ def test_param_units():
 def test_network_units():
     """Verify network-scale conversions."""
     ok = True
-    ok &= check("10 Gbps -> Gbps", NETWORK_10G_BW.to(Gbps).magnitude, 10.0)
-    ok &= check("10 Gbps -> GB/s", NETWORK_10G_BW.to(GB / second).magnitude, 1.25)
+    ok &= check("10 Gbps -> Gbps", Systems.Fabrics.Ethernet_10G.bandwidth.to(Gbps).magnitude, 10.0)
+    ok &= check("10 Gbps -> GB/s", Systems.Fabrics.Ethernet_10G.bandwidth.to(GB / second).magnitude, 1.25)
     return ok
 
 
@@ -234,7 +237,7 @@ def test_memory_bandwidth():
     ok &= check("A100 ~2 TB/s", A100_MEM_BW.to(TB / second).magnitude, 2.039)
     ok &= check("V100 900 GB/s", V100_MEM_BW.to(GB / second).magnitude, 900.0)
     ok &= check("H100 3350 GB/s", H100_MEM_BW.to(GB / second).magnitude, 3350.0)
-    ok &= check("Mobile 100 GB/s", MOBILE_NPU_MEM_BW.to(GB / second).magnitude, 100.0)
+    ok &= check("Mobile 51.2 GB/s", MOBILE_NPU_MEM_BW.to(GB / second).magnitude, 51.2)
     return ok
 
 
@@ -260,8 +263,8 @@ def test_derived_values():
     ok &= check("GPT-3 training ~25 days", days, 25.0, tol=0.1)
 
     # Waymo data rates
-    ok &= check("Waymo low 1 TB/hr", WAYMO_DATA_PER_HOUR_LOW.to(TB / hour).magnitude, 1.0)
-    ok &= check("Waymo high 19 TB/hr", WAYMO_DATA_PER_HOUR_HIGH.to(TB / hour).magnitude, 19.0)
+    ok &= check("Waymo low 1 TB/hr", ReferenceStats.Workloads.WaymoDataPerHourLow.to(TB / hour).magnitude, 1.0)
+    ok &= check("Waymo high 19 TB/hr", ReferenceStats.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 19.0)
 
     # ResNet model sizes (params * bytes_per_param)
     fp32_bytes = RESNET50_PARAMS.magnitude * 4 * byte
@@ -277,7 +280,7 @@ def test_derived_values():
 
     # Roofline analysis
     result = calc_bottleneck(RESNET50_FLOPs, fp16_bytes, A100_FLOPS_FP16_TENSOR, A100_MEM_BW)
-    ok &= check("A100 ResNet compute_ms small", result["compute_ms"], 0.013, tol=0.1)
+    ok &= check("A100 ResNet compute_ms small", result["compute_ms"], 0.026, tol=0.1)
     ok &= check("A100 ResNet memory_ms small", result["memory_ms"], 0.025, tol=0.1)
 
     return ok
@@ -296,11 +299,11 @@ def test_no_large_raw_magnitudes():
         ("A100 GB/s", A100_MEM_BW.to(GB / second).magnitude, 1e4),
         ("H100 GB/s", H100_MEM_BW.to(GB / second).magnitude, 1e4),
         ("H100 TB/s", H100_MEM_BW.to(TB / second).magnitude, 100),
-        ("Waymo TB/hr", WAYMO_DATA_PER_HOUR_HIGH.to(TB / hour).magnitude, 100),
+        ("Waymo TB/hr", ReferenceStats.Workloads.WaymoDataPerHourHigh.to(TB / hour).magnitude, 100),
         ("ResNet GFLOPs", RESNET50_FLOPs.to(GFLOPs).magnitude, 1e4),
         ("ResNet Mparam", RESNET50_PARAMS.to(Mparam).magnitude, 1e4),
         ("A100 GiB", A100_MEM_CAPACITY.to(GiB).magnitude, 1e4),
-        ("10G Gbps", NETWORK_10G_BW.to(Gbps).magnitude, 100),
+        ("10G Gbps", Systems.Fabrics.Ethernet_10G.bandwidth.to(Gbps).magnitude, 100),
     ]
     for label, value, threshold in conversions:
         if abs(value) > threshold:
@@ -346,7 +349,7 @@ def test_extended_gpu_specs():
     ok &= check("V100 TDP", V100_TDP.to(watt).magnitude, 300.0)
 
     # B200
-    ok &= check("B200 FP16", B200_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 4500.0)
+    ok &= check("B200 FP16", B200_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 2250.0)
     ok &= check("B200 BW", B200_MEM_BW.to(TB / second).magnitude, 8.0)
     ok &= check("B200 Mem", B200_MEM_CAPACITY.to(GiB).magnitude, 192.0)
 
@@ -380,8 +383,8 @@ def test_interconnect_specs():
     ok &= check("PCIe Gen5", PCIE_GEN5_BW.to(GB / second).magnitude, 64.0)
     ok &= check("IB HDR", INFINIBAND_HDR_BW.to(Gbps).magnitude, 200.0)
     ok &= check("IB NDR", INFINIBAND_NDR_BW.to(Gbps).magnitude, 400.0)
-    ok &= check("100G net", NETWORK_100G_BW.to(Gbps).magnitude, 100.0)
-    ok &= check("100G -> GB/s", NETWORK_100G_BW.to(GB / second).magnitude, 12.5)
+    ok &= check("100G net", Systems.Fabrics.Ethernet_100G.bandwidth.to(Gbps).magnitude, 100.0)
+    ok &= check("100G -> GB/s", Systems.Fabrics.Ethernet_100G.bandwidth.to(GB / second).magnitude, 12.5)
     return ok
 
 
@@ -390,16 +393,20 @@ def test_interconnect_specs():
 def test_energy_specs():
     """Verify energy constants are consistent."""
     ok = True
+    # Op/memory energy is a tech-class fact (Hardware.Tech), not a flat constant.
+    op = Hardware.Tech.Op
+    mem = Hardware.Tech.Memory
     # FP32 > FP16 > INT8 (energy ordering)
-    fp32 = ENERGY_FLOP_FP32_PJ.magnitude
-    fp16 = ENERGY_FLOP_FP16_PJ.magnitude
-    int8 = ENERGY_OP_INT8_PJ.m_as(ureg.picojoule / count)
+    fp32 = op.FlopFp32.energy.magnitude
+    fp16 = op.FlopFp16.energy.magnitude
+    # Per-op energies carry pJ/flop since the 2026-06-06 dimension split.
+    int8 = op.OpInt8.energy.m_as(ureg.picojoule / ureg.flop)
     if not (fp32 > fp16 > int8):
         FAILURES.append(f"  ✗ Energy ordering: FP32={fp32} > FP16={fp16} > INT8={int8}")
         ok = False
-    ok &= check("DRAM >> compute", ENERGY_DRAM_ACCESS_PJ.magnitude / ENERGY_FLOP_FP32_PJ.magnitude, 173.0, tol=0.05)
+    ok &= check("DRAM >> compute", mem.DRAM.energy_per_access.magnitude / op.FlopFp32.energy.magnitude, 173.0, tol=0.05)
     ok &= check("L2 > L1 > reg",
-                 ENERGY_SRAM_L2_PJ.magnitude / ENERGY_SRAM_L1_PJ.magnitude, 4.0)
+                 mem.L2.energy_per_access.magnitude / mem.L1.energy_per_access.magnitude, 4.0)
     return ok
 
 
@@ -413,7 +420,7 @@ def test_model_specs():
     ok &= check("MobileNetV2 3.5 Mparam", MOBILENETV2_PARAMS.to(Mparam).magnitude, 3.5)
     ok &= check("Llama3-8B 8030 Mparam", LLAMA3_8B_PARAMS.to(Mparam).magnitude, 8030.0)
     ok &= check("BERT 22 GFLOPs", BERT_BASE_FLOPs.to(GFLOPs).magnitude, 22.0)
-    ok &= check("MobileNetV2 0.3 GFLOPs", MOBILENETV2_FLOPs.to(GFLOPs).magnitude, 0.3)
+    ok &= check("MobileNetV2 0.6 GFLOPs", MOBILENETV2_FLOPs.to(GFLOPs).magnitude, 0.6)
     return ok
 
 
@@ -444,7 +451,7 @@ def test_formula_helpers():
 
     # fmt()
     ok &= check("fmt GB/s", float(fmt(A100_MEM_BW, "GB/s", precision=0, commas=False)), 2039.0)
-    ok &= check("fmt ms", float(fmt(RESNET50_FLOPs / A100_FLOPS_FP16_TENSOR, "ms", 3, commas=False)), 0.013, tol=0.1)
+    ok &= check("fmt ms", float(fmt(RESNET50_FLOPs / A100_FLOPS_FP16_TENSOR, "ms", 3, commas=False)), 0.026, tol=0.1)
 
     # fmt_unit()
     if fmt_unit(A100_FLOPS_FP16_TENSOR) != "TFLOP/s":
@@ -452,9 +459,11 @@ def test_formula_helpers():
             f"  ✗ fmt_unit() FLOP rate notation: got '{fmt_unit(A100_FLOPS_FP16_TENSOR)}', expected 'TFLOP/s'"
         )
         ok = False
-    if fmt_unit(1 * GFLOPs) != "GFLOPs":
+    # 2026-06-06 audit: fmt_unit now shares fmt_qty's label table, so bare
+    # FLOP work units render singular ('GFLOP'), matching prose suffixes.
+    if fmt_unit(1 * GFLOPs) != "GFLOP":
         FAILURES.append(
-            f"  ✗ fmt_unit() FLOP count notation: got '{fmt_unit(1 * GFLOPs)}', expected 'GFLOPs'"
+            f"  ✗ fmt_unit() FLOP count notation: got '{fmt_unit(1 * GFLOPs)}', expected 'GFLOP'"
         )
         ok = False
 
@@ -482,10 +491,10 @@ def test_hardware_wrong_unit_raises():
                 capacity=80 * GiB,
                 bandwidth=2039 * GB / second,
             ))
-        # Verify backward-compatible property access
-        assert node.peak_flops == 312 * TFLOPs / second
-        assert node.memory_capacity == 80 * GiB
-        assert node.memory_bw == 2039 * GB / second
+        # Verify canonical nested access to compute/memory specs
+        assert node.compute.peak_flops == 312 * TFLOPs / second
+        assert node.memory.capacity == 80 * GiB
+        assert node.memory.bandwidth == 2039 * GB / second
     except Exception as e:
         FAILURES.append(f"  ✗ HardwareNode construction failed unexpectedly: {e}")
         ok = False

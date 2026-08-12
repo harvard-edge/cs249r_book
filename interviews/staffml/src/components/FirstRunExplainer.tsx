@@ -17,9 +17,9 @@
  */
 
 import { useEffect, useState } from "react";
-import { X, Target, Crosshair, Calculator, Cpu, Clock, Repeat } from "lucide-react";
+import { X, Target, Crosshair, Calculator, Cpu, Clock, Repeat, Mic2, GitBranch, BarChart3 } from "lucide-react";
 
-export type ModeKey = "practice" | "gauntlet";
+export type ModeKey = "practice" | "gauntlet" | "interview";
 
 interface ModeContent {
   icon: React.ComponentType<{ className?: string }>;
@@ -48,6 +48,17 @@ const MODE_CONTENT: Record<ModeKey, ModeContent> = {
       { icon: Clock, text: "Pick a length (5 / 10 / 15 questions, or one deep design problem). The clock starts on Begin." },
       { icon: Calculator, text: "Hardware Ref and Napkin Calc are collapsed by default. Open them only when a real interview would let you peek." },
       { icon: Target, text: "After each question: type your answer, reveal, compare against the model, then self-rate Skip / Wrong / Partial / Nailed." },
+    ],
+  },
+  interview: {
+    icon: Mic2,
+    title: "Live Interview",
+    tagline: "Conversational. Adaptive. The AI interviewer follows up, probes weak areas, and does napkin math with you.",
+    bullets: [
+      { icon: Mic2, text: "An AI interviewer conducts a conversational mock interview, presenting real vault questions and following up on your answers." },
+      { icon: GitBranch, text: "Questions follow chains: the interviewer probes deeper when you struggle and advances to harder follow-ups when you are strong." },
+      { icon: BarChart3, text: "At the end, you get per-area ratings with evidence from your answers and specific practice recommendations." },
+      { icon: Clock, text: "Choose 15, 30, or 45 minutes. The interviewer manages pacing and topic coverage automatically." },
     ],
   },
 };

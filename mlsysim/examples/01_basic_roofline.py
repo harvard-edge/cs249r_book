@@ -17,9 +17,10 @@ def main():
     a100 = mlsysim.Hardware.Cloud.A100
     h100 = mlsysim.Hardware.Cloud.H100
 
-    # 3. Evaluate the A100
+    # 3. Evaluate the A100 (See Vol 1, Benchmarking)
+    from mlsysim.solvers import SingleNodeModel
     print("--- A100 Performance ---")
-    prof_a100 = mlsysim.Engine.solve(
+    prof_a100 = SingleNodeModel().solve(
         model=model,
         hardware=a100,
         batch_size=1,
@@ -29,7 +30,7 @@ def main():
 
     print("\n--- H100 Performance ---")
     # 4. Evaluate the H100
-    prof_h100 = mlsysim.Engine.solve(
+    prof_h100 = SingleNodeModel().solve(
         model=model,
         hardware=h100,
         batch_size=1,

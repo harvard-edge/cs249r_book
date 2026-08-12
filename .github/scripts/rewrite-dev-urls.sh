@@ -1,13 +1,16 @@
 #!/usr/bin/env bash
 # Rewrite absolute mlsysbook.ai URLs to relative paths for the dev preview site.
 #
-# Usage: rewrite-dev-urls.sh <subsite> <build-dir> [--shallow]
+# Usage: rewrite-dev-urls.sh <subsite> <build-dir> [--shallow] [--live-external]
 #
 #   subsite   — the caller's subsite name on the dev site (e.g. "slides", "instructors").
 #               Use "root" for content deployed at the dev site root (the landing page).
 #   build-dir — path to the directory containing rendered HTML files to rewrite.
-#   --shallow — only process HTML files directly in build-dir (no recursion into subdirs).
-#               Useful for unified site builds where subsites are rewritten separately.
+#   --shallow       — only process HTML files directly in build-dir (no recursion into subdirs).
+#                     Useful for unified site builds where subsites are rewritten separately.
+#   --live-external — rewrite the current volume pair for dev preview, but leave
+#                     other ecosystem subsites on mlsysbook.ai when they are not
+#                     deployed in that preview repository.
 #
 # The script knows the full site map and computes relative paths automatically.
 # When a new subsite is added, update SUBSITES below — one place, all workflows.
@@ -16,7 +19,22 @@ set -euo pipefail
 
 SUBSITE="${1:?Usage: rewrite-dev-urls.sh <subsite> <build-dir> [--shallow]}"
 BUILD_DIR="${2:?Usage: rewrite-dev-urls.sh <subsite> <build-dir> [--shallow]}"
-SHALLOW="${3:-}"
+SHALLOW=""
+LIVE_EXTERNALS=0
+for arg in "${@:3}"; do
+  case "$arg" in
+    --shallow)
+      SHALLOW="--shallow"
+      ;;
+    --live-external)
+      LIVE_EXTERNALS=1
+      ;;
+    *)
+      echo "❌ Unknown option '$arg'." >&2
+      exit 1
+      ;;
+  esac
+done
 
 # ── Site map ──────────────────────────────────────────────────────────────────
 # Maps mlsysbook.ai/<key>/ to the dev site path <value>/.
@@ -69,15 +87,23 @@ repeat_parent_prefix() {
   printf '%s' "$prefix"
 }
 
+replace_url() {
+  local search="$1"
+  local replacement="$2"
+  local file="$3"
+  SEARCH="$search" REPLACEMENT="$replacement" perl -0pi -e 's|\Q$ENV{SEARCH}\E|$ENV{REPLACEMENT}|g' "$file"
+}
+
 # ── Rewrite ───────────────────────────────────────────────────────────────────
 echo "🔗 Rewriting mlsysbook.ai URLs for dev site (subsite=$SUBSITE, subsite_depth=$SUBSITE_DEPTH)..."
 
-FIND_DEPTH=""
+FIND_ARGS=("$BUILD_DIR")
 if [[ "$SHALLOW" == "--shallow" ]]; then
-  FIND_DEPTH="-maxdepth 1"
+  FIND_ARGS+=("-maxdepth" "1")
 fi
+FIND_ARGS+=("-name" "*.html" "-type" "f")
 
-find "$BUILD_DIR" $FIND_DEPTH -name "*.html" -type f | while read -r f; do
+find "${FIND_ARGS[@]}" | while IFS= read -r f; do
   file_dir="$(dirname "$f")"
   rel_dir="${file_dir#$BUILD_DIR}"
   rel_dir="${rel_dir#/}"
@@ -102,23 +128,28 @@ find "$BUILD_DIR" $FIND_DEPTH -name "*.html" -type f | while read -r f; do
     # compared dev_path to SUBSITE which silently failed for nested subsites.
     if [[ "$SUBSITE" != "root" && "$key" == "$SUBSITE" ]]; then
       # Self-links: mlsysbook.ai/<key>/ → current subsite root from this file.
-      sed -i "s|https://mlsysbook.ai/${key}/|${SELF_PREFIX}|g" "$f"
+      replace_url "https://mlsysbook.ai/${key}/" "$SELF_PREFIX" "$f"
     else
-      sed -i "s|https://mlsysbook.ai/${key}/|${ROOT_PREFIX}${dev_path}/|g" "$f"
+      if [[ "$LIVE_EXTERNALS" -eq 1 && "$key" != "vol1" && "$key" != "vol2" ]]; then
+        continue
+      fi
+      replace_url "https://mlsysbook.ai/${key}/" "${ROOT_PREFIX}${dev_path}/" "$f"
     fi
   done
 
   # Catch-all: any remaining mlsysbook.ai/ base URL → dev root.
   # (Used by the navbar title-href and footer site links.)
-  if [[ "$SUBSITE" == "root" ]]; then
-    if [[ "$FILE_DEPTH" -eq 0 ]]; then
-      sed -i 's|https://mlsysbook.ai/|./|g' "$f"
+  if [[ "$LIVE_EXTERNALS" -eq 0 ]]; then
+    if [[ "$SUBSITE" == "root" ]]; then
+      if [[ "$FILE_DEPTH" -eq 0 ]]; then
+        replace_url "https://mlsysbook.ai/" "./" "$f"
+      else
+        replace_url "https://mlsysbook.ai/" "$SELF_PREFIX" "$f"
+      fi
     else
-      sed -i "s|https://mlsysbook.ai/|${SELF_PREFIX}|g" "$f"
+      replace_url "https://mlsysbook.ai/" "$ROOT_PREFIX" "$f"
     fi
-  else
-    sed -i "s|https://mlsysbook.ai/|${ROOT_PREFIX}|g" "$f"
   fi
 done
 
-echo "✅ URL rewriting complete ($(find "$BUILD_DIR" $FIND_DEPTH -name '*.html' -type f | wc -l) files processed)"
+echo "✅ URL rewriting complete ($(find "${FIND_ARGS[@]}" | wc -l) files processed)"

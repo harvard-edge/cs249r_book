@@ -17,6 +17,9 @@ def _json_safe(value: Any) -> Any:
         return [_json_safe(v) for v in value]
     if isinstance(value, tuple):
         return [_json_safe(v) for v in value]
+    # Duck-typed Pint Quantity check (avoids importing the registry here);
+    # serialize as the compact pretty string ("3.35 TB/s") so the unit travels
+    # with the number in JSON output.
     if hasattr(value, "magnitude") and hasattr(value, "units"):
         return f"{value:~P}"
     return value
@@ -52,8 +55,10 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
                 row["flops"] = str(item.compute.peak_flops)
                 row["bandwidth"] = str(item.memory.bandwidth)
             elif hasattr(item, "parameters"):
-                row["parameters"] = str(item.parameters)
-                row["layers"] = item.layers
+                params = getattr(item, "parameters", None)
+                row["architecture"] = getattr(item, "architecture", None)
+                row["parameters"] = str(params) if params is not None else None
+                row["layers"] = getattr(item, "layers", None)
             data.append(row)
         print_json({registry_name: data})
         return
@@ -69,11 +74,14 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
             print("| Model Name | Architecture | Parameters | Layers |")
             print("|---|---|---|---|")
             for item in items:
-                print(f"| {item.name} | {item.architecture} | {item.parameters:~P} | {item.layers} |")
+                layers_str = str(getattr(item, "layers", "-") or "-")
+                params = getattr(item, "parameters", None)
+                params_str = f"{params:~P}" if hasattr(params, "magnitude") else (str(params) if params is not None else "-")
+                print(f"| {item.name} | {item.architecture} | {params_str} | {layers_str} |")
         return
 
     table = Table(title=f"The MLSys {registry_name.title()} Zoo", box=None, padding=(0, 2))
-    
+
     if items and hasattr(items[0], "compute"):
         table.add_column("Hardware Name", style="cyan", no_wrap=True)
         table.add_column("Peak FLOP/s", justify="right", style="green")
@@ -82,7 +90,7 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
         for item in items:
             tdp_str = str(item.tdp) if item.tdp else "N/A"
             table.add_row(item.name, f"{item.compute.peak_flops:~P}", f"{item.memory.bandwidth:~P}", tdp_str)
-            
+
     elif items and hasattr(items[0], "parameters"):
         table.add_column("Model Name", style="cyan", no_wrap=True)
         table.add_column("Architecture", style="white")
@@ -97,15 +105,31 @@ def render_zoo_table(registry_name: str, items: list, output_format: str):
 
 def render_scorecard(eval_obj, output_format: str):
     """Renders the unified 3-lens SystemEvaluation scorecard."""
-    
+
     def _format_metric(k: str, v: Any) -> str:
-        """Formats a physical quantity or scalar into a human-readable string for CLI rendering."""
+        """Format a scalar metric for CLI rendering, with a unit chosen by key.
+
+        Units are matched on exact word/suffix boundaries of the snake_case
+        key (e.g. ``step_latency`` -> " ms") rather than substring containment,
+        so a key like ``memory_utilization`` can never pick up a " GB" suffix.
+        Keys whose unit is not recognized render as a bare number — matching
+        the metric dicts built in ``engine/evaluation.py``, where e.g.
+        ``scaling_efficiency`` and ``memory_utilization`` are dimensionless.
+        """
+        def _word_match(key: str, word: str) -> bool:
+            parts = key.lower().split("_")
+            return word in parts
+
         if isinstance(v, float):
+            if _word_match(k, "mfu"):
+                return f"{v:.1%}"
             val = f"{v:,.2f}"
-            if "latency" in k.lower(): val += " ms"
-            elif "throughput" in k.lower(): val += " / s"
-            elif "memory" in k.lower() and "gb" in k.lower(): val += " GB"
-            elif "mfu" in k.lower(): val = f"{v:.1%}"
+            if _word_match(k, "latency"):
+                val += " ms"
+            elif _word_match(k, "throughput"):
+                val += " / s"
+            elif _word_match(k, "memory") and _word_match(k, "gb"):
+                val += " GB"
             return val
         return f"{v}"
 
@@ -115,16 +139,16 @@ def render_scorecard(eval_obj, output_format: str):
         return
     elif output_format == "markdown":
         print(f"## MLSys·im Plan: {eval_obj.scenario_name}")
-        
+
         f_icon = "🟢" if eval_obj.feasibility.status == "PASS" else "🔴"
         print(f"\n### {f_icon} Feasibility: {eval_obj.feasibility.status}")
         print(f"{eval_obj.feasibility.summary}")
-        
+
         print(f"\n### Performance: {eval_obj.performance.status}")
         print(f"{eval_obj.performance.summary}")
         for k, v in eval_obj.performance.metrics.items():
             print(f"- **{k.replace('_', ' ').title()}**: {_format_metric(k, v)}")
-            
+
         if eval_obj.macro.status != "SKIPPED":
             print(f"\n### Ops & Macro: {eval_obj.macro.status}")
             print(f"{eval_obj.macro.summary}")
@@ -135,9 +159,9 @@ def render_scorecard(eval_obj, output_format: str):
         # Generate a standalone HTML dashboard.
         f_icon = "🟢" if eval_obj.feasibility.status == "PASS" else "🔴"
         f_color = "#10b981" if eval_obj.feasibility.status == "PASS" else "#ef4444"
-        
+
         perf_html = "".join([f"<tr><td style='padding:8px; border-bottom:1px solid #eee;'><b>{k.replace('_', ' ').title()}</b></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{_format_metric(k, v)}</td></tr>" for k, v in eval_obj.performance.metrics.items()])
-        
+
         macro_html = ""
         if eval_obj.macro.status != "SKIPPED":
             macro_rows = "".join([f"<tr><td style='padding:8px; border-bottom:1px solid #eee;'><b>{k.replace('_', ' ').title()}</b></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{_format_metric(k, v)}</td></tr>" for k, v in eval_obj.macro.metrics.items()])
@@ -148,7 +172,7 @@ def render_scorecard(eval_obj, output_format: str):
                 <table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:15px;">{macro_rows}</table>
             </div>
             """
-            
+
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -166,12 +190,12 @@ def render_scorecard(eval_obj, output_format: str):
 <body>
     <div class="container">
         <h2>MLSys·im Plan<br><span style="color:#6b7280; font-size:18px; font-weight:normal;">{eval_obj.scenario_name}</span></h2>
-        
+
         <div class="card" style="border-left: 4px solid {f_color};">
             <h3 style="color:{f_color};">{f_icon} Feasibility: {eval_obj.feasibility.status}</h3>
             <p>{eval_obj.feasibility.summary}</p>
         </div>
-        
+
         <div class="card" style="border-left: 4px solid #3b82f6;">
             <h3 style="color:#3b82f6;">Performance: {eval_obj.performance.status}</h3>
             <p>{eval_obj.performance.summary}</p>
@@ -179,7 +203,7 @@ def render_scorecard(eval_obj, output_format: str):
                 {perf_html}
             </table>
         </div>
-        
+
         {macro_html}
     </div>
 </body>
@@ -188,8 +212,8 @@ def render_scorecard(eval_obj, output_format: str):
         return
 
     # Human Mode: Render the UI Scorecard
-    # We use the unified scorecard() method from the core library to ensure 
-    # the CLI matches the textbook (Jupyter) output exactly.
+    # We use the unified scorecard() method from the core library to ensure
+    # the CLI matches the notebook scorecard output exactly.
     console_out.print(eval_obj.scorecard())
 
 
@@ -208,7 +232,7 @@ def render_optimization(opt_name: str, opt_result, output_format: str):
         return
     elif output_format == "html":
         config_html = "".join([f"<tr><td style='padding:8px; border-bottom:1px solid #eee;'><b>{k.replace('_', ' ').title()}</b></td><td style='padding:8px; border-bottom:1px solid #eee; text-align:right;'>{v}</td></tr>" for k, v in opt_result.best_config.items()])
-        
+
         html_content = f"""<!DOCTYPE html>
 <html>
 <head>
@@ -225,12 +249,12 @@ def render_optimization(opt_name: str, opt_result, output_format: str):
 <body>
     <div class="container">
         <h2>🔍 MLSys·im Optimize<br><span style="color:#6b7280; font-size:18px; font-weight:normal;">{opt_name}</span></h2>
-        
+
         <div class="card" style="border-left: 4px solid #06b6d4; text-align: center;">
             <h3 style="color:#06b6d4; font-size: 14px; text-transform: uppercase; letter-spacing: 1px;">Objective Value</h3>
             <div style="font-size: 32px; font-weight: bold; color: #111827;">{opt_result.objective_value:,.2f}</div>
         </div>
-        
+
         <div class="card" style="border-left: 4px solid #10b981;">
             <h3 style="color:#10b981;">Best Configuration</h3>
             <table style="width:100%; border-collapse:collapse; font-size:14px; margin-top:15px; margin-bottom: 15px;">
@@ -247,14 +271,14 @@ def render_optimization(opt_name: str, opt_result, output_format: str):
         return
 
     table = Table(show_header=False, box=None, padding=(0, 2))
-    
+
     table.add_row("[bold cyan]Objective Value[/bold cyan]", f"{opt_result.objective_value:,.2f}")
     table.add_row("", "")
-    
+
     table.add_row("[bold green]Best Configuration[/bold green]", "")
     for k, v in opt_result.best_config.items():
         table.add_row(f"  • {k.replace('_', ' ').title()}", f"{v}")
-        
+
     table.add_row("", "")
     table.add_row(f"[italic gray]Searched {opt_result.total_searched} configurations.[/italic gray]", "")
 
@@ -264,5 +288,5 @@ def render_optimization(opt_name: str, opt_result, output_format: str):
         border_style="cyan",
         expand=False
     )
-    
+
     console_out.print(panel)

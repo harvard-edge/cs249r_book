@@ -383,6 +383,10 @@ class Tensor:
             return Tensor(self.data + other)
         ### END SOLUTION
 
+    def __radd__(self, other):
+        """Support natural scalar arithmetic: scalar + tensor."""
+        return self.__add__(other)
+
     def __sub__(self, other):
         """Subtract two tensors element-wise.
 
@@ -409,6 +413,12 @@ class Tensor:
         else:
             return Tensor(self.data - other)
         ### END SOLUTION
+
+    def __rsub__(self, other):
+        """Support natural scalar arithmetic: scalar - tensor."""
+        if isinstance(other, Tensor):
+            return Tensor(other.data - self.data)
+        return Tensor(other - self.data)
 
     def __mul__(self, other):
         """Multiply two tensors element-wise (NOT matrix multiplication).
@@ -437,6 +447,10 @@ class Tensor:
             return Tensor(self.data * other)
         ### END SOLUTION
 
+    def __rmul__(self, other):
+        """Support natural scalar arithmetic: scalar * tensor."""
+        return self.__mul__(other)
+
     def __truediv__(self, other):
         """Divide two tensors element-wise.
 
@@ -463,6 +477,12 @@ class Tensor:
         else:
             return Tensor(self.data / other)
         ### END SOLUTION
+
+    def __rtruediv__(self, other):
+        """Support natural scalar arithmetic: scalar / tensor."""
+        if isinstance(other, Tensor):
+            return Tensor(other.data / self.data)
+        return Tensor(other / self.data)
 
     def _validate_matmul_shapes(self, other):
         """Validate that two tensors are compatible for matrix multiplication.
@@ -651,6 +671,13 @@ class Tensor:
             for i, dim in enumerate(new_shape):
                 if i != unknown_idx:
                     known_size *= dim
+            if self.size % known_size != 0:
+                raise ValueError(
+                    f"Cannot infer -1 dimension: {self.size} elements is not "
+                    f"divisible by the known dimensions product {known_size}\n"
+                    f"  ❌ {self.size} % {known_size} = {self.size % known_size}\n"
+                    f"  💡 The -1 dimension must be a whole number"
+                )
             unknown_dim = self.size // known_size
             new_shape = list(new_shape)
             new_shape[unknown_idx] = unknown_dim
@@ -922,6 +949,7 @@ Element-wise Operations:
 
 Broadcasting with Scalars (very common in ML):
 [1, 2, 3] * 2     = [2, 4, 6]      (scale all values)
+2 * [1, 2, 3]     = [2, 4, 6]      (same scaling, scalar on the left)
 [1, 2, 3] - 1     = [0, 1, 2]      (shift all values)
 [2, 4, 6] / 2     = [1, 2, 3]      (normalize all values)
 
@@ -957,7 +985,7 @@ before element-wise operations like loss computation.
 """
 ### 🧪 Unit Test: Arithmetic Operations
 
-This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior.
+This test validates our arithmetic operations work correctly with both tensor-tensor and tensor-scalar operations, including broadcasting behavior. Scalar arithmetic should feel natural whether the scalar appears before or after the tensor.
 
 **What we're testing**: Addition, subtraction, multiplication, division with broadcasting
 **Why it matters**: Foundation for batch processing, data normalization, and feature scaling
@@ -977,6 +1005,10 @@ def test_unit_arithmetic_operations():
 
     # Test tensor + scalar (very common in ML)
     result = a + 10
+    assert np.array_equal(result.data, np.array([11, 12, 13], dtype=np.float32))
+
+    # Scalar on the left should behave naturally too
+    result = 10 + a
     assert np.array_equal(result.data, np.array([11, 12, 13], dtype=np.float32))
 
     # Test broadcasting with different shapes (matrix + vector)
@@ -1006,9 +1038,19 @@ def test_unit_arithmetic_operations():
     result = a * 2
     assert np.array_equal(result.data, np.array([2, 4, 6], dtype=np.float32))
 
+    result = 2 * a
+    assert np.array_equal(result.data, np.array([2, 4, 6], dtype=np.float32))
+
     # Test division (normalization)
     result = b / 2
     assert np.array_equal(result.data, np.array([2.0, 2.5, 3.0], dtype=np.float32))
+
+    result = 12 / b
+    assert np.allclose(result.data, np.array([3.0, 12.0 / 5.0, 2.0], dtype=np.float32))
+
+    # Order matters for subtraction, but scalar-left arithmetic should still work
+    result = 10 - a
+    assert np.array_equal(result.data, np.array([9, 8, 7], dtype=np.float32))
 
     # Test chaining operations (common in ML pipelines)
     normalized = (a - 2) / 2  # Center and scale
@@ -1388,10 +1430,19 @@ def test_unit_shape_manipulation():
     vector_t = vector.transpose()
     assert np.array_equal(vector.data, vector_t.data)
 
-    # Test specific dimension transpose
-    tensor_3d = Tensor([[[1, 2], [3, 4]], [[5, 6], [7, 8]]])  # (2, 2, 2)
-    swapped = tensor_3d.transpose(0, 2)  # Swap first and last dimensions
-    assert swapped.shape == (2, 2, 2)  # Same shape but data rearranged
+    # Non-symmetric shape so a wrong axis swap produces the wrong shape and data.
+    tensor_3d = Tensor(np.arange(24).reshape(2, 3, 4))  # (2, 3, 4)
+    swapped = tensor_3d.transpose(0, 2)  # (4, 3, 2)
+    assert swapped.shape == (4, 3, 2), (
+        f"transpose(0, 2) on (2,3,4) should give (4,3,2), got {swapped.shape}"
+    )
+    for i in range(2):
+        for j in range(3):
+            for k in range(4):
+                assert swapped.data[k, j, i] == tensor_3d.data[i, j, k], (
+                    f"Data mismatch at [{k},{j},{i}]: expected {tensor_3d.data[i,j,k]}, "
+                    f"got {swapped.data[k,j,i]}"
+                )
 
     # Test common reshape pattern (flatten multi-dimensional data)
     batch_images = Tensor(rng.random((2, 3, 4)))  # (batch=2, height=3, width=4)

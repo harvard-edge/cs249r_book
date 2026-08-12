@@ -6,7 +6,7 @@ Generates Quarto-compatible Markdown tables for the textbook's backmatter.
 Extracts live data from the mlsysim Hardware and Model registries.
 """
 
-from mlsysim.core.constants import Q_
+from mlsysim.core.units import Q_
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 

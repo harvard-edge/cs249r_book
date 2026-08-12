@@ -27,7 +27,11 @@ CONTENTS = REPO_ROOT / "book" / "quarto" / "contents"
 
 CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
-LEGO_MARK = re.compile(r"#\s*[│┌].*LEGO|#\s*\│ Exports:")
+LEGO_MARK = re.compile(
+    r"#\s*[│┌].*LEGO"
+    r"|#\s*│\s*(?:Context|Goal|Scope|Show|How):"
+    r"|#.*\b4\.\s*OUTPUT\b"
+)
 VALUE_ASSIGN = re.compile(r"^(\s+)(\w+_value)\s*=\s*(.+?)\s*(?:#.*)?$", re.M)
 BARE_NUMERIC = re.compile(r"^[\d_]+(?:\.\d+)?(?:e[+-]?\d+)?$", re.I)
 
@@ -73,7 +77,7 @@ def _lego_cell_blocks(path: Path) -> list[tuple[int, str]]:
             while j < len(lines) and not CELL_END.match(lines[j]):
                 j += 1
             code = "\n".join(lines[start:j])
-            if LEGO_MARK.search(code) or "Exports:" in code:
+            if LEGO_MARK.search(code):
                 blocks.append((i + 1, code))
             i = j + 1
         else:

@@ -45,10 +45,16 @@ for (const name of targets) {
   const siteResult = { url: cfg.url, checks: {}, warnings: [], errors: [] };
 
   try {
-    const resp = await page.goto(cfg.url, { waitUntil: cfg.waitUntil || 'networkidle', timeout: 30000 });
+    const linkScope = cfg.linkScope || `${new URL(cfg.url).origin}/`;
+    const resp = await page.goto(cfg.url, { waitUntil: cfg.waitUntil || 'domcontentloaded', timeout: 30000 });
     siteResult.checks.httpStatus = resp ? resp.status() : null;
     if (!resp || resp.status() !== 200) {
       siteResult.errors.push(`HTTP ${resp?.status() ?? 'n/a'} on landing`);
+    }
+
+    const settleMs = cfg.settleMs ?? 1000;
+    if (settleMs > 0) {
+      await page.waitForTimeout(settleMs);
     }
 
     const title = await page.title();
@@ -76,10 +82,17 @@ for (const name of targets) {
       if (!found) siteResult.errors.push(`expected heading "${h}" not found`);
     }
 
+    const bodyText = await page.locator('body').innerText().catch(() => '');
+    for (const text of (cfg.expectedText || [])) {
+      if (!bodyText.includes(text)) {
+        siteResult.errors.push(`expected text "${text}" not found`);
+      }
+    }
+
     const linkHrefs = await page.$$eval('a[href]', (as) => as.map((a) => a.getAttribute('href')).filter(Boolean));
     const sameOrigin = [...new Set(linkHrefs
       .map((h) => { try { return new URL(h, cfg.url).toString(); } catch { return null; } })
-      .filter((u) => u && u.startsWith('https://mlsysbook.ai/'))
+      .filter((u) => u && u.startsWith(linkScope))
     )];
     siteResult.checks.sameOriginLinkCount = sameOrigin.length;
 
@@ -94,6 +107,7 @@ for (const name of targets) {
     }
     siteResult.checks.brokenLinkCount = brokenLinks.length;
     if (brokenLinks.length > 0) siteResult.brokenLinks = brokenLinks;
+    if (brokenLinks.length > 0) siteResult.errors.push(`${brokenLinks.length} broken same-origin links`);
 
     const additional = cfg.additionalPages || [];
     const additionalResults = {};

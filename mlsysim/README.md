@@ -15,6 +15,13 @@
     <b>A first-principles analytical modeling framework for ML systems.</b><br>
     Designed for education and early design-space reasoning before empirical benchmarking.
   </blockquote>
+  <p>
+    <a href="https://pypi.org/project/mlsysim/"><img src="https://img.shields.io/pypi/v/mlsysim?logo=pypi&logoColor=white" alt="PyPI"></a>
+    <a href="https://mlsysbook.ai/mlsysim"><img src="https://img.shields.io/badge/docs-mlsysbook.ai%2Fmlsysim-blue?logo=quarto&logoColor=white" alt="Documentation"></a>
+  </p>
+  <p>
+    <code>pip install mlsysim</code> · <a href="https://mlsysbook.ai/mlsysim">Documentation</a> · <a href="https://mlsysbook.ai/mlsysim/getting-started.html">Getting Started</a> · <a href="https://github.com/harvard-edge/cs249r_book/issues">Issues</a>
+  </p>
 </div>
 
 ---
@@ -44,21 +51,27 @@
     </tr>
     <tr>
       <td align="center"><b>Layer C</b></td>
-      <td><b>Infrastructure</b><br><code>mlsysim.infra</code></td>
+      <td><b>Infrastructure</b><br><code>mlsysim.infrastructure</code></td>
       <td>Grid profiles and datacenter sustainability.<br><i>e.g., PUE, Carbon Intensity, WUE</i></td>
     </tr>
     <tr>
       <td align="center"><b>Layer D</b></td>
       <td><b>Systems & Topology</b><br><code>mlsysim.systems</code></td>
-      <td>Fleet configurations and network fabrics.<br><i>e.g., Doorbell, AutoDrive Scenarios</i></td>
+      <td>Nodes, racks, fleet configurations, and network fabrics.<br><i>e.g., <code>Systems.Racks.DGX_H100_4Node</code>, <code>Systems.Clusters.Frontier_8K</code></i></td>
     </tr>
     <tr>
       <td align="center"><b>Layer E</b></td>
-      <td><b>Execution & Resolvers</b><br><code>mlsysim.core.solver</code></td>
+      <td><b>Execution & Resolvers</b><br><code>mlsysim.engine.solver</code></td>
       <td>The 3-tier math engine: Models, Solvers, and Optimizers (Design space search).</td>
     </tr>
   </tbody>
 </table>
+
+`Scenarios.*` sits above the stack as the runnable composition layer: it pairs a
+`Models.*` workload with a `Hardware.*` or `Systems.*` target and local
+constraints such as latency or power. Non-executable real-world anchors live in
+`ReferenceStats.*`. There are no compatibility aliases between these namespaces:
+new and existing code should use the canonical path directly.
 
 ---
 
@@ -89,7 +102,7 @@ workload:
   batch_size: 4096
 hardware:
   name: "H100"
-  nodes: 64
+  accelerators: 64
 ops:
   region: "Quebec"
   duration_days: 14.0
@@ -194,13 +207,14 @@ The framework is just as useful inside a Python script or Jupyter Notebook. The 
 
 ```python
 import mlsysim
+from mlsysim.engine.evaluation import SystemEvaluator
 
 # 1. Define the scenario
 model = mlsysim.Models.Language.Llama3_8B
 hardware = mlsysim.Hardware.Cloud.H100
 
 # 2. Run the evaluation
-evaluation = mlsysim.SystemEvaluator.evaluate(
+evaluation = SystemEvaluator.evaluate(
     scenario_name="Llama-3 8B on H100",
     model_obj=model,
     hardware_obj=hardware,
@@ -250,9 +264,12 @@ Thanks to these wonderful people for helping improve MLSys·im!
   <tbody>
     <tr>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️ 🧠 maintenance</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/aadityansha06"><img src="https://avatars.githubusercontent.com/u/96714228?v=4?v=4?s=80" width="80px;" alt="Aadityansha "/><br /><sub><b>Aadityansha </b></sub></a><br />🪲 🧑‍💻 🧪</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 ✍️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/hzeljko"><img src="https://avatars.githubusercontent.com/hzeljko?v=4?s=80" width="80px;" alt="Zeljko Hrcek"/><br /><sub><b>Zeljko Hrcek</b></sub></a><br />🧑‍💻</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/nyxst4ck"><img src="https://avatars.githubusercontent.com/u/289980115?v=4?v=4?s=80" width="80px;" alt="nyxst4ck"/><br /><sub><b>nyxst4ck</b></sub></a><br />✍️</td>
     </tr>
   </tbody>
 </table>

@@ -304,6 +304,10 @@ class MaintenanceCommand:
 
     def run_namespace(self, args) -> bool:
         """Handle `binder maintain ...` namespace commands."""
+        if not args or args == ["help"]:
+            self._print_fix_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder fix",
             description="Fix and manage book content",
@@ -332,8 +336,8 @@ class MaintenanceCommand:
             return ("-h" in args) or ("--help" in args)
 
         if not ns.topic:
-            parser.print_help()
-            return False
+            self._print_fix_help()
+            return True
 
         if ns.topic == "glossary":
             if ns.action not in (None, "paths"):
@@ -392,6 +396,26 @@ class MaintenanceCommand:
             )
 
         return False
+
+    def _print_fix_help(self) -> None:
+        """Print the `binder fix` namespace reference."""
+        table = Table(show_header=True, header_style="bold cyan", box=None)
+        table.add_column("Topic", style="cyan", width=16)
+        table.add_column("Actions", style="yellow", width=26)
+        table.add_column("Description", style="white", width=34)
+        table.add_row("glossary", "paths", "Repair glossary path references")
+        table.add_row("images", "compress", "Compress selected or all large images")
+        table.add_row("repo-health", "check", "Report oversized/generated repository files")
+        table.add_row("headers", "add, repair, list, remove", "Manage section IDs")
+        table.add_row("footnotes", "cleanup, reorganize, remove", "Repair footnote layout")
+        console.print(Panel(table, title="binder fix <topic> <action>", border_style="cyan"))
+        console.print("[dim]Examples:[/dim]")
+        console.print("  [cyan]./binder fix headers add --vol1 --dry-run[/cyan]")
+        console.print("  [cyan]./binder fix headers repair --path book/quarto/contents/vol1/training/training.qmd[/cyan]")
+        console.print("  [cyan]./binder fix images compress --all --smart-compression --apply[/cyan]")
+        console.print("  [cyan]./binder fix repo-health --json[/cyan]")
+        console.print("  [cyan]./binder fix footnotes cleanup --vol1 --dry-run[/cyan]")
+        console.print()
 
     def _resolve_content_path(self, path_arg, vol1: bool, vol2: bool) -> Path:
         """Resolve content path from args."""

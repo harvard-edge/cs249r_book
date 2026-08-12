@@ -30,11 +30,15 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from pathlib import Path
 
-INPUT = Path.home() / "Desktop/MIT_Press_Feedback/10_front_matter/data/front_matter_changes.json"
-ROOT = Path("/Users/VJ/GitHub/MLSysBook-release-audit/book/quarto/contents")
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers"
+try:
+    from .paths import DATA_ROOT, LEDGER_DIR, QUARTO_ROOT
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import DATA_ROOT, LEDGER_DIR, QUARTO_ROOT
+
+INPUT = DATA_ROOT / "10_front_matter/data/front_matter_changes.json"
+ROOT = QUARTO_ROOT
+OUT_DIR = LEDGER_DIR
 
 FRONT_MATTER_GLOBS = [
     "vol1/frontmatter/*.qmd",

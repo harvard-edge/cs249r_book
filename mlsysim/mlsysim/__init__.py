@@ -6,49 +6,50 @@ mlsysim: Machine Learning Systems Infrastructure and Modeling Platform
 __version__ = "0.1.2"
 
 from . import core
+from . import engine
 from . import hardware
 from . import models
 from . import platforms
-from . import infra
+from . import infrastructure
 from . import systems
 from . import sim
 from . import physics
 
 # AUTHORITATIVE API ENTRY POINTS
-from .core.engine import Engine
-from .core.scenarios import Scenario, Scenarios, Applications
+from .engine.engine import Engine
+from .engine.scenarios import Scenario, Scenarios
 from .hardware.registry import Hardware
 from .models.registry import Models
 from .platforms.registry import Platforms
 # Datasets loaded lazily via __getattr__ below.
 from .systems.registry import Systems
-from .infra.registry import Infrastructure
+from .infrastructure.registry import Infrastructure
 from .literature.registry import Literature
-from .ops import Ops, Monitoring
-from .core import calibration
-
-# AUTHORITATIVE SOLVERS
-from .core.solver import (
-    SingleNodeModel,
-    DistributedModel,
-    ReliabilityModel,
-    SustainabilityModel,
-    EconomicsModel,
-    ServingModel,
-    TrainingMemoryModel,
-    ServingCapacityModel,
-    DataModel,
-    PlacementOptimizer,
-)
+# Non-executable sourced anchors used by examples and external analyses.
+from .reference_stats.registry import ReferenceStats
+from .ops import Ops
+from .engine import calibration
 
 # AUTHORITATIVE MEASUREMENT (units + physics-only constants)
-from .core.constants import *  # noqa: F401,F403
+from .core.units import *  # noqa: F401,F403
 
 # AUTHORITATIVE PHYSICS FORMULAS
 from .physics import *  # noqa: F401,F403
 
 # AUTHORITATIVE FORMATTING
-from .fmt import fmt, fmt_int, fmt_qty, check, MarkdownStr
+from .fmt import (
+    fmt, fmt_int, fmt_qty, fmt_usd, fmt_eur, fmt_percent, fmt_pp, fmt_multiple,
+    fmt_multiple_range, fmt_time, fmt_rate, fmt_fps, fmt_count, fmt_params, fmt_tokens,
+    fmt_ratio, fmt_range, fmt_magnitude, fmt_text, fmt_display_math,
+    fmt_qty_range, fmt_time_range, fmt_count_range, fmt_usd_range,
+    fmt_percent_range, fmt_sci_qty,
+    fmt_power, fmt_energy, fmt_bandwidth, fmt_flop_rate, fmt_flops,
+    fmt_arithmetic_intensity, fmt_ops_rate, fmt_compute_efficiency,
+    fmt_area, fmt_heat_flux, fmt_specific_heat, fmt_memory, fmt_length, fmt_emissions, fmt_carbon_intensity, fmt_water,
+    fmt_water_rate, fmt_water_intensity, fmt_latency,
+    fmt_energy_per_op,
+    assert_qty_close, check, MarkdownStr,
+)
 
 
 def plot_evaluation_scorecard(*args, **kwargs):

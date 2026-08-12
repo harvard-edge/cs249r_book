@@ -169,7 +169,7 @@ jobs:
 
       - name: 📦 Install dependencies
         run: |
-          pip install build marimo
+          pip install build marimo uv
           pip install -r labs/requirements.txt
           pip install mlsysim/
 
@@ -178,6 +178,12 @@ jobs:
           cd mlsysim && python3 -m build --wheel
           echo "✅ Wheel built:"
           ls -la dist/*.whl
+
+      - name: 📦 Build mlsysbook-labs helper wheel
+        run: |
+          python3 -m build --wheel labs --outdir labs/dist
+          echo "✅ Lab helper wheel built:"
+          ls -la labs/dist/*.whl
 
       - name: 📦 Setup Node.js for Pyodide test
         uses: actions/setup-node@v6
@@ -208,7 +214,7 @@ jobs:
             console.log("Testing imports...");
             pyodide.runPython(`
               import mlsysim
-              from mlsysim.core.engine import Engine
+              from mlsysim import Engine
               print("✅ mlsysim imported successfully in Pyodide!")
             `);
           }
@@ -226,9 +232,12 @@ jobs:
           SMOKE_LABS="labs/vol1/lab_00_introduction.py labs/vol1/lab_01_ml_intro.py labs/vol2/lab_01_introduction.py labs/vol2/lab_05_dist_train.py"
           FAILED=""
 
-          # Setup wheel directory so relative paths work
+          # Setup wheel directory so relative paths work. Labs bootstrap with
+          # BOTH the mlsysim engine wheel and the mlsysbook-labs helper wheel,
+          # so both must be served or micropip 404s and Pyodide raises BadZipFile.
           mkdir -p /tmp/wasm-smoke/wheels
           cp mlsysim/dist/*.whl /tmp/wasm-smoke/wheels/
+          cp labs/dist/mlsysbook_labs-*.whl /tmp/wasm-smoke/wheels/
 
           for lab in $SMOKE_LABS; do
             name=$(basename "$lab" .py)
@@ -270,13 +279,40 @@ jobs:
       # enabled and Pyodide threading works. A lab is considered healthy when
       # a marimo DOM signal (tab, cell, or island) attaches within 180s.
       - name: 🎭 Install Playwright + Chromium
+        env:
+          # Fixed, HOME-independent location. labs/tests/conftest.py
+          # redirects $HOME for test isolation (so lab tests don't touch a
+          # real ~/.mlsys), which would otherwise make Playwright look for
+          # its browser cache in the wrong place once pytest runs. See the
+          # WASM persistence regression test step below.
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
         run: |
           pip install playwright
           python3 -m playwright install --with-deps chromium
 
       - name: 🌐 Browser smoke test (real Chromium + Pyodide)
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
         run: |
           python3 labs/tests/browser_smoke.py --labs-dir /tmp/wasm-smoke
+
+      # =====================================================================
+      # WASM/IndexedDB persistence regression test (#1985 / PR #1988)
+      # =====================================================================
+      # DesignLedger.save_async() previously reported success while
+      # silently failing to persist to IndexedDB, due to a Python
+      # name-mangling bug (globalThis.__mlsys_temp_state written inside the
+      # class body was rewritten to globalThis._DesignLedger__mlsys_temp_state,
+      # desyncing it from the plain name the embedded JS read). Mocked unit
+      # tests (mlsysim/tests/test_state.py) can't catch this class of bug
+      # since they replace save_async() entirely. This runs the real
+      # save_async() against real Pyodide + real IndexedDB in headless
+      # Chromium and reads the write back through a separate connection.
+      - name: 🧪 WASM persistence regression test (real IndexedDB)
+        env:
+          PLAYWRIGHT_BROWSERS_PATH: ${{ github.workspace }}/.pw-browsers
+        run: |
+          python3 -m pytest labs/tests/test_wasm_persistence.py -v --override-ini="addopts="
 
   # ===========================================================================
   # Stage 4: Link integrity (Tier 2 — non-blocking baseline)

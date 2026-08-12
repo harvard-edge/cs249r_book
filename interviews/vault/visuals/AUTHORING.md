@@ -38,7 +38,7 @@ one good diagram earns its keep across dozens of questions.
 
 ## Authoring workflow
 
-1. **Draft the SVG** following `.claude/rules/svg-style.md` (the book's
+1. **Draft the SVG** following the project SVG style rules (the book's
    SVG system). Non-negotiables:
    - `viewBox="0 0 680 460"` default (widen only when content demands).
    - `font-family="Helvetica Neue, Helvetica, Arial, sans-serif"` on

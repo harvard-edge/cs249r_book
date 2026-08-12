@@ -45,6 +45,16 @@ Our custom extensions are **protected by organizing them under the `mlsysbook-ex
   - YouTube URL validation and error handling
 - **Original**: N/A (Created specifically for this project)
 
+#### `mlsysbook-ext/pseudocode`
+- **Status**: Customized for MLSysBook
+- **Protection**: `mlsysbook-ext/` namespace prevents any accidental overwrites
+- **Customizations** (all in `pseudocode.lua`):
+  - MIT Press cross-reference casing: `@algo-` renders lowercase "algorithm N" mid-sentence, `@Algo-` renders "Algorithm N" at sentence start
+  - Right-aligned italic `▷` comment styling (CLRS column convention) via `pdf-comment-delimiter` / `pdf-italic-comment` / `pdf-right-comment` defaults
+  - Static EPUB renderer (upstream supports HTML via pseudocode.js + PDF via algpseudocodex only; EPUB previously dumped raw `\begin{algorithm}`)
+- **Original**: `leovan/pseudocode` (https://github.com/leovan/quarto-pseudocode), v1.5.0
+- **Last Updated**: Reorganized into mlsysbook-ext namespace and patched for 3-format support (algorithm blocks pass, 2026-06)
+
 ## 🔒 **How Protection Works**
 
 **Namespace Strategy**:

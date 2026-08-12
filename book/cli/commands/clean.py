@@ -5,10 +5,12 @@ Handles cleaning build artifacts and restoring configurations.
 """
 
 import shutil
-import subprocess
-import sys
-from pathlib import Path
 from rich.console import Console
+from rich.markup import escape as _rich_escape
+from rich.panel import Panel
+from rich.table import Table
+
+from cli.core.artifacts import clean_build_artifacts
 
 console = Console()
 
@@ -184,21 +186,26 @@ class CleanCommand:
             return False
 
     def clean_artifacts(self) -> bool:
-        """Clean build artifacts using the maintenance script.
+        """Clean build artifacts using Binder-native cleanup primitives.
 
         This is the same cleanup that runs as a pre-commit hook.
         """
-        script = (
-            Path(__file__).resolve().parent.parent.parent
-            / "tools" / "scripts" / "maintenance" / "cleanup_build_artifacts.py"
-        )
-        if not script.exists():
-            console.print(f"[red]Script not found: {script}[/red]")
-            return False
+        clean_build_artifacts(self.config_manager.book_dir, console=console)
+        return True
 
-        book_dir = str(self.config_manager.book_dir)
-        result = subprocess.run(
-            [sys.executable, str(script), "--book-dir", book_dir],
-            capture_output=False,
-        )
-        return result.returncode == 0
+    def print_help(self) -> None:
+        """Print the `binder clean` command reference."""
+        table = Table(show_header=True, header_style="bold cyan", box=None)
+        table.add_column("Target", style="cyan", width=14)
+        table.add_column("Description", style="white", width=58)
+        table.add_row("(none)", "Clean HTML/PDF/EPUB build directories, temp files, and active config symlink")
+        table.add_row("html", "Clean the active HTML output directory")
+        table.add_row("pdf", "Clean the active PDF output directory")
+        table.add_row("epub", "Clean the active EPUB output directory")
+        table.add_row("artifacts", "Clean generated build artifacts using the same native primitive used by pre-commit")
+        console.print(Panel(table, title=_rich_escape("binder clean [target]"), border_style="cyan"))
+        console.print("[dim]Examples:[/dim]")
+        console.print("  [cyan]./binder clean[/cyan]            [dim]# full local cleanup[/dim]")
+        console.print("  [cyan]./binder clean html[/cyan]       [dim]# clean HTML output only[/dim]")
+        console.print("  [cyan]./binder clean artifacts[/cyan]  [dim]# generated-artifact cleanup[/dim]")
+        console.print()

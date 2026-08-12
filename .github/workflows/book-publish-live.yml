@@ -590,7 +590,7 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
       - name: 🛡️ No-downgrade guard (per-volume)
-        if: inputs.site_only != 'true'
+        if: ${{ !inputs.site_only }}
         env:
           # Step `run:` blocks don't inherit shell variables across steps;
           # surface the per-volume outputs as env so the guard can read them.
@@ -854,7 +854,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, pre-flight-checks]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.site_only != 'true'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && !inputs.site_only
 
     steps:
       - name: 📥 Checkout repository
@@ -1130,7 +1130,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, download-and-deploy-artifacts]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.site_only != 'true'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && !inputs.site_only
 
     steps:
       - name: 📥 Checkout repository
@@ -1370,6 +1370,20 @@ jobs:
           # =================================================================
           echo "ℹ️ Landing page will be rendered in next step"
 
+      - name: 🔧 Flatten volume URL structure
+        # Quarto builds chapters at contents/vol{N}/{chapter}/{chapter}.html (depth 3).
+        # This step moves them to {chapter}/{chapter}.html (depth 1) so deployed URLs
+        # are mlsysbook.ai/vol{N}/{chapter}/{chapter}.html instead of the double-nested
+        # mlsysbook.ai/vol{N}/contents/vol{N}/{chapter}/{chapter}.html.
+        # See .github/scripts/flatten-vol-urls.sh for details.
+        run: |
+          if [ -d "vol1-site" ]; then
+            bash .github/scripts/flatten-vol-urls.sh vol1-site vol1
+          fi
+          if [ -d "vol2-site" ]; then
+            bash .github/scripts/flatten-vol-urls.sh vol2-site vol2
+          fi
+
       - name: 🐍 Setup Python (for release manifests)
         uses: actions/setup-python@v6
         with:
@@ -1389,6 +1403,7 @@ jobs:
           NEW_VOL2: ${{ needs.validate-inputs.outputs.new_vol2_version }}
           PREV_VOL1: ${{ needs.validate-inputs.outputs.previous_vol1_version }}
           PREV_VOL2: ${{ needs.validate-inputs.outputs.previous_vol2_version }}
+          SITE_ONLY: ${{ inputs.site_only }}
         run: |
           set -euo pipefail
 
@@ -1431,8 +1446,16 @@ jobs:
             echo "📦 ${volume}: v${release_id} (hash ${release_hash:0:12}) → ${site_dir}/release-manifest.json"
           }
 
-          emit_manifest "vol1-site" "vol1" "$NEW_VOL1"
-          emit_manifest "vol2-site" "vol2" "$NEW_VOL2"
+          MANIFEST_VOL1="$NEW_VOL1"
+          MANIFEST_VOL2="$NEW_VOL2"
+          if [ "$SITE_ONLY" = "true" ]; then
+            MANIFEST_VOL1="$PREV_VOL1"
+            MANIFEST_VOL2="$PREV_VOL2"
+            echo "ℹ️ site_only=true — keeping release manifests at $MANIFEST_VOL1 / $MANIFEST_VOL2"
+          fi
+
+          emit_manifest "vol1-site" "vol1" "$MANIFEST_VOL1"
+          emit_manifest "vol2-site" "vol2" "$MANIFEST_VOL2"
 
       - name: 🔧 Setup Quarto (for landing page)
         if: inputs.deploy_target == 'all'
@@ -1593,9 +1616,15 @@ jobs:
             echo "📊 Files to be deployed: $CHANGED_FILES"
           fi
 
+          RELEASE_LABEL="${{ needs.validate-inputs.outputs.new_version }}"
+          if [ "${{ inputs.site_only }}" = "true" ]; then
+            RELEASE_LABEL="${{ needs.validate-inputs.outputs.previous_version }}"
+            echo "ℹ️ site_only=true — deployment commit will use current release label: $RELEASE_LABEL"
+          fi
+
           # Commit with comprehensive validation
           echo "📝 Creating deployment commit..."
-          COMMIT_MSG="🚀 Deploy release ${{ needs.validate-inputs.outputs.new_version }} to /$VOL1_PATH/ + /$VOL2_PATH/ from commit ${{ github.sha }}
+          COMMIT_MSG="🚀 Deploy release $RELEASE_LABEL to /$VOL1_PATH/ + /$VOL2_PATH/ from commit ${{ github.sha }}
 
           Two-volume textbook with PDF and EPUB assets for download.
 
@@ -1603,7 +1632,7 @@ jobs:
           - Vol1 PDF/EPUB: /$VOL1_PATH/assets/downloads/
           - Vol2 HTML: /$VOL2_PATH/
           - Vol2 PDF/EPUB: /$VOL2_PATH/assets/downloads/
-          - Release: ${{ needs.validate-inputs.outputs.new_version }}
+          - Release: $RELEASE_LABEL
           - Files updated: $CHANGED_FILES"
 
           if git commit -m "$COMMIT_MSG"; then
@@ -1710,7 +1739,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     needs: [validate-inputs, download-and-deploy-artifacts]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.site_only != 'true'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && !inputs.site_only
 
     steps:
       - name: 📥 Checkout repository
@@ -1991,7 +2020,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     needs: [validate-inputs, generate-release-notes, create-tag]
-    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && inputs.site_only != 'true'
+    if: inputs.confirm == 'PUBLISH' && inputs.testing_mode != 'yes' && !inputs.site_only
 
     steps:
       - name: 📥 Checkout repository
@@ -2305,7 +2334,7 @@ jobs:
     name: '⏰ Cleanup Timed Out Release'
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    needs: [validate-inputs, trigger-production-build]
+    needs: [validate-inputs, merge-to-main, trigger-production-build, create-tag]
     if: always() && inputs.confirm == 'PUBLISH' && (needs.trigger-production-build.result == 'failure' || needs.trigger-production-build.result == 'timeout')
 
     steps:

@@ -70,10 +70,11 @@ def _render_one(code: str, output_path: str) -> Optional[str]:
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
-    # Replace plt.show() with savefig
-    modified = code.replace(
-        "plt.show()",
+    # Replace any direct show call with a save-and-close sequence.
+    modified = re.sub(
+        r"plt\.show\(\)",
         f"plt.savefig('{output_path}', dpi=150, bbox_inches='tight')\nplt.close('all')",
+        code,
     )
 
     # If code never calls plt.show(), append savefig
@@ -88,6 +89,8 @@ def _render_one(code: str, output_path: str) -> Optional[str]:
         return None
     except Exception as e:
         return str(e)
+    finally:
+        plt.close("all")
 
 
 # ---------------------------------------------------------------------------
@@ -108,6 +111,10 @@ class RenderCommand:
     # ------------------------------------------------------------------
 
     def run(self, args: List[str]) -> bool:
+        if args == ["help"]:
+            self._print_help()
+            return True
+
         parser = argparse.ArgumentParser(
             prog="binder render",
             description="Render generated figures to a browsable gallery",

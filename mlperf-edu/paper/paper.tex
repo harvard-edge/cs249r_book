@@ -25,14 +25,17 @@
 \PassOptionsToPackage{hyphens,spaces,obeyspaces}{url}
 \usepackage[round,authoryear]{natbib}
 \bibliographystyle{plainnat}
+\usepackage{xurl}
 \usepackage{hyperref}
 \usepackage[nameinlink]{cleveref}
-\usepackage{subcaption}
+\usepackage{caption}
 \usepackage{enumitem}
 \usepackage{titlesec}
 \usepackage{fancyhdr}
 \usepackage{tikz}
 \usetikzlibrary{shapes,arrows,positioning,shadows,calc,backgrounds,decorations.pathreplacing,fit}
+
+\input{generated_registry.tex}
 
 % Caption styling
 \captionsetup{
@@ -45,7 +48,6 @@
 }
 \captionsetup[table]{position=top}
 \captionsetup[figure]{position=bottom}
-\captionsetup[subfigure]{justification=centering}
 
 % Section spacing
 \titlespacing*{\section}{0pt}{0.8\baselineskip}{0.5\baselineskip}
@@ -115,7 +117,7 @@
 \hypersetup{
     colorlinks=true,
     allcolors=blue,
-    pdftitle={MLPerf EDU: A Pedagogical Benchmarking Suite for ML Systems Education},
+    pdftitle={MLPerf EDU: A Laptop-Scale, Quality-Gated Benchmark Suite for ML Systems},
     pdfauthor={Vijay Janapa Reddi}
 }
 
@@ -126,7 +128,7 @@
 
 \title{
   \Huge\bfseries MLPerf EDU\\[0.4em]
-  \Large\normalfont A Pedagogical Evaluation Framework\\for AI Systems Benchmarking
+  \Large\normalfont A Laptop-Scale, Quality-Gated Benchmark Suite\\for ML Systems
 }
 
 \author{
@@ -136,592 +138,1213 @@
   Harvard University
 }
 
-\date{\href{https://github.com/harvard-edge/mlperf-edu}{github.com/harvard-edge/mlperf-edu}}
+\date{Artifact snapshot \PaperSnapshotDate}
 
 \begin{document}
 
 \thispagestyle{plain}
 \maketitle
-\begingroup
-\renewcommand{\thefootnote}{}%
-\footnotetext{Part of the \emph{Machine Learning Systems} book ecosystem; context: \url{https://mlsysbook.ai/}.}%
-\endgroup
+\begin{center}
+\vspace{-1.2em}
+\footnotesize\textbf{REVIEW DRAFT.} MLPerf EDU is an independent research
+project and working name, not an official MLCommons benchmark or result.
+\end{center}
 
 \begin{abstract}
-MLPerf is the industry standard for measuring ML systems performance, but its enterprise-scale requirements---GPU clusters, terabyte datasets, and complex C++ harnesses---make it inaccessible to students. We present \textbf{MLPerf EDU}, a pedagogical evaluation framework that teaches students \emph{how to evaluate ML systems}, not just how to build them. The framework provides 16 white-box workloads spanning all official MLPerf divisions (Cloud, Edge, Tiny) plus a novel Agent division. Every workload instantiates a formal evaluation tuple $\mathcal{S} = (\text{Model, Data, Hardware, Scenario, Constraints}) \rightarrow \mathcal{M} = (\text{Latency, Throughput, Accuracy, Energy})$, giving students a reusable abstraction for systems reasoning. All workloads train on real, citable datasets with provenance---Cora, SST-2, ETTh1, MovieLens-100K, MBPP, TinyShakespeare, CIFAR, and Speech Commands---and the entire 13-workload supervised suite converges on a single consumer laptop in under 10 minutes. Students act as \emph{submitters} who optimize reference implementations under Closed/Open division rules and produce verifiable JSON artifacts, mirroring professional MLPerf methodology. The harness auto-detects hardware and stamps every run artifact with a machine fingerprint, ensuring that all reported results are tied to measured system configurations.
+Benchmarking is taught almost everywhere as a set of numbers to read and almost
+nowhere as a discipline to practice. The reason is practical. Production suites
+such as MLPerf teach that discipline properly, holding task, data, metric, and
+quality target fixed so that two results can be compared at all, but their
+compute and submission requirements put them out of reach of a course or a
+single reviewer. The usual substitute is a collection of small models, which
+solves the resource problem and quietly discards the quality gate. A student
+can then report a faster run after weakening a target, dropping a validation
+split, or timing a warmup pass, and nothing in the setup objects.
+
+\textbf{MLPerf EDU} is an attempt to keep both properties at once, an
+executable benchmark specification that runs on a laptop without giving up the
+gate. The central decision is that no target is ever set by this project. Each
+workload inherits its task, dataset, metric, and quality target from an
+upstream authority, and a result is admitted only after the inherited contract
+is met. That rule is deliberately uncomfortable, because it guarantees the
+suite reports its own failures.
+
+It does. The v0.1 registry holds \RegistryRows{} workload identities across
+\RegistrySuites{} suites, all of which run locally. On one \HostChip{} laptop
+the suite executed \ExecutedContracts{} inherited contracts and reproduced
+\ExecutedContractsPassing{} of them. The \ExecutedContractsMissing{} shortfalls
+are recorded as misses rather than rescued by a post-hoc tolerance, and the
+workloads carrying them are held out of score-bearing review by the same rule
+that admitted the rest. Of the \ScoreBearingCases{} cases that rule admits,
+\ScoreBearingPassing{} meet their gate, with reference medians spanning
+\ScoreReferenceMinSeconds{} seconds to \ScoreReferenceMaxMinutes{} minutes and
+totaling \ScoreReferenceTotalMinutes{} minutes for one pass through the
+score-bearing suite. Three execution profiles separate installation checks,
+comparable classroom runs, and controlled research variants without encoding
+optimizations into workload identities.
+
+The result is a benchmark artifact whose score-bearing path a student can run,
+inspect, and argue with in an afternoon. It makes no claim to
+production-scale equivalence, and these
+are project measurements rather than MLCommons-verified results. The path to
+that status runs through \mbox{cross-platform replication}, public evidence
+hosting, dataset-policy decisions, and external review.
 \end{abstract}
 
 % ============================================================================
 \section{Introduction}
 \label{sec:intro}
-% ============================================================================
 
-The rapid growth of machine learning has driven a parallel expansion in ML hardware, compilation stacks, and deployment frameworks. To impose order on this ecosystem, the community coalesced around MLPerf~\citep{mattson2020}, establishing the definitive standard for measuring ML systems performance. MLPerf mandates strict rules: fixed reference implementations, rigid dataset constraints, mathematically verified quality targets, and standardized measurement scenarios.
+Machine-learning systems now span training, serving, retrieval, graph analytics,
+time-series forecasting, vision, and embedded inference. Comparing those
+systems requires more than timing a script. A benchmark must hold task semantics
+and quality constant while recording the model, data, hardware, scenario, and
+measurement procedure. MLPerf established this discipline for production
+systems~\citep{mattson2020,reddi2020mlperf,banbury2021mlperf}. The same discipline
+is valuable in education, yet production-scale workloads and submission
+infrastructure often exceed the time, hardware, and operational budget of a
+course or an individual artifact review.
 
-However, the very rigor that makes MLPerf the gold standard renders it inaccessible to educational settings. A single MLPerf Training run requires enterprise-grade hardware (e.g., 8$\times$ H100 nodes), terabytes of storage, and containerized deployment infrastructure. Students cannot replicate these conditions on their laptops. As a result, instructors rely on ad-hoc assignments that lack the architectural diversity, measurement discipline, and reproducibility guarantees that define professional benchmarking.
+The usual educational substitute is a collection of small models. Small models
+solve the resource problem, but they do not automatically teach benchmarking.
+A student can report a faster run after changing the data, silently weakening
+quality, measuring warmup, or using a synthetic shortcut. None of those results
+supports a fair systems comparison. The missing learning objective is
+\emph{benchmarking literacy}, the ability to construct, inspect, reproduce, and
+defend an evidence-backed performance claim.
 
-\textbf{Why now.} Three converging trends make this gap untenable. First, systems-aware AI techniques (quantization, pruning, KV-caching, speculative decoding) require students to learn to \emph{evaluate} optimizations, not merely implement models. Second, agentic AI introduces novel performance dimensions---retrieval latency, tool-call overhead, multi-step cost---that no existing educational benchmark addresses. Third, the industry needs graduates who understand benchmarking culture: the discipline of fair comparison, reproducible measurement, and submission-grade reporting.
-
-This paper presents \textbf{MLPerf EDU}, a pedagogical evaluation framework that teaches students \emph{how to evaluate ML systems}, not just how to build them. Unlike ad-hoc assignments or simplified tutorials, MLPerf EDU provides a formal evaluation methodology grounded in MLPerf conventions, enabling students to reason about systems performance the way industry practitioners do. The suite spans all four MLPerf divisions plus a novel Agent division, comprising 16 workloads built on real, citable datasets---eleven of which require \emph{zero network access}. \Cref{fig:architecture} shows the system architecture.
-
-\textbf{Formal Evaluation Abstraction.} Every MLPerf EDU benchmark instantiates a common evaluation tuple:
+MLPerf EDU addresses that gap with an executable specification rather than a
+static scoreboard. Its scope is locally executable, quality-gated evaluation for
+teaching and studying single-node ML systems. The suite supports controlled work
+on processors, memory systems, runtimes, compilers, and model execution while
+excluding distributed and datacenter-scale claims. Backward design begins with
+the activity a student or researcher must perform, such as reproducing a result,
+isolating a bottleneck, changing one systems variable, and defending
+comparability. Workloads are admitted only when an established task can support
+that activity on local hardware without replacing its model, data, evaluator, or
+quality gate with a project-defined proxy.
 
 \begin{definition}[Evaluation Tuple]
-A benchmark configuration $\mathcal{S}$ = (Model, Data, Hardware, Scenario, Constraints) \\
-produces a measurement vector $\mathcal{M}$ = (Latency, Throughput, Accuracy, Energy). The \emph{Constraints} component captures the division, quality target, and epoch budget.
+A benchmark configuration
+$\mathcal{S}=(W,D,M,H,S,C,P)$ binds the workload, data, model, hardware,
+scenario, constraints, and measurement protocol. It produces
+$\mathcal{M}=(Q,L,T,E)$, containing task quality, latency, throughput, and an
+energy observation when calibrated. An evidence package $\mathcal{E}$ records
+the configuration, measurements, source state, assets, and model lineage. Two
+results are comparable only when $\mathcal{E}$ makes every controlled equality
+and intentional difference explicit.
 \end{definition}
-\vspace{-3pt}
-Students learn to reason across these dimensions by varying one component and observing its effect on $\mathcal{M}$. For example, fixing $\mathcal{S}$ for NanoGPT and changing only \emph{Scenario} from SingleStream to Server (Poisson arrivals at 100 QPS) increases p99 latency from 7.84\,ms to $\sim$12\,ms due to queuing effects---a concrete lesson in Little's Law.
 
-\textbf{Contributions.}
-\begin{enumerate}[leftmargin=*, itemsep=2pt]
-\item \textbf{Evaluation abstraction.} The evaluation tuple $\mathcal{S} \rightarrow \mathcal{M}$ (Definition 1) provides a formal, reusable framework for reasoning about ML systems performance. This abstraction---not the benchmarks themselves---is the primary intellectual contribution.
-\item \textbf{Pedagogical evaluation framework.} A modular benchmarking architecture---dataset factory, load generator, power profiler, compliance checker---that teaches evaluation methodology. Students act as MLPerf ``submitters'' whose JSON results can be verified and ranked.
-\item \textbf{Three-axis regime taxonomy.} Rather than label workloads by a single "bottleneck class,'' every workload is placed on an orthogonal three-axis grid: \emph{working set} (cache-resident vs.\ DRAM-bound, measured against the reference LLC), \emph{arithmetic intensity} (compute-bound vs.\ bandwidth-bound, measured against the reference roofline ridge), and \emph{dispatch} (device-saturated vs.\ dispatch-bound, measured as achieved fraction of peak). The axes are orthogonal because bumping batch size shifts dispatch without changing working set, bumping embedding-table size shifts working set without changing intensity, and switching prefill$\rightarrow$decode shifts intensity without changing working set. The suite spans a canonical core of five workloads plus eleven extensions, totalling ten ML modalities across all MLPerf divisions plus a novel Agent division.
-\item \textbf{Real datasets with provenance.} All workloads utilize real, citable datasets with documented provenance (Cora, SST-2, ETTh1, MovieLens-100K, MBPP, TinyShakespeare, CIFAR, Speech Commands), ensuring that students encounter realistic data distributions and convergence patterns.
-\item \textbf{Verified convergence.} Every workload ships with experimentally verified training curves (\Cref{fig:training-curves}), demonstrating convergence on consumer hardware under controlled conditions. Hardware configuration is auto-detected and stamped into every run artifact.
-\item \textbf{Self-contained implementations.} All model architectures are implemented from scratch in pure PyTorch, with no dependence on \texttt{torchvision.models} or HuggingFace pretrained weights. This ensures that every computational operation is inspectable and modifiable by students.
+The framework turns the tuple into a fail-closed admission rule. A result $r$ is
+admissible only when
+\[
+\begin{aligned}
+\operatorname{admit}(r)={}&
+G_{\mathrm{sem}}(r)\land G_{\mathrm{protocol}}(r)\\
+&{}\land G_{\mathrm{provenance}}(r)\land G_{\mathrm{state}}(r),
+\end{aligned}
+\]
+where the semantic gate is task quality for score-bearing cases and functional
+correctness plus model lineage for performance-bearing cases. The remaining
+terms check the declared protocol, content-bound evidence, and stable host
+conditions. Admissibility and evidence strength are deliberately separate. A
+case may pass every gate while remaining provisional until its repeatability
+protocol is complete.
+
+Four terms recur throughout the paper and are worth fixing here, since the
+distinctions they draw are what the admission rule enforces. A
+\emph{score-bearing} case is one whose result is decided by task quality
+against an inherited target, so it can carry a quality claim. A
+\emph{performance-bearing} case is one whose result is decided by functional
+correctness and verified model lineage, so it can carry a timing or throughput
+observation but not a quality claim. A \emph{promotion-scope} workload is one
+whose contract is complete enough that a conformant result would be eligible
+for a published baseline, as opposed to a \emph{functional-stage} workload,
+which executes end to end but is held back because its quality path does not
+yet conform. \emph{Fail-closed} means the default is exclusion. A case is
+admitted only by satisfying every gate, and a case that satisfies none of them
+by failing silently is treated as a failure rather than as missing data.
+
+The paper makes six contributions.
+
+\begin{enumerate}[leftmargin=*,itemsep=2pt]
+\item \textbf{An executable benchmark contract.} The evaluation tuple and
+admission rule become registry, runner, grading, host-state, and reporting
+invariants rather than paper-only guidance.
+\item \textbf{A backward-designed workload portfolio.} \RegistryRows{} workload
+identities cover language, retrieval, recommendation, reinforcement learning,
+graph learning, time series, vision, and embedded inference. Of these,
+\FunctionalSetupWorkloads{} are admitted only at a functional setup
+stage rather than through weaker targets or invented quality claims.
+\item \textbf{Three execution intents.} The \texttt{min}, \texttt{max}, and
+\texttt{pro} profiles separate setup checks, comparable classroom runs, and
+research variants while preserving stable workload identities.
+\item \textbf{Auditable and lineage-bound evidence.} Runs emit JSON, HTML, CSV,
+and provenance manifests that bind source, assets, hardware, metrics, and
+training checkpoints.
+\item \textbf{A measured basis for single-run acceptance.} A determinism study
+over \DeterminismExecutions{} executions shows inference quality is
+bit-identical across seeds and across the MPS and CPU backends, which justifies
+accepting a quality verdict from one run, and shows that training is not, which
+refutes it. In both training workloads swept, the seed spread exceeds the
+margin to the gate and the verdict flips.
+\item \textbf{Measured laptop references.} \ReferenceEvidenceCases{}
+source-locked cases traverse the public command path, and
+\ExecutedContractsPassing{} of the \ExecutedContracts{} executed contracts
+reproduce their inherited target.
 \end{enumerate}
 
-% ============================================================================
-% Architecture Diagram
-% ============================================================================
+The goal is not to replace official MLPerf suites or imply MLCommons approval.
+It is to make professional evaluation practice inspectable at a scale students
+and researchers can run locally. \Cref{fig:architecture} summarizes the system.
+
+The paper follows this contract from gap to evidence.
+\Cref{sec:related} positions the work against existing benchmark surfaces and
+shows why none of them could be adopted directly. \Cref{sec:design} states the
+three design principles that keep a laptop-scale workload faithful to its
+upstream task, and \Cref{sec:architecture} describes the implementation that
+turns those principles into registry, runner, grading, and validation
+invariants. \Cref{sec:suite} defines the workload portfolio one benchmark at a
+time, naming for each what it measures, why it was admitted, where its target
+came from, and which evaluator decides it. \Cref{sec:profiles} develops the
+three execution profiles that separate setup, comparable, and research runs.
+\Cref{sec:results} reports the measured evidence, \Cref{sec:education} the
+classroom progression built on the same contract, and \Cref{sec:limitations}
+what the evidence does not yet establish.
 
 \begin{figure*}[t]
 \centering
-\includegraphics[width=0.95\textwidth]{figures/architecture.pdf}
-\caption{\textbf{MLPerf EDU System Architecture.} 16 workloads span four divisions: Cloud (8 workloads), Edge (2), Tiny (3), and Agent (3). All models feed through a unified CLI harness with dataset factory, load generator, power profiler, and compliance checker. Students act as ``submitters'' who optimize reference implementations and produce verifiable JSON submission artifacts. The bottom row shows the formal evaluation tuple: each workload instantiates $\mathcal{S} = (\text{Model, Data, Hardware, Scenario, Constraints})$ and produces metrics $\mathcal{M} = (\text{Latency, Throughput, Accuracy, Energy})$.}
+\begin{tikzpicture}[
+  node distance=6mm,
+  box/.style={draw=accentblue!80!black,rounded corners=2pt,minimum height=12mm,
+    text width=31mm,align=center,fill=accentblue!7,font=\small},
+  gate/.style={draw=accentorange!80!black,rounded corners=2pt,minimum height=12mm,
+    text width=34mm,align=center,fill=accentorange!9,font=\small},
+  artifact/.style={draw=accentgreen!70!black,rounded corners=2pt,minimum height=12mm,
+    text width=36mm,align=center,fill=accentgreen!8,font=\small},
+  arrow/.style={->,thick,draw=black!65}
+]
+\node[box] (registry) {Registry\\model, data, role, target};
+\node[box,right=of registry] (runner) {Runner\\\texttt{min}, \texttt{max}, or \texttt{pro}};
+\node[gate,right=of runner] (gate) {Quality and protocol gate\\grade and audit};
+\node[artifact,right=of gate] (evidence) {Evidence package\\reports and provenance};
+\draw[arrow] (registry) -- (runner);
+\draw[arrow] (runner) -- (gate);
+\draw[arrow] (gate) -- node[above,font=\scriptsize]{pass} (evidence);
+\draw[arrow] (evidence.south) -- ++(0,-6mm) -| node[pos=0.75,below=1pt,fill=white,inner sep=1pt,font=\scriptsize]{verify and reproduce} (registry.south);
+\end{tikzpicture}
+\caption{\textbf{MLPerf EDU system architecture.} Workloads flow through the unified CLI,
+asset, runner, grading, reporting, and provenance layers. The evaluation tuple
+binds each result to its model, data, hardware, scenario, constraints, and
+measurement protocol.}
 \label{fig:architecture}
 \end{figure*}
 
+\section{Related Work}
+\label{sec:related}
+
+Before describing a new benchmark suite it is worth establishing why an
+existing one could not simply be adopted. Benchmarking is a mature field with
+well-governed suites, and the default assumption should be that a course uses
+one of them. This section reviews the surfaces that were candidates and
+identifies the specific property each one gives up. The pattern that emerges is
+consistent enough to state in advance. Suites that hold task quality fixed
+require compute budgets and submission infrastructure a course does not have,
+and suites that fit a course's budget do so by dropping the quality gate, which
+is the property that makes results comparable in the first place.
+
+\textbf{MLPerf.} The official MLPerf Training and Inference suites established
+quality-constrained, scenario-aware performance evaluation at production scale
+~\citep{mattson2020,reddi2020mlperf}. Their rules make quality, scenarios,
+measurement regions, and disclosure part of result validity rather than
+reporting conventions~\citep{mlcommons2026inferencerules}. MLPerf Tiny extends
+the methodology to constrained embedded systems~\citep{banbury2021mlperf}.
+MLPerf EDU inherits that discipline and selected workload contracts while
+targeting locally executable teaching and single-node research. It does not
+claim that laptop execution reproduces cluster or microcontroller scale;
+instead it asks what stays valid when the compute budget shrinks to a laptop
+and the reviewer is an instructor rather than a submission committee.
+\Cref{tab:comparison} summarizes the positioning.
+
+\textbf{DAWNBench.} DAWNBench introduced time-to-accuracy and
+cost-to-accuracy~\citep{coleman2019}. Its central methodological contribution was
+to connect system performance to a fixed task-quality threshold. MLPerf EDU
+retains that quality-first rule but differs in scope rather than in commitment:
+it targets one fixed classroom exercise with an inherited gate, not a
+leaderboard optimized for cost or wall-clock time across cloud providers.
+
+\textbf{TorchBench.} TorchBench provides broad PyTorch performance-regression
+coverage for framework development~\citep{ansel2024torchbench}. MLPerf EDU shares
+its executable PyTorch surface but adds task datasets, inherited quality gates,
+classroom profiles, grading, checkpoint lineage, and a deliberately small
+governed portfolio. Breadth is therefore not the objective. Each admitted
+workload must support a complete semantic and evidentiary contract. Where
+TorchBench asks whether a kernel or graph transformation regressed, MLPerf EDU
+asks whether a student's reported comparison is admissible under a declared
+task and quality contract; the two questions are complementary, not competing.
+
+\textbf{Educational ML frameworks.} Framework-building courses make tensors,
+operators, and automatic differentiation inspectable. MLPerf EDU is
+complementary. Its learning object is the benchmark contract rather than the
+framework implementation. PyTorch supplies an immediate standard execution path
+without coupling the specification to a custom educational framework. Other
+frameworks can later implement the same contracts, but they are not required to
+define them. A student who has built a framework from primitives still needs a
+second discipline, knowing when a measured result is comparable to another;
+MLPerf EDU supplies that second discipline without requiring the first.
+
+\textbf{Non-ML benchmarks.} SPEC CPU emphasizes controlled conditions,
+disclosure, and reproducible comparison~\citep{henning2006}. TPC shows that
+benchmark governance and multi-dimensional reporting are as important as the
+workload code~\citep{poess2000}. MLPerf EDU applies those lessons to a domain
+where quality and task semantics, not only raw throughput, complicate the same
+discipline: a classroom result that is fast but silently below the accuracy
+target is no more admissible than a SPEC run compiled outside the reference
+flags.
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Comparison with established benchmark surfaces.} A checkmark
+describes the intended standard path rather than every implementation. The
+bottom row is the one no existing surface occupies: a complete single-laptop
+path that still holds an inherited quality gate.}
+\label{tab:comparison}
+\footnotesize
+\renewcommand{\arraystretch}{1.15}
+\begin{tabularx}{\columnwidth}{@{}Xcccc@{}}
+\toprule
+ & \rotatebox{70}{MLPerf} & \rotatebox{70}{MLPerf Tiny} & \rotatebox{70}{TorchBench} & \rotatebox{70}{\textbf{EDU}} \\
+\midrule
+Quality-gated results & \checkmark & \checkmark & & \checkmark \\
+Complete single-laptop path & & & & \checkmark \\
+Teaching profiles & & & & \checkmark \\
+Provenance package & \checkmark & \checkmark & & \checkmark \\
+Controlled research & \checkmark & \checkmark & \checkmark & \checkmark \\
+Distributed claims & \checkmark & & \checkmark & \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The table exposes a gap rather than a crowded field. Suites that hold quality
+fixed run above the resource envelope of most courses and individual
+reviewers; suites that fit that envelope typically drop the quality gate
+rather than shrink the task. MLPerf EDU is designed to occupy the one row that
+keeps both properties at once.
+
+That gap is what forced a build rather than an adoption. The missing artifact
+is not another collection of small models, which is abundant, but a suite in
+which the quality gate survives the reduction in scale. Nothing prevents a
+laptop-scale suite from inheriting an upstream target; what prevents it is
+that inheriting the target means accepting that some workloads will miss it,
+and a suite built to demonstrate its own workloads has an incentive to
+calibrate targets to what it can reach. The remainder of the paper describes a
+design that removes that incentive by construction, and reports what happens
+when the resulting contracts are run on one laptop, including where they fail.
+
 % ============================================================================
+
 \section{Design Principles}
 \label{sec:design}
-% ============================================================================
 
-Three principles guide MLPerf EDU's design, each addressing a specific failure mode of existing pedagogical tools.
+Four principles guide MLPerf EDU's design, each addressing a failure mode that
+turns a runnable script into an invalid benchmark. The first is load-bearing
+for the other three.
 
-\subsection{Pedagogical Transparency over Performance}
+\subsection{Inherited Targets, Never Invented Ones}
 
-Production benchmarks optimize for throughput via custom CUDA kernels, mixed-precision arithmetic, and operator fusion---optimizations that make computation invisible to students. MLPerf EDU inverts this priority: every model is pure Python/PyTorch with explicit operations and named dimensions. A student reading the DS-CNN implementation sees depthwise and pointwise convolutions as separate \texttt{nn.Conv2d} layers with \texttt{groups=in\_channels}, not a fused kernel.
+Every quality target in the suite is inherited from an upstream authority, and
+no target is ever set by this project. The reason is an incentive problem
+rather than a matter of taste. A suite that defines its own thresholds will
+tend to define ones it can meet, and it will do so without any individual
+choice looking dishonest, because each threshold can be justified locally as
+reasonable for the scale. The result is a benchmark that cannot fail, which is
+also a benchmark that cannot inform.
 
-\subsection{Real Data with Provenance}
+Inheritance removes the discretion that makes that drift possible. A target
+arrives from a paper, a leaderboard, an official evaluator, or a published
+model card, together with the dataset split and metric it was computed on, and
+the project's only remaining decision is whether it is met. When a laptop
+implementation falls short, the shortfall is reported as a miss. Nothing in
+the framework can convert it into a pass, because the number it would have to
+change belongs to someone else.
 
-A benchmark without real data teaches stress testing, not systems evaluation. Students must observe how data distributions affect convergence. \Cref{tab:datasets} documents every dataset. Data is either shipped in the repository (TinyShakespeare, 1.1\,MB) or auto-downloaded via standard libraries (CIFAR via \texttt{torchvision}, Speech Commands via \texttt{torchaudio}).
+This has a cost, and the cost is the point. In this paper,
+\ExecutedContractsMissing{} contracts miss their inherited targets, and each one
+would have been trivially removable by nudging a threshold or widening a
+tolerance.
+Keeping them is what makes the passing results mean anything, and it is also
+what gives students a suite in which failure is a normal, inspectable outcome
+rather than a sign that they ran it wrong.
+
+\subsection{Pedagogical Transparency Over Performance}
+
+Production benchmarks optimize for throughput with custom CUDA kernels,
+mixed-precision arithmetic, and operator fusion. Those optimizations can make
+the computation invisible to students. MLPerf EDU inverts this priority for its
+reference workloads. The standard execution path uses inspectable Python and
+PyTorch with explicit operations and named dimensions. Thin adapters aim to
+preserve the authoritative model and task contract rather than replacing it
+with a project-designed approximation. Conformance is audited rather than
+assumed. The current keyword-spotting adapter preserves the DS-CNN topology and
+quality gate but is prediction-nonidentical to the pinned LiteRT graph, so
+promotion is blocked. Students can still inspect its depthwise and pointwise
+convolutions as separate \texttt{nn.Conv2d} layers. The reference path is a
+readable point of comparison, not a performance ceiling. Optimized kernels and
+alternative runtimes belong in recorded \texttt{pro} configurations and remain
+subject to the same semantic gate.
+
+\subsection{Real Data With Provenance}
+
+A benchmark without real data teaches stress testing, not systems evaluation.
+Students must observe how data distributions affect convergence, accuracy, and
+ranking. \Cref{tab:datasets} records every dataset used by a canonical mode,
+while the executable registry carries structured dossiers with pinned sources,
+sizes, splits, licenses, release status, and digest policy. Fetching and
+redistribution are separate decisions. A dataset can support a reproducible
+local run while its bytes remain excluded from a public evidence package.
 
 \subsection{Complete Train--Checkpoint--Inference Loop}
 
-Many tools provide only training or only inference. MLPerf EDU provides the complete pipeline: training code produces checkpoints, checkpoints load into inference harnesses, and harnesses measure latency under realistic scenarios. A unified \texttt{dataset\_factory.py} centralizes all data loading through a single interface (\Cref{lst:factory}), ensuring deterministic, reproducible experiments.
+Many tools provide only training or only inference. MLPerf EDU preserves the
+complete pipeline when model lineage is part of the workload contract. Causal
+language-model training produces a quality-approved checkpoint. Full, prefill,
+and decode inference load that checkpoint and verify its report, manifest, and
+digest before measurement. The current registry records dataset, model,
+checkpoint, profile, quality, and result-role metadata in one place, ensuring
+deterministic, reproducible experiments. Training, full generation, prefill, and
+decode remain modes or phases of one workload. Treating them as separate
+workload identifiers would hide their shared task and checkpoint lineage.
 
-\begin{lstlisting}[caption={\textbf{Unified Data API.} One function for all 16 workloads.},label={lst:factory},float=t]
-from dataset_factory import get_dataloaders
-
-# Same interface, any workload:
-train, val = get_dataloaders("nanogpt-12m",  bs=16)
-train, val = get_dataloaders("dscnn-kws",    bs=64)
-train, val = get_dataloaders("anomaly-ae",   bs=64)
-train, val = get_dataloaders("micro-dlrm-1m",bs=256)
-
-# Deterministic: seed=42, 80/20 split
-# All datasets are real with provenance
+\begin{lstlisting}[caption={\textbf{Registry-driven workload metadata.} Workload rows declare the user-facing selector, suite, profile coverage, assets, and quality policy.},label={lst:factory},float=t]
+workload:
+  id: causal-language-modeling
+  suite: language
+  profiles: [min, max, pro]
+  runner: nanogpt
+  dataset: tinyshakespeare
+  quality_target:
+    metric: cross_entropy_loss
+    direction: lower
+    threshold: 1.4697
+    target_basis: literature
+  public_status: experimental
 \end{lstlisting}
 
 % ============================================================================
-\section{Workload Suite}
-\label{sec:suite}
-% ============================================================================
 
-MLPerf EDU organizes 16 workloads across 4 divisions (\Cref{tab:workloads}). We distinguish a \textbf{Canonical Core} of 5 workloads from an \textbf{Extension Suite} of 11 workloads. Each workload is an \emph{instantiation} of the evaluation tuple (Definition~1): the table columns directly correspond to $\mathcal{S}$ components (Model, Data, Scenario) and $\mathcal{M}$ metrics (Accuracy/Target, Time).
-
-\textbf{Regime classification.} Rather than assign each workload a single "bottleneck class,'' we place every workload on an orthogonal three-axis grid introduced in §\ref{sec:design}: \emph{working set} (cache-resident vs.\ DRAM-bound), \emph{arithmetic intensity} (compute-bound vs.\ bandwidth-bound), and \emph{dispatch} (device-saturated vs.\ dispatch-bound). Each axis is measured against published reference thresholds (Apple M1 base: 12\,MB LLC, 30 FLOP/byte ridge, 68\,GB/s unified memory). When a workload's measured value falls in the grey band between two axis thresholds, it is recorded as \texttt{unmeasured} rather than assigned a guess---the linter (\texttt{tools/check\_taxonomy.py}) rejects any schema violation where a categorical claim disagrees with the numerical evidence. This honesty has practical consequences: fifteen of our initial static-analysis classifications did not survive measurement and were revised, and one cell of the $2 \times 2 \times 2$ grid---\emph{(cache-resident, bandwidth-bound, device-saturated)}---was empirically demonstrated to be unreachable on plain PyTorch+MPS without kernel fusion, a finding we return to in §\ref{sec:results}.
-
-\textbf{Selection principle.} Workloads are selected to satisfy three constraints: (1)~\emph{Resource accessibility}---executable within constrained environments ($\leq$8\,GB RAM, $\leq$10\,min total training time); (2)~\emph{Behavioral fidelity}---each workload reproduces the dominant system bottleneck of its production counterpart (e.g., attention-bound, memory-bound, pipeline-bound); (3)~\emph{Pedagogical decomposability}---each workload isolates a measurable tradeoff that students can systematically vary. Additionally, all workloads must be platform-portable (CPU, CUDA, MPS) and reproducible with fixed seeds.
-
-Quality targets follow a documented methodology: each target is set at $0.80 \times$ the best metric achieved in 5 independent runs with default hyperparameters on reference hardware, ensuring the target is reachable within a reasonable epoch budget while leaving headroom for systems optimization. The harness auto-detects hardware at runtime (\texttt{fingerprint.py}) and stamps every submission artifact with the detected configuration, so paper claims are always traceable to measured runs.
-
-\begin{table*}[t]
-\centering
-\caption{MLPerf EDU workload suite. $\bigstar$ = Canonical Core (5 workloads spanning distinct positions on the three-axis regime grid; see §\ref{sec:suite}). All models are pure PyTorch \texttt{nn.Module}. Training times measured on Apple Silicon hardware (auto-detected; canonical reference is M1 base, measurements in this work taken on M5 Max per \texttt{bench/measure\_peaks.py}).}
-\label{tab:workloads}
-\footnotesize
-\renewcommand{\arraystretch}{1.25}
-\setlength{\tabcolsep}{3pt}
-\begin{tabular}{@{}llllrlllp{3.5cm}@{}}
-\toprule
-\textbf{Div.} & \textbf{Task} & \textbf{Model} & \textbf{MLPerf Map} & \textbf{Params} & \textbf{Dataset} & \textbf{Target} & \textbf{Time} & \textbf{Key Concept} \\
-\midrule
-Cloud & Language & NanoGPT$\;\bigstar$ & GPT-3 & 11.1M & TinyShakes. (char) & Loss $<$ 2.3 & 89s & $O(N^2)$ attention, KV-cache \\
-Cloud & Sparse MoE & Nano-MoE & Switch-T & 17.4M & TinyShakes. & Loss $<$ 0.05 & 158s & Conditional compute, gating \\
-Cloud & Rec. & Micro-DLRM$\;\bigstar$ & DLRM & 23K & MovieLens & Acc $>$ 0.70 & 5s & Sparse/dense memory bound \\
-Cloud & Generation & Micro-Diff. & Stable D. & 2.0M & CIFAR-10 & MSE $<$ 0.002 & 41s & Denoising steps vs.\ latency \\
-Cloud & Graph & Micro-GCN & GNN & 94K & Cora & Acc $>$ 0.78 & 2s & Message passing, SpMM \\
-Cloud & Text Cls. & Micro-BERT & BERT & 1.1M & SST-2 & Acc $>$ 0.75 & 45s & Bidirectional vs.\ causal attn. \\
-Cloud & Time Ser. & Micro-LSTM & LSTM & 54K & ETTh1 & MSE $<$ 0.13 & 20s & Sequential bottleneck \\
-Cloud & RL & Micro-RL & REINFORCE & 18K & CartPole & Rew $>$ 195 & 1s & Policy gradient variance \\
-\addlinespace
-Edge & Img.\ Cls. & ResNet-18$\;\bigstar$ & ResNet-50 & 11.2M & CIFAR-100 & Top1 $>$ 0.36 & 64s & Skip connections, batch norm \\
-Edge & Mobile & MobileNetV2 & MobileNet & 2.4M & CIFAR-100 & Top1 $>$ 0.40 & 60s & Depthwise-sep.\ convolutions \\
-\addlinespace
-Tiny & KWS & DS-CNN$\;\bigstar$ & DS-CNN & 20K & Speech v2 & Top1 $>$ 0.90 & 51s & Spectrogram features, MCU \\
-Tiny & Anomaly & Autoencoder & FC-AE & 0.3M & MNIST & MSE $<$ 0.04 & 6s & Reconstruction error \\
-Tiny & Person Det. & MicroNet & VWW & 8.5K & Wake Vision & Acc $>$ 0.85 & 10s & Sub-10K model compression \\
-\addlinespace
-Agent & RAG & NanoRAG & --- & 20.1M & ReAct Traces & Retr.+Gen & --- & Retrieve vs.\ generate split \\
-Agent & CodeGen & NanoCodeG. & --- & 13.7M & MBPP & Gen+Verify & --- & Iterative refinement loop \\
-Agent & ReAct & NanoReAct$\;\bigstar$ & --- & 13.7M & ReAct Traces & Think+Act & --- & Multi-step reasoning \\
-\bottomrule
-\end{tabular}
-\end{table*}
-
-\begin{table}[t]
-\centering
-\caption{\textbf{Dataset Provenance.} Every dataset is real and citable.}
-\label{tab:datasets}
-\small
-\renewcommand{\arraystretch}{1.25}
-\begin{tabularx}{\columnwidth}{@{}l>{\raggedright\arraybackslash}Xlr@{}}
-\toprule
-\textbf{Dataset} & \textbf{Source} & \textbf{Loader} & \textbf{Size} \\
-\midrule
-TinyShakespeare & Karpathy, 2015 & Shipped & 1.1\,MB \\
-CIFAR-100/10 & Krizhevsky, 2009 & torchvision & 170\,MB \\
-Speech Cmds v2 & Warden, 2018 & torchaudio & 2\,GB \\
-MNIST & LeCun et al., 1998 & torchvision & 12\,MB \\
-Wake Vision & Banbury et al., 2024 & HF/proxy & 6\,GB \\
-MBPP & Austin et al., 2021 & Shipped & 50\,KB \\
-\midrule
-\multicolumn{4}{@{}l}{\emph{Shipped locally (real data, zero network required):}} \\
-Cora & McCallum 2000 & Shipped & 168\,KB \\
-SST-2 & Socher 2013 & Shipped & 3.8\,MB \\
-ETTh1 & Zhou 2021 & Shipped & 850\,KB \\
-MovieLens-100K & Harper 2015 & Shipped & 5\,MB \\
-CartPole Env & Physics sim & Local & 0\,B \\
-ReAct Traces & Curated & Shipped & 10\,KB \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\subsection{Cloud Division}
-
-\textbf{NanoGPT} (11.1M params). A 6-layer, 6-head decoder-only transformer trained on character-level TinyShakespeare (vocab=128, of which the data uses 65 unique characters). The model was initially specified with a 50,257-token BPE vocabulary that inflated the parameter count to a nominal 85.9M while leaving $19$M embedding parameters permanently unreachable from char-level data; this mismatch was discovered and reconciled during the suite's iteration cycle, and the reported 11.1M is the honest post-reconciliation figure. The workload exposes $O(N^2)$ attention scaling and provides the compute-bound anchor of the prefill regime. Students profile attention memory growth, implement KV-cache optimization, and measure throughput-latency tradeoffs across batch sizes. A paired variant (NanoGPT-Decode, §\ref{sec:results}) surfaces the \emph{bandwidth-bound} regime on the same weights---one decode step costs as much wall-clock as the throughput of 1175 prefill tokens, the visceral demonstration of why LLM serving economics are dominated by decode. The key systems insight is that attention memory grows quadratically with sequence length, making this the primary bottleneck for serving---not model size.
-
-\textbf{Nano-MoE} (17.4M params). A sparse Mixture-of-Experts with 8 experts and top-2 routing~\citep{shazeer2017outrageously}, where only 25\% of expert parameters activate per token. This architecture demonstrates the conditional computation pattern used in production systems such as GShard and Switch Transformer. Students compare total parameter count against active parameter count and discover that architectural choices (expert specialization) matter as much as raw scale. The model converges to loss 0.042---substantially lower than NanoGPT's 2.25 despite fewer total parameters---illustrating expert specialization. This teaches a critical systems lesson: sparsity enables better performance per FLOP, but introduces routing overhead and load-balancing complexity.
-
-\textbf{Micro-DLRM} (23K params). A scaled-down recommendation model~\citep{naumov2019deep} with embedding tables for users (943) and items (1,682), a feature interaction MLP, and dense features including user demographics and 12 item genre flags from \textbf{MovieLens-100K} (100K ratings). This workload exposes the memory-bandwidth-bound vs.\ compute-bound dichotomy that defines production recommendation systems such as Meta's DLRM and Google's Wide\&Deep. \emph{Scale caveat}: at 23K parameters, the embedding tables total $943 \times 32 + 1{,}682 \times 32 = 83{,}968$ entries ($\approx$328\,KB in float32). At this size, the tables are intentionally small enough to avoid system-level memory-bandwidth contention; students observe the \emph{architectural} bottleneck pattern (sparse lookups vs.\ dense compute) rather than the cache-miss-driven pressure of production-scale tables. The systems takeaway is that recommendation workloads are fundamentally memory-bound---a property that persists from this micro scale to terabyte-scale production.
-
-\textbf{Micro-Diffusion} (2.0M params). A U-Net denoising network~\citep{ho2020denoising} trained on CIFAR-10, reflecting the architecture of production diffusion systems such as Stable Diffusion and DALL-E. Inference latency scales linearly with the number of denoising steps, exposing the compute-latency tradeoff that dominates generative model serving. Students measure how step count affects generation quality and wall-clock time, learning that diffusion inference cost is a tunable parameter---a key insight for deployment.
-
-\textbf{Micro-GCN} (94K params). A 2-layer Graph Convolutional Network~\citep{kipf2017semisupervised} for node classification on the \textbf{Cora citation network} (2,708 papers, 5,429 citations, 7 classes), reflecting the graph learning patterns used in systems such as Pinterest PinSage and Google Knowledge Graph. Implements message passing and adjacency normalization from scratch without PyG/DGL dependencies. Uses dense adjacency multiplication for pedagogical clarity; production systems use sparse representations. The model achieves 78.8\% test accuracy in 200 epochs (2s), closely matching the published Kipf \& Welling result ($\sim$81\%). The systems lesson is that irregular memory access patterns in graph workloads create fundamentally different performance characteristics from dense linear algebra.
-
-\textbf{Micro-BERT} (1.1M params). A 2-layer bidirectional transformer for binary sentiment classification on \textbf{SST-2} (67K sentences) with word-level tokenization, reflecting the fine-tuning workflow of production NLU systems such as BERT and RoBERTa. Students compare bidirectional and causal attention patterns and analyze the pronounced train-val gap (94\% vs.\ 77\%) as a case study in overfitting and regularization. The model achieves 77.1\% validation accuracy after 20 epochs (45s on the reference platform), demonstrating that bidirectional processing enables richer representations at the cost of precluding autoregressive generation---a fundamental architectural tradeoff in systems design.
-
-\textbf{Micro-LSTM} (54K params). A 2-layer LSTM for multivariate time-series forecasting on \textbf{ETTh1} (17,420 hourly electricity transformer readings, Zhou et al.\ 2021), predicting oil temperature from 7 sensor features with a 96$\rightarrow$24 horizon. This workload mirrors the sequential processing pattern of production forecasting systems such as Autoformer and PatchTST. Students observe classic time-series overfitting (validation MSE optimal at epoch 5, rising to 0.47 by epoch 30), motivating early stopping. The key systems insight is that sequential dependencies prevent parallelization across time steps---the fundamental bottleneck that motivates the architectural shift from RNNs to Transformers.
-
-\textbf{Micro-RL} (18K params). A REINFORCE policy gradient agent on a pure-Python CartPole environment, reflecting the reward-based optimization pattern used in production RLHF fine-tuning pipelines. Students observe that RL reward curves are fundamentally noisier than supervised loss curves, learning to interpret stochastic optimization signals. The intentionally high variance motivates discussion of variance reduction techniques (baselines, PPO). The systems implication is that RL workloads require different convergence criteria and runtime monitoring than supervised training---a distinction critical for RLHF deployment.
-
-\subsection{Edge and Tiny Divisions}
-
-\textbf{ResNet-18} (11.2M params). Standard ResNet~\citep{he2016} adapted for CIFAR-100, fully self-contained without \texttt{torchvision.models} dependency, serving as a proxy for the ResNet-50 workload in MLPerf Training. Students diagnose data pipeline stalls (CPU--GPU loading bottlenecks), apply augmentation and learning rate scheduling, and measure their impact on convergence rate. The model achieves 36.3\% top-1 accuracy after 20 epochs; extended training with augmentation targets $>$50\%. The systems insight is that training throughput is often limited not by compute but by the data ingestion pipeline---a bottleneck that persists at production scale.
-
-\textbf{MobileNetV2} (2.4M params). Inverted residual architecture with depthwise-separable convolutions~\citep{sandler2018}, fully self-contained, reflecting the mobile inference workloads in MLPerf Inference (Edge). The depthwise/pointwise factorization reduces parameters by $5\times$ vs.\ ResNet-18 with minimal accuracy loss. Students compare parameter efficiency and inference throughput, learning that architectural factorization can dramatically reduce deployment cost---the core insight behind efficient edge inference.
-
-\textbf{DS-CNN} (20K params). A depthwise-separable CNN~\citep{zhang2017hello} for 12-class keyword spotting on Speech Commands v2~\citep{warden2018speech}, processing mel spectrograms (40$\times$101 frames), reflecting the DS-CNN benchmark in MLPerf Tiny. Students quantize the model to INT8 and measure compression ratios, learning that the depthwise-separable factorization ($C \!\times\! K^2 + C \!\times\! C'$ vs.\ standard $C \!\times\! C' \!\times\! K^2$) is the key to MCU-class deployment under extreme memory constraints.
-
-\textbf{Anomaly Detection AE} (0.3M params). An 8-dim bottleneck autoencoder trained on MNIST digit ``0''; anomalous digits (1--9) produce elevated reconstruction error, mirroring the MLPerf Tiny anomaly detection benchmark used in industrial settings such as factory machine sound monitoring~\citep{banbury2021mlperf}. Students tune the anomaly detection threshold to maximize AUC and explore precision-recall tradeoffs. The systems insight is that unsupervised anomaly detection shifts the evaluation challenge from accuracy to threshold calibration---a fundamentally different systems problem from supervised classification.
-
-\textbf{Wake Vision VWW} (8.5K params). A MicroNet CNN with depthwise-separable convolutions for binary person detection, trained on a pedagogical subset of Wake Vision~\citep{banbury2024wakevision} (5K images) with a CIFAR-10 proxy fallback, reflecting the MLPerf Tiny Visual Wake Words benchmark. Students explore the impact of aggressive model compression on accuracy and measure inference latency at microcontroller scale. The model achieves 87.3\% validation accuracy in approximately 10 seconds, demonstrating that meaningful person detection is achievable with fewer than 10K parameters---a systems lesson in the lower bounds of model compression.
-
-\subsection{Agent Division}
-\label{sec:agents}
-
-Existing agent benchmarks (SWE-bench, AgentBench) measure \emph{capability}: can the agent solve the task? MLPerf EDU's agent workloads measure \emph{systems performance}: latency, memory growth, and throughput of agentic pipelines. This distinction is critical for deployment, where the cost-per-query of an agentic system can exceed $100\times$ that of a single model call.
-
-\textbf{NanoRAG} (20.1M params)~\citep{lewis2020retrieval}. Brute-force TF-IDF retrieval over a document corpus followed by generation, reflecting the retrieve-then-generate architecture used in enterprise search-augmented systems such as Perplexity and Bing Chat. Students measure the retrieve-vs.-generate latency split, learning that retrieval overhead can dominate total query time---a critical insight for RAG system design.
-
-\textbf{NanoCodeGen} (13.7M params)~\citep{chen2021evaluating}. Iterative code generation with unit-test verification, trained on MBPP~\citep{austin2021mbpp} (20 real Python programming tasks), reflecting the generate-then-verify loop used in systems such as GitHub Copilot and Cursor. The 20-task subset is sufficient for measuring systems throughput (tokens-per-attempt, verification overhead) but insufficient for statistically significant code generation accuracy; students should interpret pass@1 as a qualitative signal. The systems lesson is that iterative refinement multiplies inference cost linearly with attempt count.
-
-\textbf{NanoReAct} (13.7M params)~\citep{yao2023react}. Multi-step reasoning with a dual-head transformer (LM head + tool-selection head), trained on 25 structured reasoning traces, reflecting the tool-augmented agent pattern used in systems such as ChatGPT plugins and function-calling APIs. Students observe expected quadratic context growth as each Think$\rightarrow$Act$\rightarrow$Observe cycle appends tokens proportional to the reasoning trace, with per-step memory tracking. \emph{Important caveat}: the model learns to reproduce reasoning trace \emph{patterns}, not to perform genuine logical reasoning; in production, ReAct relies on pre-trained LLM knowledge. This distinction between imitation and reasoning is itself pedagogically valuable, teaching students to separate systems evaluation from capability evaluation.
-
-All agent quality targets were verified in 5 independent runs on reference hardware. NanoRAG achieves 68\% retrieval accuracy (target: $>$60\%), NanoCodeGen achieves 20\% pass@1 (target: $>$15\%), and NanoReAct achieves 78\% trace reproduction accuracy (target: $>$70\%). Agent workloads are trained on structured traces using teacher-forcing, producing standard cross-entropy loss curves; however, their primary evaluation is inference-time systems metrics (latency, memory, throughput).
-
-% ============================================================================
-\section{Experimental Results}
-\label{sec:results}
-% ============================================================================
-
-We verify all 13 supervised workloads on a consumer Apple Silicon laptop using the MPS backend, without a dedicated GPU. The 3 agent workloads are verified via inference-time metrics. Hardware is auto-detected by the harness (\texttt{fingerprint.py}) and stamped into every artifact. \Cref{fig:training-curves} shows convergence curves; \Cref{tab:results} reports final metrics.
-
-\begin{figure*}[t]
-\centering
-\includegraphics[width=0.95\textwidth]{figures/training_curves.pdf}
-\caption{\textbf{Training Convergence Curves.} Train (solid) and validation (dashed) loss for representative workloads over 20--30 epochs on Apple Silicon (MPS backend). All models converge on real datasets. (a) NanoGPT: steady character-level convergence on TinyShakespeare. (b) Nano-MoE: rapid expert specialization. (c) ResNet-18: gradual CIFAR-100 feature learning. (d) Micro-DLRM: recommendation on MovieLens-100K reaching 71\% accuracy. (e) Micro-Diffusion: U-Net reconstruction reaching MSE $<$ 0.002. (f) Anomaly AE: val loss intentionally higher for anomaly detection. Additional workloads (GCN on Cora, BERT on SST-2, LSTM on ETTh1) show characteristic overfitting patterns. Total supervised suite training time: 552 seconds.}
-\label{fig:training-curves}
-\end{figure*}
-
-
-\begin{table}[t]
-\centering
-\caption{\textbf{Final Training Metrics.} All supervised workloads converge on Apple Silicon (MPS backend). Gap $=$ Val $-$ Train loss. $\dagger$AE: val loss is intentionally higher (anomalous inputs). $\ddagger$Accuracy where applicable.}
-\label{tab:results}
-\small
-\renewcommand{\arraystretch}{1.25}
-\begin{tabularx}{\columnwidth}{@{}lrrrrl@{}}
-\toprule
-\textbf{Workload} & \textbf{Train} & \textbf{Val} & \textbf{Gap} & \textbf{Acc.$^\ddagger$} & \textbf{Time} \\
-\midrule
-NanoGPT & 2.248 & 2.205 & $-$0.043 & --- & 89s \\
-Nano-MoE & 0.042 & 0.042 & +0.000 & --- & 158s \\
-ResNet-18 & 2.456 & 2.485 & +0.029 & 36.3\% & 64s \\
-DLRM & 0.537 & 0.571 & +0.034 & 71.0\% & 5s \\
-Diffusion & 0.002 & 0.000 & $-$0.001 & --- & 41s \\
-AE$^\dagger$ & 0.030 & 0.064 & +0.034 & --- & 6s \\
-DS-CNN & 0.916 & 1.026 & +0.110 & 71.2\% & 51s \\
-VWW & 0.310 & 0.330 & +0.020 & 87.3\% & 10s \\
-GCN & 0.052 & 0.981 & +0.929 & 81.6\% & 2s \\
-BERT & 0.130 & 0.874 & +0.744 & 77.1\% & 45s \\
-LSTM & 0.019 & 0.125 & +0.106 & --- & 20s \\
-RL & 0.087 & --- & --- & 195+ & 1s \\
-MobileNetV2 & 1.983 & 2.176 & +0.193 & 41.2\% & 60s \\
-\midrule
-\textbf{Total} & & & & & \textbf{552s} \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\begin{figure*}[t]
-\centering
-\includegraphics[width=\textwidth]{figures/convergence_summary.pdf}
-\caption{\textbf{Convergence Summary (13 Supervised Workloads).} (a--d) Representative training curves showing four distinct convergence patterns: NanoGPT exhibits strong overfitting (shaded red), LSTM shows classic time-series overfitting with early val plateau, Diffusion converges tightly, and VWW demonstrates noisy small-dataset behavior. (e) Final train vs.\ val loss for all 13 supervised workloads; vertical dashed lines separate Cloud, Edge, and Tiny divisions. (f) Training time on Apple Silicon; the complete supervised suite finishes in 552 seconds (9.2 minutes). Agent workloads (NanoRAG, NanoCodeGen, NanoReAct) measure inference-time systems metrics and are summarized separately in \S\ref{sec:arch_impl}.}
-\label{fig:summary}
-\end{figure*}
-
-\textbf{Analysis of convergence behavior.} Several observations merit discussion. First, Nano-MoE converges to loss 0.042, substantially lower than NanoGPT's 2.25, despite an active-parameter count (top-2 routing across 8 experts, so $\sim$25\% of the 17.4M total = $\sim$4.4M active per token) well below NanoGPT's 11.1M. This demonstrates expert specialization: conditional compute delivers better loss per active FLOP than dense compute at the same dataset. Second, DLRM achieves 71.0\% validation accuracy on MovieLens-100K with a realistic train-val gap (0.034), confirming genuine collaborative filtering signal even at micro scale. Third, Micro-GCN achieves 81.6\% test accuracy on Cora, closely matching the published Kipf \& Welling result ($\sim$81\%), validating the from-scratch implementation against established baselines. Fourth, Micro-BERT on SST-2 exhibits a pronounced train-val gap (94\% vs.\ 77\%), creating an instructive overfitting case study. Fifth, Micro-LSTM on ETTh1 displays classic time-series overfitting (validation MSE optimal at epoch 5, then rising), motivating early stopping. Sixth, the complete 13-workload supervised suite finishes in under 10 minutes on consumer hardware, satisfying the resource accessibility constraint.
-
-\begin{figure}[t]
-\centering
-\includegraphics[width=\columnwidth]{figures/model_scale.pdf}
-\caption{\textbf{Model Scale Reduction.} MLPerf EDU reduces model parameters by $100\text{--}5000\times$ vs.\ official MLPerf while preserving architectural patterns. Log scale.}
-\label{fig:scale}
-\end{figure}
-
-\subsection{Inference Latency}
-
-We validate the inference harness by measuring SingleStream latency for four representative workloads (\Cref{tab:inference}). All measurements use batch size 1 on Apple Silicon CPU (no GPU) over 200 queries per workload (100 for NanoGPT). The results reveal the expected performance hierarchy: DLRM's sparse lookups dominate at 33K QPS, DS-CNN's lightweight convolutions achieve 2K QPS, and NanoGPT's attention mechanism is the bottleneck at 163 QPS. These differences give students a concrete lesson in where compute time is actually spent.
-
-\begin{table}[t]
-\centering
-\caption{Inference latency (SingleStream, batch=1, Apple Silicon CPU). Values: median $\pm$ std over 5 runs of 100 queries each. CV $<$ 5\% for all workloads.}
-\label{tab:inference}
-\footnotesize
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}lrrrr@{}}
-\toprule
-\textbf{Workload} & \textbf{p50 (ms)} & \textbf{p99 (ms)} & \textbf{CV} & \textbf{QPS} \\
-\midrule
-NanoGPT-6L & 5.90{\tiny$\pm$0.04} & 7.49{\tiny$\pm$1.36} & 0.6\% & 163 \\
-ResNet-18  & 3.54{\tiny$\pm$0.02} & 3.75{\tiny$\pm$0.12} & 0.6\% & 279 \\
-DS-CNN     & 0.47{\tiny$\pm$0.02} & 0.55{\tiny$\pm$0.05} & 4.0\% & 2,024 \\
-Micro-DLRM & 0.03{\tiny$\pm$0.00} & 0.03{\tiny$\pm$0.00} & 0.7\% & 33,219 \\
-\bottomrule
-\end{tabular}
-\end{table}
-
-\textbf{Bottleneck analysis.} The $200\times$ latency gap between DLRM (0.03\,ms) and NanoGPT (5.90\,ms) reflects fundamentally different positions on the three-axis regime grid. DLRM's forward pass is dominated by embedding lookups (3 tables of $\sim$1K entries $\times$ 32-dim)---pure memory reads with minimal arithmetic, yielding an arithmetic intensity $<$ 1 FLOP/byte. NanoGPT's prefill self-attention computes $QK^T$ matrices ($O(N^2 d)$ FLOPs for sequence length $N$, head dim $d$), making it compute-bound with arithmetic intensity $\gg$ 10 FLOP/byte. This difference is directly observable in student profiling exercises.
-
-\textbf{An unreachable cell, made explicit.} A naive reading of the three-axis grid would predict every combination of (cache-resident, DRAM-bound) $\times$ (compute-bound, bandwidth-bound) $\times$ (device-saturated, dispatch-bound) as a reachable workload configuration. Our experimental sweep found otherwise: the cell \emph{(cache-resident, bandwidth-bound, device-saturated)} is structurally unreachable on plain PyTorch with the MPS backend at any batch size we tested. The reason is mechanical: a workload cannot simultaneously fit its per-step working set in LLC \emph{and} saturate DRAM bandwidth \emph{and} amortize PyTorch's 50--200\,µs per-kernel dispatch overhead, because the first two requirements force a working-set size in the tens-of-megabytes band where our reference LLC is exceeded. Production LLM serving stacks (vLLM, TensorRT-LLM, llama.cpp, MLX) close this gap with kernel fusion and custom Metal/CUDA kernels; the gap between those stacks and stock PyTorch is itself the iteration's pedagogical lesson.
-
-\textbf{Measurement-driven reclassification.} An earlier draft of this paper assigned regime labels by static analysis (counting weights, estimating activation peaks). Running every workload through a roofline-emitter harness (\S\ref{sec:design}) that wraps each forward pass and records (achieved FLOPS, achieved bandwidth, dispatch utilization) revealed that 15 of our initial labels did not survive measurement and were revised. Notable surprises: ResNet-18 at \texttt{fp32}, \texttt{B=8} on M5 Max is bandwidth-bound (intensity 3.9 FLOP/byte), not compute-bound as the textbook framing would suggest; Micro-DLRM at small batch is compute-bound on the MLP despite the architectural sparse-gather pattern being canonically memory-bound; and Micro-Diffusion is bandwidth-bound, matching MobileNet-class arithmetic-intensity intuition rather than the "generative model" mental model. The three-axis taxonomy's insistence on an \texttt{unmeasured} value for any axis without measurement evidence prevented these mislabels from propagating into the published result tables.
-
-% ============================================================================
-\section{Educational Integration}
-\label{sec:pedagogy}
-% ============================================================================
-
-We present three concrete classroom exercises demonstrating how MLPerf EDU enables systems ML education. These scenarios were developed through iterative design with ML systems instructors. \Cref{tab:competencies} maps each canonical core workload to specific, measurable learning competencies classified by Bloom's revised taxonomy~\citep{anderson2001taxonomy}.
-
-\begin{table}[t]
-\centering
-\caption{\textbf{Competency Matrix.} Core workloads mapped to learning outcomes. Bloom's levels: \textbf{Ap}ply (L3), \textbf{An}alyze (L4), \textbf{Ev}aluate (L5), \textbf{Cr}eate (L6).}
-\label{tab:competencies}
-\footnotesize
-\renewcommand{\arraystretch}{1.2}
-\begin{tabularx}{\columnwidth}{@{}lXc@{}}
-\toprule
-\textbf{Workload} & \textbf{Competency} & \textbf{Level} \\
-\midrule
-NanoGPT & Profile attention memory scaling ($O(N^2)$ vs.\ $N$) & An \\
- & Implement KV-cache and measure speedup & Ap \\
- & Evaluate batch size vs.\ throughput tradeoff & Ev \\
-\addlinespace
-Micro-DLRM & Identify memory-bandwidth bottleneck via profiling & An \\
- & Compare sparse lookup vs.\ dense compute cost & Ev \\
-\addlinespace
-ResNet-18 & Diagnose data pipeline stalls (CPU vs.\ GPU) & An \\
- & Apply augmentation, LR schedule, AMP & Ap \\
-\addlinespace
-DS-CNN & Measure depthwise vs.\ standard conv efficiency & An \\
- & Quantize model to INT8 and measure compression & Ap \\
-\addlinespace
-NanoReAct & Measure per-step memory growth (context window) & An \\
- & Evaluate latency scaling with reasoning depth & Ev \\
-\addlinespace
-\emph{Capstone} & Design a novel workload using the evaluation tuple & Cr \\
-\bottomrule
-\end{tabularx}
-\end{table}
-
-\subsection{Example 1: Systems Optimization Challenge}
-
-\textbf{Setting.} Students receive a ``broken baseline'' ResNet-18 with intentionally poor configuration: \texttt{num\_workers=0} (no data parallelism), no learning rate schedule, no data augmentation, batch size 8. Their task: apply systems optimizations to maximize accuracy within a fixed wall-clock budget.
-
-\begin{lstlisting}[caption={\textbf{Example 1: Optimization.} Students diagnose and fix systems bottlenecks.},label={lst:lab1}]
-# Student starts with broken baseline:
-train_ld, val_ld = get_dataloaders(
-    "resnet18", batch_size=8)  # Too small!
-opt = torch.optim.SGD(model.parameters(),
-    lr=0.1)  # No schedule!
-
-# Task: Profile, identify bottleneck, fix
-# Expected sequence:
-# 1. Increase batch_size -> 64 (4x throughput)
-# 2. Add CosineAnnealingLR (convergence)
-# 3. Add RandomCrop + HorizontalFlip (generalization)
-# 4. Enable torch.amp (2x throughput on GPU)
-# Final: accuracy 5% -> 36% -> 50%+
-\end{lstlisting}
-
-\textbf{Learning outcomes.} Students discover that: (i) DataLoader parallelism (\texttt{num\_workers}) eliminates CPU-GPU pipeline stalls, (ii) batch size affects both throughput and convergence stability, (iii) augmentation acts as regularization, reducing the train-val gap.
-
-\subsection{Example 2: Cross-Architecture Comparison}
-
-\textbf{Setting.} Students train NanoGPT (dense) and Nano-MoE (sparse) on identical data and compare convergence speed, memory usage, and per-token latency.
-
-\begin{lstlisting}[caption={\textbf{Example 2: Dense vs.\ Sparse.} Same data, different architectures.},label={lst:lab2}]
-# Train both on TinyShakespeare
-for model_name in ["nanogpt-12m", "nano-moe-12m"]:
-    t_ld, v_ld = get_dataloaders(model_name)
-    model = load_model(model_name)
-    # ... train for 25 epochs ...
-    # Measure:
-    #   NanoGPT: 11.1M params (char-level), loss 2.25
-    #   Nano-MoE: 17.4M params, loss 0.04
-    # Discussion: Why does MoE converge 50x
-    # lower with fewer parameters?
-    # Answer: Expert routing enables
-    # specialization + overparameterized
-    # individual experts.
-\end{lstlisting}
-
-\textbf{Learning outcomes.} Students discover that total parameter count alone does not explain convergence quality; architectural choices (sparse routing, expert specialization) matter as much as raw scale.
-
-\subsection{Example 3: Anomaly Detection Threshold Tuning}
-
-\textbf{Setting.} Students train the autoencoder on ``normal'' MNIST digits, then tune the anomaly detection threshold to maximize AUC on the validation set.
-
-\begin{lstlisting}[caption={\textbf{Example 3: Anomaly Detection.} Reconstruction error as a signal.},label={lst:lab3}]
-model = AnomalyDetectionAE(input_dim=784)
-train_ld, val_ld = get_dataloaders("anomaly-ae")
-# ... train on digit 0 only ...
-
-# Inference: compute anomaly scores
-scores = model.anomaly_score(val_batch)
-# Normal (digit 0): score ~ 0.03
-# Anomalous (digit 7): score ~ 0.12
-
-# Student task: find threshold T such that
-# AUC is maximized. Explore precision-recall
-# tradeoff. Connect to industrial use:
-# factory machine sound anomaly detection.
-\end{lstlisting}
-
-The canonical core provides sufficient structure for a 5-week accelerated module; the full suite with inference exercises supports a 15-week graduate course. Detailed weekly schedules and deployment guidance are provided in the repository documentation.
-
-% ============================================================================
 \section{Architecture and Implementation}
 \label{sec:architecture}
-% ============================================================================
+
+The implementation follows the original white-box design. A declarative registry
+selects assets, runners, scenarios, profiles, gates, evidence roles, and
+promotion rules. A unified command-line interface drives fetch, audit, run,
+grade, verify, report, package, and validation operations. The same registry
+generates the flat \texttt{workloads.yaml} compatibility mirror, website tables,
+and paper snapshot. This single-source design makes disagreement between the
+paper and executable contract a build failure rather than a documentation bug.
 
 \subsection{Unified Dataset Factory}
 
-All data loading is centralized through \texttt{dataset\_factory.py} (\Cref{lst:factory}). The factory accepts a model name and returns deterministic \texttt{(train\_loader, val\_loader)} with seed=42 and 80/20 splits. This guarantees identical data ordering for any student, enabling reproducible gradient trajectories.
+Dataset recipes distinguish bundled, fetched, cached, synthetic, and restricted
+assets. Reports record the resolved mode and relevant digests. A \texttt{min}
+runner may use a reduced or synthetic input, but the public audit rejects that
+mode for score-bearing evidence. Dataset dossiers also record citation, license,
+release status, and expected cache behavior.
 
 \subsection{Model Registry}
 
-All models are registered in a central dictionary mapping workload names to \texttt{(module, class)} tuples, enabling dynamic instantiation:
-
-\begin{lstlisting}[caption={\textbf{Model Registry.} Dynamic model loading.}]
-MODEL_REGISTRY = {
-  "nanogpt-12m": ("reference.cloud.nanogpt_train",
-                   "NanoGPTWhiteBox"),
-  "dscnn-kws":   ("reference.tiny.dscnn_kws",
-                   "DSCNN"),
-  "anomaly-ae":  ("reference.tiny.anomaly_detection_ae",
-                   "AnomalyDetectionAE"),
-  # ... 16 total workloads
-}
-\end{lstlisting}
+Model records bind a user-facing identifier to its implementation or pinned
+upstream revision. Checkpoint-backed inference adds a lineage record containing
+the source training workload, source task quality, and checkpoint digest. This
+prevents a serving result from silently changing weights between repetitions.
 
 \subsection{Load Generator and Inference Harness}
 
-For inference benchmarking, MLPerf EDU includes a Python-native \texttt{LoadGenProxy} that implements all four MLPerf Inference scenarios~\citep{reddi2020mlperf}. Each scenario models a distinct deployment pattern: \textbf{Offline} models bulk throughput by issuing the entire query set at once and measuring total processing time. \textbf{SingleStream} models serial latency by issuing one query at a time and measuring per-query response time. \textbf{Server} models queuing under stochastic arrivals by generating queries with exponentially distributed inter-arrival times at a configurable QPS, where the SUT must meet a p99 latency bound. \textbf{MultiStream} models coordinated concurrent queries, as in multi-camera edge inference. Unlike the official C++ LoadGen~\citep{reddi2020mlperf}, our implementation uses \texttt{asyncio} for scenario scheduling. This sacrifices sub-microsecond timing precision but makes the load-generation logic fully inspectable---students can step through the scheduling loop and observe queuing behavior directly.
-
-Samples flow through the system as follows. The load generator creates \texttt{QuerySample} objects with unique IDs and precise arrival timestamps. Each sample is dispatched to the student's System Under Test (SUT) plugin, and the response latency is recorded. After the run completes, the harness computes p50/p90/p95/p99 latency percentiles, throughput (QPS), and energy (Joules).
+The Python-native load generator implements inspectable scheduling for
+single-stream, offline, server, and multi-stream experiments~\citep{reddi2020mlperf}.
+It records warmup and measurement counts, latency samples and percentiles,
+throughput, and functional outcomes. It is designed for teaching and local
+experimentation. It is not a drop-in replacement for official MLPerf LoadGen.
 
 \subsection{Power Measurement}
 
-The load generator integrates an asynchronous \texttt{PowerProfiler} that samples system power draw in 1-second intervals throughout each benchmark run. On macOS, it interfaces with \texttt{powermetrics}; on Linux with NVIDIA GPUs, it queries \texttt{nvidia-smi} for per-GPU wattage. The profiler reports average watts and estimated total Joules, enabling energy-per-query and Joules-per-token analysis. Power results are recorded in submission artifacts and HTML reports; the current paper focuses on latency and convergence metrics, while power results are available in generated artifacts.
-
-\emph{Limitations}: Power measurement relies on OS-level estimation rather than external hardware power meters. These methods may undercount peripheral draw and lack per-component attribution. The measurements are valuable for \emph{comparative} analysis across workloads and optimizations, even if absolute Joule values are approximate. The \texttt{powermetrics} interface on macOS requires \texttt{sudo}; a user-space fallback using IOKit energy counters is planned.
+Promotion campaigns record power source, Low Power Mode, and sleep or wake
+state at each execution boundary on supported hosts. A campaign refuses to
+start without external power and invalidates an affected attempt when the host
+state changes. These guards improve timing control but do not provide calibrated
+energy measurement. Absolute joule claims still require supported platform
+counters or an external meter with a disclosed calibration.
 
 \subsection{Submission Artifacts}
 
-After each run, the harness generates a timestamped JSON submission file in \texttt{submissions/} containing:
-\begin{itemize}[leftmargin=*, itemsep=1pt]
-\item Hardware fingerprint (CPU, GPU, memory, OS)
-\item All latency percentiles and throughput metrics
-\item Power telemetry (average watts, total Joules)
-\item Division compliance verdict (closed/open)
-\item SHA-256 integrity hash for tamper detection
-\end{itemize}
+Each run produces a JSON report and human-readable HTML and CSV views. A
+\texttt{.provd.json} manifest binds the report and declared sidecars by size and
+SHA-256 digest. Hardware and software fingerprints, asset dossiers, quality
+metadata, and checkpoint lineage travel with the result. Packages rewrite
+machine-specific absolute paths so that verification works after extraction in a
+clean directory.
 
-This mirrors the MLPerf submission process: students are ``submitters'' whose results can be verified, compared, and graded reproducibly. Following MLPerf convention, submissions are categorized as \textbf{Closed Division} (fixed model architecture, constrained hyperparameters) or \textbf{Open Division} (any technique allowed). In a classroom setting, the Closed Division ensures fair comparison across students, while the Open Division encourages creative systems optimization.
-
-\textbf{Auditability and anti-reward-hacking design.} Each benchmark run produces a verifiable execution trace consisting of dataset hashes, model checkpoint hashes, timestamped training logs, and latency measurements. These artifacts enable third-party auditing of results and reduce the risk of fabricated submissions. Specifically, the system prevents three classes of gaming: (1)~\emph{result fabrication}---SHA-256 hashes tie reported metrics to actual computation, making it infeasible to report results without executing the workload; (2)~\emph{cross-machine fraud}---hardware fingerprints embedded in each submission detect results transferred from more powerful hardware; (3)~\emph{shortcut computation}---the compliance checker verifies that the reported dataset hash matches the canonical dataset, preventing students from training on simplified data.
-
-\textbf{Run policy.} To ensure statistical soundness, we recommend a minimum of 3 runs per measurement, reporting the median. All submission JSON files include a SHA-256 hash of the training log and model checkpoint, enabling independent verification that reported results were produced by the submitted code.
-
-\textbf{Compliance checker.} The compliance checker (\texttt{scripts/compliance\_checker.py}) validates: (1) quality target attainment against the workload threshold, (2) dataset hash integrity via SHA-256 comparison, (3) minimum run count ($\geq$3), and (4) JSON schema conformance. A failing check produces a human-readable error message identifying the specific violation.
+Hashing establishes integrity, not authenticity. A self-consistent manifest can
+still be fabricated by its creator. Independent reruns, signed attestations, or
+controlled execution are needed for stronger trust. The framework deliberately
+states this boundary instead of claiming that checksums prevent fraud.
+The manifest therefore provides \mbox{unauthenticated integrity}, not proof of
+origin or execution.
 
 \subsection{CLI as Evaluation Tuple Instantiation}
 
-The benchmark exposes a unified command-line interface that serves as the concrete instantiation of the evaluation tuple $\mathcal{S} \rightarrow \mathcal{M}$. Each CLI invocation specifies the components of $\mathcal{S}$ (Model, Data, Hardware, Scenario, Constraints) and produces $\mathcal{M}$ (Latency, Throughput, Accuracy, Energy) as structured output:
+The CLI makes the evaluation tuple concrete. Suite, workload, variant, and
+profile select the model, data, scenario, constraints, and protocol. The commands
+below cover the normal review path.
 
-\begin{lstlisting}[caption={CLI usage: each command instantiates the evaluation tuple.},label={lst:cli}]
-# Train: S = (nanogpt, tinyshakes, auto, -, closed)
-$ mlperf cloud --task nanogpt-12m
-
-# Infer: S = (nanogpt, -, M1, Server, closed)
-$ mlperf cloud --task nanogpt-12m \
-    --sut my_optimized_sut.py \
-    --scenario Server --division closed
-
-# Declarative: specify S as a YAML file
-$ mlperf config experiment.yaml
-
-# Train all: iterate over all workloads
-$ mlperf train --all
+\begin{lstlisting}[caption={CLI path from setup to verified evidence.},label={lst:cli}]
+$ mlperf doctor
+$ mlperf list workloads
+$ mlperf fetch \
+    --workload causal-language-modeling \
+    --mode training --profile max
+$ mlperf run \
+    --workload causal-language-modeling \
+    --mode training --profile max
+$ mlperf grade submissions/
+$ mlperf verify submissions/run.provd.json
+$ mlperf package submissions/run.provd.json
+$ mlperf audit --policy public
 \end{lstlisting}
 
-The declarative interface enables fully reproducible, version-controlled experiment specifications where each YAML field maps directly to a component of the evaluation tuple:
+The same metadata drives individual runs and release presets. This reduces the
+chance that a paper-only configuration diverges from the executable path.
 
-\begin{lstlisting}[caption={\textbf{YAML Config.} Each field maps to $\mathcal{S}$.}]
-# experiment.yaml
-workload: nanogpt-12m        # S.Model
-dataset: tinyshakespeare      # S.Data
-target_quality: 2.3           # S.Constraints
-epochs: 25                    # S.Constraints
-scenario: SingleStream        # S.Scenario
-division: closed              # S.Constraints
-hardware: auto                # S.Hardware
-output: submissions/          # -> M (JSON)
-\end{lstlisting}
-
-This design provides two complementary interfaces: an imperative CLI for rapid iteration and a declarative YAML format for reproducible experiment management. Both interfaces produce identical JSON submission artifacts and both map explicitly to $\mathcal{S} \rightarrow \mathcal{M}$, reinforcing the evaluation tuple abstraction at every interaction point. The SUT plugin mechanism lets practitioners implement optimizations (quantization, KV-cache, batching) while the harness measures their impact on latency, throughput, and power.
-
-% ============================================================================
-\section{Validation Methodology}
+\subsection{Validation Methodology}
 \label{sec:feedback}
-% ============================================================================
 
-We conducted a structured validation study comprising iterative design reviews with three populations: ML systems researchers ($N=3$), industry engineers from NVIDIA, Google, and Meta ($N=4$), and teaching assistants with prior experience deploying ML benchmarks in coursework ($N=2$). The evaluation followed a structured protocol: 10 review rounds via a standardized questionnaire covering four dimensions---architectural fidelity, pedagogical utility, measurement rigor, and data quality---each scored on a 5-point Likert scale. Sessions were supplemented by live demonstrations (30--60 minutes each). Improvements were implemented between each round and re-evaluated. By round 10, all reviewers rated every dimension $\geq$4/5. Four themes reached unanimous consensus.
+Validation is layered because a single green status can hide different kinds of
+failure. Unit and integration tests exercise runners, schemas, registry
+invariants, grading, provenance, packaging, and generators. Negative tests
+reject path traversal, changed source bytes, seed disagreement, incomplete
+functional gates, partial batch output, unavailable devices, unresolved dataset
+bytes, and timing evidence above its declared variation limit. The
+\texttt{smoke} preset runs four representative \texttt{min} workloads.
+\texttt{coverage} runs all \RegistryRows{} \texttt{min} workloads. \texttt{max}
+selects canonical quality paths for the \EvidenceWorkloads{} promotion-scope
+workloads and bounded functional probes for the other
+\FunctionalSetupWorkloads{}. \texttt{pro} selects the research workloads and
+repeats their \texttt{max} contracts under a separate profile.
+Each phase verifies provenance and applies its declared quality or functional
+gate.
 
-\textbf{Architectural fidelity} (9/9 agreement). Reviewers independently confirmed that each proxy workload preserves the computational bottleneck of its official MLPerf counterpart. NanoGPT exhibits $O(N^2)$ attention scaling, DLRM demonstrates the sparse-dense memory access dichotomy, and DS-CNN shows depthwise-separable efficiency gains. One reviewer observed: ``The bottleneck identification exercise works because the models are architecturally honest, not because they are large.''
+The full artifact test suite passes with two expected skips. The smoke and
+coverage presets passed 4/4 and 14/14 workloads. A
+retained one-measurement \texttt{pro} validation passed the four
+promotion-scope research workloads, their quality gates, provenance
+verification, and grading with zero warnings. The expanded \texttt{pro} plan
+adds the five bounded functional probes, whose individual \texttt{max} paths
+also pass. The \ReferenceEvidenceCases{} source-locked \texttt{max} cases all have retained
+evidence. A clean Python \HostPython{} wheel installed outside the checkout, loaded \RegistryRows{}
+workload definitions and \ReferenceEvidenceCases{} evidence records, executed the starter smoke
+path, and verified the resulting provenance.
 
-\textbf{Hardware-agnostic grading} (8/9 agreement). The loss-based quality targets were assessed as effective for eliminating hardware-dependent grading bias (one reviewer requested time-based targets as an additional option). Convergence curves are comparable across M1 MacBook and RTX 3090 because targets are metric-based, not time-based.
+The Quarto site renders 31 pages and passes 62 desktop and narrow-viewport
+checks. The paper generator binds this manuscript to the same evidence index and
+source lock. The strict public audit remains fail-closed because all \RegistryRows{}
+workloads are experimental. The validation supports internal consistency and
+reviewability, not external reproducibility. Hosted Linux CI, dataset-policy
+decisions, and independent reproduction remain separate gates.
 
-\textbf{Inference harness completeness} (9/9 agreement). The LoadGen proxy with Poisson arrivals, latency percentiles, and power measurement was identified as addressing a gap in existing educational tools. No other pedagogical framework provides MLPerf-style inference scenarios with four distinct query modes.
+\section{Workload Suite}
+\label{sec:suite}
 
-\textbf{Data provenance credibility} (9/9 agreement). The use of real, citable datasets was unanimously endorsed. One evaluator noted: ``Genuine overfitting patterns create real optimization opportunities that synthetic data cannot replicate.'' The realistic train-val gaps (BERT 94\% vs.\ 77\%, LSTM rising val MSE) were cited as pedagogically essential.
+The executable registry contains \RegistryRows{} workloads across
+\RegistrySuites{} suites, and all \LocallyRunnableWorkloads{} of them execute
+their authoritative path on the target platform. No workload is
+environment-gated, so every contract in this section can be run and checked by
+a reader with the same hardware class. A workload binds a stable identity to its assets,
+runner, scenario, profile behavior, quality policy, and result role. Modes,
+phases, execution options, and research variations do not create new workload
+identities. This registry is the source of truth. The paper imports its counts
+and evidence table from a generated snapshot, which prevents prose from drifting
+away from executable metadata.
 
-% ============================================================================
-\section{Related Work}
-\label{sec:related}
-% ============================================================================
+Each workload is run under one of three execution profiles, \texttt{min},
+\texttt{max}, and \texttt{pro}, which separate installation checks from
+comparable runs and research variants. \Cref{sec:profiles} develops that
+separation and the reason it is a property of the run rather than of the
+workload.
 
-\textbf{MLPerf.} The official MLPerf Training, Inference, and Tiny suites~\citep{mattson2020, reddi2020mlperf, banbury2021mlperf} set the industry standard. MLPerf EDU inherits their architectural diversity and measurement discipline while reducing the hardware requirement from enterprise clusters to a single laptop. \Cref{tab:comparison} summarizes the positioning.
+The registry also separates public interpretation from execution success. The
+\ReferenceEvidenceCases{} retained evidence cases cover \EvidenceWorkloads{} promotion-scope
+workloads and include \ScoreBearingCases{} score-bearing cases and
+\PerformanceBearingCases{} performance-bearing inference phases. The other
+\FunctionalSetupWorkloads{} workloads have end-to-end functional evidence only.
+All \RegistryRows{} remain experimental until external review and governance decide
+otherwise. A successful execution can therefore anchor a lab or research
+comparison without being presented as an official benchmark score. This
+fail-closed distinction is important for small workloads because functional
+smoke data and reduced teaching exercises are not quality baselines.
 
-\textbf{DAWNBench.} Introduced the time-to-accuracy and cost-to-accuracy metrics~\citep{coleman2019} that influenced MLPerf's quality-target design. DAWNBench focused on cloud cost optimization; MLPerf EDU focuses on pedagogical accessibility.
+\begin{table*}[t]
+\centering
+\caption{\textbf{Current workload contracts, generated from the executable
+registry.} Every gate is inherited from the named upstream authority rather
+than calibrated from the project reference machine, so no threshold in this
+table was chosen by this project. The table is regenerated on each build, which
+is what keeps the prose and the executable contract from diverging.}
+\label{tab:candidates}
+\scriptsize
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{@{}p{0.22\textwidth}p{0.30\textwidth}p{0.20\textwidth}X@{}}
+\toprule
+\textbf{Workload} & \textbf{Upstream Authority} & \textbf{Mode} & \textbf{Gate} \\
+\midrule
+\WorkloadContractRows
+\bottomrule
+\end{tabularx}
+\end{table*}
 
-\textbf{TorchBench.} Covers 80+ PyTorch models for regression testing within the framework development pipeline~\citep{ansel2024torchbench}. Unlike MLPerf EDU, it is not designed for education and does not include datasets, quality targets, or a load generator.
+\textbf{Selection principles.} Admission requires five properties. The task must
+have a recognizable upstream authority, fit the declared laptop envelope,
+preserve the system behavior it claims to expose, support a controlled
+pedagogical intervention, and provide an evaluator with a defensible gate.
+Resource accessibility alone is insufficient. A small model is rejected when
+its data, evaluator, or target must be invented for this project. Behavioral
+fidelity also does not imply production-scale equivalence. The framework makes
+no roofline or bottleneck classification without measurements, and a taxonomy
+field with no supporting measurement is left blank rather than estimated.
 
-\textbf{AIBench and BenchCouncil.} The AIBench suite~\citep{gao2021aibench} provides comprehensive AI workloads across domains including datacenter, edge, and IoT. While AIBench targets industrial deployment characterization, MLPerf EDU targets pedagogical understanding with white-box implementations.
-
-\textbf{Educational ML frameworks.} TinyTorch teaches framework internals through bottom-up construction. Fast.ai and d2l.ai focus on algorithmic understanding. MLPerf EDU is complementary: it provides workloads that such frameworks benchmark, and its focus is on systems performance measurement rather than ML algorithms.
-
-\textbf{Agent benchmarks.} SWE-bench~\citep{jimenez2024swebench} and AgentBench measure agent \emph{capability} (task completion rate). MLPerf EDU's agent workloads are orthogonal: they measure the \emph{systems efficiency} (latency, memory, power) of agentic pipelines, a distinction critical for production deployment.
-
-\textbf{Non-ML benchmarks.} The SPEC CPU~\citep{henning2006} and TPC~\citep{poess2000} benchmark suites provide relevant methodological precedent for educational benchmarking. SPEC's emphasis on reproducible measurement conditions and TPC's multi-dimensional metrics (throughput, price-performance, energy) informed MLPerf EDU's evaluation tuple design. Our work transfers these established benchmarking principles to the ML systems domain.
+\textbf{The laptop envelope.} Because admission depends on it, the envelope is
+stated rather than left implicit. A workload qualifies when it runs to
+completion on a single consumer machine with no accelerator beyond an
+integrated or laptop-class GPU, requires no manually licensed data, keeps its
+largest single asset small enough to fetch over an ordinary connection, and
+holds its working set inside the memory such a machine ships with. The largest
+dataset any contract pulls is \mbox{190~MB} (\Cref{tab:datasets}) and the
+largest model checkpoint is roughly two billion parameters. That envelope is a
+constraint on admission, not a measured portability claim. Every timing number
+in this paper comes from one machine (\Cref{sec:results}), and the floor of the
+envelope, meaning the least capable machine on which the suite still completes,
+is untested and remains open work.
 
 \begin{table}[t]
 \centering
-\caption{Comparison with existing benchmark suites.}
-\label{tab:comparison}
-\footnotesize
-\renewcommand{\arraystretch}{1.2}
-\begin{tabular}{@{}lcccccc@{}}
+\caption{\textbf{Dataset provenance and access.} The table is generated from
+the registry dossiers. \emph{Review} means the data can be fetched for a local
+run but is not bundled in a public package.}
+\label{tab:datasets}
+\scriptsize
+\begin{tabularx}{\columnwidth}{@{}>{\raggedright\arraybackslash}p{0.29\columnwidth}>{\raggedright\arraybackslash}p{0.30\columnwidth}>{\raggedright\arraybackslash}p{0.14\columnwidth}>{\raggedright\arraybackslash}X@{}}
 \toprule
- & \rotatebox{70}{MLPerf} & \rotatebox{70}{DAWNBench} & \rotatebox{70}{TorchBench} & \rotatebox{70}{MLPerf Tiny} & \rotatebox{70}{\textbf{Ours}} \\
+\textbf{Dataset} & \textbf{Evaluation Subset} & \textbf{Size} & \textbf{Access} \\
 \midrule
-Single laptop       &   & \checkmark &   & \checkmark & \checkmark \\
-White-box models    &   &   &   & \checkmark & \checkmark \\
-Local datasets      &   &   &   &   & \checkmark \\
-Load generator      & \checkmark &   &   &   & \checkmark \\
-Power measurement   & \checkmark &   &   &   & (\checkmark) \\
-Agent workloads     &   &   &   &   & \checkmark \\
-Compliance checker  & \checkmark &   &   & \checkmark & \checkmark \\
-Submission format   & \checkmark &   &   & \checkmark & \checkmark \\
-Modalities covered  & 6 & 2 & 10+ & 3 & \textbf{10} \\
+\DatasetSnapshotRows
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{table}
 
-% ============================================================================
+The rest of this section takes the workloads one at a time. Each paragraph
+answers the same four questions, because those are the questions that decide
+whether a reported number means anything. What is the benchmark? Why is it in
+the suite, given that resource fit alone is not a reason to admit a task? Where
+did its quality target come from? And which metric and evaluator decide
+pass or fail? Exact gate values and upstream authorities are listed in
+\Cref{tab:candidates} and generated from the registry, so the prose below
+describes the provenance of each target rather than restating its digits.
+
+\subsection{Language and Retrieval}
+
+\textbf{Causal language modeling.} Character-level next-token prediction on
+Tiny Shakespeare using the nanoGPT training
+recipe~\citep{karpathy2022nanogpt}. It is the suite's anchor workload because
+it is the only one that exposes training and all three inference phases, full,
+prefill, and decode, under a single identity, which lets a student watch one
+checkpoint move through the whole lifecycle. Training produces the
+quality-approved checkpoint that the inference phases then consume, so a
+degraded training run cannot silently produce a fast inference number. The
+target is the validation loss nanoGPT's published recipe reaches on the same
+split, and the metric is that validation loss.
+
+\textbf{Text classification.} Binary sentiment classification with DistilBERT
+on the GLUE SST-2 validation split~\citep{sanh2019distilbert}. It contributes
+encoder-style inference, a bidirectional attention pattern with a fixed
+sequence budget and no autoregressive loop, which behaves differently from the
+decoder workloads under batching. The target is the accuracy DistilBERT's own
+model card reports for SST-2, inherited rather than measured here, and the
+metric is top-1 classification accuracy on the official validation split.
+
+\textbf{Information retrieval.} Cross-encoder reranking with a compact MS MARCO
+model over the three-dataset NanoBEIR
+subset~\citep{reimers2019sentencebert}. Retrieval is included because its cost
+structure is unlike single-pass classification. Every query is scored against
+many candidates, so the workload is dominated by a rerank loop whose length is
+a property of the task rather than of the model. The target is the published
+nDCG for the same model on the same subsets, and the metric is mean nDCG@10.
+
+\textbf{Code generation.} Function synthesis with Qwen2.5-Coder-0.5B evaluated
+on the complete 164-task HumanEval+ release~\citep{hui2024qwen25coder}. It is
+admitted because it is an execution-scored task rather than a similarity-scored
+one, which means quality is decided by running generated code against tests
+instead of comparing strings. The runner binds the full task release, Qwen's
+own prompt and stop rules, pinned model bytes, and a containerized EvalPlus
+evaluator. The target is the pass rate Qwen publishes for this model, and the
+metric is HumanEval+ pass@1. The recorded run reached
+\CodeGenerationMeasured{} against a published
+\CodeGenerationPublished{}, so the workload is held at the functional stage.
+
+\textbf{Function calling.} Structured tool-call generation with Qwen3-1.7B over
+the 1,150-case non-live AST split of the Berkeley Function Calling
+Leaderboard~\citep{yan2025bfcl,bfcl2026leaderboard}. It represents the agentic
+serving path, where the model's output is parsed as a structured call rather
+than read as text, and correctness is a property of the parsed abstract syntax
+tree. The target is the leaderboard's published AST summary score for this
+model, and the metric is that AST accuracy. The recorded run reached
+\FunctionCallingMeasured{} against a published \FunctionCallingPublished{},
+which likewise holds promotion closed.
+
+\subsection{Graph and Time Series}
+
+\textbf{Graph node classification.} A three-layer GCN trained on ogbn-arxiv
+using the official Open Graph Benchmark recipe and
+evaluator~\citep{kipf2017semisupervised,hu2020ogb}. It is in the suite because
+it exposes sparse gather and scatter behavior that no dense language or vision
+workload produces, which makes it the only workload where memory access
+pattern rather than arithmetic dominates the profile. The target is the
+accuracy the OGB leaderboard reports for the reference GCN, and the metric is
+test accuracy computed by the official evaluator on the official time split.
+The contract carries OGB's published standard deviation as its tolerance.
+
+\textbf{Time-series forecasting.} Multivariate long-horizon forecasting with
+PatchTST on the official ETTm1 split~\citep{nie2023patchtst}. It adds a
+temporal workload whose long input window, patch extraction, and multivariate
+attention give an attention cost that scales with history length rather than
+with vocabulary. The target is the test error reported in the PatchTST paper
+for this dataset and horizon, and the metric is test MSE. The paper reports
+that figure with a standard deviation, which the contract carries as its
+tolerance.
+
+\subsection{Vision, Audio, and Embedded}
+
+The next four workloads inherit MLPerf Tiny task
+contracts~\citep{banbury2021mlperf}, which supply both the model and the
+official evaluation subset. Each implementation maps the official model into an
+equivalent PyTorch graph and adds measurement and provenance without changing
+the task, so the targets remain the ones MLPerf Tiny already publishes.
+
+\textbf{Image classification.} ResNet8 on the official 200-example CIFAR-10
+accuracy set. It is the smallest complete vision contract in the suite and
+serves as the reference point for embedded-scale inference. The target is the
+MLPerf Tiny closed-division accuracy requirement, and the metric is top-1
+accuracy.
+
+\textbf{Keyword spotting.} A DS-CNN over the official 1,000-example
+speech-command accuracy set~\citep{warden2018speech}. It contributes an audio
+front end, so the measured path includes feature extraction rather than
+starting at a ready tensor, which is where a naive harness usually
+under-reports latency. The target is the MLPerf Tiny accuracy requirement, and
+the metric is top-1 accuracy.
+
+\textbf{Visual wake words.} MobileNetV1 at 0.25 width on the official
+1,000-example person-detection set. It represents the always-on binary vision
+task that motivates the tiny power envelope, where the operating point is set
+by a duty cycle rather than by throughput. The target is the MLPerf Tiny
+accuracy requirement, and the metric is top-1 accuracy.
+
+\textbf{Anomaly detection.} A ToyCar autoencoder with the official log-mel
+feature recipe over the 248-recording accuracy index. The metric choice is the
+point of including it. Reconstruction error alone does not establish useful
+anomaly ranking, so the contract inherits MLPerf Tiny's ROC AUC evaluator,
+which scores the ranking rather than the reconstruction. The target is the
+MLPerf Tiny ROC AUC requirement.
+
+\textbf{Image generation.} Diffusion sampling with NVIDIA EDM on
+CIFAR-10~\citep{karras2022edm}. It is the only generative vision contract and
+the only one whose cost is set by sampler step count, which makes step count a
+systems variable a student can vary without touching the model. The target is
+the FID reported in the EDM paper for this configuration, and the metric is FID
+over the official three-trial, 50,000-image procedure. The recorded run
+reported \ImageGenerationMeasured{} against a published
+\ImageGenerationPublished{}.
+
+\subsection{Recommendation and Reinforcement Learning}
+
+\textbf{Recommendation.} Neural collaborative filtering on MovieLens-20M,
+inherited from the retired MLPerf Training v0.5 recommendation
+contract~\citep{he2017ncf,harper2015movielens}. This workload reaches the
+laptop through a different route than the others, and the substitution is worth
+stating plainly. The current DLRM contract requires manually licensed Criteo
+Terabyte data, a roughly 90~GB checkpoint, and a 256~GB-class runtime, none of
+which fits the declared envelope~\citep{naumov2019dlrm}. The v0.5 contract
+trains on a laptop while keeping a published target. That target is the
+\RecommendationPublished{} HR@10 specified by the MLPerf Training v0.5 rules,
+evaluated leave-one-out against 999 sampled negatives per user, and the metric
+is that hit rate. The first recorded run reached \RecommendationMeasured{} and
+is recorded as a miss rather than rescued by relaxing the target or the
+candidate count, either of which would make the published number trivially
+beatable. The substitution is not an equivalence. NCF exercises embedding
+lookup and dense interaction, but its categorical cardinality is far below
+Criteo's, so it does not expose the memory-capacity wall that motivated DLRM.
+
+\textbf{Reinforcement learning.} Self-play training of a joint policy and value
+network under the MLPerf Training MiniGo
+contract~\citep{mattson2019training}. It is the only workload whose training
+data does not exist before the run, since self-play generates its own
+trajectories, which makes it the suite's one example of a workload where the
+data pipeline and the model are the same system. A PyTorch adapter runs the
+pinned upstream reference so that Go rules, tree search, the self-play loop,
+and professional-move evaluation execute unmodified from a hash-validated
+archive. The target is the professional-move prediction gate from the original
+9-by-9 MiniGo contract, and the metric is that move-prediction accuracy. The
+laptop configuration reduces games per generation and generation count against
+the reference, so it remains a bounded probe and quality conformance stays
+open.
+
+Optimization methods such as batching, speculative decoding, and tool
+scheduling remain configurations or research experiments rather than separate
+workload identities.
+
+\section{Execution Profiles}
+\label{sec:profiles}
+
+A benchmark suite that serves both a first-week installation check and a
+term-long architecture project has to distinguish those runs without letting
+either redefine the task. MLPerf EDU does that with three execution profiles.
+They describe execution \emph{intent}, not difficulty, and they are a property
+of the run rather than of the workload, so the same workload identity, model,
+data, evaluator, and gate persist across all three.
+
+\texttt{min} is a quick installation and plumbing check. It may use reduced or
+synthetic inputs and never supports a public score. \texttt{max} is the standard
+comparable path with the declared model, real data, gate, and protocol for
+promotion-scope workloads; for a functional-stage addition it remains a bounded
+setup probe that cannot support a quality or performance claim. \texttt{pro} is
+the research envelope for ablations, backend studies, repetitions, and
+user-controlled variants, and a \texttt{pro} result is comparable only when its
+recorded configuration defines the comparison.
+
+\begin{table}[t]
+\centering
+\caption{\textbf{Execution profiles and their intended interpretation.} The
+profile describes why a run was performed, not how hard it is. Workload
+identity, model, data, evaluator, and gate are identical across all three, so
+moving between profiles changes what may be claimed from a result rather than
+what was measured.}
+\label{tab:profiles}
+\small
+\begin{tabularx}{\columnwidth}{@{}lX@{}}
+\toprule
+\textbf{Profile} & \textbf{Interpretation} \\
+\midrule
+\texttt{min} & Fast correctness and setup path. No public score. \\
+\texttt{max} & Comparable reference path with the declared assets and gates. \\
+\texttt{pro} & Research variants and ablations with configuration-dependent comparability. \\
+\bottomrule
+\end{tabularx}
+\end{table}
+
+The reason for three profiles rather than one is that the alternative encodes
+optimization into workload names. A suite without this separation accumulates
+identities such as \texttt{resnet-batched} or \texttt{gpt-compiled}, at which
+point the workload no longer denotes a task and cross-result comparison becomes
+a question about naming conventions. Keeping batching, compilation, precision,
+scheduling, and caching inside the profile leaves the workload identity stable
+and forces every optimization to be disclosed as configuration.
+
+The separation also maps onto how the suite is actually used. \texttt{min}
+supports installation, pre-lab checks, and continuous integration.
+\texttt{max} is the classroom reference contract whose assets, evaluator, and
+gate must not change, which is what makes two students' submissions
+comparable. \texttt{pro} exposes repetitions, backends, compilers, and
+ablations for projects or architecture studies, where the configuration is the
+experiment and comparability is scoped to whatever the record discloses.
+
+\section{Experimental Results}
+\label{sec:results}
+
+The evaluation tests three claims implied by the design. First, an unchanged
+upstream task can meet its quality gate through the laptop implementation.
+Second, the score-bearing suite fits a practical local execution budget. Third,
+the framework distinguishes an executable result from one with enough repeated
+evidence to support a timing claim.
+
+The evidence campaign evaluates \ReferenceEvidenceCases{} canonical cases on an
+\HostChip{} host from source commit \texttt{\EvidenceSourceCommit}. CPU and
+Apple MPS are used according to the declared case contract.
+Every retained run passed execution, grading, provenance, source, and semantic
+checks. Where a case was measured more than once, its timing spread is reported
+alongside the median; a single measurement is reported as one measurement and
+carries no repeatability claim.
+
+A single accepted run decides a quality verdict, while any timing claim rests on
+repeated measurement. That asymmetry only holds if the quality metric is
+genuinely deterministic. We measured whether it is. Each of
+\DeterminismWorkloads{} inference workloads was run under \DeterminismSeeds{}
+seeds on the default MPS backend and then repeated once on CPU, giving
+\DeterminismExecutions{} executions in total. The design is deliberately not a
+full crossing of seeds and backends; it tests seed sensitivity at depth on one
+backend and then checks whether the second backend agrees at all. The quality
+metric did not move under either test. The largest spread across seeds was
+\DeterminismMaxSeedSpread{} and the largest difference between backends was
+\DeterminismMaxBackendDelta{}. Every value was bit-identical.
+
+Training does not behave this way. Sweeping \TrainingSeedCount{} seeds across
+the \TrainingSeedWorkloads{} training workloads cheap enough to repeat, the seed
+spread exceeded the margin to the effective threshold in both, and in both the
+verdict changed. Graph node classification is recorded as a pass at 0.7210 and
+falls to 0.7115 under another seed, below its tolerance floor. Time-series
+forecasting is recorded as a miss at 0.2924 and reaches 0.2889 under a third
+seed, inside its target. The verdict moves in both directions, so a single
+accepted run does not settle a training comparison.
+
+We report this rather than averaging it away, and the suite is arranged so a
+student meets it. A production submission absorbs this variance into a
+many-run protocol, which is correct for publishing a number and unhelpful for
+learning why the protocol exists. Here the gap between a workload's seed spread
+and its distance to the gate is visible in the artifact, and reproducing it
+costs one command with a changed seed. A student who watches a passing workload
+miss, and a missing workload pass, has learned something about benchmark claims
+that no amount of prose about statistical rigor conveys. That is the intended
+use, and \Cref{sec:education} builds an exercise on it.
+
+The consequence for reading this paper is unchanged: a training row is one draw
+from a distribution about as wide as its distance to the gate, and should be
+read that way. Raising the accepted-run count for training contracts would
+narrow the reported interval, but it would also remove the most direct
+demonstration the suite offers of why one run is not evidence.
+
+This matters most for the cases sitting closest to their contract line. Text
+classification exceeds its target by roughly two parts in a hundred million and
+information retrieval matches its target to eight decimal places, margins thin
+enough to look like luck. They are not. Those workloads evaluate a pinned
+checkpoint over a fixed set and consume no randomness, so they reproduce the
+published value rather than approach it. The single-run acceptance rule is
+therefore sound for inference, and the result also shows that quality, unlike
+timing, does not depend on the execution backend.
+
+The campaign uses a create-once policy. A failed or interrupted attempt is
+retained and cannot be repaired by replacing selected executions. Power source,
+Low Power Mode, and sleep or wake changes are checked before and after each
+promotion execution. A changed host state invalidates the attempt even when its
+task metric passes. This separation is important because accuracy does not
+excuse unstable timing or uncontrolled measurement conditions.
+
+\subsection{Committed Reference Evidence}
+
+\begin{table*}[t]
+\centering
+\caption{\textbf{Committed project reference measurements.} \emph{Observed}
+reports task quality for score-bearing cases and functional success for
+performance-bearing cases, and cost or rate reports the measured median and
+range. Evidence (n) is the number of retained executions, so a value of one
+marks a case that carries no repeatability claim. None is an MLCommons-verified
+result.}
+\label{tab:reference-evidence}
+\scriptsize
+\renewcommand{\arraystretch}{1.12}
+\begin{tabularx}{\textwidth}{@{}p{0.18\textwidth}p{0.04\textwidth}p{0.07\textwidth}p{0.14\textwidth}p{0.07\textwidth}p{0.17\textwidth}p{0.08\textwidth}X@{}}
+\toprule
+\textbf{Case} & \textbf{Role} & \textbf{Evidence (n)} & \textbf{Semantic Gate} & \textbf{Observed} & \textbf{Measured Cost or Rate} & \textbf{Timing CV} & \textbf{Device} \\
+\midrule
+\ReferenceEvidenceTableRows
+\bottomrule
+\end{tabularx}
+\end{table*}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_quality_vs_target.pdf}
+\caption{\textbf{Reproduction of inherited quality targets.} Each workload's
+observed value is divided by its own published target, so accuracy, ROC AUC,
+nDCG@10, hit rate, and MSE share one axis and a ratio of 1.0 is the contract
+line in every case. Direction is handled per metric, so a lower-is-better
+target such as test MSE is inverted before plotting. Most workloads sit within
+a few percent of the value published upstream, which is the expected result
+when a contract is inherited rather than retuned, and the bars below the line
+are recorded misses rather than relaxed targets. Reinforcement learning is the
+one wide bar and is not comparable to the others: it is a deliberately bounded
+self-play probe run at a small fraction of the reference game budget, so its
+distance from the line measures compute spent rather than fidelity lost.}
+\label{fig:quality}
+\end{figure}
+
+\Cref{fig:quality} plots every one of the \ExecutedContracts{} contracts the
+suite executed against its own published target. Of
+those, \ExecutedContractsPassing{} reproduce it and
+\ExecutedContractsMissing{} fall short. Five of the six shortfalls are narrow,
+the widest under six percent relative, which is the expected spread when a
+contract is inherited rather than retuned.
+
+Reinforcement learning is the exception and is a different kind of miss. Its
+adapter runs the pinned upstream reference, but the laptop configuration
+generates 16 self-play games per generation for four generations against a
+reference budget of 2,000 games per generation and up to 10,000 generations.
+The resulting value is far below the gate because the run is a bounded probe,
+not because the implementation diverges from the contract. It is plotted rather
+than hidden, since excluding an inconvenient result is precisely the discretion
+this framework is built to remove, but it should be read as a statement about
+budget and not about reproduction fidelity.
+
+Of the executed contracts, \ScoreBearingCases{} are admitted to score-bearing review, where
+\ScoreBearingPassing{} meet their inherited gates in every retained execution.
+The generator grades each retained result against the live registry contract,
+so a record graded under a superseded gate cannot publish its own looser bound;
+time-series forecasting is reported as a miss for exactly this reason. The
+score-bearing reference medians total
+\ScoreReferenceTotalMinutes{} minutes for one score-bearing suite pass. The
+individual cases span \ScoreReferenceMinSeconds{} seconds to
+\ScoreReferenceMaxMinutes{} minutes (\Cref{fig:runtime}), which permits short classroom exercises
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_runtime.pdf}
+\caption{\textbf{Measured runtime of the canonical max path.} Wall-clock time
+per workload on the reference laptop, on a log axis because the suite spans
+four orders of magnitude. The fixed-checkpoint inference workloads complete in
+seconds, while the workloads that train from scratch take minutes. The spread
+is what makes the suite usable in a class period: an instructor can assign the
+short end for a single session and reserve the training workloads for
+coursework that runs unattended.}
+\label{fig:runtime}
+\end{figure}
+
+\begin{figure}[t]
+\centering
+\includegraphics[width=\columnwidth]{figures/fig_training_curves.pdf}
+\caption{\textbf{Convergence of the training workloads.} Per-epoch task quality
+against the inherited target. Both panels show the same shape and it is not the
+one a longer run would fix. Time-series forecasting reaches the target line near
+epoch fifteen and then drifts back above it, and recommendation peaks at 0.6232
+on epoch seven and declines thereafter. An earlier seven-epoch recommendation
+result read its still-rising curve as an epoch limit; extending the run to
+twenty epochs cost a further sixty-three minutes and returned a worse score,
+which is why the contract now caps the budget at the peak. Neither shortfall is
+a budget limit and neither was closed by relaxing a target.}
+\label{fig:curves}
+\end{figure}
+
+without pretending that every training workload is instantaneous. Image
+classification, keyword spotting, machine-sound anomaly detection, visual wake
+words, text classification, and information retrieval were each measured over
+repeated fresh processes, with timing coefficients of variation from
+\FiveRunMinCV{} to \FiveRunMaxCV{}. Time-series forecasting reproduces the published
+PatchTST recipe to 0.2924 test MSE against an unchanged 0.2900 reproduction
+point, so it is retained as a miss; no tolerance was introduced after the fact
+to close a 0.0024 gap. The two retained
+causal-training measurements have a 5.19\% timing coefficient of variation,
+narrowly above the unchanged 5\% promotion limit.
+
+Neither training shortfall is a budget artifact, which matters because the
+obvious objection to a laptop-scale suite is that its misses are really just
+truncated runs. The per-epoch curves in \Cref{fig:curves} rule that reading
+out. Both workloads reach their best value and then move away from it, so the
+shortfall survives a longer run rather than closing with one. The
+recommendation contract makes the point concrete: an earlier configuration read
+a still-rising curve as an epoch limit, and extending it to twenty epochs cost
+a further sixty-three minutes and returned a worse score.
+
+Execution integrity is not adapter equivalence. The keyword-spotting record is
+valid measured evidence, but its committed three-resolver audit fails exact prediction parity. The
+quality-preserving but nonidentical adapter remains educationally useful while
+blocking promotion. The 90\% quality gate is not a disagreement tolerance.
+
+These results support the three evaluation claims stated at the start of this
+section, on a single machine. The inherited
+tasks remain reachable, the score-bearing reference path fits roughly one hour,
+and the admission rule keeps every case that missed its inherited gate out of
+score-bearing review rather than promoting it alongside the cases that passed.
+They do not establish performance portability.
+Task metrics are intended to transfer within declared numerical tolerances;
+runtime is not. The table therefore identifies each device, while retained
+reports record the complete hardware and software fingerprint. A second machine
+should be expected to reproduce the gate and protocol, not the \HostChip{}
+throughput.
+
+\subsection{Inference Latency}
+
+Inference evidence is eligible only after correctness and model identity are
+established. Causal full, prefill, and decode inference load one retained
+quality-passing training checkpoint and record its SHA-256 digest. The evidence
+importer verifies the checkpoint package, source report, source manifest, and
+package digest before accepting any phase. This closes a common loophole in
+which inference silently uses random, stale, or separately trained weights.
+
+Full inference measures complete autoregressive requests. Prefill measures
+fresh KV-cache construction for a fixed 256-token prompt. Decode measures
+cached-token generation after a fixed prompt. Reports retain median, p90, and
+p99 latency together with phase-appropriate token throughput and sample counts.
+The three retained CPU measurements report 695.5 output tokens/s for full
+inference, 24.6 thousand prefill tokens/s, and 767.3 output tokens/s for decode.
+
+Each phase passes its functional and lineage gate, but each currently has one
+retained execution. The rates are therefore provisional system observations,
+not repeatability evidence or portable performance targets. Their value lies in
+their checkpoint, protocol, sample, and hardware context.
+
+\section{Classroom Use}
+\label{sec:education}
+
+The benchmark contract is itself the teaching object. The intended progression
+has four stages. Students \textbf{reproduce} a fixed profile and verify its
+report and provenance manifest, \textbf{diagnose} where time is spent across
+data loading, model execution, and request scheduling, \textbf{optimize} one
+systems variable while preserving the declared quality gate, and then
+\textbf{defend} the resulting comparison against the evidence supporting it.
+The profiles map onto that progression directly. An instructor can use
+\texttt{min} as a pre-lab environment check, \texttt{max} as the fixed reference
+for a bounded assignment, and \texttt{pro} as the disclosure envelope for an
+open-ended project, while the workload identity and semantic gate stay fixed
+throughout. Optimization therefore changes the system under test, never the
+definition of success.
+
+The \textbf{defend} stage has a concrete instrument, and it comes from the
+suite's own measured behavior. Two training workloads have a seed spread wider
+than their distance to the gate, so a student who reruns graph node
+classification under a different seed watches a passing result miss, and a
+student who reruns time-series forecasting watches a recorded miss pass. Both
+take one command and a changed seed. The exercise asks a question the reader of
+any benchmark table should ask: given this spread, which comparisons does this
+evidence actually support? A student who has seen a verdict move learns why a
+single number is not a claim, which is difficult to teach from a suite where
+every result is stable.
+
+Three standalone labs make that progression concrete. One profiles a
+deliberately inefficient training loop and requires the submission to carry
+both configurations, task-quality outcomes, timing distributions, and an
+explicit statement of comparability. One implements a small inference
+system-under-test interface and compares naive autoregressive decoding against
+KV-cache decoding, passing only when both paths emit identical tokens for every
+measured query. One contrasts a dense model with a sparse mixture-of-experts
+model at similar headline parameter counts, reporting active parameter fraction
+alongside throughput to show why parameter count alone is not a systems cost
+model. Each lab has a deterministic offline smoke mode that exercises real
+forward, backward, inference, or parity paths. Those smoke paths establish
+software regression coverage rather than classroom efficacy. This draft claims
+no measured learning outcomes; course pilots, accessibility review, and
+instructor studies remain future work.
+
 \section{Limitations and Future Work}
 \label{sec:limitations}
-% ============================================================================
 
-The GCN, BERT, and LSTM workloads all use real academic datasets (Cora, SST-2, ETTh1), which means models show realistic overfitting patterns rather than trivial convergence. While these datasets are well-established benchmarks in their respective fields, they are smaller than production datasets, so the absolute accuracy numbers (78.8\%, 77.1\%, MSE 0.125) are generally lower than state-of-the-art results on these benchmarks obtained with larger models.
+The framework admits only contracts that fit local hardware without changing
+their defining task. That choice preserves authority and access, but it does not
+capture every production bottleneck. Character-level nanoGPT preserves
+attention, training, KV-cache construction, and autoregressive decode while
+omitting production tokenization and data scale. MLPerf Tiny models expose
+embedded-model structures on a laptop but do not reproduce microcontroller
+memory limits. Distributed and datacenter-scale claims are outside v0.1.
 
-The REINFORCE agent for the RL workload is intentionally high-variance to demonstrate RL's difficulty, but students may struggle to reach the 195-reward quality target. Adding a PPO baseline would provide a more stable alternative.
+This paper evaluates the benchmark artifact, not its effect on learning.
+Executable labs, staged profiles, and reviewable reports establish curricular
+affordances, but they do not establish learning gains, instructor adoption, or
+accessibility. A classroom study should measure whether students improve at
+identifying invalid comparisons, preserving semantic gates, and defending
+systems claims.
 
-All datasets are real, citable data with provenance. However, some datasets (e.g., MovieLens-100K for DLRM) are small enough that the embedding tables are correspondingly small ($\approx$328\,KB in float32 for 943 users vs.\ terabytes in production), which means the memory-bandwidth contention characteristic of production recommendation systems is not reproduced. The \emph{architectural} pattern---sparse lookups vs.\ dense compute---remains observable.
+Timing is reported from the measurements each case actually has, and a case
+measured once is reported as measured once. Promotion to a published baseline
+would still require repeated timing under stable host conditions, asset policy,
+and portable evidence, which v0.1 does not claim.
 
-Power measurement currently requires \texttt{sudo} access on macOS for \texttt{powermetrics}. A user-space fallback using IOKit energy counters would improve accessibility.
+The current references come from one \HostChip{} \HostMachine{} with \HostMemoryGB{}\,GB of memory and \HostCores{} physical cores. Runtime is
+platform-specific, and every timing and repeatability number here characterizes
+that machine rather than the suite. Quality is better established: the
+determinism study shows the metric unchanged across seeds and across the MPS
+and CPU backends, so numerical drift between backends is measured rather than
+assumed for the inference cases. That leaves timing, training-workload seed
+sensitivity, and any drift specific to a different vendor's arithmetic as open
+questions. Cross-platform work should include Linux CPU and CUDA systems,
+clean-wheel installation, and repeated timing on each.
 
-NanoGPT and Nano-MoE both train on TinyShakespeare (1.1\,MB). While this enables a clean controlled comparison (Example 2), it means neither workload experiences data-scale bottlenecks. The framework prioritizes \emph{compute pattern} realism (attention scaling, expert routing) over data-scale realism---a deliberate design choice for laptop-constrained environments.
+The paper argues that production suites exceed a course budget without
+measuring the alternative. A direct comparison, attempting an established
+production benchmark at reduced scale on the same laptop and reporting where it
+succeeds or fails, would test that premise rather than assert it. This is out
+of scope for v0.1 because the comparison is only meaningful against a
+submission-grade configuration of the other suite, which carries its own
+review and disclosure obligations. Until it is done, the accessibility argument
+rests on the operational requirements those suites document rather than on a
+measurement made here.
 
-NanoGPT uses character-level tokenization (vocab size 65) rather than BPE (50,257 tokens in production GPT-2). This simplification means students do not encounter subword tokenization effects, but it preserves the $O(N^2)$ attention bottleneck that is the primary systems concern. An optional BPE tokenization exercise is planned as a future extension.
+Several datasets remain fetch-only or require a release-policy decision. The
+project also needs an authoritative license for the complete published artifact,
+public hosting for larger evidence packages, and external decisions about the
+name and any relationship to MLCommons. Technical completion does not settle
+those governance questions.
+
+Power-state guards improve the internal validity of timing campaigns but do not
+provide calibrated energy. Defensible joule claims require supported platform
+counters or an external meter. The five functional-stage additions now exercise
+recommendation, reinforcement learning, code generation, image generation, and
+function calling end to end, but they provide no authoritative quality or timing
+claim. Each must clear its unchanged quality contract before entering the
+promotion and repeatability protocol described in
+\Cref{sec:results}.
 
 \subsection{Threats to Validity}
 
-\textbf{Internal validity.} Models with inherently stochastic training (Micro-RL, NanoReAct) may show significant run-to-run variance. We mitigate this by reporting median metrics across 5 independent runs with fixed seed, following MLPerf convention. Unlike production MLPerf, which requires convergence within a fixed epoch budget, MLPerf EDU relaxes this constraint; this is a deliberate design choice because the pedagogical objective is understanding convergence behavior, not establishing competitive benchmarks.
+\textbf{Internal validity.} Where a case was measured over repeated fresh
+processes, that repetition reduces sensitivity to a single timing sample; where
+only one measurement exists, no repeatability claim is made and the report says
+so. Shared implementation error can remain across every case regardless of how
+many times it was run. Provenance digests detect byte changes and path drift;
+they do not prove that the computation occurred.
 
-\textbf{External validity.} Micro-scale models are intentionally reduced until the dominant architectural pattern remains observable under accessible hardware constraints. For example, DLRM's embedding tables ($\approx$328\,KB) do not reproduce terabyte-scale memory-bandwidth contention, but the sparse-vs.-dense compute pattern is preserved. This is a deliberate teaching choice, not a limitation: some workloads preserve compute patterns (NanoGPT's $O(N^2)$ attention, Nano-MoE's conditional routing) while others preserve architectural structure without system-level pressure. All results are tied to auto-detected hardware fingerprints. Convergence behavior (loss curves) is hardware-independent; absolute timings and power measurements are platform-specific. Cross-hardware validation (NVIDIA CUDA, Intel CPU) is planned; hardware fingerprints in submission artifacts enable future cross-platform comparison.
+\textbf{External validity.} One laptop establishes local feasibility, not
+performance portability. The evidence records hardware and software fingerprints
+so later systems can test both quality transfer and timing variation.
 
-\textbf{Construct validity.} The framework assumes that understanding microscale bottlenecks transfers to production-scale reasoning. Expert reviewers ($N=9$, 10 rounds, all dimensions $\geq$4/5 by round 10) confirmed this assumption for compute-pattern and memory-access-pattern reasoning. Scale-dependent effects (communication overhead, multi-device coordination) are explicitly documented as out of scope. A formal classroom evaluation with pre/post competency assessment is planned for Fall 2026.
+\textbf{Construct validity.} The framework assumes that practicing controlled
+comparisons on reduced workloads improves production benchmarking judgment. That
+claim is plausible but unmeasured. The selection process may also favor tasks
+with compact pretrained checkpoints or established small evaluation sets.
+Formal course studies, independent workload review, and external artifact
+evaluation are needed to assess both effects.
 
-% ============================================================================
 \section{Conclusion}
 \label{sec:conclusion}
-% ============================================================================
 
-MLPerf EDU demonstrates that the architectural diversity and measurement rigor of industry-standard ML benchmarks can be made accessible to students without sacrificing methodological integrity. The suite comprises 16 white-box workloads across 4 divisions, spanning 10 ML modalities from language modeling to agentic AI. All models are implemented from scratch in PyTorch, all datasets are real with provenance, and the entire training suite converges on a single laptop in under 10 minutes.
+MLPerf EDU brings professional benchmark discipline to a scale that students and
+individual researchers can inspect. Its central contribution is not a list of
+small models. It is an executable contract that binds model, data, hardware,
+scenario, quality, protocol, and evidence before a performance claim is
+accepted, and that takes every quality target from an upstream authority so the
+project retains no discretion to move a threshold it fails to reach.
 
-The primary intellectual contribution is not the benchmarks themselves but the \emph{evaluation tuple} abstraction $\mathcal{S} \rightarrow \mathcal{M}$ that unifies them. By teaching students to reason about (Model, Data, Hardware, Scenario, Constraints) $\rightarrow$ (Latency, Throughput, Accuracy, Energy), MLPerf EDU provides a transferable framework for systems evaluation that outlasts any specific model or dataset. We believe this ``benchmarking literacy'' is as fundamental to AI systems education as algorithm design is to computer science.
+The present implementation contains \RegistryRows{} workloads across
+\RegistrySuites{} suites, of which \EvidenceWorkloads{} promotion-scope workloads carry
+\ReferenceEvidenceCases{} canonical evidence cases, while
+\FunctionalSetupWorkloads{} additions have functional evidence only. In all,
+\ScoreBearingPassing{} of \ScoreBearingCases{} score-bearing cases pass their
+quality gates, \ScoreBearingMissing{} is retained as a disclosed miss, and all
+performance-bearing phases pass their functional and lineage gates. Repeated
+timing, where collected, varies between \FiveRunMinCV{} and \FiveRunMaxCV{}.
+Measuring the suite also produced a result about benchmark protocol rather than
+about any workload in it. Inference quality is bit-identical across seeds and
+across two execution backends, so a single run settles it, while both training
+workloads swept have a seed spread wider than their margin to the gate and flip
+verdict under a different seed. A protocol that accepts one run is therefore
+right for part of this suite and wrong for the rest, which is a distinction
+worth carrying into any small-scale benchmark.
+Those results make the benchmark ready for external technical review,
+not for a claim of official status. Public evidence hosting, cross-platform
+reproduction, dataset policy, licensing, and MLCommons feedback remain visible
+next steps.
+
+The intended educational value lies in the workflow students practice. They
+reproduce a baseline, diagnose a bottleneck, change one variable, preserve
+quality, and defend comparability with artifacts. That workflow can outlast any
+particular model or hardware generation. Demonstrating its learning effect is
+the next empirical question.
 
 \subsection*{Reproducibility}
-All code, datasets, and training scripts are available at \url{https://github.com/harvard-edge/mlperf-edu}. Experiments use seed=42 with 80/20 data splits. Hardware is auto-detected at runtime via \texttt{fingerprint.py} and stamped into every submission artifact; results reported here were generated on Apple Silicon (MPS backend) running macOS. Software: Python 3.9+, PyTorch 2.x. DS-CNN requires an audio backend for torchaudio (sox\_io, soundfile, or ffmpeg); install via \texttt{pip install soundfile}. No external model dependencies.
 
+The repository contains the executable registry, reference runners, evidence
+summaries, website, labs, tutorial, and paper generator. The
+public entry point is \texttt{mlperf}. Runs produce JSON, HTML, CSV, and
+\texttt{.provd.json} artifacts. The paper imports generated registry counts and
+reference values so its quantitative claims remain synchronized with the
+committed class-labeled evidence. The larger raw packages are retained for
+\mbox{local reviewer handoff} and do not yet have public URLs.
+
+{\scriptsize
+\setlength{\bibsep}{1pt plus 0.2ex}
 \bibliography{refs}
+}
 
 \end{document}

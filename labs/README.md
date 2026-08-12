@@ -12,7 +12,7 @@
 <div align="center">
   <h1>Co-Labs</h1>
   <blockquote>
-    <b>33 Interactive Labs Powered by MLSys·IM</b><br>
+    <b>34 Interactive Labs Powered by MLSys·IM</b><br>
     <i>Predict → Discover → Explain</i>
   </blockquote>
 </div>
@@ -162,7 +162,7 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     <tr>
       <td>03</td>
       <td><code>lab_03_communication</code></td>
-      <td>Communication at Scale</td>
+      <td>Network Fabric Design</td>
     </tr>
     <tr>
       <td>04</td>
@@ -176,18 +176,18 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
     <tr>
       <td>06</td>
-      <td><code>lab_06_fault_tolerance</code></td>
-      <td>When Failure Is Routine</td>
+      <td><code>lab_06_collective_communication</code></td>
+      <td>Collective Communication</td>
     </tr>
     <tr>
       <td>07</td>
-      <td><code>lab_07_fleet_orch</code></td>
-      <td>The Scheduling Trap</td>
+      <td><code>lab_07_fault_tolerance</code></td>
+      <td>When Failure Is Routine</td>
     </tr>
     <tr>
       <td>08</td>
-      <td><code>lab_08_inference</code></td>
-      <td>The Inference Economy</td>
+      <td><code>lab_08_fleet_orch</code></td>
+      <td>The Scheduling Trap</td>
     </tr>
     <tr>
       <td>09</td>
@@ -196,37 +196,42 @@ Every prediction is structured (radio buttons or numeric entry, never free text)
     </tr>
     <tr>
       <td>10</td>
-      <td><code>lab_10_edge_intelligence</code></td>
-      <td>The Edge Thermodynamics Lab</td>
+      <td><code>lab_10_inference</code></td>
+      <td>The Inference Economy</td>
     </tr>
     <tr>
       <td>11</td>
-      <td><code>lab_11_ops_scale</code></td>
-      <td>The Silent Fleet</td>
+      <td><code>lab_11_edge_intelligence</code></td>
+      <td>The Edge Thermodynamics Lab</td>
     </tr>
     <tr>
       <td>12</td>
-      <td><code>lab_12_security_privacy</code></td>
-      <td>The Price of Privacy</td>
+      <td><code>lab_12_ops_scale</code></td>
+      <td>The Silent Fleet</td>
     </tr>
     <tr>
       <td>13</td>
-      <td><code>lab_13_robust_ai</code></td>
-      <td>The Robustness Budget</td>
+      <td><code>lab_13_security_privacy</code></td>
+      <td>The Price of Privacy</td>
     </tr>
     <tr>
       <td>14</td>
-      <td><code>lab_14_sustainable_ai</code></td>
-      <td>The Carbon Budget</td>
+      <td><code>lab_14_robust_ai</code></td>
+      <td>The Robustness Budget</td>
     </tr>
     <tr>
       <td>15</td>
-      <td><code>lab_15_responsible_ai</code></td>
-      <td>The Fairness Budget</td>
+      <td><code>lab_15_sustainable_ai</code></td>
+      <td>The Carbon Budget</td>
     </tr>
     <tr>
       <td>16</td>
-      <td><code>lab_16_fleet_synthesis</code></td>
+      <td><code>lab_16_responsible_ai</code></td>
+      <td>The Fairness Budget</td>
+    </tr>
+    <tr>
+      <td>17</td>
+      <td><code>lab_17_fleet_synthesis</code></td>
       <td>The Fleet Synthesis (capstone)</td>
     </tr>
   </tbody>
@@ -304,11 +309,13 @@ Thanks to these wonderful people who helped build the labs!
 <table width="100%" style="width:100%">
   <tbody>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️ 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/aadityansha06"><img src="https://avatars.githubusercontent.com/u/96714228?v=4?v=4?s=80" width="80px;" alt="Aadityansha "/><br /><sub><b>Aadityansha </b></sub></a><br />🪲 🧑‍💻 🧪</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲 🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/salmanmkc"><img src="https://avatars.githubusercontent.com/u/32169182?v=4?v=4?s=80" width="80px;" alt="Salman Chishti"/><br /><sub><b>Salman Chishti</b></sub></a><br />🧑‍💻</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/Pratham-ja"><img src="https://avatars.githubusercontent.com/u/114498234?v=4?v=4?s=80" width="80px;" alt="Pratham Chaudhary"/><br /><sub><b>Pratham Chaudhary</b></sub></a><br />🧑‍💻</td>
-      <td align="center" valign="top" width="14.28%"><a href="https://github.com/asgalon"><img src="https://avatars.githubusercontent.com/u/45242704?v=4?v=4?s=80" width="80px;" alt="Peter Koellner"/><br /><sub><b>Peter Koellner</b></sub></a><br />🪲</td>
     </tr>
   </tbody>
 </table>

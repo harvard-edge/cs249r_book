@@ -240,24 +240,38 @@ class HealthCommand(BaseCommand):
         console.print(struct_table)
         console.print()
 
-        # Module implementations
-        console.print(Panel("📋 Implementation Status",
-                           title="Module Status", border_style="bright_blue"))
+        # Module implementations. This used to reinvoke InfoCommand here,
+        # which just reprints the System Details table above a second time
+        # (Python version, disk space, memory) -- nothing module-related --
+        # instead of actual per-module status. Read the real completion
+        # data directly instead.
+        from ..module.workflow import ModuleWorkflowCommand
+        from ...core.modules import get_module_mapping
 
-        # Import and run the info command to show module status
-        from .info import InfoCommand
-        info_cmd = InfoCommand(self.config)
-        info_args = ArgumentParser()
-        info_cmd.add_arguments(info_args)
-        info_args = info_args.parse_args([])  # Empty args for info
-        return info_cmd.run(info_args)
+        module_mapping = get_module_mapping()
+        progress = ModuleWorkflowCommand(self.config).get_progress_data()
+        completed = progress.get('completed_modules', [])
+        completed_count = len(completed)
+        total_count = len(module_mapping)
+
+        status_text = f"[bold]{completed_count}/{total_count}[/bold] modules completed"
+        if completed_count < total_count:
+            next_modules = [m for m in sorted(module_mapping) if m not in completed]
+            if next_modules:
+                status_text += f"\n[dim]Next: tito module start {next_modules[0]}[/dim]"
+        else:
+            status_text += "\n[dim]All modules complete![/dim]"
+
+        console.print(Panel(status_text,
+                           title="📋 Module Status", border_style="bright_blue"))
+        return 0
 
     def _check_jupyter_kernel(self):
         """Check if a TinyTorch Jupyter kernel is registered."""
         try:
             result = subprocess.run(
                 [sys.executable, "-m", "jupyter", "kernelspec", "list"],
-                capture_output=True, text=True, timeout=10
+                capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
             )
             if result.returncode == 0 and "tinytorch" in result.stdout:
                 return "[green]✅ Registered[/green]", "tinytorch kernel found"
@@ -283,7 +297,7 @@ class HealthCommand(BaseCommand):
             for kernel_name in ("tinytorch", "python3"):
                 result = subprocess.run(
                     [sys.executable, "-m", "jupyter", "kernelspec", "list", "--json"],
-                    capture_output=True, text=True, timeout=10
+                    capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=10
                 )
                 if result.returncode != 0:
                     return None

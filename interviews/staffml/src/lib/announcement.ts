@@ -17,6 +17,11 @@
  */
 
 const BASE = "https://mlsysbook.ai";
+const STAFFML_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
+
+function staffmlPath(path: string): string {
+  return `${STAFFML_BASE_PATH}${path}`;
+}
 
 export interface AnnouncementConfig {
   /** Bootstrap Icons class suffix, e.g. "megaphone" → "bi-megaphone" */
@@ -38,7 +43,7 @@ export const ANNOUNCEMENT: AnnouncementConfig = {
   dismissable: true,
   type: "primary",
   lines: [
-    `🎯 <strong>StaffML</strong> — physics-grounded ML systems interview prep; practice with worked-problem rigor. <a href="/practice">Start practicing →</a>`,
+    `🎯 <strong>StaffML</strong> — physics-grounded ML systems interview prep; practice with worked-problem rigor. <a href="${staffmlPath("/practice/")}">Start practicing →</a>`,
     `📘 <strong>The book:</strong> <a href="${BASE}/vol1/">Vol I: Foundations</a> · <a href="${BASE}/vol2/">Vol II: At Scale</a> — open access, free forever.`,
     `🛠️ <strong>Alongside the book:</strong> <a href="${BASE}/tinytorch/">TinyTorch</a> (build) · <a href="${BASE}/kits/">Hardware Kits</a> (deploy) · <a href="${BASE}/mlsysim/">MLSys·im</a> (simulate)`,
     `📬 <strong>Newsletter:</strong> ML Systems insights & updates — <a href="${BASE}/newsletter/">Subscribe →</a>`,

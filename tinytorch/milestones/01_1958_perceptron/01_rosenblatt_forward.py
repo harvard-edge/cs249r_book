@@ -67,7 +67,7 @@ This milestone shows you WHY training is essential - the model won't work withou
 - ✅ Architecture works: Forward pass executes correctly
 - ❌ But it's useless: Random weights = random predictions (~50% accuracy)
 - 💡 The lesson: Building the model is easy; making it LEARN is the hard part
-- 🎯 Motivation: You NEED training (coming in Modules 05-07!)
+- 🎯 Motivation: You NEED training (coming in Modules 04-08!)
 
 📊 WHAT TO EXPECT (This Milestone):
 - Dataset: 10 linearly separable synthetic points (just for testing)
@@ -75,11 +75,10 @@ This milestone shows you WHY training is essential - the model won't work withou
 - Expected accuracy: ~40-60% (essentially random guessing)
 - Key takeaway: "My model doesn't work... yet!"
 
-🚀 WHAT COMES NEXT (After Module 07):
-- Same architecture, but WITH training
-- Expected accuracy: 95%+ on same problem
-- Training time: ~30 seconds
-- You'll see the SAME perceptron transform from useless → intelligent
+🚀 WHAT COMES NEXT:
+- Losses, autograd, optimizers, and training loops
+- Milestone 03 uses that full stack to solve XOR and train on TinyDigits
+- You'll see random weights become learned representations
 """
 
 import sys
@@ -282,7 +281,7 @@ def main():
     # Step 1: Prepare synthetic data
     console.print("[bold]📊 Step 1: Preparing Data[/bold]")
     console.print("   Creating linearly separable clusters...")
-    console.print("   [dim]This is a SIMPLE problem - a trained model achieves 95%+ easily[/dim]")
+    console.print("   [dim]This is a SIMPLE problem - training is what makes it learn[/dim]")
     console.print("   [yellow]⚠️  No random seed - each run will be different![/yellow]")
 
     cluster1 = rng.normal([2, 2], 0.5, (5, 2))   # Class 1: top-right
@@ -423,12 +422,13 @@ def main():
 
     # Next steps
     next_steps = (
-        "[bold]Complete Modules 05-07 to unlock TRAINING:[/bold]\n\n"
+        "[bold]Complete Modules 04-08 to unlock TRAINING:[/bold]\n\n"
+        "  [cyan]•[/cyan] Module 04 (Losses):     Measure prediction errors\n"
+        "  [cyan]•[/cyan] Module 05 (DataLoader): Batch examples efficiently\n"
         "  [cyan]•[/cyan] Module 06 (Autograd):   Calculate gradients automatically\n"
         "  [cyan]•[/cyan] Module 07 (Optimizers): Update weights intelligently\n"
         "  [cyan]•[/cyan] Module 08 (Training):   Put it all together\n\n"
-        "[dim]Then return to this SAME perceptron and watch it achieve 95%+!\n"
-        "You'll see random → intelligent through the power of learning![/dim]"
+        "[dim]Then run Milestone 03 to solve XOR and train on TinyDigits with the full learning stack.[/dim]"
     )
     console.print(Panel(next_steps, title="[bold green]🚀 Next Steps[/bold green]", border_style="green"))
     press_enter_to_continue()

@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
-"""Verify archived chapter HTML contains values from inline-python LEGO exports.
+"""Verify archived chapter HTML contains values from inline-python LEGO outputs.
 
 For each QMD chapter with archived HTML under ``html-audit/<vol>/``:
 
 1. Exec python cells (shared namespace).
 2. Group ``{python} Class.attr`` refs by class (LEGO focal point).
-3. Resolve each export from Python.
+3. Resolve each output from Python.
 4. Check rendered HTML:
-   - ``*_str`` plain exports: literal substring in narrative HTML text.
+   - ``*_str`` plain outputs: literal substring in narrative HTML text.
    - ``*_math`` / ``*_eq`` / ``MarkdownStr``: key numeric tokens appear in HTML
      (math renders as LaTeX spans, not plain strings).
 
@@ -39,7 +39,11 @@ CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
 INLINE = re.compile(r"`\{python\}\s+([A-Za-z_][\w.]*)`")
 CLASS = re.compile(r"^class\s+(\w+)", re.M)
-LEGO_MARK = re.compile(r"#\s*[│┌].*LEGO|#\s*\│ Exports:")
+LEGO_MARK = re.compile(
+    r"#\s*[│┌].*LEGO"
+    r"|#\s*│\s*(?:Context|Goal|Scope|Show|How):"
+    r"|#.*\b4\.\s*OUTPUT\b"
+)
 NUM_TOKEN = re.compile(r"\d[\d,]*\.?\d*")
 
 CHAPTER_LIST = {
@@ -47,7 +51,7 @@ CHAPTER_LIST = {
         "introduction", "ml_systems", "ml_workflow", "data_engineering", "nn_computation",
         "nn_architectures", "frameworks", "training", "data_selection", "model_compression",
         "hw_acceleration", "benchmarking", "model_serving", "ml_ops", "responsible_engr",
-        "conclusion", "appendix_algorithm", "appendix_assumptions", "appendix_dam",
+        "conclusion", "appendix_algorithm", "appendix_assumptions",
         "appendix_data", "appendix_machine",
     ],
     "vol2": [
@@ -56,7 +60,8 @@ CHAPTER_LIST = {
         "fleet_orchestration", "performance_engineering", "inference", "edge_intelligence",
         "ops_scale", "security_privacy", "robust_ai", "sustainable_ai", "responsible_ai",
         "conclusion", "appendix_dam", "appendix_fleet", "appendix_communication",
-        "appendix_reliability", "appendix_c3", "appendix_assumptions",
+        "appendix_reliability", "appendix_inference", "appendix_c3",
+        "appendix_assumptions",
     ],
 }
 
@@ -70,6 +75,17 @@ def _chapter_paths(root: Path) -> list[tuple[str, str, Path, Path]]:
             else:
                 qmd = root / f"book/quarto/contents/{vol}/{name}/{name}.qmd"
             html = root / f"book/quarto/_build/html-audit/{vol}/{name}.html"
+            if not html.is_file():
+                if name.startswith("appendix_"):
+                    html = (
+                        root
+                        / f"book/quarto/_build/html-{vol}/contents/{vol}/backmatter/{name}.html"
+                    )
+                else:
+                    html = (
+                        root
+                        / f"book/quarto/_build/html-{vol}/contents/{vol}/{name}/{name}.html"
+                    )
             out.append((vol, name, qmd, html))
     return out
 
@@ -88,7 +104,7 @@ def _exec_cells(qmd: Path) -> tuple[dict, set[str], str | None]:
         if in_cell and CELL_END.match(line):
             in_cell = False
             code = "\n".join(buf)
-            is_lego = bool(LEGO_MARK.search(code)) or "Exports:" in code
+            is_lego = bool(LEGO_MARK.search(code))
             m = CLASS.search(code)
             cls = m.group(1) if m else None
             try:
@@ -160,9 +176,9 @@ def _plain_in_html(value: str, ht: str) -> bool:
 
 
 def _math_in_html(value: str, ht: str) -> bool:
-    """Math exports: require key LaTeX fragments or numeric literals in HTML."""
+    """Math outputs: require key LaTeX fragments or numeric literals in HTML."""
     norm_ht = _normalize(ht)
-    # Pure-formula exports (no standalone numbers): match distinctive substrings.
+    # Pure-formula outputs (no standalone numbers): match distinctive substrings.
     stripped = value.strip().lstrip("$").rstrip("$")
     if stripped and not NUM_TOKEN.findall(stripped.replace(",", "")):
         for frag in re.split(r"[=\\{}]+", stripped):

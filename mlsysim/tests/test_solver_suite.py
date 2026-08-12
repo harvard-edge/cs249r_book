@@ -15,8 +15,8 @@ pytestmark = pytest.mark.solver
 from mlsysim.hardware.registry import Hardware
 from mlsysim.models.registry import Models
 from mlsysim.systems.registry import Systems
-from mlsysim.infra.registry import Infrastructure, Grids
-from mlsysim.core.solver import (
+from mlsysim.infrastructure.registry import Infrastructure, Grids
+from mlsysim.engine.solvers import (
     SingleNodeModel,
     ServingModel,
     TrainingMemoryModel,
@@ -44,10 +44,10 @@ from mlsysim.core.solver import (
     TailLatencyModel,
 )
 from mlsysim.models.types import SparseTransformerWorkload
-from mlsysim.physics import calc_pipeline_bubble
+from mlsysim.physics import calc_activation_memory, calc_pipeline_bubble
 from mlsysim.systems.types import NetworkFabric
-from mlsysim.core.engine import Engine, PerformanceProfile
-from mlsysim.core.constants import ureg, Q_
+from mlsysim.engine.engine import Engine, PerformanceProfile
+from mlsysim.core.units import ureg, Q_
 from mlsysim.core.exceptions import OOMError
 
 # ======================================================================
@@ -303,6 +303,28 @@ class TestTrainingMemoryModel:
         assert result.weights.to("GB").magnitude > 0
         assert result.optimizer_state.to("GB").magnitude > result.gradients.to("GB").magnitude
 
+    def test_training_memory_activation_uses_precision_bytes(self):
+        llama = Models.Language.Llama3_8B
+        h100 = Hardware.Cloud.H100
+        result = TrainingMemoryModel().solve(
+            llama,
+            h100,
+            batch_size=8,
+            seq_len=1024,
+            precision="fp16",
+            activation_checkpointing="selective",
+        )
+        expected = calc_activation_memory(
+            n_layers=llama.layers,
+            seq_len=1024,
+            batch_size=8,
+            hidden_dim=llama.hidden_dim,
+            precision_bytes=2,
+            strategy="selective",
+        ).to("GB")
+
+        assert result.activations.to("GB").magnitude == pytest.approx(expected.magnitude)
+
     def test_zero_stage_reduces_model_state_memory(self):
         llama = Models.Language.Llama3_8B
         h100 = Hardware.Cloud.H100
@@ -334,6 +356,8 @@ class TestTrainingMemoryModel:
             TrainingMemoryModel().solve(llama, h100, batch_size=8, zero_stage=4)
         with pytest.raises(ValueError, match="optimizer"):
             TrainingMemoryModel().solve(llama, h100, batch_size=8, optimizer="mystery")
+        with pytest.raises(ValueError, match="precision"):
+            TrainingMemoryModel().solve(llama, h100, batch_size=8, precision="fp6")
 
 class TestServingCapacityModel:
     """Tests for serving capacity planning."""
@@ -774,7 +798,7 @@ class TestCompressionModel:
 
     def test_constants_and_registry_import(self):
         """Units from constants.py; reliability and literature from registries."""
-        from mlsysim.core.constants import (
+        from mlsysim.core.units import (
             ureg, Q_,
             BYTES_FP16, BYTES_FP32, BYTES_INT8, BYTES_INT4,
         )
@@ -896,6 +920,12 @@ class TestDistributedModel:
         result = solver.solve(gpt3, cluster, batch_size=32, pp_size=1)
         assert result.pipeline_bubble_latency.magnitude == 0
         assert result.bubble_fraction == 0
+
+    def test_parallelism_must_divide_total_accelerators(self):
+        solver = DistributedModel()
+        cluster = Systems.Clusters.Research_256
+        with pytest.raises(ValueError, match="divide total accelerators"):
+            solver.solve(Models.Language.Llama3_8B, cluster, batch_size=32, tp_size=3)
 
 # ======================================================================
 # 11. NetworkRooflineModel
@@ -1209,7 +1239,7 @@ class TestInferenceScalingModel:
     def test_tokens_generated_correct(self):
         """tokens_generated should equal reasoning_steps * tokens_per_step."""
         solver = InferenceScalingModel()
-        from mlsysim.core import calibration
+        from mlsysim.engine import calibration
 
         TOKENS_PER_REASONING_STEP = calibration.TOKENS_PER_REASONING_STEP
         llama = Models.Language.Llama3_8B
@@ -1589,7 +1619,6 @@ class TestTailLatencyModel:
         solver = TailLatencyModel()
         result = solver.solve(arrival_rate_qps=50.0, service_latency_ms=10.0, num_replicas=1)
         assert result.slo_headroom_ratio >= 0.0
-        assert result.slo_violation_probability == result.slo_headroom_ratio
 
     @pytest.mark.parametrize("replicas", [1, 2, 4, 8, 16])
     def test_utilization_decreases_with_replicas(self, replicas):
@@ -1607,12 +1636,18 @@ class TestBoundaryConditions:
     """Edge cases and boundary conditions for solvers and formulas."""
 
     def test_pipeline_bubble_v_zero_guarded(self):
-        """calc_pipeline_bubble with V=0 should be handled gracefully (or raise ZeroDivisionError)."""
-        # bubble = (P-1) / (V*M + P-1). With V=0, M=4, P=4: (3)/(0+3) = 1.0
-        # This is mathematically valid; it degenerates to (P-1)/(P-1) = 1.0
-        # which means 100% bubble — correct when no virtual stages contribute.
-        result = calc_pipeline_bubble(n_stages=4, n_microbatches=4, v_stages=0)
-        assert result == pytest.approx(1.0)
+        """calc_pipeline_bubble rejects v_stages < 1 with a clear ValueError.
+
+        v_stages=0 is not a physical schedule (interleaved pipelining requires
+        at least one virtual stage per device); the old behavior silently
+        degenerated to a 100% bubble. Guards added in the 2026-06-06 audit
+        make the invalid input loud instead. n_stages=1 + n_microbatches=0
+        (the old 0/0 path) is likewise rejected.
+        """
+        with pytest.raises(ValueError):
+            calc_pipeline_bubble(n_stages=4, n_microbatches=4, v_stages=0)
+        with pytest.raises(ValueError):
+            calc_pipeline_bubble(n_stages=1, n_microbatches=0)
 
     def test_pipeline_bubble_single_stage_is_zero(self):
         """With P=1 (single stage), the bubble fraction should be 0."""

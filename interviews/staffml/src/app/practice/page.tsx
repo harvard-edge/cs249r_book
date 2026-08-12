@@ -17,14 +17,15 @@ import NapkinCalc from "@/components/NapkinCalc";
 import idRedirects from "@/data/id-redirects.json";
 import AskInterviewer from "@/components/AskInterviewer";
 import MarkdownText from "@/components/MarkdownText";
+import MCQOptions from "@/components/MCQOptions";
 import NapkinMathDisplay from "@/components/NapkinMathDisplay";
 import LevelBadge from "@/components/LevelBadge";
 import { useToast } from "@/components/Toast";
 import {
   getTracks, getLevels, getCompetencyAreas, getZones, getQuestionsByFilter,
-  getQuestions, getQuestionsByTopic, getTrackCount,
-  Question, checkNapkinMath, extractFinalNumber, cleanScenario,
-  NapkinResult
+  getQuestions, getTrackCount,
+  Question, cleanScenario, gradeNapkinAnswer, isNumericQuestion,
+  NapkinGradeResult
 } from "@/lib/corpus";
 import { saveAttempt, getAttempts, updateSRCard, getDueQuestionIds, getDueCount, recordActivity } from "@/lib/progress";
 import { extractRubric, rubricToScore, RubricItem } from "@/lib/rubric";
@@ -42,6 +43,7 @@ import { Calendar, ArrowLeft, Flag, LinkIcon } from "lucide-react";
 import Link from "next/link";
 import { buildReportUrl } from "@/lib/issue-url";
 import QuestionFeedback from "@/components/QuestionFeedback";
+import BookRefCard from "@/components/BookRefCard";
 import QuestionVisual from "@/components/QuestionVisual";
 import { track } from "@/lib/analytics";
 
@@ -189,9 +191,24 @@ function PracticePage() {
   const setCurrent = setCurrentSummary;
   const skipFilterCount = useRef(0);
   const questionShownAt = useRef(Date.now());
+  // Latest-callback refs for the global keyboard listener below. The
+  // listener is intentionally stable (re-armed only on showAnswer / current
+  // / pickRandom changes) so it doesn't churn on every keystroke. But
+  // handleReveal closes over `userAnswer` (and handleScore over
+  // `effectiveMaxScore` / `questionsAnswered`) which change between
+  // listener re-arms — without these refs the listener would call a stale
+  // handleReveal that still sees `userAnswer=""` after the user has typed
+  // 100+ chars, misfiring the think-guard. Refs are refreshed in the
+  // sync effect right after handleScore is defined.
+  const handleRevealRef = useRef<(force?: boolean) => void>(() => {});
+  const handleScoreRef = useRef<(score: number) => void>(() => {});
   const [showAnswer, setShowAnswer] = useState(false);
   const [userAnswer, setUserAnswer] = useState("");
-  const [napkinResult, setNapkinResult] = useState<(NapkinResult & { userNum: number; modelNum: number }) | null>(null);
+  // MCQ self-check: the learner's selected option index (null = none yet).
+  // Reset per question. Deliberately NOT fed into the SR/scoring pipeline —
+  // MCQ rendering is a self-check, the open self-rating remains authoritative.
+  const [mcqSelected, setMcqSelected] = useState<number | null>(null);
+  const [napkinResult, setNapkinResult] = useState<NapkinGradeResult | null>(null);
   const [questionsAnswered, setQuestionsAnswered] = useState(0);
   const [weakestArea, setWeakestArea] = useState<{ area: string; pct: number } | null>(null);
   const [dueCount, setDueCount] = useState(0);
@@ -243,6 +260,7 @@ function PracticePage() {
     setCurrent(q);
     setShowAnswer(false);
     setUserAnswer("");
+    setMcqSelected(null);
     setNapkinResult(null);
     setRubricItems([]);
   }, []);
@@ -397,6 +415,7 @@ function PracticePage() {
     }
     setShowAnswer(false);
     setUserAnswer("");
+    setMcqSelected(null);
     setNapkinResult(null);
   }, [mounted, selectedTrack, selectedLevel, selectedArea, selectedZone, napkinOnly, chainsOnly, visualOnly]);
 
@@ -412,23 +431,28 @@ function PracticePage() {
     questionShownAt.current = Date.now();
     setShowAnswer(false);
     setUserAnswer("");
+    setMcqSelected(null);
     setNapkinResult(null);
     setRubricItems([]);
   }, [pool, current, showAnswer]);
 
-  // Keyboard shortcuts: Enter to reveal, 1-4 for scoring, N to skip
+  // Keyboard shortcuts: Cmd/Ctrl+Enter to reveal, 1-4 for scoring, N to skip.
+  // Stable listener — re-armed only when showAnswer/current/pickRandom change.
+  // The handlers are called via refs (see handleRevealRef / handleScoreRef)
+  // so the listener always invokes the LATEST closures even though the
+  // effect itself doesn't re-run on every keystroke.
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLTextAreaElement) {
         // Only Enter (without shift) to reveal when in textarea
         if (e.key === 'Enter' && (e.metaKey || e.ctrlKey) && !showAnswer && current) {
           e.preventDefault();
-          handleReveal();
+          handleRevealRef.current();
         }
         return;
       }
       if (showAnswer && ['1', '2', '3', '4'].includes(e.key)) {
-        handleScore(parseInt(e.key) - 1);
+        handleScoreRef.current(parseInt(e.key) - 1);
       }
       if (e.key === 'n' || e.key === 'N') {
         pickRandom();
@@ -473,14 +497,16 @@ function PracticePage() {
     }
     incrementReveals();
 
-    // Try napkin math check if the question has napkin_math and user typed something
+    // Unit-aware napkin grading — GATED on isNumericQuestion so the grader
+    // never fires on recall/conceptual questions that merely happen to have a
+    // number in the model answer. When it does fire, gradeNapkinAnswer parses
+    // both sides with js-quantities (SI prefixes, dimensional analysis) and
+    // falls back to the legacy bare-number path when units aren't present.
     let napkinGrade: string | undefined;
-    if (current?.details.napkin_math && userAnswer.trim()) {
-      const userNum = extractFinalNumber(userAnswer);
-      const modelNum = extractFinalNumber(current.details.napkin_math);
-      if (userNum !== null && modelNum !== null && modelNum > 0) {
-        const result = checkNapkinMath(userNum, modelNum, current.track);
-        setNapkinResult({ ...result, userNum, modelNum });
+    if (current && current.details.napkin_math && userAnswer.trim() && isNumericQuestion(current)) {
+      const result = gradeNapkinAnswer(userAnswer, current.details.napkin_math, current.track);
+      if (result) {
+        setNapkinResult(result);
         napkinGrade = result.grade;
       }
     }
@@ -566,6 +592,16 @@ function PracticePage() {
     pickNext();
   };
 
+  // Refresh the keyboard-shortcut refs after every render so the stable
+  // keydown listener above always reads the latest handleReveal /
+  // handleScore closures. Without this the listener invokes a stale
+  // handleReveal that still sees `userAnswer=""` while the user has
+  // typed in the textarea, misfiring the think-guard.
+  useEffect(() => {
+    handleRevealRef.current = handleReveal;
+    handleScoreRef.current = handleScore;
+  });
+
   // Pick next question: from SR due queue if in review mode, else random
   const pickNext = useCallback(() => {
     if (reviewMode) {
@@ -576,6 +612,7 @@ function PracticePage() {
           setCurrent(q);
           setShowAnswer(false);
           setUserAnswer("");
+          setMcqSelected(null);
           setNapkinResult(null);
           setRubricItems([]);
           return;
@@ -677,6 +714,7 @@ function PracticePage() {
                 setCurrent(dailyQs[0]);
                 setShowAnswer(false);
                 setUserAnswer("");
+                setMcqSelected(null);
                 setNapkinResult(null);
                 setRubricItems([]);
               }
@@ -712,6 +750,7 @@ function PracticePage() {
                     setCurrent(q);
                     setShowAnswer(false);
                     setUserAnswer("");
+                    setMcqSelected(null);
                     setNapkinResult(null);
                     setRubricItems([]);
                   }
@@ -1078,7 +1117,7 @@ function PracticePage() {
                       <div className="prose max-w-none mt-6">
                         {current.scenario ? (
                           <p className="text-textSecondary leading-relaxed text-base">
-                            {cleanScenario(current.scenario)}
+                            <MarkdownText text={cleanScenario(current.scenario)} />
                           </p>
                         ) : (
                           <ScenarioSkeleton />
@@ -1127,6 +1166,23 @@ function PracticePage() {
                       {current.visual && (
                         <QuestionVisual track={current.track} visual={current.visual} />
                       )}
+
+                      {/* MCQ self-check (A1). Renders only when the question
+                          carries options + correct_index. Selectable pre-reveal;
+                          on reveal the correct option turns green and a wrong
+                          pick turns red. NOT wired into SR/scoring — the open
+                          self-rating below remains authoritative. */}
+                      {current.details.options &&
+                        current.details.options.length > 0 &&
+                        typeof current.details.correct_index === "number" && (
+                          <MCQOptions
+                            options={current.details.options}
+                            correctIndex={current.details.correct_index}
+                            revealed={showAnswer}
+                            selected={mcqSelected}
+                            onSelect={setMcqSelected}
+                          />
+                        )}
 
                       {/* Pre-reveal chain sibling preview (toggle from ChainBadge) */}
                       {chainInfo && !showAnswer && chainPreviewOpen && (
@@ -1222,9 +1278,15 @@ function PracticePage() {
                                 </span>
                               </div>
                               <p className="text-xs text-textSecondary font-mono">
-                                Your answer: {napkinResult.userNum.toLocaleString()} |
-                                Model answer: {napkinResult.modelNum.toLocaleString()} |
-                                Off by: {(napkinResult.ratio * 100).toFixed(0)}%
+                                Your answer: {napkinResult.userDisplay ?? napkinResult.userNum.toLocaleString()} |
+                                Model answer: {napkinResult.modelDisplay ?? napkinResult.modelNum.toLocaleString()}
+                                {napkinResult.unitAware && napkinResult.userDisplay && napkinResult.modelDisplay &&
+                                 (napkinResult.grade === 'exact' || napkinResult.grade === 'close') && (
+                                  <span className="text-accentGreen"> → equivalent</span>
+                                )}
+                                {Number.isFinite(napkinResult.ratio) && (
+                                  <> | Off by: {(napkinResult.ratio * 100).toFixed(0)}%</>
+                                )}
                               </p>
                               {napkinResult.maxSelfScore < 3 && (
                                 <p className="text-[10px] text-textTertiary mt-2">
@@ -1339,6 +1401,7 @@ function PracticePage() {
                               })}
                             </div>
                             <QuestionFeedback question={current} />
+                            <BookRefCard refs={current.book_refs} />
                             {chainInfo && (
                               <ChainStrip chain={chainInfo} onNavigate={handleChainNavigate} />
                             )}

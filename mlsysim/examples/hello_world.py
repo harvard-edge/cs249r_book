@@ -14,7 +14,9 @@ model = mlsysim.Models.Language.Llama3_8B
 hardware = mlsysim.Hardware.Cloud.H100
 
 # 2. Run the Roofline engine
-profile = mlsysim.Engine.solve(model, hardware, batch_size=1)
+# (See Vol 1, Benchmarking for more examples like this)
+from mlsysim.solvers import SingleNodeModel
+profile = SingleNodeModel().solve(model, hardware, batch_size=1)
 
 # 3. See the results
 print(f"Model:      {model.name}")
@@ -27,7 +29,7 @@ print(f"Feasible:   {profile.feasible}")
 
 # 4. Try a different configuration — just change the inputs
 print("\n--- Batch size 32 ---")
-profile_batched = mlsysim.Engine.solve(model, hardware, batch_size=32)
+profile_batched = SingleNodeModel().solve(model, hardware, batch_size=32)
 print(f"Bottleneck: {profile_batched.bottleneck}")
 print(f"Latency:    {profile_batched.latency:~P}")
 print(f"Throughput: {profile_batched.throughput:~P}")

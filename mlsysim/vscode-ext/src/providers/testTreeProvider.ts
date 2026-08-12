@@ -56,10 +56,10 @@ export class TestTreeProvider implements vscode.TreeDataProvider<TreeNode> {
 
         case 'validation':
           return [
-            new ActionTreeItem('Narrative Invariants (Book)', 'mlsysim.runAction',
-              [`${pytest} book/tests/test_narrative_invariants.py -v`, 'Narrative Invariants'], 'book'),
-            new ActionTreeItem('Registry Validation (Book)', 'mlsysim.runAction',
-              [`${pytest} book/tests/test_registry.py -v`, 'Registry Validation'], 'database'),
+            new ActionTreeItem('Registry Contract', 'mlsysim.runAction',
+              [`${pytest} mlsysim/tests/test_registry_loader_contract.py -v`, 'Registry Contract'], 'database'),
+            new ActionTreeItem('Provenance Audit', 'mlsysim.runAction',
+              [`cd "${this.projectRoot}" && PYTHONPATH=mlsysim python3 -m mlsysim.tools.audit_provenance --scope all --strict`, 'Provenance Audit'], 'verified'),
             new ActionTreeItem('Validate Paper Anchors', 'mlsysim.runAction',
               [`cd "${this.projectRoot}/mlsysim/paper" && python3 validate_anchors.py`, 'Paper Anchors'], 'file-text'),
           ];

@@ -534,7 +534,14 @@ local function Pandoc_prefix_count(doc)
 
     if blk.t=="Header" and not fbx.ishtmlbook then
       if (blk.level == 1) then -- increase prefix
-         if  blk.classes:includes("unnumbered")
+         local header_text = str(blk.content):gsub("^%s+", ""):gsub("%s+$", "")
+         -- Quarto's full-PDF book render can emit an empty index wrapper as
+         -- `\chapter{}\label{section}` before the real numbered chapters.
+         -- It is not a reader-facing chapter, so it must not advance custom
+         -- callout counters (Example, Lighthouse, Systems Perspective, etc.).
+         if header_text == "" then
+           -- keep the current prefix and counters unchanged
+         elseif  blk.classes:includes("unnumbered")
          then
            prefix = ""
          else

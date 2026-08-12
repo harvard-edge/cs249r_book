@@ -587,7 +587,11 @@ class BenchmarkReport:
             'accuracy': float(accuracy),
             'latency_ms_mean': float(avg_latency),
             'latency_ms_std': float(std_latency),
-            'throughput_samples_per_sec': float(1000 / avg_latency)
+            # time.time()'s resolution is coarse enough (~15.6ms on Windows)
+            # that a fast forward pass can measure exactly 0.0 elapsed time;
+            # floor the denominator so throughput stays a large-but-finite
+            # positive number instead of raising ZeroDivisionError.
+            'throughput_samples_per_sec': float(1000 / max(avg_latency, 1e-6))
         }
 
         print(f"\n📊 Benchmark Results for {self.model_name}:")
@@ -790,7 +794,9 @@ def generate_submission(
         optimized_size = optimized_report.metrics['model_size_mb']
 
         submission['improvements'] = {
-            'speedup': float(baseline_latency / optimized_latency),
+            # See the matching guard in benchmark_model: time.time()'s coarse
+            # resolution can measure a fast model's latency as exactly 0.0.
+            'speedup': float(baseline_latency / max(optimized_latency, 1e-6)),
             'compression_ratio': float(baseline_size / optimized_size),
             'accuracy_delta': float(
                 optimized_report.metrics['accuracy'] - baseline_report.metrics['accuracy']
@@ -1193,7 +1199,7 @@ def run_optimization_workflow_example():
     print("  ✅ How TinyTorch modules work together as a complete framework")
     print("\n💡 Next steps:")
     print("  - Apply real optimizations (quantization, pruning, etc.)")
-    print("  - Benchmark milestone models (XOR, MNIST, CNN, etc.)")
+    print("  - Benchmark milestone models (XOR, TinyDigits MLP/CNN, Transformer, etc.)")
     print("  - Share your optimized results with the community!")
 
     return submission

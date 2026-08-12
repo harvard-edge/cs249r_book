@@ -6,6 +6,8 @@ import AnnouncementBar from "@/components/AnnouncementBar";
 import MaybeFooter from "@/components/MaybeFooter";
 import Providers from "@/components/Providers";
 import VersionDriftToast from "@/components/VersionDriftToast";
+import CommandPalette from "@/components/CommandPalette";
+import KeyboardShortcutsOverlay from "@/components/KeyboardShortcutsOverlay";
 import { QUESTION_COUNT_DISPLAY } from "@/lib/corpus";
 
 export const metadata: Metadata = {
@@ -20,6 +22,10 @@ export const metadata: Metadata = {
   description: `Physics-grounded system design prep for ML Engineers. ${QUESTION_COUNT_DISPLAY} questions across cloud, edge, mobile, and TinyML. 100% client-side.`,
   icons: {
     icon: "/favicon.svg",
+    // Full-bleed 180x180 raster of the roofline mark (iOS ignores SVG
+    // favicons and applies its own corner radius). Base path carried
+    // explicitly, same convention as the og-image URLs below.
+    apple: `${process.env.NEXT_PUBLIC_BASE_PATH || ""}/icons/apple-touch-icon.png`,
   },
   openGraph: {
     title: "StaffML — ML Systems Interview Prep",
@@ -100,6 +106,12 @@ export default function RootLayout({
           <main className="flex-1 flex flex-col">{children}</main>
           <MaybeFooter />
           <VersionDriftToast />
+          {/* Global overlays: command palette (Cmd/Ctrl+K, navbar search icon)
+              and the keyboard-shortcuts cheat sheet (?). Mounted once here so
+              they're reachable from every route. CommandPalette must live
+              inside Providers — it reads the vault via useVault(). */}
+          <CommandPalette />
+          <KeyboardShortcutsOverlay />
         </Providers>
       </body>
     </html>

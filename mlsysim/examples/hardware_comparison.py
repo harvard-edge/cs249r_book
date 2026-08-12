@@ -7,7 +7,7 @@ Models the Smart Doorbell across different real-world microcontrollers.
 import mlsysim
 
 def main():
-    scenario = mlsysim.Applications.Doorbell
+    scenario = mlsysim.Scenarios.SmartDoorbell
     
     devices = [
         mlsysim.Hardware.Tiny.nRF52840,

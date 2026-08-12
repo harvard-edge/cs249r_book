@@ -15,9 +15,9 @@ These tests validate that each module works correctly in isolation.
 **Purpose**: Test cross-module interactions
 **Scope**: Multiple modules working together
 **Files**:
-- `test_gradient_flow.py` - **CRITICAL**: Validates gradients flow through entire training stack
-- `test_end_to_end_training.py` - Full training loops (TODO)
-- `test_module_compatibility.py` - Module interfaces (TODO)
+- `test_integration_gradient_flow.py` - **CRITICAL**: Validates gradients flow through entire training stack
+- `test_training_flow.py` - Training loop behavior across modules
+- `test_module_dependencies.py` - Module dependency and import compatibility
 
 **Why this matters**:
 - Catches bugs that unit tests miss
@@ -64,9 +64,9 @@ pytest tests/01_tensor/ --tinytorch # Single module with education
 - Learning tips on failure (STUDENT LEARNING)
 - Clear pass/fail indicators with Rich formatting
 
-### Run without pytest
+### Run a focused integration test
 ```bash
-python tests/integration/test_gradient_flow.py
+pytest tests/integration/test_integration_gradient_flow.py -v
 ```
 
 ## Test Philosophy
@@ -106,7 +106,7 @@ When adding a test, ask:
 ## Most Important Tests
 
 🔥 **Must pass before merging**:
-- `integration/test_gradient_flow.py` - If this fails, training is broken
+- `integration/test_integration_gradient_flow.py` - If this fails, training is broken
 
 📚 **Module validation**:
 - Each module's inline tests (in `modules/`)

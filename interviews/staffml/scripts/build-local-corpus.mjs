@@ -30,14 +30,31 @@ if (process.env.STAFFML_SKIP_LOCAL_CORPUS === "1") {
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(__dirname, "..", "..", "..");
 
-const which = spawnSync("which", ["vault"], { encoding: "utf8" });
-if (which.status !== 0 || !which.stdout.trim()) {
+// Probe by actually invoking `vault`, not by shelling out to `which` — `which`
+// doesn't exist on Windows (spawnSync just ENOENTs), so that probe always
+// reported "not installed" there even with a correctly-installed vault-cli,
+// silently skipping the local corpus rebuild on every Windows checkout.
+const probe = spawnSync("vault", ["--version"], { encoding: "utf8" });
+if (probe.error || probe.status !== 0) {
   console.log(
     "[build-local-corpus] `vault` CLI not on PATH; skipping local corpus rebuild.\n" +
     "  To enable full-content rendering against your local YAMLs, run:\n" +
     "    pip install -e interviews/vault-cli\n" +
     "  then re-run `npm run dev`."
   );
+
+  // Fallback: mirror SVG visuals even without the vault CLI, so visual
+  // questions render correctly in the dev server.
+  const mirrorScript = path.resolve(__dirname, "mirror-visuals.sh");
+  console.log("[build-local-corpus] running SVG mirror fallback ...");
+  const mirror = spawnSync("bash", [mirrorScript], {
+    cwd: REPO_ROOT,
+    stdio: "inherit",
+  });
+  if (mirror.status !== 0) {
+    console.warn("[build-local-corpus] SVG mirror fallback failed (non-fatal).");
+  }
+
   process.exit(0);
 }
 

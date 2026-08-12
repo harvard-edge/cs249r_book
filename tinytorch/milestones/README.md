@@ -120,6 +120,6 @@ Each milestone has specific success criteria. Passing means your implementation 
 If a milestone fails:
 
 1. Check that all required modules are completed: `tito module status`
-2. Run the module tests: `tito test <module_number>`
+2. Run the module tests: `tito module test <module_number>`
 3. Look at the specific error message for debugging hints
 4. Review the milestone's docstring for implementation requirements

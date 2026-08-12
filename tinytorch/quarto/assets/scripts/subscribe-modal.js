@@ -195,9 +195,38 @@
     if (window.location.hash === '#subscribe') setTimeout(() => openSubscribeModal(), 300);
     window.addEventListener('hashchange', function() { if (window.location.hash === '#subscribe') openSubscribeModal(); });
 
+    function isNewsletterPageLink(link) {
+      const href = link.getAttribute('href') || '';
+      try {
+        const url = new URL(href, window.location.href);
+        return url.hostname === 'mlsysbook.ai' && url.pathname.replace(/\/+$/, '') === '/newsletter';
+      } catch (err) {
+        return false;
+      }
+    }
+
+    function isNavbarSubscribeLink(link) {
+      const text = (link.textContent || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      return text === 'subscribe' && Boolean(link.closest('.navbar')) && isNewsletterPageLink(link);
+    }
+
+    function bindSubscribeLink(link) {
+      if (link.dataset.subscribeModalBound === 'true') {
+        return;
+      }
+      link.dataset.subscribeModalBound = 'true';
+      link.addEventListener('click', function(e) {
+        e.preventDefault();
+        openSubscribeModal();
+      });
+    }
+
     setTimeout(() => {
-      document.querySelectorAll('#navbar-subscribe-btn, a[href*="#subscribe"], a.subscribe-link').forEach(link => {
-        link.addEventListener('click', function(e) { e.preventDefault(); openSubscribeModal(); });
+      document.querySelectorAll('#navbar-subscribe-btn, a[href*="#subscribe"], a.subscribe-link').forEach(bindSubscribeLink);
+      document.querySelectorAll('.navbar a.nav-link').forEach(link => {
+        if (isNavbarSubscribeLink(link)) {
+          bindSubscribeLink(link);
+        }
       });
     }, 1000);
   }

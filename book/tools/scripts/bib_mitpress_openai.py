@@ -2,15 +2,15 @@
 """Standalone MIT Press BibTeX validator for MLSysBook.
 
 This is the single command-line surface for the MIT Press bibliography sweep.
-It validates BibTeX entries with the repo's canonical parser/rules in
-``book/tools/bib_lint.py`` and adds a small MIT Press production layer for
+It validates BibTeX entries with the repo's Binder-native canonical parser/rules
+in ``book/cli/checks/bib_lint.py`` and adds a small MIT Press production layer for
 fields that should not ship in the final bibliography.
 
 OpenAI is optional and only runs when ``--smart-fix`` is passed. The normal
 ``--check`` path is deterministic and does not call the network or modify files.
 
 Usage:
-    python3 bib_mitpress_openai.py --check book/quarto/contents/vol1/backmatter/references.bib
+    python3 bib_mitpress_openai.py --check book/quarto/contents/references.bib
     python3 bib_mitpress_openai.py --all --check
     python3 bib_mitpress_openai.py --fix path/to/references.bib
     python3 bib_mitpress_openai.py --smart-fix path/to/references.bib --limit 10
@@ -19,7 +19,6 @@ Usage:
 from __future__ import annotations
 
 import argparse
-import importlib.util
 import json
 import os
 import re
@@ -33,7 +32,10 @@ from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]  # script lives at book/tools/scripts/<this>.py
-BIB_LINT_PATH = REPO_ROOT / "book" / "tools" / "bib_lint.py"
+BOOK_DIR = REPO_ROOT / "book"
+if str(BOOK_DIR) not in sys.path:
+    sys.path.insert(0, str(BOOK_DIR))
+
 DEFAULT_MODEL = "gpt-5.4-mini"
 DEFAULT_REPORT_DIR = REPO_ROOT / "book" / "tools" / "audit" / "out"
 
@@ -104,18 +106,9 @@ class FileResult:
 
 def load_bib_lint() -> Any:
     """Load the repo parser/validator without requiring package installation."""
-    if not BIB_LINT_PATH.exists():
-        raise RuntimeError(f"Cannot find {BIB_LINT_PATH}")
-    module_name = "_mlsysbook_bib_lint"
-    if module_name in sys.modules:
-        return sys.modules[module_name]
-    spec = importlib.util.spec_from_file_location(module_name, BIB_LINT_PATH)
-    if spec is None or spec.loader is None:
-        raise RuntimeError(f"Cannot import {BIB_LINT_PATH}")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    spec.loader.exec_module(module)
-    return module
+    from cli.checks import bib_lint
+
+    return bib_lint
 
 
 def short_path(path: Path) -> str:
@@ -137,19 +130,24 @@ def discover_bib_files() -> list[Path]:
 
 def resolve_files(args: argparse.Namespace) -> list[Path]:
     aliases = {
-        "vol1": REPO_ROOT / "book/quarto/contents/vol1/backmatter/references.bib",
-        "vol2": REPO_ROOT / "book/quarto/contents/vol2/backmatter/references.bib",
+        "book": REPO_ROOT / "book/quarto/contents/references.bib",
+        "vol1": REPO_ROOT / "book/quarto/contents/references.bib",
+        "vol2": REPO_ROOT / "book/quarto/contents/references.bib",
     }
     if args.all:
         return discover_bib_files()
     files = []
+    seen: set[Path] = set()
     for item in args.files:
         path = aliases.get(item)
         if path is None:
             path = Path(item)
             if not path.is_absolute():
                 path = REPO_ROOT / path
-        files.append(path)
+        path = path.resolve()
+        if path not in seen:
+            files.append(path)
+            seen.add(path)
     return files
 
 
@@ -158,6 +156,15 @@ def normalize_doi(value: str) -> str:
     value = re.sub(r"^https?://(?:dx\.)?doi\.org/", "", value, flags=re.I)
     value = re.sub(r"^doi:\s*", "", value, flags=re.I)
     return value.strip()
+
+
+def has_abbreviated_page_range(value: str) -> bool:
+    """Return true for compressed ranges like 175--85, not full ranges like 50--55."""
+    for match in re.finditer(r"\b(\d{2,})--(\d+)\b", value):
+        start, end = match.groups()
+        if len(end) < len(start):
+            return True
+    return False
 
 
 def entry_field(entry: Any, name: str) -> Any | None:
@@ -204,7 +211,7 @@ def extra_mitpress_findings(path: Path, entry: Any) -> list[Finding]:
             ))
 
         if name == "pages":
-            if re.search(r"\b\d{2,}--\d{1,2}\b", value):
+            if has_abbreviated_page_range(value):
                 findings.append(Finding(
                     rel,
                     entry.key,

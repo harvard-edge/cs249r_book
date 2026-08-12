@@ -1,6 +1,6 @@
 # Book index audit tools
 
-These scripts enforce the index conventions in `.claude/rules/index.md` and the formatting rules in `.claude/rules/book-prose.md`. They are designed to be wired into the project's pre-commit hook chain.
+These scripts enforce the index conventions in the project index rules and the formatting rules in the project prose style guide. They are designed to be wired into the project's pre-commit hook chain.
 
 ## Scripts
 
@@ -60,14 +60,14 @@ python3 book/tools/audit/index/format_audit.py
 
 When adding a new lowercase-allowed main entry (e.g., a new framework API like `tf.something`), update:
 1. `check_anti_patterns.py` — `LOWERCASE_ALLOWLIST` set
-2. `.claude/rules/index.md` — §3 lowercase main-entry allowlist
+2. the project index rules — §3 lowercase main-entry allowlist
 
 When adding a new parenthetical-acronym headword (rare; only for genuine disambiguation like `Precision (Metric)`), update:
 1. `check_anti_patterns.py` — `PARENTHETICAL_ALLOWLIST` set
-2. `.claude/rules/index.md` — note as exception
+2. the project index rules — note as exception
 
 ## How these relate to the rules files
 
-- All anti-patterns in `check_anti_patterns.py` are codified in `.claude/rules/index.md` §9
-- Tag-placement rules trace to `.claude/rules/index.md` §1 + `.claude/rules/book-prose.md` heading-case + the project's `book-check-index-placement` hook
-- Cross-reference rules from `.claude/rules/index.md` §6
+- All anti-patterns in `check_anti_patterns.py` are codified in the project index rules §9
+- Tag-placement rules trace to the project index rules §1 + the project prose style guide heading-case + the project's `book-check-index-placement` hook
+- Cross-reference rules from the project index rules §6

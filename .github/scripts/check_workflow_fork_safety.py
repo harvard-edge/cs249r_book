@@ -71,7 +71,10 @@ except ImportError:
     )
     sys.exit(2)
 
-WORKFLOW_DIR = Path(".github/workflows")
+# Resolve relative to this script (.github/scripts/), not the caller's cwd,
+# so the check works whether pre-commit runs it from the repo root or it is
+# invoked standalone from elsewhere.
+WORKFLOW_DIR = Path(__file__).resolve().parents[1] / "workflows"
 
 # Match ${{ vars.NAME }} or ${{ secrets.NAME }} with optional whitespace.
 UNSAFE_PATTERN = re.compile(r"\$\{\{\s*(vars|secrets)\.(\w+)\s*\}\}")

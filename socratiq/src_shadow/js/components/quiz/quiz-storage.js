@@ -352,7 +352,7 @@ export async function getQuizStats() {
 export async function getIncorrectQuestions() {
     try {
         const dbManager = await initDB();
-        const incorrectQuestions = await dbManager.getByKey('ongoing-incorrect-questions');
+        const incorrectQuestions = await dbManager.getByKey('ongoingIncorrectQuestions', 'current'); // Match store name from db_configs_one.js and writer in updateIncorrectQuestions()
         
         return incorrectQuestions ? incorrectQuestions.questions : [];
     } catch (error) {

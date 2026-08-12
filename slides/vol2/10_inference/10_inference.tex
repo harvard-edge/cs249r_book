@@ -67,6 +67,7 @@
 % =============================================================================
 \begin{frame}{Learning Objectives}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Ch 9 optimized the operations and kernels that execute on each device.
 This chapter assembles those fast components into a production serving
@@ -94,8 +95,8 @@ IF SHORT: Read objectives quickly.
   \item Quantify why \textbf{serving cost dominates training cost} using the total cost equation
   \item Design \textbf{batching strategies}: static, continuous, and feature-parallel
   \item Apply the \textbf{serving hierarchy} (request, replica, service, platform)
-  \item Analyze \textbf{KV cache} memory challenges and \textbf{PagedAttention}
-  \item Compare model sharding: \textbf{tensor}, \textbf{pipeline}, \textbf{expert parallelism}
+  \item Identify \textbf{KV-cache} memory challenges and explain how \textbf{continuous batching} and \textbf{memory management} sustain high GPU utilization
+  \item Compare model sharding: \textbf{tensor}, \textbf{pipeline}, \textbf{expert parallelism}, and \textbf{embedding sharding} by communication patterns and latency--memory tradeoffs
   \item Explain why \textbf{power-of-two-choices} achieves exponentially better load balancing
   \item Design \textbf{autoscaling} policies accounting for GPU cold start latency
 \end{enumerate}
@@ -104,6 +105,13 @@ IF SHORT: Read objectives quickly.
 
 \begin{frame}{Visual Language}
 \note{
+[0.5 min]
+% -- LINK: What prior concept connects to this slide
+Students saw this color system in Ch 7--8 kernel-level slides. The
+same palette now governs serving diagrams: blue for compute (GPU ops),
+green for memory/data flow (KV cache), orange for routing/scheduling,
+red for cost and bottlenecks.
+
 % -- NARRATE: What to SAY while showing this slide
 Briefly point to each card. Students know this from prior chapters.
 
@@ -149,6 +157,7 @@ Throughout this course, colors carry meaning:
 
 \begin{frame}{The \$5M Training Run That Costs \$5M Per Week to Serve}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Ch 8 covered the economics of GPU clusters for training. This slide
 reveals the economic inversion: serving dwarfs training cost.
@@ -206,6 +215,7 @@ IF SHORT: Show the table and state the inversion; skip the diagram details.
 
 \begin{frame}{The Serving Cost Equation}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The previous slide showed the inversion qualitatively. This slide
 provides the quantitative model.
@@ -243,7 +253,7 @@ Serving costs \textbf{9$\times$} training in year one. A 10\% optimization saves
 \end{mlsyscard}
 
 \vspace{0.05cm}
-\mlsysconcept{Implication:}{Optimize inference ruthlessly, even at the expense of training cost.}
+\mlsysconcept{Serving Cost Dominance Law:}{Over a model's lifetime, Inference OpEx exceeds Training CapEx by orders of magnitude. Optimize inference ruthlessly, even at the expense of training cost.}
 
 \end{frame}
 
@@ -253,6 +263,7 @@ Serving costs \textbf{9$\times$} training in year one. A 10\% optimization saves
 
 \begin{frame}{The Fundamental Inversion: Training vs Inference}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The cost equation showed WHY inference matters. This slide shows HOW
 inference differs from training at a systems level.
@@ -290,6 +301,7 @@ IF SHORT: State the inversion and show only the diagram.
 
 \begin{frame}{The Serving Tax}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The inversion showed latency matters. The serving tax quantifies the
 overhead that distributed inference adds beyond raw compute.
@@ -338,6 +350,7 @@ $$L_{\text{total}} = L_{\text{compute}} + L_{\text{network}} + L_{\text{serial}}
 
 \begin{frame}{The Serving Hierarchy}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The serving tax showed total latency breakdown. The serving hierarchy
 organizes optimization by level: request, replica, service, platform.
@@ -380,9 +393,82 @@ IF SHORT: Show the hierarchy diagram; skip the detailed table.
 
 \end{frame}
 
+\begin{frame}{LLM SLOs: \(\TTFT\) and \(\TPOT\)}
+\note{
+[2 min]
+% -- LINK: What prior concept connects to this slide
+The serving hierarchy has a request-level metric of ``ms/request.''
+For LLMs that metric splits into two distinct SLO axes --- time to
+first token and time per output token --- each mapping to a different
+computational phase.
+
+% -- NARRATE: What to SAY while showing this slide
+Point to the left card: ``TTFT measures prefill latency. The user
+sees a blank screen until the first token arrives. This is compute-bound
+--- O(n\^2) attention over the full input.'' Point to the right card:
+``TPOT measures decode cadence. Humans read at 5--10 tokens per second,
+so TPOT above 100--200 ms feels slower than natural reading.''
+Key connection: TTFT and TPOT motivate everything that follows ---
+KV cache management, continuous batching, and disaggregated serving all
+exist to hit the dual SLO simultaneously.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If you could only fix one -- high TTFT or high TPOT -- which
+user complaint is worse?'' Expected: high TTFT causes perceived
+unresponsiveness; high TPOT causes choppy streaming. Both matter, but
+TTFT is more commonly the deal-breaker for interactive products.
+
+% -- WARN: What students will get wrong on THIS topic
+Students conflate TTFT and TPOT into a single ``latency'' SLO.
+The key insight: prefill (TTFT) is compute-bound so it scales with
+input length, while decode (TPOT) is memory-bandwidth-bound so it
+scales with model size and batch occupancy. Fixing one does not fix
+the other.
+
+% -- FLEX: [CORE] or [OPTIONAL] + contingency
+[CORE] Introduces the dual SLO vocabulary every production LLM SLA uses.
+IF SHORT: Name TTFT and TPOT, state which phase each comes from, and
+move on --- the vocabulary is what matters.
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{computestroke}
+    \textbf{$\TTFT$ --- Time to First Token}\\[0.1cm]
+    {\footnotesize
+    \textbf{Phase:} Prefill (compute-bound, $O(n^2)$)\\
+    \textbf{Driver:} Input length, FLOP/s\\
+    \textbf{User experience:} Perceived responsiveness\\
+    \textbf{Target:} $<$ 500 ms for interactive chat}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{datastroke}
+    \textbf{$\TPOT$ --- Time Per Output Token}\\[0.1cm]
+    {\footnotesize
+    \textbf{Phase:} Decode (memory-bandwidth-bound)\\
+    \textbf{Driver:} HBM bandwidth, batch occupancy\\
+    \textbf{User experience:} Perceived reading speed\\
+    \textbf{Target:} $<$ 100--200 ms for streaming}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.15cm}
+\mlsysinsight{Dual SLO:}{Every LLM serving optimization --- KV cache, continuous batching, disaggregated prefill/decode --- can be evaluated by which of the two metrics it improves.}
+
+\end{frame}
+
 % --- ACTIVE LEARNING: Micro-Retrieval Cue ---
 \begin{frame}{Quick Check}
 \note{
+[1 min]
+% -- LINK: What prior concept connects to this slide
+The TTFT/TPOT slide named the primary LLM SLO pair. This quick check
+tests whether students absorbed the LLM-vs.-RecSys volume fact that
+was implicit in the serving hierarchy table.
+
 % -- NARRATE: What to SAY while showing this slide
 Read question aloud. Wait 15 seconds. Cold-call.
 Expected: LLMs are only 1--5\% of production inference by request
@@ -409,6 +495,7 @@ volume. RecSys dominate at 80--90\%.
 % --- ACTIVE LEARNING 1: Predict ---
 \begin{frame}{Predict: What Dominates Inference Volume?}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The quick check primed the question. This prediction exercise expands
 it with options and reveals the answer.
@@ -460,6 +547,7 @@ which model type accounts for the \alert{most} inference requests?}
 
 \begin{frame}{Why Batching Differs Across Model Types}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The prediction exercise showed different model types dominate.
 Each type needs a different batching strategy.
@@ -496,6 +584,7 @@ IF SHORT: Show diagram and state ``no universal optimal.''
 
 \begin{frame}{The Physics of Batching}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The taxonomy showed different batching strategies. This slide provides
 the quantitative model.
@@ -543,6 +632,7 @@ IF SHORT: Show just the equations and the key insight box.
 
 \begin{frame}{Continuous Batching for LLMs}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 Static batching works for vision. LLMs need continuous batching
 because output lengths vary wildly across requests.
@@ -621,6 +711,7 @@ IF SHORT: Focus on the 60--80\% waste problem and the 2--4x result.
 
 \begin{frame}{Queuing Theory for Batched Inference}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 Continuous batching increased throughput. But how do we model the interaction between arrival rate, batch size, and latency? Queuing theory provides the framework.
 
@@ -693,6 +784,7 @@ $\text{KV size} = 2 \times L \times H \times S \times B \times P$\\[0.3cm]
 
 \begin{frame}{KV Cache: Memory Exhaustion in LLM Serving}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Continuous batching increased throughput but the KV cache limits how
 many requests can run concurrently. This is the memory wall of serving.
@@ -742,6 +834,7 @@ IF SHORT: Show the figure and state the B=8 at 48K = OOM result.
 
 \begin{frame}{PagedAttention: Virtual Memory for KV Cache}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The KV cache wall showed memory exhaustion. PagedAttention is the
 solution, borrowed directly from OS virtual memory.
@@ -781,6 +874,7 @@ IF SHORT: State the OS analogy and the 2--4x result.
 % --- ACTIVE LEARNING 2: Exercise ---
 \begin{frame}{Your Turn: KV Cache Memory Budget}
 \note{
+[4 min]
 % -- LINK: What prior concept connects to this slide
 The KV cache wall showed the problem. This exercise applies the
 formula to a real model and checks if it fits on hardware.
@@ -832,6 +926,7 @@ IF SHORT: Reduce to 45 seconds.
 
 \begin{frame}{Speculative Decoding}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Continuous batching and PagedAttention optimize throughput. Speculative
 decoding optimizes latency by generating multiple tokens per step.
@@ -894,6 +989,7 @@ IF SHORT: State the insight and 2--3x result; skip the requirements box.
 
 \begin{frame}{Model Sharding for Inference}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 KV cache and batching optimize single-GPU serving. When models exceed
 GPU memory, sharding across multiple GPUs is mandatory.
@@ -925,9 +1021,9 @@ IF SHORT: Show only the table and the constraint equation.
 \small
 \textbf{When sharding becomes necessary:}
 
-\vspace{0.1cm}
+\vspace{0.05cm}
 \footnotesize
-\renewcommand{\arraystretch}{1.15}
+\renewcommand{\arraystretch}{1.1}
 \begin{tabular}{@{}llrl@{}}
   \toprule
   \textbf{Trigger} & \textbf{Model Example} & \textbf{Min Sharding} & \textbf{Strategy} \\
@@ -939,17 +1035,18 @@ IF SHORT: Show only the table and the constraint equation.
   \bottomrule
 \end{tabular}
 
-\vspace{0.15cm}
+\vspace{0.1cm}
 \small
 $$T_{\text{parallel}} = \frac{T_{\text{sequential}}}{P} + T_{\text{communication}}$$
 
-\vspace{0.1cm}
+\vspace{0.05cm}
 \mlsysalert{Constraint:}{Sharding helps only when communication overhead $<$ time saved. Requires NVLink (900 GB/s), not PCIe (64 GB/s).}
 
 \end{frame}
 
 \begin{frame}{Tensor Parallelism vs Pipeline Parallelism}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Sharding is necessary. The question is which strategy: tensor or
 pipeline parallelism.
@@ -1008,6 +1105,7 @@ IF SHORT: State the rule --- TP within node, PP across nodes.
 
 \begin{frame}{Serving Architecture Dimensions}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Sharding and batching are individual techniques. This slide presents the full decision space for serving architecture design as a structured framework.
 
@@ -1050,6 +1148,7 @@ IF SHORT: Point to the table and state the key trade-off.
 
 \begin{frame}{Load Balancing for Inference}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Sharding placed the model. Load balancing distributes requests across
 replicas of the model.
@@ -1088,6 +1187,7 @@ IF SHORT: Show diagram and state the exponential improvement.
 
 \begin{frame}{Power of Two Choices: The Math}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The previous slide showed the result visually. This slide provides
 the mathematical proof of the exponential improvement.
@@ -1143,6 +1243,7 @@ $E[\text{max queue}] = \Theta(\log \log n)$
 % --- ACTIVE LEARNING: Power of Two Choices Exercise ---
 \begin{frame}{Your Turn: Power of Two Choices at Scale}
 \note{
+[4 min]
 % -- LINK: What prior concept connects to this slide
 Students just saw the P2C math. This exercise makes them compute the concrete improvement for a realistic serving fleet.
 
@@ -1198,6 +1299,7 @@ IF SHORT: Show the solution and state the 1.9x improvement.
 % --- ACTIVE LEARNING 3: Discussion ---
 \begin{frame}{Discussion: Which Level Is the Bottleneck?}
 \note{
+[3 min]
 % -- LINK: What prior concept connects to this slide
 Students have seen the serving hierarchy (request, replica, service,
 platform). This discussion applies it to diagnose a real scenario.
@@ -1245,6 +1347,7 @@ IF SHORT: Do show-of-hands for each level instead of turn-and-talk.
 
 \begin{frame}{The Cold Start Problem}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Load balancing distributes traffic across existing replicas. Autoscaling
 adds new replicas. But GPU cold start is 100x slower than web services.
@@ -1268,9 +1371,9 @@ scaling fails.''
 
 % --- Layout: FULL-WIDTH diagram ---
 \centering
-\safeimg[width=0.92\textwidth,height=3.5cm,keepaspectratio]{cold-start-timeline.pdf}
+\safeimg[width=0.92\textwidth,height=3.4cm,keepaspectratio]{cold-start-timeline.pdf}
 
-\vspace{0.05cm}
+\vspace{0.04cm}
 \scriptsize
 \renewcommand{\arraystretch}{0.9}
 \begin{tabular}{@{}lrl@{}}
@@ -1283,7 +1386,7 @@ scaling fails.''
   \bottomrule
 \end{tabular}
 
-\vspace{0.05cm}
+\vspace{0.04cm}
 \small
 \mlsysalert{Key:}{Scaling decisions must anticipate demand 5+ min ahead. Batch size is the first knob to turn.}
 
@@ -1291,6 +1394,7 @@ scaling fails.''
 
 \begin{frame}{Autoscaling Strategies}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Cold start showed the constraint. This slide presents the two
 complementary strategies: reactive and predictive.
@@ -1344,12 +1448,166 @@ IF SHORT: Focus on the cold start times and the ``combine both'' conclusion.
 
 \end{frame}
 
+\begin{frame}{The Logic Wall: Test-Time Compute Scaling}
+\note{
+[2 min]
+% -- LINK: What prior concept connects to this slide
+Autoscaling addressed capacity for standard token generation. The
+Logic Wall names what happens when models move from fast pattern
+matching to slow reasoning --- the serving bottleneck shifts from
+HBM bandwidth to compute-per-request.
+
+% -- NARRATE: What to SAY while showing this slide
+``Standard LLM decode is memory-bandwidth-bound: one token decode
+takes 100 ms. A reasoning model that produces 128 internal Thinking
+Tokens before the answer spends 128 $\times$ 100 ms = 12.8 seconds.
+This is the Logic Wall: the fleet must now scale compute per request
+proportional to task difficulty. Dynamic Compute Allocation gives
+harder prompts more Thinking Time.'' Point to the latency card and
+the throughput tradeoff.
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``If you ran a reasoning model at 100 concurrent users, each with
+a 128-token thought chain, how does that change your capacity estimate
+vs. a standard model?'' Expected: 128$\times$ more GPU-seconds per
+request, forcing much smaller effective batch sizes.
+
+% -- WARN: What students will get wrong on THIS topic
+Students assume the serving optimizations from this chapter (continuous
+batching, PagedAttention) scale to reasoning models. They do, but the
+cost per request has grown 128$\times$ --- the latency wall is compute,
+not bandwidth, so HBM upgrades stop helping and FLOP/s is what matters.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Forward-looking extension; relevant for o1/Gemini-style systems.
+IF SHORT: State ``128 thinking tokens = 12.8 s; compute is the new wall''
+and move on. IF AHEAD: Ask what Dynamic Compute Allocation means for
+SLO design (users may accept longer waits for harder tasks).
+}
+
+\small
+\begin{columns}[T]
+  \begin{column}{0.50\textwidth}
+    \textbf{The Shift: Fast $\to$ Slow Thinking}
+
+    \vspace{0.1cm}
+    {\footnotesize
+    \begin{itemize}\setlength\itemsep{1pt}
+      \item \textbf{Fast Thinking} (pattern match): memory-bandwidth-bound, 100 ms/token
+      \item \textbf{Slow Thinking} (Chain-of-Thought): compute-bound, scales with reasoning depth
+      \item \textbf{Logic Wall}: fleet must scale compute \emph{per request} proportional to difficulty
+    \end{itemize}
+    }
+
+    \vspace{0.15cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Latency tax:} 128 thinking tokens $\times$ 100 ms/token = \textbf{12.8 s}\\
+    Standard model answer: \textbf{100 ms}. Reasoning: \textbf{128$\times$} longer.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.46\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Dynamic Compute Allocation}\\
+    Scheduler grants more ``Thinking Time'' to harder prompts.
+    Requires per-request compute budgets and preemption.}
+    \end{mlsyscard}
+
+    \vspace{0.1cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Implication for serving:}\\
+    HBM bandwidth no longer the bottleneck.\\
+    FLOP/s becomes the constraint.\\
+    Standard batching strategies still apply but at much higher cost-per-request.}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\end{frame}
+
+\begin{frame}{War Story: When Cache State Crossed Users (2023)}
+\note{
+[2 min]
+% -- LINK: What prior concept connects to this slide
+The KV cache and multi-tenancy sections established that serving state
+must be isolated per user. This war story shows what happens when it
+is not --- the failure mode is not performance but correctness.
+
+% -- NARRATE: What to SAY while showing this slide
+Walk through the four cards: ``ChatGPT used Redis to cache user
+session data. Under a specific Asyncio connection-reuse bug in redis-py,
+a recycled connection could return cached data belonging to a different
+active user. On March 20, 2023, OpenAI took ChatGPT offline.
+Some users could see another user's conversation title data and
+limited payment information.'' Then: ``Systems lesson: a cache is part
+of the serving correctness boundary, not just an optimization.
+Stateful inference needs the same isolation guarantees as databases.''
+
+% -- ENGAGE: Specific question, prediction, or task for THIS slide
+Ask: ``What serving design property --- stateless vs. stateful ---
+makes this bug possible, and how would disaggregated or stateless
+serving change the risk?'' Expected: stateful serving concentrates
+session data in shared cache infrastructure; stateless serving moves
+state per-user and eliminates cross-user cache sharing at the cost of
+losing prefix cache reuse.
+
+% -- WARN: What students will get wrong on THIS topic
+Students treat caches as purely additive optimizations with no
+correctness implications. In multi-tenant serving, a cache bug is a
+data privacy incident, not just a performance regression.
+
+% -- FLEX: [OPTIONAL] + contingency
+[OPTIONAL] Adds a memorable production example to the isolation concepts.
+IF SHORT: State the headline in one sentence --- ``A Redis bug in 2023
+let ChatGPT users see each others' conversation data.'' --- and name the
+systems lesson: caches are part of the correctness boundary.
+}
+
+\footnotesize
+\begin{columns}[T]
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{routingstroke}
+    {\scriptsize \textbf{Context}\\
+    ChatGPT used Redis Cluster via redis-py to cache user session data
+    and reduce database lookups in a high-volume serving system.}
+    \end{mlsyscard}
+
+    \vspace{0.08cm}
+    \begin{mlsyscard}{errorstroke}
+    {\scriptsize \textbf{Failure}\\
+    Under an Asyncio connection-reuse bug, a recycled connection
+    returned cached data belonging to a different active user.}
+    \end{mlsyscard}
+  \end{column}
+  \begin{column}{0.48\textwidth}
+    \begin{mlsyscard}{crimson}
+    {\scriptsize \textbf{Consequence}\\
+    March 20, 2023: ChatGPT taken offline. Some users saw another
+    user's conversation title data and limited payment information.}
+    \end{mlsyscard}
+
+    \vspace{0.08cm}
+    \begin{mlsyscard}{datastroke}
+    {\scriptsize \textbf{Systems lesson}\\
+    Stateful serving needs isolation around caches,
+    connection pools, and routing keys.\\
+    \textbf{A cache is part of the correctness boundary.}}
+    \end{mlsyscard}
+  \end{column}
+\end{columns}
+
+\vspace{0.05cm}
+\mlsysalert{Key:}{In multi-tenant serving, a cache bug is a data privacy incident, not a performance regression.}
+\mlsyscite{OpenAI Incident Report, March 2023}
+
+\end{frame}
+
 % =============================================================================
 \section{Wrap-Up}
 % =============================================================================
 
 \begin{frame}{Fallacies}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 The chapter covered economics, batching, KV cache, sharding, load
 balancing, and autoscaling. These fallacies challenge remaining
@@ -1359,7 +1617,14 @@ misconceptions.
 Read each fallacy and rebuttal: ``LLMs are only 1--5\% of inference
 volume. Continuous batching solves decode throughput but not prefill,
 KV cache, or sharding. Power-of-two-choices gives exponential
-improvement with one extra probe.''
+improvement with one extra probe. More GPU memory does not fix a
+bandwidth-bound decode bottleneck.''
+
+% -- WARN: What students will get wrong on THIS topic
+The fourth fallacy trips up even experienced engineers: buying larger
+H100s (e.g., 80 GB $\to$ 141 GB) does not increase decode tokens/sec
+once HBM bandwidth saturates. The binding constraint is bandwidth, not
+capacity.
 
 % -- FLEX: [CORE] or [OPTIONAL] + contingency
 [CORE] Quantitative rebuttals reinforce key numbers.
@@ -1370,18 +1635,23 @@ IF SHORT: Cover only the first fallacy (LLMs vs. RecSys).
 \textbf{Fallacy:} \textit{Inference at scale is synonymous with LLM serving.}\\
 {\scriptsize RecSys are 80--90\% of production inference by request volume. LLMs are only 1--5\%. Feature-parallel batching and embedding sharding dominate production, not continuous batching.}
 
-\vspace{0.08cm}
+\vspace{0.05cm}
 \textbf{Fallacy:} \textit{Continuous batching solves all LLM serving problems.}\\
 {\scriptsize Addresses decode throughput but not prefill ($O(n^2)$ attention), KV cache memory limits, or network bandwidth for sharded models. Necessary but not sufficient.}
 
-\vspace{0.08cm}
+\vspace{0.05cm}
 \textbf{Fallacy:} \textit{Load balancing does not matter for inference.}\\
 {\scriptsize Power-of-two-choices: max queue from $O(\log n / \log \log n)$ to $O(\log \log n)$. For 1,000 servers: $\sim$5 to $\sim$2. First-order effect on P99.}
+
+\vspace{0.05cm}
+\textbf{Fallacy:} \textit{More GPU memory always means more batch size and throughput.}\\
+{\scriptsize LLM decode is memory-\emph{bandwidth}-bound, not memory-\emph{capacity}-bound. Once HBM bandwidth saturates, adding capacity does not increase tokens/sec. Understand whether the bottleneck is capacity, bandwidth, or compute.}
 
 \end{frame}
 
 \begin{frame}{Pitfalls}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Fallacies addressed beliefs. Pitfalls address operational mistakes.
 
@@ -1389,7 +1659,14 @@ Fallacies addressed beliefs. Pitfalls address operational mistakes.
 ``Using training infrastructure for serving discovers unacceptable
 latency variance. Sizing on average throughput means a 25\% spike
 causes unbounded queues. Ignoring the serving tax means production
-latency is 30\% higher than benchmarks.''
+latency is 30\% higher than benchmarks. And multi-tenancy isolation
+retrofitted after incidents is expensive and disruptive.''
+
+% -- WARN: What students will get wrong on THIS topic
+Students build multi-tenant systems without resource quotas, assuming
+``we can add isolation later.'' The Redis war story (previous section)
+shows that later is too late: a tenant bursting to 5$\times$ normal
+traffic can degrade every other tenant before any mitigation fires.
 
 % -- FLEX: [CORE] or [OPTIONAL] + contingency
 [CORE] Operational pitfalls for serving systems.
@@ -1400,13 +1677,17 @@ IF SHORT: Cover just the first two pitfalls.
 \textbf{Pitfall:} \textit{Using training infrastructure for production serving.}\\
 {\scriptsize Training optimizes throughput over hours; serving optimizes P99 in milliseconds. Teams deploying training clusters for serving discover unacceptable latency variance.}
 
-\vspace{0.08cm}
+\vspace{0.05cm}
 \textbf{Pitfall:} \textit{Sizing capacity based on average throughput.}\\
 {\scriptsize At 80\% utilization, a 25\% spike causes unbounded queue growth. GPU cold start (5+ min) means capacity arrives after SLO violations. Plan for peak + headroom.}
 
-\vspace{0.08cm}
+\vspace{0.05cm}
 \textbf{Pitfall:} \textit{Ignoring the serving tax in latency budgets.}\\
 {\scriptsize Distributed inference adds 10--30\% overhead. A team achieving 70 ms on one GPU sees 100 ms in production.}
+
+\vspace{0.05cm}
+\textbf{Pitfall:} \textit{Neglecting multi-tenancy isolation until production.}\\
+{\scriptsize A tenant bursting to 5$\times$ normal traffic can degrade latency for all other tenants on shared infrastructure. Resource quotas, priority scheduling, and bulkhead isolation must be designed in from the start.}
 
 \end{frame}
 
@@ -1415,9 +1696,15 @@ IF SHORT: Cover just the first two pitfalls.
 % --- MUDDIEST POINT ---
 \begin{frame}{Muddiest Point}
 \note{
+[2 min]
 % -- NARRATE: What to SAY while showing this slide
 ``Write down the most confusing concept from today. Anonymous, one
 sentence. I will address top confusions next lecture.''
+
+% -- WARN: What students will get wrong on THIS topic
+The most commonly confused pair in this chapter is TTFT vs. TPOT ---
+students conflate them. A close second is confusing memory bandwidth
+(throughput bottleneck) with memory capacity (size bottleneck).
 
 % -- FLEX: [CORE] or [OPTIONAL] + contingency
 [CORE] Feedback loop.
@@ -1437,6 +1724,7 @@ sentence. I will address top confusions next lecture.''
 
 \begin{frame}{What Were the Key Ideas?}
 \note{
+[2 min]
 % -- NARRATE: What to SAY while showing this slide
 ``Close notes. 90 seconds. Write 4 most important concepts.''
 Walk around the room. Do NOT show next slide yet.
@@ -1459,6 +1747,7 @@ Walk around the room. Do NOT show next slide yet.
 
 \begin{frame}{Key Takeaways}
 \note{
+[2 min]
 % -- LINK: What prior concept connects to this slide
 Students just attempted retrieval. Reveal for self-correction.
 
@@ -1476,7 +1765,7 @@ IF SHORT: Read bullets quickly.
 
 \footnotesize
 \begin{itemize}\setlength\itemsep{1pt}
-  \item \textbf{Serving cost dominates training cost}: 100$\times$+ for high-volume applications. Every percent of serving efficiency saves significant capital.
+  \item \textbf{Serving Cost Dominance Law}: Inference OpEx exceeds Training CapEx by orders of magnitude (100$\times$+ for high-volume apps). Optimize serving ruthlessly.
   \item \textbf{The fundamental inversion}: Training optimizes throughput (samples/hr). Inference optimizes tail latency (P99 ms). Different metrics, different architectures.
   \item \textbf{No universal batching}: Static for vision, continuous for LLMs (2--4$\times$ throughput), feature-parallel for RecSys. Match technique to workload.
   \item \textbf{KV cache is the bottleneck}: Grows linearly with $B \times S$, often exceeds model weights. PagedAttention recovers 60--80\% of wasted memory.
@@ -1488,6 +1777,7 @@ IF SHORT: Read bullets quickly.
 
 \begin{frame}{References}
 \note{
+[1 min]
 % -- NARRATE: What to SAY while showing this slide
 ``Key papers: vLLM/PagedAttention for KV cache management, Mitzenmacher
 for power-of-two-choices, Megatron for tensor parallelism, Leviathan
@@ -1509,6 +1799,7 @@ for speculative decoding.''
 
 \begin{frame}{Next Lecture: Edge Intelligence}
 \note{
+[1 min]
 % -- NARRATE: What to SAY while showing this slide
 ``This chapter built the serving system inside the datacenter. Next:
 what happens when the model must run closer to users, sensors, and
@@ -1557,6 +1848,7 @@ Intelligence takes the deployment constraints to the extreme.''
 
 \begin{frame}{Backup: KV Cache Sizing Reference}
 \note{
+[2 min]
 % -- NARRATE: What to SAY while showing this slide
 Backup table with KV cache sizes for common models. GQA in Llama-70B
 reduces KV heads from 64 to 8, saving 8x cache.
@@ -1583,6 +1875,7 @@ reduces KV heads from 64 to 8, saving 8x cache.
 
 \begin{frame}{Backup: Continuous vs Static Batching}
 \note{
+[2 min]
 % -- NARRATE: Worked example comparing static and continuous batching.
 % -- FLEX: [OPTIONAL] Use for students wanting detailed batching comparison.
 }
@@ -1610,6 +1903,7 @@ reduces KV heads from 64 to 8, saving 8x cache.
 
 \begin{frame}{Backup: Speculative Decoding Math}
 \note{
+[2 min]
 % -- NARRATE: Acceptance probability and expected speedup for speculative decoding.
 % -- FLEX: [OPTIONAL] Use when students ask about the speculative decoding acceptance rate.
 }
@@ -1617,16 +1911,16 @@ reduces KV heads from 64 to 8, saving 8x cache.
 \footnotesize
 \textbf{Speculative Decoding Speedup Formula:}
 
-\vspace{0.1cm}
+\vspace{0.05cm}
 Draft model generates $K$ candidate tokens. Target model verifies all $K$ in one forward pass.
 
-\vspace{0.1cm}
+\vspace{0.05cm}
 {\small
 $$\text{Speedup} = \frac{K + 1}{1 + (1 - p_{\text{accept}}) \cdot K \cdot c}$$
 }
 
-\vspace{0.05cm}
-\renewcommand{\arraystretch}{1.1}
+\vspace{0.03cm}
+\renewcommand{\arraystretch}{1.05}
 \begin{tabular}{@{}lrrr@{}}
   \toprule
   \textbf{Acceptance Rate} & \textbf{K=4} & \textbf{K=8} & \textbf{Effective Speedup} \\
@@ -1637,7 +1931,7 @@ $$\text{Speedup} = \frac{K + 1}{1 + (1 - p_{\text{accept}}) \cdot K \cdot c}$$
   \bottomrule
 \end{tabular}
 
-\vspace{0.1cm}
+\vspace{0.05cm}
 {\footnotesize\textbf{Key insight:} Speedup depends on draft--target agreement. Easy tasks (code completion) see higher acceptance than creative tasks (story writing).}
 
 \end{frame}

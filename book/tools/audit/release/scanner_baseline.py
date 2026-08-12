@@ -5,7 +5,7 @@ Captures three measurements that together constitute the audit baseline:
 
 1. ``book/tools/audit/scan.py --scope vol1|vol2`` ledger counts
 2. The 6 detector self-tests (123/123 expected)
-3. ``book/tools/bib_lint.py --all --check`` (36 grandfathered, 0 new)
+3. ``./book/binder check bib --json`` (curated bibliography publication gate)
 
 Compares to the post-Pass 16 expected end state recorded in
 ``PASS_16_COMPLETION_REPORT.md`` §3 and reports any deviation as a
@@ -21,12 +21,15 @@ import json
 import os
 import re
 import subprocess
-import sys
-from pathlib import Path
 
-REPO = Path("/Users/VJ/GitHub/MLSysBook-release-audit")
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers"
-LOG_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/logs/scanner-baseline"
+try:
+    from .paths import LEDGER_DIR, LOG_DIR as RELEASE_LOG_DIR, REPO_ROOT
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import LEDGER_DIR, LOG_DIR as RELEASE_LOG_DIR, REPO_ROOT
+
+REPO = REPO_ROOT
+OUT_DIR = LEDGER_DIR
+LOG_DIR = RELEASE_LOG_DIR / "scanner-baseline"
 
 EXPECTED_SCANNER = {
     "vol1": {"total": 4, "accepted": 3, "open": 1},
@@ -40,7 +43,7 @@ EXPECTED_SELF_TESTS = {
     "alt_text_style": 7,
     "bibliography_hygiene": 8,
 }
-EXPECTED_BIB_LINT = {"grandfathered": 36, "new_errors": 0}
+EXPECTED_BIB_CHECK = {"total_issues": 0}
 
 
 def run(cmd: list[str], log_path: Path, env: dict[str, str] | None = None) -> tuple[int, str]:
@@ -174,37 +177,29 @@ def main() -> None:
                 f"{parsed.get('total')} expected={exp_count}/{exp_count}"
             )
 
-    # 3. bib_lint --all --check.
-    log = LOG_DIR / "bib-lint.log"
-    rc, out = run(["python3", "book/tools/bib_lint.py", "--all", "--check"], log)
-    # Output format: "Total: 0 NEW errors (0 grandfathered), 62 warnings"
-    grandfathered = None
-    new_errors = None
-    warnings = None
-    m = re.search(r"(\d+)\s+NEW\s+errors?\s*\((\d+)\s+grandfathered\)", out)
-    if m:
-        new_errors = int(m.group(1))
-        grandfathered = int(m.group(2))
-    m = re.search(r"(\d+)\s+warnings?", out)
-    if m:
-        warnings = int(m.group(1))
+    # 3. Binder bibliography gate.
+    log = LOG_DIR / "bib-check.log"
+    rc, out = run(["python3", "book/binder", "check", "bib", "--json"], log)
+    try:
+        parsed = json.loads(out)
+    except json.JSONDecodeError:
+        parsed = {"status": "unparsable", "total_issues": None, "runs": []}
+    total_issues = parsed.get("total_issues")
+    run_issues = {
+        run.get("name", "unknown"): run.get("issue_count")
+        for run in parsed.get("runs", [])
+    }
     results["bib_lint"] = {
         "return_code": rc,
-        "grandfathered": grandfathered,
-        "new_errors": new_errors,
-        "warnings": warnings,
+        "total_issues": total_issues,
+        "run_issues": run_issues,
         "log": str(log),
     }
     if rc != 0:
-        results["regressions"].append(f"bib_lint: return code {rc} (expected 0)")
-    if new_errors is not None and new_errors > EXPECTED_BIB_LINT["new_errors"]:
+        results["regressions"].append(f"binder check bib: return code {rc} (expected 0)")
+    if total_issues is not None and total_issues > EXPECTED_BIB_CHECK["total_issues"]:
         results["regressions"].append(
-            f"bib_lint: new_errors={new_errors} > expected={EXPECTED_BIB_LINT['new_errors']}"
-        )
-    if grandfathered is not None and grandfathered < EXPECTED_BIB_LINT["grandfathered"]:
-        results.setdefault("improvements", []).append(
-            f"bib_lint: grandfathered={grandfathered} < expected={EXPECTED_BIB_LINT['grandfathered']} "
-            f"(improvement: {EXPECTED_BIB_LINT['grandfathered'] - grandfathered} entries newly resolved)"
+            f"binder check bib: total_issues={total_issues} > expected={EXPECTED_BIB_CHECK['total_issues']}"
         )
 
     out_path = OUT_DIR / "scanner-baseline.json"
@@ -216,7 +211,7 @@ def main() -> None:
         "scanner_total": {s: results["scanner"][s].get("raw_total") for s in ("vol1", "vol2")},
         "self_tests": {m: f"{v.get('passed')}/{v.get('total')}"
                        for m, v in results["self_tests"].items()},
-        "bib_lint": {k: results["bib_lint"].get(k) for k in ("return_code", "grandfathered", "new_errors", "warnings")},
+        "bib_lint": {k: results["bib_lint"].get(k) for k in ("return_code", "total_issues", "run_issues")},
         "regressions": results["regressions"],
         "improvements": results.get("improvements", []),
     }, indent=2))

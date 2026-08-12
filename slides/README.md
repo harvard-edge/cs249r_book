@@ -38,8 +38,8 @@ xelatex 01_introduction.tex   # Compile (run twice for navigation)
     </tr>
     <tr>
       <td><b>Volume II</b></td>
-      <td align="center">9 decks</td>
-      <td>Course overview, Compute Infrastructure through Inference</td>
+      <td align="center">18 decks</td>
+      <td>Course overview, Introduction through Responsible AI, Conclusion</td>
     </tr>
   </tbody>
 </table>
@@ -58,7 +58,7 @@ slides/
 │   │   ├── 01_introduction.tex
 │   │   └── images/
 │   └── ...
-└── vol2/                       # Volume II decks (9 chapters)
+└── vol2/                       # Volume II decks (18 chapters)
     ├── 01_introduction/
     └── ...
 ```
@@ -71,7 +71,7 @@ Adopting instructors who want a different look can create their own variant by c
 
 ## Contributing
 
-Agent instructions and production guidelines live in `.claude/docs/slides/`.
+Agent instructions and production guidelines live in the project slides docs.
 
 ## Contributors
 
@@ -85,7 +85,9 @@ Thanks to these wonderful people who have helped build the slide decks!
 <table width="100%" style="width:100%">
   <tbody>
     <tr>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/Shashank-Tripathi-07"><img src="https://avatars.githubusercontent.com/u/178375647?v=4?v=4?s=80" width="80px;" alt="Rocky"/><br /><sub><b>Rocky</b></sub></a><br />🪲 🧑‍💻 🎨 ✍️</td>
       <td align="center" valign="top" width="14.28%"><a href="https://github.com/profvjreddi"><img src="https://avatars.githubusercontent.com/profvjreddi?v=4?s=80" width="80px;" alt="Vijay Janapa Reddi"/><br /><sub><b>Vijay Janapa Reddi</b></sub></a><br />🧑‍💻 🎨 ✍️</td>
+      <td align="center" valign="top" width="14.28%"><a href="https://github.com/farhan523"><img src="https://avatars.githubusercontent.com/u/62025759?v=4?v=4?s=80" width="80px;" alt="Farhan Asghar"/><br /><sub><b>Farhan Asghar</b></sub></a><br />🪲 🧑‍💻 🎨</td>
     </tr>
   </tbody>
 </table>

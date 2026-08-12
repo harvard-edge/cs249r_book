@@ -1,13 +1,11 @@
-"""Check: abbreviations must be expanded on first use per chapter (§10.5).
+"""Check: abbreviation first-use policy (§10.5).
 
-Rule: book-prose-merged.md section 10.5
+Rule: book-prose-merged.md section 10.5 / abbreviations.md
 
-    "Every abbreviation is expanded on its first use in each chapter.
-    Expansion resets at every chapter boundary. Pattern:
-    `convolutional neural network (CNN)` on first use, then `CNN`
-    everywhere else in that chapter."
+    Most specialized abbreviations expand on first use in each chapter.
 
-Each `.qmd` file is treated as one chapter. The check walks the file
+Each `.qmd` file is treated as one chapter for the ordinary chapter-level
+abbreviation set. The check walks the file
 once and for each abbreviation in the §10.5 canonical-forms table:
 
   1. Finds the first "canonical introduction" — a match for the
@@ -29,11 +27,11 @@ flagged — if the chapter introduces the abbreviation somewhere on
 the line where it first appears bare, the reader sees the expansion
 immediately and §10.5's intent is satisfied.
 
-Fix: editorial judgment required. The typical fix is to insert the
-canonical expansion at the first bare use OR to move an existing
-later expansion earlier. Not auto-fixable; `needs_subagent=True`.
+Fix: editorial judgment required. The typical fix is to insert the canonical
+expansion at the first bare use or move an existing later expansion earlier.
+Not auto-fixable; `needs_subagent=True`.
 
-Reference: book-prose-merged.md section 10.5 (canonical forms dict).
+Reference: abbreviations.md (canonical forms dict).
 """
 
 from __future__ import annotations
@@ -57,8 +55,8 @@ from audit.protected_contexts import (
 )
 
 CATEGORY = "abbreviation-first-use"
-RULE = "book-prose-merged.md section 10.5"
-RULE_TEXT = "Abbreviations must be expanded on first use per chapter"
+RULE = "abbreviations.md"
+RULE_TEXT = "Abbreviations must follow chapter-level first-use policy"
 
 
 # ── §10.5 canonical forms table ────────────────────────────────────────────
@@ -92,7 +90,6 @@ _CANONICAL = [
     ("CTM",    "continuous therapeutic monitoring"),
     ("DAG",    "directed acyclic graph"),
     ("DCE",    "dead-code elimination"),
-    ("DLRM",   "Deep Learning Recommendation Model"),
     ("ELT",    "extract, load, transform"),
     ("ETL",    "extract, transform, load"),
     ("FFT",    "fast Fourier transform"),

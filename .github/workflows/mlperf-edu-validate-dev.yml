@@ -1,0 +1,650 @@
+name: 'MLPerf EDU · Validate (Dev)'
+
+# Fast, blocking validation for the runnable preview. This workflow executes
+# the smoke path and all lab entry points. Actual max/release execution lives in
+# mlperf-edu-release-validation.yml and is never represented by a dry run.
+
+on:
+  workflow_dispatch:
+  workflow_call:
+  pull_request:
+    paths:
+      - 'mlperf-edu/**'
+      - '.github/workflows/mlperf-edu-*.yml'
+  push:
+    branches: [dev]
+    paths:
+      - 'mlperf-edu/**'
+      - '.github/workflows/mlperf-edu-*.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.run_id }}
+  cancel-in-progress: true
+
+env:
+  MLPERF_EDU_ROOT: mlperf-edu
+
+jobs:
+  tests-and-portability:
+    name: 'Tests, Audit, and Package Portability'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Install the Locked Development Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Run the Complete Test Suite
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run pytest
+
+      - name: Check Review-Critical Python Style
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          paths=(
+            bench/measure_peaks.py
+            src/mlperf/assets.py
+            src/mlperf/contracts.py
+            src/mlperf/edu_cli.py
+            src/mlperf/fingerprint.py
+            src/mlperf/harness.py
+            src/mlperf/__init__.py
+            src/mlperf/loadgen.py
+            src/mlperf/manifest.py
+            src/mlperf/power.py
+            src/mlperf/roofline.py
+            src/mlperf/registry.py
+            src/mlperf/runners
+            src/mlperf/reference/cloud/gpt2_infer.py
+            src/mlperf/reference/cloud/nanogpt_decode.py
+            src/mlperf/reference/cloud/nanogpt_prefill.py
+            src/mlperf/reference/cloud/nanogpt_train.py
+            src/mlperf/reference/tiny/mlperf_tiny_kws.py
+            src/mlperf/reference/tiny/mlperf_tiny_anomaly.py
+            src/mlperf/reference/tiny/mlperf_tiny_resnet.py
+            src/mlperf/reference/tiny/mlperf_tiny_vww.py
+            tools/check_taxonomy.py
+            tools/check_reference_claims.py
+            tools/check_selection_ledger.py
+            tools/check_site_layout.py
+            tools/build_handoff_manifest.py
+            tools/build_wheel.py
+            tools/generate_docs.py
+            tools/generate_review_packets.py
+            tools/import_provisional_reference_results.py
+            tools/import_reference_evidence.py
+            tools/reference_source_lock.py
+            tools/run_reference_sweep.py
+            tools/sync_verified_baselines.py
+            examples/lab1_optimization.py
+            examples/lab2_inference_sut.py
+            examples/lab3_arch_comparison.py
+            tutorials/01_first_benchmark.py
+            tutorials/smoke_first_benchmark.py
+            paper/check_paper_pdf.py
+            paper/generate_registry_snapshot.py
+            tests
+          )
+          format_paths=(
+            bench/measure_peaks.py
+            src/mlperf/contracts.py
+            src/mlperf/edu_cli.py
+            src/mlperf/fingerprint.py
+            src/mlperf/harness.py
+            src/mlperf/__init__.py
+            src/mlperf/loadgen.py
+            src/mlperf/manifest.py
+            src/mlperf/power.py
+            src/mlperf/roofline.py
+            src/mlperf/registry.py
+            src/mlperf/runners/__init__.py
+            src/mlperf/runners/common.py
+            src/mlperf/runners/graph.py
+            src/mlperf/runners/tiny.py
+            src/mlperf/runners/vision.py
+            src/mlperf/reference/cloud/nanogpt_decode.py
+            src/mlperf/reference/cloud/nanogpt_prefill.py
+            src/mlperf/reference/tiny/mlperf_tiny_resnet.py
+            src/mlperf/reference/tiny/mlperf_tiny_anomaly.py
+            src/mlperf/reference/tiny/mlperf_tiny_vww.py
+            tools/check_taxonomy.py
+            tools/check_reference_claims.py
+            tools/check_site_layout.py
+            tools/build_handoff_manifest.py
+            tools/build_wheel.py
+            tools/generate_docs.py
+            tools/generate_review_packets.py
+            tools/import_provisional_reference_results.py
+            tools/import_reference_evidence.py
+            tools/reference_source_lock.py
+            tools/run_reference_sweep.py
+            tools/sync_verified_baselines.py
+            examples/lab1_optimization.py
+            examples/lab2_inference_sut.py
+            examples/lab3_arch_comparison.py
+            tutorials/01_first_benchmark.py
+            tutorials/smoke_first_benchmark.py
+            paper/check_paper_pdf.py
+            paper/generate_registry_snapshot.py
+          )
+          uv run ruff check "${paths[@]}"
+          uv run ruff format --check "${format_paths[@]}"
+
+      - name: Run the Explicit Manifest and Package Portability Gate
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run pytest tests/test_manifest.py tests/test_edu_cli.py -k 'manifest or package or portable'
+
+      - name: Confirm the Strict Public Audit Fails Closed
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          set +e
+          uv run mlperf audit --policy public
+          status=$?
+          set -e
+          if [ "$status" -ne 1 ]; then
+            echo "expected the experimental portfolio to return public-audit status 1, got $status" >&2
+            exit 1
+          fi
+
+  python-compatibility:
+    name: 'Clean Wheel · Python ${{ matrix.python-version }}'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: ${{ matrix.python-version }}
+          enable-cache: true
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Build and Install an Unlocked Wheel
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel_dir="/tmp/mlperf-edu-wheel-${{ matrix.python-version }}"
+          venv_dir="/tmp/mlperf-edu-python-${{ matrix.python-version }}"
+          uv build --wheel --out-dir "$wheel_dir"
+          uv venv "$venv_dir" --python "${{ matrix.python-version }}"
+          wheel=$(find "$wheel_dir" -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          uv pip install --python "$venv_dir/bin/python" "$wheel"
+
+      - name: Exercise the Installed CLI and Packaged Evidence
+        working-directory: /tmp
+        shell: bash
+        run: |
+          set -euo pipefail
+          venv_dir="/tmp/mlperf-edu-python-${{ matrix.python-version }}"
+          "$venv_dir/bin/mlperf" list --format json > mlperf-edu-list.json
+          set +e
+          "$venv_dir/bin/mlperf" audit --policy public --format json > mlperf-edu-audit.json
+          audit_status=$?
+          set -e
+          test "$audit_status" -eq 1
+          "$venv_dir/bin/mlperf" run \
+            --workload image-classification \
+            --profile min \
+            --device cpu \
+            --output-dir mlperf-edu-python-smoke
+          "$venv_dir/bin/python" - <<'PY'
+          import json
+          from pathlib import Path
+
+          from mlperf.assets import asset_cache_root
+          from platformdirs import user_cache_path
+
+          audit = json.load(open("mlperf-edu-audit.json", encoding="utf-8"))
+          listed = json.load(open("mlperf-edu-list.json", encoding="utf-8"))
+          report = json.load(
+              open(
+                  "mlperf-edu-python-smoke/image-classification_min_report.json",
+                  encoding="utf-8",
+              )
+          )
+          assert len(listed["workloads"]) == 9, listed
+          assert audit["draft_evidence_source"]["claim_scope"] == (
+              "unverified-installed-artifact"
+          ), audit["draft_evidence_source"]
+          assert sum(
+              len(workload["draft_evidence"])
+              for workload in audit["workloads"]
+          ) == 12, audit
+          assert report["status"] == "passed", report
+          assert report["device_requested"] == "cpu", report
+          assert report["device_executed"] == "cpu", report
+          assert asset_cache_root() == user_cache_path("mlperf-edu").resolve()
+          assert asset_cache_root() != Path.cwd()
+          PY
+
+  generated-contracts:
+    name: 'Registry, Taxonomy, Review Packets, and Docs Drift'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Install the Locked Development Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Check the Flat and Packaged Registry Mirrors
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/export_flat_registry.py --check
+
+      - name: Check Native Verified Baselines
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/sync_verified_baselines.py --check
+
+      - name: Check the Workload Taxonomy
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/check_taxonomy.py
+
+      - name: Check Committed Reference Evidence Mirrors
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: >-
+          uv run pytest
+          tests/test_import_reference_evidence.py
+          tests/test_import_provisional_reference_results.py
+
+      - name: Check Hand-Written Reference Claims
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/check_reference_claims.py --check
+
+      - name: Check Public Review Packets
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/generate_review_packets.py --check
+
+      - name: Check Generated Documentation
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/generate_docs.py --check
+
+      - name: Record Strict Public-Release Policy Blockers
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          set +e
+          uv run mlperf audit --policy public 2>&1 | tee public-audit.txt
+          status=${PIPESTATUS[0]}
+          printf '%s\n' "$status" > public-audit-exit-code.txt
+          {
+            echo '## Strict Public-Release Audit'
+            echo ''
+            if [ "$status" -eq 0 ]; then
+              echo 'The strict public-release policy is clear.'
+            else
+              echo 'The independent preview remains publishable, but public-result release gates are still open.'
+              echo ''
+              echo 'See the public-audit artifact for the current blockers.'
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+          exit 0
+
+      - name: Upload the Strict Public Audit
+        uses: actions/upload-artifact@v7
+        with:
+          name: mlperf-edu-public-audit
+          path: ${{ env.MLPERF_EDU_ROOT }}/public-audit*.txt
+          if-no-files-found: error
+          retention-days: 30
+
+  smoke-and-labs:
+    name: 'Actual Smoke Validation and Lab Entry Points'
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Install the Locked Development Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Execute Smoke and Complete Min Coverage
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          set -euo pipefail
+          uv run mlperf validate smoke --output-dir submissions/ci-smoke
+          uv run mlperf validate coverage --output-dir submissions/ci-coverage
+          output_dir="submissions/ci-coverage/min-all"
+          for phase in full prefill decode; do
+            uv run mlperf run \
+              --workload causal-language-modeling \
+              --mode inference \
+              --phase "$phase" \
+              --profile min \
+              --output-dir "$output_dir"
+          done
+          uv run mlperf grade "$output_dir" --output "$output_dir/coverage-case-grade.json"
+          uv run python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from tools.import_reference_evidence import case_id, expected_cases
+
+          output_dir = Path("submissions/ci-coverage/min-all")
+          expected = {
+              case_id(case.workload.id, "min", case.mode, case.phase)
+              for case in expected_cases().values()
+          }
+          actual = set()
+          for path in output_dir.glob("*_min_report.json"):
+              payload = json.loads(path.read_text())
+              if payload.get("status") != "passed":
+                  raise SystemExit(f"case report did not pass: {path}")
+              if not payload.get("device_requested") or not payload.get("device_executed"):
+                  raise SystemExit(f"case report lacks device disclosure: {path}")
+              actual.add(case_id(
+                  str(payload.get("workload")),
+                  str(payload.get("profile")),
+                  str(payload.get("mode")),
+                  payload.get("phase"),
+              ))
+          if actual != expected:
+              raise SystemExit(
+                  f"case execution closure mismatch; "
+                  f"missing={sorted(expected - actual)}, extra={sorted(actual - expected)}"
+              )
+          grade_path = output_dir / "coverage-case-grade.json"
+          grade = json.loads(grade_path.read_text())
+          assert grade["passed"] == len(expected) and grade["failed"] == 0, grade
+          PY
+
+      - name: Execute All Lab Smoke Paths
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          uv run python examples/lab1_optimization.py --smoke
+          uv run python examples/lab2_inference_sut.py --smoke
+          uv run python examples/lab3_arch_comparison.py --smoke
+
+      - name: Upload Smoke Reports
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mlperf-edu-smoke-reports
+          path: |
+            ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-smoke/**
+            ${{ env.MLPERF_EDU_ROOT }}/submissions/ci-coverage/**
+          if-no-files-found: error
+          retention-days: 30
+
+  wheel-smoke:
+    name: 'Clean Wheel Install and Packaged Registry'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Build the Wheel
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/build_wheel.py
+
+      - name: Verify a Clean Installed CLI Outside the Checkout
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          wheel=$(find dist -maxdepth 1 -name '*.whl' -print -quit)
+          test -n "$wheel"
+          unzip -l "$wheel" | grep -q 'mlperf_edu/workloads.yaml'
+          unzip -l "$wheel" | grep -q 'mlperf_edu/datasets.yaml'
+          unzip -l "$wheel" | grep -q 'mlperf_edu/provisional_results/index.json'
+          uv venv /tmp/mlperf-edu-wheel-smoke --python 3.12
+          uv pip install --python /tmp/mlperf-edu-wheel-smoke/bin/python "$wheel"
+          cd /tmp
+          /tmp/mlperf-edu-wheel-smoke/bin/mlperf list --format json > /tmp/mlperf-edu-list.json
+          set +e
+          /tmp/mlperf-edu-wheel-smoke/bin/mlperf audit --policy public
+          audit_status=$?
+          set -e
+          test "$audit_status" -eq 1
+          run_dir=/tmp/mlperf-edu-installed-run
+          /tmp/mlperf-edu-wheel-smoke/bin/mlperf run \
+            --workload time-series-forecasting \
+            --profile min \
+            --output-dir "$run_dir"
+          report="$run_dir/time-series-forecasting_min_report.json"
+          manifest="$run_dir/time-series-forecasting_min.provd.json"
+          test -s "$report"
+          test -s "${report%.json}.csv"
+          test -s "${report%.json}.html"
+          test -s "$manifest"
+          jq -e '
+            .device_requested == "auto" and
+            .device_executed == "cpu" and
+            .backend == "pytorch-cpu"
+          ' "$report" >/dev/null
+          /tmp/mlperf-edu-wheel-smoke/bin/mlperf verify "$manifest"
+          /tmp/mlperf-edu-wheel-smoke/bin/mlperf report "$report" \
+            --format html \
+            --output /tmp/mlperf-edu-installed-report.html
+          /tmp/mlperf-edu-wheel-smoke/bin/mlperf package "$manifest" \
+            --output /tmp/mlperf-edu-installed-package.zip
+          test -s /tmp/mlperf-edu-installed-report.html
+          test -s /tmp/mlperf-edu-installed-package.zip
+          /tmp/mlperf-edu-wheel-smoke/bin/python - <<'PY'
+          import json
+          import zipfile
+
+          with zipfile.ZipFile("/tmp/mlperf-edu-installed-package.zip") as archive:
+              index = json.loads(archive.read("package_index.json"))
+          assert index["clean_extraction_verification"]["status"] == "passed"
+          PY
+          /tmp/mlperf-edu-wheel-smoke/bin/python - <<'PY'
+          import json
+          from importlib.resources import files
+
+          from mlperf.registry import load_registry
+
+          registry = load_registry()
+          expected_case_count = len(registry) + sum(
+              len((((workload.raw.get("mode_contracts") or {}).get("inference") or {}).get("phases") or {}))
+              for workload in registry.values()
+          )
+          index = json.loads(
+              files("mlperf_edu").joinpath("provisional_results/index.json").read_text()
+          )
+          listed = json.load(open("/tmp/mlperf-edu-list.json"))
+          assert index["case_count"] == expected_case_count, index
+          assert index["workload_count"] == len(registry), index
+          assert index["five_run_verified_case_count"] == 6, index
+          assert index["provisional_case_count"] == 6, index
+          assert len(listed["workloads"]) == len(registry), listed
+          PY
+
+  site-render:
+    name: 'Quarto Render and Internal Links'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Set Up Quarto
+        uses: quarto-dev/quarto-actions/setup@v2
+
+      - name: Install the Locked Development Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Confirm Generated Pages Are Current
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run python tools/generate_docs.py --check
+
+      - name: Render the Site
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}/site
+        run: quarto render
+
+      - name: Validate Rendered Output
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f mlperf-edu/site/_build/index.html
+          test -f mlperf-edu/site/_build/benchmarks/index.html
+          test -f mlperf-edu/site/_build/benchmarks/vision/image-classification.html
+          test -f mlperf-edu/site/_build/benchmarks/tiny/keyword-spotting.html
+          test -f mlperf-edu/site/_build/benchmarks/tiny/anomaly-detection.html
+          test -f mlperf-edu/site/_build/benchmarks/tiny/visual-wake-words.html
+          test -f mlperf-edu/site/_build/benchmarks/language/causal-language-modeling.html
+          test -f mlperf-edu/site/_build/benchmarks/language/text-classification.html
+          test -f mlperf-edu/site/_build/benchmarks/language/information-retrieval.html
+          test -f mlperf-edu/site/_build/benchmarks/graph/graph-node-classification.html
+          test -f mlperf-edu/site/_build/benchmarks/timeseries/time-series-forecasting.html
+          test -f mlperf-edu/site/_build/reference/datasets.html
+          test -f mlperf-edu/site/_build/reference/cli.html
+          test ! -d mlperf-edu/site/_build/benchmarks/agent
+          test ! -d mlperf-edu/site/_build/benchmarks/distributed
+          test ! -d mlperf-edu/site/_build/benchmarks/recommender
+          test ! -d mlperf-edu/site/_build/benchmarks/rl
+          test ! -d mlperf-edu/site/_build/benchmarks/slm
+
+      - name: Check Internal Links
+        run: python3 shared/scripts/check-internal-links.py mlperf-edu/site --quiet
+
+      - name: Install the Browser Layout Checker
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run playwright install --with-deps chromium
+
+      - name: Check Every Page at Desktop and Narrow Viewports
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: |
+          uv run python tools/check_site_layout.py \
+            --build-dir site/_build \
+            --report-dir site-layout-report
+
+      - name: Upload the Rendered Preview
+        uses: actions/upload-artifact@v7
+        with:
+          name: mlperf-edu-site
+          path: ${{ env.MLPERF_EDU_ROOT }}/site/_build/**
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload the Browser Layout Report
+        uses: actions/upload-artifact@v7
+        if: always()
+        with:
+          name: mlperf-edu-site-layout
+          path: ${{ env.MLPERF_EDU_ROOT }}/site-layout-report/**
+          if-no-files-found: error
+          retention-days: 14
+
+  paper-build:
+    name: 'Paper Build and PDF Verification'
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Set Up uv and Python
+        uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b  # v8.1.0
+        with:
+          python-version: '3.12'
+          enable-cache: true
+          cache-dependency-glob: '${{ env.MLPERF_EDU_ROOT }}/uv.lock'
+          working-directory: ${{ env.MLPERF_EDU_ROOT }}
+
+      - name: Install the Locked Development Environment
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv sync --locked --extra dev
+
+      - name: Install the LaTeX Toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y \
+            texlive-bibtex-extra \
+            texlive-fonts-recommended \
+            texlive-latex-base \
+            texlive-latex-extra
+
+      - name: Build and Verify the Review Draft
+        working-directory: ${{ env.MLPERF_EDU_ROOT }}
+        run: uv run make -C paper clean all check
+
+      - name: Upload the Verified Paper
+        uses: actions/upload-artifact@v7
+        with:
+          name: mlperf-edu-review-paper
+          path: ${{ env.MLPERF_EDU_ROOT }}/paper/output/pdf/mlperf-edu-review-draft.pdf
+          if-no-files-found: error
+          retention-days: 30
+
+  external-links:
+    name: 'External Link Integrity'
+    uses: ./.github/workflows/infra-link-check.yml
+    with:
+      path_pattern: './mlperf-edu/site/**/*.qmd'
+      lycheeignore_path: 'shared/config/.lycheeignore'
+      fail_on_broken: true
+      accept_status: '200,403,429'
+      max_concurrency: 8

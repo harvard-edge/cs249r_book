@@ -2,7 +2,7 @@
 Developer export command: rebuilds curriculum from source files.
 
 This is a DEVELOPER command for maintainers, NOT for students.
-Workflow: src/*.py → modules/*.ipynb → tinytorch/core/*.py
+Workflow: src/*.py → modules/*.ipynb → tinytorch package files
 
 Students should use `tito module complete` which only exports their
 notebook work to the package (without overwriting their notebooks).
@@ -41,7 +41,7 @@ class DevExportCommand(BaseCommand):
 
     @property
     def description(self) -> str:
-        return "Rebuild curriculum: src/*.py → modules/*.ipynb → tinytorch/core/*.py"
+        return "Rebuild curriculum: src/*.py → modules/*.ipynb → tinytorch package files"
 
     def add_arguments(self, parser: ArgumentParser) -> None:
         """Add export arguments."""
@@ -97,7 +97,7 @@ class DevExportCommand(BaseCommand):
         cwd = Path.cwd()
         is_tinytorch_root = (
             (cwd / "tinytorch" / "__init__.py").exists() or  # Running from repo root
-            (cwd / "src").exists() and (cwd / "settings.ini").exists()  # Already in tinytorch/
+            (cwd / "src").exists() and (cwd / "pyproject.toml").exists()  # Already in tinytorch/
         )
         if not is_tinytorch_root:
             console.print(Panel(
@@ -107,7 +107,7 @@ class DevExportCommand(BaseCommand):
                 "[dim]  ├── src/[/dim]\n"
                 "[dim]  ├── tinytorch/      ← package exports here[/dim]\n"
                 "[dim]  │   └── __init__.py[/dim]\n"
-                "[dim]  └── settings.ini[/dim]",
+                "[dim]  └── pyproject.toml[/dim]",
                 title="Wrong Directory", border_style="red"
             ))
             return 1
@@ -255,8 +255,7 @@ class DevExportCommand(BaseCommand):
     def _run_nbdev_export(self, notebook_paths: list, console) -> int:
         """Run nbdev_export on the given notebooks using Python API directly.
         
-        Uses nbdev.export.nb_export() instead of subprocess to ensure
-        settings.ini is read correctly regardless of environment.
+        Uses nbdev.export.nb_export() directly (more reliable than subprocess).
         """
         from nbdev.export import nb_export
         success_count = 0
@@ -265,12 +264,17 @@ class DevExportCommand(BaseCommand):
         for notebook_path_str in notebook_paths:
             try:
                 notebook_path = Path(notebook_path_str)
-                notebook_name = notebook_path.name
-                console.print(f"[dim]🔄 Exporting {notebook_name} → tinytorch/core/...[/dim]")
-
                 # Ensure target file is writable
                 module_path = notebook_path.parent
                 export_target = self._get_export_target(module_path)
+                notebook_name = notebook_path.name
+                target_display = (
+                    f"tinytorch/{export_target.replace('.', '/')}.py"
+                    if export_target != "unknown"
+                    else "tinytorch/..."
+                )
+                console.print(f"[dim]🔄 Exporting {notebook_name} → {target_display}[/dim]")
+
                 if export_target != "unknown":
                     ensure_writable_target(export_target)
 

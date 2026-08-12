@@ -2,6 +2,14 @@
 """Format Python code blocks in .qmd files using Black.
 
 Also wraps long comments and docstrings that Black doesn't handle.
+
+Two block profiles:
+- Display blocks (```python / ```{.python}): Black at 70 chars + comment
+  wrapping — narrow snippets shown to the reader.
+- Executable LEGO cells (```{python}): Black at 150 chars with string
+  normalization off and no comment wrapping — keeps the one-line
+  `field_str = fmt_*(...)` export style and never touches `#|` options
+  or LEGO box-drawing headers.
 """
 
 import ast
@@ -149,20 +157,119 @@ def wrap_long_lines(code: str, max_length: int = 70) -> str:
     return "\n".join(result)
 
 
+# Executable LEGO cells: wide one-line exports, preserve quote style.
+EXEC_LINE_LENGTH = 150
+
+# Sentinel that shields Quarto `#|` option lines from Black, which would
+# otherwise rewrite `#| echo: false` as `# | echo: false` (Black inserts
+# a space after `#` unless followed by `!`, `:`, `#`, or `'`).
+_QMD_OPT_SENTINEL = "#!__QMD_OPT__"
+
+
+def run_black(code: str, line_length: int, skip_string_normalization: bool = False) -> str:
+    """Run Black on a code string via a temp file; return formatted code.
+
+    Raises subprocess.CalledProcessError / FileNotFoundError on failure.
+    """
+    with tempfile.NamedTemporaryFile(
+        mode="w", suffix=".py", delete=False
+    ) as f:
+        f.write(code)
+        temp_path = f.name
+
+    try:
+        cmd = ["black", "--line-length", str(line_length), "--quiet"]
+        if skip_string_normalization:
+            cmd.append("--skip-string-normalization")
+        cmd.append(temp_path)
+
+        subprocess.run(
+            cmd,
+            check=True,
+            stderr=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+        )
+
+        with open(temp_path, "r") as f:
+            return f.read().rstrip()
+    finally:
+        Path(temp_path).unlink(missing_ok=True)
+
+
+def _collapse_cell_blanks(code: str) -> str:
+    """Collapse runs of blank lines to a single blank line.
+
+    Lines inside multi-line string literals are left untouched. Keeps
+    LEGO cells compact (the corpus convention) and makes the output a
+    fixed point for the `book-format-blanks` hook, whose fence tracking
+    can desync on commented-out partial code blocks.
+    """
+    import io
+    import tokenize
+
+    string_lines = set()
+    try:
+        for tok in tokenize.generate_tokens(io.StringIO(code).readline):
+            if tok.type == tokenize.STRING and tok.start[0] < tok.end[0]:
+                string_lines.update(range(tok.start[0], tok.end[0] + 1))
+    except (tokenize.TokenizeError, SyntaxError, IndentationError):
+        return code
+
+    result = []
+    prev_blank = False
+    for lineno, line in enumerate(code.split("\n"), 1):
+        is_blank = line.strip() == "" and lineno not in string_lines
+        if is_blank and prev_blank:
+            continue
+        result.append(line)
+        prev_blank = is_blank
+    return "\n".join(result)
+
+
+def format_exec_cell(code: str) -> str:
+    """Format an executable ```{python} cell.
+
+    Shields `#|` option lines, runs Black at EXEC_LINE_LENGTH with quote
+    normalization off, collapses multi-blank runs to one line, and skips
+    comment wrapping (LEGO headers use box-drawing characters that must
+    not be rewrapped).
+    """
+    shielded = "\n".join(
+        line.replace("#|", _QMD_OPT_SENTINEL, 1)
+        if line.lstrip().startswith("#|")
+        else line
+        for line in code.split("\n")
+    )
+
+    if not is_valid_python(shielded):
+        return code
+
+    try:
+        formatted = run_black(
+            shielded, EXEC_LINE_LENGTH, skip_string_normalization=True
+        )
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return code
+
+    return _collapse_cell_blanks(formatted.replace(_QMD_OPT_SENTINEL, "#|"))
+
+
 def format_python_blocks(content: str, line_length: int = 70) -> str:
     """Find and format Python code blocks in markdown using Black.
 
-    Also wraps long comments and docstrings.
+    Also wraps long comments and docstrings (display blocks only).
     """
     lines = content.split("\n")
     result = []
     in_python_block = False
+    is_exec_cell = False
     python_lines = []
 
     for line in lines:
         # Detect start of Python block
-        if re.match(r"^```(\{\.)?python", line):
+        if re.match(r"^```(\{\.)?python", line) or re.match(r"^```\{python\}", line):
             in_python_block = True
+            is_exec_cell = bool(re.match(r"^```\{python\}", line))
             result.append(line)
             python_lines = []
             continue
@@ -173,45 +280,23 @@ def format_python_blocks(content: str, line_length: int = 70) -> str:
             if python_lines:
                 code = "\n".join(python_lines)
 
+                if is_exec_cell:
+                    # Executable LEGO cell: wide one-liners, no comment
+                    # wrapping, `#|` options and quotes preserved.
+                    result.extend(format_exec_cell(code).split("\n"))
                 # Validate Python syntax before attempting to format
-                if not is_valid_python(code):
+                elif not is_valid_python(code):
                     # Skip Black for invalid Python, but still wrap comments
                     wrapped_code = wrap_long_lines(code, line_length)
                     result.extend(wrapped_code.split("\n"))
                 else:
                     try:
-                        # Write to temp file
-                        with tempfile.NamedTemporaryFile(
-                            mode="w", suffix=".py", delete=False
-                        ) as f:
-                            f.write(code)
-                            temp_path = f.name
-
-                        # Run Black with stderr suppressed
-                        subprocess.run(
-                            [
-                                "black",
-                                "--line-length",
-                                str(line_length),
-                                "--quiet",
-                                temp_path,
-                            ],
-                            check=True,
-                            stderr=subprocess.DEVNULL,
-                            stdout=subprocess.DEVNULL,
-                        )
-
-                        # Read formatted code
-                        with open(temp_path, "r") as f:
-                            formatted = f.read().rstrip()
+                        formatted = run_black(code, line_length)
 
                         # Wrap long comments/docstrings that Black didn't handle
                         formatted = wrap_long_lines(formatted, line_length)
 
                         result.extend(formatted.split("\n"))
-
-                        # Cleanup
-                        Path(temp_path).unlink()
                     except (subprocess.CalledProcessError, FileNotFoundError):
                         # If Black fails, still try to wrap comments
                         wrapped_code = wrap_long_lines(code, line_length)
@@ -219,6 +304,7 @@ def format_python_blocks(content: str, line_length: int = 70) -> str:
 
             python_lines = []
             in_python_block = False
+            is_exec_cell = False
             result.append(line)
             continue
 

@@ -6,7 +6,7 @@ from mlsysim.cli.context import OUTPUT_FORMAT_HELP, resolve_output_format
 from mlsysim.cli.schemas import EvalNodeSchema, MlsysPlanSchema
 from mlsysim.cli.exceptions import ExitCode, exit_with_code, error_shield
 from mlsysim.cli.renderers import render_scorecard, print_warning, print_error
-from mlsysim.core.evaluation import SystemEvaluator
+from mlsysim.engine.evaluation import SystemEvaluator
 
 def evaluate_main(
     ctx: typer.Context,
@@ -51,7 +51,8 @@ def evaluate_main(
             if not isinstance(loaded, dict):
                 raise ValueError(f"Configuration file must contain a YAML mapping: {config_file}")
             raw_data = loaded
-            # A full cluster definition must have a hardware block
+            # A full cluster definition must have a hardware block; a YAML with
+            # only a workload falls through to the quick single-node path.
             if raw_data and "hardware" in raw_data and "workload" in raw_data:
                 is_cluster_yaml = True
 
@@ -70,13 +71,15 @@ def evaluate_main(
                 precision=schema.hardware.precision,
                 efficiency=schema.hardware.efficiency,
                 fleet_obj=schema.fleet_obj,
-                nodes=schema.hardware.nodes,
+                nodes=schema.hardware.total_accelerators,
                 duration_days=schema.ops.duration_days if schema.ops else None
             )
             
             # Check Assertions (Gate 5)
             assertion_failures = []
             if schema.constraints and schema.constraints.asserts:
+                # Flatten the three scorecard levels into dotted metric names
+                # ("performance.latency") so YAML asserts can address any of them.
                 all_metrics = {}
                 for k, v in eval_obj.feasibility.metrics.items():
                     all_metrics[f"feasibility.{k}"] = v

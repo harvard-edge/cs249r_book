@@ -22,6 +22,7 @@
  *   role="listbox" on the result list, role="option" on items
  *   aria-selected on the active row
  *   focus on the input on open, restore on close
+ *   active row scrolled into view as you arrow through results
  */
 
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -199,6 +200,18 @@ export default function CommandPalette() {
   useEffect(() => {
     setActiveIdx(0);
   }, [query, searchQuery]);
+
+  // Keep the active row visible during keyboard navigation. The result list is
+  // scrollable (max-h-[60vh]); arrowing past the fold would otherwise move the
+  // highlight out of view. `block: "nearest"` is a no-op when the row is already
+  // fully visible, so hovering a visible row — which also sets activeIdx via
+  // onMouseEnter — never triggers a scroll jump.
+  useEffect(() => {
+    if (!open) return;
+    document
+      .getElementById(`cmdk-row-${activeIdx}`)
+      ?.scrollIntoView({ block: "nearest" });
+  }, [activeIdx, open]);
 
   // ─── Commit a result ─────────────────────────────────
   const commit = (r: Result) => {

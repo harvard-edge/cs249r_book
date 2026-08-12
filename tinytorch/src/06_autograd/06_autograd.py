@@ -1471,11 +1471,17 @@ normalization parameters, and other operations broadcast over batches.
 def test_unit_broadcast_gradients():
     """🔬 Test gradient broadcasting reduction."""
     print("🔬 Unit Test: Broadcasting in Gradients...")
-    
+
+    # Note: We set requires_grad manually here because enable_autograd() hasn't
+    # been called yet. This tests the Backward classes in isolation before the
+    # full autograd system upgrades the Tensor constructor to accept requires_grad.
+
     # Scenario 1: Bias-like broadcasting (most common case)
     # Shape: (batch, features) + (features,) → (batch, features)
-    x = Tensor(rng.standard_normal((4, 3)), requires_grad=True)
-    bias = Tensor(np.ones(3), requires_grad=True)
+    x = Tensor(rng.standard_normal((4, 3)))
+    x.requires_grad = True
+    bias = Tensor(np.ones(3))
+    bias.requires_grad = True
     
     add_func = AddBackward(x, bias)
     grad_output = np.ones((4, 3))
@@ -1496,7 +1502,8 @@ def test_unit_broadcast_gradients():
     
     # Scenario 2: Scalar broadcasting
     # Shape: (3, 4) + scalar → (3, 4)
-    x = Tensor(rng.standard_normal((3, 4)), requires_grad=True)
+    x = Tensor(rng.standard_normal((3, 4)))
+    x.requires_grad = True
     scalar_val = 5.0
     
     add_func = AddBackward(x, scalar_val)
@@ -1511,8 +1518,10 @@ def test_unit_broadcast_gradients():
     
     # Scenario 3: Multiple dimension broadcasting
     # Shape: (32, 10, 5) + (10, 1) → (32, 10, 5)
-    x = Tensor(rng.standard_normal((32, 10, 5)), requires_grad=True)
-    y = Tensor(rng.standard_normal((10, 1)), requires_grad=True)
+    x = Tensor(rng.standard_normal((32, 10, 5)))
+    x.requires_grad = True
+    y = Tensor(rng.standard_normal((10, 1)))
+    y.requires_grad = True
     
     mul_func = MulBackward(x, y)
     grad_output = np.ones((32, 10, 5))
@@ -1526,8 +1535,10 @@ def test_unit_broadcast_gradients():
     print("  ✓ Multi-dimension broadcasting works")
     
     # Scenario 4: Test all operations (Add, Mul, Sub, Div)
-    a = Tensor(rng.standard_normal((8, 16)), requires_grad=True)
-    b = Tensor(rng.standard_normal(16), requires_grad=True)
+    a = Tensor(rng.standard_normal((8, 16)))
+    a.requires_grad = True
+    b = Tensor(rng.standard_normal(16))
+    b.requires_grad = True
     
     # Test Addition
     add_func = AddBackward(a, b)
@@ -1556,13 +1567,13 @@ def test_unit_broadcast_gradients():
     # where bias is (out_features,) and output is (batch, out_features)
     batch_size, out_features = 32, 128
     output_grad = rng.standard_normal((batch_size, out_features))
-    bias = Tensor(np.zeros(out_features), requires_grad=True)
-    
+    bias = Tensor(np.zeros(out_features))
+    bias.requires_grad = True
+
     # In real Linear layer, bias gradient comes from output gradient
-    add_func = AddBackward(
-        Tensor(np.zeros((batch_size, out_features)), requires_grad=True),
-        bias
-    )
+    activations = Tensor(np.zeros((batch_size, out_features)))
+    activations.requires_grad = True
+    add_func = AddBackward(activations, bias)
     _, grad_bias = add_func.apply(output_grad)
     
     assert grad_bias.shape == (out_features,), \
@@ -2505,6 +2516,10 @@ def enable_autograd(quiet=False):
 
         return result
 
+    def tracked_radd(self, other):
+        """Scalar-left addition with gradient tracking."""
+        return tracked_add(self, other)
+
     def tracked_mul(self, other):
         """
         Multiplication with gradient tracking.
@@ -2514,23 +2529,25 @@ def enable_autograd(quiet=False):
         """
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed for consistency
         if not isinstance(other, Tensor):
             other_tensor = Tensor(other)
         else:
             other_tensor = other
         _ensure_grad_attrs(other_tensor)
 
-        # Call original operation
         result = _original_mul(self, other)
         _ensure_grad_attrs(result)
 
-        # Track gradient if needed
+        # Pass other_tensor (always a Tensor) so MulBackward can call .data on it.
         if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = MulBackward(self, other)
+            result._grad_fn = MulBackward(self, other_tensor)
 
         return result
+
+    def tracked_rmul(self, other):
+        """Scalar-left multiplication with gradient tracking."""
+        return tracked_mul(self, other)
 
     def tracked_matmul(self, other):
         """
@@ -2619,6 +2636,12 @@ def enable_autograd(quiet=False):
 
         return result
 
+    def tracked_rsub(self, other):
+        """Scalar-left subtraction with gradient tracking."""
+        if not isinstance(other, Tensor):
+            other = Tensor(other)
+        return tracked_sub(other, self)
+
     def tracked_div(self, other):
         """
         Division with gradient tracking.
@@ -2643,6 +2666,12 @@ def enable_autograd(quiet=False):
             result._grad_fn = DivBackward(self, other)
 
         return result
+
+    def tracked_rdiv(self, other):
+        """Scalar-left division with gradient tracking."""
+        if not isinstance(other, Tensor):
+            other = Tensor(other)
+        return tracked_div(other, self)
 
     def tracked_getitem(self, key):
         """
@@ -2786,9 +2815,13 @@ def enable_autograd(quiet=False):
 
     # Install enhanced operations
     Tensor.__add__ = tracked_add
+    Tensor.__radd__ = tracked_radd
     Tensor.__sub__ = tracked_sub
+    Tensor.__rsub__ = tracked_rsub
     Tensor.__mul__ = tracked_mul
+    Tensor.__rmul__ = tracked_rmul
     Tensor.__truediv__ = tracked_div
+    Tensor.__rtruediv__ = tracked_rdiv
     Tensor.__getitem__ = tracked_getitem
     Tensor.matmul = tracked_matmul
     Tensor.transpose = tracked_transpose

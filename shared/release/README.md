@@ -106,7 +106,8 @@ example. The reusable workflow handles:
 - Calls the project's build with the computed `release_id`
 - Validates the manifest the build emitted (must agree with computed id)
 - Tags `<project>-v<release_id>`
-- Generates GitHub Release notes (AI-enhanced if `ai_release_notes=yes`)
+- Generates GitHub Release notes from commit context and the supplied
+  release description
 - Uploads the deployable artifact
 
 The project-specific build commands are passed in via `with:`. The

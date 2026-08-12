@@ -7,16 +7,17 @@ printf '%s\n' "🔄 Downloading TeX Live installer, ~4MB, with mirror fallbacks.
 
 SUCCESS=false
 for mirror in \
-    "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz" \
     "https://mirrors.mit.edu/CTAN/systems/texlive/tlnet/install-tl-unx.tar.gz" \
     "https://ctan.math.washington.edu/tex-archive/systems/texlive/tlnet/install-tl-unx.tar.gz" \
     "https://mirrors.rit.edu/CTAN/systems/texlive/tlnet/install-tl-unx.tar.gz" \
-    "https://mirror.las.iastate.edu/tex-archive/systems/texlive/tlnet/install-tl-unx.tar.gz"
+    "https://mirror.las.iastate.edu/tex-archive/systems/texlive/tlnet/install-tl-unx.tar.gz" \
+    "https://mirror.ctan.org/systems/texlive/tlnet/install-tl-unx.tar.gz"
 do
     echo "🔄 Trying mirror: $mirror"
     if wget --timeout=30 --tries=2 -O /tmp/install-tl-unx.tar.gz "$mirror"; then
         echo "✅ Download successful from: $mirror"
         SUCCESS=true
+        INSTALLER_TLNET=${mirror%/install-tl-unx.tar.gz}
         break
     else
         echo "❌ Failed to download from: $mirror"
@@ -49,8 +50,8 @@ TLVER=$(basename "$1")
 TLYY=$(printf '%s\n' "$TLVER" | cut -c12-15)
 case "$TLYY" in
     2025) TLNET="https://ftp.math.utah.edu/pub/tex/historic/systems/texlive/2025/tlnet-final" ;;
-    2026) TLNET="https://mirror.ctan.org/systems/texlive/tlnet" ;;
-    2027) TLNET="https://mirror.ctan.org/systems/texlive/tlnet" ;;
+    2026) TLNET="$INSTALLER_TLNET" ;;
+    2027) TLNET="$INSTALLER_TLNET" ;;
     *) echo "❌ Unsupported TeX install-tl id"; echo "  TLVER=$TLVER"; echo "  TLYY=$TLYY"; exit 1 ;;
 esac
 echo "📍 TeX tlpdb: $TLVER at $TLNET"

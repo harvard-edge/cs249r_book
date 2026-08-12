@@ -15,7 +15,7 @@ Two layers of protection:
    inline math `$...$`, inline code `` `...` ``, `\index{...}`,
    `title="..."`, `fig-cap="..."`, `fig-alt="..."`, `lst-cap="..."`,
    `tbl-cap="..."`, `\ref{...}`, `@sec-...`, `@fig-...`, `@tbl-...`,
-   `@eq-...`, `@lst-...` cross-references, citations `[@key]`, and
+   `@eq-...`, `@lst-...`, `@alg-...` cross-references, citations `[@key]`, and
    anchor IDs `{#sec-...}`.
 
 Plus a set of named context predicates that check functions compose:
@@ -66,9 +66,9 @@ _ATTR_RE = re.compile(
     r"\b(" + "|".join(_PROTECTED_ATTRS) + r')="((?:[^"\\]|\\.)*?)"'
 )
 
-# Quarto cross-references: @sec-foo, @fig-foo, @tbl-foo, @eq-foo, @lst-foo
+# Quarto cross-references: @sec-foo, @fig-foo, @tbl-foo, @eq-foo, @lst-foo, @alg-foo
 # Slug allows letters, digits, hyphens, underscores, dots.
-_XREF_RE = re.compile(r"@(?:sec|fig|tbl|eq|lst)-[\w.-]+")
+_XREF_RE = re.compile(r"@(?:sec|fig|tbl|eq|lst|alg)-[\w.-]+")
 
 # Pandoc citations: [@key], [-@key], [@key1; @key2], [see @key pp. 33-35],
 # and bare "As @vaswani2017 showed". We use two patterns:
@@ -147,7 +147,9 @@ class LineWalker:
     # callout-tip and callout-checkpoint blocks. `::: {.callout-tip}`
     # opens a div; a bare `:::` closes it. Nested divs are supported
     # via callout_depth counting.
-    _DIV_OPEN_TIP_RE = re.compile(r"^\s*:::+\s*\{[^}]*\.callout-tip\b")
+    _DIV_OPEN_TIP_RE = re.compile(
+        r"^\s*:::+\s*\{[^}]*\.(?:callout-tip|callout-learning-objectives)\b"
+    )
     _DIV_OPEN_CHECKPOINT_RE = re.compile(
         r"^\s*:::+\s*\{[^}]*\.callout-checkpoint\b"
     )
@@ -403,7 +405,7 @@ def inline_protected_spans(line: str) -> list[tuple[int, int]]:
 
     Spans cover: inline code, inline math, \\index{...}, protected attribute
     values (title=, fig-cap=, fig-alt=, lst-cap=, tbl-cap=), Quarto
-    @-references (sec-, fig-, tbl-, eq-, lst-), LaTeX \\ref{}/\\cref{}/\\autoref{},
+    @-references (sec-, fig-, tbl-, eq-, lst-, alg-), LaTeX \\ref{}/\\cref{}/\\autoref{},
     and anchor IDs ({#sec-...}).
 
     The result is sorted by start position and adjacent/overlapping spans

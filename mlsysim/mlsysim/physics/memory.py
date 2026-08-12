@@ -5,7 +5,8 @@ from __future__ import annotations
 import math
 import pint
 
-from mlsysim.core.constants import ureg, MB
+from mlsysim.core.units import ureg, MB
+from mlsysim.core._validation import validate_at_least, validate_nonnegative
 
 from ._units import _ensure_unit
 
@@ -68,14 +69,31 @@ def calc_activation_memory(
     batch_size,
     hidden_dim,
     n_heads=None,
-    precision_bytes=1,
+    precision_bytes=2,
     strategy="selective",
 ):
     """
     Estimates the activation memory required for a Transformer model during training.
 
-    This implements the analytical bounds from Korthikanti et al. (2023). Memory
-    consumption depends heavily on the activation recomputation (checkpointing) strategy.
+    Implements the per-layer analytical bounds of Korthikanti et al. (2023),
+    "Reducing Activation Recomputation in Large Transformer Models", Sec. 4.1,
+    whose constants are expressed in BYTES with FP16 (2-byte) activations baked in:
+
+    - ``none``      (no recomputation):  ``s*b*h*34 + 5*a*s^2*b``
+    - ``selective`` (recompute attention matrices): ``s*b*h*34``
+    - ``full``      (recompute everything; keep layer inputs): ``s*b*h*2``
+
+    where ``s`` = sequence length, ``b`` = microbatch size, ``h`` = hidden
+    dimension, and ``a`` = attention heads. The quadratic ``5*a*s^2*b`` term is
+    the attention softmax/dropout/score storage — dominant at long sequence
+    lengths — and is exactly what selective recomputation discards. Activations
+    stored at other precisions scale the FP16-based constants by
+    ``precision_bytes / 2``.
+
+    (Audit fix 2026-06-06: the previous implementation used 34/10/2 as
+    precision-free coefficients AND multiplied by ``precision_bytes``, double-
+    counting the FP16 width at every strategy; its ``selective=10`` matched no
+    published convention; and the attention term was missing entirely.)
 
     Parameters
     ----------
@@ -88,26 +106,39 @@ def calc_activation_memory(
     hidden_dim : int
         Hidden dimension of the model.
     n_heads : int, optional
-        Number of attention heads (reserved for future exact attention estimates).
+        Number of attention heads. REQUIRED for ``strategy='none'`` (the
+        quadratic attention term needs it); unused otherwise.
     precision_bytes : float, optional
-        Bytes per activation element (defaults to 1).
+        Bytes per activation element (default 2, i.e. FP16 — the paper's
+        convention).
     strategy : str, optional
-        Recomputation strategy: 'none' (34x), 'selective' (10x), or 'full' (2x).
-        Defaults to 'selective'.
+        Recomputation strategy: 'none', 'selective' (default), or 'full'.
 
     Returns
     -------
     Quantity
         The total estimated activation memory in bytes.
     """
-    del n_heads  # reserved for future head-aware estimates
+    validate_at_least(n_layers, 1, "n_layers")
     s, b, h = seq_len, batch_size, hidden_dim
+    precision_scale = precision_bytes / 2  # Korthikanti constants are FP16 bytes
     if strategy == "full":
-        bytes_per_layer = 2 * s * b * h * precision_bytes
+        bytes_per_layer = 2 * s * b * h * precision_scale
     elif strategy == "selective":
-        bytes_per_layer = 10 * s * b * h * precision_bytes
+        bytes_per_layer = 34 * s * b * h * precision_scale
+    elif strategy == "none":
+        if n_heads is None:
+            raise ValueError(
+                "strategy='none' requires n_heads: the dominant 5*a*s^2*b "
+                "attention term scales with the head count (Korthikanti et al. "
+                "2023, Sec. 4.1)."
+            )
+        bytes_per_layer = (34 * s * b * h + 5 * n_heads * s * s * b) * precision_scale
     else:
-        bytes_per_layer = 34 * s * b * h * precision_bytes
+        raise ValueError(
+            f"Unknown activation strategy {strategy!r}; expected 'none', "
+            "'selective', or 'full'."
+        )
     return (n_layers * bytes_per_layer) * ureg.byte
 
 
@@ -170,12 +201,18 @@ def calc_kv_cache_size(
     Quantity
         Total KV cache size in bytes.
     """
+    validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(n_heads, 1, "n_heads")
+    validate_at_least(head_dim, 1, "head_dim")
+    validate_nonnegative(seq_len, "seq_len")
+    validate_at_least(batch_size, 1, "batch_size")
     effective_bpe = kv_precision_bytes if kv_precision_bytes is not None else bytes_per_elem
     bpe = _ensure_unit(
         effective_bpe,
         ureg.byte,
         "kv_precision_bytes" if kv_precision_bytes is not None else "bytes_per_elem",
     )
+    # Leading 2 = the separate K and V tensors cached per layer per head.
     return (2 * n_layers * n_heads * head_dim * seq_len * batch_size * bpe).to(ureg.byte)
 
 
@@ -219,7 +256,16 @@ def calc_paged_kv_cache_size(
         - size (Quantity): Total allocated KV cache size in bytes.
         - frag_pct (float): Internal memory fragmentation (0.0 to 1.0).
     """
+    validate_at_least(n_layers, 1, "n_layers")
+    validate_at_least(n_heads, 1, "n_heads")
+    validate_at_least(head_dim, 1, "head_dim")
+    validate_nonnegative(seq_len, "seq_len")
+    validate_at_least(batch_size, 1, "batch_size")
+    validate_at_least(page_size_tokens, 1, "page_size_tokens")
     bpe = _ensure_unit(bytes_per_elem, ureg.byte, "bytes_per_elem")
+    # Allocation is page-granular: round the sequence up to whole pages. The
+    # slack in the final partially-filled page is the only waste PagedAttention
+    # leaves (internal fragmentation), bounded by one page per sequence.
     padded_seq_len = math.ceil(seq_len / page_size_tokens) * page_size_tokens
     internal_frag = max(0, padded_seq_len - seq_len)
     frag_pct = internal_frag / padded_seq_len if padded_seq_len > 0 else 0.0

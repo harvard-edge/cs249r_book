@@ -21,13 +21,14 @@ A complete MLPerf-style optimization pipeline that takes YOUR networks from prev
 </tr>
 </thead>
 <tbody>
-<tr><td><b>Module 01-03</b></td><td>Tensor, Linear, ReLU</td><td>YOUR base components</td></tr>
-<tr><td><b>Module 11</b></td><td>Embeddings</td><td>YOUR token embeddings</td></tr>
-<tr><td><b>Module 12</b></td><td>Attention</td><td>YOUR multi-head attention</td></tr>
+<tr><td><b>Module 01-08</b></td><td>Foundation + Training</td><td>YOUR tensors, layers, losses, data loading, autograd, optimizers, and training loop</td></tr>
+<tr><td><b>Module 11-12</b></td><td>Embeddings + Attention</td><td>YOUR transformer components for generation speedup</td></tr>
 <tr><td><b>Module 14</b></td><td>Profiling</td><td>YOUR profiler for measurement</td></tr>
 <tr><td><b>Module 15</b></td><td>Quantization</td><td>YOUR INT8/FP16 implementations</td></tr>
 <tr><td><b>Module 16</b></td><td>Compression</td><td>YOUR pruning techniques</td></tr>
 <tr><td><b>Module 17</b></td><td>Acceleration</td><td>YOUR vectorized operations</td></tr>
+<tr><td><b>Module 18</b></td><td>Memoization</td><td>YOUR KV cache for generation</td></tr>
+<tr><td><b>Module 19</b></td><td>Benchmarking</td><td>YOUR standardized benchmark reports</td></tr>
 </tbody>
 </table>
 
@@ -106,6 +107,8 @@ python milestones/06_2018_mlperf/02_generation_speedup.py
 Or via tito:
 ```bash
 tito milestone run 06
+tito milestone run 06 --part 1  # Model compression
+tito milestone run 06 --part 2  # Generation speedup
 ```
 
 ## Key Learning

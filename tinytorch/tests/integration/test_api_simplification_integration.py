@@ -16,6 +16,14 @@ This follows TinyTorch testing conventions:
 import sys
 import warnings
 import numpy as np
+import pytest
+
+pytestmark = pytest.mark.skip(
+    reason=(
+        "PyTorch-style top-level API scaffold is not part of the current TinyTorch "
+        "release surface."
+    )
+)
 
 
 def test_modern_api_integration():

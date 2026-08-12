@@ -215,38 +215,37 @@ loss.backward()
         Through softmax and matmul
 ```
 
-## Learning Verification: What We Test
+## Milestone Verification: What We Test
 
 ### 1. **Perceptron** (1958)
-- ✅ Loss decreases (optimization works)
-- ✅ Accuracy >90% (learns linear boundary)
-- ✅ Gradients flow to w, b
-- ✅ Weights update
+- ✅ Forward pass runs with your `Tensor`, `Linear`, and `Sigmoid`
+- ✅ Outputs have reasonable shapes and probabilities
+- ✅ No training infrastructure is required yet
 
-### 2. **XOR** (1986)
-- ✅ Loss decreases >50%
-- ✅ Accuracy >90% (solves non-linear problem!)
-- ✅ Gradients flow through all layers
-- ✅ Hidden layer learns useful features
+### 2. **XOR Crisis** (1969)
+- ✅ A single-layer network cannot solve XOR
+- ✅ Accuracy stays bounded by the linear limitation
+- ✅ Students see the exact failure that motivated deeper networks
 
-### 3. **MLP Digits** (1989)
-- ✅ Test accuracy >80% (generalizes)
-- ✅ Loss decreases >50%
-- ✅ All 6 parameter groups receive gradients
-- ✅ Works on real data (1000 samples)
+### 3. **MLP Revival** (1986)
+- ✅ Hidden-layer MLP solves XOR
+- ✅ TinyDigits training reaches the milestone accuracy target
+- ✅ Loss, autograd, optimizer, dataloader, and trainer compose end-to-end
 
-### 4. **CNN** (1998)
-- ✅ Test accuracy >80%
-- ✅ Convolution gradients flow properly
-- ✅ More efficient than MLP (68% vs 52% loss reduction)
-- ✅ Spatial features learned
+### 4. **CNN Revolution** (1998)
+- ✅ LeNet-style CNN trains on TinyDigits
+- ✅ Convolution and pooling layers compose with the training stack
+- ✅ Optional CIFAR-10 scale-up exercises the same CNN path on larger images
 
-### 5. **Transformer** (2017)
-- ✅ Perfect accuracy (100%) on copy task
-- ✅ All 19 parameters receive gradients
-- ✅ Embeddings learn token representations
-- ✅ Positional encoding preserves order
-- ✅ Attention learns to copy
+### 5. **Transformer Era** (2017)
+- ✅ Attention solves reversal, copy, and mixed sequence tasks
+- ✅ Embeddings, positional encoding, multi-head attention, and transformer blocks compose
+- ✅ Sequence accuracy meets the milestone targets
+
+### 6. **MLPerf Benchmarks** (2018)
+- ✅ Optimization pipeline runs on prior milestone models
+- ✅ Benchmarking reports reproducible performance metrics
+- ✅ KV caching demonstrates generation speedup
 
 ## Fair Comparisons
 

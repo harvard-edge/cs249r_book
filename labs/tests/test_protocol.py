@@ -3,7 +3,7 @@ Level 4: Protocol Invariant Tests
 ==================================
 
 Validates that each lab complies with the 6 Protocol Invariants
-defined in .claude/docs/labs/PROTOCOL.md.
+defined in the project labs protocol doc.
 
 These are structural quality gates — they verify pedagogical
 completeness rather than runtime correctness.

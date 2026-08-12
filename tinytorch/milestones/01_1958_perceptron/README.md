@@ -8,15 +8,11 @@ This milestone recreates that pivotal moment using YOUR Tiny🔥Torch implementa
 
 ## What You're Building
 
-A single-layer perceptron for binary classification, demonstrating:
-1. **The Problem** - Why random weights don't work (forward pass only)
-2. **The Solution** - How training makes the model learn (with gradient descent)
+A single-layer perceptron for binary classification, demonstrating the forward pass before training enters the curriculum.
 
 ## Required Modules
 
-**Progressive Requirements:**
-- **Part 1 (Forward Only):** Run after Module 04 (building blocks)
-- **Part 2 (Trained):** Run after Module 08 (training capability)
+**Run after Module 03** (Tensor, activations, and layers)
 
 <table width="100%">
   <thead>
@@ -30,16 +26,12 @@ A single-layer perceptron for binary classification, demonstrating:
 <tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure</td></tr>
 <tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR sigmoid activation</td></tr>
 <tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layer</td></tr>
-<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR loss functions</td></tr>
-<tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation (Part 2 only)</td></tr>
-<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD optimizer (Part 2 only)</td></tr>
-<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop (Part 2 only)</td></tr>
 </tbody>
 </table>
 
 ## Milestone Structure
 
-This milestone uses **progressive revelation** with 2 scripts:
+This milestone uses a forward-only script:
 
 ### 01_rosenblatt_forward.py
 **Purpose:** Demonstrate the problem (untrained model)
@@ -49,17 +41,7 @@ This milestone uses **progressive revelation** with 2 scripts:
 - Show that random weights = random predictions (~50% accuracy)
 - **Key Learning:** "My model doesn't work... yet!"
 
-**When to run:** After Module 04 (before learning training)
-
-### 02_rosenblatt_trained.py
-**Purpose:** Demonstrate the solution (trained model)
-
-- Same architecture, but WITH training
-- Apply gradient descent (YOUR autograd + optimizer)
-- Watch accuracy improve from ~50% to 95%+
-- **Key Learning:** "Training makes it work!"
-
-**When to run:** After Module 08 (after learning training)
+**When to run:** After Module 03 (before learning losses, autograd, and training)
 
 ## Expected Results
 
@@ -73,7 +55,6 @@ This milestone uses **progressive revelation** with 2 scripts:
 </thead>
 <tbody>
 <tr><td><b>01 (Forward Only)</b></td><td>~50%</td><td>Random weights = random guessing</td></tr>
-<tr><td><b>02 (Trained)</b></td><td>95%+</td><td>Training learns the pattern</td></tr>
 </tbody>
 </table>
 
@@ -90,11 +71,11 @@ This is the foundation for understanding all of deep learning!
 ```bash
 cd milestones/01_1958_perceptron
 
-# Step 1: See the problem (run after Module 04)
+# See the problem (run after Module 03)
 python 01_rosenblatt_forward.py
 
-# Step 2: See the solution (run after Module 08)
-python 02_rosenblatt_trained.py
+# Or from the TinyTorch project root:
+tito milestone run 01
 ```
 
 ## Further Reading
@@ -107,7 +88,6 @@ python 02_rosenblatt_trained.py
 After completing this milestone, you'll understand:
 - How perceptrons work (forward pass)
 - Why random weights fail
-- How training transforms random weights into learned patterns
-- The fundamental learning loop: forward → loss → backward → update
+- Why training infrastructure is needed before models can learn
 
 **You've recreated the birth of neural networks!**

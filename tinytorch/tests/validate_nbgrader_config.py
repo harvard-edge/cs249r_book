@@ -4,6 +4,7 @@ NBGrader Configuration Validation Script
 Validates all TinyTorch modules for NBGrader compatibility
 """
 
+import argparse
 import re
 import json
 from pathlib import Path
@@ -189,7 +190,7 @@ class NBGraderValidator:
                     all_valid = False
 
                 # Test cells should have metadata
-                if re.search(r'def test_unit_', content_str):
+                if re.search(r'^\s*def\s+test_', content_str, flags=re.MULTILINE):
                     self.issues.append({
                         'severity': 'P0-BLOCKER',
                         'category': 'Cell Metadata',
@@ -302,15 +303,16 @@ class NBGraderValidator:
         for cell in self.cells:
             if 'nbgrader' in cell['metadata']:
                 schema_version = cell['metadata']['nbgrader'].get('schema_version')
+                if schema_version is None:
+                    continue
                 if schema_version != 3:
                     self.issues.append({
                         'severity': 'P2-ADVISORY',
                         'category': 'Schema Version',
                         'line': cell['line_start'],
                         'issue': f'NBGrader schema version is {schema_version}, expected 3',
-                        'detail': 'Schema version 3 is current standard'
+                        'detail': 'tito nbgrader generate adds schema_version=3 to staged notebooks'
                     })
-                    all_valid = False
 
         return all_valid
 
@@ -329,7 +331,10 @@ class NBGraderValidator:
             'issues': self.issues,
             'grade_ids': self.grade_ids,
             'cell_count': len(self.cells),
-            'status': 'PASS' if not self.issues else 'FAIL'
+            'status': 'PASS' if not [
+                i for i in self.issues
+                if i['severity'] in {'P0-BLOCKER', 'P1-IMPORTANT'}
+            ] else 'FAIL'
         }
 
         # Count by severity
@@ -472,15 +477,44 @@ def print_validation_report(results: Dict):
     print()
 
 
+def _default_project_root() -> Path:
+    return Path(__file__).resolve().parents[1]
+
+
+def _parse_args() -> argparse.Namespace:
+    project_root = _default_project_root()
+    parser = argparse.ArgumentParser(
+        description="Validate TinyTorch source files for nbgrader metadata compatibility"
+    )
+    parser.add_argument(
+        "--modules-dir",
+        type=Path,
+        default=project_root / "src",
+        help="Directory containing module folders (default: tinytorch/src)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=project_root / "nbgrader_validation_results.json",
+        help="JSON report path",
+    )
+    return parser.parse_args()
+
+
 if __name__ == "__main__":
-    modules_dir = Path("/Users/VJ/GitHub/TinyTorch/modules")
+    args = _parse_args()
+    modules_dir = args.modules_dir
     results = validate_all_modules(modules_dir)
     print_validation_report(results)
 
     # Save results to JSON
-    import json
-    output_file = Path("/Users/VJ/GitHub/TinyTorch/nbgrader_validation_results.json")
+    output_file = args.output
+    output_file.parent.mkdir(parents=True, exist_ok=True)
     with output_file.open('w') as f:
         json.dump(results, f, indent=2)
 
     print(f"\nDetailed results saved to: {output_file}")
+    if not results:
+        raise SystemExit("No modules were found to validate")
+    if any(r['status'] == 'FAIL' for r in results.values()):
+        raise SystemExit(1)

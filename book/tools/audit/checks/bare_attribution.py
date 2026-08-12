@@ -35,7 +35,7 @@ Protected contexts skipped via `LineWalker`:
     LaTeX command lines — all via `default_line_skip`.
   - Inline code, inline math, attribute strings (`fig-cap`, `fig-alt`,
     `tbl-cap`, `lst-cap`, `title`), `\index{...}` keys, `\ref{}` /
-    `\cref{}`, anchor IDs, Quarto `@sec-/@fig-/@tbl-/@eq-/@lst-` refs,
+    `\cref{}`, anchor IDs, Quarto `@sec-/@fig-/@tbl-/@eq-/@lst-/@alg-` refs,
     bracketed citations `[...@key...]`, bare `@key` cites, and
     footnote refs `[^fn-...]` — all via `inline_protected_spans`.
 

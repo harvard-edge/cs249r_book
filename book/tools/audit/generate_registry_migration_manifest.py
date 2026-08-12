@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Generate dead_constants_verified.json and registry_migration_manifest.json.
 
-Scans mlsysim.core.constants for defined symbols, counts repo-wide references,
+Scans mlsysim.core.units for defined symbols, counts repo-wide references,
 and assigns migration targets using scripts/map_constants.py plus heuristics.
 
 Usage:

@@ -30,7 +30,7 @@ from typing import Iterable
 REPO = Path(__file__).resolve().parents[2]
 BUILD_DIRS = {
     "vol1": REPO / "book" / "quarto" / "_build" / "html-vol1",
-    "vol2": REPO / "book" / "quarto" / "_build" / "html-vol1",
+    "vol2": REPO / "book" / "quarto" / "_build" / "html-vol2",
 }
 BINDER = REPO / "book" / "binder"
 

@@ -42,9 +42,9 @@ from audit.ledger import Issue, make_issue_id
 CATEGORY = "unresolved-xref"
 RULE = "Quarto cross-reference must resolve to a defined ID"
 RULE_TEXT = (
-    "Every @sec-/@fig-/@tbl-/@eq-/@lst- reference must point to a "
-    "{#sec-...}/{#fig-...}/etc. anchor defined somewhere in the corpus, "
-    "otherwise the rendered output shows the literal `?@sec-foo` text."
+    "Every @sec-/@fig-/@tbl-/@eq-/@lst-/@alg- reference must point to a "
+    "{#sec-...}/{#fig-...}/{#alg-...}/etc. anchor defined somewhere in the "
+    "corpus, otherwise the rendered output shows the literal `?@sec-foo` text."
 )
 
 # ── Patterns ────────────────────────────────────────────────────────────────
@@ -52,25 +52,25 @@ RULE_TEXT = (
 # ID-discovery: match every defined anchor in the corpus.
 # Matches `{#sec-foo}`, `{#fig-bar-baz}`, `{#tbl-xyz .class}`, etc.
 # Also picks up the Quarto YAML cell-option form `#| label: fig-xyz`.
-_ID_ANCHOR_RE = re.compile(r"\{#((?:sec|fig|tbl|eq|lst)-[\w.:-]+)")
+_ID_ANCHOR_RE = re.compile(r"\{#((?:sec|fig|tbl|eq|lst|alg)-[\w.:-]+)")
 _ID_YAML_LABEL_RE = re.compile(
-    r"^\s*#\|\s*label:\s*((?:sec|fig|tbl|eq|lst)-[\w.:-]+)"
+    r"^\s*#\|\s*label:\s*((?:sec|fig|tbl|eq|lst|alg)-[\w.:-]+)"
 )
 _ID_JUPYTER_LABEL_RE = re.compile(
-    r"^\s*%%\|\s*label:\s*((?:sec|fig|tbl|eq|lst)-[\w.:-]+)"
+    r"^\s*%%\|\s*label:\s*((?:sec|fig|tbl|eq|lst|alg)-[\w.:-]+)"
 )
 
-# Reference-discovery: match every @sec-/@fig-/@tbl-/@eq-/@lst- usage in prose.
+# Reference-discovery: match every @sec-/@fig-/@tbl-/@eq-/@lst-/@alg- usage in prose.
 # We allow letters, digits, hyphens, underscores, and dots in the slug —
 # matching the LABEL_REF_PATTERN convention in book/cli/commands/validate.py.
 # Trailing punctuation (`,`, `.`, `;`, `:`, `)`) is NOT part of the slug.
 _XREF_RE = re.compile(
-    r"(?<![\w@!])@((?:sec|fig|tbl|eq|lst)-[A-Za-z0-9][\w-]*)"
+    r"(?<![\w@!])@((?:sec|fig|tbl|eq|lst|alg)-[A-Za-z0-9][\w-]*)"
 )
 
 # Citation prefixes that look like xrefs but are bibliography keys. Quarto
 # treats `[@foo2020]` as a citation; we only flag the cross-ref slugs above.
-# The reference regex above already requires a sec-/fig-/tbl-/eq-/lst- prefix.
+# The reference regex above already requires a sec-/fig-/tbl-/eq-/lst-/alg- prefix.
 
 
 # ── Module-level corpus index (memoized) ────────────────────────────────────

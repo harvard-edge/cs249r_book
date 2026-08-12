@@ -45,10 +45,10 @@ INTERCONNECT_FIELDS: list[tuple[str, str]] = [
     ("INFINIBAND_GXDR_BW", "Systems.Fabrics.InfiniBand_GXDR.bandwidth"),
     ("PCIE_GEN4_BW", "Hardware.Cloud.A100.interconnect.bandwidth"),
     ("PCIE_GEN5_BW", "Hardware.Cloud.H100.interconnect.bandwidth"),
-    ("NVME_SEQUENTIAL_BW", "constants.NVME_SEQUENTIAL_BW"),
-    ("NETWORK_10G_BW", "constants.NETWORK_10G_BW"),
-    ("NETWORK_100G_BW", "constants.NETWORK_100G_BW"),
-    ("SPEED_OF_LIGHT_FIBER_KM_S", "constants.SPEED_OF_LIGHT_FIBER_KM_S"),
+    ("NVME_SEQUENTIAL_BW", "Hardware.Tech.Storage.NvmeGen4.bandwidth"),
+    ("NETWORK_10G_BW", "Systems.Fabrics.Ethernet_10G.bandwidth"),
+    ("NETWORK_100G_BW", "Systems.Fabrics.Ethernet_100G.bandwidth"),
+    ("SPEED_OF_LIGHT_FIBER_KM_S", "SPEED_OF_LIGHT_FIBER_KM_S"),
 ]
 
 @dataclass
@@ -109,8 +109,9 @@ def _exec_preamble() -> str:
     return textwrap.dedent(
         """
         from mlsysim import *
-        from mlsysim.core.constants import *
-        from mlsysim.core import constants
+        from mlsysim.core.units import *
+        from mlsysim.core import units
+        from mlsysim.physics import SPEED_OF_LIGHT_FIBER_KM_S
         from mlsysim.fmt import fmt, fmt_val, fmt_unit, fmt_int, MarkdownStr, check, sci_latex, fmt_math
         """
     ).strip()
@@ -182,14 +183,15 @@ def _render_interconnect_cell() -> str:
         "```{python}\n"
         "#| echo: false\n"
         "from mlsysim import *\n"
-        "from mlsysim.core.constants import *\n"
+        "from mlsysim.core.units import *\n"
         "#| label: appendix-interconnectconstants\n"
         "# ┌── LEGO ───────────────────────────────────────────────\n"
         "# │ Context: ## Interconnect and Network Bandwidth {.unnumbered}\n"
         "# │ Goal: Formatted value/unit pairs for reference tables in this section\n"
-        "# │ Exports: InterconnectConstants.*_val_str, InterconnectConstants.*_unit_str\n"
+        "# │ Show: Interconnect value/unit pairs consumed by appendix reference tables\n"
+        "# │ How: Read unit-bearing constants and split each into formatted value/unit strings\n"
         "# │ Source:  book/tools/audit/generate_appendix_constants.py (--write interconnect)\n"
-        "from mlsysim.core import constants\n"
+        "from mlsysim.core import units\n"
         "from mlsysim.fmt import fmt, fmt_val, fmt_unit\n"
         "\n"
         f"{body}\n"
@@ -260,14 +262,14 @@ def refresh_yaml() -> int:
     return mod.main()
 
 def _check_ast_no_legacy_imports(cell: PythonCell) -> list[str]:
-    """Flag ``from mlsysim.core.constants import H100_*`` style imports in table cells."""
+    """Flag ``from mlsysim.core.units import H100_*`` style imports in table cells."""
     issues: list[str] = []
     try:
         tree = ast.parse(cell.body)
     except SyntaxError:
         return issues
     for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom) and node.module == "mlsysim.core.constants":
+        if isinstance(node, ast.ImportFrom) and node.module == "mlsysim.core.units":
             for alias in node.names:
                 if alias.name not in ("Q_", "*") and alias.name.isupper():
                     issues.append(f"legacy import: {alias.name}")

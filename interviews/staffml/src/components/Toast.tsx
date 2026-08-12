@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, createContext, useContext } from "react";
+import { useState, useEffect, useCallback, useRef, createContext, useContext } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { X, Trophy, Flame, CheckCircle2 } from "lucide-react";
 import clsx from "clsx";
@@ -26,25 +26,56 @@ let nextId = 0;
 
 export function ToastProvider({ children }: { children: React.ReactNode }) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
+  // Track each toast's auto-dismiss timer so we can cancel it on manual
+  // dismiss and clear any still-pending timers if the provider unmounts —
+  // otherwise a timer firing after unmount calls setState on a dead tree.
+  const timers = useRef<Map<number, ReturnType<typeof setTimeout>>>(new Map());
+
+  const dismiss = useCallback((id: number) => {
+    const timer = timers.current.get(id);
+    if (timer !== undefined) {
+      clearTimeout(timer);
+      timers.current.delete(id);
+    }
+    setToasts(prev => prev.filter(t => t.id !== id));
+  }, []);
 
   const show = useCallback((msg: Omit<ToastMessage, 'id'>) => {
     const id = nextId++;
     setToasts(prev => [...prev, { ...msg, id }]);
     // Auto-dismiss after 4s
-    setTimeout(() => {
+    const timer = setTimeout(() => {
+      timers.current.delete(id);
       setToasts(prev => prev.filter(t => t.id !== id));
     }, 4000);
+    timers.current.set(id, timer);
   }, []);
 
-  const dismiss = useCallback((id: number) => {
-    setToasts(prev => prev.filter(t => t.id !== id));
+  // Clear any pending auto-dismiss timers on unmount.
+  useEffect(() => {
+    const pending = timers.current;
+    return () => {
+      pending.forEach(clearTimeout);
+      pending.clear();
+    };
   }, []);
 
   return (
     <ToastContext.Provider value={{ show }}>
       {children}
-      {/* Toast container */}
-      <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm">
+      {/* Toast container.
+          Polite live region so screen readers announce toasts (badge unlocks,
+          streaks, success messages) as they appear. aria-atomic="false" means
+          only the newly-inserted toast is read, not the whole stack re-read on
+          every change. The container is always mounted; toasts are inserted as
+          children, which is the reliable way for additions to be announced. */}
+      <div
+        role="region"
+        aria-label="Notifications"
+        aria-live="polite"
+        aria-atomic="false"
+        className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm"
+      >
         <AnimatePresence>
           {toasts.map(toast => (
             <motion.div
@@ -70,10 +101,12 @@ export function ToastProvider({ children }: { children: React.ReactNode }) {
                 )}
               </div>
               <button
+                type="button"
                 onClick={() => dismiss(toast.id)}
+                aria-label="Dismiss notification"
                 className="text-textTertiary hover:text-textPrimary transition-colors shrink-0"
               >
-                <X className="w-4 h-4" />
+                <X className="w-4 h-4" aria-hidden="true" />
               </button>
             </motion.div>
           ))}

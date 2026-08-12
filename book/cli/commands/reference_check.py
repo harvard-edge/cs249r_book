@@ -38,8 +38,7 @@ MIN_TITLE_WORDS = 4
 
 # Default .bib paths relative to repo root (when book_dir.parent.parent is repo root)
 DEFAULT_BIB_REL_PATHS = [
-    "book/quarto/contents/vol1/backmatter/references.bib",
-    "book/quarto/contents/vol2/backmatter/references.bib",
+    "book/quarto/contents/references.bib",
 ]
 
 _CHILD_SCRIPT = r"""

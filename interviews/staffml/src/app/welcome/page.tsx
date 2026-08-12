@@ -27,7 +27,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useCallback, useEffect } from "react";
-import { Target, Crosshair, Shuffle, ArrowRight, Network } from "lucide-react";
+import { Target, Crosshair, Shuffle, ArrowRight, Network, Map, Library, BarChart3 } from "lucide-react";
 import {
   QUESTION_COUNT_FORMATTED,
   TOPIC_COUNT,
@@ -106,52 +106,63 @@ export default function WelcomePage() {
           <span className="text-[11px] px-2.5 py-1 rounded-full border border-accentGreen/30 bg-accentGreen/5 text-accentGreen font-medium">Open source</span>
         </div>
 
-        {/* ─── Action cards ─── */}
-        {/* Stay 2x2 inside max-w-3xl. lg:grid-cols-4 squeezed body copy into
-            ~170px columns at iPad landscape / 1280px desktop, hurting readability. */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-8">
-          <ActionCard
-            icon={Shuffle}
-            accent="blue"
-            title="Try one right now"
-            body={`Random question from the full corpus. No setup, no filter, no commitment — see what a real StaffML question looks like in one click.`}
-            cta="Shuffle"
-            onClick={() => handleAction("/practice?random=1")}
-            primary
-          />
-          <ActionCard
-            icon={Target}
-            accent="amber"
-            title="Practice"
-            body="Untimed drills with spaced repetition. Rate yourself after each answer; the app schedules what you should see tomorrow."
-            cta="Start practicing"
-            onClick={() => handleAction("/practice")}
-          />
-          <ActionCard
-            icon={Network}
-            accent="purple"
-            title="Explore the Vault"
-            body="Radial drill-down from track to area to topic. Good when you want to understand the corpus before practicing."
-            cta="Open explorer"
-            onClick={() => handleAction("/explore")}
-          />
-          <ActionCard
-            icon={Crosshair}
-            accent="red"
-            title="Mock Interview"
-            body="Timed gauntlet: 5–15 questions or one full system-design problem. The clock matters, the feedback is the signal."
-            cta="Start interview"
-            onClick={() => handleAction("/gauntlet")}
-          />
+        {/* ─── Recommended path (hero CTA) ─── */}
+        <button
+          onClick={() => handleAction("/plans")}
+          className="w-full p-6 rounded-xl border-2 border-accentBlue/40 bg-accentBlue/5 hover:bg-accentBlue/10 transition-all text-left group mb-6"
+        >
+          <div className="flex items-center gap-3 mb-2">
+            <Map className="w-6 h-6 text-accentBlue" />
+            <h3 className="text-lg font-bold text-textPrimary">Start a Study Path</h3>
+          </div>
+          <p className="text-sm text-textSecondary leading-relaxed mb-3">
+            Pick a curated interview plan or build your own L1-to-L6+ learning path.
+            Choose a track, set your level, and resume any time.
+          </p>
+          <span className="inline-flex items-center gap-1 text-sm font-bold text-accentBlue">
+            Choose a plan <ArrowRight className="w-4 h-4 transition-transform group-hover:translate-x-0.5" />
+          </span>
+        </button>
+
+        {/* ─── How StaffML works ─── */}
+        <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-6">
+          <div className="p-4 rounded-lg border border-border bg-surface/50">
+            <Library className="w-5 h-5 text-accentPurple mb-2" />
+            <h4 className="text-[13px] font-bold text-textPrimary mb-1">Vault</h4>
+            <p className="text-[11px] text-textSecondary leading-relaxed">
+              Browse {QUESTION_COUNT_FORMATTED} questions organized by topic, track, and difficulty.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-surface/50">
+            <Target className="w-5 h-5 text-accentAmber mb-2" />
+            <h4 className="text-[13px] font-bold text-textPrimary mb-1">Practice</h4>
+            <p className="text-[11px] text-textSecondary leading-relaxed">
+              Answer questions with spaced repetition. Wrong answers come back tomorrow.
+            </p>
+          </div>
+          <div className="p-4 rounded-lg border border-border bg-surface/50">
+            <Crosshair className="w-5 h-5 text-accentRed mb-2" />
+            <h4 className="text-[13px] font-bold text-textPrimary mb-1">Mock Interview</h4>
+            <p className="text-[11px] text-textSecondary leading-relaxed">
+              Timed gauntlet mode. The clock matters, the feedback is the signal.
+            </p>
+          </div>
         </div>
 
-        {/* ─── Skip ─── */}
-        <div className="flex items-center justify-center">
+        {/* ─── Quick start fallback ─── */}
+        <div className="flex items-center justify-center gap-4">
+          <button
+            onClick={() => handleAction("/practice?random=1")}
+            className="inline-flex items-center gap-1.5 text-[12px] text-textTertiary hover:text-accentBlue transition-colors"
+          >
+            <Shuffle className="w-3 h-3" /> Try one random question
+          </button>
+          <span className="text-textTertiary text-[10px]">or</span>
           <button
             onClick={() => handleAction("/")}
             className="inline-flex items-center gap-1.5 text-[12px] text-textTertiary hover:text-textSecondary transition-colors"
           >
-            Skip — open the Vault <ArrowRight className="w-3 h-3" />
+            Skip to Vault <ArrowRight className="w-3 h-3" />
           </button>
         </div>
 

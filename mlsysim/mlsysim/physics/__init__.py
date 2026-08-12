@@ -7,12 +7,14 @@ Domain modules:
 """
 
 from ._units import _ensure_unit
+from .constants import SPEED_OF_LIGHT_FIBER_KM_S
 from .networking import calc_network_latency_ms
 from .performance import (
     dTime,
     calc_training_time,
     calc_training_time_days,
     calc_amdahls_speedup,
+    calc_strong_scaling_speedup,
     calc_bottleneck,
     calc_pipeline_bubble,
     calc_effective_flops,
@@ -26,7 +28,19 @@ from .memory import (
     calc_paged_kv_cache_size,
 )
 from .communication import (
+    calc_alpha_beta_crossover,
+    calc_ring_collective_data_factor,
+    calc_bisection_bandwidth,
+    calc_ring_allreduce_data_factor,
+    ring_allreduce_data_factor_latex,
+    calc_ring_allreduce_latency_steps,
+    calc_ring_allreduce_latency_time,
+    calc_hop_latency,
+    calc_oversubscription_effect,
+    calc_point_to_point_time,
+    calc_double_binary_tree_allreduce_time,
     calc_ring_allreduce_time,
+    calc_ring_tree_crossover_size,
     calc_tree_allreduce_time,
     calc_all_to_all_time,
     calc_hierarchical_allreduce_time,
@@ -46,12 +60,25 @@ from .statistics import (
     calc_constraint_propagation_factor,
 )
 
+from .quantities import (
+    transfer_time,
+    compute_time,
+    energy_from_power,
+    carbon_from_energy,
+    memory_from_params,
+    token_throughput,
+)
+
 __all__ = [
+    # Physical constants (book LEGO cells use `from mlsysim import *`, which
+    # only sees names listed here — audit fix 2026-06-06).
+    "SPEED_OF_LIGHT_FIBER_KM_S",
     "calc_network_latency_ms",
     "dTime",
     "calc_training_time",
     "calc_training_time_days",
     "calc_amdahls_speedup",
+    "calc_strong_scaling_speedup",
     "calc_bottleneck",
     "calc_pipeline_bubble",
     "calc_effective_flops",
@@ -63,7 +90,19 @@ __all__ = [
     "calc_kv_cache_size",
     "calc_paged_kv_cache_size",
     "calc_ring_allreduce_time",
+    "calc_point_to_point_time",
+    "calc_ring_allreduce_data_factor",
+    "ring_allreduce_data_factor_latex",
+    "calc_ring_collective_data_factor",
+    "calc_ring_allreduce_latency_steps",
+    "calc_ring_allreduce_latency_time",
+    "calc_alpha_beta_crossover",
+    "calc_oversubscription_effect",
+    "calc_bisection_bandwidth",
+    "calc_hop_latency",
     "calc_tree_allreduce_time",
+    "calc_double_binary_tree_allreduce_time",
+    "calc_ring_tree_crossover_size",
     "calc_all_to_all_time",
     "calc_hierarchical_allreduce_time",
     "calc_young_daly_interval",
@@ -77,4 +116,10 @@ __all__ = [
     "calc_population_stability_index",
     "calc_two_proportion_sample_size",
     "calc_constraint_propagation_factor",
+    "transfer_time",
+    "compute_time",
+    "energy_from_power",
+    "carbon_from_energy",
+    "memory_from_params",
+    "token_throughput",
 ]

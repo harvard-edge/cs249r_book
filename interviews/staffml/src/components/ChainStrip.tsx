@@ -31,34 +31,43 @@ export default function ChainStrip({ chain, onNavigate }: {
             alt path
           </span>
         )}
-        <div className="flex items-center gap-1">
+        <ol
+          aria-label="Question chain progress"
+          className="flex items-center gap-1 list-none p-0 m-0"
+        >
           {chain.questions.map((q, i) => {
             const def = getLevelDef(q.level);
+            const base = `Part ${i + 1} of ${chain.total}: ${q.level} ${def.name} — ${q.title}`;
+            const ariaLabel = i < chain.position ? `${base} (completed)` : base;
             return (
-              <button
-                key={q.id}
-                onClick={() => onNavigate(q.id)}
-                title={`${q.level} ${def.name}: ${q.title}`}
-                className="group"
-              >
-                <div
-                  className={clsx(
-                    "w-3 h-3 rounded-full border-2 transition-all",
-                    i === chain.position
-                      ? "scale-125"
-                      : i < chain.position
-                      ? "opacity-60"
-                      : "opacity-30"
-                  )}
-                  style={{
-                    borderColor: def.color,
-                    backgroundColor: i <= chain.position ? def.color : "transparent",
-                  }}
-                />
-              </button>
+              <li key={q.id}>
+                <button
+                  type="button"
+                  onClick={() => onNavigate(q.id)}
+                  aria-current={i === chain.position ? "step" : undefined}
+                  aria-label={ariaLabel}
+                  title={`${q.level} ${def.name}: ${q.title}`}
+                  className="group"
+                >
+                  <div
+                    className={clsx(
+                      "w-3 h-3 rounded-full border-2 transition-all",
+                      i === chain.position
+                        ? "scale-125"
+                        : i < chain.position
+                        ? "opacity-60"
+                        : "opacity-30"
+                    )}
+                    style={{
+                      borderColor: def.color,
+                      backgroundColor: i <= chain.position ? def.color : "transparent",
+                    }}
+                  />
+                </button>
+              </li>
             );
           })}
-        </div>
+        </ol>
       </div>
 
       {/* Previous/next question previews. Showing both directions makes the

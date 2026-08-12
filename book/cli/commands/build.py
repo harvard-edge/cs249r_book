@@ -249,7 +249,7 @@ class BuildCommand:
 
         return overall_ok
 
-    def _postflight_pdf_validation(self, volume: str, skip: bool = False) -> bool:
+    def _postflight_pdf_validation(self, volume: str, skip: bool = False, log_path=None) -> bool:
         """Scan the built volume PDF for unresolved refs and render leaks.
 
         Returns True if validation passed (or was skipped), False on findings
@@ -271,8 +271,33 @@ class BuildCommand:
         from cli.commands._pdf_checks import format_checklist, verify_volume_pdf
 
         quarto_dir = self.config_manager.book_dir
-        result = verify_volume_pdf(quarto_dir, volume)
+        result = verify_volume_pdf(quarto_dir, volume, log_path=log_path)
         console.print(format_checklist(result))
+
+        # Warn-only rendered geometry detail. The summary is computed inside
+        # verify_volume_pdf, so this reports the same Binder-native geometry
+        # check instead of running the older pdfplumber margin heuristic.
+        geom = getattr(result, "margin_geometry", None)
+        if geom is not None and getattr(geom, "findings", None):
+            console.print()
+            console.print(
+                f"  [yellow]⚠ margin geometry[/yellow] [dim]("
+                f"{len(geom.findings)} rendered margin finding(s) — "
+                f"non-blocking in build validation)[/dim]"
+            )
+            issue_rank = {"overlap": 0, "overflow-bottom": 1, "overflow-top": 2}
+            for finding in sorted(
+                geom.findings,
+                key=lambda f: (issue_rank.get(f.issue, 9), f.page),
+            )[:10]:
+                console.print(
+                    f"    [dim]sheet {finding.page}: {finding.issue} "
+                    f"{finding.side} — {finding.detail}[/dim]"
+                )
+            console.print(
+                f"    [dim]→ `binder layout overlaps {result.pdf_path}` to localize; "
+                f"`binder layout margins {result.pdf_path}` is the strict gate.[/dim]"
+            )
 
         if not result.ok:
             console.print()
@@ -759,7 +784,11 @@ class BuildCommand:
                     if not self._postflight_epub_validation(skip=skip_validate):
                         return False
                 elif format_type == "pdf":
-                    if not self._postflight_pdf_validation(volume, skip=skip_validate):
+                    build_log = getattr(self, '_last_build_log', None)
+                    if not self._postflight_pdf_validation(
+                        volume, skip=skip_validate,
+                        log_path=build_log if build_log and build_log.is_file() else None,
+                    ):
                         return False
             else:
                 console.print(f"[red]❌ {volume_name} {format_type.upper()} build failed[/red]")
@@ -816,7 +845,7 @@ class BuildCommand:
 
         try:
             if self.verbose:
-                # Verbose mode: stream output in real-time
+                # Verbose mode: stream output in real-time and save for analysis
                 console.print(f"[dim]▶ {description}[/dim]")
                 process = subprocess.Popen(
                     cmd,
@@ -828,12 +857,20 @@ class BuildCommand:
                     bufsize=1
                 )
 
-                # Stream output line by line
+                lines_buf: list[str] = []
                 for line in iter(process.stdout.readline, ''):
                     if line:
                         console.print(line.rstrip())
+                        lines_buf.append(line)
 
                 process.wait(timeout=1800)
+
+                # Save build log for post-build analysis (overfull hbox, etc.)
+                if cwd and lines_buf:
+                    build_log = Path(cwd) / "_build" / "last-build.log"
+                    build_log.parent.mkdir(parents=True, exist_ok=True)
+                    build_log.write_text("".join(lines_buf), encoding="utf-8")
+                    self._last_build_log = build_log
 
                 if process.returncode == 0:
                     return True
@@ -861,6 +898,14 @@ class BuildCommand:
 
                     progress.update(task, completed=True)
 
+                if cwd:
+                    build_output = "".join(part for part in (result.stdout, result.stderr) if part)
+                    if build_output:
+                        build_log = Path(cwd) / "_build" / "last-build.log"
+                        build_log.parent.mkdir(parents=True, exist_ok=True)
+                        build_log.write_text(build_output, encoding="utf-8")
+                        self._last_build_log = build_log
+
                 if result.returncode == 0:
                     return True
                 else:
@@ -887,6 +932,9 @@ class BuildCommand:
         """
         console.print("[green]🌐 Building HTML-only version...[/green]")
 
+        config_file: Optional[Path] = None
+        original_config: Optional[str] = None
+
         try:
             # Always include index.qmd
             files_to_render = ["index.qmd"]
@@ -907,7 +955,11 @@ class BuildCommand:
                 console.print(f"[dim]📋 Found {len(all_chapters)} chapters[/dim]")
 
                 # Add all chapter files to render list
-                for chapter_name, chapter_file in all_chapters.items():
+                for chapter in all_chapters:
+                    chapter_name = chapter.get("name", "")
+                    chapter_file = chapter.get("path")
+                    if not chapter_file:
+                        continue
                     try:
                         rel_path = chapter_file.relative_to(self.config_manager.book_dir)
                         files_to_render.append(str(rel_path))
@@ -922,6 +974,7 @@ class BuildCommand:
 
             # Use surgical approach - modify existing config file directly
             config_file = self.config_manager.get_config_file("html")
+            original_config = config_file.read_text(encoding='utf-8')
             self._add_render_section(config_file, files_to_render)
 
             # Ensure symlink points to the HTML config
@@ -951,12 +1004,17 @@ class BuildCommand:
             console.print(f"[red]❌ HTML-only build error: {e}[/red]")
             return False
         finally:
-            # Always remove render section from config
+            # Always restore the exact original config. HTML configs can carry
+            # load-bearing render lists, so deleting render blocks is unsafe.
             try:
-                config_file = self.config_manager.get_config_file("html")
-                self._remove_render_section(config_file)
-            except:
-                pass
+                if config_file and original_config is not None:
+                    config_file.write_text(original_config, encoding='utf-8')
+                    console.print("[dim]🛡️ Restored original HTML config[/dim]")
+                else:
+                    config_file = self.config_manager.get_config_file("html")
+                    self._remove_render_section(config_file)
+            except Exception as restore_error:
+                console.print(f"[yellow]⚠️ Error restoring HTML config: {restore_error}[/yellow]")
 
     def _add_render_section(self, config_file: Path, files_to_render: List[str]) -> None:
         """Add render section to existing config file.
@@ -970,6 +1028,19 @@ class BuildCommand:
             content = f.read()
 
         lines = content.split('\n')
+        cleaned_lines = []
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.strip().startswith('render:'):
+                i += 1
+                while i < len(lines) and (lines[i].startswith('    -') or lines[i].strip() == ''):
+                    i += 1
+                continue
+            cleaned_lines.append(line)
+            i += 1
+
+        lines = cleaned_lines
         modified_lines = []
         render_added = False
 
@@ -1064,8 +1135,12 @@ class BuildCommand:
                 if not uncommented.startswith('-'):
                     uncommented = '- ' + uncommented
                 reset_lines.append(' ' * indent + uncommented)
-            elif stripped.startswith('#') and ('part:' in stripped or stripped.lstrip('#').strip().startswith('chapters:')):
-                # Uncomment structural lines (part declarations, chapters keys)
+            elif stripped.startswith('#') and (
+                'part:' in stripped
+                or stripped.lstrip('#').strip().startswith('chapters:')
+                or stripped.lstrip('#').strip().startswith('appendices:')
+            ):
+                # Uncomment structural lines (part declarations, chapters/appendices keys)
                 indent = len(line) - len(line.lstrip())
                 uncommented = stripped.lstrip('#').lstrip()
                 reset_lines.append(' ' * indent + uncommented)
@@ -1758,8 +1833,9 @@ class BuildCommand:
     def reset_build_config(self, format_type: str, volume: Optional[str] = None) -> bool:
         """Reset build config by uncommenting all chapter entries.
 
-        For PDF/EPUB this restores commented chapter lists.
-        For HTML this also removes temporary `render:` sections used for fast builds.
+        Restores YAML manifests that may have been partially commented by a
+        chapter-selective build. PDF/EPUB use chapters:/appendices: lists;
+        HTML uses render: lists where needed.
 
         Args:
             format_type: Format to reset ('html', 'pdf', 'epub')
@@ -1796,19 +1872,24 @@ class BuildCommand:
                 original_content = cfg.read_text(encoding="utf-8")
                 reset_content = self._reset_config_comments(original_content)
 
-                if format_type == "html":
-                    # HTML fast builds can leave temporary render sections in place.
-                    cfg.write_text(reset_content, encoding="utf-8")
-                    self._remove_render_section(cfg)
-                else:
-                    cfg.write_text(reset_content, encoding="utf-8")
+                # All formats: uncomment any chapter/appendix/render entries a
+                # chapter-selective build commented out, restoring the full
+                # default manifest. For HTML this restores the render: list
+                # (vol2) and is a no-op for the render-all volume (vol1). The
+                # render: section is the HTML scoping mechanism and is no longer
+                # stripped on reset — doing so would delete vol2's full manifest.
+                cfg.write_text(reset_content, encoding="utf-8")
 
                 backup_file = cfg.with_suffix(".backup")
                 if backup_file.exists():
                     backup_file.unlink()
 
                 reset_count += 1
-                console.print(f"[green]✓[/green] Reset config: {cfg.name}")
+                try:
+                    rel = cfg.relative_to(self.config_manager.book_dir)
+                except ValueError:
+                    rel = cfg
+                console.print(f"[green]✓[/green] Reset config: {rel}")
             except Exception as e:
                 console.print(f"[red]❌ Failed to reset {cfg.name}: {e}[/red]")
 

@@ -8,7 +8,9 @@ Finds walkthrough lines with three inline-python refs in division form::
 Execs chapter cells (shared namespace), parses numeric values from resolved
 exports, and checks ``A / B ≈ C`` within tolerance.
 
-Lines with ``<!-- lego-ok: ... -->`` are skipped.
+Legacy inline LEGO suppressions are skipped by this checker,
+but authored chapters should not introduce them; use source-of-truth values or a
+queued ``lego-ok-block`` exception instead.
 """
 
 from __future__ import annotations

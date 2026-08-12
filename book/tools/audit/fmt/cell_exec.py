@@ -26,6 +26,16 @@ def patch_show_in_namespace(ns: dict) -> None:
 
 def make_exec_namespace() -> dict[str, Any]:
     setup_headless_matplotlib()
+    import sys
+    from pathlib import Path
+
+    repo = Path(__file__).resolve().parents[4]
+    repo_str = str(repo)
+    if repo_str not in sys.path:
+        sys.path.insert(0, repo_str)
+    mlsysim = repo / "mlsysim"
+    if mlsysim.is_dir() and str(mlsysim) not in sys.path:
+        sys.path.insert(0, str(mlsysim))
     return {"__builtins__": __builtins__}
 
 def exec_cell_code(code: str, ns: dict) -> None:

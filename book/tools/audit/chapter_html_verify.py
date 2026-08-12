@@ -76,6 +76,7 @@ CHAPTERS: dict[str, list[str]] = {
         "backmatter/appendix_fleet",
         "backmatter/appendix_communication",
         "backmatter/appendix_reliability",
+        "backmatter/appendix_inference",
         "backmatter/appendix_c3",
         "backmatter/appendix_assumptions",
     ],
@@ -90,6 +91,36 @@ HTML_ERROR_PATTERNS = [
     re.compile(r"Error rendering"),
 ]
 
+HTML_MATH_RENDER_PATTERNS = [
+    (
+        "spaced ASCII multiplication",
+        re.compile(r"\b\d[\d,]*(?:\.\d+)?\s+x\s+(?:\d|\$|USD|[A-Za-z_(])"),
+    ),
+    (
+        "literal dollar-times",
+        re.compile(r"\$\s*\\times\s*\$"),
+    ),
+    # 2026-06-07: added after mutation testing — an unclosed `$...` in QMD
+    # renders as a literal dollar + broken math in reader-visible prose
+    # ("$() = 1 - (1 - p)^N.") and nothing below caught it. These scan
+    # _visible_text(), which excludes rendered math spans, so legitimate
+    # `\(...\)` MathJax sources never match.
+    (
+        "unrendered math delimiter",
+        re.compile(r"\\\(|\\\)|\\\[|\\\]"),
+    ),
+    (
+        # `)` deliberately excluded: "(bandwidth/$)" and "per 1M tokens ($)"
+        # are legitimate currency parentheticals.
+        "unrendered math: $ before symbol",
+        re.compile(r"\$\s*[(=\\]"),
+    ),
+    (
+        "unresolved crossref",
+        re.compile(r"\?@(?:sec|fig|tbl|eq|lst|algo)-|(?<![\w./])@(?:sec|fig|tbl|eq|lst|algo)-[\w-]+"),
+    ),
+]
+
 
 @dataclass
 class ChapterResult:
@@ -102,6 +133,8 @@ class ChapterResult:
     build_seconds: float = 0.0
     html_spurious_clean: bool | None = None
     html_error_hits: list[str] = field(default_factory=list)
+    html_math_artifacts_clean: bool | None = None
+    html_math_artifact_hits: list[str] = field(default_factory=list)
     lego_focal_ok: bool | None = None
     prose_ok: bool | None = None
     registry_ok: bool | None = None
@@ -117,11 +150,29 @@ def _qmd_path(vol: str, ch_path: str) -> Path:
     return REPO_ROOT / "book/quarto/contents" / vol / f"{ch_path}.qmd"
 
 
+def _prepare_single_chapter_build(vol: str) -> None:
+    """Drop stale chapter HTML so post-render xref scan cannot false-fail.
+
+    Fast single-chapter binder builds only re-render the target QMD; leftover
+    HTML from prior full or partial builds remains under ``html-{vol}/`` and
+    ``verify_rendered_xrefs.py`` scans the whole output tree.
+    """
+    build_dir = REPO_ROOT / "book/quarto/_build" / f"html-{vol}"
+    contents = build_dir / "contents" / vol
+    if contents.is_dir():
+        for html in contents.rglob("*.html"):
+            html.unlink()
+    search_json = build_dir / "search.json"
+    if search_json.is_file():
+        search_json.unlink()
+
+
 def _build_html(vol: str, ch_path: str) -> tuple[bool, float, str]:
     name = ch_path.split("/")[-1]
     binder_vol = f"--{vol}"
     binder_ch = f"{vol}/{name}"
     log = Path(f"/tmp/render_{vol}_{name}.log")
+    _prepare_single_chapter_build(vol)
     t0 = time.monotonic()
     proc = subprocess.run(
         ["./book/binder", "build", "html", binder_vol, binder_ch,
@@ -180,6 +231,43 @@ def _scan_html_errors(html: Path) -> list[str]:
     return hits
 
 
+def _visible_text(html: Path) -> str:
+    try:
+        from bs4 import BeautifulSoup
+    except ImportError:
+        return ""
+    soup = BeautifulSoup(html.read_text(encoding="utf-8", errors="replace"), "html.parser")
+    content = soup.find("main") or soup.body
+    if not content:
+        return ""
+    for tag in content(["script", "style", "annotation", "mjx-assistive-mml", "pre", "code"]):
+        tag.decompose()
+    # Rendered math spans legitimately contain raw `\(...\)` source (MathJax
+    # processes client-side), and pseudocode blocks contain raw algorithmic
+    # LaTeX (pseudocode.js renders client-side too); exclude both so the
+    # unrendered-math patterns only fire on LaTeX that leaked OUTSIDE a
+    # client-rendered container. (2026-06-07)
+    for tag in content.find_all(class_=re.compile(r"\bmath\b|pseudocode")):
+        tag.decompose()
+    return re.sub(r"\s+", " ", content.get_text(separator=" "))
+
+
+def _scan_math_render_artifacts(html: Path) -> list[str]:
+    text = _visible_text(html)
+    if not text:
+        return []
+    hits: list[str] = []
+    for label, pat in HTML_MATH_RENDER_PATTERNS:
+        for match in pat.finditer(text):
+            start = max(0, match.start() - 50)
+            end = min(len(text), match.end() + 50)
+            context = text[start:end].strip()
+            hits.append(f"{label}: {context}")
+            if len(hits) >= 10:
+                return hits
+    return hits
+
+
 def _lego_focal(qmd: Path) -> tuple[bool, str]:
     proc = subprocess.run(
         [sys.executable, str(REPO_ROOT / "book/tools/audit/lego_focal_verify.py"), str(qmd)],
@@ -188,6 +276,8 @@ def _lego_focal(qmd: Path) -> tuple[bool, str]:
         text=True,
     )
     out = (proc.stdout or "") + (proc.stderr or "")
+    if proc.returncode == 0 and not out.strip():
+        return True, "no inline Python refs"
     ok = proc.returncode == 0 and "issues=0" in out
     return ok, out.strip().splitlines()[-1] if out.strip() else "no output"
 
@@ -261,6 +351,8 @@ def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterR
             res.notes += "no archived HTML (--skip-build)"
             return res
         html = archive
+        res.build_ok = True
+        res.build_seconds = 0.0
     else:
         build_ok, secs, log = _build_html(vol, ch_path)
         res.build_ok = build_ok
@@ -278,16 +370,21 @@ def verify_chapter(vol: str, ch_path: str, skip_build: bool = False) -> ChapterR
 
     res.html = str(html.relative_to(REPO_ROOT))
     res.html_error_hits = _scan_html_errors(html)
+    res.html_math_artifact_hits = _scan_math_render_artifacts(html)
+    res.html_math_artifacts_clean = not res.html_math_artifact_hits
     clean, spurious = _audit_spurious(html)
     res.html_spurious_clean = clean
     if res.html_error_hits:
         res.notes += f"html errors: {res.html_error_hits}; "
+    if res.html_math_artifact_hits:
+        res.notes += f"math artifacts: {res.html_math_artifact_hits[:2]}; "
     if not clean:
         res.notes += f"spurious .0: {spurious[:2]}; "
 
     passed = (
         res.build_ok
         and not res.html_error_hits
+        and res.html_math_artifacts_clean
         and res.html_spurious_clean
         and res.lego_focal_ok
         and res.prose_ok
@@ -332,8 +429,8 @@ def _write_markdown_table(ledger: dict) -> None:
         "",
         "Registry migration chapter verification: build HTML → raw HTML scan → LEGO/prose/registry checks.",
         "",
-        "| Vol | Chapter | Status | Build | HTML | Spurious | LEGO | Prose | Registry | s | Notes |",
-        "|-----|---------|--------|-------|------|----------|------|-------|----------|---|-------|",
+        "| Vol | Chapter | Status | Build | HTML | Math | Spurious | LEGO | Prose | Registry | s | Notes |",
+        "|-----|---------|--------|-------|------|------|----------|------|-------|----------|---|-------|",
     ]
     pass_n = fail_n = pending_n = 0
     for c in rows:
@@ -348,6 +445,7 @@ def _write_markdown_table(ledger: dict) -> None:
         lines.append(
             f"| {c['vol']} | {c['chapter']} | **{st}** | {yn(c.get('build_ok'))} | "
             f"{yn(not c.get('html_error_hits')) if c.get('html') else '—'} | "
+            f"{yn(c.get('html_math_artifacts_clean'))} | "
             f"{yn(c.get('html_spurious_clean'))} | {yn(c.get('lego_focal_ok'))} | "
             f"{yn(c.get('prose_ok'))} | {yn(c.get('registry_ok'))} | "
             f"{c.get('build_seconds', '')} | {notes} |"

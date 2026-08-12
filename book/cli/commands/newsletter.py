@@ -83,7 +83,7 @@ class NewsletterCommand:
 
     def run(self, args):
         """Route newsletter subcommands."""
-        if not args or args[0] in ("-h", "--help"):
+        if not args or args[0] in ("help", "-h", "--help"):
             self._show_help()
             return True
 

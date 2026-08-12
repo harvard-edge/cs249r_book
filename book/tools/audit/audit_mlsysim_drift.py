@@ -5,7 +5,7 @@ come from mlsysim's canonical constants.
 
 Approach:
   1. Build a registry of (canonical_name, numeric_value, magnitude_tolerance)
-     from mlsysim.core.constants.
+     from mlsysim.core.units.
   2. Walk every chapter QMD's Python cells. For each numeric literal
      assignment, check if (a) the variable name resembles a canonical name
      fragment AND (b) the literal matches the canonical value (within
@@ -54,6 +54,21 @@ CANONICAL = [
     ("h100_mem_gb",    80,    0.05, "Hardware.Cloud.H100.memory.capacity"),
     ("h100_mem_bw",    3350,  0.02, "Hardware.Cloud.H100.memory.bandwidth (GB/s)"),
     ("h100_mem_tbs",   3.35,  0.02, "Hardware.Cloud.H100.memory.bandwidth (TB/s)"),
+
+    # GPU on-chip memory hierarchy + microarchitecture (MB / KiB / count)
+    ("l2_cache",       50,    0.05, "Hardware.Cloud.H100.memory.l2_cache (MB)"),
+    ("h100_l2",        50,    0.05, "Hardware.Cloud.H100.memory.l2_cache (MB)"),
+    ("register_total", 33,    0.05, "Hardware.Cloud.H100 register file total = sm_count * register_file_per_sm (MiB)"),
+    ("register_file",  256,   0.02, "Hardware.Cloud.H100.memory.register_file_per_sm (KiB)"),
+    ("reg_per_sm",     256,   0.02, "Hardware.Cloud.H100.memory.register_file_per_sm (KiB)"),
+    ("shared_mem",     228,   0.02, "Hardware.Cloud.H100.memory.shared_memory_per_sm (KiB)"),
+    ("shared_per_sm",  228,   0.02, "Hardware.Cloud.H100.memory.shared_memory_per_sm (KiB)"),
+    ("sm_count",       132,   0.02, "Hardware.Cloud.H100.compute.sm_count"),
+
+    # On-chip / off-chip latency + access energy (ns / pJ) — Hardware.Tech / core/units.py
+    ("hbm_latency",    300,   0.05, "Hardware.Tech.Memory.DRAM.latency (ns)"),
+    ("hbm_energy",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
+    ("hbm_access",     640,   0.05, "Hardware.Tech.Memory.DRAM.energy_per_access (pJ)"),
     ("h200_mem_gb",    141,   0.05, "Hardware.Cloud.H200.memory.capacity"),
     ("h200_mem_tbs",   4.8,   0.02, "Hardware.Cloud.H200.memory.bandwidth (TB/s)"),
     ("b200_mem_gb",    192,   0.05, "Hardware.Cloud.B200.memory.capacity"),
@@ -74,17 +89,61 @@ CANONICAL = [
     ("llama2_70b_hidden",   8192, 0.02, "Models.Language.Llama2_70B.hidden_dim"),
     ("llama2_70b_heads",    64, 0.05, "Models.Language.Llama2_70B.heads"),
     ("llama2_70b_kv_heads", 8,  0.05, "Models.Language.Llama2_70B.kv_heads"),
-    ("gpt2_params_m",       1500, 0.05, "Models.GPT2.parameters (in M)"),
+    ("gpt2_params_m",       1500, 0.05, "Models.Language.GPT2.parameters (in M)"),
+    # GPT-2 Small (2026-06-10 audit add — Radford 2019; guarded in
+    # mlsysim/tests/test_physics_bounds.py::test_transformer_curated_specs)
+    ("gpt2_small_params_m", 124, 0.02, "Models.Language.GPT2_Small.parameters (in M)"),
+    ("gpt2_small_params",   124000000, 0.001, "Models.Language.GPT2_Small.parameters"),
+    ("gpt2_small_layers",   12,  0.001, "Models.Language.GPT2_Small.layers"),
+    ("gpt2_small_hidden",   768, 0.001, "Models.Language.GPT2_Small.hidden_dim"),
+    ("gpt2_small_heads",    12,  0.001, "Models.Language.GPT2_Small.heads"),
+    ("mobilenetv2_alpha10_params", 3504872, 0.001, "Models.Vision.MobileNetV2.parameters"),
+    ("mobilenetv2_alpha05_total_params", 1968680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5.parameters"),
+    ("mobilenetv2_alpha05_feature_params", 687680, 0.001, "Models.Vision.MobileNetV2_Alpha0_5FeatureExtractor.parameters"),
+
+    # Case-study reference anchors
+    ("accel_only_accuracy", 0.57, 0.001, "ReferenceStats.OuraSleepStudy.AccelOnlyAccuracy"),
+    ("enhanced_accuracy",   0.79, 0.001, "ReferenceStats.OuraSleepStudy.EnhancedAccuracy"),
+    ("scorer_agreement_low", 0.82, 0.001, "ReferenceStats.OuraSleepStudy.PsgScorerAgreementLow"),
+    ("scorer_agreement_high", 0.83, 0.001, "ReferenceStats.OuraSleepStudy.PsgScorerAgreementHigh"),
 
     # GPT-3 training (energy + ops)
     ("gpt3_train_energy_mwh", 1287, 0.05, "Models.Language.GPT3.training_energy_mwh"),
     ("gpt3_train_ops",       3.14e23, 0.05, "Models.Language.GPT3.training_ops"),
 
+    # GPT-2 training anchors (2026-06-07: moved out of training.qmd literals)
+    ("gpt2_total_flops",     1.5e21, 0.05, "Models.Language.GPT2.training_ops"),
+    ("gpt2_fwd_flops",       3e9,    0.02, "Models.Language.GPT2.inference_flops"),
+    ("gpt2_cost_2019",       50000,  0.05, "ReferenceStats.TrainingCostAnchors.Gpt2Cost2019"),
+    ("gpt4_cost_est",        100e6,  0.05, "ReferenceStats.TrainingCostAnchors.Gpt4CostEstimate"),
+
     # Interconnect bandwidth (GB/s)
     ("pcie_gen4_gb",   32,    0.05, "Hardware.Cloud.A100.interconnect.bandwidth (x16)"),
     ("pcie_gen5_gb",   64,    0.05, "Hardware.Cloud.H100.interconnect.bandwidth (x16)"),
-    ("nvlink_h100",    900,   0.02, "Hardware.Cloud.H100.nvlink.bandwidth"),
-    ("nvlink_a100",    600,   0.02, "Hardware.Cloud.A100.nvlink.bandwidth"),
+    ("nvlink_h100",    900,   0.02, "Hardware.Cloud.H100.nvlink.bandwidth (BIDIRECTIONAL total; per-direction is 450)"),
+    ("nvlink_a100",    600,   0.02, "Hardware.Cloud.A100.nvlink.bandwidth (BIDIRECTIONAL total; per-direction is 300)"),
+    # 2026-06-10 direction-convention fix: per-direction NVLink rates are the
+    # beta for one-way collective math (bandwidth_per_direction accessor).
+    ("nvlink_per_dir_h100", 450, 0.02, "Hardware.Cloud.H100.nvlink.bandwidth_per_direction"),
+    ("nvlink_per_dir_a100", 300, 0.02, "Hardware.Cloud.A100.nvlink.bandwidth_per_direction"),
+    ("intra_node_bw",  450,   0.02, "Systems.Nodes.DGX_H100.intra_node_bw (per-direction since 2026-06-10)"),
+
+    # 2026-06-10 overnight audit — every entry below is a class of literal the
+    # audit actually caught in a chapter, contradicting (or shadowing) the
+    # registry. They stay here so the pattern cannot quietly return.
+    ("nvme_latency_us", 100,  0.05, "Hardware.Tech.Storage.NvmeGen4.latency (µs; '~10 µs' device claims are Optane-class, not NVMe canon)"),
+    ("nvme_bw_gb",     7,     0.05, "Hardware.Tech.Storage.NvmeGen4.bandwidth (GB/s)"),
+    ("optics_w",       20,    0.05, "Systems.SwitchFabric.OpticsPluggable400G (W; 10 W is the CPO value)"),
+    ("optic_power",    20,    0.05, "Systems.SwitchFabric.OpticsPluggable400G (W)"),
+    ("gpu_mttf",       50000, 0.02, "Systems.Reliability.Gpu.mttf_hours (a 100,000 h figure was a competing constant)"),
+    ("mtbf_component", 50000, 0.02, "Systems.Reliability.Gpu.mttf_hours"),
+    ("gddr6x",         760,   0.02, "Hardware.Tech.Memory.GDDR6X.bandwidth (GB/s; '500-700' ranges contradicted canon)"),
+    ("tpu_v5p_bw",     2760,  0.02, "Hardware.Cloud.TPUv5p.memory.bandwidth (GB/s; chapter had 2,765)"),
+    ("tpu_v5p_vmem_mib", 128, 0.02, "Hardware.Cloud.TPUv5p.memory.sram_capacity (MiB per chip)"),
+    ("ds_cnn_params",  200000, 0.02, "Models.Tiny.DS_CNN.parameters ('500 KB model' matched no precision)"),
+    ("gpt4_params_t",  1.76,  0.05, "Models.Language.GPT4.parameters (in T; 'hundreds of billions' understated it)"),
+    ("lenet_1_params", 10000, 0.02, "Models.Vision.LeNet1.parameters ('~9.8K' was a chapter-local competing value)"),
+    ("h100_gpu_price", 30000, 0.05, "Infrastructure.Pricing.Capital.H100GpuPurchaseUsd ('3 GPUs from $282K' implied ~$94K)"),
 ]
 
 # Python LEGO cells are fenced ```{python} ... ```

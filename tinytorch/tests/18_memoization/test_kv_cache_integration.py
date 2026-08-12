@@ -5,6 +5,7 @@ Tests integration with transformer components and generation
 
 import numpy as np
 rng = np.random.default_rng(7)
+import pytest
 import sys
 from pathlib import Path
 
@@ -20,9 +21,10 @@ try:
     from tinytorch.perf.memoization import KVCache, enable_kv_cache
     HAS_KV_CACHE = True
 except ImportError:
-    HAS_KV_CACHE = False
-    KVCache = None
-    enable_kv_cache = None
+    pytest.skip(
+        "Module 18 KV cache package export is not available.",
+        allow_module_level=True,
+    )
 
 
 class TestKVCacheIntegration:

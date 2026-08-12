@@ -9,7 +9,7 @@ from mlsysim.cli.schemas import _resolve_model
 from mlsysim.cli.renderers import print_json
 from mlsysim.show import info, banner
 from mlsysim.hardware import Hardware
-from mlsysim.core.evaluation import SystemEvaluator
+from mlsysim.engine.evaluation import SystemEvaluator
 
 def _get_gpu_info():
     """Attempt to detect local GPU specifications."""
@@ -38,7 +38,7 @@ def audit_main(
     """
     **[Audit] Profile local hardware against the Iron Law.**
 
-    Detects your local CPU/GPU and benchmarks its theoretical capability against the textbook's hardware registry.
+    Detects your local CPU/GPU and compares its theoretical capability against the hardware registry.
     """
     output_format = resolve_output_format(ctx, output, supported={"text", "json", "markdown"})
 
@@ -81,6 +81,8 @@ def audit_main(
             efficiency=0.45
         )
 
+        # Relative speed via inverse latency: 1.0 = H100 parity, 0.5 = the local
+        # device takes twice as long for the same workload.
         ratio = h100_eval.performance.metrics['latency'] / eval_obj.performance.metrics['latency']
 
         if output_format == "json":

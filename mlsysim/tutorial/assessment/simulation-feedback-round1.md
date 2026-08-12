@@ -3,7 +3,7 @@
 **Tutorial:** First-Principles Performance Modeling for ML Systems: From Roofline to Fleet Design with mlsysim
 **Simulated audience:** 60 attendees (mix of PhD students, industry engineers, faculty, startup CTOs)
 **Date of simulation:** 2026-04-01
-**Simulation method:** Walk-through of DESIGN.md, tutorial_part1.tex, tutorial_part2.tex, and exercises.md
+**Simulation method:** Walk-through of DESIGN.md, tutorial_module*.tex, and exercises.md
 
 ---
 
@@ -107,7 +107,7 @@ The 3D parallelism section at 1:35--1:45 is also dense. TP, PP, and DP are three
 - "Is this just grid search? You're evaluating all combinations exhaustively?" (yes, because analytical models are fast enough -- but someone will ask about Bayesian optimization or smarter search)
 - "Can I export the Pareto front data to a CSV for further analysis?" (practical question; unclear from the API)
 
-### Part 7: TinyML to Frontier (in tutorial_part2.tex)
+### Part 7: TinyML to Frontier (in tutorial_module4.tex)
 
 **What the presenter shows:** The 9-order-of-magnitude scale span from nRF52840 to H100, Flash vs SRAM memory hierarchy on MCUs, energy-per-inference table, live demo comparing keyword spotting across devices, and the IoT right-sizing exercise.
 

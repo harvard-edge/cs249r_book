@@ -23,7 +23,10 @@ import re
 import sys
 from pathlib import Path
 
+REPO_ROOT = Path(__file__).resolve().parents[4]
+sys.path.insert(0, str(REPO_ROOT))
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+from book.cli.checks.currency_style import audit_rendered_file
 from spurious_zero import find_spurious_zeros
 
 try:
@@ -34,11 +37,42 @@ except ImportError as exc:  # pragma: no cover
     ) from exc
 
 
+_ALGO_LATEX_MARKERS = (
+    "begin{algorithm}",
+    "end{algorithm}",
+    "begin{algorithmic}",
+    "end{algorithmic}",
+    "\\endfor",
+    "\\state",
+    "\\comment{",
+    "\\for{",
+    "\\ensure",
+    "\\return",
+)
+
+
+def _skip_rendered_violation(issue) -> bool:
+    """Algorithm blocks often appear as raw LaTeX in HTML text extraction — not LEGO bugs."""
+    if issue.code != "rendered_raw_latex":
+        return False
+    ctx = issue.context.lower()
+    return any(marker in ctx for marker in _ALGO_LATEX_MARKERS)
+
+
 def audit_html(file_path: Path) -> list[dict[str, str]]:
+    issues = [
+        {
+            "value": issue.code,
+            "context": issue.context,
+        }
+        for issue in audit_rendered_file(file_path)
+        if not _skip_rendered_violation(issue)
+    ]
+
     soup = BeautifulSoup(file_path.read_text(encoding="utf-8"), "html.parser")
     content = soup.find("main") or soup.body
     if not content:
-        return []
+        return issues
 
     for tag in content(["script", "style", "pre", "code"]):
         tag.decompose()
@@ -46,10 +80,11 @@ def audit_html(file_path: Path) -> list[dict[str, str]]:
         tag.decompose()
 
     text = content.get_text(separator=" ")
-    return [
+    issues.extend(
         {"value": value, "context": context}
         for value, context in find_spurious_zeros(text)
-    ]
+    )
+    return issues
 
 
 def main() -> int:

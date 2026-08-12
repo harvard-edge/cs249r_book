@@ -4,11 +4,19 @@ Tests that automatic differentiation works with all previous modules
 """
 
 import numpy as np
+import pytest
 import sys
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+pytestmark = pytest.mark.skip(
+    reason=(
+        "Legacy Variable API integration scaffold; Tensor-based training/autograd "
+        "coverage lives in the current integration tests."
+    )
+)
 
 
 class TestAutogradTensorIntegration:

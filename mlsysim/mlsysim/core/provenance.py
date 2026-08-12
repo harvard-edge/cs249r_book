@@ -1,16 +1,21 @@
-"""Provenance types for registry entries and book-facing sourced scalars."""
+"""Provenance types for registry entries and public sourced scalars."""
 
 from __future__ import annotations
 
+from datetime import date
 from enum import Enum
 from typing import Optional, Union
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 Scalar = Union[int, float]
 
 
 class ProvenanceKind(str, Enum):
+    """How a registry value is known. Evidence-backed kinds (datasheet,
+    literature, industry_report) require a URL; estimate/derived require
+    explanatory notes (enforced in ``Provenance``)."""
+
     DATASHEET = "datasheet"
     LITERATURE = "literature"
     INDUSTRY_REPORT = "industry_report"
@@ -24,6 +29,8 @@ class ProvenanceKind(str, Enum):
 class Provenance(BaseModel):
     """How we know a numeric value (package audit trail; not BibTeX)."""
 
+    model_config = ConfigDict(extra="forbid")
+
     kind: ProvenanceKind
     ref: str = Field(min_length=1)
     url: Optional[str] = None
@@ -36,22 +43,43 @@ class Provenance(BaseModel):
         """
         Enforces validation rules based on the ProvenanceKind.
         
-        Requires URLs for datasheets, and notes for estimates and derived values,
-        ensuring proper traceability and justification for textbook numbers.
+        Requires source URLs and verification dates for evidence-backed records,
+        and notes for estimates and derived values. This keeps public numbers
+        traceable and makes intentionally illustrative numbers explicit.
         """
-        if self.kind == ProvenanceKind.DATASHEET and not self.url:
-            raise ValueError(f"datasheet provenance requires url: {self.ref!r}")
-        if self.kind == ProvenanceKind.ESTIMATE and not self.notes:
-            raise ValueError(f"estimate provenance requires notes: {self.ref!r}")
-        if self.kind == ProvenanceKind.DERIVED and not self.notes:
-            raise ValueError(f"derived provenance requires notes: {self.ref!r}")
+        if not self.verified:
+            raise ValueError(f"provenance requires verified date: {self.ref!r}")
+        try:
+            date.fromisoformat(self.verified)
+        except ValueError as e:
+            raise ValueError(f"provenance verified date must be YYYY-MM-DD: {self.ref!r}") from e
+
+        if self.kind in {
+            ProvenanceKind.DATASHEET,
+            ProvenanceKind.LITERATURE,
+            ProvenanceKind.INDUSTRY_REPORT,
+        } and not self.url:
+            raise ValueError(f"{self.kind.value} provenance requires url: {self.ref!r}")
+        if self.kind in {ProvenanceKind.ESTIMATE, ProvenanceKind.DERIVED} and not self.notes:
+            raise ValueError(f"{self.kind.value} provenance requires notes: {self.ref!r}")
         return self
 
 
 class Sourced(float):
     """
-    Scalar with mandatory ``Provenance``. Subclasses ``float`` so appendix
-    LEGO cells can divide and format values without extra coercion.
+    Scalar with mandatory ``Provenance``. Subclasses ``float`` so notebooks and
+    generated calculations can divide and format values without extra coercion.
+
+    .. warning:: Provenance does NOT survive arithmetic.
+        Any operation on a ``Sourced`` (``x * 2``, ``x / y``, ``-x``,
+        ``round(x)`` ...) returns a **plain float** — Python numeric dunders
+        construct ``float`` results, and nothing re-attaches
+        ``.provenance``/``.name``/``.description``. (``copy.copy`` raises
+        ``TypeError`` because ``__new__`` requires a provenance argument.)
+        The audit trail therefore lives only on the registry leaf value
+        itself. Derived quantities that need their own audit trail must be
+        wrapped explicitly with
+        ``sourced(derived_value, Provenance(kind=DERIVED, ...))``.
     """
 
     def __new__(
@@ -113,14 +141,40 @@ def sourced(
     name: str = "",
     description: str = "",
 ) -> Sourced:
-    """Attach provenance to a scalar used in registries or appendices."""
+    """Attach provenance to a scalar used in registries or analyses."""
     return Sourced(value, provenance, name=name, description=description)
 
 
+def sourced_qty(quantity, provenance: Provenance, *, name: str = "", description: str = ""):
+    """Attach provenance to a unit-bearing pint Quantity (the Quantity analogue of
+    ``sourced``). The Quantity is returned unchanged for arithmetic/``.m_as`` use, with
+    ``.provenance``/``.name``/``.description`` attached for the audit trail. Use for
+    registry reference values that carry units (e.g. data rates, latencies, energies).
+
+    .. warning:: The attached attributes do NOT survive ``.to()``, arithmetic,
+        or copying. They are set on this one Quantity *instance*; pint builds
+        fresh Quantity objects for every conversion and operation
+        (``q.to('ms')``, ``q * 2``, ``q + other``, ``copy.copy(q)`` ...), and
+        those results carry no ``.provenance``/``.name``/``.description``.
+        Read provenance off the registry leaf before transforming the value,
+        and re-attach explicitly (kind=DERIVED) if a derived quantity needs
+        its own audit trail.
+    """
+    quantity.provenance = provenance
+    quantity.name = name
+    quantity.description = description
+    return quantity
+
+
 def scalar_value(x: Scalar | Sourced) -> float:
-    """Plain float for arithmetic and Quarto ``{python}`` cells."""
-    if isinstance(x, Sourced):
-        return float(x)
+    """Coerce a scalar (plain or ``Sourced``) to a plain ``float``.
+
+    ``Sourced`` already subclasses ``float``, so ``float(x)`` handles both
+    cases identically; this helper exists so call sites in generated
+    calculations can state the intent ("drop provenance, keep the number")
+    explicitly. Note that the returned float carries no ``.provenance`` —
+    see the ``Sourced`` docstring for how provenance is lost in arithmetic.
+    """
     return float(x)
 
 
@@ -130,7 +184,7 @@ def fleet_mttf_hours(
     component: str,
     failure_mode: str = "",
 ) -> Sourced:
-    """MTTF anchor aligned with appendix_reliability @tbl-component-fit."""
+    """MTTF anchor for reliability registry entries."""
     from .provenance_catalog import RELIABILITY_MTTF_LITERATURE
 
     desc = f"Steady-state MTTF for {component} in continuous datacenter operation."

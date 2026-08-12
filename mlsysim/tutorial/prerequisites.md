@@ -164,7 +164,7 @@ Some exercises include optional visualization. Install plotly for
 interactive charts:
 
 ```bash
-pip install mlsysim[viz]
+pip install 'mlsysim[viz]'
 ```
 
 This adds `plotly` and `matplotlib` for `plot_roofline()` and

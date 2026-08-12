@@ -18,11 +18,15 @@ from __future__ import annotations
 import json
 import re
 from collections import Counter
-from pathlib import Path
 
-INPUT = Path.home() / "Desktop/MIT_Press_Feedback/07_alt_text/data/alt_text_edits_fixed.json"
-QUARTO_ROOT = Path("/Users/VJ/GitHub/MLSysBook-release-audit/book/quarto/contents/vol1")
-OUT_DIR = Path.home() / "Desktop/MIT_Press_Feedback/16_release_audit/ledgers"
+try:
+    from .paths import DATA_ROOT, LEDGER_DIR, REPO_ROOT
+except ImportError:  # pragma: no cover - direct script execution
+    from paths import DATA_ROOT, LEDGER_DIR, REPO_ROOT
+
+INPUT = DATA_ROOT / "07_alt_text/data/alt_text_edits_fixed.json"
+QUARTO_ROOT = REPO_ROOT / "book/quarto/contents/vol1"
+OUT_DIR = LEDGER_DIR
 
 # Match fig-alt attribute in a Pandoc-style figure attribute block.
 #   ![Caption](path){#fig-foo fig-alt="..." width=...}

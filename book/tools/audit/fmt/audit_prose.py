@@ -40,7 +40,10 @@ CELL_START = re.compile(r"^```\{python\}")
 CELL_END = re.compile(r"^```\s*$")
 setup_headless_matplotlib()
 
-INLINE_PY = re.compile(r"`\{python\}\s+([A-Za-z_][\w.]*)`")
+INLINE_PY = re.compile(
+    r"`\{python\}\s+([A-Za-z_]\w*(?:\.[A-Za-z_]\w*(?:\[-?\d+\])?)*)`"
+)
+REF_PART = re.compile(r"^([A-Za-z_]\w*)(?:\[(-?\d+)\])?$")
 
 
 @dataclass
@@ -81,14 +84,20 @@ def _resolve_ref(ref: str, ns: dict) -> str:
     """Resolve ``Class.attr`` or bare ``name`` from the exec namespace."""
     parts = ref.split(".")
     try:
-        if len(parts) == 1:
-            val = ns[parts[0]]
-        else:
-            obj = ns[parts[0]]
-            for part in parts[1:]:
-                obj = getattr(obj, part)
-            val = obj
-    except (KeyError, AttributeError):
+        head = REF_PART.match(parts[0])
+        if not head:
+            return f"<MISSING:{ref}>"
+        val = ns[head.group(1)]
+        if head.group(2) is not None:
+            val = val[int(head.group(2))]
+        for part in parts[1:]:
+            match = REF_PART.match(part)
+            if not match:
+                return f"<MISSING:{ref}>"
+            val = getattr(val, match.group(1))
+            if match.group(2) is not None:
+                val = val[int(match.group(2))]
+    except (KeyError, AttributeError, IndexError, TypeError):
         return f"<MISSING:{ref}>"
 
     # MarkdownStr / fmt outputs: use plain string form

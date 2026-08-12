@@ -6,7 +6,7 @@ Integration tests catch bugs that **unit tests miss** - specifically bugs at **m
 
 ### The Gradient Flow Pattern
 
-The gold standard is `test_gradient_flow.py`. It verifies:
+The gold standard is `test_integration_gradient_flow.py`. It verifies:
 1. **Gradients exist** (not None)
 2. **Gradients are non-zero** (actually computed)
 3. **Gradients flow through each layer** (chain not broken)
@@ -27,7 +27,7 @@ This pattern catches the most common and frustrating bugs students encounter.
 </tr>
 </thead>
 <tbody>
-<tr><td><b>`test_gradient_flow.py`</b></td><td>Broken backpropagation</td><td>01-08</td></tr>
+<tr><td><b>`test_integration_gradient_flow.py`</b></td><td>Broken backpropagation</td><td>01-08</td></tr>
 <tr><td><b>`test_training_flow.py`</b></td><td>Training loop failures</td><td>05-07</td></tr>
 <tr><td><b>`test_nlp_pipeline_flow.py`</b></td><td>NLP stack issues</td><td>10-13</td></tr>
 <tr><td><b>`test_cnn_integration.py`</b></td><td>CNN gradient issues</td><td>09</td></tr>
@@ -46,17 +46,18 @@ This pattern catches the most common and frustrating bugs students encounter.
 </thead>
 <tbody>
 <tr><td><b>`test_dataloader_integration.py`</b></td><td>Data pipeline issues</td><td>05</td></tr>
-<tr><td><b>`test_api_simplification_integration.py`</b></td><td>API compatibility</td><td>All</td></tr>
+<tr><td><b>`test_module_dependencies.py`</b></td><td>Module dependency drift</td><td>All</td></tr>
+<tr><td><b>`test_optimizers_integration.py`</b></td><td>Optimizer/training interactions</td><td>06-08</td></tr>
 </tbody>
 </table>
 
 ### 🔬 Scenario Tests
 
 These test complete use cases:
-- `integration_xor_test.py` - XOR learning (classic test)
-- `integration_mnist_test.py` - MNIST classification
-- `integration_cnn_test.py` - CNN on images
-- `integration_tinygpt_test.py` - Language model training
+- `test_xor_thorough.py` - XOR learning (classic test)
+- `test_cnn_integration.py` - CNN on images
+- `test_nlp_pipeline_flow.py` - Language model pipeline flow
+- `test_training_capabilities.py` - End-to-end training capabilities
 
 ## What Makes a Good Integration Test
 
@@ -105,7 +106,7 @@ def test_linear_layer():
 pytest tests/integration/ -v
 
 # Run only gradient flow tests
-pytest tests/integration/test_gradient_flow.py -v
+pytest tests/integration/test_integration_gradient_flow.py -v
 
 # Run only training flow tests
 pytest tests/integration/test_training_flow.py -v
@@ -155,7 +156,7 @@ def test_profiling_does_not_break_training():
 <tr><td><b>15 Quantization</b></td><td>Quantized model accuracy</td></tr>
 <tr><td><b>16 Compression</b></td><td>Compressed model still trains</td></tr>
 <tr><td><b>17 Acceleration</b></td><td>Accelerated ops match baseline</td></tr>
-<tr><td><b>18 Memoization</b></td><td>Cached ops maintain correctness</td></tr>
+<tr><td><b>18 Memoization</b></td><td>Full model-level generation with cache enabled</td></tr>
 </tbody>
 </table>
 

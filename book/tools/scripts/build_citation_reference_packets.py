@@ -29,12 +29,12 @@ SCOPES = [
     {
         "name": "vol1",
         "paths": ["book/quarto/contents/vol1/"],
-        "bibs": ["book/quarto/contents/vol1/backmatter/references.bib"],
+        "bibs": ["book/quarto/contents/references.bib"],
     },
     {
         "name": "vol2",
         "paths": ["book/quarto/contents/vol2/"],
-        "bibs": ["book/quarto/contents/vol2/backmatter/references.bib"],
+        "bibs": ["book/quarto/contents/references.bib"],
     },
     {
         "name": "book-shared",
@@ -42,10 +42,7 @@ SCOPES = [
             "book/quarto/contents/frontmatter/",
             "book/quarto/contents/backmatter/",
         ],
-        "bibs": [
-            "book/quarto/contents/vol1/backmatter/references.bib",
-            "book/quarto/contents/vol2/backmatter/references.bib",
-        ],
+        "bibs": ["book/quarto/contents/references.bib"],
     },
     {
         "name": "interviews",
@@ -104,6 +101,7 @@ NON_CITE_PREFIXES = (
     "rem-",
     "prf-",
     "alg-",
+    "algo-",
 )
 
 KNOWN_FALSE_POSITIVE_KEYS = {
@@ -189,10 +187,11 @@ def strip_inline_protected(line: str) -> str:
 
 def should_skip_key(key: str) -> bool:
     key = key.rstrip(".,;:)")
+    lower_key = key.lower()
     return (
         not key
-        or key.startswith(NON_CITE_PREFIXES)
-        or key in KNOWN_FALSE_POSITIVE_KEYS
+        or lower_key.startswith(NON_CITE_PREFIXES)
+        or lower_key in KNOWN_FALSE_POSITIVE_KEYS
         or bool(SINGLE_LETTER_RE.match(key))
         or bool(re.match(r"^\d+\.\d+", key))
     )
@@ -417,6 +416,8 @@ def build_packets(out_dir: Path, *, all_qmd: bool, granularity: str, max_context
     bib_entries = parse_bib_entries(all_bibs)
     packet_dir = out_dir / "packets"
     packet_dir.mkdir(parents=True, exist_ok=True)
+    for stale_packet in packet_dir.glob("*.citation-packet.json"):
+        stale_packet.unlink()
 
     grouped_qmds: dict[str, dict[str, Any]] = {}
     for qmd in discover_qmds(all_qmd):
@@ -492,10 +493,10 @@ def build_packets(out_dir: Path, *, all_qmd: bool, granularity: str, max_context
                 "key": "citekey",
                 "source_file": "repo-relative qmd path",
                 "line": "source line number",
-                "status": "valid | unsupported | overbroad | misplaced | stale | needs_human",
+                "status": "unsupported | overbroad | misplaced | stale | needs_human | missing_canonical | bib_metadata",
                 "claim": "short paraphrase of what the local text asks the source to support",
                 "reason": "why the source does or does not support the claim",
-                "suggested_fix": "keep | replace citation | add source | narrow claim | move citation | remove citation",
+                "suggested_fix": "replace citation | add source | narrow claim | move citation | remove citation | fix metadata",
                 "evidence": "brief source evidence, external source URL/identifier, or note that human review is needed",
             },
             "citations": citations,
@@ -562,10 +563,10 @@ def write_agent_manifest(out_dir: Path, summary: dict[str, Any]) -> None:
         '  "key": "citekey",',
         '  "source_file": "repo-relative qmd path",',
         '  "line": 123,',
-        '  "status": "unsupported | overbroad | misplaced | stale | needs_human",',
+        '  "status": "unsupported | overbroad | misplaced | stale | needs_human | missing_canonical | bib_metadata",',
         '  "claim": "short paraphrase of the local claim",',
         '  "reason": "why the cited source does or does not support it",',
-        '  "suggested_fix": "replace citation | add source | narrow claim | move citation | remove citation",',
+        '  "suggested_fix": "replace citation | add source | narrow claim | move citation | remove citation | fix metadata",',
         '  "evidence": "brief source evidence and URL/identifier, or what needs human review"',
         "}",
         "```",

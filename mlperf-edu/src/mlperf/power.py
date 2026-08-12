@@ -1,80 +1,56 @@
-import asyncio
+"""Explicit estimated-energy helper for local educational runs."""
+
+from __future__ import annotations
+
 import platform
 import subprocess
 import time
-from typing import Dict, Any
+from typing import Any
 
-class PowerProfiler:
-    """
-    Asynchronous Power Telemetry boundary capturing Wattage/Joules limits 
-    running parallel to the LoadGen workload natively without bottlenecking queries.
-    """
-    def __init__(self):
-        self.is_mac = platform.system() == "Darwin"
-        self.is_linux_nvidia = False # Fallback check for NVML available
-        self.measuring = False
-        self.power_samples = []
-
-    async def _mac_powermetrics_worker(self):
-        """
-        Interacts with macOS `powermetrics` API perfectly. 
-        Will quietly fallback to TDP emulation if ran without `sudo` by students.
-        """
-        while self.measuring:
-            # Pedagogical constraint: powermetrics requires sudo, so we calculate estimated M-Chip draw
-            # In a production execution, we would call:
-            # subprocess.Popen(["sudo", "powermetrics", "-i", "1000", "--samplers", "cpu_power"])
-            
-            # Simple emulation mapping ~15 Watts typical payload 
-            self.power_samples.append(15.2)  
-            await asyncio.sleep(1.0)
-
-    async def _nvidia_smi_worker(self):
-        """
-        Interacts with NVML / nvidia-smi power reporting flawlessly.
-        """
-        while self.measuring:
-            try:
-                res = subprocess.check_output(
-                    ['nvidia-smi', '--query-gpu=power.draw', '--format=csv,noheader,nounits']
-                )
-                power_w = float(res.decode('utf-8').strip())
-                self.power_samples.append(power_w)
-            except Exception:
-                self.power_samples.append(250.0) # Graceful 250W fallback
-            await asyncio.sleep(1.0)
-
-    async def start(self):
-        self.measuring = True
-        self.power_samples = []
-        if self.is_mac:
-            self._task = asyncio.create_task(self._mac_powermetrics_worker())
-        else:
-            self._task = asyncio.create_task(self._nvidia_smi_worker())
-
-    async def stop(self) -> Dict[str, Any]:
-        self.measuring = False
-        if getattr(self, '_task', None):
-            await asyncio.sleep(0.1) # Grace period
-            self._task.cancel()
-            
-        avg_power = sum(self.power_samples) / len(self.power_samples) if self.power_samples else 0.0
-        return {
-            "average_watts": round(avg_power, 2),
-            "estimated_joules": round(avg_power * len(self.power_samples), 2)  # Assuming 1s intervals
-        }
 
 class PowerMeter:
-    """
-    Synchronous Power Telemetry wrap used by the Training Referee cleanly.
-    """
-    def __init__(self):
-        self.start_time = None
-        
-    def start(self):
+    """Record elapsed time and a clearly labeled nominal-power estimate."""
+
+    def __init__(self, nominal_watts: float | None = None):
+        self.start_time: float | None = None
+        self.nominal_watts = nominal_watts or default_nominal_watts()
+
+    def start(self) -> None:
         self.start_time = time.time()
-        
+
     def stop(self) -> float:
-        if not self.start_time: return 0.0
+        return self.stop_report()["energy_joules"]
+
+    def stop_report(self) -> dict[str, Any]:
+        if self.start_time is None:
+            return {
+                "source": "estimated_nominal",
+                "average_watts": 0.0,
+                "duration_seconds": 0.0,
+                "energy_joules": 0.0,
+            }
         duration = time.time() - self.start_time
-        return duration * 15.2 # Standard dummy projection for pedagogical tests
+        return {
+            "source": "estimated_nominal",
+            "average_watts": round(float(self.nominal_watts), 3),
+            "duration_seconds": round(float(duration), 6),
+            "energy_joules": round(float(duration * self.nominal_watts), 6),
+        }
+
+
+def default_nominal_watts() -> float:
+    """Return a labeled estimate, using a live NVIDIA reading when available."""
+    if platform.system() == "Darwin":
+        return 15.2
+    try:
+        result = subprocess.check_output(
+            [
+                "nvidia-smi",
+                "--query-gpu=power.draw",
+                "--format=csv,noheader,nounits",
+            ],
+            stderr=subprocess.DEVNULL,
+        )
+        return float(result.decode("utf-8").strip().splitlines()[0])
+    except Exception:
+        return 65.0

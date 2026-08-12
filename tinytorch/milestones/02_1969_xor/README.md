@@ -8,13 +8,13 @@ The proof was devastating: no matter how much you train, a single layer cannot l
 
 ## What You're Building
 
-A demonstration of perceptron limitations and the multi-layer solution:
-1. **The Crisis** - Watch a perceptron fail to learn XOR despite training
-2. **The Solution** - See how adding a hidden layer solves the "impossible" problem
+A demonstration of perceptron limitations:
+1. **The Crisis** - Watch a single-layer network fail on XOR
+2. **The Bridge** - The multi-layer solution is run as Part 1 of Milestone 03, after the training stack exists
 
 ## Required Modules
 
-**Run after Module 08** (Training capability)
+**Run after Module 03** (Tensor, activations, and layers)
 
 <table width="100%">
   <thead>
@@ -28,22 +28,18 @@ A demonstration of perceptron limitations and the multi-layer solution:
 <tr><td><b>Module 01</b></td><td>Tensor</td><td>YOUR data structure</td></tr>
 <tr><td><b>Module 02</b></td><td>Activations</td><td>YOUR sigmoid/ReLU activations</td></tr>
 <tr><td><b>Module 03</b></td><td>Layers</td><td>YOUR Linear layers</td></tr>
-<tr><td><b>Module 04</b></td><td>Losses</td><td>YOUR loss functions</td></tr>
-<tr><td><b>Module 06</b></td><td>Autograd</td><td>YOUR automatic differentiation</td></tr>
-<tr><td><b>Module 07</b></td><td>Optimizers</td><td>YOUR SGD optimizer</td></tr>
-<tr><td><b>Module 08</b></td><td>Training</td><td>YOUR end-to-end training loop</td></tr>
 </tbody>
 </table>
 
 ## Milestone Structure
 
-This milestone uses **crisis → solution** narrative with 2 scripts:
+This folder contains the crisis script plus the later solution script:
 
 ### 01_xor_crisis.py
 **Purpose:** Demonstrate the fundamental limitation
 
-- Train a single-layer perceptron on XOR
-- Watch loss stay high (~0.69) and accuracy stuck at 50%
+- Run a single-layer perceptron on XOR
+- Watch accuracy stay capped because the boundary is linear
 - No matter how long you train, it CANNOT learn
 - **Key Learning:** "Minsky was right - single layers can't solve XOR"
 
@@ -60,12 +56,14 @@ x1  x2    XOR
 These 4 points CANNOT be separated by a single line!
 
 ### 02_xor_solved.py
-**Purpose:** Show how multi-layer networks solve it
+**Purpose:** Show how multi-layer networks solve it once Modules 04-08 are complete
 
 - Add ONE hidden layer (2-layer network)
 - Same XOR problem, now solvable
 - Watch accuracy reach 100%
 - **Key Learning:** "Hidden layers unlock non-linear problems!"
+
+This script is run by `tito milestone run 03 --part 1`, not by `tito milestone run 02`.
 
 **The Solution:**
 ```
@@ -88,8 +86,8 @@ The hidden layer learns to transform the space so XOR becomes linearly separable
 </tr>
 </thead>
 <tbody>
-<tr><td><b>01 (Single Layer)</b></td><td>1</td><td>~0.69 (stuck!)</td><td>~50%</td><td>Cannot learn XOR (Minsky was right)</td></tr>
-<tr><td><b>02 (Multi-Layer)</b></td><td>2</td><td>→ 0.0</td><td>100%</td><td>Hidden layers solve the problem!</td></tr>
+<tr><td><b>01 (Single Layer)</b></td><td>1</td><td>N/A</td><td>≤75%</td><td>Cannot solve XOR (Minsky was right)</td></tr>
+<tr><td><b>02 (Multi-Layer)</b></td><td>2</td><td>→ 0.0</td><td>100%</td><td>Hidden layers solve the problem in Milestone 03</td></tr>
 </tbody>
 </table>
 
@@ -107,11 +105,14 @@ The XOR crisis wasn't about perceptrons being broken - it was about needing **de
 ```bash
 cd milestones/02_1969_xor
 
-# Step 1: Experience the crisis (run after Module 08)
+# Experience the crisis (run after Module 03)
 python 01_xor_crisis.py
 
-# Step 2: See the solution (run after Module 08)
-python 02_xor_solved.py
+# Or from the TinyTorch project root:
+tito milestone run 02
+
+# See the solution later, after Module 08:
+tito milestone run 03 --part 1
 ```
 
 ## Further Reading

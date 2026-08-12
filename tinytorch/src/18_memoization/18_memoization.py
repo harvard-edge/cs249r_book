@@ -937,7 +937,13 @@ def _cached_generation_step(x, attention, cache_obj, layer_idx):
     cache_obj.update(layer_idx, K_heads, V_heads)
 
     # Step 4: Retrieve ALL cached K, V (includes history + new token)
-    K_all, V_all = cache_obj.get(layer_idx)
+    # cache_obj.get() only returns tokens already made visible by advance()
+    # (by design -- see KVCache.get()), which does NOT yet include the token
+    # just written by update() above. Append this step's own K/V, which we
+    # already have in hand, so the new token attends to itself too.
+    K_history, V_history = cache_obj.get(layer_idx)
+    K_all = Tensor(np.concatenate([K_history.data, K_heads.data], axis=2))
+    V_all = Tensor(np.concatenate([V_history.data, V_heads.data], axis=2))
 
     # Step 5: Compute attention using new Q with all cached K, V
     # Using .data (numpy) for inference-only operation (no gradients needed)
