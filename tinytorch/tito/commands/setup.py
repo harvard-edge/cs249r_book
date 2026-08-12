@@ -658,8 +658,9 @@ class SetupCommand(BaseCommand):
                 self.console.print("[green]✅ Setup completed successfully![/green]")
                 self.console.print("💡 Try: [bold]tito module start 01[/bold]")
 
-            # Prompt to join community
-            self.prompt_community_registration()
+            # Prompt to join community only if skip_profile wasn't passed
+            if not args.skip_profile:
+                self.prompt_community_registration()
 
             return 0
 
