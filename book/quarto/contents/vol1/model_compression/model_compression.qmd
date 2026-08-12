@@ -304,7 +304,7 @@ class ModelDeviceComparison:
     resnet_mem = 100 * MB  # scenario assumption: ~25M params × 4 bytes
     mobilenet_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
     mobilenet_int8_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
-    dscnn_mem = 500 * KB  # scenario assumption
+    dscnn_mem = Models.Tiny.DS_CNN.size_in_bytes(BYTES_INT8)
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     dlrm_mobile_overflow = _overflow_ratio(dlrm_mem, mobile_mem)
@@ -355,9 +355,9 @@ The **accuracy-efficiency trade-off**\index{Model Compression!accuracy-efficienc
 | **ResNet-50**          |     `{python} ModelDeviceComparison.resnet_mb_str`     |     `{python} ModelDeviceComparison.resnet_mb_str`     |                                 ok                                |                                  ok                                 |   no (`{python} ModelDeviceComparison.resnet_tiny_overflow_mult_str`)    |
 | **MobileNetV2**        |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |   `{python} ModelDeviceComparison.mobilenet_mb_str`    |                                 ok                                |                                  ok                                 |  no (`{python} ModelDeviceComparison.mobilenet_tiny_overflow_mult_str`)  |
 | **MobileNetV2 (INT8)** | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` | `{python} ModelDeviceComparison.mobilenet_int8_mb_str` |                                 ok                                |                                  ok                                 | no (`{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`) |
-| **DS-CNN (KWS)**       |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |                                    ok                                    |
+| **DS-CNN (KWS, INT8)** |     `{python} ModelDeviceComparison.dscnn_kb_str`      |     `{python} ModelDeviceComparison.dscnn_kb_str`      |                                 ok                                |                                  ok                                 |                                    ok                                    |
 
-: **The Deployment Gap**: Model memory requirements compared against typical device capacities. DLRM represents recommendation-model embedding pressure [@naumov2019deep]; DS-CNN represents the TinyML keyword-spotting case [@zhang2017hello]. Even MobileNetV2 quantized to INT8 exceeds the `{python} ModelDeviceComparison.tiny_cap_kb_str` TinyML envelope by `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`, while the purpose-built DS-CNN keyword spotter fits within it. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device tbl-colwidths="[20,15,15,15,15,20]"}
+: **The Deployment Gap**: Model weight requirements compared against typical device capacities. DLRM represents recommendation-model embedding pressure [@naumov2019deep]; DS-CNN represents the TinyML keyword-spotting case [@zhang2017hello]. Even MobileNetV2 quantized to INT8 exceeds the `{python} ModelDeviceComparison.tiny_cap_kb_str` TinyML envelope by `{python} ModelDeviceComparison.mobilenet_int8_tiny_ratio_mult_str`, while the purpose-built DS-CNN keyword spotter fits after INT8 quantization. Numbers in parentheses show how many times the model exceeds device memory. {#tbl-model-vs-device tbl-colwidths="[20,15,15,15,15,20]"}
 
 This tension manifests differently across deployment contexts. Training requires computational resources that scale with model size; inference demands strict latency and power constraints in real-time applications. Understanding where each optimization technique falls on the compression-accuracy Pareto frontier is essential for informed technique selection\index{Pareto Frontier!compression-accuracy}\index{Compression Ratio!accuracy trade-off}.
 
@@ -458,7 +458,7 @@ As an illustrative deployment scenario, consider a MobileNet trained for image c
 
 Pruning[^fn-pruning-lecun-1989] directly addresses memory efficiency constraints by eliminating redundant parameters. Because neural networks carry far more weights than any single task demands (as established earlier), we can remove a significant fraction without substantial performance degradation. The central questions are *what* to prune (individual weights vs. entire structures), *how* to decide what is expendable (magnitude, gradients, or activations), and *when* to prune (after training, during training, or even at initialization). @Sec-hardware-acceleration-nm-structured-sparsity-mechanics-9a71 explains the hardware side; the systems lesson here is that zeros become valuable only when the execution path can skip them.
 
-[^fn-pruning-lecun-1989]: **Optimal Brain Damage**: Introduced by @lecun1990optimal, the method achieved 4$\times$ parameter reduction—and proportional memory savings—in a handwriting recognizer by using second-derivative (Hessian) information to identify weights whose memory cost exceeded their accuracy contribution. The Hessian measures how much the loss increases when a weight is zeroed, directly ranking weights by their information-per-byte efficiency. However, Hessian computation costs $\mathcal{O}(n^2)$ for $n$ parameters, which is why magnitude-based pruning—despite its theoretical inferiority—became the practical standard at modern scale, where computing the Hessian itself would exceed the memory budget of the model it aims to compress. \index{Pruning!Optimal Brain Damage}
+[^fn-pruning-lecun-1989]: **Optimal Brain Damage**: Introduced by @lecun1990optimal, the method achieved 4$\times$ parameter reduction—and proportional memory savings—in a handwriting recognizer by using a diagonal approximation to second-derivative (Hessian) information to estimate the loss increase from removing each weight. A full Hessian has $\mathcal{O}(n^2)$ entries for $n$ parameters, but Optimal Brain Damage avoids storing that full matrix by approximating its diagonal. Modern-scale pruning still favors cheaper criteria such as magnitude because even diagonal curvature estimation adds training cost. \index{Pruning!Optimal Brain Damage}
 
 ::: {#dfn-model-compression-pruning .callout-definition title="Pruning"}
 
@@ -474,7 +474,7 @@ The goal of pruning is to find a sparse version of the model parameters $\hat{\m
 $$
 \min_{\hat{\mathbf{W}}} \mathcal{L}(\hat{\mathbf{W}}) \quad \text{subject to} \quad \|\hat{\mathbf{W}}\|_0 \leq k
 $$
-where $\|\hat{\mathbf{W}}\|_0$ is the **L0-norm**\index{L0 Norm!parameter count} (the count of nonzero parameters). Since minimizing the L0-norm is NP-hard\index{NP-hard!pruning optimization}, we use heuristics[^fn-heuristic-pruning] like **magnitude-based pruning**\index{Magnitude-Based Pruning!definition}. @Lst-pruning_example demonstrates this approach, removing weights with small absolute values to transform a dense weight matrix into the sparse representation\index{Sparse Matrix!storage efficiency} visualized in @fig-sparse-matrix.
+where $\|\hat{\mathbf{W}}\|_0$ is the **L0-norm**\index{L0 Norm!parameter count} (the count of nonzero parameters). Solving this cardinality-constrained optimization is combinatorial, so practical methods use heuristics[^fn-heuristic-pruning] such as **magnitude-based pruning**\index{Magnitude-Based Pruning!definition}. @Lst-pruning_example demonstrates this approach, removing weights with small absolute values to transform a dense weight matrix into the sparse representation\index{Sparse Matrix!storage efficiency} visualized in @fig-sparse-matrix.
 
 [^fn-heuristic-pruning]: **Heuristic**: From Greek *heuriskein* (to discover), the same root as Archimedes' "eureka." In pruning, the dominant heuristic--larger magnitude means more important--works well empirically but creates a systems trap: magnitude-based pruning applied globally can remove most parameters from overparameterized layers while leaving critical bottleneck layers largely intact, giving the appearance of aggressive compression while preserving much of the compute and memory cost in the layers that matter [@blalock2020state]. This is why iterative prune-retrain cycles with per-layer budgets are often safer than naive global magnitude pruning: each cycle lets the network redistribute importance before the next cut. \index{Heuristic!pruning}
 
@@ -2029,7 +2029,7 @@ The limitations\index{Knowledge Distillation!limitations} are real, however. Dis
 
 Knowledge distillation is frequently used alongside pruning and quantization for deployment-ready models. How distillation interacts with these complementary techniques determines the effectiveness of multi-stage optimization pipelines.
 
-Pruning and distillation both reduce the number of parameters a model carries, but they take the parameter count as given and decide which parameters to keep or how to transfer their knowledge. Neither technique questions whether the model's internal representations are efficiently organized. A $4096{\times}4096$ weight matrix in a transformer layer may have an effective rank of only 128—meaning it can be approximated with only 6.25 percent as many parameters; the fraction of information retained depends on the singular-value spectrum. Structured approximation methods exploit exactly this mathematical redundancy.
+Pruning modifies an existing parameterization, while distillation transfers behavior into a chosen student architecture. Neither directly represents a dense weight tensor through low-rank factors. A $4096{\times}4096$ weight matrix in a transformer layer may have an effective rank of only 128—meaning it can be approximated with only 6.25 percent as many parameters; the fraction of information retained depends on the singular-value spectrum. Structured approximation methods exploit exactly this mathematical redundancy.
 
 ### Structured approximations {#sec-model-compression-structured-approximations-4798}
 
@@ -2094,11 +2094,11 @@ where $k \ll m, n$ is the approximation rank. This is typically computed via sin
 
 [^fn-svd-rank-tradeoff]: **Singular Value Decomposition (SVD)**: The Eckart-Young theorem\index{Eckart-Young Theorem!SVD optimality} (1936) proves that retaining the top $k$ singular values yields an optimal rank-$k$ approximation in the Frobenius and spectral norms. The key systems trade-off is whether the high, one-time compute cost of this factorization—$\mathcal{O}(mn \cdot \min(m,n))$—is amortized by the memory and bandwidth savings from using the smaller model in repeated inference calls. \index{SVD!rank-bandwidth trade-off}
 
-This factorization reveals a fundamental trade-off that recurs throughout systems design: spending more arithmetic to move less data, which is profitable whenever the original tensor was dominating memory bandwidth.
+This factorization reveals a recurring systems trade-off: executing two smaller factor operations introduces another kernel boundary but can reduce both arithmetic and data movement when the retained rank is small.
 
 ::: {#nbk-model-compression-bandwidth-compute-tradeoff .callout-notebook title="The bandwidth-compute trade-off"}
 
-Low-rank factorization reduces memory pressure by trading computation for bandwidth reduction\index{Bandwidth Reduction!low-rank factorization}. Storing a `{python} LowRankFactorization.mat_dim_str` by `{python} LowRankFactorization.mat_dim_str` matrix requires `{python} LowRankFactorization.full_mb_str` (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
+Low-rank factorization can reduce both arithmetic and bandwidth demand when the retained rank is small, though it adds a second factor operation and possible kernel-launch overhead\index{Bandwidth Reduction!low-rank factorization}. Storing a `{python} LowRankFactorization.mat_dim_str` by `{python} LowRankFactorization.mat_dim_str` matrix requires `{python} LowRankFactorization.full_mb_str` (at FP32). Fetching this matrix for a single inference is a massive memory bandwidth hit, especially when limited by physical memory bandwidth constraints.
 
 If we factorize it with rank $k$ = `{python} LowRankFactorization.rank_k_value_str`, we store two matrices (`{python} LowRankFactorization.mat_dim_str` by `{python} LowRankFactorization.rank_k_value_str` and `{python} LowRankFactorization.rank_k_value_str` by `{python} LowRankFactorization.mat_dim_str`), totaling only `{python} LowRankFactorization.factored_mb_str`, a `{python} LowRankFactorization.data_reduction_mult_str` reduction in data movement. When inference uses the two factors directly, matrix-vector compute also falls from $\mathcal{O}(mn)$ to $\mathcal{O}(k(m+n))$ for small $k$. The system speedup is often dramatic because the processor moves much less data and performs fewer operations than with the original dense matrix. Explicitly materializing $\mathbf{U}\mathbf{V}$ would add $\mathcal{O}(mkn)$ work and defeat the purpose.
 
@@ -2106,7 +2106,7 @@ If we factorize it with rank $k$ = `{python} LowRankFactorization.rank_k_value_s
 
 This bandwidth-compute trade-off is the local version of the memory wall: execution becomes bottlenecked by moving weights rather than multiplying them. @Sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 later examines the same phenomenon from the hardware side.
 
-::: {#fig-matrix-factorization fig-env="figure" fig-pos="htb" fig-cap="**Low-Rank Factorization**: A weight matrix $\mathbf{M}$ of size $m{\times}n$ is approximated as the product of two smaller matrices, $\mathbf{U}_k$ $(m{\times}k)$ and $\mathbf{V}_k^T$ $(k{\times}n)$, reducing storage from $m \times n$ to $m \times k + k \times n$ parameters at the cost of one additional matrix multiplication during inference." fig-alt="Three rectangular boxes showing matrix factorization. Large M matrix of size m by n approximately equals product of narrower U matrix of size m by k and wider V-transpose matrix of size k by n."}
+::: {#fig-matrix-factorization fig-env="figure" fig-pos="htb" fig-cap="**Low-Rank Factorization**: A weight matrix $\mathbf{M}$ of size $m{\times}n$ is approximated as the product of two smaller matrices, $\mathbf{U}_k$ $(m{\times}k)$ and $\mathbf{V}_k^T$ $(k{\times}n)$, reducing storage from $m \times n$ to $m \times k + k \times n$ parameters while replacing one dense operation with two factor operations." fig-alt="Three rectangular boxes showing matrix factorization. Large M matrix of size m by n approximately equals product of narrower U matrix of size m by k and wider V-transpose matrix of size k by n."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -2137,7 +2137,7 @@ This bandwidth-compute trade-off is the local version of the memory wall: execut
 
 To see why this matters, study @fig-matrix-factorization: the matrix $\mathbf{M}$ can be approximated by the product of matrices $\mathbf{U}_k$ and $\mathbf{V}_k^T$. For intuition, most fully connected layers in networks are stored as a projection matrix $\mathbf{M}$, which requires $m{\times}n$ parameters to be loaded during computation. However, by decomposing and approximating it as the product of two lower-rank matrices, we only need to store $m \times k + k \times n$ parameters in terms of storage. Applying the factors directly costs $\mathcal{O}(k(m+n))$ for a vector input, instead of $\mathcal{O}(mn)$ for the original dense matrix; explicitly forming the dense product $\mathbf{U}\mathbf{V}$ would cost $\mathcal{O}(mkn)$ and should be avoided in inference [@Denton2014].
 
-LRMF applies to fully connected layers (large weight matrices) and convolutional layers (via depthwise-separable convolutions). The key trade-off: storage reduces from $\mathcal{O}(mn)$ to $\mathcal{O}(mk + kn)$, but inference requires an additional matrix multiplication. Choosing rank $k$ balances compression against information loss.
+LRMF applies directly to fully connected layers and can be applied to suitably reshaped convolutional weight tensors. Storage reduces from $\mathcal{O}(mn)$ to $\mathcal{O}(mk + kn)$, while inference executes two factor operations. Choosing rank $k$ balances compression and arithmetic savings against approximation error and kernel overhead.
 
 #### Tensor decomposition {#sec-model-compression-tensor-decomposition-5e9e}
 
@@ -2382,7 +2382,7 @@ edge [auto, text=blue, "$N$"']  (C2 -|G)
 
 :::
 
-The main tensor-decomposition families differ in how they trade compression against inference overhead. **CP decomposition**\index{CP Decomposition!definition}\index{Tensor Decomposition!CP decomposition} expresses a tensor as a sum of rank-one components, $\mathcal{X} \approx \sum_{r=1}^{k} \mathbf{u}_r \otimes \mathbf{v}_r \otimes \mathbf{w}_r$, which can be compact but sensitive to rank choice. **Tucker decomposition**\index{Tucker Decomposition!definition}\index{Tensor Decomposition!Tucker decomposition} keeps a small core tensor with factor matrices, $\mathcal{X} \approx \mathcal{G} \times _1 \mathbf{U} \times _2 \mathbf{V} \times _3 \mathbf{W}$, making the retained interactions more explicit at the cost of a more complex representation. **Tensor-Train (TT)**\index{Tensor Decomposition!Tensor-Train} factorizes high-dimensional tensors into a sequence of lower-rank factors, making it most attractive when the original tensor order is too large for a single matrix-like factorization to capture efficiently [@lebedev2015speeding].
+The main tensor-decomposition families differ in representation. **CP decomposition**\index{CP Decomposition!definition}\index{Tensor Decomposition!CP decomposition} expresses a tensor as a sum of rank-one components, $\mathcal{X} \approx \sum_{r=1}^{k} \mathbf{u}_r \otimes \mathbf{v}_r \otimes \mathbf{w}_r$ [@lebedev2015speeding]. **Tucker decomposition**\index{Tucker Decomposition!definition}\index{Tensor Decomposition!Tucker decomposition} keeps a small core tensor with factor matrices, $\mathcal{X} \approx \mathcal{G} \times _1 \mathbf{U} \times _2 \mathbf{V} \times _3 \mathbf{W}$. **Tensor-Train (TT)**\index{Tensor Decomposition!Tensor-Train} represents a high-order tensor as a sequence of lower-order cores. Each method's usefulness depends on rank choice, parameter savings, approximation error, and available kernels.
 
 Tensor decomposition applies to convolutional filters (approximating 4D weight tensors), attention mechanisms in transformers, and embedding layers in NLP models. The trade-offs mirror LRMF: compression vs. information loss, and the additional computational overhead of tensor contractions during inference. @Tbl-lrmf-tensor compares LRMF and tensor decomposition across applicable data structure, compression mechanism, and computational cost.
 
@@ -2398,7 +2398,7 @@ Tensor decomposition applies to convolutional filters (approximating 4D weight t
 | **Common Methods**            | Singular Value Decomposition (SVD), Alternating Least Squares (ALS)    | CP Decomposition, Tucker Decomposition, Tensor-Train (TT)                         |
 | **Computational Complexity**  | Generally lower, often $\mathcal{O}(mnk)$ for a rank-$k$ approximation | Higher, due to iterative optimization and tensor contractions                     |
 | **Storage Reduction**         | Reduces storage from $\mathcal{O}(mn)$ to $\mathcal{O}(mk + kn)$       | Achieves higher compression but requires more complex storage representations     |
-| **Inference Overhead**        | Requires additional matrix multiplication                              | Introduces additional tensor operations, potentially increasing inference latency |
+| **Inference execution**       | Replaces one dense operation with two factor operations                 | Introduces tensor contractions whose latency depends on available kernels          |
 | **Primary Use Cases**         | Fully connected layers, embeddings, recommendation systems             | Convolutional filters, attention mechanisms, multi-modal learning                 |
 | **Implementation Complexity** | Easier to implement, often involves direct factorization methods       | More complex, requiring iterative optimization and rank selection                 |
 
@@ -2410,7 +2410,7 @@ Tensor decomposition applies to convolutional filters (approximating 4D weight t
 
 In practice, LRMF and tensor decomposition can be combined: fully connected layers compressed via LRMF while convolutional kernels use tensor decomposition. The choice depends on the model's structure and whether memory or latency is the primary constraint.
 
-The techniques explored so far (pruning, distillation, and factorization) all optimize *existing* architectures. Neural architecture search takes a different approach: discovering architectures that are efficient *by construction*.
+Pruning and factorization modify existing model representations, while distillation transfers behavior into a chosen student. Neural architecture search takes a different approach: discovering architectures that are efficient *by construction*.
 
 ### Neural architecture search {#sec-model-compression-neural-architecture-search-cf12}
 
@@ -3056,7 +3056,7 @@ For DLRM, quantization is not about faster math; it is about storage density\ind
 
 Together, the two lighthouses separate the two reasons quantization matters. DLRM uses lower precision to make enormous tables fit; TinyML uses lower precision to keep every inference within a tiny energy and SRAM budget. Beyond direct compute savings, reducing numerical precision also lowers memory energy consumption, which often dominates total system power. Lower-precision representations reduce data storage requirements and memory bandwidth usage, leading to fewer and more efficient memory accesses. Accessing memory, particularly off-chip DRAM, is far more energy-intensive than performing arithmetic operations: the representative `{python} EnergyDividend.dram_read_bits_value_str`-bit DRAM read used in this chapter costs `{python} EnergyDividend.energy_dram_pj_str`, compared with picojoule-scale cache and arithmetic operations. An instruction's total energy can therefore be dominated by memory access patterns rather than computation[^fn-int8-energy-deployment].
 
-[^fn-int8-energy-deployment]: **INT8 Energy Impact**: The energy dominance of memory access is extreme: with the Horowitz constants used here, a single `{python} EnergyDividend.dram_read_bits_value_str`-bit DRAM read costs roughly `{python} EnergyDividend.dram_read_vs_int8_mac_mult_str` the energy of an INT8 multiply-accumulate [@horowitz2014]. Quantizing from FP32 to INT8 attacks this disparity on both fronts—4$\times$ fewer bytes moved *and* cheaper arithmetic per operation. Representative MobileNetV2 INT8 measurements show multi-fold energy-per-inference reductions, with most savings coming from reduced memory traffic rather than cheaper arithmetic. \index{Quantization!energy impact}
+[^fn-int8-energy-deployment]: **INT8 Energy Impact**: The energy dominance of memory access is extreme: with the Horowitz constants used here, a single `{python} EnergyDividend.dram_read_bits_value_str`-bit DRAM read costs roughly `{python} EnergyDividend.dram_read_vs_int8_mac_mult_str` the energy of an INT8 multiply-accumulate [@horowitz2014]. Quantizing from FP32 to INT8 attacks this disparity on both fronts—4$\times$ fewer bytes moved *and* cheaper arithmetic per operation—although realized energy savings depend on the memory hierarchy, kernels, and workload. \index{Quantization!energy impact}
 
 ```{python}
 #| echo: false
@@ -3737,7 +3737,7 @@ node [midway,above=5mm] {\textbf{16 bits}};
 
 :::
 
-INT8\index{INT8!efficiency gains}\index{Quantization!INT8 (8-bit integer)} precision offers more aggressive efficiency improvements for inference workloads. Many quantized models use INT8 for inference, reducing storage by 4$\times$ while accelerating computation by 4--8$\times$ on optimized hardware. INT8 is widely used in mobile and embedded AI, where energy constraints are significant.
+INT8\index{INT8!efficiency gains}\index{Quantization!INT8 (8-bit integer)} precision offers more aggressive efficiency improvements for inference workloads. Many quantized models use INT8 for inference, reducing raw value storage by 4$\times$ relative to FP32; realized speedups depend on hardware support, kernels, and workload behavior. INT8 is widely used in mobile and embedded AI, where energy constraints are significant.
 
 Binary and ternary networks\index{Quantization!binary networks}\index{Quantization!ternary networks} represent the extreme end of quantization, where weights and activations are constrained to one-bit (binary) or two-bit (ternary) values. This results in massive storage and energy savings, but model accuracy often degrades significantly unless specialized architectures are used. Our keyword-spotting lighthouse (@sec-network-architectures-efficient-architectures-keyword-spotting-0625) lives precisely in this regime, where extreme compression is required just to fit the 256 KB SRAM device budget. INT8 is often just the starting point; engineers push toward INT4 or even binary weights, trading further accuracy for the microwatt-scale power budgets that always-on acoustic models demand.
 
@@ -4293,7 +4293,7 @@ Compare the two mapping diagrams side by side in @fig-calibration-ranges. Symmet
 
 ##### Granularity {#sec-model-compression-granularity-93b3}
 
-After determining the clipping range, the next optimization step is adjusting the granularity of that range to retain as much accuracy as possible. In CNNs, the input activations of a layer undergo convolution with multiple filters, each of which may have a unique range of values. The quantization process must account for these differences to preserve model performance.
+After determining the clipping range, the next optimization step is adjusting the granularity of that range to retain as much accuracy as possible. In CNNs, each convolutional filter's weights may have a different range of values. The quantization process must account for these differences to preserve model performance.
 
 ```{python}
 #| echo: false
@@ -4403,7 +4403,7 @@ Suppose the activations range from `{python} QuantizationMathCalc.alpha_math` to
 
 This variation is strikingly visible in @fig-quantization-granularity: notice how the range for Filter one is significantly smaller than that for Filter 3. The two annotated columns contrast the strategies this variation motivates. A single shared layerwise range must accommodate the widest filter, giving narrower filters a coarser quantization step and fewer useful code points, while per-filter channelwise ranges fit each distribution independently. The precision with which the clipping range $[\alpha, \beta]$ is determined becomes an important factor in effective quantization. This variability in ranges is why different granularity-based quantization strategies are employed.
 
-::: {#fig-quantization-granularity fig-env="figure" fig-pos="htb" fig-cap="**Quantization Range Variation**: Different convolutional filters exhibit unique activation ranges, necessitating per-filter quantization to minimize accuracy loss during quantization. Adjusting the granularity of clipping ranges, as shown by the differing scales for each filter, optimizes the trade-off between model size and performance. Source: [@gholami2022]." fig-alt="Four rows showing CNN filters with Gaussian weight distributions. Each filter has different clipping ranges shown as red and blue dashed lines. Layer-wise clipping uses same range; channel-wise uses per-filter ranges."}
+::: {#fig-quantization-granularity fig-env="figure" fig-pos="htb" fig-cap="**Quantization Range Variation**: Different convolutional filters can have different weight ranges, motivating per-filter quantization to reduce quantization error. The differing clipping scales illustrate the choice between one layerwise range and separate channelwise ranges. Source: [@gholami2022]." fig-alt="Four rows showing CNN filters with Gaussian weight distributions. Each filter has different clipping ranges shown as red and blue dashed lines. Layer-wise clipping uses same range; channel-wise uses per-filter ranges."}
 
 ```{.tikz}
 \resizebox{.8\textwidth}{!}{%
@@ -4716,9 +4716,9 @@ These timing and granularity decisions interact with the broader choice of quant
 
 | **Method**                            | **Engineering effort**                        | **Accuracy preservation**                    | **Input adaptability**  | **Reach for it when**                                                          |
 |:--------------------------------------|:----------------------------------------------|:---------------------------------------------|:------------------------|:-------------------------------------------------------------------------------|
-| **Post-training quantization (PTQ)**  | Low: no retraining, applied in minutes        | Lower: no mechanism to recover loss          | Fixed calibration range | the accuracy budget tolerates 1--2% loss and the deadline is tight             |
-| **Quantization-aware training (QAT)** | High: retraining with quantization simulation | Highest: weights adapt to quantization noise | Fixed calibration range | accuracy must stay within roughly 1% and the training budget allows            |
-| **Dynamic quantization**              | Moderate: ranges recomputed at runtime        | High: range fits each input                  | Per-input range         | activation ranges vary widely across inputs and runtime overhead is acceptable |
+| **Post-training quantization (PTQ)**  | Low: no retraining                            | Model-dependent; parameters do not adapt     | Fixed calibration range | a calibrated model meets the measured accuracy and performance targets         |
+| **Quantization-aware training (QAT)** | High: additional training with quantization simulation | Often stronger when PTQ falls short | Fixed calibration range | PTQ misses the accuracy target and the training budget allows                  |
+| **Dynamic quantization**              | Moderate: ranges recomputed at runtime        | Model-dependent; range fits each input       | Per-input range         | activation ranges vary widely across inputs and runtime overhead is acceptable |
 
 : **Quantization Method Comparison**: The choice turns on three binding questions—engineering budget, accuracy threshold, and input variability—rather than a feature checklist. {#tbl-quantization_methods tbl-colwidths="[16,22,22,15,25]"}
 
@@ -4742,7 +4742,7 @@ Precision reduction is the most impactful deployment optimization.
 
 ##### PTQ in practice {#sec-model-compression-ptq-practice-2800}
 
-The preceding subsections reveal PTQ's core trade-off: simplicity vs. accuracy control. PTQ requires no retraining and can be applied to any pretrained model in minutes, making it the default starting point for deployment optimization. For rapid deployment scenarios with production deadlines under two weeks and acceptable accuracy loss of 1–2 percent, PTQ with appropriate calibration often provides a complete solution.
+The preceding subsections reveal PTQ's core trade-off: simplicity vs. accuracy control. PTQ requires no retraining, making it a common starting point for deployment optimization. Whether calibration is sufficient depends on the model, data, quantizer, target hardware, and measured accuracy requirement.
 
 The limitation is that PTQ does not update model parameters to recover from accuracy loss. If the quantized model falls below the production threshold, practitioners can recalibrate, change granularity or quantizers, use mixed precision, or apply quantization-aware training. QAT integrates precision constraints directly into the training process rather than treating quantization only as a post-hoc transformation.
 
@@ -4789,9 +4789,9 @@ draw=none,anchor= south east](B5){};
 
 :::
 
-In many cases, QAT can also build off PTQ (discussed in detail in the previous section). Trace the two-stage pipeline in @fig-ptq-qat: PTQ first produces an initial quantized model using only calibration data, requiring no gradient computation and completing in minutes rather than hours. QAT then fine-tunes this quantized model with training data, recovering accuracy lost during the initial quantization by allowing weights to adjust to low-precision constraints through backpropagation. The combined approach achieves higher accuracy than PTQ alone while requiring significantly less training time than running QAT from scratch on the full-precision model, because QAT starts from a weight configuration already close to the quantized optimum.
+QAT can reuse calibration information from a PTQ pass. Trace the two-stage pipeline in @fig-ptq-qat: PTQ estimates scales and ranges from calibration data without gradient computation. QAT then starts from the pretrained weights and fine-tunes with simulated quantization, allowing weights to adapt to low-precision constraints through backpropagation. The training cost and resulting accuracy remain workload-dependent.
 
-::: {#fig-ptq-qat fig-env="figure" fig-pos="htb" fig-cap="**PTQ-to-QAT Pipeline**: Two grouped stages: the PTQ stage quantizes and calibrates a pretrained model using calibration data, then the QAT stage fine-tunes the result with training data. This hybrid approach combines PTQ's efficiency with QAT's accuracy preservation." fig-alt="Vertical flowchart with two grouped stages. PTQ stage shows pretrained model through quantize and calibrate steps. QAT stage shows fine-tuning step. Calibrate data feeds PTQ; training data feeds QAT."}
+::: {#fig-ptq-qat fig-env="figure" fig-pos="htb" fig-cap="**PTQ-to-QAT Pipeline**: PTQ calibration can initialize ranges and scales before QAT fine-tunes the pretrained weights with simulated quantization. Calibration data feeds the PTQ stage, and training data feeds QAT." fig-alt="Vertical flowchart with two grouped stages. PTQ stage shows pretrained model through quantize and calibrate steps. QAT stage shows fine-tuning step. Calibrate data feeds PTQ; training data feeds QAT."}
 
 ```{.tikz}
 \scalebox{0.8}{
@@ -4928,21 +4928,21 @@ QAT's[^fn-qat-accuracy-gap] primary advantage is accuracy preservation under low
 
 [^fn-qat-accuracy-gap]: **Quantization-Aware Training (QAT)**: QAT preserves accuracy by simulating low-precision integer arithmetic during the training process, forcing the model's weight updates to adapt to quantization error from the start. BERT quantization studies report that training-aware or Hessian-aware methods can stay much closer to the full-precision GLUE baseline than simpler post-training routes [@zafrir2019; @shen2020]. The exact gap is model- and task-dependent, but even a few percentage points often determine whether a model meets production accuracy requirements or must be served on more expensive, higher-precision hardware. \index{QAT!accuracy preservation}
 
-The cost is additional engineering complexity. QAT inserts simulated quantization into training, so teams must validate quantization schemes, scale behavior, and accuracy recovery on the target model. This overhead makes QAT less practical for models exceeding tens of billions of parameters, where training budgets are already constrained. @choukroun2019 illustrate the complementary post-training route: low-bit inference quantization for pretrained networks without full retraining.
+The cost is additional engineering complexity. QAT inserts simulated quantization into training, so teams must validate quantization schemes, scale behavior, and accuracy recovery on the target model. This overhead can make QAT less practical for very large models when training budgets are already constrained. @choukroun2019 illustrate the complementary post-training route: low-bit inference quantization for pretrained networks without full retraining.
 
 In practice, the choice between PTQ and QAT follows a simple decision rule: start with PTQ and measure accuracy on the validation set. If accuracy meets the production threshold, ship it: the engineering cost of QAT is not justified. If PTQ falls short, invest in QAT to recover the gap. A hybrid approach, starting with PTQ calibration and applying QAT fine-tuning only for accuracy-critical layers, often provides the best balance.
 
-Both PTQ and QAT typically target 8-bit or 4-bit precision while maintaining near-original accuracy. Some deployment scenarios, however, demand even more aggressive compression, pushing precision to the absolute limits of what neural networks can tolerate.
+PTQ and QAT commonly target 8-bit or 4-bit precision, but retained accuracy depends on the model, task, and quantization method. Some deployment scenarios, however, demand even more aggressive compression, pushing precision to the absolute limits of what neural networks can tolerate.
 
 ### Extreme quantization {#sec-model-compression-extreme-quantization-aba4}
 
 Extreme quantization is reserved for deployments where even INT8 or INT4\index{INT4!extreme quantization}\index{Quantization!INT4 (4-bit integer)} cannot meet the memory or energy budget. These techniques use binary representations with two values or ternary representations with three values, often packed into 2-bit storage, to achieve dramatic reductions in memory usage and computational requirements [@Courbariaux2016]. **Binarization**\index{Binarization!definition}\index{Quantization!binarization}\index{Binary Neural Network} constrains weights and activations to two values (typically -1 and +1, or 0 and 1), drastically reducing model size and accelerating inference on specialized hardware for binary neural networks [@Rastegari2016]. However, this constraint severely limits model expressiveness, often degrading accuracy on tasks requiring high precision such as image recognition or natural language processing [@Hubara2018].
 
-**Ternarization**\index{Ternary Network!definition} extends binarization by allowing three values (-1, 0, +1), providing additional flexibility that slightly improves accuracy over pure binarization [@Zhu2017]. The zero value enables greater sparsity while maintaining more representational power. Both techniques require gradient approximation methods like Straight-Through Estimator (STE) to handle nondifferentiable quantization operations during training [@bengio2013estimating], with QAT integration helping mitigate accuracy loss [@Choi2019].
+**Ternarization**\index{Ternary Network!definition} extends binarization by allowing three values (-1, 0, +1), providing additional representational flexibility [@Zhu2017]. The zero value also enables sparsity. Both techniques require gradient approximation methods like Straight-Through Estimator (STE) to handle nondifferentiable quantization operations during training [@bengio2013estimating], with QAT integration helping mitigate accuracy loss [@Choi2019].
 
 #### Challenges and limitations {#sec-model-compression-challenges-limitations-a99c}
 
-Despite enabling ultra-low-power machine learning for embedded systems and mobile devices, binarization and ternarization face significant challenges. Performance maintenance is difficult with such drastic quantization, requiring specialized hardware capable of efficiently handling binary or ternary operations [@umuroglu2017]. Traditional processors lack optimization for these computations, necessitating custom hardware accelerators.
+Despite enabling ultra-low-power machine learning for embedded systems and mobile devices, binarization and ternarization face significant challenges. Performance maintenance is difficult with such drastic quantization, and speedups require optimized bit-packed kernels or dedicated hardware support [@umuroglu2017].
 
 Accuracy loss remains a critical concern. These methods suit tasks where high precision is not critical or where QAT can compensate for precision constraints. Despite challenges, the ability to drastically reduce model size while maintaining acceptable accuracy makes binary and ternary methods attractive for edge AI and resource-constrained environments [@Rastegari2016; @Hubara2018; @Zhu2017; @umuroglu2017]. The operational rule follows from these constraints: reach for binary or ternary representations only when a KWS-class SRAM and energy budget leaves no other option, and only when specialized kernels exist to execute the resulting operations efficiently. Below that threshold, INT8 or INT4 retains accuracy that binary and ternary forfeit.
 
@@ -5029,7 +5029,7 @@ The first design step is diagnostic: identify what the trace shows as the limiti
 
 These responses interact. Reducing convolutional FLOPs with depthwise separable convolutions[^fn-depthwise-separable-mobile] helps only if the target runtime has efficient kernels for the resulting operators. Shrinking a model with parameter-reduction layers helps only if activation storage or memory traffic was part of the measured problem. Hardware-aware design therefore does not replace profiling; it moves profiling information earlier, into the architecture itself.
 
-[^fn-depthwise-separable-mobile]: **Depthwise Separable Convolutions**: This technique directly reduces computation by factorizing a standard convolution into separate depthwise (per-channel) and pointwise $(1{\times}1)$ operations. This factorization underpins the core trade-off for on-device vision, allowing a model like MobileNetV2 to accept a 4-point accuracy drop on ImageNet in exchange for a $13.7\times$ reduction in operations vs. a ResNet-50. \index{Depthwise Separable Convolution!mobile efficiency}
+[^fn-depthwise-separable-mobile]: **Depthwise Separable Convolutions**: This technique reduces computation by factorizing a standard convolution into separate depthwise (per-channel) and pointwise $(1{\times}1)$ operations. MobileNet architectures use this factorization to trade model capacity and accuracy against lower operation counts for on-device vision [@howard2017mobilenets; @sandler2018]. \index{Depthwise Separable Convolution!mobile efficiency}
 
 #### Scaling optimization {#sec-model-compression-scaling-optimization-6ad9}
 
@@ -5131,6 +5131,7 @@ This ubiquitous Conv-BN-ReLU fusion pattern\index{Operator Fusion!Conv-BN-ReLU},
 ::: {#lst-conv-bn-relu-fusion lst-cap="**Conv-BN-ReLU Fusion**: Combining three operations into a single kernel reduces memory traffic from 6 transfers to 2, eliminating intermediate memory writes."}
 
 ```{.python}
+# Pseudocode: runtime APIs and fusion legality are implementation-dependent.
 # === UNFUSED: 3 kernel launches, 6 memory transfers ===
 conv_out = conv2d(input, weight)
 bn_out = batch_norm(conv_out, ...)
@@ -5146,7 +5147,7 @@ def conv_bn_relu_fused(input, weight, gamma, beta, mean, var):
     bn = gamma * (conv - mean) / sqrt(var + eps) + beta
 
     # Apply ReLU in registers (no memory write)
-    output = max(bn, 0)
+    output = relu(bn)
 
     # Write final result once
     return output
@@ -5725,7 +5726,7 @@ More formally, for a sparse weight matrix $\mathbf{W}_{\text{sparse}} \in \mathb
 $$
 \rho_{\text{sparse}} = \frac{\Vert \mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}} \Vert_0}{m \times n}
 $$
-where $\mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}}$ is an indicator function that yields one if entry $(i,j)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ represents the L0 norm\index{Sparsity!L0 norm}, which counts the number of nonzero elements. Floating-point representations make exact zero an unreliable boundary, so we often extend this definition to include elements that are close to zero. The thresholded sparsity ratio becomes:
+where $\mathbf{1}_{\{(\mathbf{W}_{\text{sparse}})_{ij} = 0\}}$ is an indicator function that yields one if entry $(i,j)$ is zero and 0 otherwise, and $\Vert \cdot \Vert_0$ represents the L0 norm\index{Sparsity!L0 norm}, which counts the number of nonzero elements. Exact zero is representable in floating point, but thresholded definitions also group small-magnitude values when the pruning method treats them as removable. The thresholded sparsity ratio becomes:
 $$
 \rho_{\text{sparse},\epsilon} = \frac{\Vert \mathbf{1}_{\{|(\mathbf{W}_{\text{sparse}})_{ij}| < \epsilon\}} \Vert_0}{m \times n}
 $$
@@ -6928,7 +6929,7 @@ Although each system constraint primarily aligns with one or more optimization d
 
 The binding constraint of the deployment target determines which technique to reach for first, because each optimization addresses a different resource bottleneck. When model size is the primary constraint, as with over-the-air updates or storage-limited devices, quantization provides the most direct reduction. Relative to FP32 storage, INT8 post-training quantization cuts raw weight payload by 4$\times$ and requires no retraining; its accuracy impact is model-dependent. INT4 cuts raw payload by 8$\times$, with accuracy likewise dependent on the model, task, and method. For applications where accuracy is paramount, combining knowledge distillation to a smaller architecture with subsequent quantization can preserve quality while still achieving substantial compression.
 
-When inference latency is the bottleneck, the optimization must reduce the actual number of operations executed rather than only the storage footprint. Structured pruning accomplishes this by removing entire channels or filters, directly cutting the FLOP count and producing dense sub-networks that run efficiently on commodity hardware. If the target hardware supports INT8 execution, adding quantization on top of structured pruning accelerates the arithmetic itself. For latency-critical applications with some accuracy flexibility, early-exit architectures offer an additional dimension by terminating computation early for easy inputs.
+When the latency bottleneck is compute-bound, the optimization must reduce the actual number of operations executed rather than only the storage footprint. Structured pruning accomplishes this by removing entire channels or filters, directly cutting the FLOP count and producing dense sub-networks that run efficiently on commodity hardware. If the target hardware supports INT8 execution, adding quantization on top of structured pruning accelerates the arithmetic itself. For latency-critical applications with some accuracy flexibility, early-exit architectures offer an additional dimension by terminating computation early for easy inputs.
 
 Small-batch LLM generation often presents a distinct bottleneck: autoregressive decoding can be dominated by *memory bandwidth* rather than *compute*, because each token generation loads the weight matrices but performs relatively little arithmetic. Weight-only quantization\index{Quantization!weight-only for LLMs} (INT4 or INT8 weights with FP16 activations) can then approach speedup proportional to the reduction in weight bytes until KV-cache traffic, runtime overhead, or larger batches shift the bottleneck.
 

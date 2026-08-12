@@ -749,8 +749,8 @@ The trajectory yields an engineering rule: the era of "free" performance gains f
 # │ Context: "Machine Learning Hardware Specialization" section
 # │
 # │ Goal: Demonstrate the inefficiency of general-purpose CPUs for ML.
-# │ Show: The 100× efficiency gap between CPUs and specialized accelerators.
-# │ How: Contrast CPU utilization and GFLOP/s against accelerator baselines.
+# │ Show: An illustrative CPU utilization scenario alongside accelerator baselines.
+# │ How: Compute delivered GFLOP/s at the upper end of an assumed utilization range.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_percent, fmt_flop_rate, fmt_ops_rate
@@ -759,8 +759,8 @@ class CpuMlInefficiency:
     """CPU vs accelerator efficiency gap for ML workloads."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    cpu_utilization_min_value = 5  # % utilization on ML workloads
-    cpu_utilization_max_value = 10  # % utilization on ML workloads
+    cpu_utilization_min_value = 5  # illustrative % of peak
+    cpu_utilization_max_value = 10  # illustrative % of peak
     cpu_peak_flops = Hardware.Cloud.ReferenceCPU.compute.peak_flops
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -830,7 +830,7 @@ class MlAcceleratorCallout:
 *A DRAM access costs over 100$\times$ one FP32 multiply per event.*
 :::
 
-Machine learning computational requirements reveal limitations in traditional processors. CPUs reach only `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` utilization on neural network workloads, delivering approximately `{python} CpuMlInefficiency.cpu_gflop_per_s_str` (billions of floating-point operations per second) while consuming hundreds of watts. This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth constraint compounds the problem: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies designed for kilobyte-scale working sets.
+Machine learning computational requirements reveal limitations in traditional processors. In an illustrative scenario where a reference CPU sustains `{python} CpuMlInefficiency.cpu_utilization_min_str`–`{python} CpuMlInefficiency.cpu_utilization_max_str` of its peak on a neural network workload, the upper endpoint delivers approximately `{python} CpuMlInefficiency.cpu_gflop_per_s_str` (billions of floating-point operations per second). This inefficiency results from architectural mismatches: CPUs optimize for single-thread performance and irregular memory access, while neural networks require massive parallelism and predictable data streams. The memory bandwidth constraint compounds the problem: a single neural network layer may require accessing gigabytes of parameters, overwhelming CPU cache hierarchies designed for smaller working sets.
 
 The energy economics of data movement\index{Energy!data movement cost} influence accelerator design. Per event, accessing a 32-bit value from DRAM can consume on the order of $10^2\times$ more energy than one FP32 multiply (exact values vary by technology node and design), making data movement a primary optimization target [@horowitz2014; @sze2017]. This disparity helps explain the progression from repurposed graphics processors to purpose-built neural network accelerators. TPUs and other custom accelerators can sustain high utilization on dense kernels by implementing systolic arrays and other architectures that maximize data reuse while minimizing movement.
 
@@ -3460,7 +3460,7 @@ At node level, three links define the bandwidth taper:
 
 [^fn-allreduce-gradient-sync]: **AllReduce**\index{AllReduce!definition}: A collective operation from MPI that aggregates values across processes (the "reduce") and distributes the result back to every process (the "all"). In this chapter, the term appears only to identify why accelerator-to-accelerator bandwidth matters for training workloads. At scale, algorithms, topology choices, and runtime protocols determine how costly this synchronization becomes. \index{AllReduce!gradient synchronization cost}
 
-[^fn-infiniband-rdma]: **InfiniBand**: Its key feature for multi-node scaling is RDMA (Remote Direct Memory Access), which allows a GPU in one node to access memory in another directly, bypassing the host CPU. Without RDMA, host involvement and protocol overhead can become part of the gradient-synchronization path. RDMA reduces that overhead so scaling is more often constrained by raw physical bandwidth, topology, and collective implementation rather than CPU-managed packet processing. \index{InfiniBand!RDMA for ML training}
+[^fn-infiniband-rdma]: **InfiniBand**: Its key feature for multi-node scaling is RDMA (Remote Direct Memory Access). With a GPU-aware path such as GPUDirect RDMA and registered GPU memory, a network adapter can transfer data directly between GPUs across nodes without staging it through host memory. This reduces host involvement and protocol overhead, so scaling is more often constrained by physical bandwidth, topology, and collective implementation rather than CPU-managed packet processing. \index{InfiniBand!RDMA for ML training}
 
 These three levels produce a characteristic bandwidth taper:
 
@@ -3719,7 +3719,7 @@ Depthwise convolution\index{Depthwise Convolution!low arithmetic intensity}, emb
 | **Conv2D (Dense)**                         | 50--200 FLOP/byte        | Straddles ridge; high-reuse cases compute-bound | **ResNet-50**                   |
 | **Dense MatMul (large batch, well-tiled)** | 64--256+ FLOP/byte       | Often compute-bound at large batch              | **GPT-2 (batched projections)** |
 | **Depthwise Conv**                         | 10--20 FLOP/byte         | Memory-bound                                    | **MobileNet**                   |
-| **Attention Softmax**                      | 2--5 FLOP/byte           | Memory-bound                                    | **GPT-2 (Generation)**          |
+| **Attention Softmax**                      | Convention-dependent     | Memory-bound                                    | **GPT-2 (Generation)**          |
 | **LayerNorm**                              | 1--2 FLOP/byte           | Memory-bound                                    | **GPT-2/Llama**                 |
 | **Embedding lookup**                       | <1 FLOP/byte             | Memory-bound                                    | **DLRM**                        |
 
@@ -3806,7 +3806,7 @@ For a transformer with hidden_dim = `{python} TransformerLayerCalc.t_hidden_str`
 
 - FLOPs: `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_heads_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ 3 ≈ `{python} TransformerLayerCalc.softmax_mflop_str` (exp, sum, div)
 - Bytes: `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_heads_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times 2 \times 2$ = `{python} TransformerLayerCalc.softmax_mb_str`
-- AI = `{python} TransformerLayerCalc.softmax_mflop_str` / `{python} TransformerLayerCalc.softmax_mb_str` = `{python} TransformerLayerCalc.softmax_ai_str` FLOP/byte, which is memory-bound
+- AI = `{python} TransformerLayerCalc.softmax_mflop_str` / `{python} TransformerLayerCalc.softmax_mb_str` = `{python} TransformerLayerCalc.softmax_ai_str` FLOP/byte under this simple operation count, which is memory-bound. Counts that weight exponentials and division as multiple operations produce a larger numerical intensity without changing the bottleneck classification.
 
 This analysis explains why FlashAttention\index{FlashAttention!memory optimization}\index{Attention Mechanism!memory-bound softmax} focuses on reducing memory traffic in attention rather than reducing FLOPs.
 
@@ -4700,7 +4700,7 @@ class MemoryFootprintCalc:
 
 @Lst-naive_execution reveals how each operation becomes a separate kernel in a naïve execution model, forcing intermediate results to be written to memory and then read back for the next operation.
 
-The first two operations produce intermediate tensors that a naïve multi-kernel execution exposes through device memory for the next operation. On large tensors, this movement can outweigh the arithmetic cost [@shazeer2018mesh]. @Tbl-memory-footprint illustrates the live-tensor footprint when buffers are not reused.
+The first two operations produce intermediate tensors that a naïve multi-kernel execution exposes through device memory for the next operation. On large tensors, this movement can outweigh the arithmetic cost [@Jia2019]. @Tbl-memory-footprint illustrates the live-tensor footprint when buffers are not reused.
 
 ::: {#lst-naive_execution lst-cap="**Naïve Execution**: Each step writes intermediate results to memory before processing the next, leading to increased bandwidth usage and reduced efficiency."}
 
@@ -4735,7 +4735,7 @@ Y = 2.0 * X2 + 1.0  # Final result
 
 ##### Kernel fusion for memory efficiency {#sec-hardware-acceleration-kernel-fusion-memory-efficiency-f227}
 
-The two intermediate tensors consume memory capacity when they remain live and create external traffic when separate kernels materialize them. Kernel fusion\index{Kernel Fusion!memory efficiency} can eliminate those intermediate writes and reloads [@jia2018beyond] by propagating values through registers or local memory within one kernel.
+The two intermediate tensors consume memory capacity when they remain live and create external traffic when separate kernels materialize them. Kernel fusion\index{Kernel Fusion!memory efficiency} can eliminate those intermediate writes and reloads [@Jia2019] by propagating values through registers or local memory within one kernel.
 
 A machine learning inference sequence might apply ReLU, frozen batch normalization, and then an affine scaling. In a naïve implementation, each separate kernel generates an intermediate tensor that is written to memory and read back by the next kernel:
 $$
@@ -5316,7 +5316,7 @@ While static compilation provides a foundation, efficient execution may require 
 
 Individual operations are assigned implementations during compilation or engine construction. At execution time, the runtime binds buffers, selects legal variants when the engine provides them, and launches work in dependency order.
 
-The same adaptation appears in image classification. If an incoming batch of high-resolution images requires more memory than the compiler assumed, a static execution plan can cause cache thrashing or excessive off-chip memory accesses. A dynamic runtime can adjust tiling strategies during execution, breaking tensor operations into smaller tiles that fit within high-speed on-chip memory. This prevents memory stalls and improves cache utilization.
+The same constraint appears in image classification. If an incoming batch of high-resolution images falls outside the memory assumptions of a prepared profile, the serving system must select a compatible profile or engine, split the batch, or rebuild the engine. The runtime cannot invent a new tiling strategy for an already built engine.
 
 For the running transformer inference request, sequence length may vary between calls. A static execution plan optimized for one fixed sequence length can underutilize compute resources on shorter sequences or create excessive memory pressure on longer sequences. Dynamic kernel execution mitigates this by selecting kernel implementations based on the actual sequence length and adjusting memory allocation to maintain efficiency.
 
@@ -5324,7 +5324,7 @@ Overlapping computation with memory movement can mitigate transfer bottlenecks. 
 
 Convolutional layers show the boundary clearly. TensorRT may fuse operations and benchmark convolution tactics while building the engine. During inference, the runtime dispatches those prepared layers; the GPU's hardware schedulers place their thread blocks on available SMs.
 
-Dynamic adjustment of execution strategies in response to real-time system conditions optimizes both training and inference performance across hardware platforms. These adaptations, however, depend on having the right kernel in the first place. Returning to our transformer inference example: before the runtime can adjust tiling or memory allocation for a matrix multiplication, it must first decide which kernel implementation to invoke.
+Selecting among prepared execution strategies in response to request shape and system conditions can improve both training and inference performance. This adaptation depends on having the right kernel available. Returning to our transformer inference example, the runtime must choose among implementations prepared for the request's supported shape and precision.
 
 ### Runtime kernel selection {#sec-hardware-acceleration-runtime-kernel-selection-1ffe}
 
@@ -5332,7 +5332,7 @@ While compilers perform an initial selection of kernels based on static analysis
 
 For instance, transformer-based language models spend substantial time in matrix multiplications. Mixed-precision systems such as Megatron-LM use FP16 execution on GPU Tensor Cores to increase throughput [@shoeybi2019megatron]. Which operations remain in FP32 is a model-conversion or engine-building decision validated before deployment; the runtime does not infer numerical instability and change precision on its own.
 
-Memory constraints also influence kernel selection. When memory bandwidth is limited, the runtime may adjust its execution strategy, reordering operations or changing the tiling strategy to fit computations into the available cache rather than relying on slower main memory. For example, a large matrix multiplication may be broken into smaller chunks, ensuring that the computation fits into the on-chip memory of the GPU, reducing overall latency.
+Memory constraints also influence kernel selection. When memory bandwidth is limited, the runtime may select a prepared kernel or profile whose tiling and workspace requirements fit the available resources. Creating a new tiling strategy requires engine building or compilation rather than an arbitrary runtime adjustment.
 
 Batch size also influences kernel selection. For workloads that handle a mix of small and large batches, the AI runtime may choose a latency-optimized kernel for small batches and a throughput-optimized kernel for large-scale batch processing. This adjustment ensures that the model continues to operate efficiently across different execution scenarios, without the need for manual tuning. With the appropriate kernels selected and their execution parameters adapted, the final pipeline stage determines when and where each kernel runs.
 
@@ -6006,7 +6006,7 @@ We have now optimized the full D·A·M stack: data selection minimized training 
 
 :::
 
-An accelerator is easy to mistake for a faster computer. It is better understood as a machine built to move less data per useful operation, because the cost it fights is fixed by physics; moving a byte takes far more time and energy than computing on it. Every technique in this chapter (tiling, kernel fusion, the memory hierarchy, the systolic array) exists to raise arithmetic intensity, the ratio of computation to data movement, and the roofline is the bookkeeping of that single fact. None of them repeals the cost; they only relocate the bottleneck between bandwidth and compute. This is the machine constraint made concrete: the accelerator cannot make a byte cheaper to move, only ensure that fewer bytes must move for each result worth keeping.
+An accelerator is easy to mistake for a faster computer. It is better understood as a machine built to move less data per useful operation, because moving data is often more expensive than computing on it. Every technique in this chapter (tiling, kernel fusion, the memory hierarchy, the systolic array) exists to raise arithmetic intensity, the ratio of computation to data movement, and the roofline is the bookkeeping of that single fact. None of them eliminates the cost; they only relocate the bottleneck between bandwidth and compute. This is the machine constraint made concrete: the accelerator reduces the distance or frequency of data movement so fewer bytes must traverse expensive links for each result worth keeping.
 
 ::: { .quiz-end }
 :::

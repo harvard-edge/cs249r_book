@@ -266,7 +266,7 @@ The iron law (principle \ref{pri-iron-law}) and the silicon contract (principle 
 
 The four optimization principles form a tightly coupled diagnostic chain. The Pareto frontier\index{Pareto Frontier!multi-objective optimization} (principle \ref{pri-pareto-frontier}) identifies nondominated trade-offs after objective directions are normalized: quantization trades precision for memory traffic, pruning trades capacity for speed, and distillation trades training compute for inference efficiency. The roofline bound\index{Arithmetic Intensity!bottleneck diagnosis} (principle \ref{pri-arithmetic-intensity}) diagnoses whether compute or bandwidth sets the ideal ceiling. Energy accounting\index{Energy-Movement Invariant!data locality} (principle \ref{pri-energy-movement}) combines per-event costs with event counts: in the book's reference constants, one DRAM access costs about `{python} EnergyMovementMath.dram_vs_range_mult_str` as much as one FP32/FP16 arithmetic operation, but workload-total dominance depends on how many of each occur. Amdahl's Law (principle \ref{pri-amdahl}) sets the ceiling on any parallelism gain, explaining why data loading and preprocessing can become bottlenecks in highly optimized systems.
 
-MobileNetV2 (our Lighthouse from @sec-network-architectures) navigates all four simultaneously: depthwise separable convolutions reshape the Pareto frontier [@sandler2018], INT8 quantization\index{INT8 Quantization!bandwidth trade-off} exploits the arithmetic intensity law by increasing FLOP/byte through reduced memory traffic [@jacob2018], and the resulting energy savings respect the energy-movement invariant while Amdahl's Law explains why a preprocessing stage that remains unaccelerated can limit end-to-end speedup. The KWS Lighthouse pushes these trade-offs to their extreme, where sub-megabyte models on microcontrollers leave zero margin for waste on any axis.
+MobileNetV2 (our Lighthouse from @sec-network-architectures) navigates all four simultaneously: depthwise separable convolutions reshape the Pareto frontier [@sandler2018], INT8 quantization\index{INT8 Quantization!bandwidth trade-off} exploits the arithmetic intensity law by increasing operations per byte through reduced memory traffic [@jacob2018], and the resulting energy savings respect the energy-movement invariant while Amdahl's Law explains why a preprocessing stage that remains unaccelerated can limit end-to-end speedup. The KWS Lighthouse pushes these trade-offs to their extreme, where sub-megabyte models on microcontrollers leave zero margin for waste on any axis.
 
 ### Deploy: How reality defeats assumptions (principles 9–13) { .unnumbered}
 
@@ -616,6 +616,7 @@ Tracing a quantization proposal through four principles is one diagnostic pass; 
 # │ Context: Cost-of-a-token callout demonstrating Iron Law in practice
 # │
 # │ Goal: Illustrate the memory-compute trade-off for LLM inference.
+# │ Scope: chapter-anchor — the summary reuses this chapter-level result.
 # │ Show: The ratio between idealized memory-transfer and peak-compute bounds
 # │       for batch-one Llama 2 70B decode on two balanced H100 shards.
 # │ How:  Aggregate H100 bandwidth and peak FP16 throughput across two shards.
@@ -745,8 +746,9 @@ Building and optimizing a model, however, is only half the engineering challenge
 # │ Context: "Navigating Production Reality" section on P99 latency
 # │
 # │ Goal: Demonstrate why mean latency is a misleading metric for user experience.
-# │ Show: That p99 latency is 40× higher than the mean, defining the true production constraint.
-# │ How: Calculate the gap between mean and p99 latency for a standard request distribution.
+# │ Show: That p99 latency is 40× the mean in this illustrative scenario.
+# │ How: Divide the scenario's p99 latency by its mean latency.
+# │ Scope: chapter-anchor
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
@@ -774,7 +776,7 @@ class TailLatencyRatio:
 
 ### Navigating production reality { .unnumbered}
 
-The transition from *training* to *inference* often changes optimization objectives: where training maximizes throughput over days, interactive inference may optimize a selected tail-latency quantile in milliseconds. In this worked scenario, the SLO chooses P99; another product may specify P95, P99.9, or separate deadlines by request class. Tail-latency analysis shows why mean latency can hide the requests that dominate user experience [@dean2013]. In ML serving, tail spikes can arise from garbage collection pauses in Python-based inference frameworks, dynamic batching that forms suboptimally under uneven traffic, or autoregressive generation in which a long prompt or output drives much more work than a typical short response.
+The transition from *training* to *inference* often changes optimization objectives: where training maximizes throughput over days, interactive inference may optimize a selected tail-latency quantile in milliseconds. The illustrative scenario uses a 50 ms mean and a 2,000 ms P99, so the selected tail is 40$\times$ the mean; another product may specify P95, P99.9, or separate deadlines by request class. Tail-latency analysis shows why mean latency can hide the requests that dominate user experience [@dean2013]. In ML serving, tail spikes can arise from garbage collection pauses in Python-based inference frameworks, dynamic batching that forms suboptimally under uneven traffic, or autoregressive generation in which a long prompt or output drives much more work than a typical short response.
 
 ::: {.column-margin}
 ```{=latex}
@@ -807,43 +809,38 @@ In the cloud regime, the binding decision is how to turn abundant hardware into 
 # │ EDGE-VS-H100 REFERENCE RATIOS
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Cross-domain applications section, mobile/edge paragraph
-# │          contrasting reference mobile NPU specs against an H100 accelerator.
+# │          contrasting a reference mobile platform against an H100 accelerator.
 # │
-# │ Goal:    Quantify how much less throughput, memory, and power a reference
-# │          mobile NPU has compared to a datacenter H100.
-# │ Show:    INT8 peak throughput ratio, memory-capacity ratio, and TDP ratio
-# │          between H100 and the book's reference mobile platform.
-# │ How:     Divide H100 INT8 TOPS, TDP, and memory capacity by the
-# │          corresponding mobile constants (TOPS, mobile TDP, smartphone RAM).
+# │ Goal:    Quantify the memory-capacity and TDP gaps between the reference
+# │          mobile platform and an H100.
+# │ Show:    Memory-capacity and TDP ratios between H100 and the book's
+# │          reference mobile platform.
+# │ How:     Divide H100 TDP and memory capacity by phone TDP and RAM.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Hardware, ReferenceStats
+from mlsysim import Hardware
 from mlsysim.fmt import fmt, check
 
 class EdgeReferenceRatios:
     # LOAD
     h_h100 = Hardware.Cloud.H100
-    mobile_int8_peak = Hardware.Mobile.iPhone15Pro.compute.peak_flops
-    mobile_power = ReferenceStats.MobilePower.MobileNpuTypical
+    mobile_power = Hardware.Mobile.iPhone15Pro.tdp
     phone_ram = Platforms.Mobile.ram
 
     # EXECUTE
-    int8_peak_ratio = Hardware.Cloud.H100.compute.precision_flops["int8"] / mobile_int8_peak
     power_ratio = h_h100.tdp / mobile_power
     memory_ratio = h_h100.memory.capacity / phone_ram
 
     # GUARD
-    check(int8_peak_ratio.to("").magnitude > 10, "Mobile edge example should be far below H100 throughput.")
-    check(memory_ratio.to("").magnitude > 5, "Mobile edge example should have meaningfully less memory headroom.")
+    check(memory_ratio.to("").magnitude > 5, "Mobile edge example should have meaningfully less memory capacity.")
     check(power_ratio.to("").magnitude > 100, "Mobile edge example should have a much smaller power envelope.")
 
     # OUTPUT
-    int8_peak_ratio_mult_str = fmt_multiple(int8_peak_ratio.to("").magnitude, precision=1, commas=False)
-    power_ratio_mult_str = fmt_multiple(power_ratio.to("").magnitude, precision=1, commas=False)
-    memory_ratio_mult_str = fmt_multiple(memory_ratio.to("").magnitude, precision=1, commas=False)
+    power_ratio_mult_str = fmt_multiple(power_ratio.to("").magnitude, precision=0, commas=False)
+    memory_ratio_mult_str = fmt_multiple(memory_ratio.to("").magnitude, commas=False)
 ```
 
-In contrast, mobile and edge systems face stringent power, memory, and latency constraints that demand sophisticated hardware-software co-design\index{Hardware-Software Co-design!edge deployment}. Efficient architectures introduced in @sec-network-architectures (such as depthwise separable convolutions and neural architecture search) combined with compression techniques from @sec-model-compression (such as quantization and pruning) enable deployment on devices where the book's reference mobile NPU has about `{python} EdgeReferenceRatios.int8_peak_ratio_mult_str` lower INT8 peak throughput, about `{python} EdgeReferenceRatios.memory_ratio_mult_str` less memory headroom, and about `{python} EdgeReferenceRatios.power_ratio_mult_str` smaller power envelope than an H100-class accelerator. Edge deployment matters when latency, privacy, connectivity, energy, or per-request cost make centralized serving the wrong abstraction; in those regimes, efficiency becomes part of accessibility rather than a separate optimization[^fn-ai-democratization].
+In contrast, mobile and edge systems face stringent power, memory, and latency constraints that demand sophisticated hardware-software co-design\index{Hardware-Software Co-design!edge deployment}. Efficient architectures introduced in @sec-network-architectures (such as depthwise separable convolutions and neural architecture search) combined with compression techniques from @sec-model-compression (such as quantization and pruning) enable deployment on devices where the book's reference mobile platform has about `{python} EdgeReferenceRatios.memory_ratio_mult_str` less memory capacity and about `{python} EdgeReferenceRatios.power_ratio_mult_str` smaller power envelope than an H100-class accelerator. Edge deployment matters when latency, privacy, connectivity, energy, or per-request cost make centralized serving the wrong abstraction; in those regimes, efficiency becomes part of accessibility rather than a separate optimization[^fn-ai-democratization].
 
 [^fn-ai-democratization]: **AI Democratization**\index{AI Democratization!definition}\index{AI Democratization!edge deployment}: Making AI accessible beyond a small number of well-resourced organizations through efficient systems engineering. Mobile-optimized models and cloud APIs can widen access, but doing so sustainably requires systematic optimization across hardware, algorithms, and infrastructure to maintain quality at scale.
 
@@ -927,7 +924,7 @@ The principles established here govern individual ML systems completely enough t
 # │          fleet-scale reliability as an extension of the single-system lens.
 # │
 # │ Goal:    Show that independent failures across a thousand-GPU pool collapse
-# │          a multi-year component MTTF into a sub-day cluster MTBF.
+# │          a multi-year component MTTF into an approximately two-day cluster MTBF.
 # │ Show:    Reference GPU MTTF in years, GPU count, and cluster MTBF in hours.
 # │ How:     Convert Systems.Reliability.Gpu.mttf_hours to years via HOURS_PER_DAY * DAYS_PER_YEAR;
 # │          call calc_mtbf_cluster for the independent-failure cluster MTBF.
@@ -1087,7 +1084,7 @@ The conclusion distilled the integrated perspective that distinguishes ML system
 
 * **Assumptions matter across implementations**: The thirteen principles turn framework-specific craft into measurable reasoning by combining physical bounds, decompositions, fitted models, requirements, and heuristics. Apply each only within its stated scope.
 * **Trace displaced costs without assuming conservation**: Compression, batching, monitoring, and governance can relocate burdens across data, algorithm, and machine, while good design can remove accidental complexity outright. Measurement distinguishes the two cases.
-* **Boundaries reveal the bottleneck**: In the idealized batch-one, two-H100 model, the memory-transfer lower bound for a Llama 2 70B token is about `{python} ConclusionRoofline.ratio_mult_str` the peak-compute lower bound, and p99 latency can sit `{python} TailLatencyRatio.conclusion_tail_ratio_mult_str` above the mean. Systems thinking means measuring where physics, traffic, and users bind.
+* **Boundaries reveal the bottleneck**: In the idealized batch-one, two-H100 model, the memory-transfer lower bound for a Llama 2 70B token is about `{python} ConclusionRoofline.ratio_mult_str` the peak-compute lower bound, and the illustrative p99 latency is `{python} TailLatencyRatio.conclusion_tail_ratio_mult_str` the mean. Systems thinking means measuring where physics, traffic, and users bind.
 * **Scale changes the binding term**: The next frontier is scale, where a thousand-GPU pool turns multi-year component MTTF into days-scale cluster MTBF. The physics stays, but the constraint moves to fleets.
 
 :::

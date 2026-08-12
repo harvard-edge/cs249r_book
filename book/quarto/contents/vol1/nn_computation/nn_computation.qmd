@@ -2785,7 +2785,7 @@ The bias terms[^fn-bias-parameter-cost] effectively allow each neuron to have a 
 
 [^fn-bias-parameter-cost]: **Bias Terms**: Biases add one parameter per neuron, compared with $n$ weights for a neuron with $n$ inputs, so they account for $1/(n+1)$ of that layer's parameters. Their model-wide share and effect on accuracy depend on layer widths, architecture, and normalization. Some modern architectures omit biases in layers followed by batch normalization because the normalization transform includes a learned shift. \index{Bias!parameter overhead}
 
-The organization of weights and biases across a neural network follows a systematic pattern. For a network with $N_L$ layers, three components per layer define the learnable state:
+The organization of weights and biases across a neural network follows a systematic pattern. For a network with $N_L$ layers, three components per layer define its computation; the weights and biases are learned, while the activation function is usually chosen by the designer:
 
 * A weight matrix $\mathbf{W}^{(\ell)}$ for each layer $\ell$
 * A bias vector $\mathbf{b}^{(\ell)}$ for each layer $\ell$
@@ -2948,7 +2948,7 @@ class MnistScaleComparison:
     mnist_small_mem_kb_str = fmt_qty_int(mnist_small_mem, KB, commas=False)
 ```
 
-Widening hidden layers from 100 to 1000 neurons increases parameters from ~`{python} MnistScaleComparison.mnist_small_params_k_str` to ~`{python} MnistScaleComparison.mnist_large_params_m_str` (~`{python} MnistScaleComparison.mnist_small_mem_kb_str` vs. ~`{python} MnistScaleComparison.mnist_large_mem_mb_str` in FP32) while improving MNIST accuracy only marginally (98.5 percent vs. 99.5 percent)—a trade-off that matters when deployment targets mobile memory budgets.
+Widening hidden layers from 100 to 1000 neurons increases parameters from ~`{python} MnistScaleComparison.mnist_small_params_k_str` to ~`{python} MnistScaleComparison.mnist_large_params_m_str` (~`{python} MnistScaleComparison.mnist_small_mem_kb_str` vs. ~`{python} MnistScaleComparison.mnist_large_mem_mb_str` in FP32). Whether the wider network improves accuracy requires training and evaluation; the storage increase alone already matters for mobile deployment budgets.
 
 ::: {#fig-mnist-topology-1 fig-env="figure" fig-pos="htb" fig-cap="**MNIST Network Topology**: Two panels show the network architecture for digit recognition. Panel (a) displays a $28{\times}28$ pixel image of a digit connected through hidden layers to 10 output nodes. Panel (b) shows the same architecture with the input image flattened into a 784-element vector, illustrating how spatial data enters the network." fig-alt="Two panels showing MNIST digit recognition. Panel a: 28×28 pixel image of digit 7 connected to hidden layer circles, then to 10 output nodes with one highlighted for digit classification. Panel b: Same architecture with flattened 784-pixel vector representation of input image."}
 
@@ -3334,7 +3334,7 @@ Training adds two memory contributions that inference never pays. Gradients occu
 
 : **MNIST training vs. inference memory**: Per-component memory footprint (parameters, activations, gradients, optimizer state) for training vs. inference on the toy MNIST MLP, exposing why training memory dominates and scales with both batch size and parameter count. {#tbl-nn-computation-mnist-memory-budget tbl-colwidths="[33,34,33]"}
 
-Scale drives the systems lesson. Training at batch size 32 requires `{python} MnistTrainingMemoryCalc.training_ratio_mult_str` more memory than single-sample inference in this example. For larger models, this ratio increases further because gradient and optimizer storage scale with parameter count, while activations scale with batch size and layer widths.
+Scale drives the systems lesson. Training at batch size 32 requires `{python} MnistTrainingMemoryCalc.training_ratio_mult_str` more memory than single-sample inference in this example. For larger models, the absolute gap grows as gradient and optimizer storage scale with parameter count and activations scale with batch size and layer widths; the ratio depends on their relative sizes.
 
 ```{python}
 #| echo: false
@@ -3501,23 +3501,23 @@ Detailed calculations are essential for design documents, but experienced engine
 
 - **Parameters → bytes**: Multiply by four (FP32), two (FP16 or BF16, the latter with an FP32-like exponent range), or one (INT8)
 - **FC layer parameters**: Input $\times$ Output (plus Output biases, usually negligible)
-- **Training memory**: ~3--4$\times$ inference memory (gradients + optimizer state)
+- **Training state**: Parameters, gradients, and optimizer state can require ~3--4$\times$ the weight-only parameter memory; peak activations and workspace are additional
 - **Adam optimizer overhead**: 2$\times$ parameter memory (momentum + velocity)
-- **Max batch size**: $(\text{GPU VRAM} - \text{Model Size}) / \text{Activations per sample}$
+- **Max batch size**: Approximately $(\text{GPU VRAM} - \text{persistent state} - \text{workspace}) / \text{peak activations per sample}$
 
 **Compute Estimation**
 
 - **FC layer FLOPs**: $2 \times d_{\text{in}} \times d_{\text{out}} \times B$ (multiply-add = 2 ops)
 - **MACs to FLOPs**: Multiply by 2
-- **GPU utilization**: $\text{achieved FLOP/s} / R_{\text{peak}}$ (typically 30–70 percent for training)
+- **Compute utilization proxy**: $\text{achieved FLOP/s} / R_{\text{peak}}$
 
 @Tbl-nn-computation-napkin-math-checks distills three of the most common feasibility questions into one-line formulas an engineer can apply before reaching for a profiler.
 
 | **Question**                                 | **Quick Estimate**                                                                 |
 |:---------------------------------------------|:-----------------------------------------------------------------------------------|
-| **"Will this model fit in GPU memory?"**     | $\text{Parameters} \times 4\text{ bytes} \times 4\text{ (training)} < \text{VRAM}$ |
-| **"How long per epoch on MNIST?"**           | $60\text{K} \times \text{FLOPs/image} / R_{\text{peak}}$                           |
-| **"Is this compute bound or memory bound?"** | If $B \times d_{\text{layer}} < 1000$, likely memory bound                         |
+| **"Will this model fit in GPU memory?"**     | $\text{persistent training state} + \text{peak activations} + \text{workspace} < \text{VRAM}$ |
+| **"How long per epoch on MNIST?"**           | $60\text{K} \times \text{forward-backward FLOPs/image} / \text{achieved FLOP/s}$             |
+| **"Is this compute bound or memory bound?"** | Compare arithmetic intensity with $R_{\text{peak}}/\text{BW}$                                  |
 
 : **Napkin-Math Feasibility Checks**: Three rapid mental-estimation rules for GPU fit, epoch time, and bound regime, distilled into one-line formulas an engineer can apply before running a profiler. {#tbl-nn-computation-napkin-math-checks tbl-colwidths="[50,50]"}
 
@@ -3529,7 +3529,7 @@ Mental math: `{python} MentalMathCalc.mm_params_m_str` parameters at `{python} M
 
 Feasibility math tells the engineer whether a model *fits*; it says nothing about whether it will *learn*. That depends on how the parameters those bytes hold are first set. Parameter initialization\index{Initialization!Xavier/Glorot}\index{Initialization!He initialization} is critical to network behavior. Setting all parameters to zero would cause neurons in a layer to behave identically, preventing diverse feature learning. Instead, weights are typically initialized randomly, often using specific strategies like Xavier/Glorot initialization[^fn-glorot-init-variance] [@glorot2010xavier] or He initialization [@he2015], while biases often start at small constant values or zeros. The scale of these initial values matters: values that are too large or too small lead to poor learning dynamics.
 
-[^fn-glorot-init-variance]: **Xavier/Glorot Initialization**: Weight variance must scale as $1/n$ (where $n$ is layer width) to prevent activations from vanishing or exploding across layers [@glorot2010xavier]. Before this insight, training failures from poor initialization were routinely misdiagnosed as hardware bugs or insufficient compute. The fix costs zero additional FLOPs; it is purely a matter of setting the right random distribution at startup. \index{Initialization!glorot, variance scaling}
+[^fn-glorot-init-variance]: **Xavier/Glorot Initialization**: For a layer with $n_{\text{in}}$ inputs and $n_{\text{out}}$ outputs, a common Glorot choice uses weight variance $2/(n_{\text{in}}+n_{\text{out}})$ to balance forward activations and backward gradients [@glorot2010xavier]. The fix costs zero additional FLOPs; it is purely a matter of setting the random distribution at startup. \index{Initialization!glorot, variance scaling}
 
 The distribution of parameters affects information flow through layers. In digit recognition, if weights are too small, important input details might not propagate to later layers. If too large, the network might amplify noise. Biases help adjust the activation threshold of each neuron, enabling the network to learn optimal decision boundaries.
 
@@ -4037,7 +4037,7 @@ A loss function measures how far the network's predictions are from the correct 
 
 Mathematically, a loss function $\mathcal{L}$ takes two inputs: the network's predictions $\hat{y}$ and the true values $y$. For a single training example in digit classification, the loss measures the discrepancy between prediction and truth. When training with batches of data, we typically compute the average loss across all examples in the batch\index{Batch!loss averaging}, as shown in @eq-batch-loss:
 $$ \mathcal{L}_{\text{batch}} = \frac{1}{B}\sum_{i=1}^B \mathcal{L}(\hat{y}_i, y_i) $$ {#eq-batch-loss}
-where $B$ is the batch size\index{Batch Size!loss computation} and $(\hat{y}_i, y_i)$ represents the prediction and truth for the $i$-th example. Averaging over the batch serves two purposes: it makes the loss independent of batch size (so the same learning rate works whether $B = 32$ or $B = 256$), and the summation across examples maps naturally to parallel hardware—each example's loss can be computed independently before a single reduction step combines them.
+where $B$ is the batch size\index{Batch Size!loss computation} and $(\hat{y}_i, y_i)$ represents the prediction and truth for the $i$-th example. Averaging keeps the loss and mean-gradient scale comparable across batch sizes, although the best learning rate can still change with batch size and optimization regime. The summation also maps naturally to parallel hardware: each example's loss can be computed independently before a reduction combines them.
 
 The choice of loss function depends on the type of task. For digit classification, the loss function must handle probability distributions over multiple classes, provide meaningful gradients that guide learning, penalize wrong predictions in proportion to their severity, and scale efficiently with batch processing. Cross-entropy loss satisfies all four requirements.
 
@@ -4049,7 +4049,7 @@ For classification tasks like MNIST digit recognition, **cross-entropy loss**\in
 
 For a single digit image, our network outputs a probability distribution over the 10 possible digits. We represent the true label as a one-hot vector[^fn-one-hot-encoding]\index{One-Hot Encoding!classification labels} where all entries are 0 except for a one at the correct digit's position. For instance, if the true digit is "seven", the label would be $y = \big[0, 0, 0, 0, 0, 0, 0, 1, 0, 0\big]$.
 
-[^fn-one-hot-encoding]: **One-Hot Encoding**: Representing $K$ classes as $K$-dimensional binary vectors where exactly one element is 1. This encoding is sparse by construction: for MNIST's 10 classes, 90 percent of each label vector is zeros. At scale, this sparsity becomes a systems concern. Encoding 100,000 classes (as in large-vocabulary language models) produces label vectors that waste memory and bandwidth, motivating alternatives like label smoothing\index{Label Smoothing!compute efficiency} and sampled softmax\index{Sampled Softmax!compute efficiency} that trade exact one-hot targets for compute efficiency. \index{One-Hot Encoding!sparsity scaling}
+[^fn-one-hot-encoding]: **One-Hot Encoding**: Representing $K$ classes as $K$-dimensional binary vectors where exactly one element is 1. This encoding is sparse by construction: for MNIST's 10 classes, 90 percent of each label vector is zeros. Implementations commonly store an integer class index instead of materializing that vector. For very large output spaces, methods such as sampled softmax\index{Sampled Softmax!compute efficiency} can also reduce the output computation. \index{One-Hot Encoding!sparsity scaling}
 
 The cross-entropy loss for this example is defined in @eq-cross-entropy:
 $$ \mathcal{L}(\hat{y}, y) = -\sum_{j=1}^{10} y_j \log(\hat{y}_j) $$ {#eq-cross-entropy}
@@ -4198,7 +4198,7 @@ Saving activations in the forward loop of @algo-backpropagation-training-step is
 ::: {#psp-nn-computation-memory-cost-backprop .callout-perspective title="The memory cost of backprop"}
 
 In forward inference, we can discard the activations of layer $\ell$ as soon as layer $\ell+1$ is computed. Training is different. Because the gradient at layer $\ell$ depends on the activation at layer $\ell$ (via the chain rule), we must store every intermediate activation until the backward pass reaches that layer. @Eq-training-memory captures this memory decomposition:
-$$ \text{Training Memory} \approx \text{Model Weights} + \text{Optimizer States} + \text{Activations} $$ {#eq-training-memory}
+$$ \text{Training Memory} \approx \text{Model Weights} + \text{Gradients} + \text{Optimizer States} + \text{Activations} $$ {#eq-training-memory}
 
 For deep networks, activations dominate. Storing a batch of high-resolution images across 100 layers can consume gigabytes of accelerator memory. This capacity wall drives the need for later systems techniques that reduce, recompute, or partition training state. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e provides the complete training memory equation and a worked analysis of weights, gradients, optimizer state, and activation costs.
 
@@ -4466,7 +4466,7 @@ where $\theta$ represents the collection of network parameters (weights and bias
 
 For the digit classifier, this means adjusting weights to improve classification accuracy. If the network frequently confuses "seven"s with "one"s, gradient descent will modify weights to better distinguish between these digits. The learning rate $\eta$[^fn-learning-rate-systems] controls adjustment magnitude: too large values cause overshooting optimal parameters, while too small values result in slow convergence.
 
-[^fn-learning-rate-systems]: **Learning Rate**\index{Learning Rate!etymology}: This single scalar has an outsized impact on training infrastructure because it couples directly to batch size. Doubling the batch size (to better saturate GPU parallelism) typically requires scaling the learning rate proportionally, a relationship formalized by the linear scaling rule [@goyal2017accurate]. Misjudging this coupling is a common cause of training divergence when teams scale from single-GPU to multi-GPU setups, often misdiagnosed as a hardware or data issue rather than a hyperparameter mismatch. \index{Learning Rate!batch size coupling}
+[^fn-learning-rate-systems]: **Learning Rate**\index{Learning Rate!etymology}: This scalar has an outsized impact on training infrastructure because scaling batch size can require retuning the optimization schedule. The linear scaling rule increased learning rate with batch size for a specific large-batch ImageNet training regime [@goyal2017accurate], but the best policy depends on the model, optimizer, data, and scale. Applying a scaling rule outside its validated regime can cause divergence when moving from single-GPU to multi-GPU training. \index{Learning Rate!batch size coupling}
 
 {{< margin-video "https://youtu.be/tIeHLnjs5U8?si=Uckr8YPwwAZ_UI6t" "Backpropagation" "3Blue1Brown" >}}
 
@@ -4611,7 +4611,7 @@ The transition from training to inference introduces a constraint on model adapt
 
 #### Operational phase differences {#sec-neural-computation-operational-phase-differences-3f95}
 
-Neural network operation divides into two distinct phases\index{Training vs. Inference!operational differences}\index{Inference!forward pass only} with markedly different computational requirements. @Fig-training-vs-inference contrasts these phases visually. Inference performs only the forward pass, processing inputs through the learned weights with batch sizes that vary according to demand. Training adds the backward pass for gradient computation and parameter updates, requires larger fixed batches to stabilize gradient estimates, and must store activations, gradients, and optimizer state simultaneously, consuming significantly more memory. The network architecture is identical in both phases; the difference lies entirely in computational and memory orchestration.
+Neural network operation divides into two distinct phases\index{Training vs. Inference!operational differences}\index{Inference!forward pass only} with markedly different computational requirements. @Fig-training-vs-inference contrasts these phases visually. Inference performs only the forward pass, processing inputs through the learned weights with batch sizes that vary according to demand. Training adds the backward pass for gradient computation and parameter updates, uses batches chosen for optimization and throughput, and must store activations, gradients, and optimizer state simultaneously, consuming significantly more memory. The network architecture is identical in both phases; the difference lies in computational and memory orchestration.
 
 ::: {#fig-training-vs-inference fig-env="figure" fig-pos="htb" fig-cap="**Inference vs. Training Flow**: During inference, neural networks use learned weights for forward pass computation only, simplifying the data flow and reducing computational cost compared to training, which requires both forward and backward passes for weight updates. This streamlined process enables efficient deployment of trained models for real-time predictions." fig-alt="Two parallel diagrams comparing inference and training. Both show stacked rectangles representing batches feeding into network layers and output nodes. Inference section shows smaller varied batch sizes with dashed outlines. Training section shows larger fixed batches with solid outlines. Network architecture identical in both with fully connected layers."}
 
@@ -5557,6 +5557,7 @@ These foundations equip engineers to reason about neural networks from first pri
 # │       below dense-GPU roofline ridge points.
 # │ How: Sum pipeline latencies, compute the majority-class baseline, and
 # │      locally recompute MNIST arithmetic intensity and memory ratio.
+# │ Scope: chapter-anchor
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
