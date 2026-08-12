@@ -39,6 +39,14 @@ _SVG_ARIA_LABEL = re.compile(r'aria-label="([^"]*)"')
 # well-formedness error under strict XML parsers like Kindle / epubcheck.
 _BARE_BR = re.compile(r'<br(\s*)>')
 
+# Quarto requires the first book chapter to be named index.qmd. When that
+# volume-specific landing page is intentionally empty for non-HTML formats,
+# Pandoc can emit a self-closing, textless TOC link. EPUB navigation links
+# must have accessible text, so remove only the empty list item from nav.xhtml.
+_EMPTY_NAV_LINK_ITEM = re.compile(
+    r'<li\b[^>]*>\s*<a\b[^>]*(?:/\s*>|>\s*</a>)\s*</li>'
+)
+
 
 def _sanitize_comment_body(match):
     """Replace -- inside an HTML comment body with `- -` (XML-safe)."""
@@ -160,6 +168,7 @@ def sanitize_xml_for_epubcheck(temp_dir):
         'svg_aria_c0': 0,      # C0 chars in aria-label     (RSC-016 FATAL)
         'href_rewritten': 0,   # href URLs needing sanitization (RSC-020)
         'alt_on_wrapper': 0,   # alt="..." on non-img element  (RSC-005)
+        'empty_nav_links': 0,  # textless nav anchors            (RSC-005)
     }
 
     def sanitize_xhtml(text):
@@ -234,6 +243,8 @@ def sanitize_xml_for_epubcheck(temp_dir):
     if nav_path.exists():
         original = nav_path.read_text(encoding='utf-8')
         modified, deltas = sanitize_xhtml(original)
+        modified, empty_nav_links = _EMPTY_NAV_LINK_ITEM.subn('', modified)
+        deltas['empty_nav_links'] = empty_nav_links
         for k, v in deltas.items():
             counts[k] += v
         if modified != original:
@@ -258,6 +269,7 @@ def sanitize_xml_for_epubcheck(temp_dir):
     print(f"      ✅ SVG aria-label C0 chars:       {counts['svg_aria_c0']}")
     print(f"      ✅ href URLs normalized:          {counts['href_rewritten']}")
     print(f"      ✅ alt→aria-label on wrappers:    {counts['alt_on_wrapper']}")
+    print(f"      ✅ Empty nav links removed:       {counts['empty_nav_links']}")
 
     return counts
 
