@@ -265,11 +265,19 @@ class ModuleWorkflowCommand(BaseCommand):
         module_name = module_mapping[normalized]
         module_num = int(normalized)
 
-        # Check if already started
+        # Check if already started. Tracking (started_modules) and the
+        # notebook on disk can desync, e.g. `tito system reset
+        # --keep-progress` clears modules/ but intentionally preserves
+        # started_modules/completed_modules. If that's happened, don't
+        # dead-end the student on "already started"; fall through to the
+        # recreate-from-src/ logic below instead.
         if self.is_module_started(normalized):
-            self.console.print(f"[yellow]⚠️  Module {normalized} already started[/yellow]")
-            self.console.print(f"💡 Did you mean: [bold cyan]tito module resume {normalized}[/bold cyan]")
-            return 1
+            if (self.config.project_root / "modules" / module_name).exists():
+                self.console.print(f"[yellow]⚠️  Module {normalized} already started[/yellow]")
+                self.console.print(f"💡 Did you mean: [bold cyan]tito module resume {normalized}[/bold cyan]")
+                return 1
+            self.console.print(f"[yellow]⚠️  Module {normalized} was started before, but its notebook is missing[/yellow]")
+            self.console.print(f"[cyan]🔁 Recreating it from source...[/cyan]")
 
         # Check prerequisites - all previous modules must be completed
         progress = self.get_progress_data()
@@ -491,6 +499,21 @@ class ModuleWorkflowCommand(BaseCommand):
             self.console.print(f"[yellow]⚠️  Module {normalized} not started yet[/yellow]")
             self.console.print(f"💡 Start with: [bold cyan]tito module start {normalized}[/bold cyan]")
             return 1
+
+        # Tracking says started, but the notebook itself may be missing,
+        # e.g. `tito system reset --keep-progress` clears modules/ while
+        # intentionally preserving started_modules/completed_modules.
+        # Recreate it from src/ instead of dead-ending inside _open_jupyter
+        # with "directory not found" and no way forward.
+        module_dir = self.config.project_root / "modules" / module_name
+        if not module_dir.exists():
+            self.console.print(f"[yellow]⚠️  Module {normalized} was started before, but its notebook is missing[/yellow]")
+            self.console.print(f"[cyan]🔁 Recreating it from source...[/cyan]")
+            if not self._create_module_from_src(module_name):
+                self.console.print(f"[red]❌ Could not recreate module {module_name}[/red]")
+                self.console.print(f"💡 Try: [bold cyan]tito module reset {normalized} --force[/bold cyan]")
+                return 1
+            self.console.print(f"[green]✅ Module {normalized} ready![/green]")
 
         # Update last worked
         self.update_last_worked(normalized)
