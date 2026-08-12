@@ -175,13 +175,13 @@ The multi-dimensional nature of this frontier makes optimization challenging. @T
 
 The dimensions in @tbl-performance-engineering-frontier-dimensions interact in nonobvious ways. Increasing batch size improves throughput and cost efficiency but degrades latency. Reducing precision improves throughput and memory but may degrade quality. Speculative decoding improves latency but may increase per-token cost. The performance engineer's task is to navigate these trade-offs guided by the application's specific requirements.
 
-A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the performance-engineering toolbox provides the methods for reaching that point. To make this concrete, consider two deployment configurations for the same 70B large language model (LLM).
+A real-time chatbot prioritizes latency (time-to-first-token under 200 ms, inter-token latency under 50 ms) and may tolerate higher per-token cost. A batch processing pipeline for document summarization prioritizes throughput and cost, tolerating seconds of latency. A medical diagnostic system prioritizes quality above all else, accepting lower throughput and higher cost. Each application maps to a different optimal point on the efficiency frontier, and the performance-engineering toolbox provides the methods for reaching that point. To make this concrete, consider two deployment configurations for the same 70B large language model (LLM), using an illustrative price of \$2.70 per H100-hour for both.
 
 Configuration A is latency-optimized: FP16 weights, batch size 1, speculative decoding enabled. The model replica produces approximately 50 tokens/second with 20 ms inter-token latency while occupying 8 H100 GPUs for a single user stream. Cost: approximately \$0.12 per 1,000 output tokens.
 
-Configuration B is throughput-optimized: INT4 weights, batch size 64, no speculation. Each H100 serves approximately 4,000 tokens/second aggregate throughput across all batched requests, with 120 ms inter-token latency per request. Cost: 4 GPUs serving 64 concurrent users, approximately \$0.002 per 1,000 output tokens.
+Configuration B is throughput-optimized: INT4 weights, batch size 64, no speculation. Each H100 serves approximately 4,000 tokens/second aggregate throughput across all batched requests, with 120 ms inter-token latency per request. Cost: 4 GPUs serving 64 concurrent users, approximately \$0.00019 per 1,000 output tokens.
 
-Configuration B achieves 60$\times$ lower cost per token than Configuration A, but at 6$\times$ higher latency. Neither configuration is objectively "better"; they represent different points on the efficiency frontier, optimized for different applications. Performance engineering is the discipline of navigating between these points.
+Configuration B achieves 640$\times$ lower cost per token than Configuration A, but at 6$\times$ higher latency. Neither configuration is objectively "better"; they represent different points on the efficiency frontier, optimized for different applications. Performance engineering is the discipline of navigating between these points.
 
 ### The memory wall {#sec-performance-engineering-memory-wall-physics}
 
@@ -791,11 +791,11 @@ A serving scheduler can keep the effective batch full by adding new requests as 
 
 A critical enabler for large batch sizes is **PagedAttention**\index{PagedAttention}[^fn-paged-attention-os], vLLM's paged KV cache management technique [@kwon2023]. Traditional KV cache implementations preallocate contiguous memory for each request's maximum possible sequence length.
 
-[^fn-paged-attention-os]: **PagedAttention**\index{PagedAttention!memory management}: Named by direct analogy to OS virtual memory paging, where the OS maps noncontiguous physical pages to contiguous virtual addresses. The vLLM paper presented this insight at SOSP 2023: the same mechanism eliminates internal fragmentation in KV caches, recovering the 60--80 percent of GPU memory wasted by worst-case preallocation [@kwon2023]. This single abstraction transformed LLM serving economics by enabling 2--4$\times$ larger batch sizes without any change to model weights or precision.
+[^fn-paged-attention-os]: **PagedAttention**\index{PagedAttention!memory management}: Named by direct analogy to OS virtual memory paging, where the OS maps noncontiguous physical pages to contiguous virtual addresses. The vLLM paper presented this insight at SOSP 2023: the same mechanism eliminates internal fragmentation in KV caches, recovering the 60--80 percent of GPU memory wasted by worst-case preallocation [@kwon2023]. In the paper's end-to-end evaluation, vLLM improves throughput by 2--4$\times$ at the same latency relative to FasterTransformer and Orca, without changing model weights or precision.
 
-If the maximum is 4,096 tokens but the average is 500, approximately 88 percent of the allocated memory is wasted. PagedAttention divides the KV cache into fixed-size blocks (pages), allocated on demand as the sequence grows. This eliminates memory fragmentation and enables near-100 percent utilization of the KV cache memory budget. The performance impact is indirect but substantial: by reducing memory waste, PagedAttention enables 2--4$\times$ larger effective batch sizes, which in turn improve throughput and GPU utilization through the batch size mechanism described earlier.
+If the maximum is 4,096 tokens but the average is 500, approximately 88 percent of the allocated memory is wasted. PagedAttention divides the KV cache into fixed-size blocks (pages), allocated on demand as the sequence grows. This eliminates memory fragmentation and enables near-100 percent utilization of the KV cache memory budget. The performance impact is indirect but substantial: by reducing memory waste, PagedAttention expands the feasible batch size, one mechanism behind the paper's reported 2--4$\times$ throughput improvement at the same latency.
 
-PagedAttention and KV cache quantization interact multiplicatively. PagedAttention reduces memory *waste* (from fragmentation), while quantization reduces memory *usage* (from precision). Together, they increase the effective batch size by 8--16$\times$ compared to a baseline system with preallocated FP16 KV caches, fundamentally changing the economics of LLM serving.
+PagedAttention and KV cache quantization address complementary sources of memory pressure. PagedAttention reduces memory *waste* from fragmentation, while quantization reduces memory *usage* from precision. Their joint batch-size gain depends on the model-weight footprint, request-length distribution, and scheduler headroom, so it cannot be inferred by multiplying the paper's throughput result by the 2$\times$ precision reduction.
 
 ### The prefill-decode decomposition {#sec-performance-engineering-prefill-decode}
 
@@ -1018,29 +1018,29 @@ The combination of operator fusion (reducing the number of kernels) and CUDA Gra
 
 ### FlashAttention: Tiled attention as a system primitive {#sec-performance-engineering-flashattention}
 
-Standard self-attention computes $\text{Softmax}(\mathbf{Q}\mathbf{K}^T / \sqrt{d_k})\mathbf{V}$, where $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $S{\times}S$ attention matrix $\mathbf{A} = \mathbf{Q}\mathbf{K}^T$ in HBM, where $S$ is the sequence length. For $S = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head, so the quadratic score tensors run to several gigabytes per layer. The canonical accounting below makes this precise for a 64-head Llama-style layer, counting the score and probability traffic alongside the persistent $Q$, $K$, $V$, and output tensors.
+Standard self-attention computes $\text{Softmax}(\mathbf{Q}\mathbf{K}^T / \sqrt{d_k})\mathbf{V}$, where $\mathbf{Q}$, $\mathbf{K}$, and $\mathbf{V}$ are matrices of shape $[\text{sequence length}{\times}\text{head dimension}]$. The na\"ive implementation materializes the full $S{\times}S$ attention matrix $\mathbf{A} = \mathbf{Q}\mathbf{K}^T$ in HBM, where $S$ is the sequence length. For $S = 8192$ and FP16 precision, this matrix alone consumes $8192 \times 8192 \times 2 \approx 134$ MB per attention head, so the quadratic score tensors run to several gigabytes per layer. The simplified accounting below compares HBM-visible bytes for a 64-head Llama-style layer under explicit traffic assumptions.
 
 ```{python}
 #| echo: false
 #| label: flash-attention-savings-refactor
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ FLASHATTENTION MATERIALIZED-STATE SAVINGS (LEGO)
+# │ FLASHATTENTION HBM-TRAFFIC SCENARIO (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-performance-engineering-flashattention FlashAttention prose
 # │
-# │ Goal: Quantify materialized attention-state reduction from tiling attention for a 64-head,
+# │ Goal: Compare a simplified naive-attention traffic estimate with an idealized tiled-attention lower bound for a 64-head,
 # │       8192-token sequence and 128-wide attention head, FP16 configuration.
-# │ Show: ~65x reduction in materialized quadratic state by avoiding sequence-by-sequence tensors.
-# │ How: Naive materializes score/probability matrices plus Q/K/V/output; Flash keeps only linear Q/K/V/output
-# │      as persistent HBM-visible tensors. Kernel tile reload traffic is schedule
-# │      dependent and is intentionally not counted here.
+# │ Show: ~65x scenario ratio from avoiding sequence-by-sequence HBM traffic.
+# │ How: Naive writes and reads score/probability matrices and moves Q/K/V/output once;
+# │      Flash counts one Q/K/V read and one output write. Kernel tile reload traffic is
+# │      schedule dependent and is intentionally excluded.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FlashAttentionSavings:
-    """Materialized-state analysis for tiled attention vs naive."""
+    """Simplified HBM-traffic scenario for tiled attention vs naive."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim import Models
@@ -1052,8 +1052,8 @@ class FlashAttentionSavings:
     bytes_per_elem = BYTES_FP16
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    # Step 1: Naive attention materialized state per head:
-    # Read Q, K, V once; write/read score and probability matrices; write output once.
+    # Step 1: Naive attention HBM traffic per head:
+    # Write/read score and probability matrices; move Q, K, V, and output once.
     naive_attn_bytes_per_head = 4 * seq_len * seq_len * bytes_per_elem + 4 * seq_len * head_dim * bytes_per_elem
     naive_attn_bytes_total = naive_attn_bytes_per_head * num_heads
 
@@ -1086,12 +1086,12 @@ class FlashAttentionSavings:
 FlashAttention\index{FlashAttention} [@dao2022] reformulates attention using tiling\index{Tiling}. Instead of materializing the full $S{\times}S$ attention matrix, it processes $Q$, $K$, and $V$ in small blocks that fit in on-chip SRAM. The algorithm loads tiles of $Q$, $K$, and $V$, computes partial attention scores, and maintains running statistics (online softmax) to produce the exact result without ever storing the full attention matrix in HBM.
 
 ::: {.column-margin}
-![](images/svg/performance_engineering_flash_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in blue. The naive attention rung is about 35 GB of materialized HBM state; the FlashAttention rung is about 537 MB. The gap is roughly 65 times."}
+![](images/svg/performance_engineering_flash_ladder.svg){width="100%" fig-alt="A two-rung magnitude ladder on a log scale, in blue. Under the chapter's simplified traffic assumptions, the naive attention rung is about 35 GB and the FlashAttention rung is about 537 MB. The ratio is roughly 65."}
 
-*FlashAttention shrinks attention memory about 65 times.*
+*An illustrative HBM-traffic accounting gives a ratio of about 65.*
 :::
 
-The reduction in materialized attention state is dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the naive implementation materializes and revisits approximately `{python} FlashAttentionSavings.naive_gb_str` of HBM-resident tensors for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. FlashAttention avoids the quadratic score and probability tensors; its persistent HBM-visible tensors are dominated by $Q$, $K$, $V$, and output $Y$, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. This simplified accounting excludes schedule-dependent tile reloads inside a particular kernel, but it captures the important scaling result: a `{python} FlashAttentionSavings.savings_mult_str` reduction in HBM-visible attention state for this configuration.
+The reduction in HBM traffic can be dramatic. For a sequence length of `{python} FlashAttentionSavings.head_n_str`, 64 heads, and head dimension `{python} FlashAttentionSavings.head_d_str` in FP16, the simplified naive estimate writes and reads the score and probability matrices and moves $Q$, $K$, $V$, and output once, totaling approximately `{python} FlashAttentionSavings.naive_gb_str` for the full layer, or `{python} FlashAttentionSavings.naive_head_traffic_mb_str` per head. The idealized FlashAttention lower bound counts one read of $Q$, $K$, and $V$ and one output write, totaling approximately `{python} FlashAttentionSavings.flash_mb_str` for the full layer, or `{python} FlashAttentionSavings.flash_head_traffic_mb_str` per head. The resulting `{python} FlashAttentionSavings.savings_mult_str` ratio is a scenario comparison, not a claim about allocated memory or realized kernel traffic; actual traffic depends on tile reloads and the implementation schedule.
 
 The key insight behind FlashAttention is the **online softmax**\index{Online Softmax!FlashAttention}[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $S{\times}S$ matrix.
 
@@ -1131,7 +1131,7 @@ class FlashAttentionTiling:
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     tile_dim = 128  # scenario assumption: FlashAttention tile size on H100
-    seq_len = 8192  # sequence length (matches the materialized-state example above)
+    seq_len = 8192  # sequence length (matches the traffic scenario above)
     bytes_per_elem = BYTES_FP16
     shared_per_sm = Hardware.Cloud.H100.memory.shared_memory_per_sm
 
@@ -1151,7 +1151,7 @@ class FlashAttentionTiling:
     tiles_per_dim_str = fmt_int(tiles_per_dim, commas=False)
 ```
 
-The mechanism that delivers the materialized-state reduction quantified above is tiling. FlashAttention processes the computation in tiles (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), a block of $K$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), and a block of $V$ (`{python} FlashAttentionTiling.block_kb_str`), totaling approximately `{python} FlashAttentionTiling.total_kb_str`. This fits comfortably in the H100's `{python} FlashAttentionTiling.shared_kb_str` of shared memory per SM. The tile score $A_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 =$ `{python} FlashAttentionTiling.tiles_per_dim_str` column tiles for each of `{python} FlashAttentionTiling.tiles_per_dim_str` row tiles, reloading tiles as required by the kernel schedule. The important point is that the quadratic $S{\times}S$ score and probability matrices are never materialized: the persistent per-head tensors are $Q$, $K$, $V$, $Y$, and $\mathcal{O}(S)$ softmax statistics, instead of the hundreds of megabytes of quadratic intermediates the canonical accounting above counted.
+The mechanism behind the traffic reduction above is tiling. FlashAttention processes the computation in tiles (typically $128{\times}128$ on H100). For one tile, the algorithm loads a block of $Q$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), a block of $K$ ($128 \times 128 \times 2 \approx$ `{python} FlashAttentionTiling.block_kb_str`), and a block of $V$ (`{python} FlashAttentionTiling.block_kb_str`), totaling approximately `{python} FlashAttentionTiling.total_kb_str`. This fits comfortably in the H100's `{python} FlashAttentionTiling.shared_kb_str` of shared memory per SM. The tile score $A_{\text{tile}} = Q_{\text{tile}} K_{\text{tile}}^T$ is computed and consumed entirely within SRAM; it is never written to HBM. The algorithm iterates over $8192/128 =$ `{python} FlashAttentionTiling.tiles_per_dim_str` column tiles for each of `{python} FlashAttentionTiling.tiles_per_dim_str` row tiles, reloading tiles as required by the kernel schedule. The important point is that the quadratic $S{\times}S$ score and probability matrices are never materialized: the persistent per-head tensors are $Q$, $K$, $V$, $Y$, and $\mathcal{O}(S)$ softmax statistics.
 
 FlashAttention-2 [@dao2023flashattention2] further optimizes the algorithm for GPU architectures with many streaming multiprocessors by restructuring the parallelism pattern. The original FlashAttention parallelizes over batch and head dimensions, meaning each thread block handles one (batch, head) pair and iterates over the full sequence. FlashAttention-2 additionally parallelizes over the sequence dimension of the query matrix, distributing work across thread blocks more efficiently and achieving better occupancy. It also reduces the number of non-GEMM FLOPs by restructuring the rescaling operations and exploiting the asymmetry between the Q loop (outer) and K/V loop (inner).
 
@@ -1182,9 +1182,9 @@ Verify your understanding of memory-aware attention:
 
 :::
 
-The `{python} FlashAttentionSavings.savings_mult_str` figure above is the canonical, full-layer materialized-state reduction; it is the number to carry forward. @Fig-flashattention-memory-savings adds only the *scaling shape*: because standard-attention workspace grows quadratically while FlashAttention's running state grows linearly, the advantage widens with sequence length. The plot's larger ratios reflect a narrower accounting boundary, comparing only the quadratic score workspace against the linear running statistics rather than the full set of HBM-visible tensors, so they are not directly comparable to the `{python} FlashAttentionSavings.savings_mult_str` figure; the takeaway is that the gap grows, not its exact value at a given length.
+The `{python} FlashAttentionSavings.savings_mult_str` figure above belongs only to its stated traffic scenario. @Fig-flashattention-memory-savings adds the *scaling shape*: because standard-attention workspace grows quadratically while FlashAttention's running state grows linearly, the advantage widens with sequence length. The plot uses a narrower workspace boundary, so its ratios are not directly comparable to the traffic scenario; the takeaway is that the gap grows, not its exact value at a given length.
 
-::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention Memory Savings**: $\mathcal{O}(S^2) \rightarrow \mathcal{O}(S)$. Standard attention allocates the full $S{\times}S$ score matrix in HBM, while FlashAttention maintains only $\mathcal{O}(S)$ running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. This workspace-only comparison uses a narrower boundary than the full-layer materialized-state accounting in the text; its point is the widening shape of the gap as context grows, not a headline ratio." fig-alt="Log-log plot of attention memory vs. sequence length. Standard quadratic curve rises steeply; FlashAttention linear curve grows more slowly. Shaded region shows savings, with annotations at 8K and 65K."}
+::: {#fig-flashattention-memory-savings fig-env="figure" fig-pos="htb" fig-cap="**FlashAttention Memory Savings**: $\mathcal{O}(S^2) \rightarrow \mathcal{O}(S)$. Standard attention allocates the full $S{\times}S$ score matrix in HBM, while FlashAttention maintains only $\mathcal{O}(S)$ running statistics. The shaded region represents memory freed for KV cache, activations, or larger batch sizes. This workspace-only comparison uses a narrower boundary than the traffic scenario in the text; its point is the widening shape of the gap as context grows, not a headline ratio." fig-alt="Log-log plot of attention memory vs. sequence length. Standard quadratic curve rises steeply; FlashAttention linear curve grows more slowly. Shaded region shows savings, with annotations at 8K and 65K."}
 
 ```{python}
 #| echo: false
@@ -1495,11 +1495,11 @@ In the **graph capture**\index{Graph Capture} stage, the compiler traces the mod
 
 During **graph-level optimization**\index{Graph Compilation!graph-level optimization}, the compiler applies algebraic simplifications and operation rewriting. It identifies that the bias addition in the first `Linear` layer can be folded into the matrix multiplication kernel. It also recognizes that the `GELU` activation is an element-wise operation that depends only on the output of the first `Linear`. These standard compiler optimizations can reduce graph size by 10--30 percent before any hardware-specific work begins.
 
-The operator fusion pass is the most critical for performance. It identifies sequences of operations that can be combined into single kernels to reduce memory traffic. For the FFN block, the compiler fuses the `GELU` activation into the tail of the first `Linear` kernel (if supported as an epilogue) or fuses the `GELU` and the subsequent `LayerNorm` into a single kernel. Instead of writing the intermediate result of the first `Linear` to HBM and reading it back for `GELU`, the fused kernel keeps the data in the GPU's SRAM or registers. This typically reduces the number of HBM accesses by 30--50 percent, directly alleviating the memory bandwidth bottleneck.
+The operator fusion pass is the most critical for performance. It identifies adjacent operations that can be combined into single kernels to reduce memory traffic. For the FFN block, the compiler can fuse the `GELU` activation into the tail of the first `Linear` kernel when the GEMM supports that epilogue. The second `Linear` lies between `GELU` and `LayerNorm`, so those two operations are not an adjacent fusion pair. Instead of writing the intermediate result of the first `Linear` to HBM and reading it back for `GELU`, the fused epilogue keeps the data in the GPU's SRAM or registers. This typically reduces the number of HBM accesses by 30--50 percent, directly alleviating the memory bandwidth bottleneck.
 
 The memory planning pass determines when to allocate and free tensors. Without optimization, a transformer might allocate separate buffers for every intermediate activation. The compiler analyzes tensor lifetimes, recognizing that the input to the first `Linear` is no longer needed after the second `Linear` computes its output, and reuses the same physical memory addresses. For inference and other forward-only workloads, this buffer reuse can turn peak temporary memory from the sum of many layer-local buffers into the maximum live working set. Training activations that must be saved for the backward pass require checkpointing or rematerialization; ordinary buffer reuse cannot make those saved tensors disappear. Memory planning also interacts with operator fusion: fusing two operations eliminates the intermediate tensor between them, which both removes the HBM traffic and removes the memory allocation. The compiler must reason about both effects jointly to make profitable decisions.
 
-The kernel selection pass maps each fused operation to a specific machine code implementation. For the computationally heavy linear projections, the compiler selects a vendor-optimized cuBLAS or CUTLASS GEMM kernel. For the fused `GELU-LayerNorm` sequence, it generates a custom Triton kernel that keeps data in SRAM. The result for the FFN block is a reduction from 4 separate kernels to 2 highly optimized kernels, with a corresponding reduction in global memory traffic.
+The kernel selection pass maps each fused operation to a specific machine code implementation. For the first `Linear-GELU`, the compiler selects a vendor-optimized cuBLAS or CUTLASS GEMM with an activation epilogue when available; the second `Linear` remains an optimized GEMM, and `LayerNorm` lowers to its own optimized reduction and normalization kernel. The result for the FFN block is a reduction from 4 separate kernels to 3 optimized kernels, with a corresponding reduction in global memory traffic.
 
 ### torch.compile {#sec-performance-engineering-torch-compile}
 
@@ -1863,6 +1863,8 @@ class NvlinkH100:
     bytes_per_elem = BYTES_FP16
     batch_small = 1
     batch_large = 64
+    launch_overhead = 5 * microsecond
+    b64_compute_time = 20 * microsecond
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     # Each AllReduce moves 2 * d_model * B activations, 2 bytes each (FP16).
@@ -1870,12 +1872,15 @@ class NvlinkH100:
     b64_vol = 2 * d_model * batch_large * bytes_per_elem
     b1_time = (b1_vol / bw).to(nanosecond)
     b64_time = (b64_vol / bw).to(microsecond)
+    b64_comm_time = b64_time + launch_overhead
+    b64_compute_to_comm_ratio = (b64_compute_time / b64_comm_time).to("").magnitude
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_qty, fmt_qty_int, fmt_time, check
+    from mlsysim.fmt import fmt, fmt_multiple, fmt_qty, fmt_qty_int, fmt_time, check
 
     check(bw > 500 * GB / second, "H100 NVLink bandwidth should exceed 500 GB/s")
     check(b64_vol == 64 * b1_vol, "Batch-64 volume should be 64x the batch-1 volume")
+    check(2.5 < b64_compute_to_comm_ratio < 3.0, "Batch-64 compute/communication ratio should be about 2.7x")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     bw_gb_per_s_str = fmt_qty_int(bw, GB / second, commas=False)
@@ -1883,11 +1888,15 @@ class NvlinkH100:
     b1_time_ns_str = fmt_time(b1_time, nanosecond, precision=1, commas=False)
     b64_vol_mb_str = fmt_qty(b64_vol, MB, precision=1, commas=False)
     b64_time_us_str = fmt_time(b64_time, microsecond, precision=1, commas=False)
+    launch_overhead_us_str = fmt_time(launch_overhead, microsecond, precision=0, commas=False)
+    b64_comm_time_us_str = fmt_time(b64_comm_time, microsecond, precision=1, commas=False)
+    b64_compute_time_us_str = fmt_time(b64_compute_time, microsecond, precision=0, commas=False)
+    b64_compute_to_comm_mult_str = fmt_multiple(b64_compute_to_comm_ratio, precision=1, commas=False)
 ```
 
-Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d_{\text{model}} \times B \times 2$ bytes at FP16 (where $d_{\text{model}} = 8192$ for a 70B model and $B$ is batch size). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 =$ `{python} NvlinkH100.b1_vol_kb_str` per AllReduce. At `{python} NvlinkH100.bw_gb_per_s_str` NVLink bandwidth, this transfer takes approximately `{python} NvlinkH100.b1_time_ns_str`. However, the AllReduce launch overhead (approximately 5 $\mu$s) dominates the actual data transfer time by 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
+Consider a concrete example: a 70B model with tensor parallelism across 8 H100 GPUs. Each transformer layer requires two AllReduce\index{AllReduce} operations (one after attention, one after FFN). Each AllReduce transfers approximately $2 \times d_{\text{model}} \times B \times 2$ bytes at FP16 (where $d_{\text{model}} = 8192$ for a 70B model and $B$ is batch size). At batch size 1, the data volume is $2 \times 8192 \times 1 \times 2 =$ `{python} NvlinkH100.b1_vol_kb_str` per AllReduce. At `{python} NvlinkH100.bw_gb_per_s_str` NVLink bandwidth, this transfer takes approximately `{python} NvlinkH100.b1_time_ns_str`. However, the AllReduce launch overhead (approximately `{python} NvlinkH100.launch_overhead_us_str`) dominates the actual data transfer time by more than 100$\times$. At batch size 1, the AllReduce overhead is dominated by software launch latency, not bandwidth, and overlap provides limited benefit because there is insufficient compute to hide behind.
 
-At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 =$ `{python} NvlinkH100.b64_vol_mb_str`, taking approximately `{python} NvlinkH100.b64_time_us_str` at NVLink bandwidth. The compute path over a shard is now a bundle of kernels, not a single GEMM: the attention and FFN work together take on the order of 20 $\mu$s for this configuration, while the communication remains around `{python} NvlinkH100.b64_time_us_str`. Here, the compute time exceeds the communication time by about 9$\times$, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
+At batch size 64, the data volume per AllReduce grows to $2 \times 8192 \times 64 \times 2 =$ `{python} NvlinkH100.b64_vol_mb_str`, taking approximately `{python} NvlinkH100.b64_time_us_str` at NVLink bandwidth. Including launch overhead, exposed communication takes approximately `{python} NvlinkH100.b64_comm_time_us_str`. The compute path over a shard is now a bundle of kernels, not a single GEMM: the attention and FFN work together take on the order of `{python} NvlinkH100.b64_compute_time_us_str` for this configuration. Here, the compute time exceeds the communication time by about `{python} NvlinkH100.b64_compute_to_comm_mult_str`, and overlap becomes highly effective. This illustrates why batch size is the universal control knob: it simultaneously improves arithmetic intensity, GPU utilization, and communication overlap effectiveness.
 
 This per-layer tensor-parallel example is the small-payload side of the overlap problem. Training gradient synchronization uses the same exposed-time test with much larger payloads, so the gradient-overlap calculation switches from activation exchanges to ring AllReduce over the gradient tensor.
 
@@ -1904,7 +1913,7 @@ The potential benefit of communication-computation overlap depends on the relati
 # │ Context: @sec-performance-engineering-overlap-quantify overlap analysis prose
 # │
 # │ Goal: Quantify training step speedup from overlapping ring-AllReduce with
-# │       backward pass for a 7B model on 8 H100 GPUs over NVLink (900 GB/s),
+# │       backward pass for an 8B model on 8 H100 GPUs over NVLink (900 GB/s),
 # │       at 40% MFU, to show when overlap fully hides communication overhead.
 # │ Show: ~14 GB gradients; ~145 ms backward; ~27 ms AllReduce; step drops from
 # │       ~245 ms (no overlap) to ~217 ms (with overlap) -> ~1.13x speedup—inline.
@@ -1917,7 +1926,7 @@ from mlsysim.fmt import fmt, MarkdownStr, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class OverlapCalc:
-    """Communication-computation overlap speedup for 7B model on 8 H100s."""
+    """Communication-computation overlap speedup for 8B model on 8 H100s."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     from mlsysim import Models, Hardware
@@ -1926,7 +1935,7 @@ class OverlapCalc:
         calc_ring_allreduce_data_factor,
     )
 
-    m = Models.Language.Llama3_8B  # 7-8B scale
+    m = Models.Language.Llama3_8B
     h = Hardware.Cloud.H100
     num_gpus = 8
     # Per-direction NVLink rate (one-way beta for the ring AllReduce); the
@@ -1994,7 +2003,7 @@ class OverlapCalc:
     nvlink_bw_gb_per_s_str = fmt_qty_int(nvlink_bw, GB / second, commas=False)
 ```
 
-Consider a 7B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` per direction. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. Per the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider an 8B parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` per direction. The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. Per the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The backward pass computation, at 40 percent Model FLOPs Utilization (MFU, the fraction of peak throughput spent on useful model FLOPs, defined in @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488), takes approximately `{python} OverlapCalc.backward_ms_str`.
 
 Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (forward + backward + AllReduce). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str`, a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As @fig-overlap-budget shows, as cluster scale increases from 8 to 1024 GPUs, overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. In that figure, each bar is normalized to the fixed compute budget of 100 units, and the bar height grows roughly fivefold across the x-axis because the exposed-communication segment stacked on top of that budget is precisely the portion of communication that overlap can no longer hide. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
@@ -2542,7 +2551,7 @@ In production, achieved MFU typically sits 10--20 percent lower than these hero 
 *   Reliability: Checkpointing and health heartbeats.
 *   Entropy: Thermal throttling, memory fragmentation, and multi-tenant network noise.
 
-When planning capacity, engineers must budget for the reality tax. If a benchmark projects 30 days of training, the production plan should assume 35--40 days.
+When planning capacity, engineers must budget for the reality tax. If a benchmark projects 30 days of training, a 10--20 percent slowdown implies approximately 33.3--37.5 days.
 
 :::
 
@@ -2734,7 +2743,7 @@ class FlashAttentionSummaryRecap:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     savings_mult_str = fmt_multiple(savings_ratio, commas=False, precision=0)
 ```
-The chapter's techniques form an optimization stack rather than a menu. Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, avoiding the quadratic attention intermediates that dominate long sequences through tiling and online softmax; in the 8K attention example, this is a `{python} FlashAttentionSummaryRecap.savings_mult_str` reduction in materialized attention state. Precision engineering then reduces the bytes in the trips that remain: FP8 formats improve effective bandwidth on H100 hardware, block-wise quantization protects the outlier features that defeat uniform quantization, and KV cache compression directly increases the batch sizes a serving node can admit.
+The chapter's techniques form an optimization stack rather than a menu. Operator fusion eliminates redundant HBM round-trips by combining sequences of operations into single kernels. FlashAttention is the canonical example, avoiding the quadratic attention intermediates that dominate long sequences through tiling and online softmax; in the 8K example, the chapter's simplified traffic assumptions give a `{python} FlashAttentionSummaryRecap.savings_mult_str` ratio. Precision engineering then reduces the bytes in the trips that remain: FP8 formats improve effective bandwidth on H100 hardware, block-wise quantization protects the outlier features that defeat uniform quantization, and KV cache compression directly increases the batch sizes a serving node can admit.
 
 Graph compilation moves those local transformations from hand-written kernels into the model graph. torch.compile/TorchInductor generates optimized Triton kernels from standard PyTorch code, XLA provides whole-program optimization for JAX/TPU workloads, and TensorRT specializes stable inference graphs. Communication-computation overlap applies the same bottleneck logic at the distributed boundary, hiding network latency when communication can run under useful compute. Speculative decoding and MoE go one level higher: instead of optimizing the same dense computation, they restructure the computation itself by obtaining more accepted tokens per target-model pass or by activating only the experts a token needs. System profiling closes the loop by showing which term dominates after each change, so the next intervention follows the new bottleneck rather than the old intuition.
 
@@ -2745,7 +2754,7 @@ This iterative mindset also determines which skills endure as hardware evolves. 
 ::: {.callout-takeaways title="Match the software to the silicon"}
 
 * **Bytes usually bind**: On H100-class accelerators, the chapter's roofline recap places most transformer work below the FP16 ridge point of `{python} RooflineSummaryRecap.h100_fp16_ridge_str`, so useful speedups come first from reducing HBM traffic, keeping intermediates in SRAM, and spending compute only when it moves the active bottleneck.
-* **Fusion makes locality real**: Operator fusion, CUDA graphs, and FlashAttention are not just kernel tricks; they remove launch overhead and materialized attention state. In the 8K example, tiled attention cuts stored intermediate state by `{python} FlashAttentionSummaryRecap.savings_mult_str`, turning memory pressure into usable throughput.
+* **Fusion makes locality real**: Operator fusion, CUDA graphs, and FlashAttention are not just kernel tricks; they remove launch overhead and avoid quadratic attention intermediates. In the 8K example, the simplified HBM-traffic scenario gives a `{python} FlashAttentionSummaryRecap.savings_mult_str` ratio, while realized traffic remains implementation-dependent.
 * **Precision buys bandwidth with risk**: FP8, INT8, and INT4 increase effective bandwidth and batch capacity only when outliers, scale factors, and quality checks are managed. Quantization is a systems contract between numerical format, kernel implementation, serving memory, and acceptable model behavior.
 * **Algorithms can move the roofline**: Speculative decoding and mixture-of-experts change how much useful work each target-model pass performs, but they introduce acceptance-rate, routing, AllToAll, and load-balancing constraints. The win is real only after communication and scheduler costs are measured.
 * **Profiling is every step**: The 70B case study shows optimization as bottleneck displacement: INT4 changes batch size, batch size changes arithmetic intensity, and the next limit moves. Fleet performance engineering means measure, optimize the binding term, then measure again before believing the speedup.

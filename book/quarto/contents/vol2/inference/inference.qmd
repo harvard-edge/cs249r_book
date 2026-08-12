@@ -763,7 +763,7 @@ The throughput equation describes the system's capacity:
 
 $$X(B) = \frac{B}{T_{\text{lat}}(B)} = \frac{B}{T_{\text{fixed}} + B \times T_{\text{variable}}}$$
 
-The resulting **Batching Efficiency Curve**\index{Batching!efficiency curve} shows three distinct regimes. For small batch sizes ($B$), throughput is dominated by $T_{\text{fixed}}$, making the system latency-bound (or overhead-bound) where increasing $B$ yields super-linear throughput gains. As $B$ becomes large, the $T_{\text{fixed}}$ term becomes negligible, and throughput asymptotically approaches the hardware limit $1/T_{\text{variable}}$, leaving the system compute-bound\index{Compute-Bound} (or bandwidth-bound for LLMs). The optimal batch size sits at the knee of the curve, the point where throughput gains diminish while latency continues to grow linearly.
+The resulting **Batching Efficiency Curve**\index{Batching!efficiency curve} shows three distinct regimes. For small batch sizes ($B$), throughput is dominated by $T_{\text{fixed}}$, making the system latency-bound (or overhead-bound) where increasing $B$ yields large but diminishing throughput gains. As $B$ becomes large, the $T_{\text{fixed}}$ term becomes negligible, and throughput asymptotically approaches the hardware limit $1/T_{\text{variable}}$, leaving the system compute-bound\index{Compute-Bound} (or bandwidth-bound for LLMs). The optimal batch size sits at the knee of the curve, the point where throughput gains diminish while latency continues to grow linearly.
 
 ::: {.column-margin}
 ```{=latex}
@@ -1130,13 +1130,9 @@ Admitting, completing, and refilling slots on every iteration keeps active-token
 
 ### Continuous batching throughput analysis {#sec-inference-scale-continuous-batching-throughput-analysis-ecd2}
 
-The contrast in @fig-continuous-batching-comparison motivates the throughput analysis: static batching leaves GPUs idle for the duration of the longest sequence in each batch, while continuous batching eliminates these idle gaps by inserting new requests at every iteration boundary. Continuous batching's dynamic batch management maintains high GPU utilization regardless of sequence length variance. The throughput improvement depends on sequence length distribution. For a distribution with coefficient of variation $\text{CV} = \sigma / \mu$, the gain is approximately @eq-continuous-batching-gain:
+The contrast in @fig-continuous-batching-comparison motivates the throughput analysis: static batching leaves slots idle until the longest sequence in a batch finishes, while continuous batching can refill those slots at iteration boundaries. Output-length variance creates the opportunity, but it does not determine the throughput gain by itself. The realized gain also depends on batch capacity, the full length distribution, request arrivals, KV-cache admission, prefill scheduling, and scheduler overhead. Consequently, there is no workload-independent gain formula based only on the coefficient of variation $\text{CV} = \sigma / \mu$; serving teams must compare policies under the same arrival trace, latency objective, and memory budget.
 
-$$\text{Throughput gain} \approx 1 + \frac{\text{CV}^2}{2}$$ {#eq-continuous-batching-gain}
-
-With typical LLM output lengths having $\text{CV} \approx 1.0$, continuous batching achieves approximately 1.5$\times$ throughput improvement. For highly variable outputs (conversational vs. code generation), gains can reach 2--4$\times$. This $1 + \text{CV}^2/2$ form estimates the average gain across the output-length distribution; @sec-inference-scale-continuous-batching-provides-maximum-benefit-a406 develops a complementary $1 + k \cdot \text{CV}$ upper bound that compares the single longest sequence against the mean. The distributional estimate predicts typical throughput; the max-over-mean bound caps the best case a workload can reach.
-
-The analytical gains translate directly into production systems. The following implementation study examines how vLLM realizes continuous batching through iteration-level scheduling, paged memory management, preemption, throughput, and GPU utilization\index{GPU Utilization}.
+The following implementation study examines how vLLM realizes continuous batching through iteration-level scheduling, paged memory management, preemption, throughput, and GPU utilization\index{GPU Utilization}.
 
 ::: {#exmp-inference-continuous-batching-vllm .callout-example title="Continuous batching in vLLM"}
 
@@ -1146,17 +1142,7 @@ vLLM implements continuous batching with several key mechanisms. Iteration-level
 
 vLLM implements a virtual memory mechanism similar to an operating system's swap. When memory is exhausted, the scheduler identifies low-priority requests (for example, those most recently started) and swaps their KV cache blocks from GPU HBM to CPU DRAM. These requests are paused until memory becomes available, at which point they are swapped back in and resumed. This mechanism ensures system stability under heavy load at the cost of increased latency for preempted requests.
 
-**Typical performance**: @Tbl-inference-continuous-batching-throughput reports the throughput and utilization improvement for Llama-2 70B on 8$\times$ A100:
-
-| **Batching Strategy**       | **Throughput (tokens/s)** | **GPU Utilization** |
-|:----------------------------|:-------------------------:|:-------------------:|
-| **Static (batch=8)**        |            400            |         45%         |
-| **Dynamic (timeout=50 ms)** |            580            |         65%         |
-| **Continuous**              |           1,200           |         92%         |
-
-: **Continuous batching throughput on Llama-2 70B (8$\times$ A100)**: Tokens-per-second and GPU utilization for static, dynamic, and continuous batching of a Llama-2 70B serving workload on an 8$\times$ A100 node. {#tbl-inference-continuous-batching-throughput}
-
-**Systems insight**: As @tbl-inference-continuous-batching-throughput shows, the 3$\times$ throughput improvement from continuous batching comes from eliminating idle GPU cycles during sequence length variation.
+**Measured performance**: Across the workloads evaluated in the vLLM study, the complete vLLM system delivered 2--4$\times$ higher throughput than FasterTransformer and Orca at a comparable latency level [@kwon2023]. The gain varied with model size, sequence length, and decoding method, so this range is an empirical result for those configurations rather than a general law for continuous batching.
 
 :::
 
@@ -2236,15 +2222,19 @@ Standard attention: `output = softmax(Q @ K.T/sqrt(d)) @ V`
 PagedAttention:
 ```{.python}
 def paged_attention(Q, page_table, physical_blocks, block_size):
-    # Gather K, V from noncontiguous physical blocks
-    for logical_idx in range(num_logical_blocks):
+    # Gather K, V from noncontiguous physical blocks.
+    key_blocks = []
+    value_blocks = []
+    for logical_idx in range(len(page_table)):
         physical_idx = page_table[logical_idx]
-        K_block = physical_blocks[physical_idx].K
-        V_block = physical_blocks[physical_idx].V
-        # Compute attention for this block
-        attention_scores = Q @ K_block.T / sqrt(d)
-        output += softmax(attention_scores) @ V_block
-    return output
+        key_blocks.append(physical_blocks[physical_idx].K)
+        value_blocks.append(physical_blocks[physical_idx].V)
+
+    # Normalize over every logical token, not independently per block.
+    K = concatenate(key_blocks, axis=-2)
+    V = concatenate(value_blocks, axis=-2)
+    attention_scores = Q @ K.T / sqrt(d)
+    return softmax(attention_scores, axis=-1) @ V
 ```
 
 **Systems insight**: The throughput impact\index{PagedAttention!throughput impact} of gather operations is small compared to the memory savings; @tbl-inference-pagedattention-throughput shows the 2.5--4$\times$ throughput improvement coming from fitting more concurrent sequences in the same memory.
@@ -4208,9 +4198,7 @@ Deep health checks are the primary defense against a failure mode that does not 
 
 ```{.python}
 def readiness_check():
-    free_memory = (
-        torch.cuda.memory_reserved() - torch.cuda.memory_allocated()
-    )
+    free_memory, _total_memory = torch.cuda.mem_get_info()
     if free_memory < MIN_REQUEST_MEMORY:
         return {
             "status": "not_ready",
@@ -4496,7 +4484,7 @@ def admit_request(tenant_id, request):
     quota = get_quota(tenant_id)
     usage = get_usage(tenant_id)
 
-    if usage.concurrent >= quota.max_concurrent:
+    if usage.concurrent >= quota.max_concurrent_requests:
         return RateLimitError("concurrent request limit")
     if usage.kv_cache_mb >= quota.max_kv_cache_mb:
         return RateLimitError("memory limit")
@@ -5018,13 +5006,14 @@ Cloud providers may offer discounted GPU instances[^fn-spot-inference] that can 
 
 Spot termination handling\index{Spot Instances!termination handling} is a race against the provider's warning window. @Lst-spot-termination orders the shutdown path so new work stops first, in-flight work drains while time remains, recoverable state is persisted, and the load balancer stops sending traffic before the instance disappears.
 
-::: {#lst-spot-termination lst-cap="**Spot Termination Handling**: Graceful shutdown sequence that drains in-flight requests, persists KV cache state, and deregisters from the load balancer."}
+::: {#lst-spot-termination lst-cap="**Spot Termination Handling**: Graceful shutdown sequence that stops admission, deregisters from the load balancer, drains in-flight requests, and persists recoverable state."}
 
 ```{.python}
-def handle_spot_termination():
+async def handle_spot_termination():
     # Received 2-minute warning
-    # 1. Stop accepting new requests
+    # 1. Stop admission and remove the replica from routing
     stop_accepting_requests()
+    deregister_from_loadbalancer()
 
     # 2. Complete in-flight requests (if possible)
     await complete_inflight(timeout=90)
@@ -5032,16 +5021,13 @@ def handle_spot_termination():
     # 3. Save state for resumption elsewhere
     save_kv_cache_to_storage()
 
-    # 4. Signal load balancer to redirect traffic
-    deregister_from_loadbalancer()
-
-    # 5. Terminate gracefully
+    # 4. Terminate gracefully
     shutdown()
 ```
 
 :::
 
-The sequence matters because the steps are not interchangeable. Deregistering too early strands useful capacity, but saving state after shutdown loses the KV cache; the handler preserves availability by draining first and routing away only after the replica can no longer accept work safely.
+The sequence matters because the steps are not interchangeable. Stopping admission and deregistering first prevent new requests from arriving during the drain window; the handler then completes in-flight work, persists recoverable state, and shuts down before the termination deadline.
 
 A spot-aware architecture splits traffic between on-demand and spot replicas by SLO class, as shown in @fig-spot-aware-routing. SLO-critical requests always route to on-demand capacity, while best-effort requests absorb the cost savings and interruption risk of spot instances.
 
@@ -5286,7 +5272,7 @@ The crucial realization is that outliers are artifacts of the coordinate basis r
 
 QuaRot rotates the weight and activation spaces with an orthogonal Hadamard transform[^fn-quarot-hadamard] so that any single outlier is spread evenly across all dimensions, leaving a distribution with no dominant value that uniform low-bit quantization can capture. Because the rotation is orthogonal, the layer output is unchanged and the transform needs no calibration data, which is what lets QuaRot reach W4A4 where the compensation and migration methods stop at higher precision. The serving consequence is a runtime cost the other methods do not pay: the rotation runs inline on every forward pass, adding roughly 3 percent overhead, so the test before rollout is whether the W4A4 memory-and-bandwidth win clears that standing tax on the target hardware.
 
-[^fn-quarot-hadamard]: **Hadamard rotation in QuaRot**\index{QuaRot!Hadamard rotation}: QuaRot transforms activations as $X' = X \cdot H$ and weights as $\mathbf{W}' = \mathbf{H}^T \cdot \mathbf{W}$, where $H$ is an orthogonal Hadamard matrix, computed structurally without being stored. Orthogonality preserves $\mathbf{X} \mathbf{W} = \mathbf{X}' \mathbf{W}'^{\,T}$, so the layer output is unchanged. The outlier-spreading effect is concrete: a vector $[1000, 1, 1, 1]$ with one extreme value becomes roughly $[502, 500, 500, 500]$ after the transform, so no single coordinate dominates the quantization range.
+[^fn-quarot-hadamard]: **Hadamard rotation in QuaRot**\index{QuaRot!Hadamard rotation}: QuaRot transforms activations as $X' = X \cdot H$ and weights as $\mathbf{W}' = \mathbf{H}^T \cdot \mathbf{W}$, where $H$ is an orthogonal Hadamard matrix, computed structurally without being stored. Orthogonality preserves $\mathbf{X} \mathbf{W} = \mathbf{X}' \mathbf{W}'$, so the layer output is unchanged. The outlier-spreading effect is concrete: a vector $[1000, 1, 1, 1]$ with one extreme value becomes roughly $[502, 500, 500, 500]$ after the transform, so no single coordinate dominates the quantization range.
 
 @Tbl-quarot-vs-smoothquant contrasts QuaRot's\index{QuaRot} rotation-based approach with SmoothQuant's\index{SmoothQuant} migration. The operating trade-off is calibration and runtime cost: SmoothQuant avoids runtime overhead after calibration but stops at W8A8, while QuaRot reaches W4A4 by paying an inline rotation cost.
 
@@ -5324,9 +5310,9 @@ The quantization method only pays off when the deployment hardware accelerates t
 | **BF16**       |                   Yes                   | Yes                                                                     |      1$\times$       |
 | **INT8**       |                   Yes                   | Yes                                                                     |      2$\times$       |
 | **FP8 (E4M3)** |                    No                   | Yes                                                                     |      2$\times$       |
-| **INT4**       | Software/CUTLASS or framework-dependent | Software/framework-dependent on H100; native FP4 is a Blackwell feature |  workload-dependent  |
+| **INT4**       |        Yes (native Tensor Cores)        | Software/framework-dependent on H100; native FP4 is a Blackwell feature |  workload-dependent  |
 
-: **Tensor Core Precision Support and Speedup**: Native precision support across NVIDIA Ampere and Hopper Tensor Cores. The 2$\times$ speedup at INT8 and FP8 reflects the doubled throughput of those native paths; INT4 remains framework-dependent on Ampere and Hopper, with native FP4 first appearing in Blackwell. {#tbl-tensor-core-precision-support}
+: **Tensor Core Precision Support and Speedup**: Native precision support across NVIDIA Ampere and Hopper Tensor Cores. The 2$\times$ speedup at INT8 and FP8 reflects the doubled throughput of those native paths. A100 provides native INT4 Tensor Core operations, although realized LLM speedup still depends on framework and kernel support; H100 INT4 deployment remains software/framework-dependent, and native FP4 first appears in Blackwell. {#tbl-tensor-core-precision-support}
 
 Memory bandwidth dominates autoregressive LLM decode throughput because each token reads the entire model:
 

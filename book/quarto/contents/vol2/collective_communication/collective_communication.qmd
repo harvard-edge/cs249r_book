@@ -892,13 +892,17 @@ class MoeAllToAll:
     bw_time = round((data_per_transfer / beta).to(microsecond).magnitude) * microsecond
     per_transfer = alpha + bw_time
     serialized = remote_gpus * per_transfer
-    parallel = per_transfer
+    # Concurrent peer streams share the GPU's aggregate NIC injection bandwidth.
+    # Full duplex permits simultaneous send and receive, but does not multiply the
+    # outgoing 50 GB/s port by the number of remote peers.
+    parallel = alpha + total_sent / beta
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(tokens_per_gpu == 512, f"tokens/GPU = {tokens_per_gpu}")
     check(abs(kb_per_token.to(KB).magnitude - 4.096) < 1e-9, f"KB/token = {kb_per_token.to(KB).magnitude}")
     check(tokens_per_expert == 64, f"tokens/expert = {tokens_per_expert}")
     check(abs(data_per_transfer.to(KB).magnitude - 262.144) < 1e-9, f"data/transfer = {data_per_transfer.to(KB).magnitude} KB")
     check(per_transfer == 8 * microsecond, f"T/transfer = {per_transfer.to(microsecond).magnitude} μs")
+    check(abs(parallel.to(microsecond).magnitude - 39.70016) < 1e-9, f"Parallel injection lower bound = {parallel.to(microsecond).magnitude} μs")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     alpha_us_str = fmt_time(alpha, microsecond, precision=0, commas=False)
     beta_gb_per_s_str = fmt_qty(beta, GB / second, precision=0, commas=False)
@@ -911,7 +915,7 @@ class MoeAllToAll:
     bw_time_approx_us_str = fmt_time(bw_time, microsecond, precision=0, commas=False)
     per_transfer_us_str = fmt_time(per_transfer, unit=microsecond, precision=0, commas=False)
     serialized_us_str = fmt_time(serialized, unit=microsecond, precision=0, commas=False)
-    parallel_us_str = fmt_time(parallel, unit=microsecond, precision=0, commas=False)
+    parallel_us_str = fmt_time(parallel, unit=microsecond, precision=1, commas=False)
     total_tokens_str = fmt_count(total_tokens, label="token", commas=False)
     n_gpus_str = fmt(n_gpus, precision=0, commas=False)
     hidden_dim_str = fmt(hidden_dim, precision=0, commas=False)
@@ -936,7 +940,7 @@ Each GPU holds `{python} MoeAllToAll.tokens_per_gpu_str` that need to reach `{py
 
 Each of the `{python} MoeAllToAll.remote_gpus_str` transfers is a `{python} MoeAllToAll.data_per_transfer_kb_str` message. From the $\alpha$-$\beta$ model: $T_{\text{transfer}}$ = `{python} MoeAllToAll.alpha_us_str` + `{python} MoeAllToAll.bw_time_approx_us_str` = `{python} MoeAllToAll.per_transfer_us_str` per transfer.
 
-If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers run in parallel (full-duplex, non-blocking): $\approx$ `{python} MoeAllToAll.parallel_us_str`.
+If serialized: `{python} MoeAllToAll.remote_gpus_str` $\times$ `{python} MoeAllToAll.per_transfer_us_str` = `{python} MoeAllToAll.serialized_us_str`. If all `{python} MoeAllToAll.remote_gpus_str` transfers are issued concurrently, they still share the GPU's `{python} MoeAllToAll.beta_gb_per_s_str` injection port. The aggregate injection lower bound is therefore $\alpha + \text{total bytes sent}/\beta =$ `{python} MoeAllToAll.parallel_us_str`, before contention and additional collective overhead. Full duplex permits simultaneous sending and receiving; it does not provide one full-bandwidth outgoing port per peer.
 
 **Systems insight**: The per-transfer sizes in this MoE example sit near the critical-message-size boundary, so startup overhead remains comparable to serialization time. This is why MoE scaling is often constrained by $\alpha$ (latency), fan-out, and contention rather than raw $\beta$ (bandwidth) alone, and why MoE systems benefit from low-latency switches, RDMA, message fusion, and topology-aware routing. The AllToAll also runs twice per layer (once for token dispatch, once for result collection), doubling the startup tax.
 
@@ -1166,7 +1170,7 @@ Tree AllReduce is, however, the correct choice when latency is the primary bottl
 
 ### Recursive halving-doubling (butterfly) {#sec-communication-butterfly}
 
-Ring and Tree represent two extremes of the latency-bandwidth trade-off: Ring is *bandwidth-optimal but latency-poor*, while Tree is *latency-optimal but bandwidth-poor*. A third approach combines the logarithmic latency of Tree with better bandwidth utilization. The **Recursive Halving-Doubling**\index{Recursive Halving-Doubling} algorithm (sometimes called the Butterfly algorithm\index{Butterfly Algorithm}) operates in $\log_2 N$ rounds. In each round $k$, every GPU exchanges data with a partner at distance $2^k$ in the logical numbering, and the message size halves (in the ReduceScatter phase) or doubles (in the AllGather phase).
+Ring and Tree represent two extremes of the latency-bandwidth trade-off: Ring is *bandwidth-optimal but latency-poor*, while Tree is *latency-optimal but bandwidth-poor*. A third approach combines the logarithmic latency of Tree with better bandwidth utilization. The **Recursive Halving-Doubling**\index{Recursive Halving-Doubling} algorithm (sometimes called the Butterfly algorithm\index{Butterfly Algorithm}) operates in $2\log_2 N$ rounds total: $\log_2 N$ ReduceScatter rounds followed by $\log_2 N$ AllGather rounds. In each round $k$ of either phase, every GPU exchanges data with a partner at distance $2^k$ in the logical numbering, and the message size halves (in the ReduceScatter phase) or doubles (in the AllGather phase).
 
 In the ReduceScatter phase (first $\log_2 N$ rounds), GPU $i$ partners with GPU $i \oplus 2^k$ (XOR of indices), and they exchange half of their current data. After receiving, each GPU sums its half with the received half, then discards the other half. After $\log_2 N$ rounds, each GPU holds $M/N$ bytes of the fully reduced result. The AllGather phase reverses the process: in each round, partners exchange their reduced chunks, doubling the data each GPU holds until all GPUs have the complete result.
 
@@ -1941,13 +1945,13 @@ The error-feedback trace in @tbl-error-feedback runs the same sequence with a re
 
 ### 1-bit Adam: Compression-aware optimization {#sec-communication-1bit-adam}
 
-Error feedback restores convergence guarantees for any compression scheme, but it treats the optimizer as a black box. The gradient is compressed, transmitted, decompressed, and then fed to the optimizer as if nothing happened. This separation leaves performance on the table: the optimizer maintains internal state (momentum, variance estimates) that contains information about the gradient distribution, yet compression ignores this state entirely. The decision is whether compression should operate on raw gradients or on the optimizer state that already summarizes them.
+Error feedback can restore convergence guarantees for suitable compressors under stated assumptions, but it treats the optimizer as a black box. The gradient is compressed, transmitted, decompressed, and then fed to the optimizer as if nothing happened. This separation leaves performance on the table: the optimizer maintains internal state (momentum, variance estimates) that contains information about the gradient distribution, yet compression ignores this state entirely. The decision is whether compression should operate on raw gradients or on the optimizer state that already summarizes them.
 
-A more integrated approach, pioneered by Microsoft's DeepSpeed team, compresses the *optimizer's communication* rather than the *raw gradients*. **1-bit Adam**\index{1-bit Adam} [@tang20211bit] observes that the Adam optimizer\index{Adam Optimizer} maintains two momentum states ($m_t$ and $v_t$) that change slowly between steps. Rather than communicating the full gradient and reconstructing Adam states independently on each worker, 1-bit Adam communicates only the sign of the momentum (1 bit per parameter) plus a per-tensor scaling factor.
+A more integrated approach, pioneered by Microsoft's DeepSpeed team, compresses the *optimizer's communication* rather than the *raw gradients*. **1-bit Adam**\index{1-bit Adam} [@tang20211bit] exploits the observation that Adam's second-moment estimate ($v_t$) stabilizes after an initial training period. It then compresses the communicated first-moment state ($m_t$) to 1 bit per parameter plus a scaling factor while retaining the stabilized second moment as an adaptive preconditioner.
 
-The algorithm proceeds in two phases. During a *warmup phase* (typically 15--20 percent of training), standard Adam runs with full-precision communication to establish stable momentum estimates. Once the momentum variance stabilizes (indicated by the ratio $\text{Var}(m_t) / \text{E}[|m_t|]^2$ falling below a threshold), the algorithm switches to *compressed mode*. In compressed mode, each worker computes its local Adam update, extracts the sign of the momentum difference since the last communication, and transmits 1 bit per parameter plus a single FP32 scaling factor per tensor.
+The algorithm proceeds in two phases. During a *warmup phase*, standard Adam runs with full-precision communication so that the second-moment estimate stabilizes. The algorithm then freezes that variance estimate and uses it as a fixed adaptive preconditioner. In the communication-efficient phase, workers communicate the momentum using 1-bit compression (sign plus scale) and retain each compression residual locally so it can be added before the next compression step.
 
-The theoretical justification rests on the observation that Adam's adaptive learning rates concentrate gradient information into the magnitude of the momentum terms. Once these magnitudes stabilize, the *direction* (sign) carries most of the information, while the *magnitude* can be approximated by a single scaling factor. Error feedback is applied to the sign compression to ensure no directional information is permanently lost.
+The theoretical justification combines the frozen adaptive preconditioner with error-compensated momentum compression. The residual feeds quantization error into later momentum messages, controlling accumulated compression error and supporting the paper's convergence result without treating the compressed update as an unbiased estimator.
 
 The 1-bit Adam paper reports up to 5$\times$ communication-volume reduction while matching the convergence speed of uncompressed Adam, with experiments up to 256 GPUs showing up to 3.3$\times$ higher throughput for BERT-Large pretraining and up to 2.9$\times$ higher throughput for SQuAD fine-tuning [@tang20211bit]. The practical lesson is narrower than "compression always wins": the compression overhead must remain small compared with the communication time saved.
 
@@ -2239,7 +2243,7 @@ $T_{\text{pipelined}} = T_{\text{backward}} + T_{\text{first layer comm}} + (N_L
 
 The combination of hierarchical AllReduce (reducing the volume of data to communicate), rail-optimized routing (maximizing the throughput of each communication operation), and layer-by-layer overlap (hiding the remaining communication behind computation) forms a common communication optimization stack for distributed training. Each technique addresses a different term in the performance equation: hierarchical algorithms reduce $M$, topology-aware routing maximizes effective $\beta$, and overlap amortizes $\alpha$ by running communication concurrently with computation. When all three are applied together, the communication overhead for a well-configured system can fall to 5--15 percent of total step time, down from the 50--80 percent that a naive flat, synchronous approach would impose.
 
-Even the intra-node base case shows this stack succeeding before any of the multi-node machinery is needed: a 70B-parameter model on a single node of 8 NVLink-connected GPUs must AllReduce 140 GB of FP16 gradients per step, which Ring AllReduce on NVLink completes in roughly 0.3 seconds against a 2.1-second per-step compute budget, comfortably overlapped at about 15 percent of compute time. That quantitative success sets up the pitfalls below, because each one begins by optimizing the wrong term, choosing the wrong primitive, or trusting a topology assumption that no longer matches the workload.
+Even the intra-node base case shows this stack succeeding before any of the multi-node machinery is needed: a 70B-parameter model on a single node of 8 NVLink-connected GPUs must AllReduce 140 GB of FP16 gradients per step. Using NVLink's 450 GB/s one-way rate in the $\alpha$-$\beta$ model and Ring's $2(7/8)$ traffic factor gives $2(7/8) \times 140\ \text{GB}/(450\ \text{GB/s}) \approx 0.54$ seconds, about 26 percent of a 2.1-second per-step compute budget. That quantitative success sets up the pitfalls below, because each one begins by optimizing the wrong term, choosing the wrong primitive, or trusting a topology assumption that no longer matches the workload.
 
 ## Fallacies and Pitfalls {#sec-communication-collective-operations-collective-operations-fallacies-pitfalls-9cd0}
 
@@ -2373,7 +2377,7 @@ The communication patterns established in this chapter reveal that distributed t
 * **Algorithm choice is scale-dependent**: Ring AllReduce is bandwidth-optimal but pays $\mathcal{O}(N)$ latency; Tree AllReduce is latency-optimal ($\mathcal{O}(\log N)$) but bandwidth-inefficient. Use the log-aware crossover estimate $M_{\text{crossover}} \approx N \alpha \beta / \log_2 N$ to reason about the switch point, and treat $N\alpha\beta$ only as a coarse upper-scale heuristic.
 * **Hierarchical algorithms multiply bandwidth**: By performing local reductions over fast NVLink before crossing the slow InfiniBand bridge, hierarchical collectives effectively multiply inter-node bandwidth by the number of GPUs per node.
 * **AllToAll is the contention king**: Unlike AllReduce, AllToAll creates $\mathcal{O}(N^2)$ logical connections. This makes Expert Parallelism (MoE) and Recommendation Systems fundamentally harder to scale than dense LLMs.
-* **Error feedback makes lossy compression safe**: Sparsification can discard 99 percent of gradients, provided the "error" is accumulated locally and added to the next step. This turns biased estimators into unbiased ones over time.
+* **Error feedback controls lossy compression error**: Sparsification can discard 99 percent of each transmitted update while accumulating the compression residual locally and adding it before the next compression step. Under the analyzed assumptions, this bounds accumulated compression error and restores convergence guarantees even though individual compressed updates can remain biased.
 * **Overlap is the final multiplier**: Communication-computation pipelining through gradient hooks and bucket fusion can hide 90--95 percent of communication time behind backward pass computation for deep models.
 * **Topology discovery is not optional**: High-performance libraries like NCCL dynamically map logical rings to physical wires to avoid "hot spots" and maximize bisection bandwidth. Misaligned rank-to-GPU mapping can degrade performance by 2--4$\times$.
 
@@ -2387,7 +2391,7 @@ The fleet now has its *logic* (Parallelism) and its *traffic patterns* (Communic
 
 :::
 
-[^fn-allreduce-etymology]: **AllReduce**\index{AllReduce!etymology}: A compound term from MPI (Message Passing Interface) indicating a Reduce operation (summing data from all nodes to one) followed by a Broadcast (sending the sum to all nodes). Ring-based AllReduce optimizes this by performing both phases simultaneously in $2(N-1)$ steps, ensuring that every GPU ends with the global sum without any single node becoming a bottleneck.
+[^fn-allreduce-etymology]: **AllReduce**\index{AllReduce!etymology}: A compound term from MPI (Message Passing Interface) indicating a Reduce operation (summing data from all nodes to one) followed by a Broadcast (sending the sum to all nodes). Ring-based AllReduce implements this as a sequential ReduceScatter phase followed by an AllGather phase, each taking $N-1$ rounds for $2(N-1)$ rounds total; ranks send and receive concurrently within each round, and every GPU ends with the global sum without a centralized bottleneck.
 
 [^fn-zerocopy-rdma]: **Zero-Copy Communication**\index{Zero-Copy Communication!RDMA}: RDMA (Remote Direct Memory Access) allows the NIC to transfer data directly from the application's memory on one node to the application's memory on another, bypassing the operating system's kernel buffers. For a 140 GB gradient exchange, zero-copy avoids moving 280 GB of data between the CPU and main memory, reclaiming significant memory bandwidth ($\text{BW}$).
 

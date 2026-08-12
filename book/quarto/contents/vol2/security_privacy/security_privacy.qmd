@@ -182,7 +182,7 @@ class DPCostAnalysis:
 4.  **Impact on Mean**: The mean-estimation noise\index{Differential Privacy!mean-estimation noise} comes from noise added to the *sum* with magnitude approximately `{python} DPCostAnalysis.noise_scale_usd_str`.
     *   Noise per person (average) = `{python} DPCostAnalysis.noise_scale_usd_str` / `{python} DPCostAnalysis.n_employees_str` = `{python} DPCostAnalysis.error_per_person_usd_str`.
 
-**Systems insight**: Protecting one outlier introduces a `{python} DPCostAnalysis.error_per_person_usd_str` error in the average. For a dataset of $n_{\text{records}}=$ `{python} DPCostAnalysis.n_small_str`, the error grows to `{python} DPCostAnalysis.error_small_usd_str`. Differential privacy can make estimates unstable for small $n_{\text{records}}$; it works best when the dataset is large enough that $1/n_{\text{records}}$ dampens the added noise. In an ML training context, the salary average maps directly to the gradient update computed across a mini-batch: the "sum" being protected is the sum of per-example gradients, the sensitivity is the maximum gradient norm any one training example can contribute (the clipping threshold in differentially private stochastic gradient descent, or DP-SGD), and the injected noise scales by the same $\Delta f / \epsilon$ ratio. Protecting one user's highly anomalous gradient from disproportionately shifting a model's decision boundary during federated learning is mathematically identical to protecting one outlier salary from skewing the reported mean.
+**Systems insight**: Protecting one outlier introduces a `{python} DPCostAnalysis.error_per_person_usd_str` error in the average. For a dataset of $n_{\text{records}}=$ `{python} DPCostAnalysis.n_small_str`, the error grows to `{python} DPCostAnalysis.error_small_usd_str`. Differential privacy can make estimates unstable for small $n_{\text{records}}$; it works best when the dataset is large enough that $1/n_{\text{records}}$ dampens the added noise. This central-DP calculation is sensitivity intuition for ML training, not a DP-SGD accountant. DP-SGD clips sampled per-example gradients, adds Gaussian noise to the clipped aggregate, and accounts for subsampling and composition across training steps; its noise multiplier cannot be obtained by reusing the one-shot Laplace ratio $\Delta f/\epsilon$.
 
 :::
 
@@ -731,12 +731,13 @@ For $k=$ `{python} OutputRoundingLeakage.top_k_neighbors_str` on a `{python} Out
 When rounded or truncated outputs still leak too much, calibrated noise can make repeated measurements less useful:
 
 $$
-\tilde{p}_i = p_i + \mathcal{N}(0, \sigma^2)
+\tilde{\mathbf p}=\Pi_{\Delta^{K-1}}\!\left(\mathbf p+\mathbf z\right),
+\qquad \mathbf z\sim\mathcal N(\mathbf 0,\sigma^2 I)
 $$
 
-followed by re-normalization to ensure $\sum_i \tilde{p}_i = 1$. The noise scale $\sigma$ must balance extraction defense with utility preservation. Too little noise leaves the confidence surface measurable; too much noise changes decisions for legitimate users.
+where $\Pi_{\Delta^{K-1}}$ is Euclidean projection onto the probability simplex, ensuring $\tilde p_i\geq 0$ and $\sum_i\tilde p_i=1$. The noise scale $\sigma$ must balance extraction defense with utility preservation. Too little noise leaves the confidence surface measurable; too much noise changes decisions for legitimate users. This randomized response shaping is not, by itself, a differential privacy guarantee: such a claim also requires an adjacency relation, a sensitivity bound, calibrated noise, and composition accounting.
 
-Differential privacy mechanisms provide a formal version of this budget for inference outputs: the response distribution should not change much when any one individual's record is added or removed. @Sec-security-privacy-differential-privacy-8c2b develops the full $(\epsilon, \delta)$ definition and the adjacent-dataset notation; the operational point here is that repeated queries on similar inputs consume a finite privacy budget. Privacy is therefore not a setting that can be enabled once; it is a resource that the API spends.
+Differential privacy mechanisms provide a formal version of this protection when an inference response is itself computed from sensitive records: the response distribution should not change much when any one individual's record is added or removed. @Sec-security-privacy-differential-privacy-8c2b develops the full $(\epsilon, \delta)$ definition and the adjacent-dataset notation. Repeated interactive DP releases compose, but queries to a fixed DP-trained model are post-processing and do not consume additional training privacy budget. Such queries may still enable model extraction, so output shaping and rate limits remain security controls even when no additional DP loss is incurred.
 
 The final lever is economics. Pricing strategies can make extraction unattractive even when some leakage remains. If training a model from scratch costs $C_{\text{train}}$ and extraction requires $n_{\text{queries}}$ queries at price $p_{\text{query}}$ per query, extraction is economically rational only if:
 
@@ -891,7 +892,7 @@ $$
 $$
 where $f_{\mathcal{S} \cup \mathcal{S}_{\text{poison}}}$ represents the model trained on the combined dataset of original and poisoned data. For targeted attacks, this objective can be refined to focus on specific inputs $x_t$ and target labels $y_t$:
 $$
-\max_{\mathcal{S}_{\text{poison}}} \ \mathcal{L}(f_{\mathcal{S} \cup \mathcal{S}_{\text{poison}}}, x_t, y_t)
+\min_{\mathcal{S}_{\text{poison}}} \ \mathcal{L}(f_{\mathcal{S} \cup \mathcal{S}_{\text{poison}}}, x_t, y_t)
 $$
 
 @Fig-data-poisoning-loop turns the equations into a systems loop: the attacker proposes poison, the training process absorbs it, and the validation loss feeds back into the next poisoning attempt.
@@ -1123,11 +1124,11 @@ Further research has revealed that these were not isolated incidents. Variants s
 
 For example, an edge device like a smart camera running a face recognition model on an accelerator could be vulnerable if the hardware lacks proper cache isolation. An attacker might exploit this weakness to extract intermediate computations, model parameters, or user data. Similar risks exist in cloud inference services, where hardware multi-tenancy increases the chances of cross-tenant data leakage.
 
-Such vulnerabilities pose concern in privacy-sensitive domains like healthcare, where ML systems routinely handle patient data. A breach could violate privacy regulations such as HIPAA[^fn-hipaa-violations], leading to significant legal and ethical consequences. Similar regulatory risks apply globally, with GDPR[^fn-gdpr] imposing fines up to 4 percent of global revenue for organizations that fail to implement appropriate technical measures to protect EU citizens' data.
+Such vulnerabilities pose concern in privacy-sensitive domains like healthcare, where ML systems routinely handle patient data. A breach could violate privacy regulations such as HIPAA[^fn-hipaa-violations], leading to significant legal and ethical consequences. Similar regulatory risks apply globally, with GDPR[^fn-gdpr] imposing fines up to 4 percent of total worldwide annual turnover for organizations that fail to implement appropriate technical measures for personal data within the regulation's territorial and material scope.
 
 [^fn-hipaa-violations]: **HIPAA Enforcement**\index{HIPAA!enforcement}\index{HIPAA!ML compliance}: Since 2003, HIPAA violations have generated hundreds of millions of dollars in fines, with the Anthem Inc. breach (2015) exposing 78.8 million patient records. For ML systems processing medical data, HIPAA compliance requires technical safeguards such as access control, audit controls, integrity protections, transmission security, and breach notification within 60 days; encryption is an addressable safeguard that still directly shapes training pipeline architecture and model deployment infrastructure when electronic protected health information is involved.
 
-[^fn-gdpr]: **GDPR (General Data Protection Regulation)**\index{GDPR!ML systems}: Enacted by the EU in 2018 with fines up to 4 percent of global revenue, GDPR has levied billions of euros in penalties including €746 million against Amazon (2021). For ML systems, GDPR's "right to be forgotten" creates a unique technical challenge: removing an individual's influence from trained model weights requires either full retraining or machine unlearning techniques that approximate removal of a record's learned influence, both computationally expensive at scale.
+[^fn-gdpr]: **GDPR (General Data Protection Regulation)**\index{GDPR!ML systems}: Applicable since 2018 and authorizing upper-tier fines up to 4 percent of total worldwide annual turnover, GDPR has levied billions of euros in penalties including €746 million against Amazon (2021). For ML systems, GDPR's erasure right creates a technical challenge: removing an individual's influence from trained model weights may require retraining or machine-unlearning techniques that approximate removal of a record's learned influence, both computationally expensive at scale.
 
 Hardware security is therefore not only physical tamper prevention. It is also architectural isolation: preventing processors, accelerators, and memory systems from leaking across boundaries the software assumes are sealed. Mitigations often carry performance costs, especially for data-bound ML workloads, so confidential computing and trusted execution environments (TEEs) must be evaluated as capacity and latency decisions as well as security decisions.
 
@@ -1237,7 +1238,7 @@ Securing interfaces is therefore inventory work as much as cryptography. Strong 
 
 Counterfeit hardware answers the provenance decision at component granularity: procurement becomes part of the security boundary because ML systems depend on the reliability and security of every component on which they run. A counterfeit part may look and function like a genuine processor, memory module, sensor, or network device, but it may degrade faster, fail under load, or contain hidden circuitry. In a facial-recognition access system, a counterfeit processor can turn a reliability problem into an authentication bypass. In a data center, a cloned router can silently observe model predictions or user data.
 
-The compliance risk follows the same path. Organizations that unknowingly integrate counterfeit components into ML systems may violate safety, privacy, or cybersecurity obligations[^fn-cybersecurity-regulations]. Healthcare organizations must demonstrate HIPAA compliance throughout the technology stack, while organizations handling EU citizens' data must satisfy GDPR's technical and organizational safeguards. Component provenance is therefore not only a procurement preference; it is evidence that the deployed system matches the certified system.
+The compliance risk follows the same path. Organizations that unknowingly integrate counterfeit components into ML systems may violate safety, privacy, or cybersecurity obligations[^fn-cybersecurity-regulations]. Healthcare organizations must demonstrate HIPAA compliance throughout the technology stack, while organizations processing personal data within GDPR's territorial and material scope must satisfy its technical and organizational safeguards. Component provenance is therefore not only a procurement preference; it is evidence that the deployed system matches the certified system.
 
 [^fn-cybersecurity-regulations]: **Cybersecurity Regulatory Landscape**\index{Cybersecurity Regulations!ML compliance}: Global compliance costs exceed \$150 billion annually across frameworks (SOC 2, ISO 27001, PCI DSS) plus sector-specific rules (SOX for finance, HIPAA for healthcare). For ML systems, multi-regulatory compliance creates architectural constraints: a single medical AI model deployed across the EU and US must simultaneously satisfy GDPR data residency, HIPAA audit trail, and FDA validation requirements, each imposing different demands on the training and serving infrastructure.
 
@@ -1545,9 +1546,10 @@ Federated learning provides structural privacy by keeping raw data local, and di
 
 [^fn-he-breakthrough]: **Homomorphic Encryption**\index{Homomorphic Encryption!etymology} (Greek *homos* "same" + *morphe* "form"): The name reflects the core property: operations on ciphertexts produce the "same form" of result as operations on plaintexts. Theoretical since the 1970s, fully homomorphic encryption became practical with Craig Gentry's 2009 PhD thesis. The systems cost remains steep: HE inference can run 1,000--10,000$\times$ slower than plaintext, limiting many ML applications to small models and low-throughput batch processing.
 
-In the case of HE, operations on ciphertexts correspond to operations on plaintexts, enabling encrypted inference:
+In the case of HE, evaluating a supported function on a ciphertext produces a ciphertext that decrypts to the corresponding plaintext result:
 $$
-\text{Enc}(f(x)) = f(\text{Enc}(x))
+c \leftarrow \operatorname{Enc}(pk,x), \qquad
+\operatorname{Dec}\!\left(sk,\operatorname{Eval}(pk,f,c)\right)=f(x)
 $$
 
 This property supports privacy-preserving computation in untrusted environments, such as cloud inference over sensitive health or financial records. The computational cost of HE remains high, making it more suitable for fixed-function models and latency-tolerant batch tasks. SMPC[^fn-smpc-overhead], by contrast, distributes the computation across multiple parties such that no single party learns the complete input or output. This is particularly useful in joint training across institutions with strict data-use policies, such as hospitals or banks[^fn-smpc-collaborative].
@@ -1757,7 +1759,7 @@ Input validation catches adversarial examples. Output monitoring detects anomalo
 
 This limitation motivates hardware security mechanisms: protections that operate below the software layer and remain useful even when the operating system, runtime, or application code is compromised. Hardware-based security creates a root of trust anchored in silicon, which gives higher-layer defenses something to rely on. Machine learning systems deployed in edge devices, embedded systems, and untrusted cloud infrastructure often depend on that anchor because the attacker may have physical access, co-tenant access, or administrative access to parts of the stack.
 
-The trust boundary becomes especially important when systems must satisfy regulatory requirements. Healthcare ML systems handling protected health information under HIPAA[^fn-hipaa-ml-requirements] must implement technical safeguards such as access control, audit controls, integrity protection, and transmission security. Systems processing EU citizens' data under GDPR[^fn-gdpr] must also demonstrate appropriate technical and organizational measures, including privacy-by-design principles. Hardware security does not satisfy these requirements alone, but it provides the boot, runtime, key-management, and device-identity guarantees that software controls often assume.
+The trust boundary becomes especially important when systems must satisfy regulatory requirements. Healthcare ML systems handling protected health information under HIPAA[^fn-hipaa-ml-requirements] must implement technical safeguards such as access control, audit controls, integrity protection, and transmission security. Systems processing personal data within GDPR's territorial and material scope[^fn-gdpr] must also demonstrate appropriate technical and organizational measures, including data-protection-by-design principles. Hardware security does not satisfy these requirements alone, but it provides the boot, runtime, key-management, and device-identity guarantees that software controls often assume.
 
 Each hardware security primitive answers one trust question, as summarized in @tbl-hardware-security-mechanisms. These hardware security mechanisms\index{Hardware Security Mechanisms} separate startup integrity, runtime isolation, key custody, and device identity. Secure Boot asks whether the system started from authentic code. Trusted Execution Environments (TEEs) ask whether sensitive computation can run despite an untrusted host. Hardware Security Modules (HSMs) ask where cryptographic keys can be generated and used without exposing them to ordinary memory. Physical Unclonable Functions (PUFs) ask whether a device can prove a hardware-bound identity that cannot be cloned or extracted.
 
@@ -2310,7 +2312,7 @@ Differential privacy addresses this by injecting carefully calibrated noise duri
 
 1.  **Significance**: The privacy budget $\epsilon$ converts an algorithmic property into an engineering currency that can be allocated, composed, and depleted. Production reports and benchmark studies show that privacy budgets are deployment-specific: Apple describes local-DP telemetry deployments with per-event $\epsilon$ values chosen by use case, while DP-SGD studies show accuracy and compute trade-offs across benchmark tasks [@apple2017learningprivacy; @abadi2016deep; @bu2020gaussian; @de2022dp]. Smaller $\epsilon$ raises the noise floor and usually degrades model accuracy (@fig-privacy-utility-frontier); DP-SGD can also reduce training throughput because per-sample gradient clipping works against the batch-level parallelism that makes accelerator training efficient.
 2.  **Distinction**: Unlike de-identification, which removes identifiers from records and fails against re-identification through auxiliary data, and unlike statistical disclosure control, which depends on the attacker's model, differential privacy is a property of the algorithm, not of the data: the DP guarantee holds against any adversary, including one with arbitrary side information about other records in the dataset.
-3.  **Common pitfall**: A frequent misconception is that $\epsilon$ is a per-query parameter rather than a budget across the entire interaction lifetime. Sequential composition of $k$ queries each at $\epsilon_0$ yields a total privacy loss of $k\epsilon_0$ under basic composition, tighter under advanced and Renyi accountants (@sec-security-privacy-privacy-budget-composition-edbe); a system that runs many DP-SGD training steps or answers many DP queries must therefore track cumulative loss and stop, refuse further queries, or refresh keys when the allocated budget is exhausted.
+3.  **Common pitfall**: A frequent misconception is that an $\epsilon$ label applies independently to every data access. Sequential composition of $k$ DP mechanisms, each with privacy loss $\epsilon_0$, yields total loss at most $k\epsilon_0$ under basic composition, with tighter bounds available from mechanism-specific accountants (@sec-security-privacy-privacy-budget-composition-edbe). A system that runs DP-SGD steps or answers interactive DP queries against sensitive data must therefore track cumulative loss and stop or redesign the release when the allocated budget is exhausted. Rotating cryptographic keys does not reset privacy loss, while querying a fixed DP-trained model is post-processing and incurs no additional training privacy loss.
 
 :::
 
@@ -2318,7 +2320,7 @@ The central technical problem of differential privacy is quantifying privacy los
 
 Differential privacy takes a different approach by focusing on algorithmic behavior rather than data content. The key insight is that privacy protection should be measurable and should limit what can be learned about any individual, regardless of what external information an adversary possesses.
 
-The salary-average scenario introduced in @sec-security-privacy-privacy-defined-da84 already computed the noise this mechanism adds; the formal definition gives that calculation its guarantee. To rebuild the intuition: an analyst computes the average salary of a group of people, where no one wants to reveal their actual salary. With differential privacy, each person writes their salary on a piece of paper, but before handing it in, adds or subtracts a random number from a known distribution. Averaging many papers reduces the random noise in expectation, giving an accurate estimate of the true average. Pulling out any single piece of paper, however, does not reveal the exact salary because the random offset is unknown. This is the core idea: learn aggregate patterns while making it difficult to be sure about any single individual.
+The salary-average scenario introduced in @sec-security-privacy-privacy-defined-da84 uses the central model of differential privacy. Each person supplies a bounded salary to a trusted analyst; the analyst computes the sum, adds one Laplace draw calibrated to the sum's global sensitivity, and divides by the group size. This differs from local differential privacy, in which each person randomizes a value before submission and the analyst aggregates the randomized reports. Both models compare output distributions on adjacent inputs, but their mechanisms, trust assumptions, and utility are not interchangeable.
 
 Differential privacy formalizes this intuition through a comparison of algorithm behavior on similar datasets, as @fig-differential-privacy depicts. Consider two adjacent datasets that differ only in the presence or absence of a single individual's record. Differential privacy ensures that the probability distributions of algorithm outputs remain statistically similar regardless of whether that individual's data is included. This protection is achieved through carefully calibrated noise that masks individual contributions while preserving the aggregate statistical patterns necessary for machine learning.
 
@@ -2499,92 +2501,45 @@ $$
 L_{\text{priv}}(y) = \ln\frac{p(y|D)}{p(y|D')} = \frac{\|y - f(D')\|_2^2 - \|y - f(D)\|_2^2}{2\sigma^2}
 $$
 
-When $y = f(D) + z$ for noise $z \sim \mathcal{N}(0, \sigma^2 I)$, the privacy loss becomes a shifted Gaussian with mean $\frac{\Delta_2 f^2}{2\sigma^2}$ and variance $\frac{\Delta_2 f^2}{\sigma^2}$. Using tail bounds on this distribution, the probability that $L_{\text{priv}}(y) > \epsilon$ can be bounded by $\delta$ when:
+When $y = f(D) + z$ for noise $z \sim \mathcal{N}(0, \sigma^2 I)$, the privacy loss becomes a shifted Gaussian with mean $\frac{\Delta_2 f^2}{2\sigma^2}$ and variance $\frac{\Delta_2 f^2}{\sigma^2}$. For one application of the mechanism and $0<\epsilon<1$, a classic sufficient calibration is:
 $$
 \sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln\left(\frac{1.25}{\delta}\right)}
 $$
 
-This formula reveals the three-way trade-off: achieving smaller $\epsilon$ (stronger privacy) or smaller $\delta$ (higher confidence) requires proportionally larger noise $\sigma$, which degrades model utility. The factor $\sqrt{2\ln(1.25/\delta)}$ grows slowly with $1/\delta$, so cryptographically small $\delta$ (for example, $10^{-8}$) only moderately increases the required noise compared to $\delta = 10^{-5}$. The resulting noise scale makes the accuracy cost concrete.
+This sufficient bound is a one-shot Gaussian-mechanism result within that parameter domain. It must not be used by substituting a final training budget into a DP-SGD run: sampled training composes many mechanisms and requires a sampled-Gaussian accountant. Smaller $\epsilon$ or $\delta$ generally requires more noise, but the resulting accuracy change must be measured for the specific task and training procedure.
 
 ```{python}
 #| echo: false
 #| label: gaussian-noise-scale-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ GAUSSIAN-MECHANISM NOISE SCALE (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: #exmp-security-privacy-privacy-accuracy-tax + the sigma~5.72 prose.
-# │
-# │ Goal: Pin the (eps,delta)-DP Gaussian noise scale sigma >= C*sqrt(2 ln(1.25/
-# │       delta))/eps for the privacy-accuracy-tax scenario, and the typical-ML
-# │       coefficient sigma ~ 5.72 * sensitivity at delta = 1e-7.
-# │ Show: strong eps=1 -> sigma~4.8, weak eps=10 -> sigma~0.48; coef~5.72.
-# │ How: sigma = C * sqrt(2 ln(1.25/delta)) / eps.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
+# One-shot Gaussian-mechanism example, not a DP-SGD accountant.
 import math
-from mlsysim.fmt import fmt, fmt_math, fmt_multiple, check
+from mlsysim.fmt import check, fmt, fmt_math
 
 class GaussianNoiseScale:
-    """Gaussian-mechanism noise scale sigma for (eps, delta)-DP."""
+    """Noise scale for one application of the classic Gaussian mechanism."""
 
-    # ┌── 1. LOAD (scenario assumptions) ───────────────────────────────────
-    clip_norm = 1.0  # gradient clipping norm C (= sensitivity Delta_2)
-    delta_callout = 1e-5  # failure probability for the worked callout
-    eps_strong = 1.0  # strong-privacy budget
-    eps_weak = 10.0  # weak-privacy budget
-    delta_typical = 1e-7  # typical-ML failure probability for the 5.72 coef
+    sensitivity = 1.0
+    epsilon = 0.5
+    delta = 1e-5
+    sigma_min = sensitivity * math.sqrt(2 * math.log(1.25 / delta)) / epsilon
 
-    # ┌── 2. EXECUTE (noise scale) ─────────────────────────────────────────
-    ln_term = math.log(1.25 / delta_callout)  # ~11.74
-    noise_factor = math.sqrt(2 * ln_term)  # sqrt(2 ln(1.25/delta))
-    sigma_strong = clip_norm * noise_factor / eps_strong
-    sigma_weak = clip_norm * noise_factor / eps_weak
-    sigma_signal_ratio = sigma_strong / clip_norm  # noise vs gradient norm
-    coef_typical = math.sqrt(2 * math.log(1.25 / delta_typical)) / eps_strong
+    check(9.6 < sigma_min < 9.8, f"sigma {sigma_min}")
 
-    # ┌── 3. GUARD (anchors) ───────────────────────────────────────────────
-    check(abs(sigma_strong - 4.8) < 0.1, f"strong sigma {sigma_strong}")
-    check(abs(sigma_weak - 0.48) < 0.01, f"weak sigma {sigma_weak}")
-    check(abs(coef_typical - 5.72) < 0.05, f"typical coef {coef_typical}")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    clip_norm_str = fmt(clip_norm, precision=0, commas=False)
-    eps_strong_str = fmt(eps_strong, precision=0, commas=False)
-    eps_weak_str = fmt(eps_weak, precision=0, commas=False)
-    ln_term_str = fmt(ln_term, precision=1, commas=False)
-    sigma_strong_str = fmt(sigma_strong, precision=1, commas=False)
-    sigma_weak_str = fmt(sigma_weak, precision=2, commas=False)
-    sigma_signal_ratio_mult_str = fmt_multiple(sigma_signal_ratio, precision=1, commas=False)
-    coef_typical_str = fmt(coef_typical, precision=2, commas=False)
-    sigma_strong_math = fmt_math(
-        rf"\sigma \approx {clip_norm_str} \times \sqrt{{2 \times {ln_term_str}}} / {eps_strong_str} \approx {sigma_strong_str}"
-    )
-    sigma_weak_math = fmt_math(rf"\sigma \approx {clip_norm_str} \times \sqrt{{2 \times {ln_term_str}}} / {eps_weak_str} \approx {sigma_weak_str}")
+    sensitivity_str = fmt(sensitivity, precision=0, commas=False)
+    epsilon_str = fmt(epsilon, precision=1, commas=False)
+    delta_math = fmt_math(r"10^{-5}")
+    sigma_min_str = fmt(sigma_min, precision=1, commas=False)
 ```
 
-::: {#exmp-security-privacy-privacy-accuracy-tax .callout-example title="The privacy-accuracy tax"}
+::: {#exmp-security-privacy-privacy-accuracy-tax .callout-example title="One-shot Gaussian mechanism"}
 
-**Trade-off**: Stronger privacy requires adding more noise to gradients during training. This noise acts like a "tax" on model accuracy.
+**Scenario**: Release one vector-valued query with $\ell_2$ sensitivity $\Delta_2 f =$ `{python} GaussianNoiseScale.sensitivity_str`, target $\epsilon =$ `{python} GaussianNoiseScale.epsilon_str`, and $\delta =$ `{python} GaussianNoiseScale.delta_math`.
 
-**Formula**:
-For $(\epsilon, \delta)$-DP with gradient clipping\index{Gradient Clipping} $C$, the required noise standard deviation $\sigma$ is:
-$$ \sigma \geq \frac{C \sqrt{2 \ln(1.25/\delta)}}{\epsilon} $$
+**Result**: The classic sufficient bound requires $\sigma \geq$ `{python} GaussianNoiseScale.sigma_min_str`.
 
-**Scenario**:
-
-*   **Gradient Norm Limit** $(C)$: `{python} GaussianNoiseScale.clip_norm_str`
-*   **Failure Probability** $(\delta)$: $10^{-5}$
-
-**Result** $(\sigma)$:
-
-*   **Strong Privacy** $(\epsilon =$ `{python} GaussianNoiseScale.eps_strong_str` $)$: `{python} GaussianNoiseScale.sigma_strong_math`
-*   **Weak Privacy** $(\epsilon =$ `{python} GaussianNoiseScale.eps_weak_str` $)$: `{python} GaussianNoiseScale.sigma_weak_math`
-
-**Systems insight**: Achieving $\epsilon=$ `{python} GaussianNoiseScale.eps_strong_str` requires adding noise nearly `{python} GaussianNoiseScale.sigma_signal_ratio_mult_str` larger than the signal (gradient norm `{python} GaussianNoiseScale.clip_norm_str`). This degrades accuracy by 5--10 percent unless the model trains for significantly longer or uses much larger batch sizes to average out the noise.
+**Systems insight**: This calculation applies to one Gaussian-mechanism release. It is not a DP-SGD privacy budget, because sampled training requires composition across all optimization steps.
 
 :::
-
-The noise scale must satisfy $\sigma \geq \frac{\Delta_2 f}{\epsilon}\sqrt{2\ln(1.25/\delta)}$ to achieve $(\epsilon, \delta)$-DP. For typical ML hyperparameters $(\epsilon = 1, \delta = 10^{-7})$, this requires $\sigma \approx$ `{python} GaussianNoiseScale.coef_typical_str` $\cdot \Delta_2 f$.
 
 Gaussian noise is preferred in deep learning because gradient norms are naturally bounded in $\ell_2$ space, making sensitivity analysis tractable. The Gaussian mechanism also composes more tightly under Rényi Differential Privacy accounting.
 
@@ -2606,72 +2561,33 @@ $$
 
 for moment order $\lambda_{\text{mom}}$. After $k$ compositions, the accumulated moment is $k \cdot \alpha_{\mathcal{M}}(\lambda_{\text{mom}})$. Applying the Markov inequality then yields $(\epsilon, \delta)$ bounds:
 $$
-\epsilon(\delta) = \min_{\lambda_{\text{mom}}} \left[\frac{k \cdot \alpha_{\mathcal{M}}(\lambda_{\text{mom}}) + \ln(1/\delta)}{\lambda_{\text{mom}} - 1}\right]
+\epsilon(\delta) = \min_{\lambda_{\text{mom}}>0} \left[\frac{k \cdot \alpha_{\mathcal{M}}(\lambda_{\text{mom}}) + \ln(1/\delta)}{\lambda_{\text{mom}}}\right]
 $$
 
-```{python}
-#| echo: false
-#| label: moments-accountant-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ MOMENTS-ACCOUNTANT VS NAIVE COMPOSITION (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: ResNet-20/CIFAR-10 DP-SGD privacy-accounting comparison prose.
-# │
-# │ Goal: Pin the published moments-accountant epsilon and the naive-composition
-# │       epsilon it improves on (the "~10x tighter" accounting result).
-# │ Show: moments accountant eps ~2.3 vs naive composition eps ~23.
-# │ How: naive = moments * tightness_factor (the reported accounting gain).
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
-
-class MomentsAccountant:
-    """Moments-accountant vs naive-composition privacy budget (@abadi2016deep)."""
-
-    # ┌── 1. LOAD (published result + scenario inputs) ─────────────────────
-    clip_norm = 1.0  # gradient clipping norm C
-    eps_moments = 2.3  # @abadi2016deep moments-accountant epsilon (delta=1e-5)
-    tightness_factor = 10  # accounting gain over naive composition (~10x)
-
-    # ┌── 2. EXECUTE (naive composition bound) ────────────────────────────
-    eps_naive = eps_moments * tightness_factor
-
-    # ┌── 3. GUARD (anchor) ────────────────────────────────────────────────
-    check(abs(eps_naive - 23.0) < 0.05, f"naive eps {eps_naive}")
-
-    # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    ma_clip_norm_str = fmt(clip_norm, precision=0, commas=False)
-    ma_eps_moments_str = fmt(eps_moments, precision=1, commas=False)
-    ma_eps_naive_str = fmt(eps_naive, precision=0, commas=False)
-```
-
-For DP-SGD training a ResNet-20 on CIFAR-10 with 100 epochs, batch size 256, and clipping norm $C=$ `{python} MomentsAccountant.ma_clip_norm_str`, the moments accountant yields $\epsilon \approx$ `{python} MomentsAccountant.ma_eps_moments_str` (for $\delta=10^{-5}$), compared to $\epsilon \approx$ `{python} MomentsAccountant.ma_eps_naive_str` under naive composition. This tighter accounting makes private deep learning practically feasible.
+The numerical result depends on the sampling rule, sampling rate, noise multiplier, step count, adjacency relation, and accountant. For example, @abadi2016deep report that with sampling rate $q=0.01$, noise multiplier $\sigma=4$, and $\delta=10^{-5}$, their moments accountant gives $\epsilon=1.26$ after 100 epochs and $\epsilon=2.55$ after 400 epochs; the corresponding strong-composition bounds are 9.34 and 24.22. These values belong to that experiment and are not reusable constants for another DP-SGD run.
 
 #### Renyi differential privacy and composition {#sec-security-privacy-renyi-differential-privacy-composition-f69a}
 
-Rényi Differential Privacy (RDP), introduced by @mironov2017, provides even tighter composition bounds by tracking Rényi divergence rather than KL divergence. A mechanism $\mathcal{M}$ satisfies $(\alpha, \varepsilon)$-RDP if for all adjacent $D, D'$:
+Rényi Differential Privacy (RDP), introduced by @mironov2017, provides a convenient representation for composition by tracking Rényi divergence. A mechanism $\mathcal{M}$ satisfies $(\alpha, \varepsilon)$-RDP if for all adjacent $D, D'$:
 $$
 \mathcal{D}_{\alpha}(\mathcal{M}(D) \lVert \mathcal{M}(D')) = \frac{1}{\alpha-1}\ln \mathbb{E}_{x \sim \mathcal{M}(D')}\left[\left(\frac{\Pr[\mathcal{M}(D) = x]}{\Pr[\mathcal{M}(D') = x]}\right)^{\alpha}\right] \leq \varepsilon
 $$
 
-where $\alpha > 1$ is the Rényi order. RDP composition is remarkably simple: if mechanism $\mathcal{M}_i$ satisfies $(\alpha, \varepsilon_i)$-RDP, then their composition satisfies $(\alpha, \sum_i \varepsilon_i)$-RDP. This linearity contrasts with the suboptimal $\sqrt{k}$ scaling of advanced composition for $(\epsilon, \delta)$-DP.
+where $\alpha > 1$ is the Rényi order. RDP composition is simple: if mechanism $\mathcal{M}_i$ satisfies $(\alpha, \varepsilon_i)$-RDP, then their composition satisfies $(\alpha, \sum_i \varepsilon_i)$-RDP. This representation avoids repeatedly applying a generic $(\epsilon,\delta)$ composition theorem to every training step.
 
-For Gaussian noise with scale $\sigma$, the RDP guarantee is:
+For an unsampled Gaussian mechanism with unit $\ell_2$ sensitivity and noise standard deviation $\sigma$, the RDP guarantee is:
 $$
 \varepsilon(\alpha) = \frac{\alpha}{2\sigma^2}
 $$
 
-After $k$ iterations of DP-SGD with noise $\sigma$ and sampling rate $q$, the RDP guarantee is approximately:
-$$
-\varepsilon_{\text{total}}(\alpha) \approx \frac{k \cdot q^2 \cdot \alpha}{2\sigma^2}
-$$
+Subsampling changes this mechanism. In particular, $q^2\alpha/(2\sigma^2)$ is only a leading-order approximation in restricted regimes, not a privacy guarantee that can certify a DP-SGD run. A sampled-Gaussian accountant must evaluate the specified sampling scheme and adjacency relation at multiple Rényi orders, compose the resulting per-step bounds across the actual number of steps, and then convert the result to $(\epsilon,\delta)$-DP. Production implementations should use a tested accountant such as Google DP Accounting, TensorFlow Privacy, or Opacus and record its version and sampling convention with the released model.
 
 This RDP guarantee can be converted to $(\epsilon, \delta)$-DP using:
 $$
 \epsilon = \varepsilon + \frac{\ln(1/\delta)}{\alpha - 1}
 $$
 
-optimized over $\alpha$. For typical ML workloads, RDP provides 2--3$\times$ tighter bounds than moments accountant, enabling longer training with fixed privacy budget.
+optimized over $\alpha$. The moments-accountant and RDP views are closely related; which implementation gives the tightest reported bound depends on the mechanism, orders, and numerical accountant rather than a universal multiplier.
 
 #### Practical privacy budget example: DP-SGD for image classification {#sec-security-privacy-practical-privacy-budget-example-dpsgd-image-classification-2662}
 
@@ -2681,23 +2597,16 @@ optimized over $\alpha$. For typical ML workloads, RDP provides 2--3$\times$ tig
 # ┌─────────────────────────────────────────────────────────────────────────────
 # │ PRACTICAL DP-SGD PRIVACY BUDGET (LEGO)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "Practical privacy budget example" prose worked example.
-# │
-# │ Goal: Pin the RDP accounting for CIFAR-10 DP-SGD: sampling rate, sensitivity,
-# │       step count, per-step and total RDP coefficients, and the (eps,delta)
-# │       conversion swept over the Renyi order alpha.
-# │ Show: q=0.08, Delta_2=0.0005, k=750, per-step ~0.00189, total ~1.42, eps~9.5.
-# │ How: q=B/n; eps_step = q^2/(2 sigma^2); eps(alpha)=total*alpha+ln(1/delta)/(alpha-1).
+# │ Goal: Pin the inputs that must be supplied to a tested sampled-Gaussian
+# │       privacy accountant. This cell deliberately does not estimate epsilon.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-import numpy as np
 from mlsysim import Datasets
 from mlsysim.core.units import count
-from mlsysim.fmt import fmt, fmt_math, check
+from mlsysim.fmt import fmt, check
 
 class PracticalDPBudget:
-    """RDP accounting for a CIFAR-10 DP-SGD privacy budget."""
+    """Inputs for accounting a Poisson-sampled CIFAR-10 DP-SGD run."""
 
     # ┌── 1. LOAD (registry + scenario assumptions) ────────────────────────
     n_records = int(Datasets.CIFAR10.training_examples.to(count).magnitude)  # 50,000
@@ -2707,43 +2616,21 @@ class PracticalDPBudget:
     n_epochs = 60  # scenario assumption
     eps_target = 3.0  # target privacy budget
     delta = 1e-5  # failure probability
-    alpha_lo = 4  # displayed Renyi orders bracketing the optimum
-    alpha_hi = 3
-    alpha_too_high = 10
 
-    # ┌── 2. EXECUTE (RDP accounting) ──────────────────────────────────────
-    q = batch_size / n_records  # subsampling rate
-    sensitivity = 2 * clip_norm / batch_size  # Delta_2 = 2C/B
+    # ┌── 2. EXECUTE (accountant inputs) ───────────────────────────────────
+    q = batch_size / n_records  # Poisson inclusion probability
     k_steps = int(n_epochs * n_records / batch_size)
-    eps_step_coef = q**2 / (2 * sigma**2)  # per-step RDP slope in alpha
-    eps_total_coef = k_steps * eps_step_coef  # total RDP slope in alpha
-    ln_inv_delta = math.log(1 / delta)
-    _grid = np.linspace(1.1, 20, 400_000)
-    _eps = eps_total_coef * _grid + ln_inv_delta / (_grid - 1)
-    alpha_opt = float(_grid[_eps.argmin()])
-    eps_opt = float(_eps.min())
-    eps_alpha_too_high = eps_total_coef * alpha_too_high + ln_inv_delta / (alpha_too_high - 1)
-    eps_alpha_lo = eps_total_coef * alpha_lo + ln_inv_delta / (alpha_lo - 1)
-    eps_alpha_hi = eps_total_coef * alpha_hi + ln_inv_delta / (alpha_hi - 1)
     alt_epochs = 25
     alt_batch_size = 2000
     k_alt_epochs = int(alt_epochs * n_records / batch_size)
-    eps_alt_epochs_coef = k_alt_epochs * eps_step_coef
-    eps_alt_epochs = float((eps_alt_epochs_coef * _grid + ln_inv_delta / (_grid - 1)).min())
     q_alt_batch = alt_batch_size / n_records
     k_alt_batch = int(n_epochs * n_records / alt_batch_size)
-    eps_alt_batch_coef = k_alt_batch * (q_alt_batch**2 / (2 * sigma**2))
-    eps_alt_batch = float((eps_alt_batch_coef * _grid + ln_inv_delta / (_grid - 1)).min())
 
     # ┌── 3. GUARD (anchors) ───────────────────────────────────────────────
     check(abs(q - 0.08) < 1e-6, f"q {q}")
-    check(abs(sensitivity - 0.0005) < 1e-9, f"sensitivity {sensitivity}")
     check(k_steps == 750, f"k_steps {k_steps}")
-    check(abs(eps_step_coef - 0.00189) < 1e-4, f"per-step {eps_step_coef}")
-    check(abs(eps_total_coef - 1.42) < 1e-2, f"total {eps_total_coef}")
-    check(abs(eps_opt - 9.5) < 0.2, f"eps_opt {eps_opt}")
-    check(eps_target < eps_alt_epochs < eps_opt, f"alt epochs epsilon {eps_alt_epochs}")
-    check(eps_target < eps_alt_batch < eps_opt, f"alt batch epsilon {eps_alt_batch}")
+    check(k_alt_epochs == 312, f"alternate steps {k_alt_epochs}")
+    check(abs(q_alt_batch - 0.04) < 1e-6, f"alternate q {q_alt_batch}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     n_records_str = fmt(n_records, precision=0)
@@ -2753,54 +2640,24 @@ class PracticalDPBudget:
     n_epochs_str = fmt(n_epochs, precision=0, commas=False)
     eps_target_str = fmt(eps_target, precision=0, commas=False)
     q_str = fmt(q, precision=2, commas=False)
-    sensitivity_str = fmt(sensitivity, precision=4, commas=False)
     k_steps_str = fmt(k_steps, precision=0, commas=False)
-    eps_step_coef_str = fmt(eps_step_coef, precision=5, commas=False)
-    eps_total_coef_str = fmt(eps_total_coef, precision=2, commas=False)
-    alpha_opt_str = fmt(alpha_opt, precision=1, commas=False)
-    eps_opt_str = fmt(eps_opt, precision=1, commas=False)
-    # alpha-sweep line components (slope, tail, total) at the three orders.
-    slope_too_high_str = fmt(eps_total_coef * alpha_too_high, precision=1, commas=False)
-    tail_too_high_str = fmt(ln_inv_delta / (alpha_too_high - 1), precision=2, commas=False)
-    eps_too_high_str = fmt(eps_alpha_too_high, precision=2, commas=False)
-    slope_lo_str = fmt(eps_total_coef * alpha_lo, precision=2, commas=False)
-    tail_lo_str = fmt(ln_inv_delta / (alpha_lo - 1), precision=2, commas=False)
-    eps_lo_str = fmt(eps_alpha_lo, precision=2, commas=False)
-    slope_hi_str = fmt(eps_total_coef * alpha_hi, precision=2, commas=False)
-    tail_hi_str = fmt(ln_inv_delta / (alpha_hi - 1), precision=2, commas=False)
-    eps_hi_str = fmt(eps_alpha_hi, precision=2, commas=False)
     alt_epochs_str = fmt(alt_epochs, precision=0, commas=False)
-    eps_alt_epochs_str = fmt(eps_alt_epochs, precision=1, commas=False)
     alt_batch_size_str = fmt(alt_batch_size, precision=0)
     alt_q_str = fmt(q_alt_batch, precision=2, commas=False)
-    eps_alt_batch_str = fmt(eps_alt_batch, precision=1, commas=False)
-    eps_step_math = fmt_math(
-        rf"\varepsilon_{{\text{{step}}}}(\alpha) \approx "
-        rf"\frac{{q^2 \alpha}}{{2\sigma^2}} = "
-        rf"\frac{{({q_str})^2 \alpha}}{{2({sigma_str})^2}} "
-        rf"\approx {eps_step_coef_str}\alpha"
-    )
-    eps_total_math = fmt_math(
-        rf"\varepsilon_{{\text{{total}}}}(\alpha) = {k_steps_str} \times " rf"{eps_step_coef_str}\alpha = {eps_total_coef_str}\alpha"
-    )
 ```
 
 Consider training a CNN on `{python} PracticalDPBudget.n_records_str` CIFAR-10 images with $(\epsilon, \delta) = ($ `{python} PracticalDPBudget.eps_target_str` $, 10^{-5})$ target privacy. Using DP-SGD with:
 
-- Batch size $B =$ `{python} PracticalDPBudget.batch_size_str` (sampling rate $q = B/n_{\text{records}} =$ `{python} PracticalDPBudget.q_str`)
-- Gradient clipping norm $C =$ `{python} PracticalDPBudget.clip_norm_str` (sensitivity $\Delta_2 = 2C/B =$ `{python} PracticalDPBudget.sensitivity_str`)
+- Poisson sampling with expected lot size $B =$ `{python} PracticalDPBudget.batch_size_str` (inclusion probability $q = B/n_{\text{records}} =$ `{python} PracticalDPBudget.q_str`)
+- Per-example gradient clipping norm $C =$ `{python} PracticalDPBudget.clip_norm_str`
 - Noise multiplier $\sigma =$ `{python} PracticalDPBudget.sigma_str` (noise scale relative to clipping)
 - Training for $N_{\text{epochs}} =$ `{python} PracticalDPBudget.n_epochs_str` epochs ($k = N_{\text{epochs}} \cdot n_{\text{records}}/B =$ `{python} PracticalDPBudget.k_steps_str` steps)
 
-The RDP analysis proceeds in three steps:
+These inputs do not determine a privacy guarantee through the shortcut $q^2\alpha/(2\sigma^2)$. Before release, a tested sampled-Gaussian accountant must evaluate Poisson sampling with add/remove adjacency, compose all `{python} PracticalDPBudget.k_steps_str` steps, convert to the specified $\delta$, and verify whether the result meets target $\epsilon=$ `{python} PracticalDPBudget.eps_target_str`. The release record must pin the accountant library and version, sampling convention, adjacency relation, and evaluated Rényi orders.
 
-1. Per-step RDP: `{python} PracticalDPBudget.eps_step_math`
-2. Total RDP after `{python} PracticalDPBudget.k_steps_str` steps: `{python} PracticalDPBudget.eps_total_math`
-3. Converting to $(\epsilon, \delta)$-DP means optimizing over $\alpha$. For $\alpha = 10$, $\epsilon =$ `{python} PracticalDPBudget.eps_total_coef_str` $\times 10 + \ln(10^5)/9 =$ `{python} PracticalDPBudget.slope_too_high_str` $+$ `{python} PracticalDPBudget.tail_too_high_str` $=$ `{python} PracticalDPBudget.eps_too_high_str`, which is too high. For $\alpha = 4$, $\epsilon =$ `{python} PracticalDPBudget.eps_total_coef_str` $\times 4 + \ln(10^5)/3 =$ `{python} PracticalDPBudget.slope_lo_str` $+$ `{python} PracticalDPBudget.tail_lo_str` $=$ `{python} PracticalDPBudget.eps_lo_str`. For $\alpha = 3$, $\epsilon =$ `{python} PracticalDPBudget.eps_total_coef_str` $\times 3 + \ln(10^5)/2 =$ `{python} PracticalDPBudget.slope_hi_str` $+$ `{python} PracticalDPBudget.tail_hi_str` $=$ `{python} PracticalDPBudget.eps_hi_str`. The optimum is $\alpha \approx$ `{python} PracticalDPBudget.alpha_opt_str`, yielding $\epsilon \approx$ `{python} PracticalDPBudget.eps_opt_str`.
+Training for $N_{\text{epochs}} =$ `{python} PracticalDPBudget.alt_epochs_str` reduces the number of composed steps, while reducing the expected lot size to $B =$ `{python} PracticalDPBudget.alt_batch_size_str` changes the Poisson inclusion probability to $q =$ `{python} PracticalDPBudget.alt_q_str`. The accountant must be rerun for either change; neither direction should be assigned a numerical $\epsilon$ through the leading-order shortcut. Reaching the target typically requires adjusting noise, passes, or sampling while measuring the resulting utility and compute cost[^fn-privacy-utility-tension].
 
-The single-knob changes are partial remediations, not complete solutions under this accountant. Training for $N_{\text{epochs}} =$ `{python} PracticalDPBudget.alt_epochs_str` lowers the estimate to $\epsilon \approx$ `{python} PracticalDPBudget.eps_alt_epochs_str`, while reducing the sampling rate to $B =$ `{python} PracticalDPBudget.alt_batch_size_str` $(q =$ `{python} PracticalDPBudget.alt_q_str` $)$ lowers it to $\epsilon \approx$ `{python} PracticalDPBudget.eps_alt_batch_str`. Reaching the target $\epsilon =$ `{python} PracticalDPBudget.eps_target_str` therefore requires a stronger combination, typically increasing $\sigma$ substantially while accepting lower accuracy, fewer training passes, or smaller batches. These adjustments demonstrate the fundamental privacy-utility-computational resource trade-off[^fn-privacy-utility-tension] in production ML systems: differential privacy offers strong theoretical assurances, but tightening the privacy bound consumes accuracy and compute budget in measurable ways.
-
-[^fn-privacy-utility-tension]: **Privacy-Utility Tension**\index{Privacy!utility tension}\index{Privacy!utility, trade-off}: Formalized by Dwork and McSherry, who proved that perfect privacy (infinite noise) yields zero utility, while perfect utility (zero noise) provides zero privacy. The "privacy budget" $(\epsilon)$ is a finite resource: each query or training epoch consumes a portion, and once exhausted, no further computation on that data is permitted without degrading the guarantee. This makes privacy accounting a first-class constraint in ML system design, alongside compute and memory budgets.
+[^fn-privacy-utility-tension]: **Privacy-Utility Tension**\index{Privacy!utility tension}\index{Privacy!utility, trade-off}: The privacy budget is a property of the composed randomized mechanisms applied to adjacent datasets. DP-SGD epochs contribute because they contain additional sampled Gaussian steps, and interactive DP queries contribute when they access the protected data. Post-processing an already released DP result does not consume additional budget. Once an allocation is exhausted, another data-dependent release cannot retain the same claimed bound unless the reported budget or mechanism is changed. This makes privacy accounting a first-class constraint in ML system design, alongside compute and memory budgets.
 
 Practical DP deployment requires careful consideration of computational trade-offs, privacy budget management, and implementation challenges. @Tbl-privacy-technique-comparison compares privacy-preserving technique trade-offs\index{Privacy!accuracy trade-offs} across five approaches, including federated learning\index{Federated Learning}. The maturity labels are a deployment snapshot for the regimes discussed here, not a permanent ranking of the underlying techniques.
 
@@ -2818,12 +2675,12 @@ Increasing the noise to reduce $\epsilon$ may degrade model accuracy, especially
 
 ### Privacy budget composition {#sec-security-privacy-privacy-budget-composition-edbe}
 
-A critical aspect of differential privacy is that privacy loss accumulates. Every time a mechanism accesses the sensitive data, it consumes a portion of the privacy budget $\epsilon$. If an organization trains 10 models on the same dataset, each with $\epsilon=1$, the total privacy loss is not $\epsilon=1$ but closer to $\epsilon=10$ (under simple composition).
+A critical aspect of differential privacy is that privacy loss accumulates across additional data-dependent DP releases about the same protected population. If an organization trains and releases 10 models on the same dataset, each with $\epsilon=1$, basic composition gives a total bound of $\epsilon=10$, although a mechanism-specific accountant may give a tighter bound. Repeated use of a fixed released DP model is post-processing and does not add to its training privacy loss.
 
 ::: {.column-margin}
 ![](images/svg/vol2_security_privacy_margin_003.svg){width="100%" fig-alt="Budget envelope showing ten privacy-consuming queries reaching an epsilon budget limit of 10."}
 
-*Each query spends part of the finite $\epsilon$ privacy budget.*
+*Each additional DP release against the protected data composes with earlier releases.*
 :::
 
 The privacy ledger depends on three composition tools:
@@ -2832,7 +2689,7 @@ The privacy ledger depends on three composition tools:
 *   **Advanced Composition**\index{Advanced Composition}: Provides tighter bounds, showing that privacy loss grows roughly with $\sqrt{k}$.
 *   **Rényi Differential Privacy (RDP)**\index{Rényi Differential Privacy}: A framework used in deep learning (for example, DP-SGD) that offers even tighter composition tracking, essential for training neural networks over thousands of iterations.
 
-The practical implication is that organizations must manage a **global privacy budget**\index{Global Privacy Budget} for each dataset, halting access once the budget is exhausted.
+The practical implication is that organizations must maintain a privacy ledger for the protected population and halt or redesign further data-dependent releases when the allocated bound would be exceeded.
 
 ### Quantifying the privacy-utility trade-off {#sec-security-privacy-privacy-utility-tradeoff-b3e7}
 
@@ -2901,19 +2758,14 @@ This framework treats DP as one tool in a privacy-preserving toolkit rather than
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: #exmp-security-privacy-dp-sgd-privacy-budget-example .callout-example
 # │
-# │ Goal: Pin the RDP accounting for a sentiment-classifier DP-SGD run:
-# │       per-step RDP coefficient, total over k steps, and the (eps,delta)
-# │       conversion swept over the Renyi order alpha.
-# │ Show: per-step ~0.000312*alpha, total ~0.156*alpha, optimal eps ~3.1.
-# │ How: eps_step = q^2 / (2 sigma^2); eps(alpha) = total*alpha + ln(1/delta)/(alpha-1).
+# │ Goal: Pin the inputs required by a tested sampled-Gaussian accountant.
+# │       This cell deliberately does not estimate epsilon.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-import math
-import numpy as np
 from mlsysim.fmt import check, fmt, fmt_math, fmt_percent
 
 class DPSGDBudget:
-    """RDP accounting for a DP-SGD sentiment-classifier privacy budget."""
+    """Inputs for accounting a Poisson-sampled sentiment DP-SGD run."""
 
     # ┌── 1. LOAD (scenario assumptions) ───────────────────────────────────
     n_records = 100_000  # scenario assumption: customer reviews
@@ -2925,23 +2777,13 @@ class DPSGDBudget:
     delta = 1e-6  # target failure probability
     nonprivate_accuracy = 0.92  # scenario assumption: baseline sentiment-classifier accuracy
 
-    # ┌── 2. EXECUTE (RDP accounting) ──────────────────────────────────────
-    q = batch_size / n_records  # subsampling rate
+    # ┌── 2. EXECUTE (accountant inputs) ───────────────────────────────────
+    q = batch_size / n_records  # Poisson inclusion probability
     k_steps = int(n_epochs * n_records / batch_size)
-    q_sq = q**2
-    two_sigma_sq = 2 * sigma**2
-    eps_step_coef = q_sq / two_sigma_sq  # per-step RDP slope in alpha
-    eps_total_coef = k_steps * eps_step_coef  # total RDP slope in alpha
-    ln_inv_delta = math.log(1 / delta)
-    _grid = np.linspace(1.1, 40, 400_000)
-    _eps = eps_total_coef * _grid + ln_inv_delta / (_grid - 1)
-    alpha_opt = float(_grid[_eps.argmin()])
-    eps_opt = float(_eps.min())
 
-    # ┌── 3. GUARD (anchors + feasibility) ─────────────────────────────────
-    check(abs(eps_step_coef - 0.000312) < 1e-5, f"per-step {eps_step_coef}")
-    check(abs(eps_total_coef - 0.156) < 1e-3, f"total {eps_total_coef}")
-    check(eps_opt < eps_target, f"eps_opt {eps_opt} must meet target {eps_target}")
+    # ┌── 3. GUARD (anchors) ────────────────────────────────────────────────
+    check(abs(q - 0.02) < 1e-9, f"q {q}")
+    check(k_steps == 500, f"k_steps {k_steps}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     n_records_str = fmt(n_records, precision=0)
@@ -2953,39 +2795,7 @@ class DPSGDBudget:
     delta_math_str = fmt_math(r"10^{-6}")
     q_str = fmt(q, precision=2, commas=False)
     k_steps_str = fmt(k_steps, precision=0, commas=False)
-    eps_step_coef_str = fmt(eps_step_coef, precision=6, commas=False)
-    eps_total_coef_str = fmt(eps_total_coef, precision=3, commas=False)
-    alpha_opt_str = fmt(alpha_opt, precision=1, commas=False)
-    eps_opt_str = fmt(eps_opt, precision=1, commas=False)
     nonprivate_accuracy_pct_str = fmt_percent(nonprivate_accuracy, precision=0, commas=False, style="prose")
-    # Per-step RDP identity: q^2 alpha / (2 sigma^2) = num/den = coef*alpha.
-    q_sq_str = fmt(q_sq, precision=4, commas=False)
-    two_sigma_sq_str = fmt(two_sigma_sq, precision=2, commas=False)
-    eps_step_math = fmt_math(
-        rf"\varepsilon_{{\text{{step}}}}(\alpha) = \frac{{({q_str})^2 \alpha}}"
-        rf"{{2({sigma_str})^2}} = \frac{{{q_sq_str}\alpha}}{{{two_sigma_sq_str}}} "
-        rf"\approx {eps_step_coef_str}\alpha"
-    )
-    eps_total_math = fmt_math(
-        rf"\varepsilon_{{\text{{total}}}}(\alpha) = {k_steps_str} \times " rf"{eps_step_coef_str}\alpha = {eps_total_coef_str}\alpha"
-    )
-    eps_convert_math = fmt_math(
-        rf"\epsilon = \varepsilon_{{\text{{total}}}}(\alpha) + "
-        rf"\frac{{\ln(1/\delta)}}{{\alpha - 1}} = {eps_total_coef_str}\alpha + "
-        rf"\frac{{\ln(10^6)}}{{\alpha - 1}}"
-    )
-
-    # Per-alpha sweep: slope term (total_coef*alpha), tail term
-    # (ln(1/delta)/(alpha-1)), and their sum (total epsilon).
-    slope_a8_str = fmt(eps_total_coef * 8, precision=2, commas=False)
-    slope_a10_str = fmt(eps_total_coef * 10, precision=2, commas=False)
-    slope_a12_str = fmt(eps_total_coef * 12, precision=2, commas=False)
-    tail_a8_str = fmt(ln_inv_delta / 7, precision=2, commas=False)
-    tail_a10_str = fmt(ln_inv_delta / 9, precision=2, commas=False)
-    tail_a12_str = fmt(ln_inv_delta / 11, precision=2, commas=False)
-    eps_a8_str = fmt(eps_total_coef * 8 + ln_inv_delta / 7, precision=2, commas=False)
-    eps_a10_str = fmt(eps_total_coef * 10 + ln_inv_delta / 9, precision=2, commas=False)
-    eps_a12_str = fmt(eps_total_coef * 12 + ln_inv_delta / 11, precision=2, commas=False)
 ```
 
 ::: {#nbk-security-privacy-dp-sgd-privacy-budget-example .callout-notebook title="DP-SGD privacy budget example"}
@@ -2995,53 +2805,30 @@ class DPSGDBudget:
 **Step 1**: Configure DP-SGD parameters.
 
 - Dataset size: $n_{\text{records}} =$ `{python} DPSGDBudget.n_records_str`
-- Batch size: $B =$ `{python} DPSGDBudget.batch_size_str` (sampling rate $q = B/n_{\text{records}} =$ `{python} DPSGDBudget.q_str`)
+- Poisson expected lot size: $B =$ `{python} DPSGDBudget.batch_size_str` (inclusion probability $q = B/n_{\text{records}} =$ `{python} DPSGDBudget.q_str`)
 - Gradient clipping norm: $C =$ `{python} DPSGDBudget.clip_norm_str`
 - Training epochs: $N_{\text{epochs}} =$ `{python} DPSGDBudget.n_epochs_str` (total steps $k = N_{\text{epochs}} \times n_{\text{records}}/B =$ `{python} DPSGDBudget.k_steps_str`)
 - Target: $\epsilon =$ `{python} DPSGDBudget.eps_target_str`, $\delta =$ `{python} DPSGDBudget.delta_math_str`
 
-**Step 2**: Calculate required noise multiplier.
-Using the Gaussian mechanism formula and RDP accounting, we need noise multiplier $\sigma$ such that after $k =$ `{python} DPSGDBudget.k_steps_str` iterations with sampling rate $q =$ `{python} DPSGDBudget.q_str`, the total privacy loss is $\epsilon \leq$ `{python} DPSGDBudget.eps_target_str`.
-
-The per-step RDP guarantee for Gaussian mechanism with subsampling is approximately:
-$$\varepsilon_{\text{step}}(\alpha) \approx \frac{q^2 \alpha}{2\sigma^2}$$
-
-For $\sigma =$ `{python} DPSGDBudget.sigma_str` (a typical starting point):
-
-`{python} DPSGDBudget.eps_step_math`
-
-After `{python} DPSGDBudget.k_steps_str` steps: `{python} DPSGDBudget.eps_total_math`
+**Step 2**: Record the candidate noise multiplier.
+For $\sigma =$ `{python} DPSGDBudget.sigma_str`, the accountant must evaluate the specified Poisson-sampled Gaussian mechanism and compose all $k =$ `{python} DPSGDBudget.k_steps_str` steps. The sampling convention and adjacency relation are part of the guarantee.
 
 **Step 3**: Convert RDP to DP.
-Converting to $(\epsilon, \delta)$-DP by optimizing over $\alpha$:
-
-`{python} DPSGDBudget.eps_convert_math`
-
-Sweeping the bound across $\alpha$ (@tbl-security-privacy-dp-sgd-alpha-sweep) shows the slope and tail terms trading off, with a minimum near $\alpha \approx$ `{python} DPSGDBudget.alpha_opt_str`. Optimizing the displayed approximation gives $\epsilon \approx$ `{python} DPSGDBudget.eps_opt_str`, which satisfies the target of $\epsilon \leq$ `{python} DPSGDBudget.eps_target_str` with margin.
+This example does not report a numerical $\epsilon$ from the leading-order shortcut. A production release must use a tested sampled-Gaussian accountant, verify whether the run meets target $\epsilon \leq$ `{python} DPSGDBudget.eps_target_str`, and pin the library version, sampling convention, adjacency relation, and evaluated orders.
 
 **Step 4**: Expected accuracy impact.
-With $\sigma =$ `{python} DPSGDBudget.sigma_str` and $\epsilon \approx$ `{python} DPSGDBudget.eps_opt_str` under this simplified accountant, expect a nontrivial accuracy degradation compared to nonprivate training. For a sentiment classifier achieving `{python} DPSGDBudget.nonprivate_accuracy_pct_str` accuracy without DP, the private version might land several points lower depending on model capacity, clipping norm, optimizer, and data distribution.
+The `{python} DPSGDBudget.nonprivate_accuracy_pct_str` nonprivate accuracy is a scenario assumption. Private accuracy must be measured for the actual model, clipping rule, optimizer, and data distribution.
 
 **Systems insight**: The implementation is accountable only if the mechanism and the accountant agree: clipping bounds sensitivity, noise sets the privacy-utility trade-off, and accumulated epsilon becomes a release gate for the trained artifact.
 
 :::
 
-The $\alpha$-sweep behind Step 3 makes the optimization concrete: each Rényi order yields a different slope-plus-tail bound, and the budget is the minimum across orders.
-
-| **$\alpha$** |            **Slope term**            |            **Tail term**            |           **$\epsilon$**           |
-|:------------:|:------------------------------------:|:-----------------------------------:|:----------------------------------:|
-|      8       | `{python} DPSGDBudget.slope_a8_str`  |  `{python} DPSGDBudget.tail_a8_str` | `{python} DPSGDBudget.eps_a8_str`  |
-|      10      | `{python} DPSGDBudget.slope_a10_str` | `{python} DPSGDBudget.tail_a10_str` | `{python} DPSGDBudget.eps_a10_str` |
-|      12      | `{python} DPSGDBudget.slope_a12_str` | `{python} DPSGDBudget.tail_a12_str` | `{python} DPSGDBudget.eps_a12_str` |
-
-: **RDP-to-DP conversion across Rényi orders**: The privacy bound $\epsilon$ is the sum of a slope term that grows with $\alpha$ and a tail term that shrinks with $\alpha$; the released budget is the minimum over orders, near $\alpha \approx$ `{python} DPSGDBudget.alpha_opt_str`. {#tbl-security-privacy-dp-sgd-alpha-sweep}
-
-The guarantee itself comes from clipping, calibrated noise, and the privacy accountant; the library call in @lst-security-privacy-dp-sgd-step is only an implementation path for those mechanism choices.
+The guarantee itself comes from clipping, calibrated noise, and the privacy accountant; @lst-security-privacy-dp-sgd-step shows the mechanism sequence without implementing an accountant.
 
 ::: {#lst-security-privacy-dp-sgd-step lst-cap="**DP-SGD training step**: Per-step clipping, noise addition, and accountant update that together enforce the privacy budget."}
 ```{.text}
 clip each per-example gradient to norm C
-add Gaussian noise with multiplier sigma to the averaged clipped gradient
+add noise N(0, sigma^2 C^2 I) to the clipped-gradient sum, then divide by lot size
 take one optimizer step with the privatized gradient
 accumulate privacy loss in the accountant after every step
 stop, retune, or reject the run if accumulated epsilon exceeds the target budget
@@ -3096,17 +2883,17 @@ Organizations often add defenses to individual components (encrypted storage, AP
 
 **Pitfall**: *Underestimating the attack surface expansion in distributed ML systems.*
 
-Organizations secure single-node ML systems effectively but fail to recognize distributed architectures multiply attack surfaces geometrically, not linearly. The shift from one machine to $n_{\text{nodes}}$ machines increases vulnerabilities by approximately $n_{\text{nodes}}^2$ due to inter-node communication channels creating $\mathcal{O}(n_{\text{nodes}}^2)$ attack vectors in all-to-all topologies or $\mathcal{O}(n_{\text{nodes}} \log n_{\text{nodes}})$ in ring topologies.
+Organizations secure single-node ML systems effectively but fail to recognize that distributed architectures introduce additional trust boundaries and communication channels. An all-to-all topology has $\mathcal{O}(n_{\text{nodes}}^2)$ links, whereas a ring has $\mathcal{O}(n_{\text{nodes}})$ links. Link count alone does not determine vulnerability count, but every additional node, credential, and channel must be included in the threat model.
 
 ::: {.column-margin}
-![](images/svg/vol2_security_privacy_margin_004.svg){width="100%" fig-alt="Quadratic channel curve rising above linear node baseline."}
+![](images/svg/vol2_security_privacy_margin_004.svg){width="100%" fig-alt="Channel-count curve illustrating that topology determines how communication links scale with node count."}
 
-*The attack surface grows faster than the node count.*
+*Topology determines how communication channels scale with node count.*
 :::
 
-Distributed training across 128 GPUs in 16 machines means compromising one node injects poisoned gradients propagating to the global model. Centralized poisoning requiring 0.1 percent corruption achieves the same effect with 0.01 percent when targeting specific distributed nodes. Edge deployment exacerbates this: federated learning with 10,000 clients creates 10,000 compromise points—if 1 percent are compromised (100 devices), coordinated poisoning degrades accuracy by 10--50 percent while remaining below individual-device anomaly thresholds. Effective distributed ML security requires threat modeling acknowledging superlinear growth: securing inter-node channels, managing identity across security domains, and coordinating policies across heterogeneous infrastructure.
+Distributed training across 128 GPUs in 16 machines allows a compromised node to inject poisoned gradients into global aggregation unless validation or robust aggregation contains it. Federated learning with 10,000 clients creates 10,000 separately managed endpoints. Effective distributed ML security therefore requires threat modeling the added nodes and boundaries: securing inter-node channels, managing identity across security domains, and coordinating policies across heterogeneous infrastructure.
 
-Recognizing that the shift from a single node to a distributed cluster multiplies the attack surface geometrically rules out perimeter-only thinking. Security for the machine learning fleet must be layered, measured, and tied to the full lifecycle.
+Recognizing that the shift from a single node to a distributed cluster adds nodes, channels, credentials, and trust boundaries rules out perimeter-only thinking. Security for the machine learning fleet must be layered, measured, and tied to the full lifecycle.
 
 ## Summary {#sec-security-privacy-summary-831c}
 
@@ -3121,14 +2908,14 @@ The practitioner who internalizes this chapter's layered defense architecture ga
 ::: {.callout-takeaways title="Defend the model, not just the server"}
 
 * **The model is the attack surface**: ML systems inherit ordinary server threats but add attacks against the learned boundary itself. Poisoned data, model extraction, adversarial inputs, and prompt injection can compromise behavior without exploiting a traditional software vulnerability.
-* **Privacy is a spent budget**: Because models can encode shadows of sensitive data, privacy cannot be treated as anonymization at the perimeter. Differential privacy offers bounded $(\epsilon,\delta)$ claims, but only if budgets are tracked across training, release, and repeated query access.
+* **Privacy is an accounted budget**: Because models can encode information about sensitive data, privacy cannot be treated as anonymization at the perimeter. Differential privacy offers bounded $(\epsilon,\delta)$ claims only when all data-dependent DP mechanisms are composed correctly; querying a fixed DP-trained model is post-processing and does not add training privacy loss.
 * **Generative systems need semantic defenses**: LLM failures exploit language and context: prompt injection, tool misuse, and PII leakage pass through normal text channels. Output monitoring, content isolation, policy enforcement, and guardrails must sit in the serving path, not only in network controls.
 * **Provenance enables recovery**: Signed datasets, locked dependencies, registry permissions, and deployment attestations let operators answer which data, code, principal, and checkpoint produced a suspect model. Without that chain, rollback and forensics become guesswork at fleet speed.
 * **Trust starts below software**: TEEs, secure boot, HSMs, and hardware roots of trust protect multi-tenant and confidential workloads from layers software alone cannot isolate. The defense posture is layered because each level catches failures the others cannot see.
 
 :::
 
-The deepest of this chapter's threats is not an intrusion at all. It is the model's own competence. The same fit to training data that makes a model useful is what lets an attacker read that data back out of it, and what lets a few poisoned examples bend its behavior from the inside, because a learned decision boundary cannot be patched the way a vulnerable function can. This is the information leakage invariant (principle \ref{pri-information-leakage}): a model trained on data always carries a shadow of that data, so privacy stops being a wall to build once and becomes a budget spent with every query answered. Security here cannot be bolted on at the perimeter; it has to be designed into the model from the first training run, because the asset and the attack surface are the same object.
+The deepest of this chapter's threats is not an intrusion at all. It is the model's own competence. Fitting training data can create channels for extraction or membership inference, and a few poisoned examples can bend behavior from inside the training process, because a learned decision boundary cannot be patched like a vulnerable function. This is the information leakage invariant (principle \ref{pri-information-leakage}): privacy must be designed into the mechanism and accounted across data-dependent releases. Once a DP-trained model is released, ordinary inference from that fixed model is post-processing; an interactive mechanism that consults protected records for each answer instead composes across answers. Security therefore cannot be bolted on at the perimeter, because the model is both an asset and an attack surface.
 
 ::: {.callout-chapter-connection title="From security to resilience"}
 

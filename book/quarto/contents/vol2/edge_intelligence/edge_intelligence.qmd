@@ -261,10 +261,10 @@ These scenarios require on-device learning, where models train and adapt directl
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: "The silicon dividend of a dedicated NPU" .callout-perspective
 # │
-# │ Goal: Anchor the representative NPU speed/energy advantage over a mobile CPU.
-# │ Show: CPU baseline latency (computed); speedup ≈ 20x, energy_gain ≈ 60x as
-# │       illustrative NPU targets for this accelerator class (not measured).
-# │ How: CPU baseline from SingleNodeModel; NPU ratios are asserted chapter anchors.
+# │ Goal: Illustrate how assumed NPU speed/energy ratios affect a mobile baseline.
+# │ Show: CPU baseline latency (computed); speedup = 20x, energy_gain = 60x as
+# │       explicit scenario assumptions, not benchmark measurements.
+# │ How: CPU baseline from SingleNodeModel; apply stated scenario multipliers.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Models, Hardware, Engine
@@ -276,21 +276,20 @@ class EdgeNpuSpeedup:
     # ┌── 1. LOAD ──────────────────────────────────────────
     m = Models.Vision.MobileNetV2
 
-    # Use specialized mobile hardware variants
+    # Generic mobile hardware profile used for the scenario baseline
     h_cpu = Hardware.Mobile.iPhone15Pro
-    # Mock NPU based on typical NPU vs CPU scaling for this chapter's argument
-    # (Since specific NPU-only vs CPU-only profiles are often empirical)
+    scenario_speedup = 20.0
+    scenario_energy_gain = 60.0
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     # Solve for MobileNet on standard mobile CPU
     p_cpu = SingleNodeModel().solve(m, h_cpu, batch_size=1, efficiency=0.05)  # Low efficiency for CPU
 
-    # Realized NPU benefits (approximated based on chapter narrative)
-    # The narrative anchors on 20x speedup and 60x energy gain
+    # Apply the explicit scenario assumptions; these are not measured results.
     t_cpu = p_cpu.latency
-    t_npu = t_cpu / 20.0
+    t_npu = t_cpu / scenario_speedup
     e_cpu = p_cpu.energy
-    e_npu = e_cpu / 60.0
+    e_npu = e_cpu / scenario_energy_gain
 
     speedup = (t_cpu / t_npu).to_base_units().magnitude
     energy_gain = (e_cpu / e_npu).to_base_units().magnitude
@@ -309,9 +308,9 @@ Local adaptation can only happen on hardware that already clears the inference f
 
 ::: {#psp-edge-intelligence-npu-silicon-dividend .callout-perspective title="The silicon dividend of a dedicated NPU"}
 
-The gap between running a model on a generic mobile CPU and on a dedicated Neural Processing Unit (NPU) is best understood as a "silicon dividend" rather than a marginal speedup. Published NPU profiles vary by silicon generation and workload, but for a MobileNet-class classifier the representative figures anchor the chapter's argument: a dedicated NPU runs the forward pass on the order of `{python} EdgeNpuSpeedup.npu_speedup_mult_str` faster than the same model on a mobile CPU, and at roughly `{python} EdgeNpuSpeedup.npu_energy_gain_mult_str` better energy efficiency. The CPU baseline here is computed for MobileNetV2 at low utilization (`{python} EdgeNpuSpeedup.npu_cpu_lat_ms_str` per inference); the NPU figures are illustrative targets for this class of accelerator, not a measured profile.
+The gap between running a model on a generic mobile CPU and on a dedicated Neural Processing Unit (NPU) is best understood as a "silicon dividend" rather than a marginal speedup. Published NPU profiles vary by silicon generation and workload, so this notebook uses explicit scenario assumptions rather than reporting a benchmark: a `{python} EdgeNpuSpeedup.npu_speedup_mult_str` latency improvement and a `{python} EdgeNpuSpeedup.npu_energy_gain_mult_str` energy-efficiency improvement relative to the modeled MobileNetV2 baseline (`{python} EdgeNpuSpeedup.npu_cpu_lat_ms_str` per inference). These multipliers illustrate sensitivity to accelerator gains; they are not measured properties of the named mobile profile or a particular NPU.
 
-What matters for system design is the *kind* of difference these ratios represent. Specialized hardware makes the model feasible, not merely faster: an energy gain of this magnitude is the difference between a workload that drains the battery in minutes and one that can run continuously in the background. On the edge, the CPU is for coordination and the NPU is for survival. Falling back to the CPU when the NPU target is missed does more than cost performance; it typically renders the application unusable through rapid battery drain and thermal throttling.
+What matters for system design is the *kind* of difference these ratios represent. Under the stated assumptions, specialized hardware creates substantial latency and energy margin. Whether that margin makes a workload feasible, allows continuous background execution, or makes CPU fallback unacceptable must be established with workload- and device-specific latency, power, and thermal measurements.
 
 :::
 
@@ -456,7 +455,7 @@ Decentralized, continuous learning rewrites the rules of system design. We are n
 
 ## Design Constraints {#sec-edge-intelligence-design-constraints-c776}
 
-Attempting to fine-tune a neural network on a smartphone is a thermodynamic battle. A typical GPU training cluster consumes megawatts of power, while a smartphone must execute backpropagation on a 10 W thermal budget without burning the user's hand or draining the battery in five minutes. These severe constraints force us to radically redesign our learning algorithms to be hyper-efficient in compute, memory, and data.
+Attempting to fine-tune a neural network on a smartphone is a thermodynamic battle. A typical GPU training cluster consumes megawatts of power, while a smartphone must execute backpropagation on a 10 W thermal budget without burning the user's hand. At a sustained 10 W draw, an idealized 15 Wh battery would be exhausted in about 1.5 hours, while thermal discomfort or throttling may constrain the workload much sooner. These severe constraints force us to radically redesign our learning algorithms to be hyper-efficient in compute, memory, and data.
 
 The constraints on parameters, operations, and data interact *multiplicatively* rather than *additively*, creating a constrained optimization problem far more challenging than inference-only deployment. The most important shift is in what compression is for: quantization shrinks bytes per weight, pruning removes unnecessary parameters, and knowledge distillation transfers behavior into a smaller architecture, and on-device learning turns these tools from optional optimizations into baseline feasibility requirements. This compression baseline, established here, is what later sections build on rather than re-derive.
 
@@ -1795,6 +1794,9 @@ Returning to the adapter mechanism, @lst-lowrank-adapter shows the residual bott
 ::: {#lst-lowrank-adapter lst-cap="**Residual Bottleneck Adapter**: The code implements a compact adapter module with down-projection and up-projection layers, reducing trainable parameter count while enabling efficient model adaptation on edge devices."}
 
 ```{.python}
+import torch.nn as nn
+
+
 class Adapter(nn.Module):
     def __init__(self, dim, bottleneck_dim):
         super().__init__()
@@ -1917,7 +1919,7 @@ for name, param in model.named_parameters():
 
 TinyTrain makes the runtime motivation concrete. Consider a scenario where a user wears an augmented reality headset that performs real-time object recognition. As lighting and environments shift, the system must adapt to maintain accuracy, but training must occur during brief idle periods or while charging. TinyTrain addresses this constraint through task-adaptive sparse updates: the deployment process selects a small update set that fits the device's memory and compute budget. The approach keeps adaptation fast, energy-efficient, and memory-aware when the target task and device profile match the method's assumptions.
 
-Task-adaptive sparse updates still introduce system-level trade-offs. Contribution analysis has a nontrivial computational cost even when it occurs during pretraining or initial profiling, so the deployment pipeline must budget for it. Stability also requires attention: if too few parameters are selected for updating, the model may underfit the target distribution, so teams need validation thresholds for the selected subset before deployment. The selection policy must also account for hardware-specific execution costs because some parameters show high contribution scores but prove expensive to update on certain architectures. Despite these trade-offs, task-adaptive sparse updates provide a practical mechanism to scale adaptation across deployment contexts from microcontrollers to mobile devices [@diao2023sparse].
+Task-adaptive sparse updates still introduce system-level trade-offs. Contribution analysis has a nontrivial computational cost even when it occurs during pretraining or initial profiling, so the deployment pipeline must budget for it. Stability also requires attention: if too few parameters are selected for updating, the model may underfit the target distribution, so teams need validation thresholds for the selected subset before deployment. The selection policy must also account for hardware-specific execution costs because some parameters show high contribution scores but prove expensive to update on certain architectures. Despite these trade-offs, task-adaptive sparse updates provide a practical mechanism to scale adaptation across deployment contexts from microcontrollers to mobile devices [@kwon2024tinytrain].
 
 #### Adaptation strategy comparison {#sec-edge-intelligence-adaptation-strategy-comparison-1faf}
 
@@ -2013,6 +2015,9 @@ A practical on-device implementation might use a ring buffer to store a small se
 ::: {#lst-replay-buffer lst-cap="**Replay Buffer**: Implements a circular storage mechanism for efficient memory management in constrained environments. This approach allows models to efficiently retain and sample from recent data points, balancing the need to use historical information while incorporating new insights."}
 
 ```{.python}
+import random
+
+
 # Ring buffer for experience replay on memory-constrained devices
 # Stores compressed features (not raw inputs) to minimize footprint
 class ReplayBuffer:
@@ -2101,7 +2106,7 @@ Efficient adaptation and data strategies enable a single device to learn from it
 
 ## Federated Learning: Algorithms {#sec-edge-intelligence-federated-learning-6e7e}
 
-Suppose a hospital wants to train an AI on patient records to predict complications, but stringent privacy laws make it illegal to move the raw patient data to a central server. This is cross-silo federated learning: a small number of reliable institutions collaborate without centralizing their data. The challenge is to enable multiple hospitals to collaboratively train a global model without ever sharing their raw data. Federated learning solves this by moving the computation to the data, broadcasting the model to the edge, and only aggregating the resulting model updates.
+Suppose a hospital wants to train an AI on patient records to predict complications, but its governance policy and applicable jurisdiction-specific requirements prohibit centralizing the raw patient data for this use. This is cross-silo federated learning: a small number of reliable institutions collaborate without centralizing their data. The challenge is to enable multiple hospitals to collaboratively train a global model without ever sharing their raw data. Federated learning solves this by moving the computation to the data, broadcasting the model to the edge, and only aggregating the resulting model updates.
 
 Consider a voice assistant deployed to 10 million homes. This is cross-device federated learning: many unreliable, intermittently connected devices contribute small updates when local conditions permit. Each device adapts locally to its user's voice, accent, and vocabulary. Device A learns that "data" is pronounced /ˈdeɪtə/, Device B learns /ˈdætə/. Device C encounters the rare phrase "machine learning" frequently (tech household), while Device D never sees it (nontech household). After six months of isolated local adaptation, four failure modes emerge:
 
@@ -2132,9 +2137,9 @@ Federated learning addresses these coordination constraints through privacy-pres
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: "Model Updates vs Raw Data" .callout-notebook
 # │
-# │ Goal: Quantify the bandwidth savings of federated learning for a wearable.
-# │ Show: bandwidth_reduction ≈ 80x—inline in notebook result.
-# │ How: Ratio = Data_Raw/Data_Model_Updates.
+# │ Goal: Compare one compressed FL uplink round with one raw-data upload.
+# │ Show: one-round uplink reduction ≈ 80x—inline in notebook result.
+# │ How: Ratio = Data_Raw/Data_One_Model_Update.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import check, fmt_int, fmt_qty, fmt_qty_int
@@ -2159,26 +2164,26 @@ class FederatedSavings:
     fs_reduction_mult_str = fmt_multiple(reduction, commas=False, precision=0)
 ```
 
-The operational payoff is not abstract: moving compact model updates instead of private observations can shrink the bandwidth budget by orders of magnitude for camera-personalization workloads.
+For this camera-personalization scenario, one compact model-update uplink is much smaller than one upload of the week's raw observations. Total federated communication still depends on the number of rounds and on model downloads.
 
 ::: {.column-margin}
 ![](images/svg/vol2_edge_intelligence_margin_004.svg){width="100%" fig-alt="Violet network ladder comparing 200 MB of raw upload with a 2.5 MB federated update, with 80x marked as an annotation."}
 
-*Federated learning ships updates, not raw data, cutting network load.*
+*One compressed update is smaller than one raw-data upload; repeated rounds accumulate.*
 :::
 
 ::: {#nbk-edge-intelligence-model-updates-vs-raw-data .callout-notebook title="Model updates vs. raw data"}
 
-**Problem**: A team is designing a federated camera-personalization system that learns from `{python} FederatedSavings.fs_raw_data_mb_str` of compressed user images per week. Should the system upload the raw images to the cloud for training, or use federated learning to send model updates instead?
+**Problem**: A team is designing a federated camera-personalization system that learns from `{python} FederatedSavings.fs_raw_data_mb_str` of compressed user images per week. Compare one upload of those images with one compressed model-update uplink round.
 
 **Math**:
 Bandwidth efficiency is the ratio of raw data volume to model update size.
 
 1. **Raw Data Upload**\index{Data Upload!raw}: `{python} FederatedSavings.fs_raw_data_mb_str`/week.
-2. **Federated Update**\index{Federated Learning!model updates}: A compressed model update (5M params) is only `{python} FederatedSavings.fs_update_mb_str`.
-3. **Bandwidth Reduction**\index{Bandwidth!reduction}: `{python} FederatedSavings.fs_raw_data_mb_str`/`{python} FederatedSavings.fs_update_mb_str` = `{python} FederatedSavings.fs_reduction_mult_str` savings.
+2. **One Federated Uplink Round**\index{Federated Learning!model updates}: A compressed model update (5M params) is `{python} FederatedSavings.fs_update_mb_str`.
+3. **One-Round Uplink Reduction**\index{Bandwidth!reduction}: `{python} FederatedSavings.fs_raw_data_mb_str`/`{python} FederatedSavings.fs_update_mb_str` = `{python} FederatedSavings.fs_reduction_mult_str`.
 
-**Systems insight**: Federated learning is a *network multiplier*. For a user on a limited cellular plan, uploading `{python} FederatedSavings.fs_raw_data_mb_str` of raw data is expensive and slow. Uploading a `{python} FederatedSavings.fs_update_mb_str` update is nearly invisible. Shifting compute to the data reduces network load by `{python} FederatedSavings.fs_reduction_mult_str`, enabling continuous learning even in bandwidth-constrained environments. In the Machine Learning Fleet, this is how systems scale to large user populations without bankrupting the networking budget or violating user privacy.
+**Systems insight**: For this scenario, one `{python} FederatedSavings.fs_update_mb_str` uplink is `{python} FederatedSavings.fs_reduction_mult_str` smaller than one `{python} FederatedSavings.fs_raw_data_mb_str` raw-data upload. That ratio is not the end-to-end communication saving of a training run: after roughly `{python} FederatedSavings.fs_reduction_mult_str` uplink rounds, cumulative update uploads alone equal the raw-data volume, before counting global-model downloads, retries, or protocol overhead. A deployment must therefore multiply per-round traffic by the expected round count.
 
 :::
 
@@ -2596,42 +2601,38 @@ Whether federated learning converges and how fast it reaches acceptable accuracy
 
 ##### Convergence rate fundamentals {#sec-edge-intelligence-convergence-rate-fundamentals-bfef}
 
-A useful systems abstraction is to treat the product of participating clients, local epochs, and communication rounds as the effective amount of federated computation. @mcmahan2017communication define FedAvg in terms of client participation, local minibatch/epoch work, and repeated communication rounds. For the chapter's systems model, an idealized IID scaling heuristic summarizes the optimality gap as:
+A useful systems abstraction is to track participating clients, local epochs, and communication rounds together. @mcmahan2017communication define FedAvg in terms of these controls, but they do not establish a universal convergence rate based only on their product. To illustrate how the controls can pull in opposing directions, this chapter uses the following dimensionless toy sensitivity score:
 
 $$
-\mathbb{E}[F(\theta^R) - F(\theta^\star)] \leq \mathcal{O}\left(\frac{1}{\sqrt{CER}}\right)
+S_{\text{toy}}(C,E,R;\beta_{\text{het}})
+= \frac{\sigma(1+\beta_{\text{het}})}{\sqrt{CER}}
++ \frac{\beta_{\text{het}}^2 E^2}{R}
 $$
 
-where $F$ is the global objective, $\theta^R$ is the model after $R$ rounds, $\theta^\star$ is the reference optimum of that objective, the expectation is over client sampling and stochastic local training, $C$ is the number of clients participating per round, $E$ is the number of local epochs each client performs, and $R$ is the total number of communication rounds. Under this heuristic, convergence improves with the square root of total computation: doubling clients, local epochs, or rounds each provides diminishing returns. To halve the optimality gap, the system must quadruple total computation.
+Here, $C$ is the number of participating clients per round, $E$ is the number of local epochs, $R$ is the number of communication rounds, $\sigma$ is a dimensionless scenario constant, and $\beta_{\text{het}}$ is a dimensionless knob for client drift. The first term decreases as more client-epochs are processed, while the second deliberately penalizes large $E$ under heterogeneity. This score is not a convergence theorem, an empirically calibrated estimator, or a predictor of an objective gap.
 
-The product $CER$ represents total client-epochs, the fundamental unit of federated computation. A system with 10 clients performing 5 local epochs over 100 rounds $(CER = 5000)$ achieves similar convergence to one with 50 clients performing 2 epochs over 50 rounds $(CER = 5000)$, assuming identical data distributions. This equivalence enables flexible resource allocation: bandwidth-constrained deployments can compensate with more local computation, while computation-constrained devices can rely on more frequent communication.
+The product $CER$ is useful only as a bookkeeping count of client-epochs. Equal $CER$ does not imply equal convergence because client sampling, examples per client, batch size, step size, local-update drift, and data distributions can differ. Production choices therefore require measurements or a convergence result whose assumptions match the deployed optimizer and data.
 
 ##### Non-IID data impact {#sec-edge-intelligence-noniid-data-impact-d8b9}
 
-The federated scaling heuristic assumes IID data across clients, an assumption that rarely holds in practice. Surveys and empirical studies identify non-IID data as a core federated-learning convergence challenge and quantify it with measures such as local dissimilarity, earth mover's distance, or weight divergence [@li2020; @zhao2018federated]. To reason about this systems effect, let $\beta_{\text{het}}$ denote an abstract heterogeneity penalty that grows as local client objectives drift away from the global objective:
+Federated-learning surveys and empirical studies identify non-IID data as a core convergence challenge and use measures such as local dissimilarity, earth mover's distance, or weight divergence [@li2020; @zhao2018federated]. These measures are not interchangeable. In the toy score, $\beta_{\text{het}}$ is only a scenario knob: setting it to zero removes the drift term, while increasing it makes additional local epochs more costly. It has no universal scale or direct estimator across applications.
 
-$$
-\mathbb{E}[F(\theta^R) - F(\theta^\star)] \leq \mathcal{O}\left(\frac{1 + \beta_{\text{het}}}{\sqrt{CER}} + \frac{\beta_{\text{het}}^2 E^2}{R}\right)
-$$
+The $E^2/R$ term encodes one qualitative interaction: more local work can reduce communication frequency but can also increase client drift when objectives differ. The exponent and coefficient are assumptions of this sensitivity exercise, not a claim about every FedAvg deployment.
 
-Here, $\beta_{\text{het}}$ is a compact way to represent client drift in the chapter's systems model rather than a universal metric shared by all analyses. When data is close to IID, $\beta_{\text{het}}$ is near zero and the bound reduces toward the standard $\mathcal{O}(1/\sqrt{CER})$ rate. When data is highly heterogeneous, larger $\beta_{\text{het}}$ values significantly slow convergence.
+##### Toy heterogeneity sensitivity example {#sec-edge-intelligence-quantifying-heterogeneity-practice-eece}
 
-The second term $\frac{\beta_{\text{het}}^2 E^2}{R}$ reveals a critical interaction: more local epochs $E$ amplify the heterogeneity penalty. Each additional local step moves the local model further from the global optimum before aggregation, and these deviations compound across heterogeneous clients. This creates a communication-computation trade-off that depends on data distribution characteristics.
-
-##### Quantifying heterogeneity in practice {#sec-edge-intelligence-quantifying-heterogeneity-practice-eece}
-
-Real-world federated deployments exhibit $\beta_{\text{het}}$ values that vary dramatically by application domain. Keyboard prediction across users speaking the same language typically shows $\beta_{\text{het}} \approx 0.3$-$0.8$, as vocabulary and typing patterns vary but share common linguistic structure. Cross-language keyboard prediction increases to $\beta_{\text{het}} \approx 1.5$-$3.0$ due to fundamentally different character distributions and word patterns. Health monitoring with diverse patient populations can reach $\beta_{\text{het}} \approx 2.0$-$5.0$ when physiological baselines vary dramatically across age groups, fitness levels, and medical conditions.
+Because $\beta_{\text{het}}$ is not an observed metric, it should not be assigned empirical ranges by application domain. The worked example below chooses $\beta_{\text{het}}=1.5$ only to expose the arithmetic of the toy score; the value does not characterize keyboard, language, or health data.
 
 ```{python}
 #| echo: false
 #| label: federated-convergence-worked-example
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ FEDERATED CONVERGENCE WORKED EXAMPLE
+# │ FEDERATED TOY SENSITIVITY WORKED EXAMPLE
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: @sec-edge-intelligence-quantifying-heterogeneity-practice-eece
 # │
-# │ Goal: Compute the round and client-epoch costs for IID vs non-IID FedAvg.
-# │ Show: IID 200 rounds; non-IID 5,625 rounds; E=2 reduces to 3,125 rounds.
+# │ Goal: Evaluate threshold crossings in the dimensionless toy score.
+# │ Show: Scenario outputs of 200, 5,625, and 3,125 rounds.
 # │ How: R_iid = sigma^2/(C*E*epsilon^2);
 # │      R_non_iid = max((1+beta)^2/(C*E*epsilon^2),
 # │                      beta^2*E^2/epsilon); client_epochs = R*C*E.
@@ -2645,10 +2646,10 @@ class FederatedConvergence:
     clients_per_round = 10
     local_epochs = 5
     reduced_local_epochs = 2
-    epsilon = 0.01
-    sigma = 1
+    epsilon = 0.01  # Per-component threshold in the toy score
+    sigma = 1  # Dimensionless scenario constant
     beta_iid = 0
-    beta_non_iid = 1.5
+    beta_non_iid = 1.5  # Dimensionless scenario knob, not an empirical estimate
 
     # ┌── 2. EXECUTE ───────────────────────────────────────
     epsilon_sq = epsilon**2
@@ -2671,9 +2672,9 @@ class FederatedConvergence:
     client_epoch_reduction = non_iid_client_epochs / reduced_client_epochs
 
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(iid_rounds == 200, f"IID rounds {iid_rounds} unexpected")
-    check(non_iid_rounds == 5625, f"Non-IID rounds {non_iid_rounds} unexpected")
-    check(reduced_rounds == 3125, f"Reduced rounds {reduced_rounds} unexpected")
+    check(iid_rounds == 200, f"Toy IID rounds {iid_rounds} unexpected")
+    check(non_iid_rounds == 5625, f"Toy non-IID rounds {non_iid_rounds} unexpected")
+    check(reduced_rounds == 3125, f"Toy reduced-E rounds {reduced_rounds} unexpected")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────
     fc_total_clients_str = fmt_int(total_clients, commas=False)
@@ -2703,9 +2704,9 @@ class FederatedConvergence:
     fc_client_epoch_reduction_mult_str = fmt_multiple(client_epoch_reduction, precision=1, commas=False)
 ```
 
-A production federated deployment with `{python} FederatedConvergence.fc_total_clients_str` clients makes the round-complexity trade-off concrete: `{python} FederatedConvergence.fc_total_clients_str` total clients in the population, $C$ = `{python} FederatedConvergence.fc_clients_per_round_str` clients selected per round, $E$ = `{python} FederatedConvergence.fc_local_epochs_str` local epochs per round, target optimality gap $\epsilon$ = `{python} FederatedConvergence.fc_epsilon_str`, and two scenarios comparing IID data ($\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_iid_str`) vs. moderately non-IID data ($\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_non_iid_str`).
+A hypothetical configuration with `{python} FederatedConvergence.fc_total_clients_str` clients makes the toy arithmetic concrete: $C$ = `{python} FederatedConvergence.fc_clients_per_round_str` clients selected per round, $E$ = `{python} FederatedConvergence.fc_local_epochs_str` local epochs per round, per-component score threshold $\epsilon$ = `{python} FederatedConvergence.fc_epsilon_str`, and two scenario settings, $\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_iid_str` and $\beta_{\text{het}}$ = `{python} FederatedConvergence.fc_beta_non_iid_str`. These inputs do not describe a production deployment.
 
-IID case $(\beta_{\text{het}} = 0)$: Using the convergence bound $\epsilon \leq \frac{\sigma}{\sqrt{CER}}$ where $\sigma$ captures gradient variance (typically $\sigma \approx 1$ for normalized objectives), we solve for required rounds:
+Zero-drift toy case $(\beta_{\text{het}} = 0)$: With the second component equal to zero and the scenario choice $\sigma=1$, setting the first component at or below $\epsilon$ gives:
 
 $$
 R_{\text{IID}} \geq \frac{\sigma^2}{C \cdot E \cdot \epsilon^2} = \frac{1}{10 \cdot 5 \cdot 0.0001} = 200 \text{ rounds}
@@ -2713,15 +2714,15 @@ $$
 
 With `{python} FederatedConvergence.fc_clients_per_round_str` clients per round and `{python} FederatedConvergence.fc_local_epochs_str` local epochs, this represents `{python} FederatedConvergence.fc_iid_rounds_str` $\times$ `{python} FederatedConvergence.fc_clients_per_round_str` $\times$ `{python} FederatedConvergence.fc_local_epochs_str` = `{python} FederatedConvergence.fc_iid_client_epochs_str` total client-epochs of computation.
 
-Non-IID case $(\beta_{\text{het}} = 1.5)$: The heterogeneity penalty requires satisfying both terms of the bound. With $E=5$, the variance term requires `{python} FederatedConvergence.fc_non_iid_variance_rounds_str` rounds, while the heterogeneity term dominates:
+Positive-drift toy case $(\beta_{\text{het}} = 1.5)$: Apply the threshold separately to both components. With $E=5$, the first component requires `{python} FederatedConvergence.fc_non_iid_variance_rounds_str` rounds, while the assumed drift component requires:
 
 $$
 \frac{\beta_{\text{het}}^2 E^2}{R} \leq \epsilon \implies R \geq \frac{\beta_{\text{het}}^2 E^2}{\epsilon} = \frac{2.25 \times 25}{0.01} = 5,625 \text{ rounds}
 $$
 
-This represents a roughly `{python} FederatedConvergence.fc_round_increase_factor_mult_str` increase in communication rounds compared to the IID case. The non-IID scenario requires `{python} FederatedConvergence.fc_non_iid_rounds_str` $\times$ `{python} FederatedConvergence.fc_clients_per_round_str` $\times$ `{python} FederatedConvergence.fc_local_epochs_str` = `{python} FederatedConvergence.fc_non_iid_client_epochs_str` client-epochs, demonstrating how data heterogeneity dominates convergence costs.
+The larger component threshold is roughly `{python} FederatedConvergence.fc_round_increase_factor_mult_str` above the zero-drift scenario. It corresponds to `{python} FederatedConvergence.fc_non_iid_rounds_str` $\times$ `{python} FederatedConvergence.fc_clients_per_round_str` $\times$ `{python} FederatedConvergence.fc_local_epochs_str` = `{python} FederatedConvergence.fc_non_iid_client_epochs_str` client-epochs. These are outputs of the chosen toy constants, not predicted convergence costs.
 
-The quadratic dependence on $E$ suggests reducing local computation when heterogeneity is high. With $E = 2$ instead of $E = 5$, the heterogeneity term shrinks to `{python} FederatedConvergence.fc_reduced_heterogeneity_rounds_str` rounds while the variance term grows to `{python} FederatedConvergence.fc_reduced_variance_rounds_str`, so the variance term now dominates:
+The assumed $E^2$ drift term makes the score sensitive to local-epoch choice. With $E = 2$ instead of $E = 5$, the drift-component threshold shrinks to `{python} FederatedConvergence.fc_reduced_heterogeneity_rounds_str` rounds while the first-component threshold grows to `{python} FederatedConvergence.fc_reduced_variance_rounds_str`:
 
 $$
 R \geq \max\left(\frac{(1+\beta_{\text{het}})^2}{C \cdot E \cdot \epsilon^2}, \frac{\beta_{\text{het}}^2 E^2}{\epsilon}\right)
@@ -2729,13 +2730,13 @@ R \geq \max\left(\frac{(1+\beta_{\text{het}})^2}{C \cdot E \cdot \epsilon^2}, \f
 = \max(3,125, 900) = 3,125 \text{ rounds}
 $$
 
-This reduces total rounds by `{python} FederatedConvergence.fc_round_reduction_mult_str` at the cost of `{python} FederatedConvergence.fc_local_compute_ratio_mult_str` more communication per unit of local computation. The total client-epochs become `{python} FederatedConvergence.fc_reduced_rounds_str` $\times$ `{python} FederatedConvergence.fc_clients_per_round_str` $\times$ `{python} FederatedConvergence.fc_reduced_local_epochs_str` = `{python} FederatedConvergence.fc_reduced_client_epochs_str`, a `{python} FederatedConvergence.fc_client_epoch_reduction_mult_str` reduction from the $E$ = `{python} FederatedConvergence.fc_local_epochs_str` non-IID case. This illustrates why adaptive local epoch selection based on estimated data heterogeneity significantly improves federated learning efficiency.
+Within this toy score, the threshold-crossing round count falls by `{python} FederatedConvergence.fc_round_reduction_mult_str`, while local work per round falls by `{python} FederatedConvergence.fc_local_compute_ratio_mult_str`. The client-epoch count becomes `{python} FederatedConvergence.fc_reduced_rounds_str` $\times$ `{python} FederatedConvergence.fc_clients_per_round_str` $\times$ `{python} FederatedConvergence.fc_reduced_local_epochs_str` = `{python} FederatedConvergence.fc_reduced_client_epochs_str`, a `{python} FederatedConvergence.fc_client_epoch_reduction_mult_str` reduction from the $E$ = `{python} FederatedConvergence.fc_local_epochs_str` scenario. This demonstrates only the sensitivity encoded by the assumed formula; an actual deployment must estimate the trade-off empirically or use an applicable convergence result.
 
 ##### Communication-computation trade-off {#sec-edge-intelligence-communicationcomputation-tradeoff-6e31}
 
 The interaction between local epochs and communication rounds creates a fundamental design trade-off, visualized in @fig-comm-compute-tradeoff. More local epochs reduce communication frequency (the computational pull) but increase client drift (the statistical penalty)\index{Client Drift!federated learning}, while fewer local epochs maintain tighter synchronization at higher communication cost.
 
-::: {#fig-comm-compute-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Communication-Computation Trade-Off**: For IID data, increasing local epochs consistently reduces total communication with minimal penalty. For non-IID data, client drift causes convergence degradation beyond an optimal point (typically $E \in [2, 5]$), making aggressive local computation counterproductive. System designers must estimate data heterogeneity to select appropriate operating points." fig-alt="Plot of rounds to convergence vs. local epochs showing flat IID curve and rising non-IID curve with sweet spot annotation."}
+::: {#fig-comm-compute-tradeoff fig-env="figure" fig-pos="htb" fig-cap="**Communication-Computation Trade-Off**: This schematic shows the qualitative tension between performing more local work per round and accumulating client drift under non-IID data. Its $\epsilon$-optimal axis and operating-point labels are schematic shorthand, not a convergence guarantee or a universal optimal epoch range; system designers must measure the deployed optimizer, data, and client population." fig-alt="Schematic plot of a qualitative round-count score versus local epochs, with IID and non-IID curves and an illustrative operating point; the epsilon-optimal axis label is not a proven convergence bound."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, node distance=1cm and 1cm]

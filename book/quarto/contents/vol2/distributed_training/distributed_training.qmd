@@ -693,6 +693,8 @@ from mlsysim import Models
 from mlsysim.fmt import fmt, check, fmt_time, fmt_memory, fmt_bandwidth
 
 # ┌── LEGO ───────────────────────────────────────────────
+# │ Scope: chapter-anchor — the gradient-accumulation comparison reuses this
+# │ 32-GPU scale-out baseline so its cost remains tied to the same scenario.
 class Scaling32GPU:
     from mlsysim.physics import calc_ring_allreduce_data_factor, calc_ring_allreduce_time
 
@@ -784,13 +786,13 @@ class GradAccumScenario:
     compute_8gpu_ms = 1800
     from mlsysim.physics import calc_ring_allreduce_time
 
-    # Same NVLink AllReduce as the 8-GPU scaling scenario (~5.8 ms).
-    # 2026-06-07: was a hardcoded 0.35 ms contradicting that computation.
+    # Same one-way NVLink beta and AllReduce as the 8-GPU scaling scenario.
+    nvlink_bw_beta = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
     comm_8gpu_ms = (
         calc_ring_allreduce_time(
             message_bytes=Models.Language.GPT2.size_in_bytes(BYTES_FP16),
             n_gpus=n_gpus_ga,
-            bandwidth_bytes_s=Hardware.Cloud.H100.nvlink.bandwidth,
+            bandwidth_bytes_s=nvlink_bw_beta,
             latency_s=0 * ms,
         )
         .to(ms)
@@ -798,7 +800,8 @@ class GradAccumScenario:
     )
     training_hours_1gpu = 25
     hourly_rate = 128
-    baseline_cost_val = 3021
+    baseline_nodes = Scaling32GPU.gpus // n_gpus_ga
+    baseline_cost_val = Scaling32GPU.training_32gpu_hours_val * baseline_nodes * hourly_rate
     effective_batch_val = n_gpus_ga * batch_per_gpu * accum_steps
     overhead_val = comm_8gpu_ms / (accum_steps * compute_8gpu_ms) * 100
     effective_speedup = n_gpus_ga * (1 - overhead_val / 100)
@@ -807,6 +810,7 @@ class GradAccumScenario:
     ga_savings_val = baseline_cost_val - ga_cost_val
     ga_savings_pct_val = ga_savings_val / baseline_cost_val * 100
     check(effective_batch_val == 512, f"Effective batch should be 512, got {effective_batch_val}")
+    check(baseline_nodes == 4, f"32-GPU baseline should use 4 nodes, got {baseline_nodes}")
 
     # ┌── 4. OUTPUT ───────────────────────────────────────
     effective_batch_str = fmt(effective_batch_val, precision=0)
@@ -814,11 +818,13 @@ class GradAccumScenario:
     # "%"-glyph math form for the worked-calc line (this value is only consumed inside that calculation).
     comm_overhead_pct_math = fmt_math(rf"{overhead_val:.3f}\%")
     ga_training_hours_str = fmt_time(ga_training_hours_val, 'hour', precision=1, commas=False, style='word')
+    baseline_training_hours_str = fmt_time(Scaling32GPU.training_32gpu_hours_val, 'hour', precision=1, commas=False, style='word')
     baseline_cost_str = fmt_usd(baseline_cost_val, precision=0)
     ga_cost_str = fmt_usd(round(ga_cost_val))
     ga_savings_str = fmt_usd(round(ga_savings_val))
     ga_savings_pct_str = fmt_percent(ga_savings_pct_val / 100, precision=1, commas=False, style='prose')
     n_gpus_ga_str = fmt_count(n_gpus_ga, commas=False, label="GPU")
+    baseline_nodes_str = fmt_count(baseline_nodes, commas=False, label="node")
     batch_per_gpu_str = fmt(batch_per_gpu, precision=0, commas=False)
     accum_steps_str = fmt(accum_steps, precision=0, commas=False)
     compute_8gpu_ms_str = fmt_time(compute_8gpu_ms, 'millisecond', precision=0, commas=False)
@@ -835,7 +841,8 @@ class GradAccumScenario:
 2. **Communication overhead**: With `{python} GradAccumScenario.accum_steps_str`-step accumulation, we AllReduce once every `{python} GradAccumScenario.accum_steps_str` steps.
    - Overhead = `{python} GradAccumScenario.comm_8gpu_ms_str` / (`{python} GradAccumScenario.accum_steps_str` $\times$ `{python} GradAccumScenario.compute_8gpu_ms_str`) $\approx$ `{python} GradAccumScenario.comm_overhead_pct_math`.
 3. **Training duration**: Total time is `{python} GradAccumScenario.ga_training_hours_str`.
-4. **Total cost**: `{python} GradAccumScenario.ga_training_hours_str` $\times$ `{python} GradAccumScenario.hourly_rate_str` = `{python} GradAccumScenario.ga_cost_str`.
+4. **Scale-out baseline cost**: `{python} GradAccumScenario.baseline_nodes_str` $\times$ `{python} GradAccumScenario.baseline_training_hours_str` $\times$ `{python} GradAccumScenario.hourly_rate_str` = `{python} GradAccumScenario.baseline_cost_str`.
+5. **Accumulation cost**: `{python} GradAccumScenario.ga_training_hours_str` $\times$ `{python} GradAccumScenario.hourly_rate_str` = `{python} GradAccumScenario.ga_cost_str`.
 
 **Systems insight**: Gradient accumulation\index{Gradient Accumulation!communication overhead} saves `{python} GradAccumScenario.ga_savings_str` (`{python} GradAccumScenario.ga_savings_pct_str`) by concentrating computation where bandwidth is abundant (NVLink within the node) and minimizing the frequency of synchronization. When the network is slow, do not scale out—scale the batch size locally.
 
@@ -1092,11 +1099,11 @@ For data-parallel training of our `{python} InfraFrontierStragglerRecap13.fronti
 
 Using ring-AllReduce over InfiniBand at `{python} CommScalingIbRecap.ib_bw_gb_per_s_str` effective bandwidth, the raw communication time is approximately `{python} CommScalingMath.comm_time_formula_math`, which for large $N$ approaches `{python} CommScalingMath.comm_approx_math` seconds. With 75 percent overlap between gradient communication and the backward pass, the effective exposed communication time drops to `{python} CommScalingMath.t_comm_math` seconds. Under the same assumptions, the compute term is `{python} CommScalingMath.t_compute_math` seconds, so the exposed step time is about `{python} CommScalingMath.exposed_step_s_str` and naive data-parallel scaling efficiency is `{python} CommScalingMath.t_compute_s_str`/`{python} CommScalingMath.exposed_step_s_str` $\approx$ `{python} CommScalingMath.scaling_efficiency_str`. Well-configured systems can recover much of this loss by combining tensor parallelism, pipeline parallelism, topology-aware placement, and more effective communication overlap.
 
-The scaling efficiency depends critically on the ratio of computation to communication. Three factors govern this ratio. Larger models have more computation per training step (more FLOPs per weight update), so the same communication overhead represents a smaller fraction of total step time; this *model-communication ratio* is why scaling efficiency improves as models grow larger. Larger batches push in the same direction, raising the computation per step without proportionally raising communication, because gradients are the same size regardless of batch size\index{Batch Size}; the catch is that large batches can harm convergence and so require learning rate tuning and warmup schedules. Network bandwidth\index{Bandwidth!network} enters most directly, since doubling the InfiniBand bandwidth halves the communication time and improves scaling efficiency in proportion. The network fabric is therefore a first-order determinant of cluster productivity, not a secondary concern; its cost (10--15 percent of total system cost) is easily justified if it lifts scaling efficiency by even a few percentage points, because poor scaling efficiency wastes the other 85--90 percent of the investment.
+The scaling efficiency depends critically on computation per communicated byte. At fixed tokens per update, increasing parameter count raises both transformer computation and gradient bytes roughly proportionally, so model size alone does not guarantee better scaling. Larger batches raise computation per optimizer step without changing gradient size\index{Batch Size}; the catch is that large batches can harm convergence and so require learning-rate tuning and warmup schedules. Network bandwidth\index{Bandwidth!network} enters directly because doubling InfiniBand bandwidth halves the bandwidth term, but efficiency changes according to the full step-time denominator rather than in direct proportion. The network fabric is therefore a first-order determinant of cluster productivity, not a secondary concern; its cost (10--15 percent of total system cost) is easily justified if it lifts scaling efficiency by even a few percentage points, because poor scaling efficiency wastes the other 85--90 percent of the investment.
 
-*Paradoxically, larger models are easier to scale than smaller ones.*
+*Workloads with more computation per communicated byte are easier to scale.*
 
-These three factors interact in important ways. Larger models with larger batch sizes achieve better scaling efficiency, which means that the most expensive training workloads are also the ones that benefit most from scale. This creates a virtuous cycle for large-scale infrastructure: the workloads that justify building thousand-GPU clusters are also the workloads that use them most efficiently. Conversely, small models and small batch sizes scale poorly, which is why teams training 1B-parameter models on 64 GPUs often achieve only 40--60 percent scaling efficiency.
+These factors interact, so efficiency cannot be inferred from model size or GPU count alone. The worked model below fixes the parameter count, tokens per update, accelerator count, effective bandwidth, MFU, and overlap before calculating one efficiency point. Changing any of those inputs requires recomputing the full step-time model.
 
 ```{python}
 #| echo: false
@@ -1107,7 +1114,7 @@ class InfraFrontierStragglerRecap14:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-However, even for large models, scaling does not continue indefinitely. There exists a **scaling cliff**\index{Scaling Cliff} beyond which adding more GPUs actually reduces cost-efficiency. Under the assumptions of our `{python} InfraFrontierStragglerRecap14.frontier_params_b_str` model, the cost-efficient region is approximately 1,024--4,096 GPUs, where the communication-to-compute ratio remains favorable and scaling efficiency stays above 70 percent. Beyond 8,192 GPUs, the AllReduce communication time begins to dominate the backward pass computation time, and the efficiency drops below 50 percent. While the wall-clock training time may still decrease slightly with more GPUs, the *cost per useful FLOP* increases because the organization is paying for 8,000 GPUs to do the work of 4,000. The nonlinear relationship dictates that the economic viability of training large models is bounded by the physics of interconnect latency, not merely by hardware availability. The cluster must be sized to operate in the linear regime of the scaling curve, and the model architecture (batch size, sequence length, parallelism dimensions) must be co-designed with the cluster size to maintain this balance.
+However, even for large models, scaling does not continue indefinitely. There exists a **scaling cliff**\index{Scaling Cliff} beyond which marginal speedup no longer justifies the added devices. Under the single explicit model used here—a `{python} InfraFrontierStragglerRecap14.frontier_params_b_str` model, `{python} CommScalingMath.batch_tokens_m_str` per update, `{python} CommScalingMath.n_gpus_str`, `{python} CommScalingMath.mfu_pct_str` MFU, and `{python} CommScalingMath.overlap_pct_str` communication overlap—naive data parallelism reaches only `{python} CommScalingMath.scaling_efficiency_pct_str`. The example therefore does not imply a universal 1,024--4,096-GPU efficient region or an 8,192-GPU cliff. Evaluating another cluster size requires recomputing per-device compute time, collective latency and bandwidth cost, overlap, and topology. The model architecture and cluster size must be co-designed to keep those terms in balance.
 
 ::: {#nbk-distributed-training-scaling-efficiency-175b-model .callout-notebook title="Scaling efficiency for a 175B model"}
 
@@ -1362,27 +1369,31 @@ Hardware efficiency metrics govern throughput, but convergence theory determines
 
 ### Convergence rate for synchronous data parallel SGD {#sec-distributed-training-systems-systems-convergence-rate-synchronous-data-parallel-sgd-2ed5}
 
-The fundamental convergence result for distributed SGD explains why adding workers can reduce iteration count without changing the optimizer's meaning. The theorem uses two standard regularity assumptions: the loss is smooth enough that gradients cannot change arbitrarily fast, and each stochastic gradient has bounded variance around the true gradient. Written formally, for a loss function $\mathcal{L}(\theta)$ with $L_s$-Lipschitz gradients and variance-bounded stochastic gradients $\mathbb{E}[\|g_i - \nabla \mathcal{L}(\theta)\|^2] \leq \sigma^2$, synchronous data parallel SGD with $N$ workers achieves the following convergence rate.
+The fundamental convergence result for distributed SGD explains what synchronous averaging preserves. Let $\mathcal{L}$ be lower bounded by $\mathcal{L}_{\inf}$ and have $L_s$-Lipschitz gradients. Each worker computes gradients from $b$ independent samples, the aggregated estimator $g_k$ is unbiased, and its conditional variance satisfies $\mathbb{E}[\|g_k-\nabla\mathcal{L}(\theta_k)\|^2\mid\theta_k]\leq\sigma^2/(Nb)$. These assumptions yield a nonconvex stationarity guarantee without asserting convergence to a global minimizer.
 
 ::: {#thrm-distributed-training-convergence-rate-distributed-sgd .callout-theorem title="Convergence rate for distributed SGD"}
 
-For synchronous data parallel SGD with $N$ workers, each computing gradients on a local batch of size $b$, after $K$ total iterations the expected optimization error satisfies:
+For the update $\theta_{k+1}=\theta_k-\eta g_k$ with constant step size $0<\eta\leq 1/L_s$, after $K$ synchronized updates,
 
 $$
-\mathbb{E}[\mathcal{L}(\theta_K)] - \mathcal{L}^{\star} \leq \underbrace{\frac{L_s \|\theta_0 - \theta^{\star}\|^2}{2K}}_{\text{optimization error}} + \underbrace{\frac{\eta L_s \sigma^2}{2Nb}}_{\text{variance floor}}
+\frac{1}{K}\sum_{k=0}^{K-1}\mathbb{E}\!\left[\|\nabla\mathcal{L}(\theta_k)\|^2\right]
+\leq
+\underbrace{\frac{2\bigl(\mathcal{L}(\theta_0)-\mathcal{L}_{\inf}\bigr)}{\eta K}}_{\text{optimization term}}
++
+\underbrace{\frac{\eta L_s\sigma^2}{Nb}}_{\text{stochastic-variance term}}.
 $$
 
-where $\eta$ is the learning rate, $L_s$ is the smoothness constant, $\mathcal{L}^{\star}$ is the optimal loss value, $\theta^{\star}$ is an optimal parameter vector, and $\sigma^2$ is the gradient variance. The effective convergence rate is $\mathcal{O}(1/\sqrt{NbK})$ when the learning rate is tuned optimally as $\eta = \mathcal{O}(\sqrt{Nb/K})$.
+Choosing $\eta=\min\!\left\{1/L_s,\sqrt{2(\mathcal{L}(\theta_0)-\mathcal{L}_{\inf})Nb/(L_s\sigma^2K)}\right\}$ balances the two terms. Before the smoothness cap becomes active, the stochastic contribution scales as $\mathcal{O}(1/\sqrt{NbK})$.
 
 :::
 
-The theorem reveals several important insights. First, the variance floor decreases linearly with the number of workers $N$, explaining why distributed training can achieve the same final loss with fewer iterations in the linear scaling regime. With equal local batch size $b$, synchronous data-parallel SGD computes the same minibatch gradient as a single worker using batch size $Nb$ for that step; convergence speed still depends on learning-rate scaling and critical-batch-size effects. Second, the convergence rate $\mathcal{O}(1/\sqrt{NbK})$ shows that workers, local batch size, and iteration count jointly determine statistical progress, assuming infinite bandwidth. This is the **statistical efficiency**\index{Statistical Efficiency!distributed training} of distributed training, distinct from hardware efficiency.
+The theorem isolates the benefit that follows from the assumptions. With equal local batch size $b$, synchronous data-parallel SGD computes the same minibatch estimator as one worker using batch size $Nb$ for that update, and the estimator variance decreases as $1/(Nb)$. It does not say that every increase in batch size proportionally reduces time to a target loss; learning-rate limits and critical-batch-size effects still apply. This distinction is the **statistical efficiency**\index{Statistical Efficiency!distributed training} of distributed training, separate from hardware efficiency.
 
 However, the theorem assumes perfect synchronization (BSP). When workers proceed at different rates or use stale gradients, convergence guarantees degrade, as we examine next.
 
 ### Staleness impact: BSP vs. SSP vs. ASP {#sec-distributed-training-systems-systems-staleness-impact-bsp-vs-ssp-vs-asp-e153}
 
-The operational guarantees of BSP, SSP, and ASP established in @sec-distributed-training-systems-systems-synchronization-models-396f have a convergence cost, which this section sketches with stylized smooth-objective bounds. The staleness parameter $\tau_{\text{stale}}$ quantifies how many iterations behind a gradient may be when applied to parameters, and it is the variable that ties throughput to solution quality [@ho2013more; @dutta2018slow].
+The operational guarantees of BSP, SSP, and ASP established in @sec-distributed-training-systems-systems-synchronization-models-396f have convergence consequences, but there is no universal additive staleness penalty independent of the objective, step-size schedule, worker count, and delay model. The staleness parameter $\tau_{\text{stale}}$ quantifies how many updates occur between computing and applying a gradient, tying throughput to solution quality [@ho2013more; @dutta2018slow].
 
 ::: {#dfn-distributed-training-gradient-staleness .callout-definition title="Gradient staleness"}
 
@@ -1394,33 +1405,21 @@ The operational guarantees of BSP, SSP, and ASP established in @sec-distributed-
 
 :::
 
-The convergence behavior differs across these models in ways that directly affect training cost and solution quality. In Bulk Synchronous Parallel (BSP, $\tau_{\text{stale}} = 0$), all workers compute gradients on the same parameter version, then synchronize via barrier before updating. This guarantees mathematical equivalence to single-device training with larger batch size, an optimal convergence rate of $\mathcal{O}(1/\sqrt{NbK})$, and no hyperparameter adjustment beyond batch size scaling.
+The convergence behavior differs across these models in ways that directly affect training cost and solution quality. In Bulk Synchronous Parallel (BSP, $\tau_{\text{stale}}=0$), all workers compute on the same parameter version and aggregate before updating. Under the assumptions of the theorem above, the synchronized estimator inherits the $Nb$ minibatch guarantee.
 
-Stale Synchronous Parallel (SSP, $\tau_{\text{stale}} \leq s$) relaxes the barrier by allowing workers to proceed up to $s$ iterations ahead of the slowest worker. In a stylized bound, the convergence rate gains an additive delay term:
+Stale Synchronous Parallel (SSP, $\tau_{\text{stale}}\leq s$) allows workers to proceed up to $s$ clocks ahead of the slowest worker. Ho et al. prove an average-regret rate $\mathcal{O}(\sqrt{(s+1)N/T})$ for their SSP update sequence with $N$ workers and $T$ updates, assuming convex Lipschitz component functions, a bounded domain, and a decreasing step size [@ho2013more]. This result makes the staleness dependence explicit, but it is not interchangeable with the nonconvex stationarity theorem above.
 
-$$
-\mathbb{E}[\mathcal{L}(\theta_K)] - \mathcal{L}^{\star} \leq \mathcal{O}\left(\frac{1}{\sqrt{NbK}}\right) + \mathcal{O}\left(\frac{s^2 \eta^2 L_s^2}{Nb}\right)
-$$
-
-The second term represents the **staleness penalty**\index{Staleness Penalty}. For bounded staleness $s$, this penalty is controlled by keeping delay small and retuning the learning rate. Deployments that choose bounded staleness accept convergence degradation for throughput improvement on heterogeneous clusters.
-
-Asynchronous SGD (ASP, $\tau_{\text{stale}} = \infty$) eliminates waiting entirely: workers update parameters immediately. While this maximizes throughput, the same teaching model shows a larger delay-dependent term:
-
-$$
-\mathbb{E}[\mathcal{L}(\theta_K)] - \mathcal{L}^{\star} \leq \mathcal{O}\left(\frac{1}{\sqrt{K}}\right) + \mathcal{O}\left(\bar{\tau}_{\text{stale}}^2 \eta^2 L_s^2\right)
-$$
-
-where $\bar{\tau}_{\text{stale}}$ is the average staleness. The staleness penalty now scales with the square of average delay, and critically, the variance reduction from $N$ workers disappears in the dominant term. Several techniques compensate for this. Learning rate decay ($\eta' = \eta / \sqrt{1 + \bar{\tau}_{\text{stale}}}$) reduces the staleness penalty but slows convergence. Momentum correction adjusts the momentum term to account for delayed updates. Gradient clipping prevents stale gradients with large magnitudes from destabilizing training.
+Asynchronous SGD imposes no protocol-wide finite delay bound. Removing the barrier can improve update throughput, but a convergence rate requires additional assumptions about realized delays, the objective, and the step-size schedule. Dutta et al. analyze this as an error-runtime trade-off in which worker speed and gradient staleness jointly determine whether accepting a delayed update helps [@dutta2018slow]. Therefore neither a fixed square-of-average-delay penalty nor the complete loss of $N$-worker variance reduction follows from asynchronous execution alone.
 
 @Tbl-convergence-comparison summarizes the convergence properties of each synchronization model.
 
-| **Model** |         **Staleness**          |                               **Convergence Rate**                               | **Variance Reduction** | **Best For**                          |
-|:----------|:------------------------------:|:--------------------------------------------------------------------------------:|:----------------------:|:--------------------------------------|
-| **BSP**   |   $\tau_{\text{stale}} = 0$    |                           $\mathcal{O}(1/\sqrt{NbK})$                            |      Full ($1/N$)      | Final training, reproducibility       |
-| **SSP**   |  $\tau_{\text{stale}} \leq s$  |          $\mathcal{O}(1/\sqrt{NbK}) + \mathcal{O}(s^2\eta^2 L_s^2/Nb)$           |        Partial         | Heterogeneous clusters                |
-| **ASP**   | $\tau_{\text{stale}} = \infty$ | $\mathcal{O}(1/\sqrt{K}) + \mathcal{O}(\bar{\tau}_{\text{stale}}^2\eta^2 L_s^2)$ |          None          | Maximum throughput, early exploration |
+| **Model** | **Delay control** | **Scoped guarantee** | **Systems effect** |
+|:----------|:------------------|:---------------------|:-------------------|
+| **BSP** | $\tau_{\text{stale}}=0$ | Synchronous $Nb$-minibatch theorem above | Waits for the slowest worker |
+| **SSP** | $\tau_{\text{stale}}\leq s$ | $\mathcal{O}(\sqrt{(s+1)N/T})$ average regret under convex assumptions [@ho2013more] | Bounds delay while reducing some waits |
+| **ASP** | No protocol-wide finite bound | No universal rate without additional delay and objective assumptions | Removes the global barrier but applies stale updates |
 
-: **Convergence Properties by Synchronization Model**: BSP provides optimal convergence guarantees at the cost of synchronization overhead. SSP offers a tunable trade-off between throughput and convergence. ASP maximizes throughput but loses the variance reduction benefit of parallelism. {#tbl-convergence-comparison tbl-colwidths="[12,11,19,21,37]"}
+: **Convergence Properties by Synchronization Model**: The synchronization protocol determines the delay model; the convergence rate follows only after the objective, gradient, delay, and step-size assumptions are fixed. {#tbl-convergence-comparison}
 
 ### Learning rate scaling rules {#sec-distributed-training-systems-systems-learning-rate-scaling-rules-fa26}
 
@@ -1789,7 +1788,7 @@ from mlsysim.solvers import DistributedModel
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, check, MarkdownStr, fmt_memory, fmt_memory_capacity
-from mlsysim.physics import memory_from_params
+from mlsysim.physics import calc_activation_memory, memory_from_params
 
 class A100CapacityContext:
     """A100 hardware reference."""
@@ -1815,7 +1814,12 @@ class MemoryWallAnalysis:
     bytes_gradients = BYTES_FP16 / param
     bytes_adam_state = 12 * (byte / param)
     n_gpus = 64
-    activation_approx = 50 * GB  # assumption: activation budget for this scenario
+    layers = 96
+    seq_len = 2048
+    micro_batch = 1
+    hidden = 12_288
+    heads = 96
+    activation_strategy = "full"
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     param_mem = memory_from_params(params, bytes_weights)
@@ -1823,7 +1827,15 @@ class MemoryWallAnalysis:
     optim_mem = memory_from_params(params, bytes_adam_state)
     total_static_mem = param_mem + gradient_mem + optim_mem
     per_gpu_static = total_static_mem / n_gpus
-    total_per_gpu = per_gpu_static + activation_approx
+    activation_mem = calc_activation_memory(
+        layers,
+        seq_len,
+        micro_batch,
+        hidden,
+        n_heads=heads,
+        strategy=activation_strategy,
+    )
+    total_per_gpu = per_gpu_static + activation_mem
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(param_mem == 350 * GB, f"param storage ({param_mem})")
@@ -1831,7 +1843,8 @@ class MemoryWallAnalysis:
     check(optim_mem == 2100 * GB, f"optim storage ({optim_mem})")
     check(total_static_mem == 2800 * GB, f"total static ({total_static_mem})")
     check(43 * GB < per_gpu_static < 44 * GB, f"per-GPU static ({per_gpu_static.to(GB).magnitude:.1f})")
-    check(93 * GB < total_per_gpu < 94 * GB, f"total per GPU ({total_per_gpu})")
+    check(4 * GB < activation_mem < 6 * GB, f"checkpointed activations ({activation_mem.to(GB).magnitude:.1f} GB)")
+    check(total_per_gpu < A100CapacityContext.mem, f"total per GPU ({total_per_gpu})")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     param_gb_str = fmt_memory(param_mem, unit=GB, precision=0, commas=False)
@@ -1839,7 +1852,7 @@ class MemoryWallAnalysis:
     optim_gb_str = fmt_memory(optim_mem, unit=GB, precision=0, commas=True)
     total_static_gb_str = fmt_memory(total_static_mem, unit=GB, precision=0, commas=True)
     per_gpu_gb_str = fmt_memory(per_gpu_static, unit=GB, precision=1, commas=False)
-    activation_gb_str = fmt_memory(activation_approx, unit=GB, precision=0, commas=False)
+    activation_gb_str = fmt_memory(activation_mem, unit=GB, precision=1, commas=False)
     total_per_gpu_gb_str = fmt_memory(total_per_gpu, unit=GB, precision=1, commas=False)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
     bytes_fp16_str = fmt(BYTES_FP16.to(byte).magnitude, precision=0, commas=False)
@@ -1856,9 +1869,9 @@ class MemoryWallAnalysis:
 2.  **Gradients and optimizer state**: gradients add `{python} FrontierModelParallelRecap.frontier_params_b_str` params $\times$ `{python} MemoryWallAnalysis.bytes_fp16_str` bytes = `{python} MemoryWallAnalysis.gradient_gb_str`, while Adam FP32 master weights, momentum, and variance add `{python} FrontierModelParallelRecap.frontier_params_b_str` params $\times$ `{python} MemoryWallAnalysis.bytes_adam_str` bytes = `{python} MemoryWallAnalysis.optim_gb_str`.
 3.  **Total static memory**: `{python} MemoryWallAnalysis.total_static_gb_str`.
 4.  **ZeRO-3 sharding**: With `{python} MemoryWallAnalysis.n_gpus_str`, per-GPU static memory = `{python} MemoryWallAnalysis.total_static_gb_str`/`{python} MemoryWallAnalysis.n_gpus_str` $\approx$ `{python} MemoryWallAnalysis.per_gpu_gb_str`.
-5.  **Activation memory**: For sequence length 2048 and batch size 1, a 96-layer transformer generates $\approx$ `{python} MemoryWallAnalysis.activation_gb_str` of activations per GPU.
+5.  **Activation memory**: For sequence length 2048 and batch size 1, the canonical full-checkpointing strategy stores $\approx$ `{python} MemoryWallAnalysis.activation_gb_str` of activations per GPU.
 
-**Systems insight**: `{python} MemoryWallAnalysis.per_gpu_gb_str` (static) + `{python} MemoryWallAnalysis.activation_gb_str` (dynamic) = `{python} MemoryWallAnalysis.total_per_gpu_gb_str`. This exceeds the `{python} A100CapacityContext.a100_mem_gb_str` capacity of the A100. Even with full ZeRO-3 sharding, pure data parallelism fails. The only recourse is tensor parallelism to split the layers themselves.
+**Systems insight**: `{python} MemoryWallAnalysis.per_gpu_gb_str` (static) + `{python} MemoryWallAnalysis.activation_gb_str` (dynamic) = `{python} MemoryWallAnalysis.total_per_gpu_gb_str`. Under this simplified accounting, ZeRO-3 plus full activation checkpointing fits within the `{python} A100CapacityContext.a100_mem_gb_str` A100 capacity, leaving material headroom for framework buffers and transient layer gathers. If those additional allocations exceed the remaining HBM, the design can reduce the micro-batch, offload state, increase the sharding degree, or add tensor or pipeline parallelism; tensor parallelism is not the only recourse.
 
 :::
 
@@ -2343,11 +2356,11 @@ Only by combining all three can we train Archetype A systems efficiently.
 
 To see why the combination matters, consider three parallelism configurations for training the `{python} FrontierHybridRecap.frontier_params_b_str` model on a 1,024-GPU cluster organized as 128 nodes of 8 GPUs each. The progression from pure data parallelism through tensor and pipeline parallelism makes the efficiency gain concrete.
 
-Configuration A: Pure Data Parallelism (DP-1024). All 1,024 GPUs replicate the full model (using ZeRO to shard optimizer states), and each GPU processes a different data shard. The gradient AllReduce exchanges 350 GB across the full InfiniBand fabric. As the scaling-efficiency analysis showed, this achieves approximately 37.5 percent efficiency because the inter-node communication dominates.
+Configuration A: Pure Data Parallelism (DP-1024) is a communication counterfactual rather than a feasible placement for this model. The FP16 weights alone occupy 350 GB, so an A100 or H100 cannot replicate them; sharding only optimizer states does not change that fact. If replication were possible, all 1,024 ranks would form one data-parallel group, and each rank would participate in an AllReduce of the 350 GB gradient tensor across the InfiniBand fabric. The earlier 37.5 percent calculation isolates that communication cost.
 
-Configuration B: TP-8, DP-128. Within each node, 8 GPUs use tensor parallelism over NVLink. Across nodes, 128 data-parallel groups synchronize gradients over InfiniBand. Each data-parallel group now needs to AllReduce only the gradients for its 1/8 shard of the model (43.75 GB instead of 350 GB), and the TP communication is contained within the fast NVLink domain. The inter-node AllReduce time drops from 14 seconds to approximately 1.75 seconds. If the compute time is still 2.1 seconds, the efficiency improves to $2.1 / (2.1 + 1.75) \approx 54.5$ percent, and with communication-computation overlap, practical efficiency reaches 75--85 percent.
+Configuration B: TP-8, DP-128. Within each of 128 model replicas, 8 GPUs use tensor parallelism over NVLink. The corresponding tensor shard from every replica forms one 128-rank data-parallel group, so the layout contains 8 such groups. Each rank AllReduces its 1/8 gradient shard, 43.75 GB rather than 350 GB, and TP communication remains within the fast NVLink domain. The inter-node AllReduce time drops from 14 seconds to approximately 1.75 seconds. If the compute time is still 2.1 seconds, the efficiency improves to $2.1 / (2.1 + 1.75) \approx 54.5$ percent, and with communication-computation overlap, practical efficiency reaches 75--85 percent.
 
-Configuration C: TP-8, PP-4, DP-32. Within each node, 8 GPUs use tensor parallelism. Across 4 nodes, pipeline parallelism divides the model into 4 stages. Across the remaining 32 data-parallel groups, gradient synchronization occurs over InfiniBand. Pipeline parallelism reduces the gradient AllReduce volume further (each stage has roughly 1/4 of the parameters), and the pipeline communication (forwarding activations between stages) has lower volume than a full AllReduce. The trade-off is the pipeline bubble: at the beginning and end of each microbatch, some pipeline stages are idle while waiting for activations from earlier stages or gradients from later stages. The bubble fraction is approximately $(p-1)/m$, so with 4 pipeline stages and 32 microbatches per training step, the bubble wastes roughly 9 percent of compute.
+Configuration C: TP-8, PP-4, DP-32. Each of 32 model replicas uses 8-way tensor parallelism within a stage and 4 pipeline stages across nodes. For each of the $8\times4=32$ tensor-and-pipeline shard positions, the corresponding ranks from all replicas form one 32-rank data-parallel group. Each rank therefore AllReduces a $350/(8\times4)\approx10.94$ GB gradient shard. Pipeline communication forwards activations between stages and has lower volume than a full-model AllReduce. The trade-off is the pipeline bubble: at the beginning and end of each microbatch, some pipeline stages are idle while waiting for activations from earlier stages or gradients from later stages. The bubble fraction is approximately $(p-1)/m$, so with 4 pipeline stages and 32 microbatches per training step, the bubble wastes roughly 9 percent of compute.
 
 The three-way comparison reveals a clear pattern: configurations that keep high-bandwidth communication (tensor parallelism) within the fast NVLink domain and push only low-bandwidth communication (data-parallel AllReduce of smaller gradient shards) onto the slower InfiniBand fabric achieve the highest efficiency. *The infrastructure hierarchy dictates the parallelism hierarchy.* The resulting principle is called hierarchy-aware parallelism, and it is a common approach for large-scale training systems.
 
@@ -2545,8 +2558,11 @@ class ThreeDParallelism:
     total_gpus_h100_value_str = fmt(total_gpus_h100, precision=0)
     nvlink5_bw_tb_per_s_str = fmt_bandwidth(nvlink5_bw, unit=TB / second, precision=1, commas=False)
     params_trillion_str = fmt_params(TRILLION, scale="trillion", scale_style="word", precision=0, commas=False)
-    tp_blackwell_value_str = fmt(16, precision=0, commas=False)
-    pp_blackwell_value_str = fmt(32, precision=0, commas=False)
+    tp_blackwell = 16
+    pp_blackwell = 8
+    check(tp_blackwell * pp_blackwell == tp_h100 * pp_h100, "Model-partition product should remain 128")
+    tp_blackwell_value_str = fmt(tp_blackwell, precision=0, commas=False)
+    pp_blackwell_value_str = fmt(pp_blackwell, precision=0, commas=False)
     gpus_per_node_value_str = fmt(Systems.Nodes.DGX_H100.accelerators_per_node, precision=0, commas=False)
     tp_alt_value_str = fmt(32, precision=0, commas=False)
     die_to_die_bw_tb_per_s_str = fmt_bandwidth(10 * (TB / second), unit=TB / second, precision=0, commas=False)
@@ -2554,7 +2570,7 @@ class ThreeDParallelism:
 
 The Blackwell architecture provides a concrete example of how accelerator packaging changes the 3D parallelism trade-offs. First, NVLink 5 provides `{python} ThreeDParallelism.nvlink5_bw_tb_per_s_str` of bidirectional bandwidth per GPU, doubling the intra-node capacity of the Hopper generation. This allows for larger tensor parallelism $(t)$ groups (for example, $t=$ `{python} ThreeDParallelism.tp_blackwell_value_str` or $t=$ `{python} ThreeDParallelism.tp_alt_value_str` across multiple nodes) with lower latency overhead. Second, Blackwell adds FP4 Tensor Core support, improving low-precision throughput and memory efficiency for supported workloads; whether FP4 is used for training depends on the numerical recipe and software stack.
 
-For a `{python} ThreeDParallelism.params_trillion_str` parameter model, a Blackwell-class configuration can use $t=$ `{python} ThreeDParallelism.tp_blackwell_value_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_value_str`-GPU nodes via NVLink Switch) and $p=$ `{python} ThreeDParallelism.pp_blackwell_value_str`, reducing the total number of pipeline stages and associated bubble overhead relative to a `{python} ThreeDParallelism.total_gpus_h100_value_str`-GPU Hopper-scale fleet reference configuration. The `{python} ThreeDParallelism.die_to_die_bw_tb_per_s_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. The general systems lesson is that improving local bandwidth shifts pressure outward: once intra-node communication is less binding, rail-optimized topologies (@sec-network-fabrics-rail-optimized) and All-to-All optimization become more important for larger Machine Learning Fleet configurations.
+For a `{python} ThreeDParallelism.params_trillion_str` parameter model, a Blackwell-class configuration can use $t=$ `{python} ThreeDParallelism.tp_blackwell_value_str` (spanning two `{python} ThreeDParallelism.gpus_per_node_value_str`-GPU nodes via NVLink Switch) and $p=$ `{python} ThreeDParallelism.pp_blackwell_value_str`. Relative to the Hopper reference's $t=8$ and $p=16$, this keeps the model-partition product at 128 while halving the number of pipeline stages and its associated bubble term. The `{python} ThreeDParallelism.die_to_die_bw_tb_per_s_str` die-to-die interconnect within the Blackwell GPU further collapses the distinction between intra-chip and intra-package communication, allowing the two reticle-limited dies to function as a single high-bandwidth tensor parallel unit. The general systems lesson is that improving local bandwidth shifts pressure outward: once intra-node communication is less binding, rail-optimized topologies (@sec-network-fabrics-rail-optimized) and All-to-All optimization become more important for larger Machine Learning Fleet configurations.
 
 The same placement constraints can be made operational through design-space search.
 

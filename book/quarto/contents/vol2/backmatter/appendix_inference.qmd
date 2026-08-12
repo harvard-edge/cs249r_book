@@ -58,21 +58,24 @@ $$E[T] = E[W] + E[T_{\text{batch}}] + E[T_{\text{svc}}]$$
 where:
 
 - $E[W]$ is the expected waiting time in queue before joining a batch
-- $E[T_{\text{batch}}]$ is the expected time to form a complete batch (batch accumulation delay)
+- $E[T_{\text{batch}}]$ is the expected per-request batch-accumulation delay before dispatch
 - $E[T_{\text{svc}}]$ is the expected inference time once the batch executes
 
-For dynamic batching with maximum wait time $T_{\text{max}}$ and maximum batch size $B_{\text{max}}$, the batch formation process is bounded. Under Poisson arrivals with rate $\lambda_{\text{arr}}$, the expected number of requests accumulated in time $T_{\text{max}}$ is $\lambda_{\text{arr}} \cdot T_{\text{max}}$. The actual batch size $B$ follows:
+For dynamic batching with maximum wait time $T_{\text{max}}$ and maximum batch size $B_{\text{max}}$, the first request triggers the batching window. Let $N \sim \operatorname{Poisson}(\lambda_{\text{arr}}T_{\text{max}})$ count subsequent arrivals during that window and let $k=B_{\text{max}}-1$. For $B_{\text{max}}>1$, the realized batch size is $B=\min(B_{\text{max}},1+N)$, including the trigger request, so:
 
-$$E[B] = \min(B_{\text{max}}, \lambda_{\text{arr}} \cdot T_{\text{max}})$$
+$$E[B] = \sum_{n=0}^{k-1}(n+1)\Pr(N=n) + B_{\text{max}}\Pr(N\geq k)$$
 
-The batch accumulation delay depends on whether the batch fills by reaching $B_{\text{max}}$ or by timeout:
+Let $\tau_k$ be the Erlang-distributed time of the $k$th subsequent arrival. A full batch closes when $\tau_k \leq T_{\text{max}}$, while a timeout batch closes at $T_{\text{max}}$ with $N=n<k$. The mean per-request accumulation delay within each realized batch is:
 
-$$E[T_{\text{batch}}] = \begin{cases}
-\frac{B_{\text{max}}}{2\lambda_{\text{arr}}} & \text{if } \lambda_{\text{arr}} \cdot T_{\text{max}} \geq B_{\text{max}} \text{ (batch fills)} \\
-\frac{T_{\text{max}}}{2} & \text{if } \lambda_{\text{arr}} \cdot T_{\text{max}} < B_{\text{max}} \text{ (timeout triggers)}
-\end{cases}$$
+$$E[T_{\text{batch}} \mid \text{full}] = \frac{1}{2}E[\tau_k \mid \tau_k \leq T_{\text{max}}]$$
 
-The factor of $1/2$ in both cases reflects the average wait for requests arriving uniformly throughout the batch window.
+$$E[T_{\text{batch}} \mid N=n,\ \text{timeout}] = \frac{T_{\text{max}}}{2}\left(1+\frac{1}{n+1}\right), \qquad 0 \leq n < k$$
+
+Weighting each batch outcome by its realized request count gives the mean delay of a randomly selected request:
+
+$$E[T_{\text{batch}}] = \frac{B_{\text{max}}\Pr(N\geq k)E[\tau_k/2 \mid \tau_k\leq T_{\text{max}}] + \sum_{n=0}^{k-1}(n+1)\Pr(N=n)E[T_{\text{batch}} \mid N=n,\ \text{timeout}]}{E[B]}$$
+
+When batches reliably fill before timeout, this expression approaches $E[\tau_k]/2=(B_{\text{max}}-1)/(2\lambda_{\text{arr}})$. For $B_{\text{max}}=1$, the batch contains only its trigger request and accumulation delay is zero.
 
 #### Optimal batch size derivation {#sec-appdx-inference-scale-optimal-batch-size-derivation-3a3c}
 
@@ -82,17 +85,17 @@ $$B = \operatorname{arg\,min}_{B} E[T(B)] \quad \text{subject to} \quad \mu_{\te
 
 The constraint ensures system stability (service rate exceeds arrival rate).
 
-Substituting the response time components:
+For a high-traffic regime in which batches of size $B$ reliably fill before timeout, substituting the response time components gives:
 
-$$E[T(B)] = E[W(B)] + \frac{B}{2\lambda_{\text{arr}}} + T_{\text{svc}}(B)$$
+$$E[T(B)] = E[W(B)] + \frac{B-1}{2\lambda_{\text{arr}}} + T_{\text{svc}}(B)$$
 
-For an M/G/1 queue with batch arrivals (treating each batch as a single "super-request"), the queue sees batches rather than individual requests. If the request arrival rate is $\lambda_{\text{arr}}$ and the average batch size is $B$, the batch arrival rate is $\lambda_{\text{batch}}=\lambda_{\text{arr}}/B$. The Pollaczek-Khinchine formula gives the expected waiting time:
+For a tractable waiting-time estimate, use an M/G/1 surrogate that treats batches as Poisson "super-requests." If the request arrival rate is $\lambda_{\text{arr}}$ and the average batch size is $B$, this surrogate uses batch arrival rate $\lambda_{\text{batch}}=\lambda_{\text{arr}}/B$. This is not the exact process produced by grouping Poisson request arrivals, because fixed-size grouping yields Erlang inter-batch times; finite $K$ or $c>1$ requires a bulk-service model or simulation. Within the explicit surrogate, the Pollaczek-Khinchine formula gives:
 
 $$E[W] = \frac{\lambda_{\text{batch}} \cdot E[T_{\text{svc}}^2]}{2(1 - \rho_{\text{serv}})}$$
 
 where $\rho_{\text{serv}} = \lambda_{\text{batch}} \cdot E[T_{\text{svc}}] = \lambda_{\text{arr}} \cdot E[T_{\text{svc}}] / B$ is the server utilization. The second moment $E[T_{\text{svc}}^2]$ captures service time variability.
 
-For our linear service time model with deterministic service (variance zero within a batch):
+For the linear service time model with deterministic service in this surrogate:
 
 $$E[W(B)] = \frac{\lambda_{\text{arr}} \cdot T_{\text{svc}}(B)^2}{2B(1 - \lambda_{\text{arr}} \cdot T_{\text{svc}}(B)/B)}$$
 
@@ -168,19 +171,19 @@ Applying @eq-optimal-batch-approx to compute the minimum batch size that preserv
 
 $$B_{\min} \approx \frac{100 \times 0.05}{0.75 - 100 \times 0.0005} = \frac{5}{0.70} \approx 7.14$$
 
-Rounding up gives $B=8$ as the smallest batch size that meets the target utilization headroom. Evaluating the full response-time expression then shows how larger batches reduce utilization but add batch-accumulation delay:
+Rounding up gives $B=8$ as the smallest batch size that meets the target utilization headroom. Evaluating the surrogate response-time expression under the full-batch assumption then shows how larger batches reduce utilization but add batch-accumulation delay:
 
 **Performance at different batch sizes.**
 
 @Tbl-batch-size-comparison quantifies the trade-offs across batch sizes from 1 to 32:
 
-| **Size $B$** | **$T_{\text{svc}}(B)$ (ms)** | **req/s** | **$\rho_{\text{serv}}$** | **E[W] (ms)** | **$B/(2\lambda_{\text{arr}})$ (ms)** | **E[T] (ms)** |
+| **Size $B$** | **$T_{\text{svc}}(B)$ (ms)** | **req/s** | **$\rho_{\text{serv}}$** | **E[W] (ms)** | **$(B-1)/(2\lambda_{\text{arr}})$ (ms)** | **E[T] (ms)** |
 |:-------------|:----------------------------:|:---------:|:------------------------:|:-------------:|:------------------------------------:|:-------------:|
-| **1**        |             50.5             |    19.8   |     505% (unstable)      |    $\infty$   |                 5.0                  |    $\infty$   |
-| **4**        |             52.0             |    76.9   |     130% (unstable)      |    $\infty$   |                 20.0                 |    $\infty$   |
-| **8**        |             54.0             |   148.1   |          67.5%           |      56.1     |                 40.0                 |     150.1     |
-| **16**       |             58.0             |   275.9   |          36.3%           |      16.5     |                 80.0                 |     154.5     |
-| **32**       |             66.0             |   484.8   |          20.6%           |      8.6      |                160.0                 |     234.6     |
+| **1**        |             50.5             |    19.8   |     505% (unstable)      |    $\infty$   |                 0.0                  |    $\infty$   |
+| **4**        |             52.0             |    76.9   |     130% (unstable)      |    $\infty$   |                 15.0                 |    $\infty$   |
+| **8**        |             54.0             |   148.1   |          67.5%           |      56.1     |                 35.0                 |     145.1     |
+| **16**       |             58.0             |   275.9   |          36.3%           |      16.5     |                 75.0                 |     149.5     |
+| **32**       |             66.0             |   484.8   |          20.6%           |      8.6      |                155.0                 |     229.6     |
 
 : **Batch Size Impact on GPT-3 Serving Performance**: Batch sizes below 8 cannot sustain 100 QPS (utilization exceeds 100 percent). After including batch-accumulation delay, the latency minimum in this simple model occurs near $B=8$; $B=16$ has nearly the same mean latency with lower utilization, while $B=32$ leaves more headroom but pays a large accumulation-delay penalty. {#tbl-batch-size-comparison}
 
@@ -205,22 +208,22 @@ class GPT3ServingResults:
     b8_service_ms = 54.0
     b8_util_pct = 67.5
     b8_wait_ms = 56.1
-    b8_accum_ms = 40.0
-    b8_total_ms = 150.1
+    b8_accum_ms = 35.0
+    b8_total_ms = 145.1
 
     # Batch 16 results
     b16_service_ms = 58.0
     b16_util_pct = 36.3
     b16_wait_ms = 16.5
-    b16_accum_ms = 80.0
-    b16_total_ms = 154.5
+    b16_accum_ms = 75.0
+    b16_total_ms = 149.5
 
     # Batch 32 results
     b32_service_ms = 66.0
     b32_util_pct = 20.6
     b32_wait_ms = 8.6
-    b32_accum_ms = 160.0
-    b32_total_ms = 234.6
+    b32_accum_ms = 155.0
+    b32_total_ms = 229.6
 
     # Prose-facing canonical strings (preserve raw floats for arithmetic above)
     b8_service_ms_str = fmt_time(b8_service_ms, 'millisecond', precision=0, commas=False)
@@ -262,7 +265,7 @@ class LittlesLawVerify:
     # ┌── 1. LOAD ──────────────────────────────────────────
     arrival_rate = 100 / second  # scenario assumption: request arrival rate
     batch_size = 16
-    batch16_total_ms = 154.5  # scenario result from the batch-size table above
+    batch16_total_ms = 149.5  # scenario result from the batch-size table above
     expected_total_latency = batch16_total_ms * ms
     utilization = 36.3 / 100
     # ┌── 2. EXECUTE ───────────────────────────────────────
@@ -270,7 +273,7 @@ class LittlesLawVerify:
     in_service = batch_size * utilization
     in_queue = n_req - in_service
     # ┌── 3. GUARD ─────────────────────────────────────────
-    check(15 < n_req < 16, f"Q_req should be ~15.5, got {n_req:.2f}")
+    check(14 < n_req < 15, f"Q_req should be ~15.0, got {n_req:.2f}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     batch_size_str = fmt_int(batch_size, commas=False)
     expected_total_ms_str = fmt_time(expected_total_latency, 'millisecond', precision=1, commas=False)
@@ -294,7 +297,7 @@ With batch size `{python} LittlesLawVerify.batch_size_str` and utilization `{pyt
 - Expected requests in service: `{python} LittlesLawVerify.batch_size_str` $\times$ `{python} LittlesLawVerify.utilization_str` = `{python} LittlesLawVerify.in_service_str`
 - Expected requests in queue: `{python} LittlesLawVerify.n_req_str` - `{python} LittlesLawVerify.in_service_str` = `{python} LittlesLawVerify.in_queue_str`
 
-This matches the response-time decomposition: roughly 6 requests are in service and roughly 10 are waiting or accumulating into batches on average.
+This matches the response-time decomposition: roughly 6 requests are in service and roughly 9 are waiting or accumulating into batches on average.
 
 :::
 
@@ -316,17 +319,17 @@ Any batch size below $B_{\text{min}}$ results in an unstable system.
 
 ##### Step 3: Compute latency at candidate batch sizes {.unnumbered}
 
-For each candidate $B \in \{B_{\text{min}}, 2B_{\text{min}}, ..., B_{\text{max}}\}$, compute:
+Under the same Poisson-super-request surrogate and full-batch assumption, for each candidate $B \in \{B_{\text{min}}, 2B_{\text{min}}, ..., B_{\text{max}}\}$, compute:
 
-$$E[T(B)] = \frac{\lambda_{\text{arr}} \cdot T_{\text{svc}}(B)^2}{2B(1 - \lambda_{\text{arr}} T_{\text{svc}}(B)/B)} + \frac{B}{2\lambda_{\text{arr}}} + T_{\text{svc}}(B)$$
+$$E[T(B)] = \frac{\lambda_{\text{arr}} \cdot T_{\text{svc}}(B)^2}{2B(1 - \lambda_{\text{arr}} T_{\text{svc}}(B)/B)} + \frac{B-1}{2\lambda_{\text{arr}}} + T_{\text{svc}}(B)$$
 
 ##### Step 4: Account for tail latency {.unnumbered}
 
-For P99 SLO compliance, use the heavy-traffic approximation for tail latency:
+If measured response times are approximately Gaussian, their P99 can be estimated as:
 
 $$T_{\text{P99}} \approx E[T] + 2.33 \cdot \sigma_T$$
 
-where $\sigma_T$ is the standard deviation of response time. For exponential-like response times, P99 is closer to $-\ln(0.01)E[T] \approx 4.6 \cdot E[T]$; use measured percentiles for production sizing.
+where $\sigma_T$ is the standard deviation of response time. This Gaussian rule is not a general heavy-traffic approximation because queueing response times are commonly skewed. For exponential response times, P99 is $-\ln(0.01)E[T] \approx 4.6 \cdot E[T]$; use measured percentiles for production sizing.
 
 ##### Step 5: Select optimal batch size {.unnumbered}
 
@@ -357,7 +360,7 @@ The relationship between batch size, throughput, and latency defines an operatin
 
 The trade-off curve demonstrates several key insights:
 
-1. **Pareto frontier**\index{Pareto Frontier}: The curve represents efficient operating points; any point below the curve is dominated by a point on the curve with either higher throughput or lower latency.
+1. **Pareto frontier**\index{Pareto Frontier}: An operating point is Pareto efficient when no other candidate provides at least as much throughput and no more latency, with a strict improvement in at least one objective. The frontier is the set of these nondominated points.
 2. **Knee of the curve**\index{Knee of the Curve}: The optimal batch size often lies at the "knee" where throughput gains diminish while latency continues to increase linearly.
 3. **SLO-constrained optimum**\index{SLO!constrained optimum}: When an SLO bounds maximum latency, the optimal point is where the curve intersects the SLO boundary.
 4. **Diminishing returns**\index{Diminishing Returns}: Beyond the knee, doubling batch size may increase throughput by only 10--20 percent while doubling latency.

@@ -266,7 +266,7 @@ The symmetry is not a coincidence: ring AllReduce decomposes into one ReduceScat
 
 AllToAll is the most general collective: each GPU sends a distinct $M/N$-sized chunk to every other GPU, and receives a distinct chunk from each. It is the routing primitive for Mixture-of-Experts (MoE) architectures, where tokens must be dispatched to the correct expert and the results gathered back.
 
-Ring AllToAll, given by @eq-alltoall:
+Pairwise-exchange AllToAll, given by @eq-alltoall:
 
 $$ T_{\text{alltoall}} = \frac{N - 1}{N} \cdot \frac{M}{\beta} + (N - 1) \cdot \alpha $$ {#eq-alltoall}
 
@@ -292,12 +292,12 @@ With the individual formulas in place, @tbl-collective-summary provides a compac
 | **AllReduce (Tree)**     |       $2\log_2 N \cdot \frac{M}{\beta}$       | $2\log_2 N \cdot \alpha$ |        Small-message sync        |
 | **AllGather (Ring)**     |     $\frac{N-1}{N} \cdot \frac{M}{\beta}$     |   $(N-1) \cdot \alpha$   |  FSDP parameter reconstruction   |
 | **ReduceScatter (Ring)** |     $\frac{N-1}{N} \cdot \frac{M}{\beta}$     |   $(N-1) \cdot \alpha$   |   FSDP/ZeRO gradient sharding    |
-| **AllToAll (Ring)**      |     $\frac{N-1}{N} \cdot \frac{M}{\beta}$     |   $(N-1) \cdot \alpha$   |        MoE expert routing        |
+| **AllToAll (Pairwise)**  |     $\frac{N-1}{N} \cdot \frac{M}{\beta}$     |   $(N-1) \cdot \alpha$   |        MoE expert routing        |
 | **Broadcast (Tree)**     |        $\log_2 N \cdot \frac{M}{\beta}$       | $\log_2 N \cdot \alpha$  | Weight distribution, config sync |
 
-: **Collective Operation Cost Summary**: Bandwidth and latency terms for ring and tree algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $N$ = GPU count, $M$ = total message size in bytes. {#tbl-collective-summary}
+: **Collective Operation Cost Summary**: Bandwidth and latency terms for ring, tree, and pairwise-exchange algorithms. The bandwidth term determines cost for large messages (gradients, parameters); the latency term determines cost for small messages (scalars, barriers). $N$ = GPU count, $M$ = total message size in bytes. {#tbl-collective-summary}
 
-Two patterns emerge from this table. First, bandwidth-optimal ring algorithms all share the $(N-1)/N$ factor, which approaches 1 for large $N$. Per-rank communication therefore approaches a constant multiple of $M$: about $2M$ for AllReduce and about $M$ for AllGather, ReduceScatter, or AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $N$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
+Two patterns emerge from this table. First, the ring and pairwise-exchange models contain the $(N-1)/N$ factor, which approaches 1 for large $N$. Per-rank communication therefore approaches a constant multiple of $M$: about $2M$ for ring AllReduce and about $M$ for ring AllGather, ring ReduceScatter, or pairwise AllToAll. Aggregate traffic still scales with the number of ranks. Second, the latency term grows linearly with $N$ for ring algorithms but logarithmically for tree algorithms, creating the algorithm selection trade-off analyzed next.
 
 ## Algorithm Selection {#sec-appdx-comm-foundations-algorithm-selection}
 
@@ -311,22 +311,24 @@ NCCL automatically selects a collective algorithm based on message size and GPU 
 
 The ring algorithm minimizes bandwidth usage but pays a latency cost that grows linearly with $N$. The tree algorithm minimizes latency but wastes bandwidth because it sends the full message at each level. Recursive halving-doubling splits the difference: it uses halving (like a tree) for the reduce phase and doubling for the gather phase, achieving near-optimal bandwidth with $\mathcal{O}(\log N)$ latency steps.
 
-The decision boundary between ring and tree depends on message size:
+The decision boundary between ring and tree depends on both message size and participant count. For the power-of-two case modeled by @eq-ring-allreduce and @eq-tree-allreduce, equating the two times gives the crossover in @eq-ring-tree-crossover:
 
-- **$M \gg n^*$** (large gradients): Use **ring**. The bandwidth term dominates, and ring's $(N-1)/N$ factor is optimal.
-- **$M \ll n^*$** (barriers, scalars): Use **tree**. The latency term dominates, and tree's $\log_2 N$ steps are far fewer than ring's $2(N-1)$.
-- **$M \approx n^*$** (medium tensors): Use recursive halving-doubling for balanced performance, or test empirically.
+$$ M_{\times}(N) = n^* \times \frac{(N-1)-\log_2 N}{\log_2 N-(N-1)/N}, \qquad n^*=\alpha\beta $$ {#eq-ring-tree-crossover}
+
+- **$M > M_{\times}(N)$** (large gradients): The ring has the lower modeled cost because its smaller bandwidth coefficient outweighs its additional startup steps.
+- **$M < M_{\times}(N)$** (barriers, scalars): The tree has the lower modeled cost because its logarithmic startup term outweighs its additional bandwidth cost.
+- **$M \approx M_{\times}(N)$** (medium tensors): The two modeled costs are similar, so benchmark them alongside recursive halving-doubling on the target topology.
 
 @Tbl-algorithm-selection provides guidance for choosing the right algorithm.
 
-| **Regime**                               |                **Ring**                |               **Tree**               | **Recursive Halving-Doubling**                               |
-|:-----------------------------------------|:--------------------------------------:|:------------------------------------:|:-------------------------------------------------------------|
-| **Large messages ($M > 10 \times n^*$)** |  Best---optimal bandwidth utilization  | Poor---sends $M$ at every tree level | Good---near-optimal bandwidth, $\mathcal{O}(\log N)$ latency |
-| **Small messages ($M < n^*/10$)**        | Poor---$2(N-1)$ startup costs dominate |   Best---$\log_2 N$ startup costs    | Good---$\mathcal{O}(\log N)$ startup costs                   |
-| **Medium messages ($M \approx n^*$)**    |               Acceptable               |              Acceptable              | Best---balances both terms                                   |
-| **Power-of-2 $N$**                       |           Works for any $N$            |         Best when $N = 2^k$          | Requires $N = 2^k$                                           |
+| **Regime**                              |                 **Ring**                 |                 **Tree**                 | **Recursive Halving-Doubling**                               |
+|:----------------------------------------|:----------------------------------------:|:----------------------------------------:|:-------------------------------------------------------------|
+| **$M > M_{\times}(N)$**                | Lower cost under the displayed models    | Higher bandwidth term                    | Candidate with near-optimal bandwidth and logarithmic steps |
+| **$M < M_{\times}(N)$**                | Higher linear startup term                | Lower cost under the displayed models    | Candidate with logarithmic startup steps                    |
+| **$M \approx M_{\times}(N)$**         | Benchmark on the target topology          | Benchmark on the target topology          | Benchmark on the target topology                            |
+| **Power-of-2 $N$**                      | Works for any $N$                         | Matches the displayed $\log_2 N$ model   | Requires $N = 2^k$                                         |
 
-: **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling for different message sizes and GPU counts. $n^* = \alpha \times \beta$ is the crossover message size from @eq-crossover. {#tbl-algorithm-selection}
+: **Algorithm Selection Guide**: Strengths and weaknesses of ring, tree, and recursive halving-doubling relative to the participant-dependent ring-tree crossover $M_{\times}(N)$ in @eq-ring-tree-crossover. {#tbl-algorithm-selection}
 
 ### Hierarchical AllReduce {#sec-appdx-comm-foundations-hierarchical}
 
@@ -494,12 +496,31 @@ class CommCompression:
     compressed_comm = calc_ring_allreduce_time(compressed_msg, ring_n_gpus, ib_ndr.bandwidth, Systems.Fabrics.InfiniBand_NDR.latency_us * microsecond)
     compressed_total = compressed_comm + compress_overhead
     compress_speedup = (ring_time / compressed_total).to_base_units().magnitude
+    codec_budget = ring_time - compressed_comm
     min_transfer = ring_msg / ib_ndr.bandwidth
     check(ring_time >= min_transfer, "Uncompressed time must cover link transfer floor")
+    check(compress_overhead < codec_budget, "Codec overhead must be less than the actual collective time saved")
 
     @staticmethod
-    def breakeven_ms(comm_ms, compression_ratio):
-        return comm_ms * (1 - 1 / compression_ratio)
+    def breakeven_ms(
+        uncompressed_ms,
+        compression_ratio,
+        n_gpus=ring_n_gpus,
+        bandwidth=ib_ndr.bandwidth,
+        alpha_us=Systems.Fabrics.InfiniBand_NDR.latency_us,
+    ):
+        uncompressed = uncompressed_ms * ms
+        startup = 2 * (n_gpus - 1) * alpha_us * microsecond
+        check(uncompressed > startup, "Target AllReduce time must exceed the ring startup floor")
+        data_factor = 2 * (n_gpus - 1) / n_gpus
+        message = (uncompressed - startup) * bandwidth / data_factor
+        compressed = calc_ring_allreduce_time(
+            message / compression_ratio,
+            n_gpus,
+            bandwidth,
+            alpha_us * microsecond,
+        )
+        return (uncompressed - compressed).to(ms).magnitude
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────────────
     ring_n_str = fmt(ring_n_gpus, precision=0, commas=False)
@@ -511,8 +532,8 @@ class CommCompression:
     compressed_total_ms_str = fmt_time(compressed_total, ms, precision=1, commas=False)
     compress_speedup_mult_str = fmt_multiple(compress_speedup, precision=1, commas=False)
     breakeven_4_10_str = fmt(breakeven_ms(10, 4), precision=1, commas=False)
-    breakeven_4_40_str = fmt(breakeven_ms(40, 4), precision=0, commas=False)
-    breakeven_4_100_str = fmt(breakeven_ms(100, 4), precision=0, commas=False)
+    breakeven_4_40_str = fmt(breakeven_ms(40, 4), precision=1, commas=False)
+    breakeven_4_100_str = fmt(breakeven_ms(100, 4), precision=1, commas=False)
     breakeven_16_10_str = fmt(breakeven_ms(10, 16), precision=1, commas=False)
     breakeven_16_40_str = fmt(breakeven_ms(40, 16), precision=1, commas=False)
     breakeven_16_100_str = fmt(breakeven_ms(100, 16), precision=1, commas=False)
@@ -543,7 +564,7 @@ class CommCompression:
 
 :::
 
-@Tbl-compression-breakeven shows how the break-even codec overhead varies with compression ratio and uncompressed AllReduce time. Higher compression ratios tolerate larger codec overheads.
+@Tbl-compression-breakeven shows how the break-even codec overhead varies with compression ratio and uncompressed AllReduce time. Higher compression ratios tolerate larger codec overheads, up to the bandwidth-dependent portion of the uncompressed collective.
 
 | **Compression Ratio ($r_{\text{comp}}$)** |    **AllReduce = 10 ms (Max Codec Overhead)**   |    **AllReduce = 40 ms (Max Codec Overhead)**   |   **AllReduce = 100 ms (Max Codec Overhead)**    |
 |:------------------------------------------|:-----------------------------------------------:|:-----------------------------------------------:|:------------------------------------------------:|
@@ -552,17 +573,17 @@ class CommCompression:
 | **64$\times$**                            |  `{python} CommCompression.breakeven_64_10_str` |  `{python} CommCompression.breakeven_64_40_str` | `{python} CommCompression.breakeven_64_100_str`  |
 | **256$\times$**                           | `{python} CommCompression.breakeven_256_10_str` | `{python} CommCompression.breakeven_256_40_str` | `{python} CommCompression.breakeven_256_100_str` |
 
-: **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as $T_{\text{transfer}}(M) \times (1 - 1/r_{\text{comp}})$. At high compression ratios, nearly the entire uncompressed AllReduce time is available as codec budget. {#tbl-compression-breakeven}
+: **Compression Break-Even Thresholds**: Maximum tolerable codec overhead (encode + decode) for compression to reduce total time, computed as the actual collective-time difference $T_{\text{transfer}}(M)-T_{\text{transfer}}(M/r_{\text{comp}})$. The shared startup latency cancels, so even at high compression ratios it is not part of the codec budget. {#tbl-compression-breakeven}
 
 ## Summary {.unnumbered}
 
 ::: {.callout-takeaways title="Communication costs are predictable"}
 
 * **The $\alpha$-$\beta$ model**: The model ($T(n) = \alpha + n/\beta$) decomposes every network transfer into a fixed startup cost and a payload-proportional bandwidth cost. The crossover message size $n^* = \alpha \times \beta$ determines which cost dominates.
-* **Ring-based collectives**: AllReduce, AllGather, ReduceScatter, and AllToAll achieve bandwidth-optimal communication with a $(N-1)/N$ factor, but their latency term grows linearly with GPU count. Tree-based algorithms trade bandwidth for logarithmic latency scaling.
-* **Algorithm selection**: Message size relative to $n^*$ determines the algorithm: ring for large messages (gradients), tree for small messages (barriers), and hierarchical two-level schemes for multi-node clusters.
+* **Collective cost structure**: Ring AllReduce, ring AllGather, ring ReduceScatter, and pairwise-exchange AllToAll contain a $(N-1)/N$ bandwidth factor, while their latency terms grow linearly with GPU count. Tree-based algorithms trade bandwidth for logarithmic latency scaling.
+* **Algorithm selection**: Message size relative to the participant-dependent crossover $M_{\times}(N)$ determines whether the displayed ring or tree model is cheaper. Production selection also benchmarks recursive halving-doubling and hierarchical schemes on the target topology.
 * **Pipeline bubble fraction**: $b_{\text{pipe}} = (p-1)/(p-1+m)$ is the fundamental overhead of pipeline parallelism. The practical rule $m \geq 4p$ keeps bubbles below 20 percent, and interleaved scheduling with $V$ virtual stages makes the bubble reduction approach $V$ when the microbatch term dominates.
-* **Gradient compression**: Gradient compression is profitable when the codec overhead (encode + decode) is less than the communication time saved. At high compression ratios in the bandwidth-dominated regime, nearly the entire uncompressed AllReduce time is available as overhead budget---but convergence impact must always be validated.
+* **Gradient compression**: Gradient compression is profitable when the codec overhead (encode + decode) is less than the communication time saved. At high compression ratios, the bandwidth-dependent portion of the uncompressed AllReduce time approaches the overhead budget, but convergence impact must always be validated.
 * **Four parameters predict communication cost**: The point-to-point and collective communication models in this appendix derive from two hardware parameters ($\alpha$ and $\beta$) and two workload parameters (message payload $n$ or $M$, plus participant count $N$ for collectives). Measuring these quantities for a cluster yields a complete first-order prediction of distributed training overhead, with pipeline and compression sections introducing additional parameters as noted earlier.
 
 :::

@@ -355,6 +355,7 @@ These per-component FIT figures describe the silicon's intrinsic soft-error budg
 # │
 # │ Goal: Reproduce the worked MTBF cascade from canonical MTTF/fleet constants so
 # │       every quoted rate is traceable and cannot drift.
+# │ Scope: chapter-anchor — checkpoint analysis reuses the worked cluster MTBF.
 # │ Show: lambda per subsystem, total, system rate, cluster MTBF, failure cadence.
 # │ How:  lambda = 1/MTTF; power/network shared across the node's GPUs; system = N*total.
 # │       Narrative cadence follows the displayed rate (0.2708) for self-consistency.
@@ -1036,7 +1037,7 @@ Transient faults matter because they can leave no damaged component to find afte
 
 Advanced semiconductor processes can increase soft-error sensitivity as node capacitance, supply voltage, and stored charge shrink [@baumann2005]. For GPUs[^fn-gpu-fault-rates-training], the practical risk is amplified by massive parallelism: thousands of execution lanes and high-bandwidth memories create many sites where transient faults can affect weights, activations, or gradients. Operational MTBF[^fn-mtbf-checkpoint] values are therefore workload-, component-, and environment-dependent rather than universal. For the checkpointing analysis below, the important systems rule is compounding: a cluster of 1,000 accelerators with an illustrative per-accelerator MTBF of 50,000 hours experiences an expected failure every 50 hours, necessitating robust checkpointing.
 
-[^fn-mtbf-checkpoint]: **MTBF (Mean Time Between Failures)**\index{MTBF!checkpoint frequency}: Formalized by the U.S. military in MIL-HDBK-217 (1965), MTBF assumes exponential failure distributions during the useful-life period. For ML training, MTBF feeds directly into the Young-Daly formula: a cluster with 50,000-hour per-device MTBF and 1,000 devices has a system MTBF of 50 hours, demanding checkpoints every 1--2 hours to keep wasted compute below 1 percent of total training time.
+[^fn-mtbf-checkpoint]: **MTBF (Mean Time Between Failures)**\index{MTBF!checkpoint frequency}: Formalized by the U.S. military in MIL-HDBK-217 (1965), MTBF assumes exponential failure distributions during the useful-life period. For ML training, MTBF feeds directly into the Young-Daly formula: a cluster with 50,000-hour per-device MTBF and 1,000 devices has a system MTBF of 50 hours. MTBF alone does not determine the checkpoint interval: even before checkpoint-write overhead is added, an interval $\tau$ incurs an expected rework fraction $\tau/(2\,\text{MTBF})$, so a one-hour interval already reaches 1 percent. Setting a total-waste target also requires the checkpoint write time $T_{\text{write}}$.
 
 [^fn-gpu-fault-rates-training]: **GPU Fault Rates**\index{GPU!fault rates}\index{GPU!fault rate}: GPUs concentrate thousands of execution lanes and high-bandwidth memory stacks in a single package. ML accelerators also run sustained high-power kernels with large volumes of weight, activation, and gradient data in flight, so transient faults can affect both computation and communication state.
 
@@ -1134,9 +1135,9 @@ Permanent faults are irreversible hardware defects that persist until the faulty
 
 The most consequential permanent faults in ML accelerators are those that corrupt arithmetic silently and repeatably. A stuck-at fault in a Tensor Core's multiply-accumulate datapath, or a defective cell in an HBM bank that stores weight shards, produces the same wrong value every time the same computation runs. In training, this means every forward pass through the affected matrix produces a deterministically biased result, and every backward pass accumulates a skewed gradient. Because the error is reproducible but numerically small, training loss may decline normally for hundreds of steps before the accumulated bias manifests as gradient divergence or unexpectedly poor validation accuracy. In inference, the same defect deterministically skews specific output logits—a safety-critical property in medical or autonomous-driving deployments, where the fault does not crash the system but systematically tilts every decision involving the affected weight tile.
 
-The Intel Pentium FDIV bug\index{Pentium FDIV Bug!error regions}, discovered in 1994, provides the canonical illustration of this failure mode in a general-purpose processor. An error in the lookup table used by the Pentium processor's division unit caused incorrect results for specific operations (@fig-permanent-fault). The error was small—a mistake in the fifth digit—but it compounded across operations, corrupting precision-critical applications. The ML accelerator case differs in geometry but not in principle: where the FDIV bug corrupted scalar divisions, a stuck-at fault in a Tensor Core corrupts specific rows or columns of every matrix-multiply output that routes through the defective lane, affecting all feature maps or gradient shards that touch that partition of the computation. In safety-sensitive applications, the persistent arithmetic error becomes a safety hazard because every downstream decision inherits the biased computation.
+The Intel Pentium FDIV bug\index{Pentium FDIV Bug!error regions}, discovered in 1994, provides the canonical illustration of this failure mode in a general-purpose processor. An error in the lookup table used by the Pentium processor's division unit caused incorrect results for specific operand regions (@fig-permanent-fault). The ML accelerator case differs in geometry but not in principle: where the FDIV bug corrupted scalar divisions, a stuck-at fault in a Tensor Core corrupts specific rows or columns of every matrix-multiply output that routes through the defective lane, affecting all feature maps or gradient shards that touch that partition of the computation. In safety-sensitive applications, the persistent arithmetic error becomes a safety hazard because every downstream decision inherits the biased computation.
 
-::: {#fig-permanent-fault fig-env="figure" fig-pos="htb" fig-cap="**FDIV Error Regions**: The downward spikes piercing the surface mark where the Pentium processor's faulty division unit produced incorrect results when calculating 4195835/3145727. Ideally, all values should round to 1.3338, but the bug dropped affected results from 1.33384 to 1.33368, an error in the fifth digit. Source: *Byte Magazine*." fig-alt="3D surface plot of Pentium FDIV bug results. A near-flat surface near 1.33384 is pierced by downward spikes dropping to 1.33368 where division produced incorrect fifth-digit results."}
+::: {#fig-permanent-fault fig-env="figure" fig-pos="htb" fig-cap="**FDIV Error Regions**: The downward spikes mark operand regions where the Pentium processor's faulty division unit produced incorrect results. Source: *Byte Magazine*." fig-alt="Three-dimensional surface plot with downward spikes marking operand regions affected by the Pentium FDIV bug."}
 
 ![](./images/png/permanent_fault.png)
 
@@ -1401,7 +1402,7 @@ The practical challenge is that software faults interact with every other system
 
 Software faults in ML frameworks range from syntactic and logical errors to memory leaks,[^fn-memory-leak-gpu] concurrency bugs, and integration failures. They propagate across system boundaries: an error in a tensor allocation routine can cascade to disrupt training, inference, or evaluation in seemingly unrelated modules. Some faults are intermittent, manifesting only under specific conditions such as high system load, particular hardware configurations, or rare data inputs.
 
-[^fn-memory-leak-gpu]: **Memory Leak**\index{Memory!leak, gpu training}: A programming error where allocated memory is never released. In ML systems, GPU memory leaks are uniquely destructive because accelerator memory is scarce (40--80 GB per device) and shared across the entire training pipeline. A single leaked tensor per batch---perhaps from a debugging hook left in production---can exhaust GPU memory within hours, causing silent OOM failures that kill long-running training jobs without checkpointing.
+[^fn-memory-leak-gpu]: **Memory Leak**\index{Memory!leak, gpu training}: A programming error where allocated memory is never released. In ML systems, GPU memory leaks are uniquely destructive because accelerator memory is scarce (40--80 GB per device) and shared across the entire training pipeline. A single leaked tensor per batch---perhaps from a debugging hook left in production---can exhaust GPU memory within hours, raising an explicit OOM error that kills a long-running training job without checkpointing.
 
 ```{python}
 #| echo: false
@@ -1413,8 +1414,8 @@ Software faults in ML frameworks range from syntactic and logical errors to memo
 # │          mismanagement paragraph.
 # │
 # │ Goal: Compute the BF16-weights-plus-AdamW training-state footprint for a 70B
-# │       model so the "no headroom" claim tracks the model size and byte budget.
-# │ Show: Parameter count and the aggregate per-node training-state footprint.
+# │       model so the node-capacity comparison tracks the model size and byte budget.
+# │ Show: Parameter count and the aggregate training-state footprint.
 # │ How:  footprint = memory_from_params(params, bytes_per_param). The 12 B/param
 # │       budget is BF16 weights (2) plus AdamW optimizer states (10).
 # │
@@ -1440,7 +1441,7 @@ class OomAdamwFootprint:
     footprint_gb_str = fmt_qty(footprint, GB, precision=0, commas=False)
 ```
 
-Resource mismanagement is a prominent failure class. GPU memory allocations accumulate across training iterations as intermediate activations, optimizer states, and gradient buffers are allocated but not released, until the allocator exhausts available capacity and raises an out-of-memory error mid-batch. A `{python} OomAdamwFootprint.params_b_str` parameter model in BF16 with AdamW optimizer states requires roughly `{python} OomAdamwFootprint.footprint_gb_str` of GPU memory across a node, leaving virtually no headroom for unexpected buffer growth. Memory pressure builds gradually over hundreds of iterations, making root-cause attribution difficult without per-layer memory profiling.
+Resource mismanagement is a prominent failure class. GPU memory allocations accumulate across training iterations as intermediate activations, optimizer states, and gradient buffers are allocated but not released, until the allocator exhausts available capacity and raises an out-of-memory error mid-batch. A `{python} OomAdamwFootprint.params_b_str` parameter model in BF16 with AdamW optimizer states requires roughly `{python} OomAdamwFootprint.footprint_gb_str` of GPU memory, exceeding the 640 GB aggregate capacity of an $8 \times 80$ GB node before activations and temporary buffers are included. The state therefore requires additional sharding across nodes or offload. Memory pressure builds gradually over hundreds of iterations, making root-cause attribution difficult without per-layer memory profiling.
 
 Concurrency and synchronization errors constitute another recurring fault class. In distributed or multi-threaded environments, incorrect coordination among parallel processes leads to race conditions,[^fn-race-condition-training-ft] or inconsistent states.
 
@@ -1949,7 +1950,7 @@ These software practices catch implementation faults that surface through tests 
 *Silent data corruption accumulates until it becomes routine.*
 :::
 
-As clusters scale to 100,000+ GPUs, the probability of a "Silent Data Corruption" (SDC) event (in which an ALU or HBM bit flip occurs without triggering ECC or hardware alerts) approaches certainty during large collective operations. Standard AllReduce algorithms assume that if a node is *alive*, its data is *correct*. In the machine learning fleet, we must transition to a Byzantine fault tolerance mindset: "Trust, but verify."
+As clusters scale to 100,000+ GPUs, even a small per-GPU silent-data-corruption (SDC) rate accumulates across repeated collective operations. A single collective is not certain to contain an SDC event: under the illustrative rate used below, the per-step probability remains small while the cumulative probability grows over a long training run. Standard AllReduce algorithms assume that if a node is *alive*, its data is *correct*. In the machine learning fleet, we must transition to a Byzantine fault tolerance mindset: "Trust, but verify."
 
 Check-and-verify methods turn that mindset into a data-path invariant. The system computes a checksum, hash, or redundant reduction over each gradient shard or reduced buffer, compares the result across ranks or against an independently computed digest, and blocks the optimizer step when the verification disagrees. A quick estimate makes the exposure concrete.
 
@@ -1963,7 +1964,7 @@ class SDCCollective:
 
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = 100000
-    p_sdc_per_gpu_hr = Systems.Reliability.SdcRatePerGpuHr  # 1 in a million chance per hour
+    p_sdc_per_gpu_hr = Systems.Reliability.SdcRatePerGpuHr  # illustrative generic SDC-rate assumption
     training_step_s = 2
     # ┌── 2. EXECUTE ───────────────────────────────────────
     exposure_gpu_hr = n_gpus * (training_step_s / SEC_PER_HOUR)  # aggregate GPU-hours per step
@@ -1979,20 +1980,20 @@ class SDCCollective:
     exposure_eq_math = fmt_math(rf"{_n_tex} \times ({training_step_s}/{SEC_PER_HOUR}) \approx {fmt_int(round(exposure_gpu_hr))}")
 ```
 
-::: {#nbk-fault-tolerance-napkin-math-sdc-certainty .callout-notebook title="The SDC certainty"}
+::: {#nbk-fault-tolerance-napkin-math-sdc-certainty .callout-notebook title="SDC risk accumulation"}
 
-**Problem**: Calculate the probability that at least one GPU in a `{python} SDCCollective.n_gpus_str`-GPU fleet experiences a silent ALU error during a single `{python} SDCCollective.training_step_s_str` training step.
+**Problem**: Under an illustrative generic SDC-rate assumption, calculate the probability that at least one GPU in a `{python} SDCCollective.n_gpus_str`-GPU fleet experiences an SDC event during a single `{python} SDCCollective.training_step_s_str` training step.
 
 1. **Fleet size**: `{python} SDCCollective.n_gpus_str` accelerators.
-2. **Individual risk**: $10^{-6}$ per hour (a conservative estimate for SDC).
+2. **Individual risk**: $10^{-6}$ per GPU-hour (an illustrative generic SDC-rate assumption).
 3. **The exposure**: In a 2-second window, the fleet has `{python} SDCCollective.exposure_eq_math` "GPU-hours" of exposure.
 4. **The probability**: $\Pr(\text{at least one SDC}) \approx$ `{python} SDCCollective.prob_str`.
 
-**Systems insight**: In a 100k-GPU fleet, a silent error occurs every 18,000 steps (roughly every 10 hours). Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, model parameters silently accumulate corrupted contributions and drift within half a day. Robustness moves from being a *restart* problem to a *verification* problem: the fleet must perform redundant reductions or use parity-protected gradients to catch silent parameter corruption.
+**Systems insight**: Under this illustrative constant-rate assumption, a 100k-GPU fleet expects one SDC event every 18,000 steps (roughly every 10 hours), even though the per-step probability is only `{python} SDCCollective.prob_str`. Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, corrupted contributions can accumulate in model parameters over a long run. Robustness moves from being a *restart* problem to a *verification* problem: the fleet can use redundant reductions or parity-protected gradients to catch silent parameter corruption.
 
 :::
 
-The calculation makes check-and-verify mandatory, but verification only earns trust when tested against realistic failures. The next step is therefore to inject faults deliberately and confirm that the same checks catch the corruption before it reaches model state.
+The calculation motivates check-and-verify, but verification only earns trust when tested against realistic failures. The next step is therefore to inject faults deliberately and confirm that the same checks catch the corruption before it reaches model state.
 
 ## Fault Injection Tools and Frameworks {#sec-ft-fault-injection-tools-frameworks}
 
@@ -2769,11 +2770,11 @@ The idealized protocol assumes step 2 completes quickly. At scale, this barrier 
 
 :::
 
-The basic protocol has a subtle correctness bug: if the coordinator crashes after some workers confirm but before writing metadata, those workers believe the checkpoint succeeded while the system has no valid checkpoint. Production systems use two-phase commit[^fn-two-phase-commit-checkpoint], a classic distributed systems protocol [@gray1978], to make the checkpoint decision atomic:
+The basic protocol has a subtle correctness bug: if the coordinator crashes after workers prepare their shards but before recording a final decision, the system must not expose those shards as a valid checkpoint. Production systems can use two-phase commit[^fn-two-phase-commit-checkpoint], a classic distributed systems protocol [@gray1978], to make the checkpoint decision atomic:
 
-[^fn-two-phase-commit-checkpoint]: **Two-Phase Commit (2PC)**\index{Two-Phase Commit!checkpoint atomicity}: Formalized by @gray1978, 2PC ensures all participants either commit or abort atomically. The protocol's known weakness is blocking: if the coordinator fails between prepare and commit, participants wait indefinitely. For distributed checkpointing this blocking is acceptable because a stuck checkpoint can be timed out and retried, whereas the alternative (partial checkpoint writes) would leave the system with an unrecoverable inconsistent state.
+[^fn-two-phase-commit-checkpoint]: **Two-Phase Commit (2PC)**\index{Two-Phase Commit!checkpoint atomicity}: Formalized by @gray1978, 2PC ensures all participants either commit or abort atomically. The protocol's known weakness is blocking: if the coordinator fails after participants prepare but before they learn the decision, prepared participants must wait until the durable decision is recovered. A timeout can trigger coordinator recovery, but it cannot by itself authorize unilateral rollback.
 
-In the prepare phase, workers write to a staging location and report success to the coordinator. In the commit phase, the coordinator atomically renames or commits all shards together, moving files from `staging/` to `checkpoints/`, for example. If the coordinator fails between phases, workers detect the failure during the next heartbeat\index{Heartbeat} and roll back staged writes, so either all shards commit together or none do. Consistency remains a separate requirement: synchronous gradient updates naturally create step boundaries where all workers have applied the same updates, but asynchronous training and pipeline parallelism require more careful coordination to define a consistent cut.
+In the prepare phase, workers write to a staging location and report success to the coordinator. The coordinator then records a durable commit or abort decision before notifying participants; a committed checkpoint becomes visible through complete metadata or a commit marker. If the coordinator fails after prepare, participants remain blocked until the original or a replacement coordinator recovers that durable decision. Uncommitted staged shards can be garbage collected only after recovery establishes that no commit decision exists. Consistency remains a separate requirement: synchronous gradient updates naturally create step boundaries where all workers have applied the same updates, but asynchronous training and pipeline parallelism require more careful coordination to define a consistent cut.
 
 #### Sharded checkpointing {#sec-fault-tolerance-reliability-reliability-sharded-checkpointing-58d0}
 
@@ -2998,7 +2999,7 @@ A **warm restart**\index{Warm Restart} preserves the state of surviving workers.
 
 Warm restarts can reduce $T_{\text{load}}$ and $T_{\text{warmup}}$ to near-zero for 99.9 percent of the cluster, cutting total recovery time from minutes to seconds. For the `{python} FaultToleranceRecoveryRecap.n_workers_str` example, a warm restart avoids reloading `{python} FaultToleranceRecoveryRecap.gpt3_ckpt_tb_str` from storage, saving the `{python} RecoveryBudget.t_load_s_str` $T_{\text{load}}$ and 2-minute $T_{\text{warmup}}$ for all but the replacement node.
 
-The trade-off is software complexity. Warm restarts require the application to handle dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. Frameworks like TorchElastic and DeepSpeed provide this capability, but the failure modes during warm restart itself (a crash during communicator rebuild, for instance) must be handled by falling back to cold restart. A mature deployment can use warm restart as the fast path with cold restart as the safety net. @Tbl-cold-vs-warm-restart contrasts the two strategies:
+The trade-off is software complexity. Survivor-preserving warm restarts require specialized application and runtime support for dynamic membership changes without leaking CUDA memory, corrupting shared state, or deadlocking during communicator reconstruction. TorchElastic does not preserve worker processes across membership changes: it stops the surviving workers and starts a new worker group. DeepSpeed's documented recovery path is checkpoint-centered rather than a survivor-preserving warm restart. A deployment that implements a warm-restart fast path still needs cold restart as a safety net. @Tbl-cold-vs-warm-restart contrasts the two strategies:
 
 | **Aspect**                  | **Cold Restart**                 | **Warm Restart**                       |
 |:----------------------------|:---------------------------------|:---------------------------------------|
@@ -3138,10 +3139,10 @@ Suppose a 1,024-GPU training job loses an 8-GPU node to a hardware fault, but th
 
 ::: {#dfn-fault-tolerance-elastic-training .callout-definition title="Elastic training"}
 
-***Elastic Training***\index{Elastic Training!definition}\index{Training!elastic} is the capability of a distributed training job to dynamically adjust its worker count during execution without requiring a full restart.
+***Elastic Training***\index{Elastic Training!definition}\index{Training!elastic} is the capability of a distributed training job to adjust its worker count across membership changes, potentially through a coordinated worker-group restart.
 
-1.  **Significance**: It converts hard failures into throughput degradations rather than full stops. A 1,024-GPU job that loses 8 GPUs continues at 99.2 percent capacity instead of dropping to zero. It requires learning rate recalibration and gradient accumulation adjustment to maintain mathematical consistency as the global batch size changes.
-2.  **Distinction**: Unlike checkpoint-restart recovery (which halts the job, waits for replacement hardware, and reloads state), elastic recovery is always-live: the optimization loop never stops, it only changes its parallel width.
+1.  **Significance**: It converts a permanent capacity loss into a temporary interruption followed by reduced throughput. A 1,024-GPU job that loses 8 GPUs can resume at 99.2 percent capacity instead of waiting for replacement capacity. It requires learning rate recalibration and gradient accumulation adjustment to maintain mathematical consistency as the global batch size changes.
+2.  **Distinction**: Unlike fixed-size checkpoint-restart recovery, which waits for replacement hardware to restore the original allocation, elastic recovery can restart or resume with a different worker count. The optimization loop may pause while membership, ranks, and state are re-established.
 3.  **Common pitfall**: A frequent misconception is that elasticity is "automatic." In reality, recovery requires coordinated adaptation: the training framework, the data loader, and the orchestrator must all synchronize their state to ensure that no data samples are lost or double-counted during the resize.
 
 :::
@@ -3156,7 +3157,7 @@ Suppose a 1,024-GPU training job loses an 8-GPU node to a hardware fault, but th
 
 ### Recovery adaptation mechanisms {#sec-fault-tolerance-reliability-reliability-elastic-training-mechanisms-49b1}
 
-As @fig-elastic-flow illustrates, elastic recovery converts what would otherwise be hard failures into graceful capacity adjustments: a lost worker reduces the active count rather than aborting the job, the running step adapts to the smaller resource allocation, and the cluster resumes productive work within seconds rather than waiting minutes to hours for replacement hardware. When a failure reduces the worker count, the surviving workers must adapt several training components before they can resume. Each adaptation addresses a specific consistency requirement that, if violated, would corrupt the model or waste computation.
+As @fig-elastic-flow illustrates, elastic recovery converts what would otherwise be hard failures into graceful capacity adjustments: a lost worker reduces the active count rather than requiring replacement capacity before the job can resume. The worker group may restart while the framework re-establishes membership, ranks, and state under the smaller resource allocation. When a failure reduces the worker count, the recovery path must adapt several training components before productive work resumes. Each adaptation addresses a specific consistency requirement that, if violated, would corrupt the model or waste computation.
 
 Batch size adjustment is the first concern: with fewer workers, each worker must process more samples to maintain the global batch size, or the global batch size must be reduced. Reducing global batch size during recovery may require learning rate adjustment to preserve convergence properties.
 
@@ -3188,9 +3189,9 @@ This recovery capability can unlock a significant cost advantage. Organizations 
 
 The framework question is which resize invariants it can enforce automatically: group membership, shard ownership, data coverage, and batch math. The recovery adaptation mechanisms above (batch size adjustment, learning rate recalibration, data loader redistribution, state resharding) must be implemented by the training framework, and frameworks differ in how much of this recovery logic they automate after a failure.
 
-PyTorch Elastic (TorchElastic) detects worker failures through a rendezvous mechanism[^fn-rendezvous-elastic] that re-executes whenever the worker group changes [@pytorchElasticDocs; @pytorchRendezvousDocs]. Surviving workers re-form the communication group with new `RANK` and `WORLD_SIZE` assignments after restart. TorchElastic handles rank reassignment and communication-group reconstruction, but leaves batch size, learning rate, and checkpoint semantics to user code.
+PyTorch Elastic (TorchElastic) detects worker failures through a rendezvous mechanism[^fn-rendezvous-elastic] that re-executes whenever the worker group changes [@pytorchElasticDocs; @pytorchRendezvousDocs]. On a failure or membership change, TorchElastic stops all surviving workers, forms a new worker group, and starts its workers with new `RANK` and `WORLD_SIZE` assignments. It handles rank reassignment and communication-group reconstruction after restart, but leaves batch size, learning rate, and checkpoint semantics to user code.
 
-[^fn-rendezvous-elastic]: **Rendezvous**\index{Rendezvous!elastic training}: From French "rendez-vous" (present yourselves), this coordination protocol requires all surviving workers to discover each other and agree on the new group membership before training can resume. The protocol's cost is a synchronization barrier that blocks all workers until the slowest one arrives, creating a recovery latency proportional to cluster heterogeneity.
+[^fn-rendezvous-elastic]: **Rendezvous**\index{Rendezvous!elastic training}: From French "rendez-vous" (present yourselves), this coordination protocol requires the restarted workers to discover each other and agree on the new group membership before training can resume. The protocol's cost is a synchronization barrier that blocks all workers until the slowest one arrives, creating a recovery latency proportional to cluster heterogeneity.
 
 DeepSpeed [@rasley2020] provides ZeRO-based distributed training and checkpointing building blocks for large models [@deepspeedCheckpointingDocs]. Its recovery model is checkpoint-based: after a failure, the job reloads from the last durable checkpoint, and Universal Checkpointing addresses portability across some changes in parallelism and topology [@deepspeedUniversalCheckpointingDocs]. The elastic behavior still depends on the surrounding launcher and resource manager rather than being made transparent by the framework alone.
 

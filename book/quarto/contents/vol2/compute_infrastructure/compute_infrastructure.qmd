@@ -315,7 +315,7 @@ class V100NvlinkRecap:
     nvlink_gb_per_s_str = fmt_qty(Hardware.Cloud.V100.nvlink.bandwidth, GB / second, precision=0, commas=False)
 ```
 
-The Ampere architecture (2020) expanded Tensor Core support to additional data types (TF32, BF16, INT8, INT4), reflecting the growing importance of mixed-precision training and quantized inference. The A100 also introduced Multi-Instance GPU (MIG), which partitions a single GPU into up to seven isolated instances, enabling efficient sharing of expensive hardware across multiple inference workloads. The most consequential change for infrastructure was Ampere's third-generation NVLink, which doubled bidirectional bandwidth to `{python} A100Specs.nvlink_gb_per_s_str` per GPU from Volta's `{python} V100NvlinkRecap.nvlink_gb_per_s_str`, directly addressing the communication wall for tensor parallelism, which splits each layer's matrices across GPUs.
+The Ampere architecture (2020) expanded Tensor Core support to TF32 and BF16, after Turing had introduced INT8 and INT4 Tensor Core modes for quantized inference. The A100 also introduced Multi-Instance GPU (MIG), which partitions a single GPU into up to seven isolated instances, enabling efficient sharing of expensive hardware across multiple inference workloads. The most consequential change for infrastructure was Ampere's third-generation NVLink, which doubled bidirectional bandwidth to `{python} A100Specs.nvlink_gb_per_s_str` per GPU from Volta's `{python} V100NvlinkRecap.nvlink_gb_per_s_str`, directly addressing the communication wall for tensor parallelism, which splits each layer's matrices across GPUs.
 
 ```{python}
 #| echo: false
@@ -343,7 +343,7 @@ class H100Specs:
     nvlink_gb_per_s_str = fmt_bandwidth(nvlink, unit=GB / second, precision=0, commas=False)
 ```
 
-The Hopper architecture (2022) added the Transformer Engine, which dynamically selects between FP8 and FP16 precision on a per-layer basis, doubling the effective throughput for Transformer models without requiring manual precision tuning. Hopper also introduced NVLink 4.0 at `{python} H100Specs.nvlink_gb_per_s_str` per GPU and the NVLink Switch, enabling NVLink connectivity beyond the 8-GPU boundary.
+The Hopper architecture (2022) added the Transformer Engine, whose FP8 recipes and autocast integration run supported Transformer operations in FP8 with managed scaling while retaining higher precision where the configured recipe or implementation requires it. Hopper also introduced NVLink 4.0 at `{python} H100Specs.nvlink_gb_per_s_str` per GPU and the NVLink Switch, enabling NVLink connectivity beyond the 8-GPU boundary.
 
 ```{python}
 #| echo: false
@@ -623,13 +623,13 @@ class TpuV5pRecap:
 
 The TPU v5p\index{TPU!v5p} (2023) continued this pod-scale design for high-end training. It features `{python} TpuV5pRecap.peak_bf16_str` of BF16 compute, `{python} TpuV5pRecap.hbm_gb_str` of HBM2e with `{python} TpuV5pRecap.hbm_bw_gb_per_s_str` memory bandwidth, and 1,200 GB/s bidirectional ICI bandwidth per chip, optimized for the massive AllReduce operations required by billion-parameter models. @Tbl-tpu-evolution shows how that pod-first design evolved across TPU generations. @Sec-appdx-comm-foundations-allreduce develops the collective communication complexity model and the algorithm choices behind AllReduce, which explain why inter-chip bandwidth, not per-chip arithmetic, sets the ceiling on training throughput as model size grows.
 
-| **Generation** | **Year** |     **Key Innovation**     |            **Peak BF16**             |              **HBM**              | **ICI BW** |
-|:---------------|:--------:|:--------------------------:|:------------------------------------:|:---------------------------------:|:----------:|
-| **TPU v1**     |   2015   | systolic array (Inference) |               92 TOPS*               |                 —                 |     —      |
-| **TPU v2**     |   2017   |   High-Bandwidth Memory    |              45 TFLOP/s              |               16 GB               |  600 GB/s  |
-| **TPU v3**     |   2018   | Liquid Cooling, Pod Scale  |             105 TFLOP/s              |               32 GB               |  650 GB/s  |
-| **TPU v4**     |   2021   | Optical Circuit Switching  |             275 TFLOP/s              |               32 GB               | 1,200 GB/s |
-| **TPU v5p**    |   2023   |     SparseCore, HBM2e      | `{python} TpuV5pRecap.peak_bf16_str` | `{python} TpuV5pRecap.hbm_gb_str` | 1,200 GB/s |
+| **Generation** | **Year** |     **Key Innovation**     |            **Peak BF16**             |              **HBM**              | **ICI BW (aggregate, one direction)** |
+|:---------------|:--------:|:--------------------------:|:------------------------------------:|:---------------------------------:|:-------------------------------------:|
+| **TPU v1**     |   2015   | systolic array (Inference) |               92 TOPS*               |                 —                 |                   —                   |
+| **TPU v2**     |   2017   |   High-Bandwidth Memory    |              45 TFLOP/s              |               16 GB               |               248 GB/s                |
+| **TPU v3**     |   2018   | Liquid Cooling, Pod Scale  |             123 TFLOP/s              |               32 GB               |               280 GB/s                |
+| **TPU v4**     |   2021   | Optical Circuit Switching  |             275 TFLOP/s              |               32 GB               |               300 GB/s                |
+| **TPU v5p**    |   2023   |     SparseCore, HBM2e      | `{python} TpuV5pRecap.peak_bf16_str` | `{python} TpuV5pRecap.hbm_gb_str` |               600 GB/s                |
 
 : **Google TPU Architecture Evolution**: The TPU's development highlights a "Pod-first" design philosophy where inter-chip interconnect bandwidth and compiler-level optimization (XLA) are as important as peak per-chip arithmetic. Note: TPU v1 was INT8 only. {#tbl-tpu-evolution}
 
@@ -968,7 +968,7 @@ HBM solves this problem by changing the physical topology entirely, as @fig-hbm-
 ![](images/svg/hbm-architecture.svg)
 :::
 
-The vertical stacking represents a fundamental change in memory architecture: rather than increasing bandwidth by pushing signals faster through long copper traces (the DDR approach, which has diminishing returns), HBM increases bandwidth by multiplying the number of parallel signal paths through extremely short vertical connections. A single HBM stack bonds 8--12 DRAM dies vertically, threading thousands of TSVs through each die to form a 1024-bit-wide interface per stack, compared to 64 bits for a DDR5 channel. This 16$\times$ wider interface, combined with higher per-pin signaling rates, is the source of HBM's bandwidth advantage. Because the vias travel *through* the silicon rather than *across* a PCB, the signal path shrinks from centimeters to tens of micrometers, roughly a 1000$\times$ reduction, and the whole stack sits on the same silicon interposer as the processor die so data travels from DRAM cell to arithmetic unit in nanoseconds rather than the tens of nanoseconds required by off-package DDR.
+The vertical stacking represents a fundamental change in memory architecture: rather than increasing bandwidth by pushing signals faster through long copper traces (the DDR approach, which has diminishing returns), HBM increases bandwidth by multiplying the number of parallel signal paths through extremely short vertical connections. A single HBM stack bonds 8--12 DRAM dies vertically, threading thousands of TSVs through each die to form a 1024-bit-wide interface per stack, compared to 64 bits for a DDR5 channel. This 16$\times$ wider interface, combined with higher per-pin signaling rates, is the source of HBM's bandwidth advantage. The processor and HBM stacks share a package and communicate across the silicon interposer, shortening the electrical path relative to socketed DIMMs. This packaging primarily improves bandwidth and energy per transferred bit; it does not by itself imply that complete HBM load latency is only a few nanoseconds.
 
 The shortened distance has three direct physical benefits:
 
@@ -993,7 +993,7 @@ These questions check whether the physical benefits of 3D-stacked memory are cle
 
 @Tbl-hbm-comparison summarizes the physical trade-off: HBM wins bandwidth by moving memory onto the package and widening the interface, not by making each off-package signal faster.
 
-| **Metric**          |                   **Host DRAM** (DDR5)                  |                 **Accelerator HBM** (HBM3e)                  |    **Scaling Factor**    |
+| **Metric**          |              **CPU-local Host DRAM** (DDR5)             |              **GPU-local Accelerator HBM** (H100 HBM3)       |    **Scaling Factor**    |
 |:--------------------|:-------------------------------------------------------:|:------------------------------------------------------------:|:------------------------:|
 | **Mechanism**       |                      2D PCB Traces                      |                       3D Die Stacking                        |            -             |
 | **Placement**       |                      Socketed DIMMs                     |                    On-package (Substrate)                    |    Physical Proximity    |
@@ -1001,7 +1001,7 @@ These questions check whether the physical benefits of 3D-stacked memory are cle
 | **Interface Width** |                          64-bit                         |                      1024-bit per stack                      |     16$\times$ Wider     |
 | **Energy**          |                        ~20 pJ/bit                       |                         ~2--5 pJ/bit                         | 4--10$\times$ Efficiency |
 
-: **HBM vs. Standard DRAM Comparison**: HBM achieves its bandwidth advantage through three simultaneous innovations: 3D die stacking (more bits per package), TSV interconnects (shorter signal paths), and on-package placement (proximity to the processor). {#tbl-hbm-comparison}
+: **HBM vs. Standard DRAM Comparison**: HBM achieves its bandwidth advantage through three simultaneous innovations: 3D die stacking (more bits per package), TSV interconnects (shorter signal paths), and on-package placement (proximity to the processor). The bandwidth figures describe each memory's local requester path: CPU to host DDR5 and H100 GPU to its own HBM3. A GPU request to host DRAM must also traverse the node interconnect and is not represented by the DDR5 channel figure. {#tbl-hbm-comparison}
 
 ```{python}
 #| echo: false
@@ -1893,15 +1893,15 @@ class TensorCoreTdpRecap:
 
 :::
 
-The precision support of Tensor Cores has expanded with each generation, driven by the discovery that neural network training and inference can tolerate lower numerical precision than was previously assumed. The Volta generation supported only FP16 accumulation. Ampere added BF16, TF32, and INT8. Hopper added FP8 (both E4M3 and E5M2 formats) with dynamic per-tensor scaling through the Transformer Engine.
+The precision support of Tensor Cores has expanded with each generation, driven by the discovery that neural network training and inference can tolerate lower numerical precision than was previously assumed. Volta Tensor Cores accepted FP16 multiplicands and supported FP16 or FP32 accumulation. Turing added INT8 and INT4 modes for inference, Ampere added BF16 and TF32, and Hopper added FP8 (both E4M3 and E5M2 formats) with per-tensor scaling through the Transformer Engine.
 
-The Transformer Engine automatically monitors the magnitude distribution of each tensor and selects FP8 when precision is adequate or FP16 when higher precision is needed, doubling the effective throughput for layers where FP8 suffices. This hardware-assisted precision management represents a convergence of arithmetic design and model-level insight: the hardware is no longer a passive executor of the programmer's precision choices but an active participant in the precision decision.
+Transformer Engine recipes and FP8 autocast determine which supported operations run in FP8. The scaling machinery records tensor ranges and applies scale factors so values fit the selected FP8 format; it does not independently determine that a layer is numerically safe for FP8 and switch it to FP16 when it is not. Precision policy therefore remains a software configuration and validation decision.
 
 Understanding the distinction between the two FP8 formats clarifies why this matters for practitioners. The E4M3 format (4 exponent bits, 3 mantissa bits) can represent values up to approximately $4.48 \times 10^{2}$, with 3 bits of mantissa providing about 1 part in 8 relative precision. This range and precision are adequate for many neural network weights and activations after per-tensor scaling brings their observed range into the FP8 window.
 
 The E5M2 format (5 exponent bits, 2 mantissa bits) provides a wider dynamic range, with maximum finite values around $5.73 \times 10^{4}$, at the cost of reduced precision (only 2 mantissa bits, or about 1 part in 4 relative precision). This wider range is important for gradients during the backward pass, which can span more orders of magnitude than forward-pass activations, particularly in the early and late layers of deep networks.
 
-The Transformer Engine selects between these formats on a per-layer basis, and the per-tensor scaling factors are maintained in a small metadata buffer that adds negligible memory overhead. The scaling factors are updated every few iterations based on the observed tensor value distributions, ensuring that the limited precision of FP8 is focused on the range of values that actually appear in each tensor.
+The configured Transformer Engine recipe determines how these formats are used; a common hybrid recipe uses E4M3 for forward tensors and E5M2 for backward tensors. Scaling factors and tensor-range metadata are maintained by the implementation, with the update rule determined by the selected scaling recipe.
 
 The practical implication for fleet design is that peak TFLOP/s specifications are precision-dependent. The H100 delivers `{python} TensorCoreTdpRecap.h100_fp16_tc_tflop_per_s_str` in FP16 but twice that (`{python} TensorCoreTdpRecap.h100_fp8_tc_tflop_per_s_str`) in FP8. A fleet designed for FP8 training effectively has twice the compute density of the same fleet running FP16, with no additional hardware. This makes precision engineering a first-class optimization lever for infrastructure planners, not just a model accuracy concern.
 
@@ -2251,24 +2251,26 @@ The precision landscape for ML has evolved rapidly. @Tbl-precision-throughput su
 
 ```{python}
 #| echo: false
+from mlsysim.fmt import fmt_ops_rate
+
 # ┌── LEGO ───────────────────────────────────────────────
 class TensorCorePrecisionRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     h100_fp16_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.peak_flops, unit=TFLOPs / second, precision=0, commas=False)
     h100_fp8_tc_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.H100.compute.precision_flops['fp8'], unit=TFLOPs / second, precision=0, commas=True)
+    h100_int8_tc_tops_str = fmt_ops_rate(Hardware.Cloud.H100.compute.precision_flops['int8'], unit=TOPS, precision=0, commas=True)
 ```
 
-| **Format**           | **Bits** | **Exponent** | **Mantissa** |                      **H100 Dense TFLOP/s**                      |         **Typical Use**          |
+| **Format**           | **Bits** | **Exponent** | **Mantissa** |                      **H100 Dense Peak**                         |         **Typical Use**          |
 |:---------------------|:--------:|:------------:|:------------:|:----------------------------------------------------------------:|:--------------------------------:|
-| **FP32**\index{FP32} |    32    |      8       |      23      |                               ~67                                | Master weights, loss computation |
-| **TF32**\index{TF32} |    19    |      8       |      10      |                               494                                |    Training (NVIDIA default)     |
+| **FP32**\index{FP32} |    32    |      8       |      23      |                          ~67 TFLOP/s                             | Master weights, loss computation |
+| **TF32**\index{TF32} |    19    |      8       |      10      |                          494 TFLOP/s                             |    Training (NVIDIA default)     |
 | **BF16**\index{BF16} |    16    |      8       |      7       | `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` |      Training, fine-tuning       |
 | **FP16**\index{FP16} |    16    |      5       |      10      | `{python} TensorCorePrecisionRecap.h100_fp16_tc_tflop_per_s_str` |    Training with loss scaling    |
 | **FP8 (E4M3)**       |    8     |      4       |      3       | `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str`  |      Forward pass, weights       |
 | **FP8 (E5M2)**       |    8     |      5       |      2       | `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str`  |     Backward pass, gradients     |
-| **INT8**\index{INT8} |    8     |     N/A      |     N/A      | `{python} TensorCorePrecisionRecap.h100_fp8_tc_tflop_per_s_str`  |    Post-training quantization    |
-| **INT4**\index{INT4} |    4     |     N/A      |     N/A      |                              3,958                               |     Weight-only quantization     |
+| **INT8**\index{INT8} |    8     |     N/A      |     N/A      |   `{python} TensorCorePrecisionRecap.h100_int8_tc_tops_str`      |    Post-training quantization    |
 
 : **Precision Formats and Hardware Throughput on H100**: The table uses dense peak throughput where Tensor Core support exists; structured sparsity can roughly double several of these advertised peaks. The choice of precision affects both the training dynamics (convergence, numerical stability) and the infrastructure requirements (memory capacity, bandwidth utilization). TF32 preserves the FP32 exponent width but reduces mantissa precision so Tensor Cores can accelerate common FP32 training workloads. {#tbl-precision-throughput}
 
@@ -2310,7 +2312,7 @@ class InfraFrontierStragglerRecap3:
 
 For inference, **quantization**\index{Quantization} is one of the most impactful optimizations for serving economics because it directly alters the hardware topology required for large models. Our `{python} InfraFrontierStragglerRecap3.frontier_params_b_str` model at FP16 requires 350 GB, necessitating a minimum of five 80 GB H100 GPUs simply to load the parameters. At INT8, this drops to 175 GB, fitting on three GPUs. At INT4, it shrinks to 87.5 GB, fitting on two GPUs. For memory-bandwidth-bound inference, reading 4-bit weights instead of 16-bit weights effectively quadruples the available bandwidth for weight loading, proportionally reducing per-token latency. A production team deploying at INT4 rather than FP16 can reduce the memory footprint and bandwidth demand of the inference fleet substantially, subject to the quality loss of the chosen quantization method and workload.
 
-For training, many workloads use **mixed-precision training**\index{Mixed-Precision Training}, a strategy that decouples storage precision from arithmetic precision. A "master copy" of weights remains in FP32 for numerical stability, while the computationally intensive forward and backward passes are cast to BF16\index{Precision!BF16} or FP16 to exploit the full throughput of Tensor Cores. Gradients are accumulated in FP32 to prevent underflow before the optimizer updates the master weights. The H100's Transformer Engine extends this paradigm by dynamically selecting between FP8\index{Precision!FP8} and FP16 on a per-layer basis, potentially doubling throughput again for layers resilient to reduced precision. The cumulative effect on training velocity can be multiple-fold when the model remains numerically stable at the lower precision.
+For training, many workloads use **mixed-precision training**\index{Mixed-Precision Training}, a strategy that decouples storage precision from arithmetic precision. A "master copy" of weights remains in FP32 for numerical stability, while the computationally intensive forward and backward passes are cast to BF16\index{Precision!BF16} or FP16 to exploit the full throughput of Tensor Cores. Gradients are accumulated in FP32 to prevent underflow before the optimizer updates the master weights. The H100's Transformer Engine extends this paradigm through configured FP8 recipes, autocast integration, and scaling metadata, potentially doubling peak throughput for supported operations that remain numerically stable at the lower precision. The training-time improvement depends on model coverage and the remaining bottlenecks.
 
 #### Energy cost of data movement {#sec-compute-infrastructure-energy-cost-data-movement-3cd1}
 
@@ -2549,7 +2551,7 @@ class H100NvlinkNodeRecap:
 
 The node exists because of a gap in the memory hierarchy. HBM provides enough *bandwidth* to feed the accelerator's arithmetic units, but not enough *capacity* to hold the full 175B-parameter running example. Host DRAM provides capacity (512 GB to 2 TB per server) but not enough bandwidth.
 
-The node bridges this gap by aggregating the HBM of multiple accelerators into a shared pool, connected by an interconnect fast enough to allow cooperative computation across all of them. The key engineering insight is that by placing 8 accelerators in a single chassis and connecting them with a high-speed fabric, the node creates a virtual accelerator with 8$\times$ the memory capacity and 8$\times$ the compute throughput of any individual chip, while the fast interconnect ensures that this virtual accelerator can operate nearly as efficiently as a single monolithic device.
+The node bridges this gap by aggregating the HBM of multiple accelerators into distributed capacity connected by a fast interconnect. Each accelerator's HBM remains private to that device: software must shard or replicate tensors explicitly and use collectives or peer transfers when an operation crosses device boundaries. Placing 8 accelerators in one chassis therefore provides 8$\times$ aggregate capacity and 8$\times$ aggregate compute, but it does not create a single shared-memory accelerator; performance depends on how well the partitioning limits traffic over the fabric.
 
 The economic argument for multi-accelerator nodes is equally compelling. Consider the alternative: building a single accelerator with enough HBM to hold a 175B model (350 GB in FP16). Current packages provide roughly 16--24 GB per HBM stack, so a 350 GB single-accelerator design would require on the order of 15--22 HBM stacks, far beyond the 5-stack H100 or 8-stack B200-class package. The manufacturing cost of such a package would be prohibitive (yield decreases with package and interposer area), and the power delivery to a single chip with enough Tensor Cores to use all that bandwidth would exceed any practical cooling solution. Distributing the computation across 8 accelerators connected by NVLink allows the node to achieve the aggregate memory capacity and compute throughput of this hypothetical super-chip while remaining within manufacturable and coolable boundaries.
 
@@ -2769,11 +2771,11 @@ The practical consequence is that placement is part of the parallelism strategy:
 
 ### Dense node designs {#sec-compute-dense-nodes}
 
-Given the bandwidth hierarchy, the engineering challenge within a node is clear: connect 8 accelerators with enough bandwidth that they can function as a single logical device for tensor-parallel operations. The solution is a specialized switching fabric that provides full bisection bandwidth between all accelerator pairs. Understanding the design of this fabric requires appreciating why simpler alternatives fail.
+Given the bandwidth hierarchy, the engineering challenge within a node is clear: connect 8 accelerators with enough bandwidth for tensor-parallel operations across their private memories. The solution is a specialized switching fabric that provides full bisection bandwidth between accelerator pairs. Understanding the design of this fabric requires appreciating why simpler alternatives fail.
 
 The simplest approach would be to connect the 8 GPUs in a ring, where each GPU has links to its two neighbors. A ring is inexpensive (requiring only $N$ links for $N$ GPUs) and works well for ring-AllReduce, where data flows sequentially around the ring in a circular pattern. The ring-AllReduce algorithm achieves optimal bandwidth utilization for gradient synchronization because each GPU simultaneously sends data to its right neighbor and receives data from its left neighbor, keeping all links busy throughout the operation.
 
-However, tensor parallelism requires *all-to-all* communication: every GPU must exchange partial results with every other GPU after each layer. This is a fundamentally different communication pattern from the sequential flow of ring-AllReduce, and the ring topology handles it poorly. In a ring of 8 GPUs, communicating between opposite sides requires 4 hops, reducing effective bandwidth by 4$\times$ compared to a direct link. A fully connected mesh, where every GPU has a direct link to every other GPU, eliminates this problem but requires $N(N-1) / 2 = 28$ links for 8 GPUs, a wiring challenge that becomes impractical as the link count grows quadratically. The NVSwitch\index{NVSwitch} crossbar\index{Crossbar Switch} provides the best of both worlds: full bisection bandwidth with a manageable number of switch chips.
+However, tensor parallelism requires frequent collectives, commonly AllReduce, ReduceScatter, and AllGather after sharded matrix operations. A physical ring can execute ring-AllReduce efficiently, but its fixed multi-hop paths constrain other simultaneous traffic patterns and make topology-aware scheduling important. A fully connected mesh, where every GPU has a direct link to every other GPU, eliminates the multi-hop constraint but requires $N(N-1) / 2 = 28$ links for 8 GPUs, a wiring challenge that becomes impractical as the link count grows quadratically. The NVSwitch\index{NVSwitch} crossbar\index{Crossbar Switch} provides full-bisection switched connectivity with a manageable number of switch chips.
 
 ```{python}
 #| echo: false
@@ -2784,9 +2786,10 @@ class BandwidthHierarchyNvlinkRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvlink_bw_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth, GB / second, precision=0, commas=False)
+    nvlink_per_direction_gb_per_s_str = fmt_qty(Hardware.Cloud.H100.nvlink.bandwidth_per_direction, GB / second, precision=0, commas=False)
 ```
 
-Consider the NVIDIA DGX H100 architecture\index{DGX}. Eight H100 GPUs sit on a single baseboard, each connected to four NVSwitch chips via 18 NVLink 4.0 lanes. The NVSwitch chips form a non-blocking crossbar[^fn-crossbar-nvswitch]: any GPU can communicate with any other GPU at the full `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_gb_per_s_str` bidirectional bandwidth simultaneously, without contention. This is the equivalent of giving every pair of GPUs their own private highway, rather than forcing them to share a single road.
+Consider the NVIDIA DGX H100 architecture\index{DGX}. Eight H100 GPUs sit on a single baseboard, each connected to four NVSwitch chips via 18 NVLink 4.0 lanes. The NVSwitch chips form a non-blocking crossbar[^fn-crossbar-nvswitch] through which any GPU can reach any other GPU. Each GPU's port budget is `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_gb_per_s_str` bidirectional, or `{python} BandwidthHierarchyNvlinkRecap.nvlink_per_direction_gb_per_s_str` in one direction, shared across that GPU's simultaneous transfers; it is not a separate full-bandwidth link for every GPU pair.
 
 [^fn-crossbar-nvswitch]: **Crossbar Switch**\index{Crossbar Switch!NVSwitch}: A topology providing a dedicated path between every input-output pair simultaneously. An $N{\times}N$ crossbar has $N^2$ crosspoints, achieving full bisection bandwidth. NVSwitch implements a 3-stage crossbar using four switch chips (each with 64 NVLink ports), consuming ~800 W total -- more than an entire V100 GPU -- but this power cost is justified because it enables all-to-all tensor parallelism within a node, the communication pattern that would otherwise dominate training time.
 
@@ -2804,7 +2807,7 @@ class NodeCapacityDenseRecap:
     h100_fp8_tflop_per_s_str = fmt_qty(Hardware.Cloud.H100.compute.precision_flops['fp8'], TFLOP / second, precision=0, commas=False)
 ```
 
-The result is that the 8 GPUs within a DGX H100 can be treated as a single logical device with `{python} NodeCapacityDenseRecap.node_hbm_cap_gb_str` of aggregate HBM and a combined compute throughput of 8 $\times$ `{python} NodeCapacityDenseRecap.h100_fp8_tflop_per_s_str`. This abstraction is critical for software: the training framework can partition a model across the 8 GPUs using tensor parallelism as if they were a single larger processor, with the NVSwitch fabric making the partitioning nearly transparent from a performance perspective.
+The result is a node with `{python} NodeCapacityDenseRecap.node_hbm_cap_gb_str` of aggregate HBM capacity and a combined peak compute throughput of 8 $\times$ `{python} NodeCapacityDenseRecap.h100_fp8_tflop_per_s_str`, while each GPU retains private HBM. Training frameworks partition tensors explicitly across those devices, and NVSwitch reduces the communication cost between shards without making placement or collective synchronization transparent.
 
 The physical layout of the DGX H100 baseboard reflects this design goal. The 8 GPUs are arranged on the baseboard with the 4 NVSwitch chips positioned centrally. Each GPU connects to all 4 NVSwitch chips via NVLink lanes, and each NVSwitch chip has 64 NVLink ports that cross-connect the GPUs.
 
@@ -2830,7 +2833,7 @@ class TensorParallelAllReduce:
     tp_gpus = 8  # GPUs per node (tensor parallel)
     microbatch = 4  # sequences per microbatch (scenario)
     seq_len = 2048  # tokens per sequence (scenario)
-    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
+    nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth_per_direction
     pcie_bw = Hardware.Cloud.H100.interconnect.bandwidth
     compute_step = 200 * millisecond  # scenario anchor for the diagnostic below
 
@@ -2841,13 +2844,15 @@ class TensorParallelAllReduce:
     shard_cols = hidden // tp_gpus
     bytes_fp16 = int(BYTES_FP16.to(byte).magnitude)
     allreduce_bytes = microbatch * seq_len * hidden * bytes_fp16 * byte
-    per_allreduce = (allreduce_bytes / nvlink_bw).to("millisecond")
+    ring_traffic_factor = 2 * (tp_gpus - 1) / tp_gpus
+    allreduce_traffic = ring_traffic_factor * allreduce_bytes
+    per_allreduce = (allreduce_traffic / nvlink_bw).to("millisecond")
     cumulative = sync_events * per_allreduce
-    pcie_per_allreduce = (allreduce_bytes / pcie_bw).to(millisecond)
+    pcie_per_allreduce = (allreduce_traffic / pcie_bw).to(millisecond)
     pcie_cumulative = sync_events * pcie_per_allreduce
     pcie_cumulative_display = round(pcie_cumulative.to(millisecond).magnitude) * millisecond
     pcie_wait_fraction = (pcie_cumulative / (compute_step + pcie_cumulative)).to_base_units().magnitude
-    nvlink_utilization = (compute_step / (compute_step + cumulative)).to_base_units().magnitude
+    nvlink_compute_fraction = (compute_step / (compute_step + cumulative)).to_base_units().magnitude
     hidden_disp = format(hidden, ",").replace(",", "{,}")
     shard_disp = format(shard_cols, ",").replace(",", "{,}")
     seq_disp = format(seq_len, ",").replace(",", "{,}")
@@ -2861,7 +2866,9 @@ class TensorParallelAllReduce:
     shard_math = fmt_math(f"{hidden_disp}{{\\times}}{shard_disp}")
     allreduce_formula_math = fmt_math(f"{microbatch} \\times {seq_disp} \\times {hidden_disp} \\times {bytes_fp16}")
     allreduce_mb_str = fmt_int(allreduce_bytes.to(MB).magnitude)
-    per_allreduce_ms_str = fmt_time(per_allreduce, "millisecond", precision=1, commas=False)
+    ring_traffic_factor_str = fmt(ring_traffic_factor, precision=2, commas=False)
+    allreduce_traffic_mb_str = fmt_int(allreduce_traffic.to(MB).magnitude)
+    per_allreduce_ms_str = fmt_time(per_allreduce, "millisecond", precision=3, commas=False)
     layers_str = fmt_int(layers)
     sync_events_str = fmt_int(sync_events)
     cumulative_ms_str = fmt_time(cumulative, "millisecond", precision=1, commas=False)
@@ -2869,18 +2876,16 @@ class TensorParallelAllReduce:
     pcie_cumulative_ms_str = fmt_time(pcie_cumulative_display, millisecond, precision=0, commas=False)
     compute_step_ms_str = fmt_time(compute_step, millisecond, precision=0, commas=False)
     pcie_wait_pct_str = fmt_percent(pcie_wait_fraction, precision=1, commas=False, style='prose')
-    nvlink_util_pct_str = fmt_percent(nvlink_utilization, precision=1, commas=False, style='prose')
+    nvlink_compute_fraction_pct_str = fmt_percent(nvlink_compute_fraction, precision=1, commas=False, style='prose')
 ```
 
 During a tensor-parallel forward pass, each GPU holds one shard of each weight matrix and computes its portion of the matrix multiplication. For a Transformer layer with hidden dimension `{python} TensorParallelAllReduce.hidden_str` (typical for a `{python} TensorParallelAllReduce.model_params_b_str`B model), each of the `{python} TensorParallelAllReduce.tp_gpus_str` GPUs holds a `{python} TensorParallelAllReduce.shard_math` slice of the weight matrix. After each GPU computes its partial result, an AllReduce operation sums the partial results across all `{python} TensorParallelAllReduce.tp_gpus_str` GPUs over NVLink.
 
-The AllReduce for a single layer's output involves exchanging approximately `{python} TensorParallelAllReduce.allreduce_formula_math` bytes (FP16) across the NVLink fabric. For a typical microbatch size of `{python} TensorParallelAllReduce.microbatch_str` sequences at `{python} TensorParallelAllReduce.seq_str` tokens, this is roughly `{python} TensorParallelAllReduce.allreduce_mb_str` MB per AllReduce, which completes in about `{python} TensorParallelAllReduce.per_allreduce_ms_str` at `{python} BandwidthHierarchyNvlinkRecap.nvlink_bw_gb_per_s_str`.
+The logical output tensor for one AllReduce contains `{python} TensorParallelAllReduce.allreduce_formula_math` bytes (FP16). For a microbatch of `{python} TensorParallelAllReduce.microbatch_str` sequences at `{python} TensorParallelAllReduce.seq_str` tokens, that payload is roughly `{python} TensorParallelAllReduce.allreduce_mb_str` MB. An ideal ring AllReduce with `{python} TensorParallelAllReduce.tp_gpus_str` participants moves $2(p-1)/p =$ `{python} TensorParallelAllReduce.ring_traffic_factor_str` times the payload per GPU, or about `{python} TensorParallelAllReduce.allreduce_traffic_mb_str` MB. At `{python} BandwidthHierarchyNvlinkRecap.nvlink_per_direction_gb_per_s_str` of one-direction bandwidth, the transfer-time lower bound is approximately `{python} TensorParallelAllReduce.per_allreduce_ms_str`.
 
-Even with `{python} TensorParallelAllReduce.layers_str` layers (forward pass) and `{python} TensorParallelAllReduce.layers_str` layers (backward pass), the cumulative AllReduce time is about `{python} TensorParallelAllReduce.cumulative_ms_str` per training step. This is possible because the NVSwitch crossbar allows all 8 GPUs to communicate simultaneously without contention, unlike a ring topology where data must traverse multiple hops sequentially.
+Across `{python} TensorParallelAllReduce.layers_str` forward layers and `{python} TensorParallelAllReduce.layers_str` backward layers, the `{python} TensorParallelAllReduce.sync_events_str` transfers sum to about `{python} TensorParallelAllReduce.cumulative_ms_str` per step before overlap. NVSwitch provides the paths needed for the collective, but this value remains an ideal bandwidth-only lower bound that excludes startup latency, software overhead, and competing traffic.
 
-The communication overhead is small relative to the compute time per layer, which is approximately 2--5 ms depending on the sequence length and batch size. The resulting tensor-parallel scaling efficiency within the node is typically 85--95 percent, meaning that using 8 GPUs achieves 6.8--7.6$\times$ the throughput of a single GPU.
-
-The remaining 5--15 percent efficiency loss comes from two sources. First, the AllReduce communication itself, even at NVLink bandwidth, consumes a fraction of each layer's execution time. Second, some operations in the Transformer (layer normalization, dropout, activation functions) are not tensor-parallelized because their computation is small relative to the matrix multiplications. These sequential operations must complete on every GPU before the next layer's tensor-parallel computation can begin, introducing small but cumulative idle time.
+Against the `{python} TensorParallelAllReduce.compute_step_ms_str` compute-time anchor used below, the unoverlapped NVLink lower bound leaves computation at `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str` of combined compute-plus-communication time. Actual tensor-parallel efficiency can be higher when collectives overlap useful computation or lower when latency, contention, load imbalance, and nonparallel work add delay, so it must be measured rather than inferred from peak link bandwidth alone.
 
 ```{python}
 #| echo: false
@@ -2898,9 +2903,9 @@ class BandwidthHierarchyPcieExampleRecap:
 <!-- lego-ok-block: PCIe-vs-NVLink tensor-parallel diagnostic narrative -->
 **Scenario**: Early users of multi-GPU nodes often attempted tensor parallelism over PCIe, expecting the `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth to suffice.
 
-**Diagnosis**: Tensor parallelism requires AllReduce after *every* Transformer layer, not just *once* per training step. A model with `{python} TensorParallelAllReduce.layers_str` layers generates `{python} TensorParallelAllReduce.layers_str` AllReduce operations per forward pass and another `{python} TensorParallelAllReduce.layers_str` during the backward pass, totaling `{python} TensorParallelAllReduce.sync_events_str` synchronization events per step. At PCIe bandwidth, each AllReduce for a `{python} TensorParallelAllReduce.hidden_str`-dimensional hidden state takes approximately `{python} TensorParallelAllReduce.pcie_per_allreduce_ms_str`, accumulating to `{python} TensorParallelAllReduce.pcie_cumulative_ms_str` of pure communication overhead per step. With a `{python} TensorParallelAllReduce.compute_step_ms_str` compute-step anchor, the accelerators spend roughly `{python} TensorParallelAllReduce.pcie_wait_pct_str` of their time waiting for PCIe transfers. Switching to NVLink reduces each AllReduce to `{python} TensorParallelAllReduce.per_allreduce_ms_str`, bringing total communication overhead to `{python} TensorParallelAllReduce.cumulative_ms_str` and restoring accelerator utilization to over `{python} TensorParallelAllReduce.nvlink_util_pct_str`.
+**Diagnosis**: Tensor parallelism requires collectives throughout the Transformer stack, not just *once* per training step. In this simplified scenario, a model with `{python} TensorParallelAllReduce.layers_str` layers generates `{python} TensorParallelAllReduce.layers_str` AllReduce operations per forward pass and another `{python} TensorParallelAllReduce.layers_str` during the backward pass, totaling `{python} TensorParallelAllReduce.sync_events_str` synchronization events per step. Including the ideal ring traffic factor, each PCIe AllReduce for a `{python} TensorParallelAllReduce.hidden_str`-dimensional hidden state takes approximately `{python} TensorParallelAllReduce.pcie_per_allreduce_ms_str`, accumulating to `{python} TensorParallelAllReduce.pcie_cumulative_ms_str` of pure communication time per step. With a `{python} TensorParallelAllReduce.compute_step_ms_str` compute-step anchor and no overlap, the accelerators spend roughly `{python} TensorParallelAllReduce.pcie_wait_pct_str` of combined time waiting for PCIe transfers. Switching to NVLink reduces the ideal lower bound to `{python} TensorParallelAllReduce.per_allreduce_ms_str` per AllReduce and `{python} TensorParallelAllReduce.cumulative_ms_str` total; computation then accounts for `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str` of combined time before overlap.
 
-**Systems lesson**: For tensor parallelism, the interconnect is the bottleneck, and the difference between PCIe and NVLink is not incremental; it is the difference between a functional and a nonfunctional system.
+**Systems lesson**: For communication-heavy tensor parallelism, NVLink cuts the ideal transfer-time floor by about an order of magnitude relative to PCIe, while achieved performance still depends on overlap, collective implementation, and contention.
 <!-- end lego-ok-block -->
 
 :::
@@ -3060,7 +3065,7 @@ For our `{python} InfraFrontierNodeTrainRecap.frontier_params_b_str` model train
 
 ### Node memory partitioning {#sec-compute-node-memory}
 
-A common misconception is that a model's memory footprint equals its weight storage. In practice, training state dwarfs the weights: Adam optimizer moments, gradients, and activations collectively consume 5--7$\times$ more memory than the parameters alone, and these components reside in different tiers of the node's memory hierarchy.
+A common misconception is that a model's memory footprint equals its weight storage. In this mixed-precision Adam example, the FP32 master weights, optimizer moments, gradients, and activations collectively consume about 7--8$\times$ more memory than the FP16 parameters alone, and these components reside in different tiers of the node's memory hierarchy.
 
 ```{python}
 #| echo: false
@@ -3087,12 +3092,13 @@ class InfraFrontierNodeTableRecap:
     # ┌── 2. EXECUTE ───────────────────────────────────────
     weights = model.size_in_bytes(BYTES_FP16)
     gradients = weights
+    master_weights = params * BYTES_FP32
     optimizer_m = params * BYTES_FP32
     optimizer_v = optimizer_m
     activation_min = 100 * GB
     activation_max = 400 * GB
-    total_min = 2.2 * TB
-    total_max = 2.5 * TB
+    total_min = weights + gradients + master_weights + optimizer_m + optimizer_v + activation_min
+    total_max = weights + gradients + master_weights + optimizer_m + optimizer_v + activation_max
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(weights.to(GB).magnitude > 0, "Weights must be positive")
@@ -3104,6 +3110,7 @@ class InfraFrontierNodeTableRecap:
     bytes_fp32_str = fmt_memory(BYTES_FP32, unit=byte, precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=False)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=False)
+    master_weights_gb_str = fmt_memory(master_weights, unit=GB, precision=0, commas=False)
     optimizer_m_gb_str = fmt_memory(optimizer_m, unit=GB, precision=0, commas=False)
     optimizer_v_gb_str = fmt_memory(optimizer_v, unit=GB, precision=0, commas=False)
     activation_range_gb_str = fmt_qty_range(activation_min, activation_max, GB, precision=0, commas=False)
@@ -3114,6 +3121,7 @@ class InfraFrontierNodeTableRecap:
 |:---------------------------------------|:-------------:|:-----------------------------------------------------:|:--------------------------------------------------------------------------------:|
 | **Model Weights**\index{Model Weights} |      FP16     | `{python} InfraFrontierNodeTableRecap.bytes_fp16_str` |              `{python} InfraFrontierNodeTableRecap.weights_gb_str`               |
 | **Gradients**                          |      FP16     | `{python} InfraFrontierNodeTableRecap.bytes_fp16_str` |             `{python} InfraFrontierNodeTableRecap.gradients_gb_str`              |
+| **Master Weights**                     |      FP32     | `{python} InfraFrontierNodeTableRecap.bytes_fp32_str` |          `{python} InfraFrontierNodeTableRecap.master_weights_gb_str`             |
 | **Optimizer (Adam $m$)**               |      FP32     | `{python} InfraFrontierNodeTableRecap.bytes_fp32_str` |            `{python} InfraFrontierNodeTableRecap.optimizer_m_gb_str`             |
 | **Optimizer (Adam $v$)**               |      FP32     | `{python} InfraFrontierNodeTableRecap.bytes_fp32_str` |            `{python} InfraFrontierNodeTableRecap.optimizer_v_gb_str`             |
 | **Activations**                        |     Mixed     |                        Variable                       |          `{python} InfraFrontierNodeTableRecap.activation_range_gb_str`          |
@@ -3126,8 +3134,10 @@ class InfraFrontierNodeTableRecap:
 # ┌── LEGO ───────────────────────────────────────────────
 class InfraFrontierNodeWeightsRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
-    total_footprint_min = 2.2 * TB
-    total_footprint_max = 2.5 * TB
+    params = Models.Language.GPT3.parameters
+    persistent_state = params * (2 * BYTES_FP16 + 3 * BYTES_FP32)
+    total_footprint_min = persistent_state + 100 * GB
+    total_footprint_max = persistent_state + 400 * GB
 
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(total_footprint_min < total_footprint_max, "Footprint range must be ordered")
@@ -3335,7 +3345,7 @@ Gradients match the weight size: `{python} InfraFrontierNodeModelRecap.grad_gb_s
 - **Total**: ~`{python} InfraFrontierNodeModelRecap.total_per_gpu_gb_str` (exceeds `{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM)
 
 <!-- lego-ok-block: post-mitigation HBM envelope after gradient accumulation/offloading -->
-**Resolution**: Use gradient accumulation\index{Gradient Accumulation} (accumulate over 2--4 microbatches before AllReduce, reducing peak activation memory) and gradient offloading\index{Gradient Offloading} (store inactive gradient shards in DDR5). With these techniques, the per-GPU HBM usage drops to approximately 70--75 GB, fitting within the 80 GB envelope with a small margin for NCCL communication buffers.
+**Resolution**: Reduce the per-GPU microbatch size to lower peak activation memory, then use gradient accumulation\index{Gradient Accumulation} over 2--4 such microbatches before synchronization and the optimizer update to preserve the effective batch size. Gradient offloading\index{Gradient Offloading} stores inactive gradient shards in DDR5. With these techniques, the per-GPU HBM usage drops to approximately 70--75 GB, fitting within the 80 GB envelope with a small margin for NCCL communication buffers.
 <!-- end lego-ok-block -->
 
 **Systems insight**: Model capacity is not the only memory constraint. Training fits only when weights, gradients, optimizer state, activations, communication buffers, and fragmentation are managed together.
@@ -3482,7 +3492,6 @@ class RackPowerRackRecap:
     # ┌── 1. LOAD ──────────────────────────────────────────
     rack = Systems.Racks.DGX_H100_4Node
     cluster_gpus = Systems.Clusters.Training_1K.total_accelerators
-
     # ┌── 2. EXECUTE ───────────────────────────────────────
     node_power = rack.total_power / rack.nodes_per_rack
     racks_for_cluster = cluster_gpus / rack.accelerator_count
@@ -3527,7 +3536,7 @@ class H100TdpRackRecap:
 
 ## The Rack {#sec-compute-rack}
 
-A standard 42U server rack\index{Rack} in a traditional data center draws 5--10 kW and can be cooled by room-temperature air pushed through perforated floor tiles. Now place four DGX H100 nodes in that same rack: 32 GPUs, each drawing `{python} H100TdpRackRecap.tdp_w_str`, plus host CPUs, memory, networking, power conversion losses, and cooling overhead. The rack power reaches `{python} RackPowerRackRecap.rack_power_kw_str`, an order of magnitude beyond what traditional data center infrastructure was designed to deliver or cool. At this density, the engineering constraints shift from silicon and signal integrity to power delivery\index{Power Delivery} and thermodynamics. The rack is where the power wall and the laws of heat transfer\index{Cooling} become the dominant design forces.
+A standard 42U server rack\index{Rack} in a traditional data center draws 5--10 kW and can be cooled by room-temperature air pushed through perforated floor tiles. The chapter's four-node DGX H100 rack scenario draws `{python} RackPowerRackRecap.rack_power_kw_str` at the modeled IT boundary. At this density, the engineering constraints shift from silicon and signal integrity to power delivery\index{Power Delivery} and thermodynamics. The rack is where the power wall and the laws of heat transfer\index{Cooling} become dominant design forces.
 
 ::: {.column-margin}
 ![](images/svg/vol2_compute_infrastructure_margin_002.svg){width="100%" fig-alt="Linear rack-power scale with a dashed 10 kW air-cooling envelope and a red DGX H100 rack marker around 33 kW."}
@@ -3544,21 +3553,21 @@ class InfraFrontierRackPowerRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
-For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across 1,024 GPUs requires `{python} RackPowerRackRecap.racks_for_1k_str` racks (4 nodes of 8 GPUs each per rack). Each rack dissipates `{python} RackPowerRackRecap.rack_power_kw_str` as heat, the thermal output of a small industrial furnace. The aggregate facility-relevant power draw of the training cluster is approximately `{python} RackPowerRackRecap.cluster_power_mw_str`, enough to power several hundred homes. Delivering this power reliably, converting it efficiently, and removing the resulting heat without allowing any component to exceed its thermal limit is a multi-disciplinary engineering challenge that spans electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
+For our `{python} InfraFrontierRackPowerRecap.frontier_params_b_str` model, training across 1,024 GPUs requires `{python} RackPowerRackRecap.racks_for_1k_str` racks (4 nodes of 8 GPUs each per rack). Across the cluster, the modeled rack IT power sums to approximately `{python} RackPowerRackRecap.cluster_power_mw_str`, before facility cooling overhead. Delivering this power reliably and removing the resulting heat without allowing any component to exceed its thermal limit is a multidisciplinary engineering challenge spanning electrical, mechanical, and civil engineering. A failure at any point in the power delivery chain, from the utility substation to the individual GPU voltage regulator, can halt the entire training run, wasting hours of computation and potentially corrupting the training state.
 
 ::: {#dfn-compute-infrastructure-rack .callout-definition title="Rack"}
 
 ***Rack***\index{Rack!definition} is the physical infrastructure unit, a standardized 42U enclosure, that houses multiple compute nodes, a Top-of-Rack (ToR) switch (the first network aggregation point connecting all nodes in the rack to the broader cluster fabric), power distribution units, and cooling distribution manifolds, defining the granularity at which power and cooling capacity must be provisioned.
 
-1.  **Significance**: AI rack power density has grown dramatically: a rack of 4 DGX H100 nodes contains 32 GPUs at `{python} H100TdpRackRecap.tdp_w_str` each, totaling 22.4 kW of GPU power alone, plus 11+ kW for CPUs, NVSwitch, NICs, power conversion losses, and cooling overhead, reaching 33–40 kW per rack. This far exceeds the 5–10 kW typical of general-purpose data center racks, requiring dedicated liquid cooling infrastructure and electrical circuits that must be co-designed with the building.
+1.  **Significance**: AI rack power density has grown dramatically. The chapter's four-node DGX H100 scenario contains 32 GPUs at `{python} H100TdpRackRecap.tdp_w_str` each and draws `{python} RackPowerRackRecap.rack_power_kw_str` at the modeled IT boundary. This exceeds the 5–10 kW typical of general-purpose data center racks and requires purpose-designed electrical distribution and cooling capacity. Whether that cooling is engineered air or liquid depends on the system configuration and facility design.
 2.  **Distinction**: Unlike a node (the compute unit), a rack is the infrastructure unit: it is the physical level at which cooling manifolds, power distribution, and the ToR switch are integrated—making the rack the minimum replaceable and serviceable unit for facility operations, not the node.
 3.  **Common pitfall**: A frequent misconception is that rack placement is a logistical afterthought. Nodes within the same rack share a ToR switch and have single-hop connectivity; nodes in different racks cross at least two switch hops. Placing all pipeline-parallel stages of a training job within the same rack minimizes inter-stage latency and reduces inter-rack fabric load.
 
 :::
 
-The rack opener promised that the laws of heat transfer become the dominant design force at this level, and the reason is a hard physical limit on how fast a moving fluid can carry heat away from a surface. Air is a poor coolant: it has low density and low heat capacity, so a given volume of air absorbs little energy before its temperature rises to the point where it can no longer cool the silicon. Forced-air cooling, even with hot-aisle/cold-aisle containment and high-static-pressure fans, removes heat at a rate set by how much air the facility can physically push through the rack. That rate tops out around 30 kW per rack. Below roughly 10 kW, room-temperature air through perforated floor tiles suffices, which is why traditional 42U racks were never a thermal problem. Engineered air cooling stretches the envelope toward 30 kW, but no amount of additional fan power moves past it: beyond that density the air leaving the rack is already too hot to absorb more heat, and adding fans consumes power and produces noise without removing additional watts. A rack of four DGX H100 nodes sits at 33--40 kW, already past the air ceiling, and Blackwell-class racks push toward 100 kW and beyond, the point at which air cooling fails outright. Air is not throttled at these densities; it is disqualified.
+The rack opener promised that the laws of heat transfer become a dominant design force at this level. Air has much lower volumetric heat capacity than liquid, so an air-cooled rack needs sufficient airflow, pressure, and temperature rise to carry away its heat. There is no universal 30 kW cutoff: the practical limit depends on server and facility design. The chapter's `{python} RackPowerRackRecap.rack_power_kw_str` scenario can use engineered air cooling in a suitable facility; denser systems can make liquid cooling the practical choice.
 
-This thermal ceiling is what forces the rack from air to liquid: above the air-cooling threshold the only way to remove the heat is to put a far denser coolant in direct contact with the silicon, which is why high-density AI racks are liquid-cooled by physical necessity rather than by choice. @Sec-sustainable-ai-cooling takes up the cooling architectures that meet this requirement, the efficiency comparison between air and liquid cooling, and the facility-power overhead the choice carries every hour the cluster runs.
+Cooling selection is therefore configuration-dependent rather than a consequence of one rack-power threshold. Direct-to-chip liquid cooling raises heat-removal capacity and can reduce fan energy, while engineered air remains viable for systems and facilities designed for its airflow requirements. @Sec-sustainable-ai-cooling compares these architectures and the facility-power overhead each choice carries every hour the cluster runs.
 
 ### Rack design considerations {#sec-compute-rack-design}
 
@@ -4051,7 +4060,7 @@ The B200's memory bandwidth (8 TB/s) is only 2.4$\times$ higher than the H100's 
 
 **Fallacy**: *Air cooling is sufficient for AI workloads.*
 
-Operators of legacy facilities assume air cooling can scale to dense AI racks with enough additional fans and chiller capacity. It cannot. Air physically cannot remove heat fast enough above roughly 30 kW per rack; dense AI racks can consume 60 to 120 kW, and Blackwell-class rack designs push past 130 kW. Attempting to air-cool such a cluster leads to thermal throttling, sustained clock reductions, and ultimately component failure---not a performance penalty but a hardware liability. Liquid cooling is not an optimization for these clusters; it is a thermodynamic requirement that the rack-density choice forces independently of any TCO analysis.
+Operators of legacy facilities may assume that adding fans and chiller capacity is sufficient for any denser AI rack. In practice, the cooling choice depends on the system's heat-rejection design and the facility's available airflow, pressure, inlet temperature, and containment. Engineered air remains viable for some dense configurations, while higher rack densities can require direct liquid cooling to avoid thermal throttling or exceeding facility limits.
 
 **Fallacy**: *All GPU-hours are equivalent in TCO analysis.*
 

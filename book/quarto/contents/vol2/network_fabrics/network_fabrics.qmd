@@ -1039,7 +1039,7 @@ class BisectionDefinitionExample:
 
 ::: {#dfn-network-fabrics-bisection-bandwidth .callout-definition title="Bisection bandwidth"}
 
-***Bisection Bandwidth***\index{Bisection Bandwidth!definition} is a network topology metric defined as the minimum aggregate link capacity crossing any partition that divides the cluster into two equal halves, representing the worst-case throughput ceiling for all-to-all communication patterns such as AllReduce.
+***Bisection Bandwidth***\index{Bisection Bandwidth!definition} is a network topology metric defined as the minimum aggregate link capacity crossing any partition that divides the cluster into two equal halves, representing the worst-case throughput ceiling for traffic that must cross that partition, including global collectives.
 
 1.  **Significance**: Bisection bandwidth $\text{BW}_{\text{bisect}}$ directly sets the cluster-scale bandwidth ceiling for global synchronization. A `{python} BisectionDefinitionExample.gpus_str` fat-tree with `{python} BisectionDefinitionExample.link_gbit_per_s_str` links at 1:1 subscription provides `{python} BisectionDefinitionExample.bisect_1_1_math` per direction; a 4:1 oversubscribed spine reduces this to `{python} BisectionDefinitionExample.bisect_4_1_tb_per_s_str`, making each AllReduce step `{python} BisectionDefinitionExample.slowdown_mult_str` slower and turning the network into the dominant iron law bottleneck rather than the accelerator.
 2.  **Distinction**: Unlike aggregate bandwidth (the sum of all edge link speeds, which can be high even in a poorly connected topology), $\text{BW}_{\text{bisect}}$ measures global connectivity—a star topology with 1,000 edge links all meeting at one central switch has high aggregate bandwidth but $\text{BW}_{\text{bisect}}$ limited by that switch's backplane capacity.
@@ -1047,7 +1047,7 @@ class BisectionDefinitionExample:
 
 :::
 
-For ML training, where all-to-all communication is standard, full $\text{BW}_{\text{bisect}}$ is the foundational requirement. A fabric that falls short forces every synchronization step to bottleneck at the narrowest cross-section, and the entire cluster idles while gradients trickle through.
+ML training includes global collectives and AllToAll phases that can drive traffic across topology partitions, making full $\text{BW}_{\text{bisect}}$ a common performance target. A fabric that falls short forces synchronization traffic crossing the narrowest section to bottleneck there, idling accelerators while gradients pass through the constrained links.
 
 Bisection bandwidth is a metric; the topology property that delivers full $\text{BW}_{\text{bisect}}$ under arbitrary traffic patterns is a non-blocking fabric. A non-blocking design guarantees that the uplink capacity at every switch tier matches or exceeds the downlink capacity, so no internal contention reduces the cross-sectional throughput below its theoretical maximum. When a fabric is oversubscribed, the effective $\text{BW}_{\text{bisect}}$ drops by the oversubscription ratio, and every global collective slows proportionally. @Sec-appdx-c3-taxonomy-comp-comm shows how to diagnose the regime where communication, rather than computation, becomes the binding constraint, so that an oversubscribed spine can be recognized as a fabric problem before it is mistaken for slow accelerators.
 
@@ -1091,7 +1091,7 @@ Leaf, spine, and core tiers provide multiple equal-cost paths instead of a singl
 ![](images/svg/fat-tree-detail.svg)
 :::
 
-The fat-tree[^fn-fat-tree-clos] is a common default for ML clusters because a non-blocking design can provide full $\text{BW}_{\text{bisect}}$, a nonnegotiable requirement for the AllReduce collective, which demands simultaneous, all-to-all communication. The network is constructed in hierarchical tiers: Leaf switches (ToR) connect directly to servers, Spine switches interconnect all leaves within a locality domain known as a pod\index{Pod}, and Core switches bind multiple pods together.
+The fat-tree[^fn-fat-tree-clos] is a common default for ML clusters because a non-blocking design can provide full $\text{BW}_{\text{bisect}}$ across arbitrary partitions. This capacity benefits global AllReduce even though implementations such as rings and trees do not require simultaneous all-to-all communication. The network is constructed in hierarchical tiers: Leaf switches (ToR) connect directly to servers, Spine switches interconnect all leaves within a locality domain known as a pod\index{Pod}, and Core switches bind multiple pods together.
 
 [^fn-fat-tree-clos]: **Fat-Tree (Clos Network)**\index{Fat-Tree!Clos origin}: The underlying multi-stage switching theory was invented by @clos1953 at Bell Labs to minimize the number of electromechanical crosspoints in telephone exchanges. @leiserson1985 at MIT generalized the concept as the "fat-tree," where the tree is "fat" because link bandwidth increases toward the root, proving it could emulate any network of equal hardware volume. The same cost-minimization logic that drove 1950s telephony now drives ML cluster design: minimize switch count while guaranteeing non-blocking connectivity for global AllReduce.
 
@@ -1161,7 +1161,8 @@ A concrete bisection estimate shows how quickly oversubscription turns into sync
 # │       from a non-blocking (1:1) to an oversubscribed network.
 # │ Show: slowdown_factor, cluster cost, communication share, and wasted cost
 # │       inline in the notebook result.
-# │ How: T = M / BW_bisect; BW_bisect = N * BW_link / Oversub_Ratio.
+# │ How: T = f_ring * M / BW_bisect, where f_ring = 2(N-1)/N;
+# │      BW_bisect = N_side * BW_link / Oversub_Ratio.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt_count, fmt_int, fmt_qty, fmt, fmt_multiple, fmt_percent, fmt_usd, check, fmt_time
@@ -1170,7 +1171,7 @@ class BisectionScaling:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = Systems.Clusters.Training_1K.total_accelerators
     beta = Systems.Fabrics.InfiniBand_NDR.bandwidth
-    gradient = 100 * GB  # scenario assumption: per-GPU gradient shard
+    gradient = 100 * GB  # scenario assumption: AllReduce payload per GPU
     oversubscription_ratio = 4.0  # scenario assumption: cost-optimized spine
     cluster_cost_m = 300  # scenario assumption: cluster cost in millions USD
     comm_fraction = 0.30  # scenario assumption: training time spent communicating
@@ -1179,7 +1180,8 @@ class BisectionScaling:
     gpus_per_side = n_gpus // 2
     bw_1_1_q = calc_bisection_bandwidth(gpus_per_side, beta)
     bw_4_1_q = calc_bisection_bandwidth(gpus_per_side, beta, oversubscription_ratio=oversubscription_ratio)
-    total_data = gpus_per_side * gradient
+    ring_factor = 2 * (n_gpus - 1) / n_gpus
+    total_data = gpus_per_side * gradient * ring_factor
     time_1_1 = total_data / bw_1_1_q
     time_4_1 = total_data / bw_4_1_q
     slowdown = (time_4_1 / time_1_1).to_base_units().magnitude
@@ -1187,6 +1189,7 @@ class BisectionScaling:
     waste_m = throughput_loss * cluster_cost_m
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(n_gpus % 2 == 0, "Bisection model requires an even GPU count")
+    check(abs(time_1_1.to(second).magnitude - 3.99609375) < 1e-9, "Ring AllReduce time should be about 3.996 s")
     check(round(slowdown, 3) == round(oversubscription_ratio, 3), "Slowdown must match oversubscription ratio")
     check(round(waste_m, 1) == 142.1, f"Expected oversubscription waste to be about $142.1M, got ${waste_m:.1f}M")
     # ┌── 4. OUTPUT ────────────────────────────────────────
@@ -1194,13 +1197,14 @@ class BisectionScaling:
     bbs_gpus_per_side_value_str = fmt(gpus_per_side, precision=0, commas=False)
     bbs_beta_gb_per_s_str = fmt_qty(beta, GB / second, precision=0, commas=False)
     bbs_gradient_gb_str = fmt_qty(gradient, GB, precision=0, commas=False)
+    bbs_ring_factor_str = fmt(ring_factor, precision=3, commas=False)
     bbs_total_data_gb_str = fmt_qty(total_data, GB, precision=0, commas=True)
     bbs_bw_1_1_gb_per_s_str = fmt_qty(bw_1_1_q, GB / second, precision=0, commas=True)
     bbs_bw_4_1_gb_per_s_str = fmt_qty(bw_4_1_q, GB / second, precision=0, commas=True)
     bbs_oversubscription_ratio_str = fmt(oversubscription_ratio, precision=0, commas=False)
     bbs_slowdown_mult_str = fmt_multiple(slowdown, commas=False, precision=0)
-    bbs_time_1_1_ms_str = fmt_time(time_1_1, millisecond, precision=0, commas=True)
-    bbs_time_4_1_ms_str = fmt_time(time_4_1, millisecond, precision=0, commas=True)
+    bbs_time_1_1_s_str = fmt_time(time_1_1, second, precision=3, commas=False)
+    bbs_time_4_1_s_str = fmt_time(time_4_1, second, precision=3, commas=False)
     bbs_cluster_cost_m_str = fmt_usd(cluster_cost_m * MILLION, precision=0, commas=False, scale="M")
     bbs_comm_fraction_pct_str = fmt_percent(comm_fraction, precision=0, commas=False, style='prose')
     bbs_waste_m_str = fmt_usd(waste_m * MILLION, precision=1, commas=False, scale="M")
@@ -1212,11 +1216,12 @@ class BisectionScaling:
 
 **Math**:
 Bisection bandwidth ($\text{BW}_{\text{bisect}}$) is the minimum pipe diameter between halves of the cluster.
+For a bandwidth-optimal ring, ReduceScatter plus AllGather contributes a traffic factor $2(N-1)/N =$ `{python} BisectionScaling.bbs_ring_factor_str` per GPU.
 
 1. **Non-blocking (1:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_gpus_per_side_value_str` $\times$ `{python} BisectionScaling.bbs_beta_gb_per_s_str` $=$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` per direction.
-   - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_1_1_ms_str`.
+   - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_1_1_s_str`.
 2. **Oversubscribed (`{python} BisectionScaling.bbs_oversubscription_ratio_str`:1)**: $\text{BW}_{\text{bisect}} =$ `{python} BisectionScaling.bbs_bw_1_1_gb_per_s_str` divided by `{python} BisectionScaling.bbs_oversubscription_ratio_str` = `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` per direction.
-   - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_4_1_ms_str`.
+   - Time: `{python} BisectionScaling.bbs_total_data_gb_str` / `{python} BisectionScaling.bbs_bw_4_1_gb_per_s_str` $\approx$ `{python} BisectionScaling.bbs_time_4_1_s_str`.
 
 **Systems insight**: Saving money on core switches creates a `{python} BisectionScaling.bbs_slowdown_mult_str` bottleneck for global synchronization. On a `{python} BisectionScaling.bbs_cluster_cost_m_str` supercomputer where training is `{python} BisectionScaling.bbs_comm_fraction_pct_str` communication, that bottleneck wastes approximately `{python} BisectionScaling.bbs_waste_m_str` in idle compute time, matching the bisection-bottleneck model in @sec-network-fabrics-fat-tree. For training, network oversubscription is a false economy.
 
@@ -1344,17 +1349,17 @@ These questions check whether workload-specific network-design trade-offs are cl
 
 ### Dragonfly and torus alternatives {#sec-network-fabrics-dragonfly}
 
-A **Dragonfly**\index{Dragonfly Topology}[^fn-dragonfly-isca] topology organizes switches into high-radix groups, where each group functions as a fully connected island. These groups connect to one another via global optical links. The hierarchical structure minimizes the number of expensive long-distance cables required to scale, reducing cabling cost by roughly 50 percent compared to a fat-tree. However, bandwidth within a group is non-blocking (100 percent), while bandwidth between groups is typically only 25–50 percent of the aggregate injection rate. For ML workloads, this oversubscription creates a binary performance cliff based on job placement. A training job that fits entirely within a single dragonfly group sees full line-rate performance; a job spanning multiple groups is throttled by the limited global bandwidth, potentially suffering a 2--4$\times$ slowdown. Dragonfly fabrics therefore require topology-aware schedulers that rigidly pack jobs into groups to avoid crossing the oversubscribed global links.
+A **Dragonfly**\index{Dragonfly Topology}[^fn-dragonfly-isca] topology organizes high-radix routers into fully connected groups joined by global optical links. In the balanced configuration analyzed by @kim2008, $a=2p=2h$, where each group has $a$ routers and each router has $p$ terminal ports and $h$ global channels. Global bandwidth is therefore a design parameter rather than a fixed percentage of aggregate injection bandwidth. Performance for jobs spanning groups depends on the chosen $p/h$ ratio, routing, and traffic matrix, so the topology does not imply a universal 2--4$\times$ slowdown.
 
-[^fn-dragonfly-isca]: **Dragonfly Topology**\index{Dragonfly!topology origin}: Introduced by John Kim and William Dally at ISCA 2008, the dragonfly uses high-radix routers grouped into fully connected "super-nodes" to reduce global cabling by 52 percent compared to a folded Clos of equivalent scale. The cost savings are real but create a rigid scheduling constraint: any training job that crosses group boundaries hits the oversubscribed global links, making topology-aware placement mandatory rather than optional.
+[^fn-dragonfly-isca]: **Dragonfly Topology**\index{Dragonfly!topology origin}: Introduced by John Kim and William Dally at ISCA 2008, the dragonfly uses high-radix routers grouped into fully connected "super-nodes." For systems with at least 16K terminals, the paper reports a 52 percent network-cost reduction relative to a folded Clos of the same bandwidth, and its adaptive-routing evaluation approaches ideal throughput [@kim2008].
 
-A **Torus**\index{Torus} topology connects each node directly to its neighbors in a multidimensional grid, most commonly a 3D torus where every node links to its six adjacent peers (up/down, left/right, front/back). The design offers full local bandwidth with minimal switching hardware, as connections travel only 1–2 hops to reach neighbors. However, global communication requires traversing the diameter of the mesh ($\mathcal{O}(N^{1/3})$ hops), making latency scale poorly with cluster size. Google adopted this architecture for its Tensor Processing Unit (TPU) pods because Transformer training is dominated by data parallelism and pipeline parallelism, both of which use nearest-neighbor communication patterns that map naturally onto the physical grid. The limitation becomes apparent with Mixture-of-Experts (MoE), which relies on AllToAll communication patterns. On a torus, these random permutations congest the limited $\text{BW}_{\text{bisect}}$ of the mesh, causing performance to degrade by 2--4$\times$ compared to a switch-based fat-tree.
+A **Torus**\index{Torus} topology connects each node directly to its neighbors in a multidimensional grid, most commonly a 3D torus where every node links to its six adjacent peers (up/down, left/right, front/back). The design offers full local bandwidth with minimal switching hardware, as connections travel only 1–2 hops to reach neighbors. However, global communication requires traversing the diameter of the mesh ($\mathcal{O}(N^{1/3})$ hops), making latency scale poorly with cluster size. Google adopted this architecture for its Tensor Processing Unit (TPU) pods because Transformer training is dominated by data parallelism and pipeline parallelism, both of which use nearest-neighbor communication patterns that map naturally onto the physical grid. The limitation becomes apparent with Mixture-of-Experts (MoE), which relies on AllToAll communication patterns. On a torus, these random permutations can congest the limited $\text{BW}_{\text{bisect}}$ of the mesh and degrade performance relative to a non-blocking switch fabric.
 
 The trade-offs between these topologies become stark when quantified for a large-scale deployment. Consider a 4,096-GPU cluster. A non-blocking fat-tree at this scale, built from the $k=64$ switches assumed throughout this chapter, requires hundreds of switches (two 2,048-GPU pods plus a bridging core layer) and tens of thousands of optical cables to deliver 100 percent $\text{BW}_{\text{bisect}}$, enabling any GPU to communicate with any other at full speed. A 3D torus connecting the same nodes might use zero external switches (relying on direct host-to-host links) and only short copper cables, but offers only a fraction of $\text{BW}_{\text{bisect}}$ (scaling with $N^{2/3}$). The architecture choice follows from workload regularity. Google's TPU Pods have used torus topologies because their workloads, primarily transformer training, are predictable and the structured grid efficiently supports collective communication algorithms (ring AllReduce, AllGather, ReduceScatter) that map onto the 3D mesh. General-purpose GPU clusters often favor fat-trees because their workloads are more diverse, ranging from recommendation systems to graph neural networks, and rely heavily on global AllReduce patterns that require the full $\text{BW}_{\text{bisect}}$ only a tree can provide. A torus saves millions in switch costs but rigidly constrains the software; a fat-tree costs more but provides the universality needed for general-purpose AI research.
 
-@Fig-network-topologies quantifies the bandwidth and cost differences between these common families. The Butterfly bar represents a multistage low-diameter switching network: it uses fewer stages than a full fat-tree, but its structured paths offer less bisection bandwidth for arbitrary ML collectives.
+@Fig-network-topologies gives one illustrative comparison using the stated bandwidth and cost assumptions. Quantitative results depend on radix, endpoint count, link speed, routing, and equipment cost; the topology name alone does not determine either bisection bandwidth or cost per Gb/s.
 
-::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**Network Topologies for ML: Bandwidth vs. Cost**: Bar chart comparing $\\text{BW}_{\\text{bisect}}$ (TB/s, left axis) and cost per Gb/s (right axis) for five topologies on a 1,024-GPU cluster: Fat-tree (25.6 TB/s, \\$3.0/Gb/s), Dragonfly (20.0, \\$4.0), Torus 3D (8.0, \\$1.5), Rail-opt (12.8, \\$2.0), Butterfly (6.4, \\$5.0). Fat-tree provides full $\\text{BW}_{\\text{bisect}}$ but at 2$\times$ the cost of Torus 3D per Gb/s." fig-alt="Bar chart of five topologies (Fat-tree, Dragonfly, Torus 3D, Rail-opt, Butterfly) with two y-axes: bisection bandwidth in TB/s on the left and cost per Gb/s on the right. Fat-tree is tallest (25.6 TB/s); Torus 3D is cheapest per Gb/s."}
+::: {#fig-network-topologies fig-env="figure" fig-pos="htb" fig-cap="**Network Topologies for ML: An Illustrative Bandwidth-Cost Scenario**: Assumed $\\text{BW}_{\\text{bisect}}$ (TB/s, left axis) and cost per Gb/s (right axis) for five topology configurations on a 1,024-GPU cluster: Fat-tree (25.6 TB/s, \\$3.0/Gb/s), Dragonfly (20.0, \\$4.0), Torus 3D (8.0, \\$1.5), Rail-opt (12.8, \\$2.0), and Butterfly (6.4, \\$5.0). These scenario values illustrate the comparison method rather than universal properties of each topology family." fig-alt="Illustrative bar chart of five topology configurations with assumed bisection bandwidth in TB/s and cost per Gb/s; fat-tree has the highest assumed bandwidth and Torus 3D the lowest assumed cost per Gb/s."}
 ![](images/svg/topology-bandwidth.svg)
 :::
 
@@ -1437,20 +1442,20 @@ A production incident shows how this cascade can freeze a cluster.
 
 ```{python}
 #| echo: false
-#| label: pfc-storm-probability
+#| label: transceiver-degradation-probability
 # ┌─────────────────────────────────────────────────────────────────────────────
-# │ PFC STORM PROBABILITY (NOTEBOOK)
+# │ TRANSCEIVER DEGRADATION PROBABILITY (NOTEBOOK)
 # ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: "The Probability of a PFC Storm" .callout-notebook
+# │ Context: "Probability of at least one transceiver degradation" notebook
 # │
-# │ Goal: Quantify the risk of congestion spreading in a large RoCE cluster.
-# │ Show: storm_prob_pct ≈ 22%—inline in notebook result.
-# │ How: Pr(storm) = 1 - (1 - p_transceiver_degrade)^N_transceivers.
+# │ Goal: Quantify component-degradation exposure in a large RoCE cluster.
+# │ Show: probability of at least one degradation ≈ 22%.
+# │ How: Pr(any degradation) = 1 - (1 - p)^N_transceivers.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.fmt import fmt, fmt_count, fmt_percent, check
 
-class PfcStormRisk:
+class TransceiverDegradationRisk:
     # ┌── 1. LOAD ──────────────────────────────────────────
     n_gpus = 4096
     links_per_gpu = 3  # leaf + spine + core
@@ -1459,29 +1464,28 @@ class PfcStormRisk:
     # ┌── 2. EXECUTE ───────────────────────────────────────
     n_total_links = n_gpus * links_per_gpu
     n_total_transceivers = n_total_links * transceivers_per_link
-    p_safe = (1 - p_transceiver_degrade) ** n_total_transceivers
-    p_storm = 1 - p_safe
+    p_no_degradation = (1 - p_transceiver_degrade) ** n_total_transceivers
+    p_any_degradation = 1 - p_no_degradation
     # ┌── 3. GUARD (Invariants) ─────────────────────────────────────────
     check(n_total_links == 12288, f"Total links {n_total_links} outside expected range")
     check(n_total_transceivers == 24576, f"Total transceivers {n_total_transceivers} outside expected range")
-    check(0.2 < p_storm < 0.23, f"Storm probability {p_storm:.2f} outside expected range")
+    check(0.2 < p_any_degradation < 0.23, f"Degradation probability {p_any_degradation:.2f} outside expected range")
     # ┌── 4. OUTPUT (Formatting) ────────────────────────────────────────
-    pfc_n_gpus_str = fmt_int(n_gpus, commas=False)
-    pfc_p_degrade_pct_str = fmt_percent(
+    n_gpus_str = fmt_int(n_gpus, commas=False)
+    p_degrade_pct_str = fmt_percent(
         p_transceiver_degrade,
         precision=3,
         commas=False,
         style="prose",
     )
-    pfc_total_links_str = fmt(n_total_links, precision=0)
-    pfc_total_transceivers_str = fmt(n_total_transceivers, precision=0)
-    pfc_safe_prob_str = fmt(p_safe, precision=3, commas=False)
-    pfc_storm_prob_decimal_str = fmt(p_storm, precision=3, commas=False)
-    pfc_storm_prob_str = fmt_percent(p_storm, precision=1, commas=False, style='prose')
-    pfc_storm_prob_rounded_str = fmt_percent(p_storm, precision=1, commas=False, style='prose')
-    pfc_safe_prob_math = fmt_math(f"\\Pr(\\text{{safe}}) = (1 - 0.00001)^{{{pfc_total_transceivers_str}}} " f"\\approx {pfc_safe_prob_str}")
-    pfc_storm_prob_math = fmt_math(f"\\Pr(\\text{{storm}}) = 1 - {pfc_safe_prob_str} " f"= \\mathbf{{{pfc_storm_prob_decimal_str}}}")
-    pfc_links_per_gpu_str = fmt_count(links_per_gpu, commas=False, label="link tier")
+    total_links_str = fmt(n_total_links, precision=0)
+    total_transceivers_str = fmt(n_total_transceivers, precision=0)
+    no_degradation_prob_str = fmt(p_no_degradation, precision=3, commas=False)
+    any_degradation_prob_decimal_str = fmt(p_any_degradation, precision=3, commas=False)
+    any_degradation_prob_str = fmt_percent(p_any_degradation, precision=1, commas=False, style='prose')
+    no_degradation_prob_math = fmt_math(f"\\Pr(\\text{{no degradation}}) = (1 - 0.00001)^{{{total_transceivers_str}}} " f"\\approx {no_degradation_prob_str}")
+    any_degradation_prob_math = fmt_math(f"\\Pr(\\text{{at least one degradation}}) = 1 - {no_degradation_prob_str} " f"= \\mathbf{{{any_degradation_prob_decimal_str}}}")
+    links_per_gpu_str = fmt_count(links_per_gpu, commas=False, label="link tier")
 ```
 
 ::: {#cs-network-fabrics-microsoft-pfc-deadlock .callout-case-study title="Microsoft's PFC deadlock (2016)"}
@@ -1496,20 +1500,20 @@ class PfcStormRisk:
 
 :::
 
-A simple probability calculation shows that such incidents are not rare edge cases but recurring operational risks at scale.
+A component-exposure calculation quantifies how often a cluster should expect at least one degraded transceiver; it does not by itself estimate the probability of a PFC storm.
 
-::: {#nbk-network-fabrics-probability-pfc-storm .callout-notebook title="The probability of a PFC storm"}
+::: {#nbk-network-fabrics-probability-transceiver-degradation .callout-notebook title="Probability of at least one transceiver degradation"}
 
-**Problem**: A `{python} PfcStormRisk.pfc_n_gpus_str`-GPU RoCE cluster is in operation. If the probability of a single transceiver degrading and triggering PFC pauses is just `{python} PfcStormRisk.pfc_p_degrade_pct_str` per day, what is the chance of a cluster-wide "PFC Storm" occurring in a given day?
+**Problem**: A `{python} TransceiverDegradationRisk.n_gpus_str`-GPU RoCE cluster is in operation. If the probability of each transceiver degrading is `{python} TransceiverDegradationRisk.p_degrade_pct_str` per day, what is the chance that at least one transceiver degrades on a given day?
 
 **Math**:
-In a lossless Ethernet fabric, one bad link can pause its neighbor, which pauses its neighbor, eventually freezing the entire tree.
+Assume independent transceiver-degradation events with the same per-device probability.
 
-1. **Total exposure**: `{python} PfcStormRisk.pfc_n_gpus_str` $\times$ `{python} PfcStormRisk.pfc_links_per_gpu_str` = `{python} PfcStormRisk.pfc_total_links_str` links, or `{python} PfcStormRisk.pfc_total_transceivers_str` transceivers.
-2. **Probability of zero transceiver failures**: `{python} PfcStormRisk.pfc_safe_prob_math`.
-3. **Probability of at least one storm**: `{python} PfcStormRisk.pfc_storm_prob_math` (about `{python} PfcStormRisk.pfc_storm_prob_rounded_str`).
+1. **Total exposure**: `{python} TransceiverDegradationRisk.n_gpus_str` $\times$ `{python} TransceiverDegradationRisk.links_per_gpu_str` = `{python} TransceiverDegradationRisk.total_links_str` links, or `{python} TransceiverDegradationRisk.total_transceivers_str` transceivers.
+2. **Probability of zero transceiver degradations**: `{python} TransceiverDegradationRisk.no_degradation_prob_math`.
+3. **Probability of at least one degradation**: `{python} TransceiverDegradationRisk.any_degradation_prob_math` (about `{python} TransceiverDegradationRisk.any_degradation_prob_str`).
 
-**Systems insight**: Even with "five-nines" reliable components, a large-scale RoCE cluster faces a `{python} PfcStormRisk.pfc_storm_prob_str` daily risk of a fabric-wide freeze. That is not guaranteed to happen every day, but it is frequent enough to be a weekly-scale operational concern. RoCE deployments therefore require aggressive PFC watchdogs and hardware-level telemetry, because at scale, "rare" link degradations become recurring operational realities that must be handled automatically.
+**Systems insight**: Under these assumptions, a large RoCE cluster has a `{python} TransceiverDegradationRisk.any_degradation_prob_str` daily chance of at least one degraded transceiver. This result motivates hardware telemetry and automated remediation, but estimating fabric-wide freeze risk additionally requires the conditional probability that a degradation triggers and propagates a PFC storm.
 
 :::
 
@@ -1535,7 +1539,7 @@ Adaptive routing\index{Adaptive Routing} mitigates this problem by allowing swit
 
 [^fn-packet-spraying]: **Packet Spraying**\index{Packet Spraying!load balancing}: Unlike standard Ethernet (which hashes flows to single paths to avoid reordering), packet spraying sends individual packets of a single flow across multiple paths. This can improve $\text{BW}_{\text{bisect}}$ for AllReduce elephant flows when the transport can tolerate or repair reordering. UEC's Ultra Ethernet Transport design explicitly includes multi-path packet spraying and flexible ordering to reduce the ECMP collision problem for AI/HPC traffic [@ultraEthernet2025specification].
 
-Ethernet fabrics typically employ *flowlet switching*\index{Flowlet Switching}, rerouting bursts of packets only when a sufficient time gap is detected, to avoid the performance penalties associated with packet reordering. This mechanism becomes essential for Mixture-of-Experts (MoE) models. Unlike the predictable Ring AllReduce pattern, MoE models use AllToAll communication, where every GPU sends data to every other GPU containing active experts. For a 175B-parameter model using expert parallelism with 64 experts, this generates a dense $64{\times}64$ traffic matrix—4,096 simultaneous flows. Under static ECMP, hash collisions are statistically guaranteed to create stragglers; adaptive routing is required to distribute this traffic evenly across the fabric's $\text{BW}_{\text{bisect}}$.
+Ethernet fabrics typically employ *flowlet switching*\index{Flowlet Switching}, rerouting bursts of packets only when a sufficient time gap is detected, to avoid the performance penalties associated with packet reordering. This mechanism becomes essential for Mixture-of-Experts (MoE) models. Unlike the predictable Ring AllReduce pattern, MoE models use AllToAll communication among the ranks in an expert-parallel group. A dense exchange among 64 expert-parallel ranks contains at most $64(64-1)=4{,}032$ directed remote rank pairs after excluding self-transfers; the actual active traffic depends on expert placement and token-routing sparsity. Under static ECMP, collisions among these flows can create stragglers, so adaptive routing helps distribute traffic across the fabric's $\text{BW}_{\text{bisect}}$.
 
 ### The incast problem in ML {#sec-network-fabrics-incast}
 
@@ -1758,7 +1762,7 @@ Network performance problems in ML clusters are insidious because they manifest 
 
 ### Link-level telemetry {#sec-network-fabrics-link-telemetry}
 
-At the physical layer, hardware counters answer whether the wire still behaves like the model assumed. Every RDMA NIC and switch maintains these counters, accessible via the `perfquery` utility [@linuxManpages2026perfquery]. **PortXmitData**\index{PortXmitData} and **PortRcvData**\index{PortRcvData} provide the raw byte counts used to compute real-time link utilization, while **PortXmitDiscards**\index{PortXmitDiscards} tracks packets dropped by the switch—in a properly configured lossless fabric, discards should be exactly zero. Physical signal integrity is tracked via the **SymbolErrorCounter**\index{SymbolErrorCounter}, which increments on bit-level errors caused by loose cables or dirty optics, and the **LinkDownedCounter**\index{LinkDownedCounter}, which logs link flaps often triggered by intermittent hardware faults or overheating transceivers.
+At the physical layer, hardware counters answer whether the wire still behaves like the model assumed. Every RDMA NIC and switch maintains these counters, accessible via the `perfquery` utility [@linuxManpages2026perfquery]. **PortXmitData**\index{PortXmitData} and **PortRcvData**\index{PortRcvData} count data in units of four octets, so utilization calculations multiply each counter delta by four to recover bytes. **PortXmitDiscards**\index{PortXmitDiscards} tracks packets dropped by the switch—in a properly configured lossless fabric, discards should be exactly zero. Physical signal integrity is tracked via the **SymbolErrorCounter**\index{SymbolErrorCounter}, which increments on bit-level errors caused by loose cables or dirty optics, and the **LinkDownedCounter**\index{LinkDownedCounter}, which logs link flaps often triggered by intermittent hardware faults or overheating transceivers.
 
 ```{python}
 #| echo: false
@@ -1809,7 +1813,7 @@ These metrics are typically polled by a centralized monitoring system (for examp
 
 Once counters rule out visible link faults, validation must test the bandwidth and latency that the training job can actually use. A healthy NDR InfiniBand link can approach the raw `{python} IbNdrMonitoringRecap.ib_ndr_gb_per_s_str` rate after encoding and protocol overheads, but the only useful number is the delivered payload bandwidth on the specific host pair. Operators rely on periodic health checks, often running perftest tools such as `ib_write_bw` between selected node pairs and assembling the results into an **all-pairs bandwidth matrix**\index{All-Pairs Bandwidth Matrix} [@linuxRdma2026perftest]. This heatmap immediately visualizes cold spots in the fabric where specific spine switches or cable bundles are underperforming, allowing for targeted maintenance before jobs are scheduled.
 
-For latency-sensitive synchronization, `ib_write_lat` measures round-trip times for small RDMA writes. Baseline NDR latency should remain below 2 $\mu$s for directly connected nodes. Latencies exceeding 5 $\mu$s suggest switch-buffer congestion or routing imbalances, while values spiking above 100 $\mu$s usually indicate the RDMA path has fallen back to TCP/IP emulation—a catastrophic configuration error. Before launching a massive training job, robust validation includes application-level tests such as `nccl-tests`, which verify that the fabric can sustain the expected AllReduce bandwidth across the specific collective topology (ring or tree) used by the workload. This ensures that the physical network reality matches the theoretical design before expensive compute resources are allocated.
+For latency-sensitive synchronization, `ib_write_lat` runs a ping-pong test with small RDMA writes and reports half the measured round-trip time as one-way latency. Baseline NDR latency should remain below 2 $\mu$s for directly connected nodes. Latencies exceeding 5 $\mu$s suggest switch-buffer congestion or routing imbalances, while values spiking above 100 $\mu$s indicate a severe path, congestion, or configuration problem but do not imply a TCP fallback. Before launching a massive training job, robust validation includes application-level tests such as `nccl-tests`, which verify that the fabric can sustain the expected AllReduce bandwidth across the specific collective topology (ring or tree) used by the workload. This ensures that the physical network reality matches the theoretical design before expensive compute resources are allocated.
 
 ### Systematic debugging workflow {#sec-network-fabrics-debug-workflow}
 

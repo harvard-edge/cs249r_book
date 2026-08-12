@@ -433,7 +433,7 @@ Carbon = Energy $\times$ Grid Intensity.
 **Systems insight**: Site selection dominates the modeled levers. The Quebec-versus-Poland pair gives a `{python} CarbonFrontier.cf_ratio_mult_str` difference, which exceeds many common algorithmic efficiency gains. Efficiency extends beyond FLOPs to the carbon-intensity of those FLOPs, making carbon-aware scheduling a first-class operational competency in the machine learning fleet.
 
 ::: {.column-margin}
-![](images/svg/vol2_sustainable_ai_margin_001.svg){width="100%" fig-alt="Carbon-emissions ladder for the same training job: Poland is about 80 tonnes CO2, Quebec about 2 tonnes, with the 40 times difference shown as an annotation rather than a third bar."}
+![](images/svg/vol2_sustainable_ai_margin_001.svg){width="100%" fig-alt="Carbon-emissions ladder for the same training job: Poland is about 8,200 tonnes CO2, Quebec about 200 tonnes, with the 40 times difference shown as an annotation rather than a third bar."}
 
 *The same job's carbon emissions depend on where it runs.*
 :::
@@ -1049,7 +1049,7 @@ The practical question is which lifecycle phase dominates a given workload, beca
 
 For training-centric research workloads, the training phase often dominates operational emissions because mathematical optimization requires sustained parallel computation[^fn-optimizer-memory-cost]. As demonstrated by the GPT-3 case study, large language model training runs exemplify this energy intensity. Geographic placement affects emissions: moving an identical workload between hydro-heavy and coal-heavy grids can create tens-fold differences in carbon intensity.[^fn-carbon-intensity-variance]
 
-[^fn-optimizer-memory-cost]: **Optimizer Memory as Energy Cost**\index{Optimizer!memory energy cost}: Adaptive Moment Estimation (Adam) requires 3$\times$ the memory of plain SGD because it stores per-parameter first and second moment estimates alongside the weights themselves. For a 70B model in FP32, this means 840 GB of optimizer state. The sustainability implication is direct: larger optimizer state means more HBM accesses per training step, and at 160 pJ/byte for DRAM, memory overhead can dominate the energy budget of parameter updates.
+[^fn-optimizer-memory-cost]: **Optimizer Memory as Energy Cost**\index{Optimizer!memory energy cost}: Adaptive Moment Estimation (Adam) stores per-parameter first and second moment estimates. For a 70B model in FP32, these two moment buffers total 560 GB; the 280 GB of parameters bring parameters plus moments to 840 GB, excluding gradients. Any memory comparison with plain SGD depends on whether gradients and momentum are included. The sustainability implication is direct: larger optimizer state means more HBM accesses per training step, and at 160 pJ/byte for DRAM, memory overhead can dominate the energy budget of parameter updates.
 
 [^fn-carbon-intensity-variance]: **Carbon Intensity Variance**\index{Carbon Intensity!variance}: Grid carbon intensity spans two orders of magnitude: coal at 820 g CO~2~/kWh vs. hydro at 10–30 g CO~2~/kWh. Critically, intensity also varies temporally: Texas fluctuates 10$\times$ within a single day based on wind generation. This dual geographic and temporal variance is what makes carbon-aware scheduling viable: combining the geographic lever (the 8 to 40 times range from @sec-sustainable-ai-scale-environmental-impact-ac9a) with temporal shifting pushes the achievable spread toward the high end of the 10 to 80 times span, so identical training runs can differ several-fold in emissions based solely on when and where they execute.
 
@@ -2002,6 +2002,7 @@ def calculate_carbon_footprint(
     gpu_power_watts: float,
     num_gpus: int,
     training_hours: float,
+    it_power_multiplier: float,
     pue: float,
     grid_intensity_gco2_kwh: float,
     gpu_embodied_kg: float,
@@ -2011,8 +2012,9 @@ def calculate_carbon_footprint(
 
     # Operational emissions
     energy_wh = gpu_power_watts * num_gpus * training_hours
-    energy_kwh = (energy_wh * watt * hour).to(kWh).magnitude
-    facility_energy_kwh = energy_kwh * pue
+    gpu_energy_kwh = (energy_wh * watt * hour).to(kWh).magnitude
+    it_energy_kwh = gpu_energy_kwh * it_power_multiplier
+    facility_energy_kwh = it_energy_kwh * pue
     # g CO2 → kg (mlsysim does not export mass pint units yet).
     operational_kg = (
         facility_energy_kwh * grid_intensity_gco2_kwh / THOUSAND
@@ -2039,9 +2041,10 @@ result = calculate_carbon_footprint(
     gpu_power_watts=400,
     num_gpus=64,
     training_hours=336,  # 14 days
+    it_power_multiplier=TrainingEmissions.it_power_multiplier,
     pue=_us_grid.pue,
     grid_intensity_gco2_kwh=_us_grid.carbon_intensity_g_kwh,
-    gpu_embodied_kg=164,
+    gpu_embodied_kg=Hardware.Cloud.A100.embodied_carbon_kg,
     gpu_lifetime_years=4,
 )
 print(
@@ -2558,7 +2561,7 @@ Verify your understanding of the data center power path:
 
 At `{python} H100TdpRackRecap.tdp_w_str` per GPU, the VRM dissipates 35--70 W of heat, which must be cooled along with the GPU itself. This VRM heat is sometimes overlooked in thermal design: in a liquid-cooled system where cold plates cover the GPUs, the VRMs are typically still air-cooled by small fans, creating a thermal management challenge for the remaining components that do not have direct liquid cooling contact.
 
-The cumulative efficiency across all five stages is typically 85--90 percent, meaning that for every 100 W of useful computation, 10--15 W is lost as heat in the power delivery chain itself. This overhead is part of the PUE calculation and represents an irreducible cost of converting utility power to useful computation.
+The cumulative efficiency across all five stages is typically 85--90 percent, meaning that for every 100 W entering the delivery chain, 10--15 W is lost as heat before reaching the transistors. Facility-side conversion losses upstream of the IT boundary contribute to PUE, while baseboard voltage-regulator losses remain part of the measured IT load.
 
 To make this concrete, consider the power budget for a single rack containing four DGX H100 nodes:
 
@@ -2685,7 +2688,7 @@ To appreciate the magnitude of these transients, consider a `{python} H100TdpRac
 *Training phase transitions create microsecond power shocks.*
 :::
 
-The power delivery chain itself introduces inefficiencies at each stage. Utility-to-medium-voltage transformation loses 1--2 percent. The UPS loses 3--5 percent (modern double-conversion designs) or 1--2 percent (eco-mode designs that bypass the inverter during normal operation). The PDU loses 2--3 percent. Voltage regulation on the baseboard loses another 5--8 percent. Cumulatively, 10--15 percent of the power drawn from the grid is dissipated as heat in the delivery chain before it ever reaches a transistor. This overhead is part of the PUE calculation: a PUE of 1.10 implies that the delivery chain and cooling together consume 10 percent above the IT load.
+The power delivery chain itself introduces inefficiencies at each stage. Utility-to-medium-voltage transformation loses 1--2 percent. The UPS loses 3--5 percent (modern double-conversion designs) or 1--2 percent (eco-mode designs that bypass the inverter during normal operation). The PDU loses 2--3 percent. Voltage regulation on the baseboard loses another 5--8 percent. Cumulatively, 10--15 percent of the power drawn from the grid is dissipated as heat in the delivery chain before it ever reaches a transistor. Only losses upstream of the IT boundary contribute to PUE; baseboard voltage regulation is part of the IT load. A PUE of 1.10 means that all non-IT facility loads, including facility-side conversion and cooling, consume 10 percent above the IT load.
 
 ```{python}
 #| echo: false
@@ -2735,7 +2738,7 @@ At the largest scales, the data center's power draw represents a significant fra
 
 At large-cluster scale, the same delivery limit becomes a grid-procurement problem rather than an electricity bill. GPT-3's `{python} Gpt3HouseholdEnergyAnchor.gpt3_training_mwh_str` training run is the chapter's roughly `{python} Gpt3HouseholdEnergyAnchor.gpt3_household_years_str`-household-year anchor. Later large systems have not disclosed comparable training-energy accounts, which is precisely why the engineering discipline must track energy at the workload level instead of relying on public model cards alone.
 
-This grid-procurement problem worsens when model and data growth multiply each other. The scaling of energy consumption with model size is approximately linear: doubling the model parameters roughly doubles the training energy (assuming the same number of training tokens per parameter). When both model size and dataset size increase simultaneously, total training energy grows super-linearly. A model with 10$\times$ the parameters, trained on 10$\times$ the data, requires approximately 100$\times$ the energy.
+This grid-procurement problem worsens when model and data growth multiply each other. At fixed training tokens per parameter, doubling the model parameters also doubles the token count, so training work and energy grow by approximately 4$\times$. More generally, when model size and dataset size increase simultaneously, total training energy grows approximately with their product. A model with 10$\times$ the parameters, trained on 10$\times$ the data, therefore requires approximately 100$\times$ the energy.
 
 ```{python}
 #| echo: false
@@ -3068,7 +3071,7 @@ A 10 MW data center with evaporative cooling towers can consume well over 100 mi
 
 Dry coolers, which use fans to blow air over a radiator without evaporation, eliminate water consumption but work efficiently only when the ambient air temperature is well below the coolant temperature, limiting their effectiveness in hot climates. Many facilities use hybrid approaches: dry coolers during cool weather and evaporative towers during heat waves.
 
-**Waste heat reuse**\index{Waste Heat Reuse} treats the data center's thermal output as a resource rather than a waste product. The thermal density of ML accelerator clusters creates an advantage over traditional CPU infrastructure that is easy to overlook: the grade of heat they produce. Traditional air-cooled CPU racks exhaust warm air at roughly 35 degrees Celsius, a temperature range too low for most practical reuse without energy-intensive heat pumps. A liquid-cooled ML cluster, by contrast, returns coolant from its Coolant Distribution Units at 50--65 degrees Celsius---high-grade heat well suited for district heating networks, greenhouse climate control, and industrial process applications. The same accelerator thermal density that demands direct-to-chip cooling thus makes ML racks thermodynamically superior candidates for municipal waste heat programs compared to traditional IT infrastructure. Several Nordic data centers supply their waste heat to municipal heating networks, offsetting the natural gas or electricity that would otherwise be required to heat buildings during winter. A 10 MW ML data center can supply approximately 8--9 MW of useful heat (accounting for heat pump efficiency), enough to heat several thousand apartments. When the economic value of the waste heat is credited against the data center's operating costs, the effective PUE can drop below 1.0, meaning the facility produces more useful energy (computation plus heat) than it consumes from the grid.
+**Waste heat reuse**\index{Waste Heat Reuse} treats the data center's thermal output as a resource rather than a waste product. The thermal density of ML accelerator clusters creates an advantage over traditional CPU infrastructure that is easy to overlook: the grade of heat they produce. Traditional air-cooled CPU racks exhaust warm air at roughly 35 degrees Celsius, a temperature range too low for most practical reuse without energy-intensive heat pumps. A liquid-cooled ML cluster, by contrast, returns coolant from its Coolant Distribution Units at 50--65 degrees Celsius---high-grade heat well suited for district heating networks, greenhouse climate control, and industrial process applications. The same accelerator thermal density that demands direct-to-chip cooling thus makes ML racks thermodynamically superior candidates for municipal waste heat programs compared to traditional IT infrastructure. Several Nordic data centers supply their waste heat to municipal heating networks, offsetting the natural gas or electricity that would otherwise be required to heat buildings during winter. A 10 MW ML data center can supply approximately 8--9 MW of useful heat (accounting for heat pump efficiency), enough to heat several thousand apartments. Crediting reused heat can reduce net operating cost, but it does not reduce PUE below 1.0 because PUE is total facility energy divided by IT energy. Energy reuse should instead be reported with Energy Reuse Effectiveness (ERE) or a separate net-energy balance, either of which can fall below 1.0 when exported useful energy exceeds facility overhead.
 
 The viability of waste heat reuse depends on the proximity of heat consumers. Urban data centers, despite their higher land and electricity costs, are often better positioned for waste heat reuse than remote facilities because they are close to residential and commercial heating loads. The result is a counterintuitive economic optimization: a data center in a Nordic city may have higher electricity costs but lower net operating costs after waste heat revenues, compared to a remote facility with cheaper electricity but no heat consumers nearby.
 
@@ -3620,12 +3623,12 @@ The hierarchical approach achieves `{python} WakeWordPower.avg_power_uw_str` ave
 
 #### Federated learning energy analysis {#sec-sustainable-ai-federated-learning-energy-analysis-2c07}
 
-Training at the edge eliminates data transmission but increases local compute. @Eq-federated-energy contrasts the energy trade-offs between federated and centralized approaches:
+Training at the edge keeps raw data local but replaces its transfer with repeated model downloads and client-update uploads. @Eq-federated-energy contrasts the energy trade-offs between federated and centralized approaches, where $R$ is the number of rounds and $N_{\text{clients}}$ is the number of participating clients per round:
 
-$$E_{\text{federated}} = N_{\text{clients}} \times E_{\text{local\_train}} + E_{\text{aggregation}}$$
-$$E_{\text{centralized}} = N_{\text{clients}} \times E_{\text{transmit}} + E_{\text{cloud\_train}}$$ {#eq-federated-energy}
+$$E_{\text{federated}} = R \left[N_{\text{clients}} \left(E_{\text{local\_train}} + E_{\text{download}} + E_{\text{upload}}\right) + E_{\text{aggregation}}\right]$$
+$$E_{\text{centralized}} = N_{\text{clients}} \times E_{\text{raw\_data\_upload}} + E_{\text{cloud\_train}}$$ {#eq-federated-energy}
 
-Federated learning becomes more energy-efficient when data sizes exceed model update sizes. For privacy-sensitive applications with rich sensor data, federated approaches often achieve both privacy *and* energy benefits, as transmitting model weight updates (megabytes) requires less energy than transmitting raw data (gigabytes) for applications like on-device personalization. The edge analysis leaves one more lifecycle term: the physical supply chain that produces the devices and accelerators.
+Federated learning becomes more energy-efficient only when repeated model communication, local training, and aggregation consume less energy than raw-data transfer and centralized training. Data being larger than one model update is insufficient by itself because downloads and uploads recur across rounds. For privacy-sensitive applications with rich sensor data, federated approaches can still achieve both privacy *and* energy benefits when the full communication and computation terms favor local training. The edge analysis leaves one more lifecycle term: the physical supply chain that produces the devices and accelerators.
 
 ### Water, chemicals, and critical materials {#sec-sustainable-ai-water-usage-caae}
 
@@ -4180,9 +4183,9 @@ Effective AI sustainability governance operates through a combination of mandato
 
 [^fn-ai-act-energy]: **EU AI Act (2024)**\index{EU AI Act!energy reporting}: The EU AI Act, adopted in 2024, is an early broad AI regulatory framework that creates obligations for general-purpose AI models and additional obligations for models with systemic risk, including models presumed to have high-impact capabilities above $10^{25}$ FLOPs of training compute. Technical documentation must include computational resources and known or estimated model energy consumption. For violations by providers of general-purpose AI models, Article 101 permits fines up to 3 percent of annual worldwide turnover or EUR 15 million; the separate 7 percent maximum applies to prohibited-practice violations.
 
-[^fn-csrd-ai-reporting]: **CSRD (Corporate Sustainability Reporting Directive)**: Effective 2024, this EU regulation requires 50,000+ companies to disclose audited Scope 1, 2, and 3 emissions using standardized ESRS frameworks. For AI infrastructure, CSRD forces disclosure of previously hidden costs: the embodied carbon of GPU procurement, energy from outsourced cloud training, and end-of-life hardware disposal that collectively constitute the majority of an AI system's Scope 3 footprint.
+[^fn-csrd-ai-reporting]: **CSRD (Corporate Sustainability Reporting Directive)**: As amended by Directive (EU) 2026/470, the CSRD scope covers EU companies with more than 1,000 employees and more than EUR 450 million in net annual turnover. Covered companies report material sustainability information under standardized ESRS frameworks. For AI infrastructure, this reporting can expose previously hidden costs such as the embodied carbon of GPU procurement, energy from outsourced cloud training, and end-of-life hardware disposal in the value chain.
 
-Beyond measurement mandates, governments are exploring direct restriction mechanisms. These include setting limits on computational power available for training large AI models, mirroring **Emissions Trading Systems (ETS)**\index{Emissions Trading System}[^fn-ets-compute-cap] used in environmental policy. Such "cap-and-trade" systems for compute would force organizations to operate within predefined energy budgets or procure additional capacity, creating a market for computational carbon credits. The expansion of carbon pricing and **Carbon Border Adjustment Mechanisms (CBAM)**\index{Carbon Border Adjustment Mechanism} is converting the geographic location of compute into a direct financial variable---the carbon intensity of regional electricity grids varies across the span established in @sec-sustainable-ai-scale-environmental-impact-ac9a, making carbon-aware scheduling a key compliance strategy.
+Beyond measurement mandates, governments are exploring direct restriction mechanisms. These include setting limits on computational power available for training large AI models, mirroring **Emissions Trading Systems (ETS)**\index{Emissions Trading System}[^fn-ets-compute-cap] used in environmental policy. Such "cap-and-trade" systems for compute would force organizations to operate within predefined energy budgets or procure additional capacity, creating a market for computational carbon credits. Carbon pricing can make electricity source and workload location economic scheduling variables. The EU **Carbon Border Adjustment Mechanism (CBAM)**\index{Carbon Border Adjustment Mechanism}, by contrast, applies to embedded emissions in specified imported goods and electricity; it does not generally price an AI service according to the regional grid where its computation ran.
 
 [^fn-ets-compute-cap]: **Emissions Trading for Compute**\index{Emissions Trading for Compute}\index{Emissions Trading!compute cap}: The EU ETS (2005) pioneered cap-and-trade for industrial emissions; applying this model to AI compute would set aggregate energy budgets for training clusters and let organizations trade surplus capacity. The mechanism converts sustainability from a voluntary optimization into a priced constraint: organizations that invest in efficiency can sell unused allocation to less efficient competitors, creating a financial incentive aligned with the iron law's utilization term ($\eta_{\text{hw}}$).
 
