@@ -2237,7 +2237,7 @@ These control mechanisms share a common systems design: they are callback-based 
 
 | **Mechanism**                                                       | **What it controls**                                                                                          | **Cost or hazard**                                                                                             |
 |:--------------------------------------------------------------------|:--------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|
-| `retain_graph=True`\index{Graph Retention!multiple backward passes} | Keeps saved graph state available for another backward traversal                                               | Retains memory that would otherwise be released; the amount depends on the graph and saved values             |
+| `retain_graph=True`\index{Graph Retention!multiple backward passes} | Keeps saved graph state available for another backward traversal                                              | Retains memory that would otherwise be released; the amount depends on the graph and saved values              |
 | Gradient accumulation                                               | Successive backward passes sum into `.grad` until `zero_grad()` resets them, enabling large effective batches | Forgetting the reset silently mixes gradients across optimization steps                                        |
 | Custom `autograd.Function`                                          | User-defined forward and backward rules for operations outside the built-in library                           | Moves the differentiation contract (what to save, how to differentiate) to the implementer                     |
 | Gradient hooks\index{Gradient Hook!inspection and modification}     | Inspecting or modifying gradients mid-traversal (clipping, logging, debugging)                                | Runs arbitrary Python per registered tensor on every backward pass                                             |
@@ -2985,12 +2985,12 @@ The cost of moving data between devices varies by orders of magnitude depending 
 
 [^fn-nvlink-bandwidth-hierarchy]: **NVLink**: NVIDIA's high-bandwidth GPU-to-GPU interconnect (see @sec-hardware-acceleration), providing `{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` bidirectional bandwidth (NVLink 3.0 on A100) compared to `{python} DeviceBandwidthHierarchy.pcie4_bidir_gb_per_s_str` for PCIe 4.0 x16. This ~10$\times$ bandwidth advantage determines whether tensor parallelism, splitting one large tensor computation across multiple GPUs, is practical for a given model size: GPUs connected only by PCIe can make the $D_{\text{vol}}/\text{BW}$ communication term dominate total training time, erasing the benefit of additional compute. \index{NVLink!bandwidth hierarchy}
 
-| **Interconnect** |                                                                             **Bandwidth**                                                                             |                   **Transfer Time**                   | **Path**                            |
-|:-----------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------:|:-----------------------------------|
-| **PCIe 3.0 x16** |                                                         `{python} DeviceBandwidthHierarchy.pcie3_gb_per_s_str`                                                        |  `{python} DeviceBandwidthHierarchy.pcie3_4mb_ms_str` | Host to device                     |
-| **PCIe 4.0 x16** |                                                         `{python} DeviceBandwidthHierarchy.pcie4_gb_per_s_str`                                                        |  `{python} DeviceBandwidthHierarchy.pcie4_4mb_ms_str` | Host to device                     |
-| **NVLink 3.0**   | `{python} DeviceBandwidthHierarchy.nvlink_a100_per_direction_gb_per_s_str` per direction (`{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` bidirectional) | `{python} DeviceBandwidthHierarchy.nvlink_4mb_ms_str` | GPU to GPU                         |
-| **GPU Memory**   |                                                        `{python} DeviceBandwidthHierarchy.a100_bw_gb_per_s_str`                                                       |   `{python} DeviceBandwidthHierarchy.hbm_4mb_ms_str`  | On device                          |
+| **Interconnect** |                                                                             **Bandwidth**                                                                             |                   **Transfer Time**                   | **Path**       |
+|:-----------------|:---------------------------------------------------------------------------------------------------------------------------------------------------------------------:|:-----------------------------------------------------:|:---------------|
+| **PCIe 3.0 x16** |                                                         `{python} DeviceBandwidthHierarchy.pcie3_gb_per_s_str`                                                        |  `{python} DeviceBandwidthHierarchy.pcie3_4mb_ms_str` | Host to device |
+| **PCIe 4.0 x16** |                                                         `{python} DeviceBandwidthHierarchy.pcie4_gb_per_s_str`                                                        |  `{python} DeviceBandwidthHierarchy.pcie4_4mb_ms_str` | Host to device |
+| **NVLink 3.0**   | `{python} DeviceBandwidthHierarchy.nvlink_a100_per_direction_gb_per_s_str` per direction (`{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` bidirectional) | `{python} DeviceBandwidthHierarchy.nvlink_4mb_ms_str` | GPU to GPU     |
+| **GPU Memory**   |                                                        `{python} DeviceBandwidthHierarchy.a100_bw_gb_per_s_str`                                                       |   `{python} DeviceBandwidthHierarchy.hbm_4mb_ms_str`  | On device      |
 
 : **Device Transfer Overhead**: Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2$\times$ total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead tbl-colwidths="[25,25,20,30]"}
 
@@ -3028,7 +3028,8 @@ with torch.cuda.stream(compute_stream):
 x_pinned = torch.randn(1000, 1000).pin_memory()
 x_gpu = x_pinned.to("cuda", non_blocking=True)  # Asynchronous
 
-# A pageable source may require staging and should not be assumed to overlap
+# A pageable source may require staging and should not be assumed to
+# overlap
 y_regular = torch.randn(1000, 1000)
 y_gpu = y_regular.to("cuda", non_blocking=True)
 ```
@@ -3044,20 +3045,29 @@ The same synchronization pattern appears when model stages overlap across microb
 ```{.python}
 # Pipeline parallelism: place stages on separate GPUs
 devices = [torch.device(f"cuda:{i}") for i in range(3)]
-stages = [Stage1().to(devices[0]), Stage2().to(devices[1]), Stage3().to(devices[2])]
+stages = [
+    Stage1().to(devices[0]),
+    Stage2().to(devices[1]),
+    Stage3().to(devices[2]),
+]
 streams = [torch.cuda.Stream(device=device) for device in devices]
 events = [
-    [torch.cuda.Event() for _ in range(num_microbatches)] for _ in stages
+    [torch.cuda.Event() for _ in range(num_microbatches)]
+    for _ in stages
 ]
 outputs = [[None] * num_microbatches for _ in stages]
 
 for mb in range(num_microbatches):
-    for stage_idx, (stage, stream, device) in enumerate(zip(stages, streams, devices)):
+    for stage_idx, (stage, stream, device) in enumerate(
+        zip(stages, streams, devices)
+    ):
         with torch.cuda.device(device), torch.cuda.stream(stream):
             if stage_idx > 0:
                 # Wait for previous stage to complete this microbatch
                 events[stage_idx - 1][mb].wait()
-                stage_input = outputs[stage_idx - 1][mb].to(device, non_blocking=True)
+                stage_input = outputs[stage_idx - 1][mb].to(
+                    device, non_blocking=True
+                )
             else:
                 stage_input = inputs[mb].to(device, non_blocking=True)
 
@@ -3705,6 +3715,7 @@ Complex models compose from reusable submodules\index{nn.Module!hierarchical com
 import torch
 import torch.nn as nn
 
+
 class ResidualBlock(nn.Module):
     def __init__(self, channels):
         super().__init__()
@@ -3718,6 +3729,7 @@ class ResidualBlock(nn.Module):
         x = torch.relu(self.bn1(self.conv1(x)))
         x = self.bn2(self.conv2(x))
         return torch.relu(x + residual)
+
 
 class ResNet(nn.Module):
     def __init__(self, num_blocks, channels=64):
@@ -3734,6 +3746,7 @@ class ResNet(nn.Module):
             x = block(x)
         x = x.mean(dim=[2, 3])  # Global average pooling
         return self.fc(x)
+
 
 model = ResNet(num_blocks=4)
 total = sum(p.numel() for p in model.parameters())
@@ -3809,6 +3822,7 @@ import torch.nn as nn
 
 model = nn.Sequential(nn.Linear(10, 20), nn.ReLU(), nn.Linear(20, 5))
 
+
 # Forward hook to inspect activations
 def forward_hook(module, input, output):
     print(
@@ -3818,9 +3832,11 @@ def forward_hook(module, input, output):
         f"std={output.std():.3f}"
     )
 
+
 # Backward hook to inspect gradients
 def backward_hook(module, grad_input, grad_output):
     print(f"Gradient norm: {grad_output[0].norm():.3f}")
+
 
 # Register hooks on specific layer
 handle_fwd = model[0].register_forward_hook(forward_hook)
@@ -3950,9 +3966,11 @@ JAX's functional paradigm requires a genuine mental shift from "tracking state t
 import jax
 import jax.numpy as jnp
 
+
 def loss_fn(params, x, y):
     pred = jnp.dot(x, params["w"]) + params["b"]
     return jnp.mean((pred - y) ** 2)
+
 
 # Transform: compute gradients
 grad_fn = jax.grad(loss_fn)
@@ -4002,6 +4020,7 @@ The same simple network exposes how each design philosophy shapes the code. @Lst
 # PyTorch - Dynamic, Pythonic
 import torch.nn as nn
 
+
 class SimpleNet(nn.Module):
     def __init__(self):
         super().__init__()
@@ -4009,6 +4028,7 @@ class SimpleNet(nn.Module):
 
     def forward(self, x):
         return self.fc(x)
+
 
 # TensorFlow/Keras - High-level API
 import tensorflow as tf
@@ -4021,8 +4041,10 @@ model = tf.keras.Sequential(
 import jax.numpy as jnp
 from jax import random
 
+
 def simple_net(params, x):
     return jnp.dot(x, params["w"]) + params["b"]
+
 
 key = random.PRNGKey(0)
 key_w, key_b = random.split(key)
@@ -4066,7 +4088,7 @@ The same principle extends beyond the three general-purpose frameworks. Runtime 
 | **PyTorch eager**               | Research and iteration         | Baseline latency; full Python/runtime footprint                   | Dynamic graphs, eager debugging               | Dispatch overhead and missing graph view   |
 | **Compiled PyTorch/TensorFlow** | Server training and serving    | Workload-dependent gains when graph capture is clean              | Graph capture, fusion, layout planning        | Operator coverage and graph breaks         |
 | **TensorFlow Lite/Core ML**     | Mobile and edge inference      | Commonly targets tens of ms latency and MB-scale model packages   | Quantization, static graphs, NPU delegates    | Target-specific conversion constraints     |
-| **TF Lite Micro/microTVM**      | Microcontroller inference      | KB-scale RAM budgets on many TinyML deployments                   | Static allocation, INT8 kernels               | Selected operators and constrained memory |
+| **TF Lite Micro/microTVM**      | Microcontroller inference      | KB-scale RAM budgets on many TinyML deployments                   | Static allocation, INT8 kernels               | Selected operators and constrained memory  |
 | **ONNX Runtime**                | Cross-framework serving        | Backend-dependent; can match native runtimes for supported graphs | Standard graph format, execution providers    | Export gaps and custom-operator fallbacks  |
 | **TensorRT/TVM**                | Hardware-specialized inference | Target-dependent gains over untuned eager baselines               | Kernel fusion, precision lowering, autotuning | Narrower target and conversion assumptions |
 
@@ -4086,12 +4108,12 @@ As ML models move from cloud servers to edge devices\index{Deployment Target!clo
 
 @Tbl-deployment-frameworks continues the same constraint map across the cloud-to-edge spectrum: each row identifies the runtime assumptions that fit the target envelope.
 
-| **Environment**              | **Runtime assumptions that usually fit** | **Optimization lever**                       | **Binding constraint**            |
-|:-----------------------------|:-----------------------------------------|:---------------------------------------------|:----------------------------------|
-| **Cloud/Server**             | Full training/serving frameworks         | Graph compilation, batching, lower precision | Throughput, cost                  |
+| **Environment**              | **Runtime assumptions that usually fit** | **Optimization lever**                       | **Binding constraint**               |
+|:-----------------------------|:-----------------------------------------|:---------------------------------------------|:-------------------------------------|
+| **Cloud/Server**             | Full training/serving frameworks         | Graph compilation, batching, lower precision | Throughput, cost                     |
 | **Edge**                     | Static graph or portable serving runtime | Static graphs, lower-precision kernels       | Workload-specific latency and memory |
-| **Mobile**                   | App-integrated runtime with delegates    | Accelerator delegates, compact model formats | Battery, thermal, app size limits |
-| **Microcontroller (TinyML)** | Tiny runtime with fixed allocation       | Static allocation, small integer kernels     | Tight RAM, no dynamic memory      |
+| **Mobile**                   | App-integrated runtime with delegates    | Accelerator delegates, compact model formats | Battery, thermal, app size limits    |
+| **Microcontroller (TinyML)** | Tiny runtime with fixed allocation       | Static allocation, small integer kernels     | Tight RAM, no dynamic memory         |
 
 : **Deployment Target Constraint Map**: Runtime assumptions, optimization levers, and binding constraints for each deployment tier, from cloud servers to microcontrollers. {#tbl-deployment-frameworks tbl-colwidths="[15,35,25,25]"}
 
@@ -4127,12 +4149,11 @@ Rather than seeking the "best" framework, effective selection first eliminates c
 
 The TensorFlow ecosystem illustrates how these axes interact concretely. Its three variants (TensorFlow\index{TensorFlow!full framework}, TensorFlow Lite\index{TensorFlow Lite!mobile deployment}, TensorFlow Lite Micro\index{TensorFlow Lite Micro!microcontroller deployment}) trace a single design philosophy across progressively tighter constraints, a pattern that generalizes to any framework family. @Tbl-tf-comparison quantifies the trade-offs.
 
-
 |                                    |         **TensorFlow**        | **TensorFlow Lite** | **TensorFlow Lite for Microcontrollers** |
 |:-----------------------------------|:-----------------------------:|:-------------------:|:----------------------------------------:|
 | **Training**                       |              Yes              |       Limited       |                    No                    |
 | **Inference**                      | Yes (but inefficient on edge) | Yes (and efficient) |      Yes (and even more efficient)       |
-| **Operator Coverage**              |            Broad              |       Inference-focused       |          Model-selected subset           |
+| **Operator Coverage**              |             Broad             |  Inference-focused  |          Model-selected subset           |
 | **Native Lower-Precision Tooling** |              Yes              |         Yes         |                   Yes                    |
 
 : **TensorFlow Variant Software Comparison**: Design trade-offs across TensorFlow, TensorFlow Lite, and TensorFlow Lite Micro, balancing model expressiveness, binary size, and resource constraints. Operator coverage narrows from a general training framework to deployment-focused runtimes whose supported set depends on the model and build. Native lower-precision tooling enables further optimization for constrained environments. {#tbl-tf-comparison tbl-colwidths="[28,26,20,26]"}
@@ -4157,11 +4178,11 @@ The static-vs.-dynamic graph distinction (examined in @sec-ml-frameworks-executi
 
 Once model requirements are satisfied, the framework must integrate with the target software environment. @Tbl-tf-sw-comparison reveals how operating system requirements, memory management, and accelerator support vary across TensorFlow variants.
 
-|                                | **TensorFlow** | **TensorFlow Lite** | **TensorFlow Lite for Microcontrollers** |
-|:-------------------------------|:--------------:|:-------------------:|:----------------------------------------:|
-| **Needs an OS**                |      Yes       |         Yes         |                    No                    |
-| **Model Access**               | Filesystem or service | Platform-specific storage mapping | Platform-specific compiled or mapped storage |
-| **Accelerator Support**        |      Yes       |     Delegates        |        Optimized kernels and integrations     |
+|                         |     **TensorFlow**    |        **TensorFlow Lite**        |   **TensorFlow Lite for Microcontrollers**   |
+|:------------------------|:---------------------:|:---------------------------------:|:--------------------------------------------:|
+| **Needs an OS**         |          Yes          |                Yes                |                      No                      |
+| **Model Access**        | Filesystem or service | Platform-specific storage mapping | Platform-specific compiled or mapped storage |
+| **Accelerator Support** |          Yes          |             Delegates             |      Optimized kernels and integrations      |
 
 : **TensorFlow Variant Capability Comparison**: Capabilities of TensorFlow, TensorFlow Lite, and TensorFlow Lite Micro regarding operating system dependence, memory management, and hardware acceleration. Progressive constraint across variants enables selection by deployment context, from full-scale servers to resource-constrained edge devices. {#tbl-tf-sw-comparison tbl-colwidths="[28,24,24,24]"}
 
@@ -4404,13 +4425,13 @@ class TrainingStepCalc:
     train_bwd_ai_str = fmt_arithmetic_intensity((bwd_flops / bwd_mem), unit=flop / byte, commas=False)
 ```
 
-| **Component**                    |                                         **Modeled Work**                                           |                 **Memory Traffic**                |            **Arithmetic Intensity**           |
-|:---------------------------------|:---------------------------------------------------------------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
-| **MatMul (x @ W1)**              |  `{python} TrainingStepCalc.train_mm1_dims_math` = `{python} TrainingStepCalc.train_mm1_mflop_str`  |  `{python} TrainingStepCalc.train_mm1_mem_mb_str` |  `{python} TrainingStepCalc.train_mm1_ai_str` |
-| **ReLU**                         | `{python} TrainingStepCalc.train_relu_dims_math` = `{python} TrainingStepCalc.train_relu_kflop_str` | `{python} TrainingStepCalc.train_relu_mem_kb_str` | `{python} TrainingStepCalc.train_relu_ai_str` |
-| **MatMul (h @ W2)**              |  `{python} TrainingStepCalc.train_mm2_dims_math` = `{python} TrainingStepCalc.train_mm2_kflop_str`  |  `{python} TrainingStepCalc.train_mm2_mem_kb_str` |  `{python} TrainingStepCalc.train_mm2_ai_str` |
-| **Cross-entropy (simplified)**   |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
-| **Backward (assumed 2$\times$ forward)** |                    ~`{python} TrainingStepCalc.train_bwd_mflop_str`                          |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
+| **Component**                            |                                           **Modeled Work**                                          |                 **Memory Traffic**                |            **Arithmetic Intensity**           |
+|:-----------------------------------------|:---------------------------------------------------------------------------------------------------:|:-------------------------------------------------:|:---------------------------------------------:|
+| **MatMul (x @ W1)**                      |  `{python} TrainingStepCalc.train_mm1_dims_math` = `{python} TrainingStepCalc.train_mm1_mflop_str`  |  `{python} TrainingStepCalc.train_mm1_mem_mb_str` |  `{python} TrainingStepCalc.train_mm1_ai_str` |
+| **ReLU**                                 | `{python} TrainingStepCalc.train_relu_dims_math` = `{python} TrainingStepCalc.train_relu_kflop_str` | `{python} TrainingStepCalc.train_relu_mem_kb_str` | `{python} TrainingStepCalc.train_relu_ai_str` |
+| **MatMul (h @ W2)**                      |  `{python} TrainingStepCalc.train_mm2_dims_math` = `{python} TrainingStepCalc.train_mm2_kflop_str`  |  `{python} TrainingStepCalc.train_mm2_mem_kb_str` |  `{python} TrainingStepCalc.train_mm2_ai_str` |
+| **Cross-entropy (simplified)**           |                           ~`{python} TrainingStepCalc.train_ce_kflop_str`                           |  `{python} TrainingStepCalc.train_ce_mem_kb_str`  |  `{python} TrainingStepCalc.train_ce_ai_str`  |
+| **Backward (assumed 2$\times$ forward)** |                           ~`{python} TrainingStepCalc.train_bwd_mflop_str`                          |  `{python} TrainingStepCalc.train_bwd_mem_mb_str` |  `{python} TrainingStepCalc.train_bwd_ai_str` |
 
 : **Per-Operation Roofline Analysis**: Analytical work and memory-traffic estimates for a two-layer MLP training step. The cross-entropy row assigns one operation-equivalent each to exponentiation, accumulation, and normalization per logit, while the backward row assumes twice the forward work and three times its memory traffic. These are modeling assumptions rather than measured instruction counts. MatMul operations have much higher arithmetic intensity than element-wise operations, while the simplified ReLU and cross-entropy models remain memory-sensitive. {#tbl-training-step-roofline tbl-colwidths="[27,33,18,22]"}
 
@@ -4685,7 +4706,6 @@ The right framework mode depends on the loop being optimized. During exploration
 Machine learning frameworks exist to solve three fundamental problems that would otherwise make deep learning impractical. The first is execution: deciding when and how computation runs. Frameworks navigate the trade-off between eager execution (immediate, debuggable, flexible) and graph execution (deferred, optimizable, deployable), while modern hybrid approaches like `torch.compile` attempt to provide both flexibility during development and optimization for production. The second is differentiation: computing gradients automatically. Frameworks implement reverse-mode automatic differentiation that computes exact gradients for arbitrary operation compositions, transforming the mathematical chain rule into a software primitive that can train billions of parameters with a single `loss.backward()` call. The third is abstraction: targeting diverse hardware from a single interface. Frameworks provide tensor abstractions, intermediate representations, and runtime systems that hide hardware complexity while enabling efficient utilization across CPUs, GPUs, TPUs, and specialized accelerators.
 
 These problems are interconnected and constrained by the iron law of performance (@sec-introduction-iron-law-ml-systems-c32a): execution strategy determines dispatch overhead $(L_{\text{lat}})$, differentiation determines memory traffic $(D_{\text{vol}})$, and abstraction determines hardware utilization $(\eta_{\text{hw}})$. The memory wall makes data movement often more expensive than computation, explaining why frameworks invest in kernel fusion, selective recomputation, lower-precision execution, and compilation pipelines.
-
 
 ::: {.callout-takeaways title="The layer between math and hardware"}
 

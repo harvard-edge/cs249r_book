@@ -258,9 +258,9 @@ Here $\eta_{\text{hw}}$ is an effective end-to-end utilization factor, the achie
 |:--------------------------------|:--------------------------------|:-------------------------------------------------------------------------------|
 | **Mixed Precision (FP16/BF16)** | Peak Throughput ↑               | Uses supported lower-precision hardware paths                                  |
 | **Data Prefetching**            | Utilization ↑                   | Reduces accelerator idle time waiting for data                                 |
-| **Gradient Checkpointing**      | Memory ↓, Operations ↑          | Reduces saved activations by recomputing selected values                        |
-| **Gradient Accumulation**       | Memory ↓, Synchronization ↓     | Builds an effective batch from serialized micro-batches                         |
-| **Operator Fusion**             | Memory Traffic ↓, Overhead ↓    | Avoids intermediate transfers and reduces kernel launches                       |
+| **Gradient Checkpointing**      | Memory ↓, Operations ↑          | Reduces saved activations by recomputing selected values                       |
+| **Gradient Accumulation**       | Memory ↓, Synchronization ↓     | Builds an effective batch from serialized micro-batches                        |
+| **Operator Fusion**             | Memory Traffic ↓, Overhead ↓    | Avoids intermediate transfers and reduces kernel launches                      |
 | **FlashAttention**              | Memory Traffic ↓, Utilization ↑ | Same asymptotic FLOPs, much lower HBM IO; backward recomputation may add FLOPs |
 
 : **Iron Law Optimization Mapping**: Optimization techniques mapped to iron law terms. Understanding which term a technique affects guides optimization strategy selection. {#tbl-iron-law-mapping tbl-colwidths="[25,27,48]"}
@@ -342,12 +342,12 @@ GPT-2 is large enough to expose real training bottlenecks yet small enough to re
 **Context**:
 GPT-2 (1.5 billion parameters) serves as our primary case study because it is large enough to expose meaningful compute, activation, and optimizer-state constraints while remaining easier to analyze than frontier-scale models. Whether it requires distributed training depends on precision, optimizer state, activation memory, hardware capacity, and the target training time. @Tbl-training-gpt2-lighthouse-specs maps each model property to the systems constraint it creates:
 
-| **Property**     |                           **Specification**                           | **Systems Implication**                                                                                                                                        |
-|:-----------------|:---------------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| **Parameters**   |         `{python} GPT2LighthouseSpecs.gpt2_params_b_str` (XL)         | Requires ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp16_gb_str` (FP16) or ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp32_gb_str` (FP32) for weights alone. |
-| **Architecture** |                          48 Layers, 1600 Dim                          | Deep pipeline creates heavy activation memory pressure.                                                                                                        |
-| **Dataset**      | WebText (`{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str`)     | Preprocessing, shuffling, and delivery must sustain the selected training configuration.                                                                       |
-| **Compute**      |         ~ `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`         | Training duration depends on achieved throughput and accelerator count.                                                                                         |
+| **Property**     |                         **Specification**                         | **Systems Implication**                                                                                                                                        |
+|:-----------------|:-----------------------------------------------------------------:|:---------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| **Parameters**   |       `{python} GPT2LighthouseSpecs.gpt2_params_b_str` (XL)       | Requires ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp16_gb_str` (FP16) or ~`{python} GPT2LighthouseSpecs.gpt2_weights_fp32_gb_str` (FP32) for weights alone. |
+| **Architecture** |                        48 Layers, 1600 Dim                        | Deep pipeline creates heavy activation memory pressure.                                                                                                        |
+| **Dataset**      | WebText (`{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str`) | Preprocessing, shuffling, and delivery must sustain the selected training configuration.                                                                       |
+| **Compute**      |       ~ `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`       | Training duration depends on achieved throughput and accelerator count.                                                                                        |
 
 : **GPT-2 (1.5 billion parameters) lighthouse model specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates—memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
 
@@ -679,12 +679,12 @@ Modern accelerators can implement these functions through native instructions, p
 
 @Tbl-compare-activations summarizes how these behaviors translate into system constraints.
 
-| **Function** | **Key Advantages**                                                               | **Key Disadvantages**                            | **System Implications**                                                                              |
-|:-------------|:---------------------------------------------------------------------------------|:-------------------------------------------------|:-----------------------------------------------------------------------------------------------------|
-| **Sigmoid**  | Smooth; bounded output in $(0, 1)$.                                               | Gradients saturate at large magnitudes; output is not zero-centered. | Uses exponential or approximation kernels whose cost depends on the target.               |
-| **Tanh**     | Smooth; zero-centered output in $(-1, 1)$.                                       | Gradients saturate at large magnitudes.           | Uses special-function or approximation kernels similar in structure to sigmoid.            |
-| **ReLU**     | Simple threshold operation; nonsaturating for positive inputs.                    | Can produce persistently inactive units.          | Often inexpensive and fusible; exploitable sparsity depends on downstream support.          |
-| **Softmax**  | Produces a normalized distribution over an axis.                                  | Requires reductions and cross-element coordination. | Parallel implementations coordinate maximum, sum, and normalization stages.              |
+| **Function** | **Key Advantages**                                             | **Key Disadvantages**                                                | **System Implications**                                                            |
+|:-------------|:---------------------------------------------------------------|:---------------------------------------------------------------------|:-----------------------------------------------------------------------------------|
+| **Sigmoid**  | Smooth; bounded output in $(0, 1)$.                            | Gradients saturate at large magnitudes; output is not zero-centered. | Uses exponential or approximation kernels whose cost depends on the target.        |
+| **Tanh**     | Smooth; zero-centered output in $(-1, 1)$.                     | Gradients saturate at large magnitudes.                              | Uses special-function or approximation kernels similar in structure to sigmoid.    |
+| **ReLU**     | Simple threshold operation; nonsaturating for positive inputs. | Can produce persistently inactive units.                             | Often inexpensive and fusible; exploitable sparsity depends on downstream support. |
+| **Softmax**  | Produces a normalized distribution over an axis.               | Requires reductions and cross-element coordination.                  | Parallel implementations coordinate maximum, sum, and normalization stages.        |
 
 : **Activation Function Systems Comparison**: Activation functions differ in mathematical behavior, kernel cost, fusion opportunities, and memory access patterns. {#tbl-compare-activations tbl-colwidths="[10,28,23,39]"}
 
@@ -912,14 +912,14 @@ The choice of optimization algorithm creates specific patterns of computation an
 \renewcommand{\arraystretch}{1.35}
 ```
 
-| **Property**                    |  **SGD**   |  **Momentum**  |    **RMSprop**    |               **Adam**              |
-|:--------------------------------|:----------:|:--------------:|:-----------------:|:-----------------------------------:|
-| **Memory Overhead**             |    None    | Velocity terms | Squared gradients | Both velocity and squared gradients |
-| **Parameter + optimizer state** | 1$\times$  |   2$\times$    |     2$\times$     |              3$\times$              |
-| **Dense State Access**          | Parameters and gradients | Adds velocity | Adds squared-gradient state | Adds first- and second-moment state |
-| **Update Work**                 | Lowest auxiliary work | Adds momentum update | Adds adaptive scaling | Adds moment updates and bias correction |
-| **Hardware Efficiency**         |   Varies   |     Varies     |       Varies      |                Varies               |
-| **Convergence Behavior**        |   Varies   |     Varies     |       Varies      |                Varies               |
+| **Property**                    |         **SGD**          |     **Momentum**     |         **RMSprop**         |                 **Adam**                |
+|:--------------------------------|:------------------------:|:--------------------:|:---------------------------:|:---------------------------------------:|
+| **Memory Overhead**             |           None           |    Velocity terms    |      Squared gradients      |   Both velocity and squared gradients   |
+| **Parameter + optimizer state** |        1$\times$         |      2$\times$       |          2$\times$          |                3$\times$                |
+| **Dense State Access**          | Parameters and gradients |    Adds velocity     | Adds squared-gradient state |   Adds first- and second-moment state   |
+| **Update Work**                 |  Lowest auxiliary work   | Adds momentum update |    Adds adaptive scaling    | Adds moment updates and bias correction |
+| **Hardware Efficiency**         |          Varies          |        Varies        |            Varies           |                  Varies                 |
+| **Convergence Behavior**        |          Varies          |        Varies        |            Varies           |                  Varies                 |
 
 : **Optimizer Memory Footprint**: Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[26,10,13,17,34]"}
 
@@ -1372,12 +1372,12 @@ Operations with high arithmetic intensity are compute bound: their performance i
 
 @Tbl-training-arithmetic-intensity summarizes common tendencies rather than fixed measurements. Dense matrix multiplication can reuse operands enough to reach high arithmetic intensity, while standalone elementwise and reduction kernels often perform less work per byte moved. The target hardware's ridge point determines the resulting regime.
 
-| **Operation**            | **Arithmetic-intensity tendency**                              | **Classification condition**                         |
-|:-------------------------|:----------------------------------------------------------------|:-----------------------------------------------------|
-| **Dense MatMul (large)** | High when shapes and tiling provide substantial operand reuse  | Compute-bound only when intensity exceeds the ridge  |
-| **Activation functions** | Usually low as standalone elementwise kernels                  | Often memory-sensitive unless fusion removes traffic |
-| **LayerNorm/BatchNorm**  | Reduction and elementwise work with multiple tensor passes     | Depends on fusion, shape, and target ridge point      |
-| **Attention softmax**    | Reduction and normalization over the attention axis            | Depends on materialization, tiling, and fusion        |
+| **Operation**            | **Arithmetic-intensity tendency**                             | **Classification condition**                         |
+|:-------------------------|:--------------------------------------------------------------|:-----------------------------------------------------|
+| **Dense MatMul (large)** | High when shapes and tiling provide substantial operand reuse | Compute-bound only when intensity exceeds the ridge  |
+| **Activation functions** | Usually low as standalone elementwise kernels                 | Often memory-sensitive unless fusion removes traffic |
+| **LayerNorm/BatchNorm**  | Reduction and elementwise work with multiple tensor passes    | Depends on fusion, shape, and target ridge point     |
+| **Attention softmax**    | Reduction and normalization over the attention axis           | Depends on materialization, tiling, and fusion       |
 
 : **Training Operation Classification Conditions**: Operation families exhibit common arithmetic-intensity tendencies, but classification requires comparing the measured implementation with the target hardware's ridge point. Memory-sensitive kernels may benefit from reducing traffic or increasing fusion, while compute-bound kernels benefit from additional arithmetic throughput. {#tbl-training-arithmetic-intensity tbl-colwidths="[33,33,33]"}
 
@@ -2517,7 +2517,7 @@ A common mistake in ML systems is ignoring the fixed execution granularity of GP
 \renewcommand{\arraystretch}{1.3}
 ```
 
-|            **Independent Work Items**           |                    **Warps Needed**                   |              **Lane Utilization**              |                      **Relative Time**                      |
+| **Independent Work Items**                      |                    **Warps Needed**                   |              **Lane Utilization**              |                      **Relative Time**                      |
 |:------------------------------------------------|:-----------------------------------------------------:|:----------------------------------------------:|:-----------------------------------------------------------:|
 | `{python} TrainingDimensions.wave_batch_32_str` | `{python} TrainingDimensions.wave_warps_32_value_str` |                      100%                      |                          1$\times$                          |
 | `{python} TrainingDimensions.wave_batch_33_str` | `{python} TrainingDimensions.wave_warps_33_value_str` | `{python} TrainingDimensions.wave_util_33_str` | ~`{python} TrainingDimensions.wave_time_33_factor_mult_str` |
@@ -2860,7 +2860,7 @@ At billion-parameter scale, optimizer state dominates the memory budget. As quan
 
 \legend{Others, Weight Gradient, Optimizer State, Activation, Weights}
 \draw[dashed,RedLine,ultra thick] (axis cs:24,-0.5) -- (axis cs:24,3.5)
-node[above right=0pt, RedLine, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n}, 
+node[above right=0pt, RedLine, font=\footnotesize\bfseries\usefont{T1}{phv}{m}{n},
 fill=white, fill opacity=0.85, text opacity=1, inner sep=2pt, pos=1] {24 GB Limit (RTX 4090)};
 \end{axis}
 \end{tikzpicture}
@@ -4149,12 +4149,12 @@ NVIDIA's Hopper architecture (H100) introduces FP8\index{FP8!hardware accelerati
 
 FP8 training doubles Tensor Core throughput again (`{python} MixedPrecisionHardwareDetail.h100_fp8_pflop_per_s_str` on H100 dense vs. `{python} MixedPrecisionHardwareDetail.h100_fp16_pflop_per_s_str` for FP16 dense, without sparsity). However, FP8's severely limited precision requires per-tensor scaling factors maintained in higher precision, adding algorithmic complexity. @Tbl-precision-decision-tree summarizes when each precision is appropriate:
 
-| **Precision** | **When to Use**                                  | **Hardware Requirement** |
-|:--------------|:-------------------------------------------------|-------------------------:|
-| **FP8**       | Throughput-oriented training with validated scaling |     Supported FP8 hardware |
-| **BF16**      | Wide exponent range without FP16 loss scaling       | Supported BF16 accelerator |
-| **FP16**      | Higher mantissa precision with managed loss scaling | Supported FP16 accelerator |
-| **FP32**      | Higher precision or unsupported lower-precision path |                      GPU |
+| **Precision** | **When to Use**                                      |   **Hardware Requirement** |
+|:--------------|:-----------------------------------------------------|---------------------------:|
+| **FP8**       | Throughput-oriented training with validated scaling  |     Supported FP8 hardware |
+| **BF16**      | Wide exponent range without FP16 loss scaling        | Supported BF16 accelerator |
+| **FP16**      | Higher mantissa precision with managed loss scaling  | Supported FP16 accelerator |
+| **FP32**      | Higher precision or unsupported lower-precision path |                        GPU |
 
 : **Precision Selection Guide**: Format choice depends on hardware support, kernel coverage, numerical behavior, and validation results. FP8 requires an explicit scaling strategy; BF16 provides a wider exponent range than FP16; FP16 often uses loss scaling; and FP32 remains available for sensitive operations or unsupported lower-precision paths. {#tbl-precision-decision-tree}
 
@@ -4177,8 +4177,12 @@ import torch
 
 model = TransformerModel().cuda()
 optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-amp_dtype = torch.float16  # torch.bfloat16 usually does not need loss scaling
-scaler = torch.amp.GradScaler("cuda", enabled=(amp_dtype == torch.float16))
+amp_dtype = (
+    torch.float16
+)  # torch.bfloat16 usually does not need loss scaling
+scaler = torch.amp.GradScaler(
+    "cuda", enabled=(amp_dtype == torch.float16)
+)
 
 for batch in dataloader:
     optimizer.zero_grad()
@@ -4242,11 +4246,11 @@ class CrossGenPrecisionCalc:
 
 The `autocast` context applies a framework-defined dtype policy to eligible operations; it does not imply that every matrix operation is low precision or that every normalization and loss operation is FP32. The example uses FP16 and a gradient scaler. A BF16 recipe generally omits gradient scaling. @Tbl-hw-precision-strategy summarizes common options across GPU generations, but the final choice requires workload validation.
 
-| **Architecture**  | **Recommended Precision**            | **Key Considerations**                                                                                                |
-|:------------------|:-------------------------------------|:----------------------------------------------------------------------------------------------------------------------|
-| **V100 (Volta)**  | FP16 with loss scaling          | No native BF16 Tensor Core path; clipping depends on the training recipe                                              |
-| **A100 (Ampere)** | BF16 or FP16                   | BF16 avoids FP16 loss scaling; TF32 can accelerate eligible FP32 matrix operations                                   |
-| **H100 (Hopper)** | BF16, FP16, or validated FP8   | FP8 requires an FP8-aware recipe; `{python} MixedPrecisionHardwareDetail.h100_fp8_tflop_per_s_str` is a peak ceiling |
+| **Architecture**  | **Recommended Precision**    | **Key Considerations**                                                                                               |
+|:------------------|:-----------------------------|:---------------------------------------------------------------------------------------------------------------------|
+| **V100 (Volta)**  | FP16 with loss scaling       | No native BF16 Tensor Core path; clipping depends on the training recipe                                             |
+| **A100 (Ampere)** | BF16 or FP16                 | BF16 avoids FP16 loss scaling; TF32 can accelerate eligible FP32 matrix operations                                   |
+| **H100 (Hopper)** | BF16, FP16, or validated FP8 | FP8 requires an FP8-aware recipe; `{python} MixedPrecisionHardwareDetail.h100_fp8_tflop_per_s_str` is a peak ceiling |
 
 : **Precision Strategy by GPU Architecture**: Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy tbl-colwidths="[13,28,59]"}
 
@@ -4429,6 +4433,7 @@ FlashAttention's performance gains materialize through careful exploitation of G
 import torch
 import torch.nn.functional as F
 
+
 # Standard attention (materializes n-by-n matrix)
 def standard_attention(q, k, v):
     # q, k, v: [batch, heads, seq_len, head_dim]
@@ -4439,14 +4444,17 @@ def standard_attention(q, k, v):
     output = torch.matmul(attn, v)
     return output
 
+
 # FlashAttention (no n-by-n materialization)
 def flash_attention(q, k, v):
     # Automatically uses FlashAttention if available
     output = F.scaled_dot_product_attention(q, k, v)
     return output
 
+
 # Explicit FlashAttention 2 (flash-attn library)
 from flash_attn import flash_attn_func
+
 
 def flash_attn_2(q, k, v):
     # q, k, v: [batch, seq_len, heads, head_dim]
@@ -4516,12 +4524,12 @@ class FlashAttentionSpeedup:
 
 ::: {tbl-colwidths="[14,14,14,15,14,15,14]"}
 
-|              **Sequence Length**              |                 **Standard Forward**                 |                   **Flash Forward**                    |                **Standard Backward**                 |                   **Flash Backward**                   | **Memory (Standard)** | **Memory (Flash)** |
+| **Sequence Length**                           |                 **Standard Forward**                 |                   **Flash Forward**                    |                **Standard Backward**                 |                   **Flash Backward**                   | **Memory (Standard)** | **Memory (Flash)** |
 |:----------------------------------------------|:----------------------------------------------------:|:------------------------------------------------------:|:----------------------------------------------------:|:------------------------------------------------------:|:---------------------:|:------------------:|
-|                      512                      |                        12 ms                         |                          8 ms                          |                        35 ms                         |                         18 ms                          |         4.2 GB        |       2.8 GB       |
+| 512                                           |                        12 ms                         |                          8 ms                          |                        35 ms                         |                         18 ms                          |         4.2 GB        |       2.8 GB       |
 | `{python} FlashAttentionSpeedup.seq_2048_str` | `{python} FlashAttentionSpeedup.std_fwd_2048_ms_str` | `{python} FlashAttentionSpeedup.flash_fwd_2048_ms_str` | `{python} FlashAttentionSpeedup.std_bwd_2048_ms_str` | `{python} FlashAttentionSpeedup.flash_bwd_2048_ms_str` |         18 GB         |        6 GB        |
-|                      4096                     |                         OOM                          |                         32 ms                          |                         OOM                          |                         85 ms                          |         >40 GB        |       12 GB        |
-|                      8192                     |                         OOM                          |                         68 ms                          |                         OOM                          |                         180 ms                         |         >80 GB        |       24 GB        |
+| 4096                                          |                         OOM                          |                         32 ms                          |                         OOM                          |                         85 ms                          |         >40 GB        |       12 GB        |
+| 8192                                          |                         OOM                          |                         68 ms                          |                         OOM                          |                         180 ms                         |         >80 GB        |       24 GB        |
 
 : **FlashAttention Benchmark Comparison**: Illustrative per-call timing and peak memory for standard attention vs. FlashAttention on a 40 GB A100-style configuration across sequence lengths. OOM marks configurations where standard attention exceeds the 40 GB memory budget; the 8192-token row also shows that standard attention would exceed 80 GB. {#tbl-flashattention-benchmarks}
 
@@ -4761,11 +4769,11 @@ Setting the derivative of total memory cost $(k \times A + (N_L/k) \times A)$ to
 
 Not all operations are equally expensive to recompute, which motivates selective checkpointing. @Tbl-selective-checkpoint-placement compares where activation memory is large enough to justify recomputation.
 
-| **Layer type**          | **Memory cost**                                                         | **Recompute cost**                 | **Checkpointing strategy**                                               |
-|:------------------------|:------------------------------------------------------------------------|:-----------------------------------|:-------------------------------------------------------------------------|
-| **Attention blocks**    | Shape-dependent; materialized attention can add quadratic intermediates | High and sequence-length-dependent | Checkpoint block boundaries when saved state justifies recomputation     |
-| **Feed-forward blocks** | Often dominated by expanded hidden activations                          | High and width-dependent           | Checkpoint when expanded activations dominate memory                     |
-| **Normalization**       | Small standalone outputs                                                | Low                                | Usually handled within a larger checkpointed block                       |
+| **Layer type**          | **Memory cost**                                                         | **Recompute cost**                 | **Checkpointing strategy**                                           |
+|:------------------------|:------------------------------------------------------------------------|:-----------------------------------|:---------------------------------------------------------------------|
+| **Attention blocks**    | Shape-dependent; materialized attention can add quadratic intermediates | High and sequence-length-dependent | Checkpoint block boundaries when saved state justifies recomputation |
+| **Feed-forward blocks** | Often dominated by expanded hidden activations                          | High and width-dependent           | Checkpoint when expanded activations dominate memory                 |
+| **Normalization**       | Small standalone outputs                                                | Low                                | Usually handled within a larger checkpointed block                   |
 
 : **Selective Checkpoint Placement**: Placement compares the state saved at a block boundary with the work required to reconstruct it. Attention and feed-forward costs depend on sequence length, width, kernel implementation, and whether memory-efficient attention is already in use. {#tbl-selective-checkpoint-placement tbl-colwidths="[18,34,18,30]"}
 
@@ -5269,7 +5277,7 @@ class GPT2SummaryCalc:
 | **Activations (batch=32)**                                             |      `{python} GPT2SummaryCalc.b_act_gb_str`      |      `{python} GPT2SummaryCalc.o_act_gb_str`      | Gradient checkpointing + FP16                                             |
 | **Total Memory**                                                       | **`{python} GPT2SummaryCalc.b_total_mem_gb_str`** | **`{python} GPT2SummaryCalc.o_total_mem_gb_str`** | —                                                                         |
 | **Training Time (32 V100s)**                                           |     `{python} GPT2SummaryCalc.b_time_days_str`    |     `{python} GPT2SummaryCalc.o_time_days_str`    | Data prefetching + utilization                                            |
-| **Energy Consumption**                                                 |    `{python} GPT2SummaryCalc.b_energy_kwh_str`    |    `{python} GPT2SummaryCalc.o_energy_kwh_str`    | Assumed constant cluster power over each duration                          |
+| **Energy Consumption**                                                 |    `{python} GPT2SummaryCalc.b_energy_kwh_str`    |    `{python} GPT2SummaryCalc.o_energy_kwh_str`    | Assumed constant cluster power over each duration                         |
 | **Electricity Cost (`{python} GPT2SummaryCalc.electricity_rate_str`)** |       `{python} GPT2SummaryCalc.b_cost_str`       |       `{python} GPT2SummaryCalc.o_cost_str`       | —                                                                         |
 | **Carbon Footprint**                                                   |   `{python} GPT2SummaryCalc.b_carbon_tonnes_str`  |   `{python} GPT2SummaryCalc.o_carbon_tonnes_str`  | Regional grid average (`{python} GPT2SummaryCalc.grid_ci_kg_per_kwh_str`) |
 
@@ -6065,7 +6073,6 @@ When a selected workload is partitioned across $N_{\text{GPU}}$ devices, the spl
 
 :::
 
-
 ```{python}
 #| echo: false
 #| label: single-node-interconnect-recap
@@ -6294,12 +6301,12 @@ With this vocabulary of parallelism strategies (data, model, pipeline, tensor, a
 
 @Tbl-scaling-decision turns this principle into a lookup keyed on measured resource limits rather than universal parameter-count thresholds.
 
-| **Observed constraint**                     | **Candidate approach** | **Rationale**                                             |
-|:--------------------------------------------|:-----------------------|:----------------------------------------------------------|
-| Training state fits one device and time is acceptable | Single GPU        | Minimizes communication and operational complexity        |
-| State or throughput exceeds one device but fits one node | Single multi-GPU node | Uses fast local interconnects before crossing the network |
-| Required state or schedule exceeds one node | Multi-node cluster     | Adds aggregate memory or compute at a communication cost   |
-| Input service rate is below accelerator demand | Parallel or distributed input pipeline | Adds input throughput where profiling shows it is needed |
+| **Observed constraint**                                  | **Candidate approach**                 | **Rationale**                                             |
+|:---------------------------------------------------------|:---------------------------------------|:----------------------------------------------------------|
+| Training state fits one device and time is acceptable    | Single GPU                             | Minimizes communication and operational complexity        |
+| State or throughput exceeds one device but fits one node | Single multi-GPU node                  | Uses fast local interconnects before crossing the network |
+| Required state or schedule exceeds one node              | Multi-node cluster                     | Adds aggregate memory or compute at a communication cost  |
+| Input service rate is below accelerator demand           | Parallel or distributed input pipeline | Adds input throughput where profiling shows it is needed  |
 
 : **Scaling Decision Guidelines**: Choose the least distributed configuration that satisfies measured memory, throughput, and schedule requirements. Model architecture, training state, input pipeline, hardware, and topology all affect the boundary. {#tbl-scaling-decision}
 
@@ -6404,6 +6411,7 @@ class TrainingCarbonFootprint:
     cf_household_months_str = fmt_time(cf_household_months, 'month', precision=1, commas=False, style='word')
     cf_flops_eqn_str = fmt_math(f"{cf_flops_mantissa_str} \\times 10^{{{cf_flops_exp_str}}}")
     cf_sustained_tflop_per_s_str = fmt_flop_rate(cf_sustained_flops, unit=TFLOP / second, precision=0, commas=False)
+
 # Export for prose
 ```
 

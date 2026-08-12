@@ -456,7 +456,6 @@ This table provides one systems input to architecture selection. Task requiremen
 
 : **Lighthouse Workload Signatures**: Weight-only FP32 intensity proxies for three model scenarios. These values suggest different compute and bandwidth pressures but do not determine a fixed hardware affinity; realized bottlenecks depend on execution regime and hardware balance. {#tbl-workload-signatures tbl-colwidths="[20,20,20,40]"}
 
-
 The "Bottleneck" column in @tbl-lighthouse-comparison deserves particular attention: it identifies which system resource (compute throughput, memory bandwidth, memory capacity, latency, or power) limits performance for each workload class. In iron law terms (@sec-introduction-iron-law-ml-systems-c32a), the bottleneck identifies whether $O$ (operations) or $D_{\text{vol}}$ (data movement) dominates the runtime. These distinctions determine which optimization strategies prove effective, a theme we return to throughout subsequent chapters.
 
 ```{python}
@@ -556,7 +555,6 @@ class LighthouseSpecs:
     kws_params_k_str = fmt_params(m_kws.parameters, scale="K", precision=0, commas=False)
     kws_mflop_str = fmt_flops(kws_flops, unit=MFLOPs, precision=0)
     kws_fp32_kb_str = fmt_memory(kws_mem, unit=KB, precision=0, commas=True)
-
 ```
 
 | **Model**        | **Domain**  |                     **Params**                    |                    **FLOPs/Inf**                    |                     **Memory**                    | **Bottleneck** | **Role in Textbook**                   |
@@ -1739,7 +1737,8 @@ def conv_layer_spatial(input, kernel, bias):
 
 ```{.python}
 def conv_layer_compute(input, kernel, bias):
-    # Logical view of convolution (usually implemented via im2col + GEMM)
+    # Logical view of convolution (usually implemented via im2col +
+    # GEMM)
     # Loop 1: Process each image in batch
     for image in range(batch_size):
         # Loop 2&3: Move across image spatially
@@ -1945,7 +1944,7 @@ These memory, compute, and data-movement patterns converge in one model that ser
 | **Parameters**  | `{python} CNNLighthouseProfile.mobilenet_params_m_str` | `{python} CNNLighthouseProfile.mobilenet_fp32_mb_str` at FP32; `{python} CNNLighthouseProfile.mobilenet_size_ratio_mult_str` smaller than ResNet-50. |
 | **FLOPs/Image** | `{python} CNNLighthouseProfile.mobilenet_mflop_str`    | `{python} CNNLighthouseProfile.mobilenet_flops_ratio_mult_str` fewer than ResNet-50 for similar accuracy.                                            |
 | **Constraint**  | Latency Bound                                          | Single-image inference speed is the priority.                                                                                                        |
-| **Bottleneck**  | Overhead/Memory Access                                 | Operator dispatch and memory access can dominate actual compute.                                                                                      |
+| **Bottleneck**  | Overhead/Memory Access                                 | Operator dispatch and memory access can dominate actual compute.                                                                                     |
 | **Profile**     | Low Arithmetic Intensity                               | Memory access and control logic matter more than peak FLOP/s.                                                                                        |
 
 : **MobileNetV2 systems profile**: Quantitative properties of the efficiency lighthouse and their system consequences. Roughly an order of magnitude smaller than ResNet-50 in both parameters and FLOPs, MobileNetV2's operation shapes and arithmetic intensity make single-image latency sensitive to operator-dispatch overhead and memory access on mobile CPUs. {#tbl-nn-architectures-mobilenet-profile tbl-colwidths="[17,25,58]"}
@@ -2767,7 +2766,6 @@ def attention_layer_compute(Q, K, V):
 
 :::
 
-
 #### Memory requirements {#sec-network-architectures-memory-requirements-72c3}
 
 Attention mechanisms require storage for query-key-value projections and intermediate feature representations. A naive implementation also materializes an $S{\times}S$ attention-weight matrix for every sequence and head, creating a quadratic memory bottleneck alongside the $S{\times}d$ inputs and outputs. For long sequences, these transient scores can dominate accelerator memory even though the learned projection matrices remain fixed in size. Tiled exact-attention kernels such as FlashAttention stream score blocks through faster memory and avoid retaining the complete matrix in HBM, while still computing $S^2$ dense interactions. This distinction separates an unavoidable quadratic compute cost for dense attention from optional quadratic score storage. A quick calculation shows how fast the naive storage wall appears at scale.
@@ -3139,6 +3137,7 @@ def self_attention_layer(X, W_Q, W_K, W_V, d_k):
 
     return output
 
+
 def multi_head_attention(X, W_Q, W_K, W_V, W_O, num_heads, d_k):
     outputs = []
     for i in range(num_heads):
@@ -3226,13 +3225,13 @@ class GPT2BandwidthProfile:
 
 **Why it matters**: GPT-2 XL exemplifies **memory-bandwidth-bound**\index{Memory-bandwidth-bound workload} batch-one decoding. In the weight-only model used here, each decoding step reads `{python} GPT2BandwidthProfile.gpt2_fp32_gb_str` of FP32 weights and performs matrix-vector operations. The resulting arithmetic intensity is about `{python} GPT2BandwidthProfile.intensity_fp32_str` with FP32 weights or `{python} GPT2BandwidthProfile.intensity_fp16_str` with FP16 weights. Batching can amortize this weight traffic, while KV-cache and activation traffic add to it. @Tbl-nn-architectures-gpt2-profile summarizes the bandwidth lighthouse's quantitative properties:
 
-| **Property**   | **Value**                                                | **System Implication**                                                                                       |
-|:---------------|:---------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------|
-| **Parameters** | `{python} GPT2BandwidthProfile.gpt2_params_b_str`        | Weight loading dominates inference latency.                                                                  |
-| **Model Size** | `{python} GPT2BandwidthProfile.gpt2_fp32_gb_str` (FP32)  | Fits on one GPU but saturates HBM bandwidth.                                                                 |
-| **Compute**    | `{python} GPT2BandwidthProfile.gpt2_gflop_per_token_str` | Low per-token compute; bottleneck is data movement, not math.                                                |
-| **Constraint** | Memory Bandwidth                                         | Weight-bound batch-one tokens/s depends strongly on HBM bandwidth.                                           |
-| **Profile**    | Bandwidth-Bound (small-batch decoding)                   | Larger batches can amortize weight traffic and shift the bottleneck.                                         |
+| **Property**   | **Value**                                                | **System Implication**                                               |
+|:---------------|:---------------------------------------------------------|:---------------------------------------------------------------------|
+| **Parameters** | `{python} GPT2BandwidthProfile.gpt2_params_b_str`        | Weight loading dominates inference latency.                          |
+| **Model Size** | `{python} GPT2BandwidthProfile.gpt2_fp32_gb_str` (FP32)  | Fits on one GPU but saturates HBM bandwidth.                         |
+| **Compute**    | `{python} GPT2BandwidthProfile.gpt2_gflop_per_token_str` | Low per-token compute; bottleneck is data movement, not math.        |
+| **Constraint** | Memory Bandwidth                                         | Weight-bound batch-one tokens/s depends strongly on HBM bandwidth.   |
+| **Profile**    | Bandwidth-Bound (small-batch decoding)                   | Larger batches can amortize weight traffic and shift the bottleneck. |
 
 : **GPT-2 XL systems profile**: Weight-only estimates for batch-one autoregressive decoding. Under these assumptions, each step reads the model weights at roughly 0.5--1 FLOP/byte, so HBM bandwidth strongly constrains generation throughput. {#tbl-nn-architectures-gpt2-profile tbl-colwidths="[12,30,58]"}
 
@@ -4177,12 +4176,12 @@ Where:
 
 @Tbl-arch-complexity captures *where* data lives and how access patterns scale. The complementary @tbl-computational-complexity that follows captures *how much* computation each architecture demands, including forward-pass FLOPs, parallelization potential, and the resulting bottleneck. Together, the two tables answer the systems questions "how much work?" and "how does the memory system handle it?", providing a resource profile that informs design decisions such as choosing memory hierarchy configurations and developing memory optimization strategies.
 
-| **Architecture** | **Parameters**                                                                                                            | **Forward Pass**                                                                                          | **Memory**                                                                                                  | **Parallelization**                     | **Bottleneck**                                                         |
-|:-----------------|:--------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------|
-| **MLPs**         | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                                              | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                              | $\mathcal{O}(d_{\text{in}}d_{\text{out}})$ weights $\mathcal{O}(B d_{\text{out}})$ activations              | Excellent Matrix ops parallel           | Memory bandwidth                                                       |
-| **CNNs**         | $\mathcal{O}(k^2 \times c_{\text{in}} \times c_{\text{out}})$ per layer                                                   | $\mathcal{O}(H_{\text{img}} \times W_{\text{img}} \times k^2 \times c_{\text{in}} \times c_{\text{out}})$ | $\mathcal{O}(H_{\text{img}} \times W_{\text{img}} \times c)$ features $\mathcal{O}(k^2 \times c^2)$ weights | Good Spatial independence               | Often compute throughput; bandwidth for depthwise or small-batch cases |
+| **Architecture** | **Parameters**                                                                                                            | **Forward Pass**                                                                                          | **Memory**                                                                                                              | **Parallelization**                     | **Bottleneck**                                                         |
+|:-----------------|:--------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------|:----------------------------------------|:-----------------------------------------------------------------------|
+| **MLPs**         | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                                              | $\mathcal{O}(d_{\text{in}} \times d_{\text{out}})$ per layer                                              | $\mathcal{O}(d_{\text{in}}d_{\text{out}})$ weights $\mathcal{O}(B d_{\text{out}})$ activations                          | Excellent Matrix ops parallel           | Memory bandwidth                                                       |
+| **CNNs**         | $\mathcal{O}(k^2 \times c_{\text{in}} \times c_{\text{out}})$ per layer                                                   | $\mathcal{O}(H_{\text{img}} \times W_{\text{img}} \times k^2 \times c_{\text{in}} \times c_{\text{out}})$ | $\mathcal{O}(H_{\text{img}} \times W_{\text{img}} \times c)$ features $\mathcal{O}(k^2 \times c^2)$ weights             | Good Spatial independence               | Often compute throughput; bandwidth for depthwise or small-batch cases |
 | **RNNs**         | $\mathcal{O}(d_{\text{hidden}}^2+d_{\text{hidden}} \times d_{\text{in}})$ total                                           | $\mathcal{O}(S \times d_{\text{hidden}}^2)$ for $S$ time steps                                            | $\mathcal{O}(d_{\text{hidden}})$ recurrent state (inference); $\mathcal{O}(S d_{\text{hidden}})$ activations (training) | Poor Sequential deps                    | Sequential deps                                                        |
-| **Transformers** | $\mathcal{O}(d_{\text{model}}^2)$ QKV/O projections plus $\mathcal{O}(d_{\text{model}}d_{\text{ff}})$ feed-forward layers | $\mathcal{O}(S^2 \times d_{\text{model}} + S \times d_{\text{model}}^2)$ per layer                        | $\mathcal{O}(S^2)$ attention $\mathcal{O}(S \times d_{\text{model}})$ sequences                             | Excellent (positions) Limited by memory | Memory $(S^2)$                                                         |
+| **Transformers** | $\mathcal{O}(d_{\text{model}}^2)$ QKV/O projections plus $\mathcal{O}(d_{\text{model}}d_{\text{ff}})$ feed-forward layers | $\mathcal{O}(S^2 \times d_{\text{model}} + S \times d_{\text{model}}^2)$ per layer                        | $\mathcal{O}(S^2)$ attention $\mathcal{O}(S \times d_{\text{model}})$ sequences                                         | Excellent (positions) Limited by memory | Memory $(S^2)$                                                         |
 
 : **Computational Complexity Comparison**: Scaling behaviors and resource requirements for major neural network architectures. Variables: $d_{\text{in}}$ = input dimension, $d_{\text{out}}$ = output dimension, $d_{\text{model}}$ = transformer model dimension, $d_{\text{hidden}}$ = RNN hidden-state dimension, $k$ = kernel size, $c$ = channels, $H_{\text{img}}, W_{\text{img}}$ = spatial dimensions, $S$ = sequence length (time steps), $B$ = batch size. The bottleneck column identifies the primary performance-limiting factor in typical deployments. {#tbl-computational-complexity tbl-colwidths="[12,18,16,20,18,16]"}
 
@@ -4909,13 +4908,13 @@ Constraint analysis comes next. @Tbl-nn-architectures-wildlife-constraints catal
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Constraint**   | **Requirement**                | **Implication**                                         |
-|:-----------------|:-------------------------------|:--------------------------------------------------------|
-| **Connectivity** | None (offline)                 | All inference must run on-device                        |
-| **Power**        | ~2 W average (solar + battery) | Rules out GPUs; must use low-power MCU or edge NPU      |
-| **Latency**      | <500 ms per detection          | Allows batch size 1, no real-time streaming             |
+| **Constraint**   | **Requirement**                | **Implication**                                          |
+|:-----------------|:-------------------------------|:---------------------------------------------------------|
+| **Connectivity** | None (offline)                 | All inference must run on-device                         |
+| **Power**        | ~2 W average (solar + battery) | Rules out GPUs; must use low-power MCU or edge NPU       |
+| **Latency**      | <500 ms per detection          | Allows batch size 1, no real-time streaming              |
 | **Memory**       | 512 MB RAM, 2 GB storage       | Model, activations, and runtime buffers must fit locally |
-| **Accuracy**     | 90%+ on 50 species             | Requires sufficient model capacity                      |
+| **Accuracy**     | 90%+ on 50 species             | Requires sufficient model capacity                       |
 
 : **Wildlife monitoring constraints**: Five deployment constraints and their implications for the camera-trap scenario. No connectivity rules out cloud-only inference, while the power, latency, memory, and accuracy requirements must be validated on the target device. {#tbl-nn-architectures-wildlife-constraints tbl-colwidths="[16,33,51]"}
 
@@ -4948,10 +4947,10 @@ The fifth step is risk assessment. @Tbl-nn-architectures-wildlife-risks pairs th
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Risk**                             | **Mitigation**                                                                   |
-|:-------------------------------------|:---------------------------------------------------------------------------------|
-| **90% accuracy not achieved**        | Train on augmented dataset; consider EfficientNet-Lite if MobileNet insufficient |
-| **Thermal throttling in enclosure**  | Add passive heatsink; reduce inference frequency in high-temperature conditions  |
+| **Risk**                             | **Mitigation**                                                                    |
+|:-------------------------------------|:----------------------------------------------------------------------------------|
+| **90% accuracy not achieved**        | Train on augmented dataset; consider EfficientNet-Lite if MobileNet insufficient  |
+| **Thermal throttling in enclosure**  | Add passive heatsink; reduce inference frequency in high-temperature conditions   |
 | **New species added postdeployment** | Expand or retrain the output head and plan an over-the-air (OTA) update mechanism |
 
 : **Wildlife camera deployment risks**: Top accuracy, thermal, and species-coverage risks for the MobileNetV2 deployment, paired with the engineering mitigation chosen for each. {#tbl-nn-architectures-wildlife-risks}
