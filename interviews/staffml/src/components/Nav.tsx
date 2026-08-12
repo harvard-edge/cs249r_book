@@ -99,8 +99,11 @@ export default function Nav() {
             </span>
           </Link>
 
-          {/* Desktop primary nav */}
-          <div className="hidden md:flex items-center gap-0.5">
+          {/* Desktop primary nav. Uses the shared nav-lg (992px) breakpoint,
+              not Tailwind's default md (768px) — at 768px this row doesn't
+              fit (7 links + Tools dropdown) and forces horizontal overflow.
+              nav-lg matches EcosystemBar's collapse point above it. */}
+          <div className="hidden nav-lg:flex items-center gap-0.5">
             {primaryLinks.map(({ href, label, icon: Icon }) => (
               <Link
                 key={href}
@@ -170,7 +173,7 @@ export default function Nav() {
           {/* Mobile hamburger */}
           <button
             onClick={() => setMobileOpen(!mobileOpen)}
-            className="md:hidden p-2 text-textTertiary hover:text-textPrimary transition-colors"
+            className="nav-lg:hidden p-2 text-textTertiary hover:text-textPrimary transition-colors"
             aria-label="Toggle navigation menu"
             aria-haspopup="true"
             aria-expanded={mobileOpen}
@@ -183,7 +186,7 @@ export default function Nav() {
 
       {/* Mobile menu */}
       {mobileOpen && (
-        <div id="nav-mobile-menu" className="md:hidden border-t border-border bg-surface px-4 py-3 space-y-1">
+        <div id="nav-mobile-menu" className="nav-lg:hidden border-t border-border bg-surface px-4 py-3 space-y-1">
           {primaryLinks.map(({ href, label, icon: Icon }) => (
             <Link
               key={href}

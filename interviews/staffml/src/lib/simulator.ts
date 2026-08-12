@@ -127,8 +127,11 @@ export function simulate(config: SimConfig): SimResult {
     Math.max(checkpointTimeMins, 0.5), clusterMtbfHours * 60
   );
 
-  // Training time (assume 1T tokens)
-  const totalFlops = FORMULAS.training_flops(model.params_b, 1);
+  // Training time (assume 1T tokens). training_flops() takes tokens_b in
+  // billions, so 1T tokens is 1000, not 1 -- passing 1 silently computed
+  // the time for 1B tokens (1/1000th of the labeled target), which rounds
+  // to "0 days" for any realistic throughput.
+  const totalFlops = FORMULAS.training_flops(model.params_b, 1000);
   const trainingTimeDays = totalFlops / (actualFlops * 86400);
 
   return {
