@@ -345,7 +345,7 @@ However, the gap between adjacent voltage levels in PAM4 shrinks by a factor of 
 ![](images/svg/pam4-vs-nrz.svg)
 :::
 
-### Reach and medium: Copper vs. optics {#sec-network-fabrics-copper-optics}
+### Reach and medium for copper and optics {#sec-network-fabrics-copper-optics}
 
 The choice of physical medium determines how far a link can reach before latency, power, and cost reshape the cluster geometry. @Tbl-network-fabrics-link-media compares the recurring cable and optics options by the attributes that decide where each one belongs.
 
@@ -466,7 +466,7 @@ class SerDesPowerBudget:
 
 Every port depends on a **Serializer/Deserializer (SerDes)**\index{SerDes}\index{SerDes!definition}\index{Serializer/Deserializer} circuit that converts parallel data from the switch ASIC into a serial stream. As bandwidth scales, these circuits have become the dominant power consumer in the network fabric. Consider the energy implications for our cluster of `{python} NetworkWireClusterRecap.n_gpus_str`: maintaining full $\text{BW}_{\text{bisect}}$ for the `{python} SerDesPowerBudget.grad_gb_str` of gradient traffic requires roughly `{python} SerDesPowerBudget.n_links_str` high-speed links. If each `{python} IbNdrWireRecap.ib_ndr_gbit_per_s_str` port consumes `{python} SerDesPowerBudget.port_power_w_str` (combined SerDes and optical transceiver power), the interconnect alone draws `{python} SerDesPowerBudget.interconnect_kw_str` continuously—`{python} SerDesPowerBudget.power_frac_pct_str` of the cluster's power budget dedicated merely to moving bits, not computing on them.
 
-The **link budget**\index{Link Budget}, a strict decibel (dB) allowance for signal attenuation, governs the reach of these links. As signals traverse copper, they lose energy to skin effect and dielectric absorption. The link budget is the difference between the transmitter's output power and the receiver's sensitivity limit. For a standard 50G PAM4 lane, the budget might be 30 dB. If a 3-meter DAC cable introduces 18 dB of loss and the connectors add another 2 dB, 10 dB of margin remains. However, as frequency doubles to support 100G lanes (for 800 Gb/s ports), the loss per meter increases sharply. The physics forces a brutal trade-off: to maintain signal integrity without exceeding the power budget, cable reach must decrease. Copper links operating at 800 Gb/s are limited to roughly 1–2 meters, physically constraining the diameter of a compute rack and forcing the use of expensive, power-hungry optics for any connection leaving the cabinet. In 1.6 Tb/s-class planning scenarios, SerDes and optical power can account for a large fraction of cluster energy, making power-per-bit a primary scaling constraint. The wire sets hard limits on reach and speed; the transport layer must build a reliable communication primitive on top of these physical links.
+The **link budget**\index{Link Budget}, a strict decibel (dB) allowance for signal attenuation, governs the reach of these links. As signals traverse copper, they lose energy to skin effect and dielectric absorption. The link budget is the difference between the transmitter's output power and the receiver's sensitivity limit. For a standard 50G PAM4 lane, the budget might be 30 dB. If a 3-meter DAC cable introduces 18 dB of loss and the connectors add another 2 dB, 10 dB of margin remains. However, as frequency doubles to support 100G lanes (for 800 Gb/s ports), the loss per meter increases sharply. The physics forces a demanding trade-off: to maintain signal integrity without exceeding the power budget, cable reach must decrease. Copper links operating at 800 Gb/s are limited to roughly 1–2 meters, physically constraining the diameter of a compute rack and forcing the use of expensive, power-hungry optics for any connection leaving the cabinet. In 1.6 Tb/s-class planning scenarios, SerDes and optical power can account for a large fraction of cluster energy, making power-per-bit a primary scaling constraint. The wire sets hard limits on reach and speed; the transport layer must build a reliable communication primitive on top of these physical links.
 
 ## Level 2: Transport and the Performance Model {#sec-network-fabrics-transport}
 
@@ -502,7 +502,7 @@ class IbNdrTransportRecap:
     ib_ndr_gbit_per_s_str = fmt_bandwidth(Systems.Fabrics.InfiniBand_NDR.bandwidth, unit=Gbps, precision=0, commas=False)
 ```
 
-Standard TCP/IP is architecturally unfit for the `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str` era. The protocol stack was designed when network speeds were orders of magnitude slower than CPU memory bandwidth, but at these line rates that relationship has inverted. Processing a `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str` stream through the Linux kernel imposes a crushing interrupt tax: copying payload data between user space and kernel buffers can consume the entire memory bandwidth of a dual-socket server, requiring tens of CPU cores merely to keep the pipe full. The result is a CPU wall where the host processor becomes the bottleneck for network traffic, starving the application logic it is meant to serve.
+Standard TCP/IP is architecturally unfit for the `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str` era. The protocol stack was designed when network speeds were orders of magnitude slower than CPU memory bandwidth, but at these line rates that relationship has inverted. Processing a `{python} IbNdrTransportRecap.ib_ndr_gbit_per_s_str` stream through the Linux kernel imposes a prohibitive interrupt tax: copying payload data between user space and kernel buffers can consume the entire memory bandwidth of a dual-socket server, requiring tens of CPU cores merely to keep the pipe full. The result is a CPU wall where the host processor becomes the bottleneck for network traffic, starving the application logic it is meant to serve.
 
 RDMA bypasses this entire layer. Offloading the transport logic to the NIC hardware allows applications to read and write directly to remote memory. For ML, GPUDirect RDMA\index{GPUDirect RDMA}[^fn-gpudirect-rdma] extends this zero-copy principle to the accelerators themselves [@nvidia2026gpudirectRdma]. Without GPUDirect, a gradient update follows a tortuous path: GPU memory $\rightarrow$ CPU system RAM $\rightarrow$ kernel buffer $\rightarrow$ NIC. GPUDirect short-circuits this to a single PCIe transaction: GPU $\rightarrow$ NIC, as @fig-gpudirect-data-path contrasts. For our 175B model's 350 GB gradient exchange, the optimization eliminates 700 GB of redundant memory copies across the cluster per step, reducing latency and freeing the CPU to orchestrate complex pipelining logic rather than acting as a data mover.
 
@@ -535,7 +535,7 @@ This stack choice is visible at the protocol boundary. @Fig-ib-roce-stack compar
 
 :::
 
-### Losslessness and the go-back-n problem {#sec-network-fabrics-losslessness}
+### Losslessness and the go-back-N problem {#sec-network-fabrics-losslessness}
 
 The critical takeaway from @fig-ib-roce-stack is that the Verbs API provides a uniform programming model, but the reliability guarantees beneath it differ fundamentally: InfiniBand enforces losslessness in hardware, while RoCE must construct it from Ethernet's best-effort foundations using PFC and ECN. ML collectives assume in-order, lossless delivery, but the hardware implementation of this reliability introduces a critical fragility. TCP handles packet loss gracefully via Selective Acknowledgement, retransmitting only the specific missing segment. RDMA protocols like RoCEv2, by contrast, typically rely on simpler recovery paths such as **Go-Back-N**\index{Go-Back-N} retransmission when rare packet drops occur [@gangidi2024rdma]. The NIC's physical constraints drive this choice: implementing complex reassembly logic for out-of-order packets requires substantial on-chip SRAM, which consumes precious die area needed for SerDes blocks and packet processing engines. The NIC hardware is optimized for throughput, not state management.
 
@@ -1365,7 +1365,7 @@ The trade-offs between these topologies become stark when quantified for a large
 
 Bisection analysis alone assumes a single workload type. In practice, clusters serve multiple workloads with different communication patterns, and topology selection must balance their competing demands.
 
-::: {#chk-network-fabrics-topology-selection-your-workload .callout-checkpoint title="Topology selection for your workload"}
+::: {#chk-network-fabrics-topology-selection-your-workload .callout-checkpoint title="Topology Selection for Your Workload"}
 
 The choice of network topology dictates the upper bound of training efficiency. Warm up by matching each single-workload pattern to its ideal topology, then design a fabric that must serve several at once.
 
