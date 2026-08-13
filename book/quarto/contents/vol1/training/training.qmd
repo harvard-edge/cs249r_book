@@ -2322,9 +2322,10 @@ $$R_{\text{memory}} =\min(\text{BW}_{\text{storage}}, \text{BW}_{\text{system}},
 # ├─────────────────────────────────────────────────────────────────────────────
 # │ Context: Data Flows memory-tier hierarchy.
 # │
-# │ Goal: Keep the accelerator HBM bandwidth figure local to the hierarchy prose.
-# │ Show: V100 HBM bandwidth in GB/s.
-# │ How: Read the V100 hardware twin and format memory bandwidth.
+# │ Goal: Keep every bandwidth figure in the hierarchy prose local and pinned
+# │       to the registry tiers rather than hand-typed.
+# │ Show: Local NVMe storage, system memory, and V100 HBM bandwidth in GB/s.
+# │ How: Read the storage tech tiers and the V100 hardware twin.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware
@@ -2333,18 +2334,28 @@ from mlsysim.fmt import check, fmt_bandwidth
 class MemoryHierarchyBandwidth:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     v100 = Hardware.Cloud.V100
+    nvme = Hardware.Tech.Storage.NvmeGen4
+    system_memory = Hardware.Tech.Storage.SystemMemory
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     v100_bw = v100.memory.bandwidth
+    nvme_bw = nvme.bandwidth
+    system_memory_bw = system_memory.bandwidth
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(v100_bw.to(GB / second).magnitude > 0, "V100 memory bandwidth must be positive")
+    check(
+        nvme_bw.to(GB / second).magnitude < system_memory_bw.to(GB / second).magnitude < v100_bw.to(GB / second).magnitude,
+        "Bandwidth must increase from storage to system memory to accelerator HBM",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
     v100_bw_gb_per_s_str = fmt_bandwidth(v100_bw, unit=GB / second, precision=0, commas=False)
+    nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_bw, unit=GB / second, precision=0, commas=False)
+    system_memory_bw_gb_per_s_str = fmt_bandwidth(system_memory_bw, unit=GB / second, precision=0, commas=False)
 ```
 
-Storage devices provide 1--2 GB/s, system memory delivers 50--100 GB/s, and accelerator HBM achieves `{python} MemoryHierarchyBandwidth.v100_bw_gb_per_s_str` or higher. Each tier is orders of magnitude faster than the one below it, which means data that flows freely within accelerator memory creates a severe bottleneck when it must be fetched from disk. This cascading bandwidth hierarchy explains why the iteration time of a well-pipelined system is governed by the *maximum* of its component latencies rather than their *sum*, as @eq-iteration-time shows:
+Local NVMe storage provides `{python} MemoryHierarchyBandwidth.nvme_bw_gb_per_s_str`, system memory delivers `{python} MemoryHierarchyBandwidth.system_memory_bw_gb_per_s_str`, and accelerator HBM achieves `{python} MemoryHierarchyBandwidth.v100_bw_gb_per_s_str` or higher. Each tier is roughly an order of magnitude faster than the one below it, which means data that flows freely within accelerator memory creates a severe bottleneck when it must be fetched from disk. This cascading bandwidth hierarchy explains why the iteration time of a well-pipelined system is governed by the *maximum* of its component latencies rather than their *sum*, as @eq-iteration-time shows:
 $$T_{\text{iteration}} =\max(T_{\text{fetch}}, T_{\text{process}}, T_{\text{transfer}})$$ {#eq-iteration-time}
 
 When pipeline stages overlap correctly (fetching the next batch from storage while preprocessing the current one and transferring the previous one to the accelerator), the iteration time equals the duration of the slowest stage rather than the sum of all stages. This overlap is exactly what prefetching achieves, turning a serial bottleneck into a parallel pipeline where each tier operates concurrently on different batches.

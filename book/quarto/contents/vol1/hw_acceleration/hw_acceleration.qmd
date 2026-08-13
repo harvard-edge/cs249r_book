@@ -76,7 +76,7 @@ from mlsysim.fmt import (
 )
 
 class HwAccelSetup:
-    """A100 peak FP16/BF16 throughput vs. server CPU for the opening callout."""
+    """A100 peak FP16/BF16 throughput vs. the registry reference CPU for the opening callout."""
 
     # LOAD
     a100_tflops_fp16 = Hardware.Cloud.A100.compute.peak_flops.to(TFLOPs / second).magnitude
@@ -110,7 +110,7 @@ Reducing parameters, precision, or operations only matters when the machine can 
 
 ***Hardware Acceleration***\index{Hardware Acceleration!definition} is the practice of replacing general-purpose processor logic with domain-specific silicon optimized for the regular tensor operations of ML workloads, trading programmability for the compute density $(R_{\text{peak}})$ and performance-per-watt gains that data-parallel matrix multiplication can exploit.
 
-1.  **Significance**: An A100 GPU delivers `{python} HwAccelSetup.a100_fp16_tflop_per_s_str` for FP16/BF16 matrix multiplication; against this chapter's illustrative 1–2 TFLOP/s server-CPU baseline, this is a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap. Its 54.2 billion transistors devote far more silicon to parallel arithmetic than to branch prediction, out-of-order scheduling, and large caches [@NVIDIA2020; @choquette2021].
+1.  **Significance**: An A100 GPU delivers `{python} HwAccelSetup.a100_fp16_tflop_per_s_str` for FP16/BF16 matrix multiplication; against this chapter's illustrative 1–2 TFLOP/s reference-CPU baseline, this is a `{python} HwAccelSetup.cpu_gap_range_mult_str` gap. Its 54.2 billion transistors devote far more silicon to parallel arithmetic than to branch prediction, out-of-order scheduling, and large caches [@NVIDIA2020; @choquette2021].
 2.  **Distinction**: Unlike a general-purpose CPU, which is optimized to minimize latency for any single instruction in an arbitrary serial program, an accelerator is optimized to maximize throughput for a specific operation class—meaning it achieves its gains only when the workload presents enough parallel work to keep all arithmetic units busy simultaneously.
 3.  **Common pitfall**: A frequent misconception is that an accelerator's advertised peak throughput is the throughput a workload receives. Delivered performance is the lower of the compute ceiling and what memory bandwidth can feed, the roofline constraint: a low-arithmetic-intensity kernel can sit at a small fraction of peak FLOP/s no matter how fast the silicon is rated, because it starves for data rather than for arithmetic.
 
@@ -797,29 +797,36 @@ Machine learning constitutes a computational domain with unique characteristics 
 ```{python}
 #| echo: false
 #| label: ml-accelerator-callout-calc
-from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate
+from mlsysim.fmt import fmt, check, fmt_bandwidth, fmt_flop_rate, fmt_multiple
 
 class MlAcceleratorCallout:
-    """A100 throughput and bandwidth vs. server CPU for the ML accelerator callout."""
+    """A100 throughput and bandwidth against the host DRAM path for the ML accelerator callout."""
 
     # LOAD
     a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
     a100_bandwidth = Hardware.Cloud.A100.memory.bandwidth
+    host_dram_bandwidth = Hardware.Tech.Storage.HostDram.bandwidth
+
+    # EXECUTE
+    hbm_vs_host_dram = (a100_bandwidth / host_dram_bandwidth).to("").magnitude
 
     # GUARD
     check(a100_peak_flops > 0, "A100 peak FLOP/s must be positive")
     check(a100_bandwidth > 0, "A100 memory bandwidth must be positive")
+    check(hbm_vs_host_dram > 1, "Accelerator HBM must outrun the host DRAM path")
 
     # OUTPUT
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(a100_bandwidth, unit=TB / second, precision=2, commas=False)
+    host_dram_bw_gb_per_s_str = fmt_bandwidth(host_dram_bandwidth, unit=GB / second, precision=0, commas=False)
+    hbm_vs_host_dram_mult_str = fmt_multiple(hbm_vs_host_dram, precision=1, commas=False)
 ```
 
 ::: {#dfn-hw-acceleration-ml-accelerator .callout-definition title="ML accelerator"}
 
 ***Machine Learning Accelerators***\index{ML Accelerator!definition}\index{Accelerator!ML} are domain-specific processors whose silicon is designed primarily for the dense matrix operations and regular data flow of neural networks, achieving high $R_{\text{peak}}$ and memory bandwidth utilization for these workloads by devoting die area to arithmetic units rather than to general-purpose control logic.
 
-1.  **Significance**: An ML accelerator's defining feature is not raw arithmetic but a balanced feed of data to that arithmetic. The A100's `{python} MlAcceleratorCallout.a100_bw_tb_per_s_str` of memory bandwidth, roughly a 10$\times$ gap over a server CPU's 200 GB/s, is what lets its `{python} MlAcceleratorCallout.a100_fp16_tflop_per_s_str` of FP16/BF16 throughput stay fed rather than starved [@NVIDIA2020; @choquette2021]. That balance is then specialized by workload: training accelerators size FLOP/s and bandwidth for bidirectional gradient flow and large activation footprints, while inference accelerators trade those for energy efficiency and deterministic single-request latency.
+1.  **Significance**: An ML accelerator's defining feature is not raw arithmetic but a balanced feed of data to that arithmetic. The A100's `{python} MlAcceleratorCallout.a100_bw_tb_per_s_str` of memory bandwidth, about `{python} MlAcceleratorCallout.hbm_vs_host_dram_mult_str` the `{python} MlAcceleratorCallout.host_dram_bw_gb_per_s_str` a host DRAM path delivers, is what lets its `{python} MlAcceleratorCallout.a100_fp16_tflop_per_s_str` of FP16/BF16 throughput stay fed rather than starved [@NVIDIA2020; @choquette2021]. That balance is then specialized by workload: training accelerators size FLOP/s and bandwidth for bidirectional gradient flow and large activation footprints, while inference accelerators trade those for energy efficiency and deterministic single-request latency.
 2.  **Distinction**: The accelerator's gains are conditional on the data flowing through it being parallel and regular. An ML accelerator processes thousands of independent arithmetic operations at once with predictable memory access, so it is orders of magnitude faster than a CPU on dense matrix multiplication but can be slower on irregular control flow such as tree traversal or dynamic programming, where there is no parallel data stream to feed.
 3.  **Common pitfall**: A frequent misconception is that ML accelerators always accelerate ML. An accelerator only delivers its peak throughput when the workload provides enough parallel work to saturate all arithmetic units simultaneously: a batch-1 autoregressive inference request may use only a small fraction of a large training accelerator's compute capacity because sequential token generation cannot fill thousands of parallel compute lanes.
 
@@ -3044,7 +3051,20 @@ proc_names = [
     "NVIDIA B200",
 ]
 proc_years = [2014, 2017, 2017, 2020, 2021, 2022, 2024, 2024, 2025, 2025]
-proc_bw = [480, 600, 900, 2000, 1200, 3000, 5300, 1640, 6000, 8000]
+# A100 and H100 bandwidths come from the hardware registry so this figure cannot
+# drift from the ridge-point figure and prose that read the same twins.
+proc_bw = [
+    480,
+    600,
+    900,
+    Hardware.Cloud.A100.memory.bandwidth.to(GB / second).magnitude,
+    1200,
+    Hardware.Cloud.H100.memory.bandwidth.to(GB / second).magnitude,
+    5300,
+    1640,
+    6000,
+    8000,
+]
 proc_index = np.asarray(proc_bw) / proc_bw[0]
 proc_log_index = np.log10(proc_index)
 
@@ -3629,6 +3649,10 @@ class RooflineGap:
     h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_bandwidth(h100_bandwidth, unit=TB / second, precision=2, commas=False)
 
+    v100_year_str = fmt(h_v100.release_year, precision=0, commas=False)
+    a100_year_str = fmt(h_a100.release_year, precision=0, commas=False)
+    h100_year_str = fmt(h_h100.release_year, precision=0, commas=False)
+
     v100_ridge_str = fmt_arithmetic_intensity(h_v100.ridge_point(), unit=flop / byte, commas=False)
     a100_ridge_str = fmt_arithmetic_intensity(h_a100.ridge_point(), unit=flop / byte, commas=False)
     h100_ridge_str = fmt_arithmetic_intensity(h_h100.ridge_point(), unit=flop / byte, commas=False)
@@ -3693,9 +3717,9 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 
 **Evolution**:
 
-*   **V100 (2017)**: `{python} RooflineGap.v100_tflop_per_s_str` / `{python} RooflineGap.v100_bw_tb_per_s_str` ≈ `{python} RooflineGap.v100_ridge_str`.
-*   **A100 (2020)**: `{python} RooflineGap.a100_fp16_tflop_per_s_str` / `{python} RooflineGap.a100_bw_tb_per_s_str` ≈ `{python} RooflineGap.a100_ridge_str`.
-*   **H100 (2023)**: `{python} RooflineGap.h100_fp16_tflop_per_s_str` / `{python} RooflineGap.h100_bw_tb_per_s_str` ≈ `{python} RooflineGap.h100_ridge_str`.
+*   **V100 (`{python} RooflineGap.v100_year_str`)**: `{python} RooflineGap.v100_tflop_per_s_str` / `{python} RooflineGap.v100_bw_tb_per_s_str` ≈ `{python} RooflineGap.v100_ridge_str`.
+*   **A100 (`{python} RooflineGap.a100_year_str`)**: `{python} RooflineGap.a100_fp16_tflop_per_s_str` / `{python} RooflineGap.a100_bw_tb_per_s_str` ≈ `{python} RooflineGap.a100_ridge_str`.
+*   **H100 (`{python} RooflineGap.h100_year_str`)**: `{python} RooflineGap.h100_fp16_tflop_per_s_str` / `{python} RooflineGap.h100_bw_tb_per_s_str` ≈ `{python} RooflineGap.h100_ridge_str`.
 
 **Systems insight**: The "bar" for compute intensity has doubled. An algorithm with $I$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte was compute-bound (good) on A100 but is bandwidth-bound (bad) on H100. This explains why "legacy" code often sees only `{python} RooflineGap.bandwidth_ratio_mult_str` speedup on H100 (bandwidth ratio) instead of the advertised `{python} RooflineGap.flops_ratio_mult_str` (FLOPs ratio).
 
