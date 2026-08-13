@@ -160,3 +160,56 @@ class GoodFormatting:
     assert not [
         issue for issue in issues if issue.code == "noncanonical_str_assign"
     ]
+
+
+def test_star_import_does_not_excuse_unexported_helper(tmp_path):
+    """`from mlsysim import *` must not be treated as providing a helper the
+    package does not actually export.
+
+    Regression guard for the model_compression bug (2026-08-13): the star-import
+    allowlist was hand-maintained and claimed 16 names mlsysim never exported,
+    so a cell calling fmt_memory_capacity() with only a star import passed every
+    static gate and then raised NameError at render.
+    """
+    chapter = tmp_path / "chapter.qmd"
+    chapter.write_text(
+        """
+```{python}
+from mlsysim import *
+from mlsysim.core.units import *
+from mlsysim import Platforms
+
+class Scale:
+    ram_str = fmt_memory_capacity(Platforms.Tiny.ram, unit=KiB, precision=0)
+```
+""",
+        encoding="utf-8",
+    )
+
+    issues = audit([chapter])
+
+    missing = [i for i in issues if i.code == "missing_fmt_import"]
+    assert len(missing) == 1
+    assert "fmt_memory_capacity" in missing[0].message
+
+
+def test_star_import_still_excuses_genuinely_exported_helper(tmp_path):
+    """The tightened set must not create false positives: a helper mlsysim
+    really does export stays excused by the star import."""
+    chapter = tmp_path / "chapter.qmd"
+    chapter.write_text(
+        """
+```{python}
+from mlsysim import *
+
+class Scale:
+    count_str = fmt_count(1024, label="GPU")
+    memory_str = fmt_memory(80, unit=None)
+```
+""",
+        encoding="utf-8",
+    )
+
+    issues = audit([chapter])
+
+    assert [i for i in issues if i.code == "missing_fmt_import"] == []
