@@ -3286,7 +3286,8 @@ from mlsysim.core.units import GB, USD, count, hour, ureg
 from mlsysim.fmt import fmt_percent, fmt_usd, check, fmt_count, fmt_qty, fmt_time
 
 class CostBreakdown:
-    """ImageNet-scale training cost breakdown: data costs (~99%) dominate compute (~1%)."""
+    """ImageNet-scale cost breakdown: data (~83%) still leads compute (~17%) once the
+    whole training campaign, not a single run, is priced."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
     raw_data_cost = 50000 * USD  # scenario assumption: licensed dataset
@@ -3298,12 +3299,18 @@ class CostBreakdown:
     storage_duration = 12 * ureg.month  # scenario assumption: retention time
     train_epoch_count = 100
     train_gpu_count = 8  # scenario assumption: 8-GPU training job
-    train_duration = 24 * hour  # scenario assumption: training runtime
+    train_duration = 24 * hour  # scenario assumption: runtime of ONE run
+    # The dataset is paid for once; the accelerators are not. A published model
+    # is the survivor of a campaign of hyperparameter sweeps, restarts, and
+    # ablations, so pricing a single run understates compute by that factor.
+    # 30 is a deliberately conservative campaign size for this scenario.
+    train_run_count = 30  # scenario assumption: runs in the training campaign
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     label_cost = label_count * cost_per_label
     storage_cost = (storage_size * storage_rate * storage_duration).to(USD)
-    train_gpu_hours = train_gpu_count * train_duration
+    train_gpu_hours_per_run = train_gpu_count * train_duration
+    train_gpu_hours = train_gpu_hours_per_run * train_run_count
     train_compute_cost = (train_gpu_hours * gpu_rate).to(USD)
     total_cost = raw_data_cost + label_cost + storage_cost + train_compute_cost
 
@@ -3320,8 +3327,8 @@ class CostBreakdown:
         f"Storage should be 150 GB x $0.02/GB/month x 12 months = $36, got {storage_cost.to(USD).magnitude:.2f}.",
     )
     check(
-        abs(train_compute_cost.to(USD).magnitude - 768.0) < 1e-9,
-        f"Training should be 192 GPU-hours x $4.00/h = $768, got {train_compute_cost.to(USD).magnitude:.2f}.",
+        abs(train_compute_cost.to(USD).magnitude - 23_040.0) < 1e-9,
+        f"Training should be 30 runs x 192 GPU-hours x $4.00/h = $23,040, " f"got {train_compute_cost.to(USD).magnitude:.2f}.",
     )
     check(
         abs(label_cost.to(USD).magnitude - 60_000.0) < 1e-9,
@@ -3333,6 +3340,7 @@ class CostBreakdown:
     c_label_usd_str = fmt_usd(label_cost, precision=0)
     c_store_usd_str = fmt_usd(storage_cost, precision=0, commas=False)
     c_train_usd_str = fmt_usd(train_compute_cost, precision=0)
+    train_run_count_str = fmt_count(train_run_count, label="run")
     c_total_usd_str = fmt_usd(total_cost, precision=0)
     p_data_str = fmt_percent(p_data, precision=1, commas=False, style='symbol')
     p_compute_str = fmt_percent(p_compute, precision=1, commas=False, style='symbol')
@@ -3361,14 +3369,14 @@ class CostBreakdown:
 \renewcommand{\arraystretch}{1.25}
 ```
 
-| **Cost Component**                                                                                                                                           | **Calculation**                                                                                                                                        |                                        **Amount**                                        |
-|:-------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------:|
-| **Raw data (`{python} CostBreakdown.n_labels_str` images)**                                                                                                  | Licensed dataset, flat fee                                                                                                                             |                          `{python} CostBreakdown.c_raw_usd_str`                          |
-| **Labels (crowd annotation)**                                                                                                                                | `{python} CostBreakdown.n_labels_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                          |                         `{python} CostBreakdown.c_label_usd_str`                         |
-| **Storage (cloud object store)**                                                                                                                             | `{python} CostBreakdown.storage_size_str` $\times$ `{python} CostBreakdown.cb_storage_rate_str` $\times$ `{python} CostBreakdown.storage_duration_str` |                         `{python} CostBreakdown.c_store_usd_str`                         |
-| **Training (`{python} CostBreakdown.train_epoch_count_str` in `{python} CostBreakdown.train_duration_str` on `{python} CostBreakdown.train_gpu_count_str`)** | `{python} CostBreakdown.train_gpu_hours_str` $\times$ `{python} CostBreakdown.cb_gpu_rate_str`                                                         |                         `{python} CostBreakdown.c_train_usd_str`                         |
-| **Total**                                                                                                                                                    |                                                                                                                                                        |                       **`{python} CostBreakdown.c_total_usd_str`**                       |
-| **Data vs. Compute ratio**                                                                                                                                   |                                                                                                                                                        | `{python} CostBreakdown.p_data_str` data, `{python} CostBreakdown.p_compute_str` compute |
+| **Cost Component**                                                                                                                                                                                                       | **Calculation**                                                                                                                                        |                                        **Amount**                                        |
+|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------:|
+| **Raw data (`{python} CostBreakdown.n_labels_str` images)**                                                                                                                                                              | Licensed dataset, flat fee                                                                                                                             |                          `{python} CostBreakdown.c_raw_usd_str`                          |
+| **Labels (crowd annotation)**                                                                                                                                                                                            | `{python} CostBreakdown.n_labels_str` $\times$ `{python} CostBreakdown.cb_cost_per_label_str`                                                          |                         `{python} CostBreakdown.c_label_usd_str`                         |
+| **Storage (cloud object store)**                                                                                                                                                                                         | `{python} CostBreakdown.storage_size_str` $\times$ `{python} CostBreakdown.cb_storage_rate_str` $\times$ `{python} CostBreakdown.storage_duration_str` |                         `{python} CostBreakdown.c_store_usd_str`                         |
+| **Training campaign (`{python} CostBreakdown.train_run_count_str`, each `{python} CostBreakdown.train_epoch_count_str` in `{python} CostBreakdown.train_duration_str` on `{python} CostBreakdown.train_gpu_count_str`)** | `{python} CostBreakdown.train_gpu_hours_str` $\times$ `{python} CostBreakdown.cb_gpu_rate_str`                                                         |                         `{python} CostBreakdown.c_train_usd_str`                         |
+| **Total**                                                                                                                                                                                                                |                                                                                                                                                        |                       **`{python} CostBreakdown.c_total_usd_str`**                       |
+| **Data vs. Compute ratio**                                                                                                                                                                                               |                                                                                                                                                        | `{python} CostBreakdown.p_data_str` data, `{python} CostBreakdown.p_compute_str` compute |
 
 : **Illustrative ImageNet-Scale Cost Breakdown**: Itemized acquisition, labeling, storage, and compute costs under the stated scenario assumptions. Each amount follows from the rate shown beside it, using the book's published crowd-labeling, object-storage, and cloud-GPU rates. Data costs dominate this particular calculation because licensing and annotation are included while the training run itself is short. {#tbl-data-selection-imagenet-cost-breakdown tbl-colwidths="[34,36,30]"}
 
@@ -3376,7 +3384,7 @@ class CostBreakdown:
 \endgroup
 ```
 
-**Systems insight**: Acquisition and labeling can dwarf compute cost in supervised vision workloads, as they do under these assumptions, where a single day on eight accelerators accounts for well under 1 percent of the total. A longer or larger training campaign shifts that balance, so a complete ROI calculation must price both categories rather than assuming which one dominates.
+**Systems insight**: Acquisition and labeling can dwarf compute cost in supervised vision workloads, as they do under these assumptions. The compute figure prices the whole training campaign, not one run: a published model is the survivor of sweeps, restarts, and ablations, and costing a single run would understate compute roughly thirtyfold. Even so, acquisition and labeling remain the larger share. The run count is an assumption like any other, so a complete ROI calculation must state it and price both categories rather than assuming which one dominates.
 
 :::
 
