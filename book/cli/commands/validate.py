@@ -379,6 +379,8 @@ class ValidateCommand:
                   note='"chapter 12" lowercase in prose (§10.3.2)'),
             Scope("xref-case", "_run_xref_sentence_start_case",
                   note="@-prefix casing must match sentence position: @Fig- at a sentence start, @fig- mid-sentence (both directions; sec/fig/tbl/eq/lst/alg)"),
+            Scope("callout-ref-form", "_run_callout_ref_form",
+                  note="custom numbered callouts (dfn/exmp/nbk/pri/... from custom-numbered-blocks.yml) are referenced with \\ref{id}, never @id"),
         ],
         "labels": [
             # duplicates and orphans are both curated, but each carries its
@@ -7326,6 +7328,117 @@ class ValidateCommand:
         return ValidationRunResult(
             name="xref-sentence-start-case",
             description="Flag crossref prefix casing that fights sentence position (MIT Press convention)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # Prefixes for the book's custom numbered callouts are declared once, in
+    # config/shared/base/custom-numbered-blocks.yml (`classes: <name>: prefix:`).
+    # Read them from that file rather than hardcoding a list here, so adding a
+    # new numbered callout type extends this check automatically.
+    CUSTOM_BLOCKS_CONFIG = (
+        Path(__file__).resolve().parent.parent.parent
+        / "quarto" / "config" / "shared" / "base" / "custom-numbered-blocks.yml"
+    )
+
+    def _custom_callout_prefixes(self) -> List[str]:
+        """Prefixes declared in custom-numbered-blocks.yml, longest-first."""
+        try:
+            text = self.CUSTOM_BLOCKS_CONFIG.read_text(encoding="utf-8")
+        except OSError:
+            return []
+        # Deliberately a line scan, not a YAML parse: the file is a Quarto
+        # filter-metadata block and this check must not gain a yaml dependency
+        # or fail closed if the surrounding schema shifts.
+        found = re.findall(r"^\s*prefix:\s*([A-Za-z][A-Za-z0-9]*)", text, re.MULTILINE)
+        return sorted(set(found), key=len, reverse=True)
+
+    def _run_callout_ref_form(self, root: Path) -> ValidationRunResult:
+        """Custom numbered callouts must be referenced with \\ref{id}, not @id.
+
+        The custom-numbered-blocks filter resolves BOTH forms, but they render
+        differently (custom-numbered-blocks.lua):
+
+          * ``\\ref{pri-iron-law}``  -> RawInline/Math branch -> ``refnum`` only,
+            e.g. "3". Prose supplies the label word: "principle \\ref{pri-...}"
+            renders "principle 3".
+          * ``@pri-iron-law``        -> Cite branch -> ``reflabel .. " " .. refnum``,
+            e.g. "Principle 3" -- the label is baked in.
+
+        So the @-form silently duplicates the label whenever prose already names
+        the artifact: "(principle @pri-iron-law)" renders "(principle Principle
+        3)". The book's convention is the \\ref{} form (78 uses in prose at the
+        time this check landed, versus zero prose @-form uses).
+
+        Code cells are exempt. LEGO cell header comments legitimately cite these
+        IDs in their ``Context:`` lines (28 such references book-wide); those are
+        documentation, never rendered, and must not be rewritten. This mirrors
+        the skip-code-and-comments rule in .claude/rules/automation-safety.md.
+
+        Added 2026-08-13 after a prose pass converted three ``\\ref{pri-...}``
+        references to ``@pri-...``, which would have shipped "principle Principle
+        N" in vol1 responsible_engr.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        prefixes = self._custom_callout_prefixes()
+
+        if not prefixes:
+            return ValidationRunResult(
+                name="callout-ref-form",
+                description="Custom numbered callouts must use \\ref{id}, not @id",
+                files_checked=0,
+                issues=[ValidationIssue(
+                    file=str(self.CUSTOM_BLOCKS_CONFIG),
+                    line=0,
+                    code="callout_prefixes_unreadable",
+                    message=(
+                        "Could not read callout prefixes from "
+                        "custom-numbered-blocks.yml; check is inert"
+                    ),
+                    severity="warning",
+                )],
+                elapsed_ms=int((time.time() - start) * 1000),
+            )
+
+        ref_re = re.compile(r"@(" + "|".join(prefixes) + r")-([\w-]+)")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            in_code = False
+            for idx, line in enumerate(lines, 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                # Skip executable cells and chunk options. LEGO cell header
+                # comments ("# | Context  @nbk-...") cite these IDs as
+                # documentation, but they live inside ```{python} fences, so
+                # in_code already covers them -- do NOT also skip lines starting
+                # with "#", which would blind the check to markdown headings.
+                if in_code or stripped.startswith("#|"):
+                    continue
+                for m in ref_re.finditer(line):
+                    prefix, slug = m.group(1), m.group(2)
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="callout_at_ref",
+                        message=(
+                            f"@{prefix}-{slug} references a custom numbered "
+                            f"callout; use \\ref{{{prefix}-{slug}}} instead "
+                            f"(the @-form renders the label too, duplicating it "
+                            f"when prose already names the artifact)"
+                        ),
+                        severity="error",
+                        context=line.strip()[:100],
+                    ))
+
+        return ValidationRunResult(
+            name="callout-ref-form",
+            description="Custom numbered callouts must use \\ref{id}, not @id",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
