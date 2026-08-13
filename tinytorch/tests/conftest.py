@@ -107,10 +107,10 @@ def _check_module_exported(num, title, export_file, import_path, key_symbol):
                     f"{import_path}.{key_symbol} is None "
                     f"(exported but symbol is missing or failed silently)"
                 )
-        except ImportError as exc:
+        except Exception as exc:
             errors.append(
                 f"Module {num:02d} ({title}): "
-                f"cannot import {import_path} — {exc}"
+                f"error importing {import_path} — {type(exc).__name__}: {exc}"
             )
 
     return errors

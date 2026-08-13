@@ -34,8 +34,6 @@ What we test:
 """
 
 import sys
-import importlib
-import tempfile
 import types
 from pathlib import Path
 
@@ -159,16 +157,14 @@ class TestExportPaths:
 
     def test_module_09_exports_to_spatial_not_convolutions(self):
         """Module 09 exports to core.spatial (non-obvious — must not drift)."""
-        entry = _MODULE_REGISTRY[8]  # 0-indexed, module 09
-        assert entry[0] == 9
+        entry = next(e for e in _MODULE_REGISTRY if e[0] == 9)
         assert "spatial" in entry[2], (
             f"Module 09 should export to core/spatial.py, got '{entry[2]}'"
         )
 
     def test_module_20_exports_to_olympics(self):
         """Module 20 exports to the top-level olympics package."""
-        entry = _MODULE_REGISTRY[19]  # 0-indexed, module 20
-        assert entry[0] == 20
+        entry = next(e for e in _MODULE_REGISTRY if e[0] == 20)
         assert entry[2].startswith("olympics/"), (
             f"Module 20 should export to olympics/, got '{entry[2]}'"
         )
