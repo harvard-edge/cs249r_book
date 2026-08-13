@@ -507,8 +507,12 @@ class GPT2Compute:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     qkv_billion_str = fmt_int(flops_qkv / BILLION, commas=False)
-    attn_qk_billion_str = fmt_int(flops_score / BILLION, commas=False)
-    attn_pair_billion_str = fmt_int(flops_attn_pair / BILLION, commas=False)
+    # The callout prints QK^T and Attn x V as equal halves of a pair total, so the
+    # pair is derived from the *displayed* single value. Rounding each independently
+    # at integer precision printed 107 + 107 = 215.
+    attn_qk_billion_value = round(flops_score / BILLION, 1)
+    attn_qk_billion_str = fmt(attn_qk_billion_value, precision=1, commas=False)
+    attn_pair_billion_str = fmt(2 * attn_qk_billion_value, precision=1, commas=False)
     out_proj_billion_str = fmt_int(flops_out_proj / BILLION, commas=False)
 
     total_layer_gflop_str = fmt_flops(flops_layer_fwd_qty, unit=GFLOPs, precision=2, commas=False)
@@ -2690,7 +2694,12 @@ class ResNetMemoryScaling:
 
     # Batch 32 (compare totals against nominal A100 capacity)
     total_mem_b32 = act_b32 + grad_b32 + param_mem
-    pct_a100 = (total_mem_b32 / a100_mem).to("").magnitude
+    # The prose prints the branded capacity ("80 GB"), so the share divides the two
+    # displayed magnitudes rather than the underlying quantities. Dividing by 80 GiB
+    # (85.9 GB) while displaying the decimal label printed 14.1 percent under a
+    # sentence from which the reader computes 15.1. A book-wide decimal/binary unit
+    # convention is being decided separately and may revisit this line.
+    pct_a100 = total_mem_b32.to(GB).magnitude / a100_mem.to(GiB).magnitude
 
     # Batch 64 (Doubling acts/grads)
     act_b64 = act_b32 * 2
@@ -4568,7 +4577,7 @@ FlashAttention exemplifies a fundamental systems engineering principle: **IO-awa
 
 This principle extends beyond attention. In IO-aware matrix multiplication, tiling algorithms\index{Tiling!algorithms, matrix computation} like those in CUTLASS minimize DRAM traffic by maximizing data reuse in fast caches. A naive $m{\times}m$ matrix multiply performs $\mathcal{O}(m^3)$ FLOPs with $\mathcal{O}(m^2)$ memory traffic, while blocked algorithms maintain $\mathcal{O}(m^3)$ FLOPs but reduce cache misses through locality optimization.
 
-The same byte-movement principle reappears in communication-efficient distributed training, where gradient compression trades extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms, where a 10 percent increase in FLOPs that halves memory traffic yields 3--5$\times$ energy savings. This section establishes the IO-aware heuristic; distributed and edge deployment settings reuse the same byte-movement logic.
+The same byte-movement principle reappears in communication-efficient distributed training, where gradient compression trades extra computation (compression/decompression) for reduced network bandwidth consumption. Low-power edge devices with limited memory bandwidth benefit even more from IO-aware algorithms. Trading 10 percent more arithmetic to halve memory traffic approaches a 2$\times$ energy reduction in the limit where data movement accounts for the entire budget, and falls short of that bound whenever arithmetic carries a meaningful share, because halving one additive term of a sum cannot more than halve the sum. This section establishes the IO-aware heuristic; distributed and edge deployment settings reuse the same byte-movement logic.
 
 FlashAttention transforms practical model training capabilities. By eliminating the $\mathcal{O}(S^2)$ memory bottleneck, FlashAttention enables three capabilities:
 

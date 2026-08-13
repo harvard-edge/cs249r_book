@@ -2177,7 +2177,7 @@ Every value saved for the backward pass persists until its derivative rule consu
 # │
 # │ Goal: Compare an illustrative ResNet-50 training peak with FP32 weight storage
 # │       without treating weight bytes as complete inference memory.
-# │ Show: "~102 MB FP32 weights vs. 10–15 GB illustrative training peak"—inline
+# │ Show: "~102 MB FP32 weights vs. 8.4–12.4 GB illustrative training peak"—inline
 # │       and in "The Administrative Tax" callout (@sec-ml-frameworks-tensor-structure-dimensions-4a14).
 # │ How: model.size_in_bytes() helpers; m_as(MB/Mparam) for unit extraction.
 # │
@@ -2194,8 +2194,8 @@ class ResNetMemory:
 
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     model = Models.Vision.ResNet50
-    training_min = 10 * GB  # scenario assumption
-    training_max = 15 * GB  # scenario assumption
+    activations_min = 8 * GB  # scenario assumption: saved-activation low end
+    activations_max = 12 * GB  # scenario assumption: saved-activation high end
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     params_m = model.parameters.to(Mparam).magnitude
@@ -2203,27 +2203,41 @@ class ResNetMemory:
     fp32 = model.size_in_bytes(BYTES_FP32)
     adam = model.size_in_bytes(BYTES_ADAM_STATE)
 
+    # The prose presents the training peak as the sum of its four components, so
+    # derive it here. A hardcoded 10-15 GB did not follow from 8-12 GB of
+    # activations plus weights, gradients, and Adam state.
+    training_min = activations_min + fp32 + fp32 + adam
+    training_max = activations_max + fp32 + fp32 + adam
+
     # Decimal GB → MB is ×1000 (book-prose §1: decimal units in prose).
     training_ratio_min = (training_min / fp32).to_base_units().magnitude
     training_ratio_max = (training_max / fp32).to_base_units().magnitude
+
+    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
+    check(
+        training_min > activations_min and training_max > activations_max,
+        "The training peak must exceed saved activations alone.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     resnet_params_m_str = fmt_count(params_m * MILLION, scale='M', precision=1, commas=False)
     resnet_fp32_mb_str = fmt_qty(fp32, MB, precision=1, commas=False)
     resnet_adam_mb_str = fmt_qty(adam, MB, precision=1, commas=False)
 
-    resnet_training_min_gb_str = fmt_qty(training_min, GB, precision=0, commas=False)
-    resnet_training_max_gb_str = fmt_qty(training_max, GB, precision=0, commas=False)
+    resnet_act_min_gb_str = fmt_qty(activations_min, GB, precision=0, commas=False)
+    resnet_act_max_gb_str = fmt_qty(activations_max, GB, precision=0, commas=False)
+    resnet_training_min_gb_str = fmt_qty(training_min, GB, precision=1, commas=False)
+    resnet_training_max_gb_str = fmt_qty(training_max, GB, precision=1, commas=False)
     resnet_training_ratio_range_mult_str = fmt_multiple_range(training_ratio_min, training_ratio_max, precision=1, commas=False)
 ```
 
 ::: {.column-margin}
-![](images/svg/vol1_frameworks_margin_001.svg){width="100%" fig-alt="Vertical memory ladder comparing an illustrative ResNet-50 training footprint around 10 to 15 GB against approximately 102 MB of FP32 weight storage."}
+![](images/svg/vol1_frameworks_margin_001.svg){width="100%" fig-alt="Vertical memory ladder comparing an illustrative ResNet-50 training footprint of roughly 8 to 12 GB against approximately 102 MB of FP32 weight storage."}
 
 *The illustrative training peak dwarfs weight storage alone.*
 :::
 
-The saved-activation footprint depends on layer shapes, batch size, and which values each backward rule requires. Consider an illustrative ResNet-50 scenario with `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` of FP32 weights), batch size 64, and $224{\times}224$ images. Assuming 8--12 GB of saved activations, parameter gradients add ~`{python} ResNetMemory.resnet_fp32_mb_str`, and Adam's two FP32 moment buffers add ~`{python} ResNetMemory.resnet_adam_mb_str`. The resulting `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` training scenario is roughly `{python} ResNetMemory.resnet_training_ratio_range_mult_str` the FP32 weight storage alone. It is not a comparison with complete inference memory, which also includes activations and runtime workspaces.
+The saved-activation footprint depends on layer shapes, batch size, and which values each backward rule requires. Consider an illustrative ResNet-50 scenario with `{python} ResNetMemory.resnet_params_m_str` parameters (~`{python} ResNetMemory.resnet_fp32_mb_str` of FP32 weights), batch size 64, and $224{\times}224$ images. Assuming `{python} ResNetMemory.resnet_act_min_gb_str`--`{python} ResNetMemory.resnet_act_max_gb_str` of saved activations, parameter gradients add ~`{python} ResNetMemory.resnet_fp32_mb_str`, and Adam's two FP32 moment buffers add ~`{python} ResNetMemory.resnet_adam_mb_str`. Summing those four components gives a `{python} ResNetMemory.resnet_training_min_gb_str`--`{python} ResNetMemory.resnet_training_max_gb_str` training scenario, roughly `{python} ResNetMemory.resnet_training_ratio_range_mult_str` the FP32 weight storage alone. It is not a comparison with complete inference memory, which also includes activations and runtime workspaces.
 
 The example shows why training capacity cannot be estimated from weights alone. It does not establish that data movement dominates latency or that training exactly doubles inference traffic; both depend on the operations, implementation, and memory reuse. @Sec-appdx-algorithm-foundations-true-cost-training-memory-e54e derives the four-component training-state equation ($M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}}$) and discusses additional runtime memory.
 
@@ -2689,9 +2703,12 @@ class ResNetAdminTaxRatio:
     """ResNet-50 illustrative training peak vs. FP32 weight-storage ratio."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    # Cross-cell dependency: the peak is read from ResNetMemory (defined in
+    # @sec-ml-frameworks-principle-2-memorycompute-tradeoff-19f2, earlier in this
+    # chapter) so the two call sites cannot drift apart.
     model = Models.Vision.ResNet50
-    training_min = 10 * GB  # scenario assumption
-    training_max = 15 * GB  # scenario assumption
+    training_min = ResNetMemory.training_min
+    training_max = ResNetMemory.training_max
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     fp32 = model.size_in_bytes(BYTES_FP32)

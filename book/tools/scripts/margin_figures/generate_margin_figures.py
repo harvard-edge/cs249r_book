@@ -1114,11 +1114,13 @@ def frameworks_training_memory_ladder(candidate=None):
     from mlsysim.core.units import BYTES_FP32, GB
 
     infer_gb = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32).m_as(GB)
-    training_mid_gb = 12.5
+    # Matches ResNetMemory in frameworks.qmd: 8-12 GB of saved activations plus
+    # weights, gradients, and Adam state gives an 8.4-12.4 GB peak.
+    training_mid_gb = 10.4
     make_ladder(
         "vol1/frameworks",
         "vol1_frameworks_margin_001",
-        [("train 10-15 GB", training_mid_gb), ("infer %.0f MB" % (infer_gb * 1000), infer_gb)],
+        [("train 8-12 GB", training_mid_gb), ("infer %.0f MB" % (infer_gb * 1000), infer_gb)],
         domain="memory",
         wall=False,
     )
