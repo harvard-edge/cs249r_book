@@ -215,16 +215,57 @@ The relative importance of each dimension varies by deployment target. Cloud sys
 
 The preceding optimization framework identifies three dimensions of compression, but which dimensions matter most depends entirely on where the model will run. A data center GPU with 80 GB of HBM faces different binding constraints than a smartphone with shared RAM or a microcontroller with only a few hundred kilobytes of SRAM. @Tbl-deployment-scenarios summarizes the key constraints across deployment environments.
 
+```{python}
+#| echo: false
+#| label: deployment-scenario-latency-calc
+# ┌─────────────────────────────────────────────────────────────────────────────
+# │ DEPLOYMENT SCENARIO LATENCY ENVELOPES
+# ├─────────────────────────────────────────────────────────────────────────────
+# │ Context: @tbl-deployment-scenarios—the Latency column.
+# │
+# │ Goal: Pin each deployment context's latency envelope to the Platforms
+# │       registry so the compression targets match the tier definitions.
+# │ Show: Cloud, combined mobile/edge, and TinyML latency ranges.
+# │ How: Parse the Platforms tier envelopes; the mobile/edge row spans the
+# │      union of the two tiers it merges.
+# │
+# └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import *
+
+class DeploymentScenarioLatency:
+    """Latency envelopes for the cloud, mobile/edge, and TinyML compression targets."""
+
+    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    cloud_min_ms, cloud_max_ms = [int(v) for v in Platforms.Cloud.latency_range_ms.split("-")]
+    edge_min_ms, edge_max_ms = [int(v) for v in Platforms.Edge.latency_range_ms.split("-")]
+    mobile_min_ms, mobile_max_ms = [int(v) for v in Platforms.Mobile.latency_range_ms.split("-")]
+    tiny_min_ms, tiny_max_ms = [int(v) for v in Platforms.Tiny.latency_range_ms.split("-")]
+
+    # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
+    # The table merges mobile and edge into one row, so span both envelopes.
+    mobile_edge_min_ms = min(mobile_min_ms, edge_min_ms)
+    mobile_edge_max_ms = max(mobile_max_ms, edge_max_ms)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(tiny_max_ms <= mobile_edge_max_ms <= cloud_max_ms, "Latency envelopes must widen from TinyML to cloud.")
+    check(mobile_edge_min_ms <= mobile_min_ms, "Merged mobile/edge row must span the mobile envelope.")
+
+    # ┌── 4. OUTPUT (Formatting) ───────────────────────────────────────────
+    cloud_latency_range_str = fmt_range(cloud_min_ms, cloud_max_ms, precision=0, commas=False, unit="ms")
+    mobile_edge_latency_range_str = fmt_range(mobile_edge_min_ms, mobile_edge_max_ms, precision=0, commas=False, unit="ms")
+    tiny_latency_range_str = fmt_range(tiny_min_ms, tiny_max_ms, precision=0, commas=False, unit="ms")
+```
+
 ```{=latex}
 \begingroup
 \renewcommand{\arraystretch}{1.25}
 ```
 
-| **Context**     |      **Memory**      | **Latency** | **Power** | **Primary Goal** |
-|:----------------|:--------------------:|:-----------:|:----------|:-----------------|
-| **Cloud**       |      tens of GB      |  10–100 ms  | Flexible  | Throughput, cost |
-| **Mobile/Edge** | hundreds of MB to GB |   10–50 ms  | W-scale   | Size, latency    |
-| **TinyML**      |        KB–MB         |   1–10 ms   | mW        | Size, energy     |
+| **Context**     |      **Memory**      |                            **Latency**                             | **Power** | **Primary Goal** |
+|:----------------|:--------------------:|:------------------------------------------------------------------:|:----------|:-----------------|
+| **Cloud**       |      tens of GB      |    `{python} DeploymentScenarioLatency.cloud_latency_range_str`    | Flexible  | Throughput, cost |
+| **Mobile/Edge** | hundreds of MB to GB | `{python} DeploymentScenarioLatency.mobile_edge_latency_range_str` | W-scale   | Size, latency    |
+| **TinyML**      |        KB–MB         |    `{python} DeploymentScenarioLatency.tiny_latency_range_str`     | mW        | Size, energy     |
 
 : **Deployment Constraints**: Each deployment context imposes different optimization priorities. {#tbl-deployment-scenarios tbl-colwidths="[20,22,16,14,28]"}
 
@@ -301,7 +342,7 @@ class ModelDeviceComparison:
     # Model sizes (decimal — match the underlying byte-count math)
     dlrm_mem = Models.Recommendation.DLRM.model_size
     gpt2_mem = Models.Language.GPT2.size_in_bytes(BYTES_FP32)
-    resnet_mem = 100 * MB  # scenario assumption: ~25M params × 4 bytes
+    resnet_mem = Models.Vision.ResNet50.size_in_bytes(BYTES_FP32)
     mobilenet_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_FP32)
     mobilenet_int8_mem = Models.Vision.MobileNetV2.size_in_bytes(BYTES_INT8)
     dscnn_mem = Models.Tiny.DS_CNN.size_in_bytes(BYTES_INT8)
@@ -326,7 +367,7 @@ class ModelDeviceComparison:
     # Typed formatters own the units and multiplier glyphs in the table.
     dlrm_gb_str = fmt_qty(dlrm_mem, GB, precision=0, commas=False)
     gpt2_gb_str = fmt_qty(gpt2_mem, GB, precision=0, commas=False)
-    resnet_mb_str = fmt_qty(resnet_mem, MB, precision=0, commas=False)
+    resnet_mb_str = fmt_qty(resnet_mem, MB, precision=1, commas=False)
     mobilenet_mb_str = fmt_memory(mobilenet_mem, unit=MB, commas=False)
     mobilenet_int8_mb_str = fmt_qty(mobilenet_int8_mem, MB, precision=1, commas=False)
     dscnn_kb_str = fmt_qty(dscnn_mem, KB, precision=0, commas=False)
