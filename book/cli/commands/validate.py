@@ -10601,6 +10601,35 @@ class ValidateCommand:
     BINARY_UNITS = ("GiB", "MiB", "KiB", "TiB")
     BRANDED_HELPER = "fmt_memory_capacity"
 
+    # Known leaks parked pending the book-wide memory-unit convention change
+    # (2026-08-13 ruling: store and print capacity in true decimal bytes, so an
+    # A100 is 80e9 B, not 80 GiB). Fixing these piecemeal now would convert
+    # against a registry that still stores binary magnitudes, so the values
+    # would be wrong twice. The convention change resolves all four at the root
+    # and DELETES this allowlist; it must not outlive that commit.
+    #
+    # Keyed by (chapter-relative path, exact call text) so it survives line
+    # drift but not a change to the call itself: edit the call and the check
+    # fires again, which is the intent.
+    BINARY_UNIT_ALLOWLIST = {
+        (
+            "contents/vol1/backmatter/appendix_machine.qmd",
+            "fmt_qty(tpuv5_cap, GiB, precision=0, commas=False)",
+        ),
+        (
+            "contents/vol1/backmatter/appendix_machine.qmd",
+            "fmt_qty(tpuv5_sram, MiB, precision=0, commas=False)",
+        ),
+        (
+            "contents/vol1/frameworks/frameworks.qmd",
+            "fmt_memory(fp16, unit=GiB, commas=False)",
+        ),
+        (
+            "contents/vol1/frameworks/frameworks.qmd",
+            "fmt_memory(remaining, unit=GiB, commas=False)",
+        ),
+    }
+
     def _run_binary_units_in_output(self, root: Path) -> ValidationRunResult:
         """Flag formatter calls that leak binary units into rendered output.
 
@@ -10631,10 +10660,13 @@ class ValidateCommand:
                     um = unit_re.search(args)
                     if not um:
                         continue
+                    rel = self._relative_file(file)
+                    if (rel, m.group(0)) in self.BINARY_UNIT_ALLOWLIST:
+                        continue
                     unit = um.group(1)
                     decimal = {"GiB": "GB", "MiB": "MB", "KiB": "KB", "TiB": "TB"}[unit]
                     issues.append(ValidationIssue(
-                        file=self._relative_file(file),
+                        file=rel,
                         line=idx,
                         code="binary_unit_in_output",
                         message=(
