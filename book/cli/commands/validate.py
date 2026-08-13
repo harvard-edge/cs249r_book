@@ -655,6 +655,10 @@ class ValidateCommand:
             # under 5s today but is fundamentally a test suite, not a static
             # check. TODO: consider moving to CI.
             Scope("physics", "_run_unit_tests"),
+            Scope("binary-in-output", "_run_binary_units_in_output",
+                  note="only fmt_memory_capacity may take a binary unit; every other fmt_* leaks GiB/MiB/KiB/TiB into rendered prose"),
+            Scope("hardware-version-form", "_run_hardware_version_form", default=False,
+                  note="accelerator version naming must use one form book-wide (canonical: spaced, 'TPU v4'); default=False until the corpus is normalized"),
         ],
         "notation": [
             Scope("consistency", "_run_notation_consistency",
@@ -10586,6 +10590,143 @@ class ValidateCommand:
             files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    # Binary units are banned in rendered prose (prose-craft.md: "Never binary
+    # units in prose. Write GB and TB, not GiB or TiB"). Exactly one helper is
+    # allowed to take a binary unit: fmt_memory_capacity, which exists to hold a
+    # precise binary magnitude while printing the branded decimal label vendors
+    # actually use ("80 GB" for 80 GiB of HBM). Any OTHER fmt_* given a binary
+    # unit prints the binary unit itself.
+    BINARY_UNITS = ("GiB", "MiB", "KiB", "TiB")
+    BRANDED_HELPER = "fmt_memory_capacity"
+
+    def _run_binary_units_in_output(self, root: Path) -> ValidationRunResult:
+        """Flag formatter calls that leak binary units into rendered output.
+
+        Added 2026-08-13. A camera-ready audit found `fmt_memory(fp16, unit=GiB)`
+        rendering "13 GiB" in body prose, next to three other sites giving the
+        same quantity as "14 GB", and `fmt_qty(cap, GiB)` printing GiB into a
+        hardware reference table. Both are invisible to a prose-level grep for
+        "GiB" because the unit only appears in the formatter argument.
+
+        The rule is mechanical: fmt_memory_capacity may take a binary unit;
+        nothing else may. Error messages name the exact replacement so the fix
+        is unambiguous.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        call_re = re.compile(
+            r"\b(fmt_[a-z_]+)\s*\(([^()]*(?:\([^()]*\)[^()]*)*)\)"
+        )
+        unit_re = re.compile(r"(?<![\w.])(" + "|".join(self.BINARY_UNITS) + r")(?![\w])")
+
+        for file in files:
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                for m in call_re.finditer(line):
+                    helper, args = m.group(1), m.group(2)
+                    if helper == self.BRANDED_HELPER:
+                        continue
+                    um = unit_re.search(args)
+                    if not um:
+                        continue
+                    unit = um.group(1)
+                    decimal = {"GiB": "GB", "MiB": "MB", "KiB": "KB", "TiB": "TB"}[unit]
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="binary_unit_in_output",
+                        message=(
+                            f"{helper}(...{unit}...) renders the binary unit "
+                            f"'{unit}' into prose, which prose-craft.md forbids. "
+                            f"FIX — pick one: (a) if this is a COMPUTED SIZE, use "
+                            f"the decimal unit: replace `{unit}` with `{decimal}` "
+                            f"(the magnitude changes; re-check any sentence that "
+                            f"adds or subtracts it); (b) if this is a HARDWARE "
+                            f"CAPACITY that vendors brand in decimal (an '80 GB' "
+                            f"A100 holding 80 GiB), use "
+                            f"`{self.BRANDED_HELPER}(<value>, unit={unit})`, which "
+                            f"keeps the binary magnitude and prints '{decimal}'. "
+                            f"Do NOT mix the two in one sentence: a branded "
+                            f"capacity minus a decimal size does not add up."
+                        ),
+                        severity="error",
+                        context=m.group(0)[:100],
+                    ))
+
+        return ValidationRunResult(
+            name="binary-units-in-output",
+            description="Only fmt_memory_capacity may take a binary unit; others leak GiB/MiB into prose",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # Accelerator families whose version suffix is written inconsistently.
+    # Canonical form is SPACED, matching the vendor's own product naming
+    # (Google Cloud writes "TPU v4", "TPU v5e", "TPU v5p").
+    HW_VERSION_FAMILIES = ("TPU",)
+
+    def _run_hardware_version_form(self, root: Path) -> ValidationRunResult:
+        """Flag accelerator version names written in the non-canonical form.
+
+        Added 2026-08-13. A camera-ready audit found the corpus almost exactly
+        split: TPUv4 x36 / TPU v4 x25, TPUv1 x10 / TPU v1 x16, TPUv5p x12 /
+        TPU v5p x13. Neither form dominates, so a reader sees both within a few
+        pages. Canonical is the spaced form, which is what Google itself uses.
+
+        Skips code fences, chunk options, `\\index{}` keys, and identifiers such
+        as Hardware.Cloud.TPUv4 or a `tpuv4_` variable, where the closed form is
+        a symbol rather than prose.
+
+        default=False: normalizing ~66 closed-form occurrences is a corpus pass,
+        not a commit-time gate. Flip to default=True once that pass lands.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        closed_re = re.compile(
+            r"(?<![\w.])(" + "|".join(self.HW_VERSION_FAMILIES) + r")(v\d+[a-z]*)(?![\w])"
+        )
+
+        for file in files:
+            in_code = False
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                stripped = line.strip()
+                if stripped.startswith("```"):
+                    in_code = not in_code
+                    continue
+                if in_code or stripped.startswith("#|"):
+                    continue
+                # Strip contexts where the closed form is an identifier, not prose.
+                scrubbed = re.sub(r"\\index\{[^}]*\}|`[^`]*`|\{#[^}]*\}", "", line)
+                for m in closed_re.finditer(scrubbed):
+                    family, ver = m.group(1), m.group(2)
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="hardware_version_form",
+                        message=(
+                            f"'{family}{ver}' uses the closed version form. "
+                            f"Canonical is the spaced form the vendor uses: "
+                            f"FIX — replace `{family}{ver}` with `{family} {ver}`. "
+                            f"Leave the closed form untouched inside code, "
+                            f"`\\index{{}}` keys, and identifiers such as "
+                            f"Hardware.Cloud.{family}{ver} or {family.lower()}{ver}_bw_str; "
+                            f"only rendered prose, headings, captions and table "
+                            f"cells are in scope."
+                        ),
+                        severity="warning",
+                        context=scrubbed.strip()[:100],
+                    ))
+
+        return ValidationRunResult(
+            name="hardware-version-form",
+            description="Accelerator version naming uses one canonical (spaced) form book-wide",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
         )
 
     def _run_lego_units(self, root: Path) -> ValidationRunResult:
