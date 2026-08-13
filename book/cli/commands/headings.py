@@ -61,7 +61,7 @@ MLPerf MLCommons LAPACK LINPACK D·A·M DAM C³ C^3 CCC C3
 TinyML AutoML AutoAugment RandAugment NAS
 NVIDIA AMD Intel ARM Apple Google Amazon Microsoft Meta Facebook IBM Qualcomm TSMC Samsung Uber Tesla DeepSeek Anthropic Cerebras Groq Graphcore SambaNova Tenstorrent Oura Jeep Cherokee Rényi Teton Slurm
 MIT Stanford Berkeley CMU UIUC EPFL ETH Caltech Harvard Princeton Yale Columbia
-Hennessy Patterson Amdahl Gustafson Turing Sutton Karpathy Kuhn Goodhart Horowitz Williams Waterman Knuth Tanenbaum Dean Chintala Huang LeCun Han Reddi Stoica Huyen Emer Kullback Leibler Kolmogorov Smirnov Shannon Bayes Markov Bellman Boltzmann
+Hennessy Patterson Amdahl Gustafson Turing Sutton Karpathy Kuhn Goodhart Horowitz Williams Waterman Knuth Tanenbaum Dean Chintala Huang LeCun Han Reddi Stoica Huyen Emer Kullback Leibler Kolmogorov Smirnov Shannon Bayes Markov Bellman Boltzmann Poisson
 HIPAA GDPR COPPA CCPA FERPA SOX HITRUST ISO SOC NAND NOR SLC MLC TLC QLC NaN Inf
 HBM2 HBM3 HBM3e DDR4 DDR5 GDDR5 GDDR6 GDDR6X LPDDR4 LPDDR5
 V100 A100 H100 H200 B100 B200 GB200 T4 L4 L40 RTX Xeon Epyc Ryzen M1 M2 M3 M4 Grace Hopper Blackwell Ampere Volta Pascal
@@ -70,7 +70,7 @@ I II III IV V VI VII VIII IX X XI XII
 Roofline Instinct Xavier Orin Jetson
 Young-Daly Bayes
 Adam AdamW SGD SGDM Adagrad RMSprop Lion Lamb Shampoo Muon
-Clos Fat-Tree Dragonfly Torus Mesh Hypercube Butterfly
+Clos Fat-Tree Dragonfly Torus Mesh Hypercube Butterfly Go-Back-N
 """.split())
 
 COMPOUND_NAMES = {
@@ -93,6 +93,13 @@ COMPOUND_NAMES = {
 # stays lowercase per the paper, "Adam" stays capitalized as a proper noun).
 SKIP_HEADINGS = {
     "1-bit Adam: Compression-aware optimization",
+    # 2026-08-13: tokenizer limitation, not a style exception. TOKEN_RE requires
+    # a token to start with a letter, so "50-layer" splits into "50" / "-" /
+    # "layer"; "50" is not word-like, so "layer" is misread as the first word
+    # after the colon and gets capitalized. Corpus is 30-0 for lowercase
+    # "N-layer". Remove this entry once TOKEN_RE absorbs digit-initial
+    # hyphenated compounds as single tokens.
+    "Empirical validation: 50-layer comparison",
 }
 
 # "Compute" added 2026-06: the C³ first axis was unified from "Computation"
