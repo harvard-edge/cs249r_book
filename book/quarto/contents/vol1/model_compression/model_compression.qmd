@@ -2780,7 +2780,6 @@ class QuantizationEnergyPhysics:
     ENERGY_ADD_FP32_PJ = Hardware.Tech.Op.AddFp32.energy
     ENERGY_ADD_INT8_PJ = Hardware.Tech.Op.AddInt8.energy
 
-    int8_energy_reduction = 20
     bytes_fp32 = BYTES_FP32.to(byte).magnitude
     bytes_int8 = BYTES_INT8.to(byte).magnitude
 
@@ -2795,6 +2794,10 @@ class QuantizationEnergyPhysics:
     energy_add_int8 = ENERGY_ADD_INT8_PJ.to(pJ / flop).magnitude
     energy_float_add_ratio = energy_add_fp32 / energy_add_int8
     energy_dram_read_ratio = energy_dram.to(pJ).magnitude / energy_add_int8
+    # Multiply-energy ratio, derived from the two multiply costs quoted in the
+    # callout. Distinct from EnergyRatio.int8_fp32_energy_ratio later in this
+    # chapter, which adds the accumulate step and therefore lands near 20x.
+    int8_multiply_energy_reduction = (energy_flop_fp32 / energy_op_int8).to("").magnitude
 
     check(bytes_fp32 / bytes_int8 == 4, "FP32-to-INT8 memory reduction should be 4x.")
     check(energy_dram_read_ratio > 10_000, "DRAM reads should exceed INT8 add energy by more than four orders of magnitude.")
@@ -2812,7 +2815,7 @@ class QuantizationEnergyPhysics:
     energy_op_int8_pj_per_op_str = fmt_energy_per_op(energy_op_int8, precision=1, commas=False)
     energy_float_add_ratio_mult_str = fmt_multiple(energy_float_add_ratio, precision=0, commas=False)
     energy_dram_read_ratio_mult_str = fmt_multiple(energy_dram_read_ratio, precision=1, commas=True)
-    int8_energy_reduction_mult_str = fmt_multiple(int8_energy_reduction, precision=0, commas=False)
+    int8_multiply_energy_reduction_mult_str = fmt_multiple(int8_multiply_energy_reduction, precision=1, commas=False)
     mem_reduction_ratio_mult_str = fmt_multiple(bytes_fp32 / bytes_int8, precision=0, commas=False)
 ```
 
@@ -2827,7 +2830,7 @@ According to the iron law $(T = \frac{D_{\text{vol}}}{\text{BW}} + \frac{O}{R_{\
 
 @Tbl-model-compression-energy-hierarchy normalizes these costs against an 8-bit integer add to expose the four-order-of-magnitude gap between arithmetic and DRAM access.
 
-For inference workloads, moving from FP32 to INT8 saves `{python} QuantizationEnergyPhysics.mem_reduction_ratio_mult_str` in raw value storage, while the arithmetic values above give an idealized compute-component reduction of `{python} QuantizationEnergyPhysics.int8_energy_reduction_mult_str`. End-to-end energy also includes memory, control, sensors, and idle power. @Sec-appdx-machine-foundations-roofline-model-2529 gives this relationship a formal shape: workloads with little arithmetic per byte are memory-bound, so shrinking data movement dominates; workloads with more arithmetic per byte are compute-bound, so arithmetic savings matter more. The arithmetic ratio alone cannot predict device battery life.
+For inference workloads, moving from FP32 to INT8 saves `{python} QuantizationEnergyPhysics.mem_reduction_ratio_mult_str` in raw value storage, while the two multiply costs above give an idealized multiply-energy reduction of `{python} QuantizationEnergyPhysics.int8_multiply_energy_reduction_mult_str`. End-to-end energy also includes memory, control, sensors, and idle power. @Sec-appdx-machine-foundations-roofline-model-2529 gives this relationship a formal shape: workloads with little arithmetic per byte are memory-bound, so shrinking data movement dominates; workloads with more arithmetic per byte are compute-bound, so arithmetic savings matter more. The arithmetic ratio alone cannot predict device battery life.
 
 These same physics apply at data center scale: distributed training systems use reduced precision to cut gradient communication overhead, a topic covered in @sec-model-training-mixedprecision-training-9218. @Sec-hardware-acceleration returns to the silicon mechanisms that exploit these energy differences.
 
@@ -3785,7 +3788,7 @@ class EnergyRatio:
     int8_fp32_energy_ratio_mult_str = fmt_multiple(int8_fp32_energy_ratio, precision=0, commas=False)
 ```
 
-The energy analysis completes the motivation for quantization: fewer bits reduce memory movement and lower arithmetic energy\index{Energy Efficiency!quantization benefits}\index{Model Compression!energy efficiency}, but only when the target processor exposes the corresponding low-precision units. An INT8 operation, for example, uses roughly `{python} EnergyRatio.int8_fp32_energy_ratio_mult_str` less energy than its FP32 equivalent. Accelerators with Tensor Cores, FP8/INT8 units, TPUs, or NPUs can compound arithmetic savings with lower memory traffic, while general-purpose CPUs without efficient low-precision paths may lose much of the benefit to packing, dequantization, or scalar fallback. The practical implication is that precision is a model-hardware decision, not a software flag.
+The energy analysis completes the motivation for quantization: fewer bits reduce memory movement and lower arithmetic energy\index{Energy Efficiency!quantization benefits}\index{Model Compression!energy efficiency}, but only when the target processor exposes the corresponding low-precision units. A full INT8 multiply-accumulate, for example, uses roughly `{python} EnergyRatio.int8_fp32_energy_ratio_mult_str` less energy than its FP32 equivalent. Accelerators with Tensor Cores, FP8/INT8 units, TPUs, or NPUs can compound arithmetic savings with lower memory traffic, while general-purpose CPUs without efficient low-precision paths may lose much of the benefit to packing, dequantization, or scalar fallback. The practical implication is that precision is a model-hardware decision, not a software flag.
 
 ### Precision reduction strategies {#sec-model-compression-precision-reduction-strategies-db83}
 
