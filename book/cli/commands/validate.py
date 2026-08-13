@@ -560,6 +560,12 @@ class ValidateCommand:
             Scope("suffix-semantics", "_run_fmt_semantic_suffix",
                   note="value-kind in suffix= must be a typed formatter",
                   default=False),
+            # Added 2026-08-13: catches math that cannot compile (bare
+            # \left}/\right}, unbalanced escaped braces, odd `$` counts). A
+            # cleanup script corrupted 38 sites across both volumes and every
+            # existing gate passed; see _run_latex_balance.
+            Scope("latex-balance", "_run_latex_balance",
+                  note="unbalanced $, bare \\left}/\\right}, unclosed \\{"),
             # render-audit builds every chapter (~10 min). Manual stage only;
             # default=False ensures `binder check math` stays under 1s.
             Scope("render-audit", "_run_math_render_audit", default=False),
@@ -10697,6 +10703,164 @@ class ValidateCommand:
 
     # Accelerator families whose version suffix is written inconsistently.
     # Canonical form is SPACED, matching the vendor's own product naming
+    # ── LaTeX balance ────────────────────────────────────────────────────────
+    # Added 2026-08-13 after a corpus-wide cleanup script silently corrupted 38
+    # math sites across both volumes: it stripped the backslash from `\}` (32x,
+    # turning `\max\{B : ...\}` into `\max\{B : ...}`) and the opening `$` from
+    # `$<` (6x, leaving an orphan `$`). Every one of those passed `check math`,
+    # `check all`, and a full pre-commit run. LaTeX would have failed at PDF
+    # build time, far from the edit that caused it.
+    #
+    # Three rules, ordered by signal strength:
+    #   1. \left/\right followed by a BARE brace  -> always invalid LaTeX
+    #   2. escaped braces unbalanced inside one math span
+    #   3. odd number of unescaped `$` on a prose line
+    _LB_INLINE_CODE = re.compile(r"`[^`]*`")
+    # A `$` is a math delimiter when preceded by an EVEN number of backslashes
+    # (zero counts). `\$` is an escaped literal dollar; `\\$` is an escaped
+    # backslash (a TikZ line break) followed by a real delimiter.
+    _LB_DOLLAR = re.compile(r"(?<!\\)(?:\\\\)*\$")
+    # Quarto attribute strings are parsed once before Pandoc sees them, so a
+    # literal dollar is written `\\$` there. Collapse that doubling before
+    # applying the rule above.
+    _LB_ATTR_LINE = re.compile(r"\b(fig|tbl|lst)-(cap|alt)\s*=")
+    _LB_LEFTRIGHT_BARE = re.compile(r"\\(left|right)\s*([{}])")
+    _LB_DISPLAY = re.compile(r"\$\$")
+
+    def _lb_strip(self, line: str) -> str:
+        """Blank out inline code spans so their `$` and braces do not count."""
+        return self._LB_INLINE_CODE.sub(lambda m: " " * len(m.group(0)), line)
+
+    def _run_latex_balance(self, root: Path) -> ValidationRunResult:
+        """Flag math that cannot compile: bare \\left}/\\right}, unbalanced
+        escaped braces inside a math span, and odd `$` counts in prose.
+
+        Skips fenced code blocks and inline code spans. `$$` display math is
+        accumulated across lines, so a multi-line display equation is checked as
+        one span rather than line by line.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        for file in files:
+            rel = self._relative_file(file)
+            in_code = False
+            in_display = False
+            disp_buf: List[str] = []
+            disp_start = 0
+
+            in_tikz = False
+            for idx, raw in enumerate(self._read_text(file).splitlines(), 1):
+                stripped = raw.strip()
+                if stripped.startswith("```"):
+                    if in_code:
+                        in_code = in_tikz = False
+                    else:
+                        in_code = True
+                        # TikZ blocks are fenced, but their node labels carry
+                        # real `$...$` math that must still balance. Check the
+                        # math rules there; skip the escaped-brace rule, since
+                        # TikZ braces are node/option syntax, not set braces.
+                        in_tikz = "tikz" in stripped.lower()
+                    continue
+                if in_code and not in_tikz:
+                    continue
+
+                line = self._lb_strip(raw)
+
+                # Rule 1 — \left} / \right{ etc. Always wrong, anywhere.
+                for m in self._LB_LEFTRIGHT_BARE.finditer(line):
+                    issues.append(ValidationIssue(
+                        file=rel, line=idx, code="latex_bare_delimiter",
+                        message=(
+                            f"`\\{m.group(1)}{m.group(2)}` uses a bare brace. "
+                            f"\\left and \\right need an ESCAPED brace: write "
+                            f"`\\{m.group(1)}\\{m.group(2)}`. A bare brace here "
+                            f"does not compile."
+                        ),
+                        severity="error", context=raw.strip()[:120],
+                    ))
+
+                # Track $$ display blocks and check each as one span.
+                dollars_dd = len(self._LB_DISPLAY.findall(line))
+                if in_display:
+                    disp_buf.append(line)
+                    if dollars_dd:
+                        in_display = False
+                        self._lb_check_braces(
+                            " ".join(disp_buf), rel, disp_start, issues, raw)
+                        disp_buf = []
+                    continue
+                if dollars_dd == 1:
+                    in_display = True
+                    disp_start = idx
+                    disp_buf = [line]
+                    continue
+                if dollars_dd >= 2:
+                    self._lb_check_braces(line, rel, idx, issues, raw)
+                    continue
+
+                # Rule 3 — odd count of unescaped `$` on a normal line.
+                # A `$` preceded by ANY backslash is a literal dollar, not a
+                # delimiter. That covers `\$` in prose and the `\\$` form that
+                # appears inside fig-cap/tbl-cap attribute strings, where the
+                # attribute parser eats one backslash before Pandoc sees it.
+                bare = line
+                if self._LB_ATTR_LINE.search(bare):
+                    bare = bare.replace("\\\\", "\\")
+                if len(self._LB_DOLLAR.findall(bare)) % 2 == 1:
+                    issues.append(ValidationIssue(
+                        file=rel, line=idx, code="latex_unbalanced_dollar",
+                        message=(
+                            "Odd number of unescaped `$` on this line, so an "
+                            "inline math span is not closed. Usual cause: an "
+                            "opening `$` was dropped (`$<1$` becoming `< 1$`). "
+                            "Escape a currency dollar as `\\$`."
+                        ),
+                        severity="error", context=raw.strip()[:120],
+                    ))
+                elif not in_tikz:
+                    # Rule 2 — per inline math span.
+                    for span in re.findall(r"(?<!\\)\$(.+?)(?<!\\)\$", bare):
+                        self._lb_check_braces(span, rel, idx, issues, raw)
+
+            if in_display and disp_buf:
+                self._lb_check_braces(
+                    " ".join(disp_buf), rel, disp_start, issues, raw)
+
+        return ValidationRunResult(
+            name="latex-balance",
+            description=f"LaTeX math balance ({len(files)} files)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _lb_check_braces(self, span: str, rel: str, line_no: int,
+                         issues: List[ValidationIssue], raw: str) -> None:
+        """Escaped braces must balance inside a single math span."""
+        opens = len(re.findall(r"(?<!\\)\\\{", span))
+        closes = len(re.findall(r"(?<!\\)\\\}", span))
+        if opens == closes:
+            return
+        if opens > closes:
+            msg = (
+                f"{opens} `\\{{` but {closes} `\\}}` in this math span: a set "
+                f"brace is not closed. Usual cause: a cleanup pass stripped the "
+                f"backslash, turning `\\}}` into a plain `}}` that LaTeX reads "
+                f"as a group close."
+            )
+        else:
+            msg = (
+                f"{closes} `\\}}` but {opens} `\\{{` in this math span: a "
+                f"closing set brace has no opener."
+            )
+        issues.append(ValidationIssue(
+            file=rel, line=line_no, code="latex_unbalanced_escaped_brace",
+            message=msg, severity="error", context=raw.strip()[:120],
+        ))
+
     # (Google Cloud writes "TPU v4", "TPU v5e", "TPU v5p").
     HW_VERSION_FAMILIES = ("TPU",)
 
