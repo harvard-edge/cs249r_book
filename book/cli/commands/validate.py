@@ -7232,9 +7232,14 @@ class ValidateCommand:
         start = time.time()
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
-        xref_re = re.compile(r"@([Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lg)-[\w-]+")
-        alg_bracket_re = re.compile(r"\[(Algorithm|algorithm)\s+(@[Aa]lg-[\w-]+)\]")
-        bare_alg_re = re.compile(r"(?<!\[)\b(Algorithm|algorithm)\s+@[Aa]lg-[\w-]+")
+        # `algo-` is the book's algorithm prefix (cross-references.md -> Algorithm
+        # References; `alg-` collides with Quarto's native theorem environment).
+        # `[Aa]lgo?` covers both so casing on @Algo-/@algo- is actually enforced.
+        # (Fixed 2026-08-14: the old `[Aa]lg` never matched `@algo-`, leaving every
+        # algorithm cross-reference unchecked for sentence-position casing.)
+        xref_re = re.compile(r"@([Ff]ig|[Tt]bl|[Ss]ec|[Ee]q|[Ll]st|[Aa]lgo?)-[\w-]+")
+        alg_bracket_re = re.compile(r"\[(Algorithm|algorithm)\s+(@[Aa]lgo?-[\w-]+)\]")
+        bare_alg_re = re.compile(r"(?<!\[)\b(Algorithm|algorithm)\s+@[Aa]lgo?-[\w-]+")
         footnote_def = re.compile(r"^\s*\[\^fn-")
 
         def classify_position(line: str, lines: List[str], idx: int, col: int, ref_end: int) -> tuple[bool, bool]:
