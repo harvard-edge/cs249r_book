@@ -3692,7 +3692,7 @@ Overlapping extends the same idea across the full pipeline. As the GPU processes
 
 Machine learning frameworks (introduced in @sec-ml-frameworks) expose the control variables for this trade-off. @Lst-dataloader_usage demonstrates PyTorch's DataLoader configuration\index{DataLoader!configuration parameters}, where `{python} PreprocessingScenarios.num_workers_str` sets preprocessing parallelism and `{python} PreprocessingScenarios.prefetch_factor_str` maintains a buffer of `{python} PreprocessingScenarios.prefetch_buffer_batches_str` batches ready for accelerator consumption.
 
-::: {#lst-dataloader_usage lst-cap="**Pipeline Optimization**: Machine learning workflows benefit from efficient data handling through batching and prefetching to maintain constant accelerator utilization."}
+::: {#lst-dataloader_usage lst-cap="**DataLoader Prefetch Configuration**: Four workers with a prefetch factor of two maintain up to eight batches in the host-side prefetch window."}
 
 ```{.python}
 loader = DataLoader(
@@ -4184,7 +4184,7 @@ Using FP16 or BF16 halves the bytes per stored value relative to FP32, but reali
 
 Modern frameworks abstract hardware complexity through automatic operation routing, as discussed in @sec-ml-frameworks. The framework runtime determines which operations benefit from reduced precision and which require FP32 for numerical stability. PyTorch's automatic mixed precision manages precision selection and loss scaling transparently, as @lst-mixed-precision illustrates.
 
-::: {#lst-mixed-precision lst-cap="**Mixed Precision Training**: Automatic precision selection with loss scaling to prevent gradient underflow while maximizing Tensor Core utilization."}
+::: {#lst-mixed-precision lst-cap="**Mixed Precision Training**: Autocast selects eligible lower-precision operations, while gradient scaling is enabled for the FP16 path and omitted for BF16."}
 
 ```{.python}
 import torch
@@ -4198,13 +4198,13 @@ scaler = torch.amp.GradScaler(
     "cuda", enabled=(amp_dtype == torch.float16)
 )
 
-for batch in dataloader:
+for inputs, targets in dataloader:
     optimizer.zero_grad()
 
     # Automatic precision selection per operation
     with torch.amp.autocast("cuda", dtype=amp_dtype):
-        output = model(batch)
-        loss = criterion(output, target)
+        output = model(inputs)
+        loss = criterion(output, targets)
 
     # Scale loss to prevent gradient underflow
     scaler.scale(loss).backward()
@@ -4902,7 +4902,7 @@ This illustrative GPT-2-scale scenario uses assumed prices and durations to show
 - Use `{python} GradientAccumulation.gpus_accum_str` accelerators and accumulate `{python} GradientAccumulation.accum_steps_count_str` micro-batches of `{python} GradientAccumulation.micro_batch_str` examples each.
 - Each accelerator processes `{python} GradientAccumulation.micro_batch_str` $\times$ `{python} GradientAccumulation.accum_steps_count_str` = `{python} GradientAccumulation.batch_per_gpu_str` examples per update, giving a global effective batch of `{python} GradientAccumulation.gpus_accum_str` $\times$ `{python} GradientAccumulation.batch_per_gpu_str` = `{python} GradientAccumulation.effective_batch_str`.
 
-A distributed `no_sync()` context can defer AllReduce until the final micro-batch. @Lst-gradient-accumulation-loop shows this synchronization placement.
+A distributed `no_sync()` context can defer AllReduce until the final micro-batch.
 
 **Trade-off Analysis**
 
@@ -4950,7 +4950,9 @@ Accumulated configuration:
 
 :::
 
-::: {#lst-gradient-accumulation-loop lst-cap="**Gradient Accumulation Training Loop**: Accumulates gradients over multiple micro-batches before synchronization, reducing communication overhead."}
+@Lst-gradient-accumulation-loop places one AllReduce after sixteen local micro-batches, making the synchronization boundary explicit.
+
+::: {#lst-gradient-accumulation-loop lst-cap="**Gradient Accumulation Training Loop**: Sixteen local micro-batches accumulate before one AllReduce and optimizer update."}
 
 ```{.python}
 optimizer.zero_grad()

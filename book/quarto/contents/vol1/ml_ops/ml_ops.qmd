@@ -914,6 +914,8 @@ def validate_no_skew(
 
 :::
 
+The gate converts an observable distribution mismatch into a CI failure before promotion, but its KS threshold must be calibrated to sample size and feature criticality; a passing statistic does not prove schema, semantic, or point-in-time parity.
+
 #### Versioning and lineage {#sec-ml-operations-versioning-lineage-b1cf}
 
 Lineage tracking\index{Lineage Tracking!model provenance} and versioning\index{Model Versioning!artifact tracking}\index{Data Versioning!reproducibility} implement reproducibility (@sec-ml-operations-foundational-principles-44e6), which requires all artifacts influencing model behavior to be versioned. Unlike traditional software, ML models depend on multiple changing artifacts: training data, feature engineering logic, trained model parameters, and configuration settings. MLOps practices enforce tracking of versions across all pipeline components to manage this complexity.
@@ -1282,11 +1284,13 @@ Automated training pipelines introduce a critical decision regarding their execu
 
 Those schedules are starting points, not rules. Scheduled retraining\index{Retraining!scheduled updates} runs on a fixed cadence, such as daily, weekly, or monthly, regardless of performance metrics. It is simple to implement and guarantees that recent data eventually enters the model, but it can waste compute when the distribution is stable or respond too slowly when a shift happens between calendar runs.
 
-Triggered retraining\index{Retraining!triggered updates} ties the retraining decision to observed degradation. It optimizes compute cost by retraining only when monitoring detects performance loss or drift beyond thresholds, but it requires robust telemetry and careful calibration to avoid false positives or missed degradation. @Lst-ops-triggered-retraining expresses the trigger as a decision function rather than a deployment-specific configuration file: retrain when the measured loss from staleness exceeds the cost and risk of a new training run. For the complete illustrative scenario evaluated below, the parameters yield an optimal interval near one day.
+Triggered retraining\index{Retraining!triggered updates} ties the retraining decision to observed degradation. It optimizes compute cost by retraining only when monitoring detects performance loss or drift beyond thresholds, but it requires robust telemetry and careful calibration to avoid false positives or missed degradation.
 
 Continuous retraining\index{Online Learning!incremental updates} updates the model incrementally as labeled data arrives, either through online learning or periodic micro-updates. This keeps the model current with minimal latency, but it raises the validation burden because noisy labels or adversarial data can be incorporated before humans have reviewed the shift.
 
 The operating choice therefore depends on four constraints: retraining cost, validation infrastructure, rollback capability, and label availability. Large models may cost tens of thousands of dollars per run; triggered retraining requires ground truth or reliable proxy labels; and every automated update path needs enough validation and rollback capacity to prove that the new model outperforms the baseline. Scheduled retraining suits stable domains, triggered retraining addresses gradual drift, and continuous retraining belongs to rapidly evolving distributions where waiting for a calendar interval would lose too much value.
+
+The economic and validation constraints become executable in @lst-ops-triggered-retraining: the decision function schedules a run only when estimated recovered value exceeds retraining, validation, and rollout risk and validation data are fresh.
 
 ::: {#lst-ops-triggered-retraining lst-cap="**Triggered Retraining Decision**: The decision combines quality loss, feature drift, prediction shift, and retraining cost so automatic retraining fires only when the expected benefit exceeds the operational risk."}
 
@@ -1309,6 +1313,8 @@ if benefit > risk and validation_data_is_fresh():
 ```
 
 :::
+
+The gate separates detecting drift from authorizing retraining: drift contributes to estimated benefit, while fresh validation data and positive net value determine whether automation acts. For the complete illustrative scenario evaluated below, the parameters yield an optimal interval near one day.
 
 ##### Quantitative retraining economics {#sec-ml-operations-quantitative-retraining-economics-1579}
 
@@ -2570,7 +2576,7 @@ on_stale:
 
 :::
 
-Failures at different layers produce different symptoms and demand different responses.
+A freshness policy turns staleness from a silent data defect into an explicit fallback; the same detect-and-respond contract must cover every layer of the monitoring stack.
 
 ::: {#chk-ml-ops-monitoring-stack .callout-checkpoint title="The monitoring stack"}
 
@@ -2901,9 +2907,9 @@ class SliceAnalysisCalc:
 
 ##### Feature attribution for debugging {#sec-ml-operations-feature-attribution-debugging-f4ab}
 
-When slice analysis identifies a problematic segment, feature attribution techniques\index{Feature Attribution!debugging techniques} help identify which features drive incorrect predictions. @Lst-ops-shap-debugging demonstrates a workflow that uses SHAP values\index{SHAP Values!model debugging}, feature-attribution scores that estimate how much each input feature contributed to an individual prediction, to analyze mispredictions within a specific slice.
+When slice analysis identifies a problematic segment, feature attribution techniques\index{Feature Attribution!debugging techniques} help identify which features the model relies on within incorrect predictions. @Lst-ops-shap-debugging demonstrates a workflow that uses SHAP values\index{SHAP Values!model debugging}, feature-attribution scores that estimate how much each input feature contributed to an individual prediction, to analyze mispredictions within a specific slice.
 
-::: {#lst-ops-shap-debugging lst-cap="**SHAP-Based Debugging Workflow**: This code filters mispredicted examples from a problematic slice (tablet users), computes SHAP values to explain model decisions, and generates a summary plot revealing which features contribute most to the errors."}
+::: {#lst-ops-shap-debugging lst-cap="**SHAP-Based Debugging Workflow**: This code filters mispredicted tablet examples, computes SHAP values for their model outputs, and plots the selected examples' feature attributions."}
 
 ```{.python}
 # SHAP-based debugging workflow
@@ -2919,13 +2925,13 @@ errors = predictions[
 explainer = shap.Explainer(model)
 shap_values = explainer(errors[feature_columns])
 
-# Identify features with high attribution for errors
+# Plot feature attributions for the selected errors
 shap.summary_plot(shap_values, errors[feature_columns])
 ```
 
 :::
 
-Common findings from feature attribution debugging include: stale features (feature store not updating for specific segments), missing feature coverage (features undefined for edge cases), and feature distribution shift (feature semantics changed in production).
+The attribution plot identifies features the model relied on within the failing slice; it does not establish whether those features caused the errors. Diagnosing stale features, missing coverage, or semantic shift requires checking feature lineage and production distributions.
 
 ::: {#psp-ml-ops-zombie-feature .callout-perspective title="Zombie features"}
 
