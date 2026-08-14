@@ -1264,7 +1264,7 @@ Key vector operations map directly to common deep learning patterns. @Tbl-vector
 | **Masked operations**       | Selectively operates on vector elements                   | Attention masks, padding handling           |
 | **Vector-scalar broadcast** | Applies scalar to all vector elements                     | Bias addition, scaling operations           |
 
-: **Vector Operations**: Core vector operations map directly to deep learning primitives: reductions implement pooling layers, gathers enable embedding lookups, scatters update embedding gradients, and masked operations handle attention masks. Each operation exploits data-level parallelism to process multiple elements simultaneously, explaining why vector units are universal across all accelerator designs. {#tbl-vector}
+: **Vector Operations**: Core vector operations map directly to deep learning primitives: reductions implement pooling layers, gathers enable embedding lookups, scatters update embedding gradients, and masked operations handle attention masks. These mappings show how vector hardware supports common ML primitives. {#tbl-vector}
 
 These efficiency gains extend beyond instruction count reduction. Memory bandwidth utilization improves as vector loads transfer multiple values per operation, and energy efficiency increases because control logic is amortized across many data elements. These improvements compound across the deep layers of modern neural networks, where billions of element-wise operations execute per forward pass. The architectural pattern is not new. The Cray-1[^fn-cray-vector-legacy] pioneered the same approach for scientific computing in 1975 [@jordan1982], but neural networks have given it unprecedented commercial importance.
 
@@ -1450,16 +1450,16 @@ vrsqrt.v v5, v1          # Vector reciprocal-square-root path
 
 :::
 
-Each SFU implements a specific function through specialized circuitry. For instance, a ReLU unit performs the comparison and selection in dedicated logic, eliminating branching overhead. Square root operations use hardware implementations of algorithms like Newton-Raphson with fixed iteration counts, providing predictable latency bounds. Exponential and logarithmic functions often combine small lookup tables with hardware interpolation circuits. @Tbl-sfu summarizes the various hardware implementations and their typical latencies, spanning from single-cycle activations to logarithmic-time reductions.
+Specialized function paths implement nonlinear and reduction primitives through architecture-specific circuitry. A ReLU can use compare-and-select logic; square root, exponential, and logarithmic functions may use iterative approximations, lookup tables, or interpolation. @Tbl-sfu summarizes representative mechanisms and their qualitative latency behavior.
 
-| **Function Unit**    | **Operation**       | **Implementation Strategy**           | **Illustrative Latency** |
-|:---------------------|:--------------------|:--------------------------------------|-------------------------:|
-| **Activation Unit**  | ReLU, sigmoid, tanh | Piece-wise approximation circuits     |               1–2 cycles |
-| **Statistics Unit**  | Mean, variance      | Parallel reduction trees              |         $\log(N)$ cycles |
-| **Exponential Unit** | exp, log            | Table lookup + hardware interpolation |               2–4 cycles |
-| **Root/Power Unit**  | sqrt, rsqrt         | Fixed-iteration Newton-Raphson        |               4–8 cycles |
+| **Function Unit**    | **Operation**           | **Implementation Strategy**                    | **Illustrative Latency**    |
+|:---------------------|:------------------------|:-----------------------------------------------|:----------------------------|
+| **Activation Unit**  | ReLU                    | Compare-and-select or maximum                  | Low; architecture-dependent |
+| **Statistics Unit**  | Mean, variance          | Parallel reduction trees                       | Grows with reduction depth  |
+| **Exponential Unit** | exp, log, sigmoid, tanh | Approximation, table lookup, and interpolation | Architecture-dependent      |
+| **Root/Power Unit**  | sqrt, rsqrt             | Iterative or approximation hardware            | Architecture-dependent      |
 
-: **Special Function Units**: Dedicated hardware implementations of common mathematical functions (like relu, sigmoid, and reciprocal square root) accelerate machine learning computations by eliminating software overhead and enabling parallel processing of vector data. The latency ranges are representative design targets, not universal product specifications; the important point is that nonlinear primitives have different hardware costs. {#tbl-sfu}
+: **Special Function Units**: Dedicated paths reduce instruction overhead for nonlinear and reduction primitives. Implementations and latency are architecture-dependent; the table describes mechanisms rather than universal cycle counts. {#tbl-sfu}
 
 Vector operations, matrix operations, and special function units constitute the three core computational primitives, but primitives alone do not determine throughput. The primitives tell us *what* operations accelerators perform efficiently; the execution models tell us *how* those operations are parallelized across thousands of processing elements. This distinction matters because the same matrix multiplication can achieve 10 percent or 90 percent of peak performance depending on how it maps to the execution model: a difference driven by thread organization, memory access patterns, and synchronization overhead rather than algorithmic complexity.
 
@@ -2388,7 +2388,7 @@ The precision format used in hardware design has cascading implications across t
 | **Turing**                                   |     2018 | FP16, INT8, INT4, INT1                                         | FP64, FP32, FP16, INT8             |
 | **Ampere**\index{NVIDIA!Ampere architecture} |     2020 | FP64, TF32\index{TF32!tensor float 32}, BF16, FP16, INT8, INT4 | FP64, FP32, FP16, BF16, INT8       |
 
-: **Precision Support Evolution**: GPU architectures progressively expanded support for lower-precision data types, enabling performance gains and efficiency improvements in AI workloads. Early architectures primarily used FP32, while later generations incorporated FP16, BF16, INT8, and INT4 to accelerate both training and inference tasks. {#tbl-nvidia-numerics tbl-colwidths="[15,10,38,37]"}
+: **Precision Support Evolution**: From Volta through Ampere, Tensor Core support expanded from FP16 to TF32, BF16, and integer formats, broadening the precision choices available to training and inference; the CUDA-core column shows the separate scalar/vector formats each generation supports. {#tbl-nvidia-numerics tbl-colwidths="[15,10,38,37]"}
 
 As AI models continue to scale, precision support connects the compute primitive discussion back to the memory wall: lower-bit formats matter when they reduce the bytes moved and keep the hardware's matrix engines fed. The remaining architectural question is how these execution units, precision formats, and memory paths integrate into complete accelerator systems. Architectural integration\index{Architectural Integration!execution unit organization} determines how efficiently computational primitives become usable accelerator throughput. SIMD lanes, tensor cores, and systolic arrays are building blocks, but their full-chip organization varies significantly across AI processors; the choice of execution units, their numerical precision support, and their connectivity shape how effectively hardware can scale for deep learning workloads.
 
@@ -3195,24 +3195,24 @@ plt.close()
 
 Many ML workloads combine regular dense kernels with irregular memory pressure\index{Memory Access!irregular patterns} from sparsity, embedding lookups, variable sequence lengths, attention/KV-cache traffic, and small batches. The dense parts are exactly why accelerators work so well; the irregular parts are where standard caching mechanisms and memory hierarchies struggle, leading to increased memory latency and inefficient bandwidth utilization.
 
-Comparing ML memory access patterns against traditional computing workloads reveals the scale of the challenge. Traditional workloads, such as scientific computing, general-purpose CPU applications, and database processing, typically exhibit well-defined memory access characteristics that benefit from standard caching and prefetching techniques. ML workloads, on the other hand, introduce highly dynamic access patterns (@tbl-traditional-vs-ml-mem) that challenge conventional memory optimization strategies.
+Many ML systems contain both access regimes. @Tbl-traditional-vs-ml-mem contrasts regular dense kernels with irregular components such as embeddings, sparse operators, and input-dependent routing.
 
 ```{=latex}
 \begingroup
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Feature**                      | **Traditional Computing Workloads**                                     | **Machine Learning Workloads**                               |
-|:---------------------------------|:------------------------------------------------------------------------|:-------------------------------------------------------------|
-| **Memory Access Pattern**        | Regular and predictable (e.g., sequential reads, structured patterns)   | Irregular and dynamic (e.g., sparsity, attention mechanisms) |
-| **Cache Locality**               | High temporal and spatial locality                                      | Often low locality, especially in large models               |
-| **Data Reuse**                   | Structured loops with frequent data reuse                               | Sparse and dynamic reuse depending on layer type             |
-| **Data Dependencies**            | Well-defined dependencies allow efficient prefetching                   | Variable dependencies based on network structure             |
-| **Workload Example**             | Scientific computing (e.g., matrix factorizations, physics simulations) | Neural networks (e.g., CNNs, Transformers, sparse models)    |
-| **Memory Bottleneck**            | DRAM latency, cache misses                                              | Off-chip bandwidth constraints, memory fragmentation         |
-| **Impact on Energy Consumption** | Moderate, driven by FLOP-heavy execution                                | High, dominated by data movement costs                       |
+| **Feature**            | **Regular Dense Kernels**                               | **Irregular ML Components**                          |
+|:-----------------------|:--------------------------------------------------------|:-----------------------------------------------------|
+| **Access Pattern**     | Contiguous or tiled                                     | Indirect, scattered, or input-dependent              |
+| **Cache Locality**     | Often high after tiling                                 | Often lower and workload-dependent                   |
+| **Data Reuse**         | Structured across tiles or batches                      | Sparse or dynamic, depending on the operator         |
+| **Dependencies**       | Static loop nests                                       | Input-dependent routing or variable shapes           |
+| **Examples**           | GEMM, convolution, dense attention                      | Embedding lookup, unstructured sparsity, MoE routing |
+| **Primary Pressure**   | Compute or bandwidth, depending on arithmetic intensity | Latency, bandwidth, metadata, and load imbalance     |
+| **Energy Consequence** | Depends on reuse and memory tier                        | Extra movement and metadata can increase energy      |
 
-: **Memory Access Characteristics**: Traditional workloads exhibit predictable, sequential memory access benefiting from standard caching, while machine learning workloads introduce irregular and dynamic patterns due to sparsity and data dependencies. These differences inform the design of memory systems that efficiently support modern AI applications. {#tbl-traditional-vs-ml-mem}
+: **Regular and Irregular Memory Access**: Regular dense kernels expose tileable reuse and predictable addresses, whereas irregular ML components rely more on indirect or input-dependent access, weakening caching and prefetching and adding metadata or load-balance overhead. A single model may contain both regimes. {#tbl-traditional-vs-ml-mem}
 
 ```{=latex}
 \endgroup
@@ -3238,16 +3238,16 @@ At the highest level, large-capacity but slow storage devices provide long-term 
 
 The key pattern in @tbl-memory-hierarchy is that larger, more distant storage generally provides greater capacity at higher latency and energy cost. The ratios are not uniform between adjacent levels, and nearby register or SRAM accesses need not cost more than every arithmetic operation.
 
-| **Memory Level**                                 |               **Approx. Latency**               |    **Bandwidth**    | **Capacity** | **Example Use in Deep Learning**                                 |
-|:-------------------------------------------------|:-----------------------------------------------:|:-------------------:|:------------:|:-----------------------------------------------------------------|
-| **Registers**                                    |                     ~1 cycle                    |       Highest       |  Few values  | Storing operands for immediate computation                       |
-| **L1/L2 Cache (SRAM)**\index{SRAM!on-chip cache} |                    ~1--10 ns                    |         High        |    KB--MB    | Caching frequently accessed activations and small weight blocks  |
-| **Scratchpad Memory**                            |                    ~5--20 ns                    |         High        |      MB      | Software-managed storage for intermediate computations           |
-| **Device DRAM (HBM, GDDR, or LPDDR)**            |                   ~50--150 ns                   | Moderate--Very High |      GB      | Storing model parameters and activations that do not fit on-chip |
-| **Host DRAM (typically DDR)**                    | ~50--150 ns locally, plus interconnect transfer |       Moderate      |    GB--TB    | Staging or offloading data outside accelerator memory            |
-| **Flash Storage (SSD/NVMe)**                     |                  ~100 µs--1 ms                  |         Low         |      TB      | Storing pretrained models and checkpoints for later loading      |
+| **Memory Level**                                 | **Relative Latency**                |    **Bandwidth**    | **Relative Capacity** | **Example Use in Deep Learning**                                 |
+|:-------------------------------------------------|:------------------------------------|:-------------------:|:----------------------|:-----------------------------------------------------------------|
+| **Registers**                                    | Lowest                              |       Highest       | Tiny                  | Storing operands for immediate computation                       |
+| **L1/L2 Cache (SRAM)**\index{SRAM!on-chip cache} | Very low                            |         High        | Small                 | Caching frequently accessed activations and small weight blocks  |
+| **Scratchpad Memory**                            | Very low                            |         High        | Small to medium       | Software-managed storage for intermediate computations           |
+| **Device DRAM (HBM, GDDR, or LPDDR)**            | High                                | Moderate--Very High | Large                 | Storing model parameters and activations that do not fit on-chip |
+| **Host DRAM (typically DDR)**                    | High locally; transfer adds latency |       Moderate      | Large to very large   | Staging or offloading data outside accelerator memory            |
+| **Flash Storage (SSD/NVMe)**                     | Very high                           |         Low         | Very large            | Storing pretrained models and checkpoints for later loading      |
 
-: **Memory Hierarchy Trade-Offs**: AI accelerators use a multilevel memory hierarchy to balance performance and capacity. Each level provides distinct latency, bandwidth, and capacity characteristics that dictate how neural network components (weights, activations, and intermediate results) should be allocated to minimize bottlenecks and maximize throughput. {#tbl-memory-hierarchy tbl-colwidths="[23,18,15,13,35]"}
+: **Memory Hierarchy Trade-Offs**: AI accelerators use a multilevel memory hierarchy to balance performance and capacity. Each level provides distinct latency, bandwidth, and capacity characteristics that dictate how neural network components (weights, activations, and intermediate results) should be allocated to minimize bottlenecks and maximize throughput. Relative labels describe the typical ordering; exact values depend on architecture. @Sec-appdx-machine-foundations-latencies-every-programmer-know-e89f supplies registry-backed reference latencies. {#tbl-memory-hierarchy tbl-colwidths="[23,18,15,13,35]"}
 
 The hierarchy invites an apparently simple solution: build larger, faster off-chip memory and eliminate the need for on-chip SRAM entirely. The answer is rooted in physics: signal propagation within and between chips imposes a hard latency floor.
 
@@ -3699,14 +3699,13 @@ The ridge point\index{Ridge Point!hardware comparison}, the hardware balance $I_
 \renewcommand{\arraystretch}{1.5}
 ```
 
-| **Accelerator**          |           **Peak FP16**            |            **Bandwidth**             |    **Ridge Point**    |
-|:-------------------------|:----------------------------------:|:------------------------------------:|:---------------------:|
-| **GPU (2017-era)**       |        $\sim 10^2$ TFLOP/s         |           $\sim 10^3$ GB/s           | $\sim 10^2$ FLOP/byte |
-| **GPU (2020-era)**       |        $\sim 10^2$ TFLOP/s         | $\sim 10^3$ GB/s to $\sim 10^0$ TB/s | $\sim 10^2$ FLOP/byte |
-| **GPU (2023-era)**       |        $\sim 10^3$ TFLOP/s         |              a few TB/s              | $\sim 10^2$ FLOP/byte |
-| **TPU-class (2023-era)** | $\sim 10^2$ to $\sim 10^3$ TFLOP/s |            $\sim 1$ TB/s             | $\sim 10^2$ FLOP/byte |
+| **NVIDIA Accelerator**                          |                  **Peak FP16**                   |                **Bandwidth**                |            **Ridge Point**            |
+|:------------------------------------------------|:------------------------------------------------:|:-------------------------------------------:|:-------------------------------------:|
+| **V100 (`{python} RooflineGap.v100_year_str`)** |   `{python} RooflineGap.v100_tflop_per_s_str`    | `{python} RooflineGap.v100_bw_tb_per_s_str` | `{python} RooflineGap.v100_ridge_str` |
+| **A100 (`{python} RooflineGap.a100_year_str`)** | `{python} RooflineGap.a100_fp16_tflop_per_s_str` | `{python} RooflineGap.a100_bw_tb_per_s_str` | `{python} RooflineGap.a100_ridge_str` |
+| **H100 (`{python} RooflineGap.h100_year_str`)** | `{python} RooflineGap.h100_fp16_tflop_per_s_str` | `{python} RooflineGap.h100_bw_tb_per_s_str` | `{python} RooflineGap.h100_ridge_str` |
 
-: **Hardware Ridge Points**: Representative ridge point ranges for different accelerator generations, determined by their compute-to-bandwidth ratios. Values shown are order-of-magnitude approximations; actual ridge points vary by precision mode and specific SKU. Higher ridge points require higher FLOP/byte intensity to achieve peak utilization. {#tbl-ridge-points}
+: **Hardware Ridge Points**: Registry-backed FP16 peak throughput, memory bandwidth, and resulting ridge point for three NVIDIA generations. The ridge rises from V100 to H100 because compute throughput grows faster than bandwidth; these values are hardware-specific rather than universal generation averages. {#tbl-ridge-points}
 
 ```{=latex}
 \endgroup
@@ -3749,7 +3748,7 @@ Depthwise convolution\index{Depthwise Convolution!low arithmetic intensity}, emb
 | **LayerNorm**                              | 1--2 FLOP/byte           | Memory-bound                                    | **GPT-2/Llama**                 |
 | **Embedding lookup**                       | $<1$ FLOP/byte           | Memory-bound                                    | **DLRM**                        |
 
-: **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. Large, well-tiled convolutions and batched GEMMs can be compute-bound, while small-batch dense projections, MobileNet depthwise layers, attention softmax, normalization, and DLRM embeddings are often memory-bound. {#tbl-roofline-operations tbl-colwidths="[25,25,25,25]"}
+: **Operations on the Roofline**: Neural network layers span a wide range of arithmetic intensities. Large, well-tiled convolutions and batched GEMMs can be compute-bound, while MobileNet depthwise layers, attention softmax, normalization, and DLRM embeddings are often memory-bound. {#tbl-roofline-operations tbl-colwidths="[25,25,25,25]"}
 
 ```{=latex}
 \endgroup
@@ -4137,12 +4136,12 @@ The situation becomes even more extreme for element-wise operations like normali
 
 The roofline analysis directly informs optimization priorities, summarized in @tbl-optimization-intensity-regime.
 
-| **Intensity regime**          | **Typical operations**                         | **Optimization priority**                | **Common techniques**                                                                 | **Expected impact**                                                                                                                                |
-|:------------------------------|:-----------------------------------------------|:-----------------------------------------|:--------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------------------------------|
-| High AI ($>200$ FLOP/byte)    | Large convolutions                             | Maximize compute utilization.            | Tensor Cores, thread-block tuning, and high occupancy.                                | Can approach 90--95% of peak TFLOP/s.                                                                                                              |
-| Medium AI (20--200 FLOP/byte) | Medium-sized dense layers                      | Balance compute and memory optimization. | Larger batches, register tiling, and fusion with adjacent operations.                 | Can move from memory-bound to compute-bound execution.                                                                                             |
-| Low AI ($<20$ FLOP/byte)      | Small dense layers and element-wise operations | Reduce memory traffic.                   | Aggressive operator fusion, reduced precision (FP16 → INT8), and algorithmic changes. | Fusion alone can yield 2--4$\times$ speedups.                                                                                                      |
-| Very low AI ($<2$ FLOP/byte)  | Normalization layers and activation functions  | Eliminate memory round-trips.            | Mandatory fusion with adjacent operations and in-place computation where possible.    | Fusion can yield 10$\times$ speedups; for example, LayerNorm combined with the Gaussian Error Linear Unit (GELU) can become a single fused kernel. |
+| **Intensity regime**          | **Typical operations**                         | **Optimization priority**                | **Common techniques**                                                                 | **Expected impact**                                                            |
+|:------------------------------|:-----------------------------------------------|:-----------------------------------------|:--------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------|
+| High AI ($>200$ FLOP/byte)    | Large convolutions                             | Maximize compute utilization.            | Tensor Cores, thread-block tuning, and high occupancy.                                | Raises sustained compute utilization when the kernel already clears the ridge. |
+| Medium AI (20--200 FLOP/byte) | Medium-sized dense layers                      | Balance compute and memory optimization. | Larger batches, register tiling, and fusion with adjacent operations.                 | Can move the binding bottleneck between memory and compute.                    |
+| Low AI ($<20$ FLOP/byte)      | Small dense layers and element-wise operations | Reduce memory traffic.                   | Aggressive operator fusion, reduced precision (FP16 → INT8), and algorithmic changes. | Reduces external-memory traffic when fusion or layout changes are legal.       |
+| Very low AI ($<2$ FLOP/byte)  | Normalization layers and activation functions  | Eliminate memory round-trips.            | Fuse with adjacent operations and use in-place computation where legal.               | Removes intermediate round-trips when adjacent operations can be fused.        |
 
 : **Optimization by Arithmetic Intensity Regime**: Roofline position determines whether an optimization should chase compute utilization, memory-traffic reduction, or complete elimination of memory round-trips. The lower the arithmetic intensity, the more valuable fusion and data-movement avoidance become. {#tbl-optimization-intensity-regime tbl-colwidths="[15,18,14,25,28]"}
 
@@ -4812,8 +4811,6 @@ class FusionBenefitsCalc:
     fused_mb_str = fmt_memory(fused_memory, unit=MB, precision=1, commas=False)
 ```
 
-@Tbl-fusion-benefits quantifies the ideal external-memory traffic benefit before the section generalizes the rule.
-
 @Tbl-fusion-benefits highlights the impact of operation fusion on memory efficiency. By keeping intermediate results in registers or local memory rather than writing them to main memory, fusion reduces external traffic. For three separate pointwise inference kernels, the idealized naïve path reads and writes one tensor per operation, whereas the fused path reads the input once and writes the output once.
 
 | **Execution Model** | **External Tensor Payloads** |              **Traffic (MB)**              |
@@ -5287,14 +5284,14 @@ Traditional software runtimes are designed for managing general-purpose program 
 \renewcommand{\arraystretch}{1.3}
 ```
 
-| **Aspect**                  | **Traditional Runtime**                  | **AI Runtime**                                          |
-|:----------------------------|:-----------------------------------------|:--------------------------------------------------------|
-| **Execution Model**         | Sequential or multi-threaded execution   | Massively parallel tensor execution                     |
-| **Task Scheduling**         | CPU thread management                    | Kernel dispatch across accelerators                     |
-| **Memory Management**       | Fine-grained allocation (stack and heap) | Dynamic tensor allocation, buffer reuse                 |
-| **Optimization Priorities** | Low-latency instruction execution        | Minimizing memory stalls, maximizing parallel execution |
-| **Adaptability**            | Mostly static execution plan             | Adapts to batch size and hardware availability          |
-| **Target Hardware**         | CPUs (general-purpose execution)         | CPUs, GPUs, TPUs, and custom accelerators               |
+| **Aspect**                  | **Traditional Runtime**                  | **AI Runtime**                                            |
+|:----------------------------|:-----------------------------------------|:----------------------------------------------------------|
+| **Execution Model**         | Sequential or multi-threaded execution   | Massively parallel tensor execution                       |
+| **Task Scheduling**         | CPU thread management                    | Kernel dispatch across accelerators                       |
+| **Memory Management**       | Fine-grained allocation (stack and heap) | Dynamic tensor allocation, buffer reuse                   |
+| **Optimization Priorities** | Low-latency instruction execution        | Minimizing memory stalls, maximizing parallel execution   |
+| **Adaptability**            | Mostly static execution plan             | Selects among prepared shape profiles and kernel variants |
+| **Target Hardware**         | CPUs (general-purpose execution)         | CPUs, GPUs, TPUs, and custom accelerators                 |
 
 : **Runtime Execution Models**: Traditional runtimes prioritize sequential or multi-threaded instruction processing, while AI runtimes use massively parallel tensor operations for accelerated computation on machine learning workloads. This divergence necessitates specialized AI runtime architectures designed for efficient parallelization and memory management of large-scale tensor data. {#tbl-runtime-comparison tbl-colwidths="[22,35,43]"}
 

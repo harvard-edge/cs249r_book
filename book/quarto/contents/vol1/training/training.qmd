@@ -4266,7 +4266,7 @@ The `autocast` context applies a framework-defined dtype policy to eligible oper
 | **A100 (Ampere)** | BF16 or FP16                 | BF16 avoids FP16 loss scaling; TF32 can accelerate eligible FP32 matrix operations                                   |
 | **H100 (Hopper)** | BF16, FP16, or validated FP8 | FP8 requires an FP8-aware recipe; `{python} MixedPrecisionHardwareDetail.h100_fp8_tflop_per_s_str` is a peak ceiling |
 
-: **Precision Strategy by GPU Architecture**: Each generation introduces wider precision support, reducing the engineering burden of loss scaling while increasing throughput. {#tbl-hw-precision-strategy tbl-colwidths="[13,28,59]"}
+: **Precision Strategy by GPU Architecture**: V100 supports FP16 Tensor Core training, A100 adds native BF16, and H100 adds FP8 paths whose use requires recipe-specific validation. {#tbl-hw-precision-strategy tbl-colwidths="[13,28,59]"}
 
 An illustrative single-GPU GPT-2 scenario (`{python} CrossGenPrecisionCalc.gpt2_params_b_str`) shows how assumed throughput might evolve with hardware and precision: `{python} CrossGenPrecisionCalc.v100_fp32_sps_str` for V100 FP32, `{python} CrossGenPrecisionCalc.v100_fp16_sps_str` for V100 FP16, `{python} CrossGenPrecisionCalc.a100_bf16_sps_str` for A100 BF16, and `{python} CrossGenPrecisionCalc.h100_fp8_sps_str` for H100 FP8. These values are scenario inputs rather than a controlled cross-generation benchmark, because software versions, kernels, batch shapes, and FP8 recipes also change. The valid systems lesson is that low-precision algorithms and specialized hardware must be evaluated together.
 
@@ -4683,13 +4683,13 @@ This equivalence holds when each example's computation is identical and the loss
 
 Gradient accumulation exchanges memory capacity for computation time. @Tbl-gradient-accumulation-tradeoffs separates the memory benefit from the compute and scheduling costs that remain.
 
-| **Dimension**   | **Effect**                                                                                               |
-|:----------------|:---------------------------------------------------------------------------------------------------------|
-| **Memory**      | $\mathcal{O}(b)$ instead of $\mathcal{O}(B)$, yielding a $k\times$ reduction in activation memory        |
-| **Computation** | Unchanged total FLOPs, as all $B$ examples are still processed                                           |
-| **Time**        | $k$ forward and backward passes execute before each optimizer step, introducing synchronization overhead |
+| **Dimension**   | **Effect**                                                                                                                                    |
+|:----------------|:----------------------------------------------------------------------------------------------------------------------------------------------|
+| **Memory**      | $\mathcal{O}(b)$ instead of $\mathcal{O}(B)$, yielding a $k\times$ reduction in activation memory                                             |
+| **Computation** | Unchanged total FLOPs, as all $B$ examples are still processed                                                                                |
+| **Time**        | $k$ micro-batch forward and backward passes precede each optimizer step; smaller micro-batches can reduce utilization and add launch overhead |
 
-: **Gradient Accumulation Trade-Offs**: Accumulation reduces activation memory by processing micro-batches but preserves total compute and adds synchronization overhead before each optimizer step. {#tbl-gradient-accumulation-tradeoffs}
+: **Gradient Accumulation Trade-Offs**: Accumulation reduces resident activation memory and preserves total example-level arithmetic. Wall-clock cost depends on micro-batch efficiency, kernel-launch overhead, and whether distributed synchronization is deferred until the accumulated update. {#tbl-gradient-accumulation-tradeoffs}
 
 Accumulation preserves the total example-level arithmetic but can change efficiency because smaller micro-batches use the accelerator differently and launch kernels more often. With distributed `no_sync()` accumulation, one gradient synchronization occurs after the $k$ local micro-batches rather than after each one. The model in @eq-gradient-accumulation-overhead gives the per-update time:
 $$
@@ -4978,20 +4978,20 @@ Both techniques introduce explicit trade-offs. Activation checkpointing recomput
 
 These techniques target different constraints. Prefetching addresses data starvation, mixed precision can accelerate eligible computation and reduce tensor storage, FlashAttention reduces attention memory traffic, and gradient accumulation enables effective batches that would otherwise exceed activation memory. Their benefit depends on the measured bottleneck, and applying one does not guarantee that it removes the end-to-end constraint.
 
-| **Aspect**                    | **Prefetching and Overlapping**                                    | **Mixed-Precision Training**                                | **Gradient Accumulation and Checkpointing**                              |
-|:------------------------------|:-------------------------------------------------------------------|:------------------------------------------------------------|:-------------------------------------------------------------------------|
-| **Primary Goal**              | Minimize data transfer delays and maximize accelerator utilization | Reduce memory consumption and computational overhead        | Overcome memory limitations during backpropagation and parameter updates |
-| **Key Mechanism**             | Asynchronous data loading and parallel processing                  | Combining lower- and higher-precision computation           | Simulating larger batch sizes and selective activation storage           |
-| **Memory Impact**             | Increases memory usage for prefetch buffer                         | Can reduce weights, activations, and communicated tensors   | Reduces resident activations; parameter-gradient size is unchanged       |
-| **Computation Speed**         | Improves by reducing idle time                                     | Accelerates computations using FP16                         | May slow down due to recomputations in checkpointing                     |
-| **Scalability**               | Highly scalable, especially for large datasets                     | Enables training of larger models                           | Allows training deeper models on limited hardware                        |
-| **Hardware Requirements**     | Benefits from fast storage and multi-core CPUs                     | Requires GPUs with FP16 support (for example, Tensor Cores) | Works on standard hardware                                               |
-| **Implementation Complexity** | Moderate (requires tuning of prefetch parameters)                  | Low to moderate (with framework support)                    | Moderate (requires careful segmentation and accumulation)                |
-| **Main Benefits**             | Reduces training time, improves hardware utilization               | Faster training, larger models, reduced memory usage        | Enables larger batch sizes and deeper models                             |
-| **Primary Challenges**        | Tuning buffer sizes, increased memory usage                        | Potential numerical instability, loss scaling needed        | Increased computational overhead, slower parameter updates               |
-| **Ideal Use Cases**           | Large datasets, complex preprocessing                              | Large-scale models, especially in NLP and computer vision   | Deep networks (50+ layers), memory-constrained environments              |
+| **Aspect**                    | **Prefetching and Overlapping**                                    | **Mixed-Precision Training**                                             | **Gradient Accumulation and Checkpointing**                              |
+|:------------------------------|:-------------------------------------------------------------------|:-------------------------------------------------------------------------|:-------------------------------------------------------------------------|
+| **Primary Goal**              | Minimize data transfer delays and maximize accelerator utilization | Reduce tensor storage and accelerate eligible lower-precision operations | Overcome memory limitations during backpropagation and parameter updates |
+| **Key Mechanism**             | Asynchronous data loading and parallel processing                  | Combining lower- and higher-precision computation                        | Simulating larger batch sizes and selective activation storage           |
+| **Memory Impact**             | Increases memory usage for prefetch buffer                         | Can reduce weights, activations, and communicated tensors                | Reduces resident activations; parameter-gradient size is unchanged       |
+| **Computation Speed**         | Improves by reducing idle time                                     | Can accelerate eligible FP16/BF16 operations on supported hardware       | May slow down due to recomputations in checkpointing                     |
+| **Scalability**               | Highly scalable, especially for large datasets                     | Enables training of larger models                                        | Allows training deeper models on limited hardware                        |
+| **Hardware Requirements**     | Benefits from fast storage and multi-core CPUs                     | Supported lower-precision accelerator paths                              | Works on standard hardware                                               |
+| **Implementation Complexity** | Moderate (requires tuning of prefetch parameters)                  | Low to moderate (with framework support)                                 | Moderate (requires careful segmentation and accumulation)                |
+| **Main Benefits**             | Reduces training time, improves hardware utilization               | Faster training, larger models, reduced memory usage                     | Enables larger batch sizes and deeper models                             |
+| **Primary Challenges**        | Tuning buffer sizes, increased memory usage                        | Potential numerical instability, loss scaling needed                     | Increased computational overhead, slower parameter updates               |
+| **Ideal Use Cases**           | Large datasets, complex preprocessing                              | Large-scale models, especially in NLP and computer vision                | Memory-constrained batches or activation-heavy models                    |
 
-: **Optimization Strategies**: Prefetching, mixed-precision training, and gradient accumulation address distinct bottlenecks in AI training pipelines: data transfer, memory consumption, and backpropagation. Selecting an appropriate strategy balances implementation complexity against gains in speed and resource utilization, depending on hardware and workload characteristics. {#tbl-optimization}
+: **Optimization Strategies**: The table compares prefetching, mixed precision, and the combined use of gradient accumulation and checkpointing. The first targets input stalls, the second changes storage and eligible arithmetic, and the third trades smaller resident activation sets for micro-batch or recomputation overhead. {#tbl-optimization}
 
 The table compares techniques in isolation; the GPT-2 walkthrough shows how those techniques combine when one model must fit in memory, run fast enough, and stay within a realistic cost envelope.
 

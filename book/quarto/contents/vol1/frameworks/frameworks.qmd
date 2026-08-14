@@ -1471,7 +1471,7 @@ The resulting workflow is a systems decision. Rapid prototyping favors eager exe
 | **Debugging**            | Easy (standard Python)                          | Difficult (symbolic)                                                      | Moderate (mixed)                        |
 | **Performance**          | Baseline                                        | High (optimized)                                                          | High (compiled regions)                 |
 
-: **Execution Model Trade-Offs**: Each execution model occupies a distinct position in the flexibility-optimization trade-off space. Eager execution maximizes debugging flexibility but sacrifices optimization potential; static graphs maximize optimization but sacrifice dynamic control flow; hybrid JIT compilation attempts both by compiling captured regions while falling back to eager for unsupported patterns. {#tbl-framework-execution-models tbl-colwidths="[25,25,25,25]"}
+: **Execution Model Trade-Offs**: Each execution model occupies a distinct position in the flexibility-optimization trade-off space. Eager execution maximizes debugging flexibility but limits cross-operation optimization; static graphs maximize optimization but require control flow to be represented in the graph; hybrid JIT compilation compiles captured regions while falling back to eager execution for unsupported patterns. {#tbl-framework-execution-models tbl-colwidths="[25,25,25,25]"}
 
 Eager mode's primary value is in the iteration loop quantified in @sec-ml-workflow-understanding-ml-lifecycle-ca87: it allows using standard Python debuggers (like PDB) to inspect variables mid-execution, whereas graph-mode debugging often requires specialized framework tools. This immediate feedback accelerates the prototyping phase of the ML lifecycle.
 
@@ -1592,22 +1592,22 @@ class CompilationBenchmark:
 
 : **Illustrative Training and Inference Throughput**: Hypothetical throughput and compilation-time inputs for comparing execution modes on an NVIDIA A100 GPU with batch size 32. These values are assumptions rather than benchmark measurements. Within this scenario, the table implies torch.compile speedups of `{python} CompilationBenchmark.torch_compile_speedup_range_mult_str` over eager mode, while TensorRT implies `{python} CompilationBenchmark.tensorrt_speedup_range_mult_str` speedups but requires longer compilation and is inference only. {#tbl-training-benchmark tbl-colwidths="[20,20,20,20,20]"}
 
-These throughput differences across execution modes raise a practical question—which framework execution strategy best serves each workload archetype. The optimal strategy depends on which iron law term dominates the workload, and @tbl-framework-archetype-strategy aligns each recurring archetype to its recommended execution strategy.
+These throughput differences across execution modes raise a practical question—which framework execution strategy best serves each workload archetype. The appropriate strategy depends on the workload, backend, and dominant iron law term, and @tbl-framework-archetype-strategy maps each recurring archetype to a candidate execution strategy.
 
-| **Archetype**                 | **Dominant iron law Term**                                                 | **Optimal Framework Strategy**           | **Rationale**                                                                                                                                                         |
+| **Archetype**                 | **Dominant iron law Term**                                                 | **Candidate Framework Strategy**         | **Rationale**                                                                                                                                                         |
 |:------------------------------|:---------------------------------------------------------------------------|:-----------------------------------------|:----------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **ResNet-50 (Compute Beast)** | $\frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ (Compute)               | Compiled dense kernels                   | Regular dense kernels benefit from layout selection, precision lowering, and backend specialization; fusion helps most in surrounding memory- or launch-bound regions |
 | **GPT-2 (Bandwidth Hog)**     | $\frac{D_{\text{vol}}}{\text{BW}}$ (Memory Bandwidth)                      | Fused attention + graph compilation      | Fused attention and compilation reduce HBM round-trips and improve cache reuse                                                                                        |
 | **DLRM (Sparse Scatter)**     | $\frac{D_{\text{vol}}}{\text{BW}_{\text{random}}}+L_{\text{lat, network}}$ | Eager execution with specialized kernels | Embedding lookups are inherently irregular and dynamic; compilation gains are small                                                                                   |
 | **DS-CNN (Tiny Constraint)**  | $L_{\text{lat}}$ (Overhead)                                                | Ahead-of-time microcontroller runtime    | Sub-ms inference; every microsecond of Python overhead is unacceptable                                                                                                |
 
-: **Framework execution strategy by workload**: Recommended execution strategy for each workload archetype, aligned to the dominant iron law term. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
+: **Framework execution strategy by workload**: Candidate execution strategies for each workload archetype, aligned to the dominant iron law term. {#tbl-framework-archetype-strategy tbl-colwidths="[17,28,22,33]"}
 
 ::: {#lhs-frameworks-framework-strategy-by-archetype .callout-lighthouse title="Framework strategy by archetype"}
 
 The four recurring archetypes in @tbl-framework-archetype-strategy trace one principle across the framework: compilation benefits scale with how much of the workload is optimizable.
 
-**Systems insight**: In the illustrative scenario, Compute Beasts (the ResNet-50 row in @tbl-training-benchmark) benefit most because their dense kernels expose the most surface for layout selection, precision lowering, and fusion. Sparse Scatter workloads such as DLRM gain little because their bottleneck, irregular embedding lookups, leaves almost nothing for the compiler to optimize.
+**Systems insight**: In the illustrative scenario, Compute Beasts such as the ResNet-50 row in @tbl-training-benchmark benefit because their dense kernels expose substantial surface for layout selection, precision lowering, and fusion. Sparse Scatter workloads such as DLRM can gain less when irregular embedding lookups leave limited compiler scope.
 
 :::
 
@@ -3009,7 +3009,7 @@ The cost of moving data between devices varies by orders of magnitude depending 
 | **NVLink 3.0**   | `{python} DeviceBandwidthHierarchy.nvlink_a100_per_direction_gb_per_s_str` per direction (`{python} DeviceBandwidthHierarchy.nvlink_a100_gb_per_s_str` bidirectional) | `{python} DeviceBandwidthHierarchy.nvlink_4mb_ms_str` | GPU to GPU     |
 | **GPU Memory**   |                                                        `{python} DeviceBandwidthHierarchy.a100_bw_gb_per_s_str`                                                       |   `{python} DeviceBandwidthHierarchy.hbm_4mb_ms_str`  | On device      |
 
-: **Device Transfer Overhead**: Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2$\times$ total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). Transfer times dominate for small operations, making device placement critical for performance. {#tbl-device-transfer-overhead tbl-colwidths="[25,25,20,30]"}
+: **Device Transfer Overhead**: Transfer time for a 4 MB tensor across different interconnects. PCIe bandwidth shown is unidirectional (typical for GPU transfers), with full-duplex operation providing 2$\times$ total bandwidth. NVLink bandwidth is bidirectional (300 GB/s per direction). These transfer costs can dominate lightweight operations, making device placement critical. {#tbl-device-transfer-overhead tbl-colwidths="[25,25,20,30]"}
 
 These numbers connect directly to the iron law of performance. Every cross-device transfer contributes to $(D_{\text{vol}}/\text{BW})$ at a fraction of on-device bandwidth. Dividing 1 GB by the stated PCIe 4.0 peak gives `{python} DeviceBandwidthHierarchy.pcie4_1gb_ms_str`, a bandwidth-only lower bound that omits protocol, launch, synchronization, topology, and contention overhead. Transfers can dominate lightweight or small-batch workloads, so deployed latency must be measured rather than inferred from peak bandwidth alone.
 
@@ -3142,7 +3142,7 @@ The same synchronization discipline has one operational trap: debug code often l
 | **Compute Throughput** | Achieved/peak FLOP/s       | Reduce memory bottlenecks          |
 | **Tensor Core Active** | Time in Tensor Core ops    | Verify mixed-precision utilization |
 
-: **Nsight Compute Metrics**: Key metrics for ML kernel optimization. Low values indicate specific optimization opportunities. Nsight Systems identifies which kernels dominate runtime, and Nsight Compute reveals why those kernels underperform. {#tbl-nsight-metrics}
+: **Nsight Compute Metrics**: Key metrics for diagnosing ML kernels. Interpret each value against workload eligibility and kernel intent; Nsight Systems identifies which kernels dominate runtime, and Nsight Compute reveals why those kernels underperform. {#tbl-nsight-metrics}
 
 #### Data pipelines and loading {#sec-ml-frameworks-domainspecific-data-organizations-48d9}
 
@@ -3703,12 +3703,12 @@ for name, param in layer.named_parameters():
 
 @Tbl-frameworks-parameter-discovery-apis shows how the same principle manifests differently across frameworks. Despite syntactic differences, all frameworks solve the same problem: enabling optimizers to discover and update trainable parameters while preserving nontrainable state across forward passes.
 
-| **Framework**                                       | **Parameter Access**          | **Nontrainable State**           |
-|:----------------------------------------------------|:------------------------------|:---------------------------------|
-| **PyTorch**                                         | `model.parameters()`          | `register_buffer()`              |
-| **Keras**                                           | `layer.trainable_weights`     | `layer.non_trainable_weights`    |
-| **JAX/Flax**\index{Flax!JAX neural network library} | `params = model.init(key, x)` | Separate `state` dict            |
-| **TensorFlow**                                      | `module.trainable_variables`  | `module.non_trainable_variables` |
+| **Framework**                                       | **Parameter Access**                                         | **Nontrainable State**                                     |
+|:----------------------------------------------------|:-------------------------------------------------------------|:-----------------------------------------------------------|
+| **PyTorch**                                         | `model.parameters()`                                         | `register_buffer()`                                        |
+| **Keras**                                           | `layer.trainable_weights`                                    | `layer.non_trainable_weights`                              |
+| **JAX/Flax**\index{Flax!JAX neural network library} | `variables["params"]` after `variables = model.init(key, x)` | Separate variable collections (for example, `batch_stats`) |
+| **TensorFlow**                                      | `module.trainable_variables`                                 | `module.non_trainable_variables`                           |
 
 : **Parameter Discovery APIs Across Frameworks**: Each framework exposes a different surface for distinguishing trainable parameters from nontrainable buffers, but all four solve the same underlying problem of letting optimizers find weights to update while preserving state (running statistics, frozen tensors) across forward passes. {#tbl-frameworks-parameter-discovery-apis tbl-colwidths="[23,38,38]"}
 
@@ -4100,16 +4100,16 @@ The same principle extends beyond the three general-purpose frameworks. Runtime 
 \renewcommand{\arraystretch}{1.25}
 ```
 
-| **Runtime family**              | **Where it fits**              | **Scale anchor**                                                  | **Optimization path**                         | **Constraint to test**                     |
+| **Runtime family**              | **Where it fits**              | **Constraint anchor**                                             | **Optimization path**                         | **Constraint to test**                     |
 |:--------------------------------|:-------------------------------|:------------------------------------------------------------------|:----------------------------------------------|:-------------------------------------------|
 | **PyTorch eager**               | Research and iteration         | Baseline latency; full Python/runtime footprint                   | Dynamic graphs, eager debugging               | Dispatch overhead and missing graph view   |
 | **Compiled PyTorch/TensorFlow** | Server training and serving    | Workload-dependent gains when graph capture is clean              | Graph capture, fusion, layout planning        | Operator coverage and graph breaks         |
-| **TensorFlow Lite/Core ML**     | Mobile and edge inference      | Commonly targets tens of ms latency and MB-scale model packages   | Quantization, static graphs, NPU delegates    | Target-specific conversion constraints     |
-| **TF Lite Micro/microTVM**      | Microcontroller inference      | KB-scale RAM budgets on many TinyML deployments                   | Static allocation, INT8 kernels               | Selected operators and constrained memory  |
+| **TensorFlow Lite/Core ML**     | Mobile and edge inference      | Target-specific mobile latency and package-size budgets           | Quantization, static graphs, NPU delegates    | Target-specific conversion constraints     |
+| **TF Lite Micro/microTVM**      | Microcontroller inference      | Target-specific microcontroller RAM and flash budgets             | Static allocation, INT8 kernels               | Selected operators and constrained memory  |
 | **ONNX Runtime**                | Cross-framework serving        | Backend-dependent; can match native runtimes for supported graphs | Standard graph format, execution providers    | Export gaps and custom-operator fallbacks  |
 | **TensorRT/TVM**                | Hardware-specialized inference | Target-dependent gains over untuned eager baselines               | Kernel fusion, precision lowering, autotuning | Narrower target and conversion assumptions |
 
-: **Runtime Constraint Map**: Quantitative anchors for major ML runtime families. These are not universal benchmark results: actual latency, memory use, energy, and hardware utilization must be measured for the specific model, hardware, precision, batch size, and compiler configuration. {#tbl-framework-efficiency-matrix tbl-colwidths="[24,20,24,24,22]"}
+: **Runtime Constraint Map**: Constraint anchors for major ML runtime families. These are not universal benchmark results: actual latency, memory use, energy, and hardware utilization must be measured for the specific model, hardware, precision, batch size, and compiler configuration. {#tbl-framework-efficiency-matrix tbl-colwidths="[24,20,24,24,22]"}
 
 ```{=latex}
 \endgroup
@@ -4166,12 +4166,12 @@ Rather than seeking the "best" framework, effective selection first eliminates c
 
 The TensorFlow ecosystem illustrates how these axes interact concretely. Its three variants (TensorFlow\index{TensorFlow!full framework}, TensorFlow Lite\index{TensorFlow Lite!mobile deployment}, TensorFlow Lite Micro\index{TensorFlow Lite Micro!microcontroller deployment}) trace a single design philosophy across progressively tighter constraints, a pattern that generalizes to any framework family. @Tbl-tf-comparison quantifies the trade-offs.
 
-|                                    |         **TensorFlow**        | **TensorFlow Lite** | **TensorFlow Lite for Microcontrollers** |
-|:-----------------------------------|:-----------------------------:|:-------------------:|:----------------------------------------:|
-| **Training**                       |              Yes              |       Limited       |                    No                    |
-| **Inference**                      | Yes (but inefficient on edge) | Yes (and efficient) |      Yes (and even more efficient)       |
-| **Operator Coverage**              |             Broad             |  Inference-focused  |          Model-selected subset           |
-| **Native Lower-Precision Tooling** |              Yes              |         Yes         |                   Yes                    |
+|                                    | **TensorFlow** | **TensorFlow Lite** | **TensorFlow Lite for Microcontrollers** |
+|:-----------------------------------|:--------------:|:-------------------:|:----------------------------------------:|
+| **Training**                       |      Yes       |       Limited       |                    No                    |
+| **Inference**                      |      Yes       |         Yes         |                   Yes                    |
+| **Operator Coverage**              |     Broad      |  Inference-focused  |          Model-selected subset           |
+| **Native Lower-Precision Tooling** |      Yes       |         Yes         |                   Yes                    |
 
 : **TensorFlow Variant Software Comparison**: Design trade-offs across TensorFlow, TensorFlow Lite, and TensorFlow Lite Micro, balancing model expressiveness, binary size, and resource constraints. Operator coverage narrows from a general training framework to deployment-focused runtimes whose supported set depends on the model and build. Native lower-precision tooling enables further optimization for constrained environments. {#tbl-tf-comparison tbl-colwidths="[28,26,20,26]"}
 
@@ -4209,15 +4209,15 @@ The key distinctions follow the same progressive constraint pattern. TensorFlow 
 
 Software compatibility alone does not guarantee deployment; the framework must fit within physical hardware limits. @Tbl-tf-hw-comparison quantifies this final constraint dimension.
 
-|                             | **TensorFlow**                                        | **TensorFlow Lite**    | **TensorFlow Lite for Microcontrollers** |
-|:----------------------------|:------------------------------------------------------|:-----------------------|:-----------------------------------------|
-| **Base Binary Size**        | A few MB (varies by platform and build configuration) | Tens to hundreds of KB | On the order of 10 KB                    |
-| **Base Memory Footprint**   | Several MB (minimum runtime overhead)                 | Hundreds of KB         | Tens of KB                               |
-| **Optimized Architectures** | X86, TPUs, GPUs                                       | Arm Cortex A, x86      | Arm Cortex M, DSPs, MCUs                 |
+|                             | **TensorFlow**                            | **TensorFlow Lite**                        | **TensorFlow Lite for Microcontrollers** |
+|:----------------------------|:------------------------------------------|:-------------------------------------------|:-----------------------------------------|
+| **Base Binary Size**        | Build- and package-dependent              | Build- and delegate-dependent              | Model- and operator-selection-dependent  |
+| **Base Memory Footprint**   | Model-, runtime-, and allocator-dependent | Model-, delegate-, and allocator-dependent | Fixed arena plus runtime state           |
+| **Optimized Architectures** | x86, TPUs, GPUs                           | Arm Cortex-A, x86                          | Arm Cortex-M, DSPs, MCUs                 |
 
-: **TensorFlow Hardware Optimization**: Resource requirements (binary size and memory footprint) decrease across TensorFlow variants as they target increasingly constrained hardware, from servers to microcontrollers. Optimized architectures shift from general-purpose CPUs and GPUs to ARM Cortex-M processors and digital signal processors for resource-limited environments. {#tbl-tf-hw-comparison tbl-colwidths="[24,26,25,25]"}
+: **TensorFlow Hardware Targets**: TensorFlow variants target progressively more constrained hardware, shifting from x86, GPUs, and TPUs to Arm Cortex-A platforms and then Arm Cortex-M processors, DSPs, and MCUs. Actual binary size and memory footprint depend on the build, selected operators, delegates, model, and runtime configuration. {#tbl-tf-hw-comparison tbl-colwidths="[24,26,25,25]"}
 
-Binary size spans three orders of magnitude: from MB (full TensorFlow) to tens of KB (TensorFlow Lite Micro). Memory footprint follows the same pattern. Processor architecture support shifts correspondingly from x86/GPU/TPU (data center) through Arm Cortex-A (mobile/edge) to Arm Cortex-M, DSPs, and MCUs (embedded). These are not arbitrary engineering tiers---they mirror the physical constraints (Light Barrier, power wall, memory wall) that carve the deployment spectrum into distinct paradigms (@sec-ml-systems-deployment-spectrum-71be). The engineering lesson generalizes beyond TensorFlow: every framework family that spans deployment tiers makes analogous trade-offs between capability and resource footprint, and the framework's job is to make those trade-offs navigable rather than invisible.
+Binary size and memory footprint depend on the selected build, operators, delegates, model, and runtime configuration. Processor architecture support shifts from x86 processors, GPUs, and TPUs in data centers through Arm Cortex-A platforms at the mobile/edge tier to Arm Cortex-M processors, DSPs, and MCUs in embedded systems. These are not arbitrary engineering tiers---they mirror the physical constraints (Light Barrier, power wall, memory wall) that carve the deployment spectrum into distinct paradigms (@sec-ml-systems-deployment-spectrum-71be). The engineering lesson generalizes beyond TensorFlow: every framework family that spans deployment tiers makes analogous trade-offs between capability and resource footprint, and the framework's job is to make those trade-offs navigable rather than invisible.
 
 #### Production-ready evaluation factors {#sec-ml-frameworks-productionready-evaluation-factors-e088}
 
