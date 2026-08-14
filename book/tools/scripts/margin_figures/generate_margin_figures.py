@@ -1159,16 +1159,6 @@ def data_selection_compute_data_gap():
     write(fig, "vol1/data_selection", "data_selection_scaling_saturation")
 
 
-def data_selection_quality_multiplier(candidate=None):
-    make_ladder(
-        "vol1/data_selection",
-        "vol1_data_selection_margin_001",
-        [("noisy 10K", 10_000), ("clean 100", 100)],
-        domain="data",
-        wall=False,
-    )
-
-
 def data_selection_echo_threshold(candidate=None):
     fig, ax = new_fig("scale-anchor")
     knee(ax, knee_frac=0.63, style="dashed", pct_label="e=R")
@@ -2012,8 +2002,6 @@ def _other_new(candidate):
         data_engineering_locality_ladder(candidate)
     elif cid == "vol1-data-engineering-margin-004":
         data_engineering_segmentation_ladder(candidate)
-    elif cid == "vol1-data-selection-margin-001":
-        data_selection_quality_multiplier(candidate)
     elif cid == "vol1-data-selection-margin-003":
         data_selection_echo_threshold(candidate)
     elif cid == "vol1-nn-computation-margin-001":
@@ -2149,7 +2137,6 @@ def generate_curated_margin_figures() -> None:
             "vol1-ml-systems-margin-004",
             "vol1-data-engineering-margin-003",
             "vol1-data-engineering-margin-004",
-            "vol1-data-selection-margin-001",
             "vol1-data-selection-margin-003",
             "vol1-model-compression-margin-001",
             "vol1-nn-computation-margin-001",

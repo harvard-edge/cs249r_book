@@ -18,7 +18,7 @@ When inspecting source markdown, use the `Source QMD` line below, then read the 
 
 ## Summary
 
-- Margin figures audited: `224`
+- Margin figures audited: `223`
 - Strict review threshold: `0.30`
 - Entries marked for manual review by the packet: `58`
 - Manual review standard: prose claim + visual evidence + caption takeaway click together.
@@ -921,49 +921,6 @@ _Paragraph before the margin block:_
 _Paragraph after the margin block:_
 
 > The Information-Compute Ratio is not constant; it follows a law of diminishing returns. We define the ICR Frontier as the point where the marginal learning signal from additional data drops toward zero.
-
-**Reader-Link Check**
-
-- Source markdown: the excerpt above shows the `.column-margin` block and the exact caption beside the prose.
-- The prose anchor is the text an editor should compare against the caption.
-- The `fig-alt` describes what the visual marks encode; the caption should state the reader takeaway from those marks.
-
-### 022. vol1/data_selection @ line 1147: One clean label can be worth a hundred noisy ones.
-
-- **Source QMD:** `../../quarto/contents/vol1/data_selection/data_selection.qmd:1147`
-- **Asset:** `../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_001.svg`
-- **Audit status:** `Pass`; lexical overlap `0.62`
-- **Caption:** One clean label can be worth a hundred noisy ones.
-- **Figure evidence (`fig-alt`):** Vertical log-scale data ladder comparing 10,000 noisy samples against 100 clean samples, showing a 100-times sample-quality multiplier.
-
-![One clean label can be worth a hundred noisy ones.](../../quarto/contents/vol1/data_selection/images/svg/vol1_data_selection_margin_001.svg)
-
-**Source Markdown Excerpt**
-
-```markdown
-1145
-1146  ::: {.column-margin}
-1147  ![](images/svg/vol1_data_selection_margin_001.svg){width="100%" fig-alt="Vertical log-scale data ladder comparing 10,000 noisy samples against 100 clean samples, showing a 100-times sample-quality multiplier."}
-1148
-1149  *One clean label can be worth a hundred noisy ones.*
-1150  :::
-1151
-1152  **Math**: Classical learning theory (for convex optimization with SGD) tells us that convergence rates depend on label noise. While deep learning operates in a nonconvex regime, the qualitative relationship holds broadly.
-```
-
-**Strongest Prose Anchor**
-
-> The physics of noise : This estimate explains why one clean sample provides as much learning signal as 100 noisy ones.
-
-**Placement Context**
-
-_Paragraph before the margin block:_
-
-> The physics of noise : This estimate explains why one clean sample provides as much learning signal as 100 noisy ones.
-
-_Paragraph after the margin block:_
-
-> Math : Classical learning theory (for convex optimization with SGD) tells us that convergence rates depend on label noise. While deep learning operates in a nonconvex regime, the qualitative relationship holds broadly.
 
 **Reader-Link Check**
 
