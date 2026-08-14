@@ -4353,45 +4353,9 @@ The evolution from CNNs to transformers has increased reliance on gather and red
 
 The computational, memory access, and data movement primitives explored earlier become system design constraints when they force resources to be allocated in silicon and software. Matrix-heavy workloads justify tensor units; random and gather-heavy workloads justify memory hierarchy and interconnect investment. The way these primitives influence hardware design, create common bottlenecks, and drive trade-offs turns architecture selection into infrastructure planning.
 
-```{python}
-#| echo: false
-#| label: tpu-perf-per-watt-calc
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ TPU V1 PEAK OPS PER WATT
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: TPU footnote in the system design impact section
-# │
-# │ Goal: Compute the peak ops/W ratio from the stated TPU v1 and K80 specs.
-# │ Show: The quoted peak specs imply about 80x peak ops/W, with precision caveats.
-# │ How: Compare TOPS/W to TFLOP/s/W after normalizing both to tera-ops/s/W.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, fmt, check
-
-class TPUPerfPerWatt:
-    """Peak operations-per-watt comparison for TPU v1 vs. NVIDIA K80."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    tpu_tops = 92
-    tpu_watts = 40
-    k80_tflops = 8.7
-    k80_watts = 300
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    tpu_tops_per_watt = tpu_tops / tpu_watts
-    k80_tflops_per_watt = k80_tflops / k80_watts
-    peak_ops_per_watt_ratio = tpu_tops_per_watt / k80_tflops_per_watt
-
-    # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
-    check(75 <= peak_ops_per_watt_ratio <= 85, f"TPU/K80 peak ops/W ratio should be about 80x, got {peak_ops_per_watt_ratio:.1f}x.")
-
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    peak_ops_per_watt_ratio_mult_str = fmt_multiple(peak_ops_per_watt_ratio, precision=1, commas=False)
-```
-
 The most visible result is specialized hardware. The prevalence of matrix multiplications and convolutions in deep learning has led to the development of tensor processing units (TPUs)[^fn-dnn-tpu] and Tensor Cores in GPUs, which are specifically designed to perform these operations efficiently. @Sec-hardware-acceleration examines how these specialized units map architectural primitives to silicon, from systolic arrays for GEMM to dataflow engines for convolution.
 
-[^fn-dnn-tpu]: **TPU (Tensor Processing Unit)**: Google's response to the prevalence of matrix multiplications across all neural network architectures. The TPU maps GEMM onto a large systolic array, executing thousands of multiply-accumulate operations per clock cycle while sacrificing general-purpose flexibility (caches, complex control flow) for domain-specific efficiency. The first-generation TPU v1 (deployed 2015, detailed 2017) delivered 92 TOPS (vendor-reported INT8 tera-operations/s) at 40 W, compared to an NVIDIA K80's ~8.7 TFLOP/s (FP32) at 300 W, about `{python} TPUPerfPerWatt.peak_ops_per_watt_ratio_mult_str` higher peak operations per watt from the quoted specifications. That peak comparison mixes INT8 TOPS with FP32 TFLOP/s, so application throughput-per-watt must still be measured on the structured matrix workloads that dominate neural network inference. Hardware has continued to co-evolve with the dominant primitives: subsequent accelerator generations added dedicated transformer-oriented features, such as dynamic precision switching between lower-precision formats to accelerate attention and feed-forward layers at reduced numerical cost, a concrete instance of the same design principle—dedicating silicon to a dominant primitive can outperform general-purpose flexibility. \index{TPU!domain-specific design}\index{TPU!performance per watt}
+[^fn-dnn-tpu]: **TPU (Tensor Processing Unit)**: Google's first TPU maps matrix multiplication onto a large systolic array, trading general-purpose features such as caches and complex control flow for domain-specific inference efficiency [@jouppi2017]. The architectural lesson needed here is qualitative: when one primitive dominates a workload, dedicated data paths and local reuse can outperform general-purpose flexibility. @Sec-hardware-acceleration develops the precision choices, hardware specifications, and performance trade-offs. \index{TPU!domain-specific design}\index{TPU!performance per watt}
 
 Memory systems have also evolved in response to deep learning primitives. The need to support both sequential and random access patterns efficiently has driven the development of multi-level memory hierarchies. High-bandwidth memory (HBM)\index{HBM}\index{HBM!bandwidth advantage}--3D-stacked DRAM delivering 2--3 TB/s of bandwidth, over 20$\times$ standard server RAM--has become common in AI accelerators to support high data-movement requirements, especially for operations such as transformer attention. On-chip memory hierarchies have grown in complexity, with multiple levels of caching and scratchpad memories\index{Scratchpad Memory!explicit control}--programmer-controlled SRAM that trades cache convenience for explicit data movement and predictable locality--to support the diverse working set sizes of different neural network layers.
 
