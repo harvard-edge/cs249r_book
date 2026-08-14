@@ -259,6 +259,37 @@ class TestCheckpointing:
             trainer.save_checkpoint(path)
             assert os.path.exists(path)
 
+    def test_momentum_buffers_restored_on_fresh_optimizer(self):
+        """Momentum buffers survive a save/load round trip onto a brand new Trainer."""
+        model = simple_model()
+        opt = SGD(model.parameters(), lr=0.1, momentum=0.9)
+        trainer = Trainer(model, opt, MSELoss())
+
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+        trainer.train_epoch(data)
+
+        original_buffers = [buf.copy() for buf in opt.get_momentum_state()]
+        assert any(np.any(buf != 0) for buf in original_buffers), (
+            "Momentum buffers should be non-zero after a training step"
+        )
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+
+            fresh_model = simple_model()
+            fresh_opt = SGD(fresh_model.parameters(), lr=0.1, momentum=0.9)
+            fresh_trainer = Trainer(fresh_model, fresh_opt, MSELoss())
+            fresh_trainer.load_checkpoint(path)
+
+            restored_buffers = fresh_opt.get_momentum_state()
+            assert len(restored_buffers) == len(original_buffers)
+            for original, restored in zip(original_buffers, restored_buffers):
+                np.testing.assert_allclose(restored, original)
+        finally:
+            os.remove(path)
+
 
 # ─────────────────────────────────────────────
 # Trainer.evaluate
@@ -383,6 +414,36 @@ class TestSchedulerIntegration:
         expected_lr = scheduler.get_lr(0)
         trainer.train_epoch(data)
         assert abs(trainer.optimizer.lr - expected_lr) < 1e-9
+
+    def test_scheduler_state_restored_after_checkpoint_round_trip(self):
+        """Scheduler config and trainer.epoch combine to reproduce the same LR after reload."""
+        scheduler = CosineSchedule(max_lr=0.2, min_lr=0.02, total_epochs=10)
+        trainer, _ = simple_trainer(lr=0.2, scheduler=scheduler)
+        data = [(Tensor([[1.0, 0.5]]), Tensor([[2.0]]))]
+
+        for _ in range(3):
+            trainer.train_epoch(data)
+
+        lr_before_save = scheduler.get_lr(trainer.epoch)
+
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+
+            fresh_scheduler = CosineSchedule(max_lr=999.0, min_lr=999.0, total_epochs=999)
+            fresh_trainer, _ = simple_trainer(lr=0.2, scheduler=fresh_scheduler)
+            fresh_trainer.load_checkpoint(path)
+
+            assert fresh_trainer.epoch == trainer.epoch
+            assert fresh_scheduler.max_lr == scheduler.max_lr
+            assert fresh_scheduler.min_lr == scheduler.min_lr
+            assert fresh_scheduler.total_epochs == scheduler.total_epochs
+
+            lr_after_load = fresh_scheduler.get_lr(fresh_trainer.epoch)
+            assert abs(lr_after_load - lr_before_save) < 1e-9
+        finally:
+            os.remove(path)
 
     def test_lr_decreases_over_epochs(self):
         scheduler = CosineSchedule(max_lr=0.1, min_lr=0.01, total_epochs=20)

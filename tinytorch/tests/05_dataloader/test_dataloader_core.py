@@ -25,7 +25,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.dataloader import TensorDataset, DataLoader
+from tinytorch.core.dataloader import TensorDataset, DataLoader, RandomHorizontalFlip
 
 
 class TestDataLoaderBasics:
@@ -114,6 +114,37 @@ class TestDataLoaderBasics:
             "Two independently-shuffled loaders produced identical first batches — "
             "shuffle may not be working"
         )
+
+
+class TestTensorDatasetValidation:
+    """Test TensorDataset construction validation."""
+
+    def test_tensor_dataset_zero_tensors_raises(self):
+        """
+        WHAT: TensorDataset() with zero tensor arguments raises.
+
+        WHY: A dataset must wrap at least one tensor. Constructing one
+        with no tensors would have no meaningful length or samples.
+
+        STUDENT LEARNING: TensorDataset enforces its precondition with
+        an assert, so the failure surfaces as AssertionError.
+        """
+        with pytest.raises(AssertionError):
+            TensorDataset()
+
+
+class TestRandomHorizontalFlipValidation:
+    """Test RandomHorizontalFlip probability validation."""
+
+    def test_random_horizontal_flip_negative_p_raises(self):
+        """RandomHorizontalFlip(p=-0.1) raises ValueError."""
+        with pytest.raises(ValueError):
+            RandomHorizontalFlip(p=-0.1)
+
+    def test_random_horizontal_flip_p_above_one_raises(self):
+        """RandomHorizontalFlip(p=1.1) raises ValueError."""
+        with pytest.raises(ValueError):
+            RandomHorizontalFlip(p=1.1)
 
 
 if __name__ == "__main__":

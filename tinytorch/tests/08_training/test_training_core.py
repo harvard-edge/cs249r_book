@@ -170,6 +170,61 @@ class TestTrainingLoop:
             "Bias update did not match between accumulation and single batch."
         )
 
+    def test_gradient_accumulation_handles_trailing_partial_batch(self):
+        """
+        WHAT: With accumulation_steps=2 and an odd number of batches (5),
+        the last batch forms a leftover window of size 1.
+
+        WHY: The remainder window must still trigger an optimizer update,
+        otherwise the final batch's gradient is silently dropped.
+
+        STUDENT LEARNING: train_epoch flushes any leftover accumulated
+        gradients after the main loop, even if the window is not full.
+        """
+        from tinytorch.core.tensor import Tensor
+        from tinytorch.core.layers import Linear
+        from tinytorch.core.losses import MSELoss
+        from tinytorch.core.optimizers import SGD
+        from tinytorch.core.training import Trainer
+        from tinytorch.core.autograd import enable_autograd
+
+        enable_autograd()
+
+        layer = Linear(1, 1)
+        layer.weight.data = np.array([[1.0]], dtype=np.float32)
+        layer.bias.data = np.array([0.0], dtype=np.float32)
+
+        optimizer = SGD(layer.parameters(), lr=0.1)
+        trainer = Trainer(layer, optimizer, MSELoss())
+
+        # 5 batches, accumulation_steps=2: updates after batch 2, batch 4,
+        # and a trailing remainder update after batch 5.
+        x = Tensor([[1.0]])
+        y = Tensor([[2.0]])
+        data = [(x, y)] * 5
+
+        weights_before_full_pairs = layer.weight.data.copy()
+        trainer.train_epoch(data, accumulation_steps=2)
+        weights_after_all_batches = layer.weight.data.copy()
+
+        # Compare against only processing the first 4 batches (two full pairs,
+        # no remainder): the trailing batch must contribute an additional update.
+        layer2 = Linear(1, 1)
+        layer2.weight.data = np.array([[1.0]], dtype=np.float32)
+        layer2.bias.data = np.array([0.0], dtype=np.float32)
+        optimizer2 = SGD(layer2.parameters(), lr=0.1)
+        trainer2 = Trainer(layer2, optimizer2, MSELoss())
+        trainer2.train_epoch(data[:4], accumulation_steps=2)
+        weights_after_four_batches = layer2.weight.data.copy()
+
+        assert not np.allclose(weights_after_all_batches, weights_after_four_batches), (
+            "The trailing partial accumulation window (5th batch) should still "
+            "trigger an optimizer update, changing weights beyond the 4-batch case."
+        )
+        assert not np.allclose(weights_after_all_batches, weights_before_full_pairs), (
+            "Weights should have changed after training with a trailing partial batch."
+        )
+
 
 class TestTrainingUtilities:
     """Test training helper functions."""
