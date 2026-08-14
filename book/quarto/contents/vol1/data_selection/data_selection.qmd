@@ -285,11 +285,11 @@ The compute-data asymmetry can invert the optimization priority. When *data* is 
 
 The engineering toolkit for intelligent data selection follows a deliberate optimization ordering\index{Data Selection!optimization ordering}: first ask whether a sample is worth processing, then ask how to process the remaining workload efficiently. Data selection puts the "largest return first" principle into practice by addressing whether work is necessary before asking how to simplify or accelerate it. The highest-return move comes first. Static pruning\index{Static Pruning!definition} removes low-value samples before a single gradient is computed. Dynamic selection\index{Dynamic Selection!definition} adapts the data diet during training through curriculum learning and active learning. Synthetic generation\index{Synthetic Data Generation!definition} creates high-value samples through augmentation, simulation, or teacher-generated examples when real data runs short.
 
-Each stage can increase the information density of the data that reaches the model when measured quality gains justify its overhead, and together they form a complementary toolkit: pruning reduces *what* the pipeline contains, selection focuses *how* the pipeline uses it, and synthesis expands *what* the pipeline can access. Before examining these techniques, we must formalize *what* "data selection" means, *why* it is inherently a systems problem, and *how* to measure its effectiveness.
+Each stage can increase the information density of the data that reaches the model when measured quality gains justify its overhead, and together they form a complementary toolkit: pruning reduces *what* the pipeline contains, selection focuses *how* the pipeline uses it, and synthesis expands *what* the pipeline can access. Comparing these techniques requires a systems definition of data selection and a measurable account of its effectiveness.
 
 ### Defining data selection {#sec-data-selection-defining-data-selection-ef2f}
 
-The three-stage pipeline needs a quantity that lets engineers compare samples before they spend accelerator time on them. A duplicated image, a mislabeled record, and a rare boundary case may all cost the same forward and backward pass, but they do not contribute the same learning signal. Data selection therefore starts by making sample value explicit relative to compute cost. We call that quantity the Information-Compute Ratio: learning signal gained per unit of training compute, formalized below.
+The three-stage pipeline needs a quantity that lets engineers compare samples before they spend accelerator time on them. A duplicated image, a mislabeled record, and a rare boundary case may all cost the same forward and backward pass, but they do not contribute the same learning signal. Data selection therefore starts by making sample value explicit relative to compute cost. The Information-Compute Ratio measures that value as learning signal gained per unit of training compute, formalized below.
 
 ::: {#dfn-data-selection-data-selection .callout-definition title="Data selection"}
 
@@ -351,7 +351,7 @@ The compute budget (`{python} ComputeDataGap.h100_count_str` H100 GPUs for `{pyt
 
 Under these assumptions, the decision criterion favors selection over simply buying more accelerator time.
 
-The data selection imperative applies across model architectures, though the bottlenecks differ. Unlike the compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are memory bandwidth-bound during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs. Because data selection benefits every architecture regardless of its dominant bottleneck, the appropriate framing is systemic rather than purely statistical.
+The data selection imperative applies across model architectures, though the bottlenecks differ. Unlike our compute-bound ResNet-50 Lighthouse, GPT-2/Llama models are memory bandwidth-bound during inference (though often compute-bound during training as well) and still benefit enormously from data selection during training. Each token processed requires the same forward/backward pass cost regardless of model bottleneck, so fewer tokens means fewer FLOPs. Because data selection benefits every architecture regardless of its dominant bottleneck, the appropriate framing is systemic rather than purely statistical.
 
 ### Systems perspective {#sec-data-selection-systems-perspective-bd61}
 
@@ -708,12 +708,12 @@ A higher ICR means each FLOP of training buys more learning; pushing it up is th
 *Past the frontier, data becomes a tax: compute climbs, learning stalls.*
 :::
 
-The Information-Compute Ratio is not constant; it follows a law of diminishing returns. We define the **ICR Frontier**\index{Information-Compute Ratio!frontier} as the point where the marginal learning signal from additional data drops toward zero.
+The Information-Compute Ratio is not constant; it follows a law of diminishing returns. The **ICR Frontier**\index{Information-Compute Ratio!frontier} is the point where the marginal learning signal from additional data drops toward zero.
 
 To illustrate diminishing returns, let $I(D)$ be the information content of a dataset of size $D$ and assume $I(D) \propto \log D$. This is a toy model rather than a general law. If compute cost scales linearly with the per-sample operation count $O_{\text{sample}}$, then $C(D) = O_{\text{sample}} \cdot D$, and the resulting ICR follows @eq-icr-decay:
 $$\text{ICR}(D) = \frac{\frac{d}{dD} I(D)}{\frac{d}{dD} C(D)} \approx \frac{1/D}{O_{\text{sample}}} = \frac{1}{O_{\text{sample}} \cdot D}$$ {#eq-icr-decay}
 
-Under this illustrative model, the $1/(O_{\text{sample}} \cdot D)$ decay creates what we call the data wall\index{Data Wall!zero learning signal}. Beyond a workload-dependent frontier, additional data may provide little learning while still adding compute. In this regime, data becomes a **data tax**\index{Data Tax!definition} that inflates the $O$ term of the iron law without a commensurate improvement in the accuracy numerator of the RoC (return on compute, see @sec-introduction-roc-invariant). The knee is a practical trade-off between target performance and marginal cost, not the mathematical maximum of ICR in this model.
+Under this illustrative model, the $1/(O_{\text{sample}} \cdot D)$ decay creates the data wall\index{Data Wall!zero learning signal}. Beyond a workload-dependent frontier, additional data may provide little learning while still adding compute. In this regime, data becomes a **data tax**\index{Data Tax!definition} that inflates the $O$ term of the iron law without a commensurate improvement in the accuracy numerator of the RoC (return on compute, see @sec-introduction-roc-invariant). The knee is a practical trade-off between target performance and marginal cost, not the mathematical maximum of ICR in this model.
 
 The "Data selection and the iron law" callout shows that data selection turns the total operations $(O)$ term from a fixed constant into a variable. A 2$\times$ improvement in measured ICR halves the FLOPs required to reach the same measured gain. It produces the same ideal time reduction as a 2$\times$ throughput increase only when the workload is compute-bound and the saved work lies on the critical path. ICR focuses specifically on compute; the cost-modeling framework in @sec-data-selection-cost-modeling-9b02 extends the same reasoning to acquisition, labeling, and storage costs.
 
@@ -2369,7 +2369,7 @@ When its pretraining cost is reused across tasks, SSL supports the **foundation 
 
 [^fn-foundation-model-risk]: **Foundation Model**\index{Foundation Model!homogenization risk}: The name emphasizes that these models serve as a shared base for many downstream tasks, but this creates a single point of failure. Defects in the foundation model's pretraining data (biases, factual errors, memorized private content) propagate to every application built upon it. From a systems perspective, this homogenization risk means that data selection quality during pretraining has an outsized blast radius: a curation error that would affect one task in the train-from-scratch paradigm now affects thousands of downstream deployments.
 
-Self-supervised learning addresses the label bottleneck by learning from data structure rather than human annotation, yet it cannot solve data scarcity itself. Rare classes may have too few examples, edge cases may never appear in the wild, and privacy constraints may prevent collecting real samples. The third stage of the data selection pipeline addresses this gap by creating new data on demand rather than selecting or curating existing data.
+Self-supervised learning addresses the label bottleneck by learning from data structure rather than human annotation, yet it cannot solve data scarcity itself. Rare classes may have too few examples, edge cases may never appear in the wild, and privacy constraints may prevent collecting real samples. The third stage of our data selection pipeline addresses this gap by creating new data on demand rather than selecting or curating existing data.
 
 ## Synthetic Data Generation {#sec-data-selection-synthetic-data-generation-415c}
 
@@ -2595,7 +2595,7 @@ The preceding techniques create new input samples, but another form of synthesis
 
 A teacher prediction such as [0.7, 0.2, 0.1] exposes relative preferences that a one-hot label [1, 0, 0] omits. A student may benefit from that signal when the teacher is accurate and aligned with the target distribution. At scale, teacher-generated targets add an inference pass and require quality controls; any student cost or quality advantage must be measured against that added generation expense.
 
-Together, augmentation, generative synthesis, and distillation complete the third stage of the data selection pipeline. Where static pruning removes redundancy and dynamic selection focuses compute on high-value samples, synthetic generation fills gaps by creating samples that never existed. Selecting the right combination of techniques from these three pipeline stages requires a structured decision framework.
+Together, augmentation, generative synthesis, and distillation complete the third stage of our data selection pipeline. Where static pruning removes redundancy and dynamic selection focuses compute on high-value samples, synthetic generation fills gaps by creating samples that never existed. Selecting the right combination of techniques from these three pipeline stages requires a structured decision framework.
 
 ## Decision Framework {#sec-data-selection-decision-framework-0261}
 
@@ -2748,7 +2748,7 @@ The gap between algorithmic elegance and practical value raises several systems 
 
 ## Selection Engineering {#sec-data-selection-selection-engineering-a4eb}
 
-Choosing the right data selection technique is necessary but not sufficient. **Selection engineering**\index{Selection Engineering!definition} begins where the decision framework ends: after identifying which algorithms to apply, we must ensure those algorithms actually deliver their promised speedups when deployed on real hardware with real data pipelines. A naive active learning loop that scans the entire dataset every epoch to select the "best" samples will turn a *compute-bound* training job into an *I/O-bound* bottleneck. The architectural patterns that prevent this and implement data selection in production are the subject of the following discussion.
+A naive active learning loop that scans the entire dataset every epoch to select the "best" samples can turn a *compute-bound* training job into an *I/O-bound* bottleneck. **Selection engineering**\index{Selection Engineering!definition} begins where the decision framework ends: after identifying which algorithms to apply, we must ensure that they deliver their promised speedups on real hardware and real data pipelines. The architectural patterns that prevent this failure implement data selection in production.
 
 ### The selection bottleneck {#sec-data-selection-selection-bottleneck-4d00}
 
@@ -3236,7 +3236,7 @@ Engineering patterns solve the *how*, but a more fundamental question remains: w
 
 ## Cost Modeling {#sec-data-selection-cost-modeling-9b02}
 
-The systems framing of data selection demands cost modeling\index{Cost Modeling!data selection economics} and quantitative answers. Practitioners must determine whether to label 10,000 more samples or buy more GPU hours, when active learning pays for itself, and what ROI a deduplication infrastructure investment delivers.
+That investment decision demands cost modeling\index{Cost Modeling!data selection economics} and quantitative answers. Practitioners must determine whether to label 10,000 more samples or buy more GPU hours, when active learning pays for itself, and what ROI a deduplication infrastructure investment delivers.
 
 ### Quantifying data costs and ROI {#sec-data-selection-quantifying-data-costs-roi-f0b4}
 
@@ -4777,7 +4777,7 @@ The answer to the chapter's opening question is that examples can differ substan
 
 ::: {.callout-chapter-connection title="From data to algorithms"}
 
-With high-quality data in hand, we have optimized the source of the system. Even the best data, however, cannot make an inefficient model run fast on constrained hardware. In @sec-model-compression, we move from optimizing *what* the system learns to optimizing *how* it represents that knowledge, applying pruning, quantization, and knowledge distillation to reduce the computational cost of the model artifact itself.
+Data selection changes *what* the system learns from; even the best data cannot make an inefficient model run fast on constrained hardware. @Sec-model-compression shifts the focus to *how* the system represents what it learns, applying pruning, quantization, and knowledge distillation to reduce the computational cost of the model artifact itself.
 
 :::
 

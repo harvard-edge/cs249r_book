@@ -1116,7 +1116,7 @@ fit=(BB1)(DPE1)(DPE4)(B1),yshift=0mm](BB2){};
 
 The evolution from the Intel 8087 to the Google TPU reveals a consistent pattern: hardware evolves to fit the algorithm's dominant bottleneck. Where the 8087 addressed floating-point operations that dominated many scientific workloads, modern AI accelerators address dense matrix and convolution operations that dominate much of neural-network training and inference [@palmer1980intel8087; @goodfellow2016deep; @sze2017; @jouppi2017]. This concentration of demand explains why specialized AI silicon can deliver large performance-per-watt improvements over general-purpose processors on matching workloads.
 
-These same three properties, massive parallelism, predictable data flow, and tolerance for reduced precision, shape every accelerator architecture decision. Before examining the computational primitives that exploit them, we examine the architectural organization that enables their efficient execution. Modern AI accelerators achieve their dramatic performance improvements through a carefully orchestrated hierarchy of specialized components operating in concert.
+These same three properties, massive parallelism, predictable data flow, and tolerance for reduced precision, shape every accelerator architecture decision. Their efficient execution depends on the accelerator's physical organization: a hierarchy of specialized components operating in concert.
 
 The processing substrate consists of an array of processing elements\index{Processing Element!accelerator building block} (visible as the "PE" grid in @fig-accelerator-anatomy), each containing dedicated computational units optimized for specific operations: tensor cores\index{Tensor Core!matrix multiplication} execute matrix multiplication, vector units\index{Vector Unit!element-wise operations} perform element-wise operations, and special function units\index{Special Function Unit!activation functions} compute activation functions. These processing elements are organized in a grid topology that enables massive parallelism, with dozens to hundreds of units operating simultaneously on different portions of the computation, exploiting the data-level parallelism inherent in neural network workloads.
 
@@ -1130,7 +1130,7 @@ With the accelerator's physical architecture established, the next step is to ex
 
 Regardless of the layer type (fully connected, convolutional, or attention-based), the dominant operation in neural networks\index{Neural Network!dominant MAC pattern} is multiplying input values by learned weights and accumulating the results. This multiply-accumulate (MAC) pattern often dominates execution time and can appear billions of times per inference pass. Its regularity is what makes hardware specialization possible: unlike general-purpose code with unpredictable branches and irregular memory access, MACs follow fixed data-flow patterns with predictable reuse, enabling architectures that trade away generality for raw throughput. The transition from CPUs achieving approximately 100 GFLOP/s to accelerators delivering 100,000+ GFLOP/s reflects this architectural bet: eliminating flexibility to optimize for the specific operations that neural networks actually perform.
 
-We call the hardware units that exploit these patterns AI compute primitives\index{AI Compute Primitive!definition}: specialized functional blocks, each optimized for a particular class of operation. Three primitives are especially common in accelerators, each targeting a distinct computational pattern found in neural networks.
+The hardware units that exploit these patterns are AI compute primitives\index{AI Compute Primitive!definition}: specialized functional blocks, each optimized for a particular class of operation. Three primitives are especially common in accelerators, each targeting a distinct computational pattern found in neural networks.
 
 ```{python}
 #| echo: false
@@ -3510,7 +3510,7 @@ These overheads (interconnect latency, bandwidth taper, and synchronization dela
 
 Model architecture determines which memory term binds\index{Model Memory Pressure!architecture-specific}. While multilayer perceptrons (MLPs), convolutional neural networks (CNNs), and transformer networks each require large parameter sets, their distinct access patterns create different pressure on weights, activations, bandwidth, and host transfers, so each demands a different accelerator optimization strategy.
 
-To ground this analysis, we return to the Lighthouse Models introduced in @tbl-lighthouse-examples: ResNet-50 represents CNN workloads with high spatial reuse, GPT-2/Llama exemplifies transformer memory pressure, DLRM illustrates sparse embedding lookups that stress memory systems differently than dense operations, and MobileNetV2 demonstrates efficiency-optimized architectures with depthwise convolutions. These examples will recur throughout the remainder of this chapter as we analyze how memory characteristics translate to hardware utilization.
+The Lighthouse Models introduced in @tbl-lighthouse-examples ground this analysis: ResNet-50 represents CNN workloads with high spatial reuse, GPT-2/Llama exemplifies transformer memory pressure, DLRM illustrates sparse embedding lookups that stress memory systems differently than dense operations, and MobileNetV2 demonstrates efficiency-optimized architectures with depthwise convolutions. Their different memory characteristics reveal how workload structure translates to hardware utilization.
 
 #### Multilayer perceptrons {#sec-hardware-acceleration-multilayer-perceptrons-0bbc}
 
@@ -4317,8 +4317,6 @@ As this derivation demonstrates, the Roofline Model provides the diagnostic fram
 
 ## Hardware Mapping {#sec-hardware-acceleration-hardware-mapping-fundamentals-neural-networks-f9a9}
 
-The Roofline analysis taught us to diagnose whether specific operations are compute bound or memory bound on given hardware. We saw that ResNet-50's convolutions can reach high arithmetic intensity (50–200 FLOP/byte), with the high-reuse cases crossing into the compute-bound regime, while the unbatched GPT-2 decoding example achieves only a few FLOP/byte and is severely memory bound. Diagnosis, however, is only half the challenge. Once we know that LayerNorm has low arithmetic intensity on an A100, the challenge becomes executing it efficiently despite this limitation. This is the domain of hardware mapping\index{Hardware Mapping!computational graph to hardware}, the art of translating abstract computational graphs into concrete execution plans that exploit accelerator architectures while respecting their constraints.
-
 Consider a $3{\times}3$ convolution running on an accelerator tile. The mathematical operation is fixed, but the execution plan is not. One schedule can keep a filter in local registers while many output pixels stream past it; another can advance pixel by pixel and reload the same filter values repeatedly from a slower memory tier. Both schedules compute the same tensor. Only one turns the reuse in the convolution into real bandwidth savings. Hardware mapping is the discipline that makes that difference explicit: it decides where the work runs, where the data lives while it is reused, and when each loop or kernel executes so the accelerator is fed rather than idle.
 
 ::: {#dfn-hw-acceleration-mapping-ai-acceleration .callout-definition title="Mapping in AI acceleration"}
@@ -5094,11 +5092,9 @@ Modern accelerators provide the architectural features needed to realize hybrid 
 
 However, hybrid mapping remains a design-time optimization. In production workloads, execution conditions change dynamically due to varying input sizes, memory contention, and hardware resource availability. Machine learning compilers and runtime systems extend these static mapping choices by introducing dynamic scheduling, memory optimizations, and automatic tuning, ensuring that deep learning workloads operate efficiently across diverse accelerators and deployment environments.
 
-The mapping strategies and dataflow optimizations examined in preceding sections represent the "what" of efficient execution: which data to keep local, how to tile computations, and which parallelization strategies to employ. Determining optimal configurations for specific hardware and workloads, however, requires systematic automation. **Machine learning compilers**\index{Machine Learning Compiler!definition} address this gap by transforming abstract mapping principles into concrete execution plans tailored to target accelerators.
-
 ## Compiler Support {#sec-hardware-acceleration-compiler-support-172e}
 
-Machine learning compilers automate the translation of dataflow strategies into executable code, addressing a critical challenge: the mapping decisions analyzed earlier must be instantiated differently for each hardware target. The gap between "knowing what optimizations exist" and "applying them correctly" is vast: a single convolution can be implemented with dozens of valid tiling strategies, kernel variants, and memory layouts, most of which perform poorly on any given hardware. Compilers navigate this complexity systematically. Compiling ResNet-50 for GPU inference exemplifies the process:
+A single convolution can be implemented with dozens of valid tiling strategies, kernel variants, and memory layouts, most of which perform poorly on a given target. **Machine learning compilers**\index{Machine Learning Compiler!definition} navigate this complexity by translating dataflow strategies into target-specific executable code. Compiling ResNet-50 for GPU inference exemplifies the process:
 
 1. **Graph optimization** fuses repeated Conv2D-BatchNorm-ReLU patterns into fewer kernels, eliminating intermediate writes that would otherwise consume bandwidth
 2. **Kernel selection** chooses Tensor Core implementations for compatible convolutions, exploiting the high arithmetic intensity calculated in the Roofline analysis
@@ -6030,7 +6026,7 @@ The Roofline Model and arithmetic intensity provide a diagnostic framework for a
 
 ::: {.callout-chapter-connection title="From optimization to validation"}
 
-We have now optimized the full D·A·M stack: data selection minimized training requirements, model compression reduced algorithmic complexity, and hardware acceleration maximized machine throughput. Optimization without measurement, however, is guesswork. In @sec-benchmarking, we move from theoretical FLOPs to measured latency, applying the Roofline Model and statistical methods to validate our optimization claims against reality.
+Data selection reduces training requirements, model compression reduces algorithmic complexity, and hardware acceleration raises machine throughput. Optimization without measurement, however, is guesswork. @Sec-benchmarking moves from theoretical FLOPs to measured latency, applying the Roofline Model and statistical methods to test optimization claims against reality.
 
 :::
 
