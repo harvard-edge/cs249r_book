@@ -529,6 +529,16 @@ class SetupCommand(BaseCommand):
              self.console.print("\n[green]✅ You are already connected to the TinyTorch community.[/green]")
              return
 
+        # Unlike install.sh (which honors this for its own prompts), tito setup
+        # never checked this env var, so a fully unattended run (CI, scripted
+        # setup, no stdin) crashed here with "EOF when reading a line" instead
+        # of skipping the prompt like every other TINYTORCH_NON_INTERACTIVE=1
+        # invocation is supposed to.
+        if os.environ.get("TINYTORCH_NON_INTERACTIVE"):
+            self.console.print("\n[dim]Skipping community prompt (TINYTORCH_NON_INTERACTIVE set). "
+                                "You can join anytime with: tito community login[/dim]")
+            return
+
         self.console.print()
         self.console.print(Panel.fit(
             "[bold cyan]🌍 Join the TinyTorch Community[/bold cyan]\n\n"
