@@ -477,6 +477,15 @@ class ValidateCommand:
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
+            # Added 2026-08-14. A tone-audit pass left two sentences starting
+            # with a lowercase word and introduced nine banned meta-openers;
+            # nothing in the gate set noticed. See cli/checks/prose_integrity.
+            Scope("sentence-start", "_run_sentence_start",
+                  note="a sentence must not start with a lowercase word"),
+            Scope("manual-et-al", "_run_manual_et_al",
+                  note="hand-typed 'Author et al.' — use narrative @key"),
+            Scope("underscore-italics", "_run_underscore_italics",
+                  note="underscores are reserved for the Purpose hook"),
             Scope("contractions", "_run_mitpress_contractions",
                   note='no "can\'t", "it\'s" in body prose'),
             Scope("spelling-dict", "_run_mitpress_spelling_dict",
@@ -5445,6 +5454,79 @@ class ValidateCommand:
         return ValidationRunResult(
             name="percent-in-tables",
             description="Tables use the % symbol, not the word 'percent' (prose keeps the word)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_sentence_start(self, root: Path) -> ValidationRunResult:
+        """Flag a sentence that begins with a lowercase word.
+
+        Added 2026-08-14. A tone-audit pass rewrote `we examine` to
+        `this section examines` mid-sentence and left
+        "...$\\rho_{\\text{energy}}$. this section introduces..." in two
+        places. Obvious to a reader, invisible to every existing check.
+
+        Skips code, math, inline code, index keys, URLs, tables, headings, and
+        list items. Exempts abbreviations that end in a period (e.g., i.e.,
+        vs., Fig., et al.) and the lowercase-by-convention terms from
+        capitalization.md (torch.compile, im2col, bfloat16, p99, ...).
+        """
+        from cli.checks.prose_integrity import find_bad_sentence_starts
+        return self._run_prose_integrity(
+            root, find_bad_sentence_starts, "sentence-start",
+            "sentence_starts_lowercase",
+            lambda h: (f"Sentence starts with the lowercase word '{h.detail}'. "
+                       f"Capitalize it, or rewrite so the clause joins the "
+                       f"previous sentence."))
+
+    def _run_manual_et_al(self, root: Path) -> ValidationRunResult:
+        """Flag hand-typed 'Author et al.' in prose.
+
+        Added 2026-08-14. citation.md forbids bare attributions: citeproc
+        renders narrative `@key` as "Author et al. (year)", so typing it by
+        hand either duplicates the rendered citation or leaves a claim the
+        reader cannot trace to the bibliography.
+        """
+        from cli.checks.prose_integrity import find_manual_et_al
+        return self._run_prose_integrity(
+            root, find_manual_et_al, "manual-et-al", "manual_et_al",
+            lambda h: (f"Hand-typed '{h.match}'. Use the narrative form "
+                       f"`@key` instead — citeproc renders it as "
+                       f"'{h.detail} et al. (year)' and keeps the claim "
+                       f"traceable to the bibliography."))
+
+    def _run_underscore_italics(self, root: Path) -> ValidationRunResult:
+        """Flag `_italic_` outside the Purpose hook question.
+
+        Added 2026-08-14. emphasis.md reserves underscores exclusively for the
+        Purpose hook; body prose uses asterisks. A fig/table audit pass
+        converted `*statistical significance*` to underscores and it reached
+        dev before a re-verification caught it.
+        """
+        from cli.checks.prose_integrity import find_underscore_italics
+        return self._run_prose_integrity(
+            root, find_underscore_italics, "underscore-italics",
+            "underscore_italics",
+            lambda h: (f"`{h.match}` uses underscore italics. Body prose uses "
+                       f"asterisks (*{h.detail}*); underscores are reserved "
+                       f"for the Purpose hook question."))
+
+    def _run_prose_integrity(self, root, finder, name, code, msg):
+        """Shared driver for the prose-integrity detectors."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        for file in files:
+            rel = self._relative_file(file)
+            for hit in finder(self._read_text(file)):
+                issues.append(ValidationIssue(
+                    file=rel, line=hit.line, code=code, message=msg(hit),
+                    severity="error", context=hit.context,
+                ))
+        return ValidationRunResult(
+            name=name,
+            description=f"{name} ({len(files)} files)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
