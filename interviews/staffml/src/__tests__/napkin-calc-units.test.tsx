@@ -25,6 +25,13 @@ describe('NapkinCalc unit contract', () => {
     // Defaults: 70B params, 1T tokens -> 6 * 70e9 * 1e12 = 4.2e23 FLOPs.
     // The detail line prints FLOPs in units of 1e21, so 420.0, not 0.4.
     expect(screen.getByText(/6 × 70B × 1T = 420\.0e21 FLOPS/)).toBeTruthy();
+
+    // Scales with the input, so a hardcoded 1000 would not satisfy this.
+    // The labels here are not associated with their inputs, so reach the
+    // field through the label's sibling rather than getByLabelText.
+    const tokensInput = screen.getByText('Tokens (T)').parentElement!.querySelector('input')!;
+    fireEvent.change(tokensInput, { target: { value: '2' } });
+    expect(screen.getByText(/6 × 70B × 2T = 840\.0e21 FLOPS/)).toBeTruthy();
   });
 
   it('sizes AllReduce by the interconnect, not by HBM bandwidth', () => {

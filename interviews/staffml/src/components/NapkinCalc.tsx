@@ -5,9 +5,15 @@ import { Calculator, ChevronDown, ChevronRight } from "lucide-react";
 import clsx from "clsx";
 import { HARDWARE_SPECS, INTERCONNECTS, FORMULAS, HardwareSpec } from "@/lib/hardware";
 
-// AllReduce crosses the interconnect, not the GPU's own HBM. Mirror the
-// simulator's convention (8 GPUs/node, NVLink within a node, InfiniBand
-// between nodes) so both tools teach the same network model.
+// AllReduce crosses the interconnect, not the GPU's own HBM. Node size and
+// link choice follow the simulator's convention (8 GPUs/node, NVLink within
+// a node, InfiniBand between nodes).
+//
+// Deliberately simpler than lib/simulator.ts, which also applies a
+// hierarchical-AllReduce bandwidth multiplier (an intra-node reduce shrinks
+// the message by gpusPerNode before it crosses the network). A napkin
+// estimate uses the raw link rate, so this reads ~8x slower than /simulator
+// for the same multi-node config -- an upper bound, not a contradiction.
 const GPUS_PER_NODE = 8;
 const INTRA_NODE_LINK = INTERCONNECTS.find(i => i.name === 'NVLink H100')!;
 const INTER_NODE_LINK = INTERCONNECTS.find(i => i.name === 'InfiniBand NDR')!;
