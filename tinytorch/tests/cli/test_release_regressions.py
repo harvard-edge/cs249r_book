@@ -4,11 +4,13 @@ Release regression tests for student-facing CLI and API correctness.
 
 import importlib.util
 import io
+import json
 import os
 import subprocess
 import sys
 from argparse import Namespace
 from pathlib import Path
+from unittest.mock import MagicMock, patch
 
 import numpy as np
 from rich.console import Console
@@ -16,6 +18,9 @@ from rich.console import Console
 from tito.commands.export_utils import find_source_file_for_export
 from tito.commands.milestone import (
     MILESTONE_SCRIPTS,
+    MilestoneCommand,
+    MilestoneSystem,
+    _module_progress_to_int,
     _required_modules_for,
     _validate_required_exports,
 )
@@ -193,3 +198,104 @@ def test_generated_warning_points_to_current_export_command():
 
     assert "tito module complete XX" in text
     assert "tito module complete <module_name>" not in text
+
+
+def _write_milestone_progress_files(tmp_path, completed_modules, unlocked_milestones=None):
+    tito_dir = tmp_path / ".tito"
+    tito_dir.mkdir(exist_ok=True)
+    (tito_dir / "progress.json").write_text(json.dumps({"completed_modules": completed_modules}))
+    (tito_dir / "milestones.json").write_text(json.dumps({
+        "completed_milestones": [],
+        "completion_dates": {},
+        "unlocked_milestones": unlocked_milestones or [],
+        "unlock_dates": {},
+        "total_unlocked": len(unlocked_milestones or []),
+        "achievements": [],
+    }))
+
+
+def test_can_unlock_true_when_required_and_trigger_complete_and_not_unlocked(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _write_milestone_progress_files(tmp_path, completed_modules=[1, 2, 3])
+
+    system = MilestoneSystem(CLIConfig.from_project_root(TINYTORCH_ROOT))
+    status = system.get_milestone_status()
+
+    assert status["milestones"]["01"]["can_unlock"] is True
+
+
+def test_can_unlock_false_when_already_unlocked(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _write_milestone_progress_files(tmp_path, completed_modules=[1, 2, 3], unlocked_milestones=["01"])
+
+    system = MilestoneSystem(CLIConfig.from_project_root(TINYTORCH_ROOT))
+    status = system.get_milestone_status()
+
+    assert status["milestones"]["01"]["can_unlock"] is False
+
+
+def test_can_unlock_false_when_nothing_completed(monkeypatch, tmp_path):
+    monkeypatch.chdir(tmp_path)
+    _write_milestone_progress_files(tmp_path, completed_modules=[])
+
+    system = MilestoneSystem(CLIConfig.from_project_root(TINYTORCH_ROOT))
+    status = system.get_milestone_status()
+
+    assert status["milestones"]["01"]["can_unlock"] is False
+
+
+def test_module_progress_to_int_accepts_int():
+    assert _module_progress_to_int(6) == 6
+
+
+def test_module_progress_to_int_parses_numeric_prefix_string():
+    assert _module_progress_to_int("06_autograd") == 6
+
+
+def test_module_progress_to_int_rejects_unparseable_string():
+    assert _module_progress_to_int("abc") is None
+
+
+def test_module_progress_to_int_rejects_wrong_type():
+    assert _module_progress_to_int(None) is None
+    assert _module_progress_to_int(3.5) is None
+
+
+def test_export_validator_reports_import_error(monkeypatch):
+    monkeypatch.setitem(sys.modules, "tinytorch.core.tensor", None)
+
+    failures = _validate_required_exports([1])
+
+    assert any(
+        failure.startswith("tinytorch.core.tensor.Tensor: import failed")
+        for failure in failures
+    )
+
+
+def test_run_command_stops_after_first_failure_when_noninteractive(monkeypatch):
+    monkeypatch.chdir(TINYTORCH_ROOT)
+    command = MilestoneCommand(CLIConfig.from_project_root(TINYTORCH_ROOT))
+    command.console = Console(file=io.StringIO(), width=120)
+
+    args = Namespace(milestone_id="06", part=None, skip_checks=True)
+
+    run_calls = []
+
+    def fake_run(cmd, **kwargs):
+        run_calls.append(cmd)
+        result = MagicMock()
+        result.returncode = 1
+        return result
+
+    with patch("tito.commands.milestone.subprocess.run", side_effect=fake_run), \
+         patch("sys.stdin") as mock_stdin, \
+         patch("sys.stdout") as mock_stdout, \
+         patch("builtins.input") as mock_input:
+        mock_stdin.isatty.return_value = False
+        mock_stdout.isatty.return_value = False
+
+        returncode = command._handle_run_command(args)
+
+    assert returncode == 1
+    assert len(run_calls) == 1
+    mock_input.assert_not_called()
