@@ -23,7 +23,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.tokenization import CharTokenizer
+from tinytorch.core.tokenization import CharTokenizer, create_tokenizer, tokenize_dataset
 
 
 class TestTokenizerBasics:
@@ -94,6 +94,38 @@ class TestTokenizerBasics:
         assert isinstance(vocab_size, int) and vocab_size > 0, (
             "Tokenizer should have positive vocab_size"
         )
+
+
+class TestTokenizeDataset:
+    """Test tokenize_dataset behavior around max_length."""
+
+    def test_no_truncation_when_max_length_omitted(self):
+        """
+        WHAT: With no max_length argument, long sequences are preserved in full.
+
+        WHY: Truncation should only happen when the caller explicitly asks
+        for it. Silent truncation would drop data users didn't opt into
+        losing.
+        """
+        tokenizer = CharTokenizer()
+        long_text = "abcdefghij" * 20  # 200 characters
+        tokenizer.build_vocab([long_text])
+
+        full_length = len(tokenizer.encode(long_text))
+        tokenized = tokenize_dataset([long_text], tokenizer)
+
+        assert len(tokenized[0]) == full_length, (
+            "tokenize_dataset without max_length should not truncate the sequence"
+        )
+
+
+class TestCreateTokenizer:
+    """Test create_tokenizer factory validation."""
+
+    def test_unsupported_strategy_raises_value_error(self):
+        """WHAT: An unsupported strategy string raises ValueError."""
+        with pytest.raises(ValueError):
+            create_tokenizer("word", corpus=["hello world"])
 
 
 if __name__ == "__main__":

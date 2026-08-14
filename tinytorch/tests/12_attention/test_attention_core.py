@@ -228,6 +228,70 @@ class TestMultiHeadAttention:
             # 64 is not divisible by 5
             MultiHeadAttention(embed_dim=64, num_heads=5)
 
+    def test_multihead_accepts_4d_mask_matching_3d_result(self):
+        """
+        WHAT: A mask already shaped (batch, 1, seq, seq) gives the same
+        output as the equivalent (batch, seq, seq) mask.
+
+        WHY: forward() only reshapes 3D masks to 4D for broadcasting across
+        heads. A caller who already supplies the 4D shape should get an
+        identical result, not be silently mishandled.
+        """
+        batch, seq, embed_dim = 2, 5, 32
+        num_heads = 4
+
+        mha = MultiHeadAttention(embed_dim, num_heads)
+        x = Tensor(rng.standard_normal((batch, seq, embed_dim)))
+
+        mask_data = np.tril(np.ones((seq, seq)))
+        mask_3d = Tensor(np.broadcast_to(mask_data, (batch, seq, seq)).copy())
+        mask_4d = Tensor(mask_3d.data.reshape(batch, 1, seq, seq))
+
+        out_3d = mha.forward(x, mask_3d)
+        out_4d = mha.forward(x, mask_4d)
+
+        assert np.allclose(out_3d.data, out_4d.data), (
+            "MultiHeadAttention should produce identical output for an "
+            "equivalent 3D and pre-reshaped 4D mask."
+        )
+
+    def test_multihead_accepts_2d_mask_matching_3d_result(self):
+        """
+        WHAT: A 2D mask shaped (seq, seq) broadcasts the same way as the
+        equivalent per-batch 3D mask.
+
+        WHY: forward() leaves 2D masks untouched (no explicit reshape),
+        relying on numpy broadcasting through _apply_mask. This must still
+        produce the same attention output as passing the mask per-batch.
+        """
+        batch, seq, embed_dim = 2, 5, 32
+        num_heads = 4
+
+        mha = MultiHeadAttention(embed_dim, num_heads)
+        x = Tensor(rng.standard_normal((batch, seq, embed_dim)))
+
+        mask_data = np.tril(np.ones((seq, seq)))
+        mask_2d = Tensor(mask_data.copy())
+        mask_3d = Tensor(np.broadcast_to(mask_data, (batch, seq, seq)).copy())
+
+        out_2d = mha.forward(x, mask_2d)
+        out_3d = mha.forward(x, mask_3d)
+
+        assert np.allclose(out_2d.data, out_3d.data), (
+            "MultiHeadAttention should produce identical output for an "
+            "equivalent 2D and 3D mask."
+        )
+
+    def test_multihead_embed_dim_mismatch_raises(self):
+        """
+        WHAT: Input whose last dim doesn't match the configured embed_dim
+        raises ValueError.
+        """
+        mha = MultiHeadAttention(embed_dim=32, num_heads=4)
+        x = Tensor(rng.standard_normal((2, 5, 16)))
+        with pytest.raises(ValueError):
+            mha.forward(x)
+
 
 class TestAttentionGradientFlow:
     """

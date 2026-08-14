@@ -112,5 +112,53 @@ class TestPositionalEncoding:
         )
 
 
+class TestEmbeddingValidation:
+    """Test Embedding index validation."""
+
+    def test_index_at_or_above_vocab_size_raises(self):
+        """WHAT: An index >= vocab_size raises ValueError."""
+        embed = Embedding(vocab_size=10, embed_dim=4)
+        with pytest.raises(ValueError):
+            embed.forward(Tensor([15]))
+
+    def test_negative_index_raises(self):
+        """WHAT: A negative index raises ValueError."""
+        embed = Embedding(vocab_size=10, embed_dim=4)
+        with pytest.raises(ValueError):
+            embed.forward(Tensor([-1]))
+
+
+class TestPositionalEncodingValidation:
+    """Test PositionalEncoding input validation."""
+
+    def test_2d_input_missing_batch_dim_raises(self):
+        """WHAT: A 2D input (missing batch dim) raises ValueError."""
+        pos_enc = PositionalEncoding(max_seq_len=100, embed_dim=64)
+        x = Tensor(rng.standard_normal((50, 64)))
+        with pytest.raises(ValueError):
+            pos_enc.forward(x)
+
+    def test_seq_len_exceeding_max_raises(self):
+        """WHAT: seq_len > max_seq_len raises ValueError."""
+        pos_enc = PositionalEncoding(max_seq_len=10, embed_dim=64)
+        x = Tensor(rng.standard_normal((2, 20, 64)))
+        with pytest.raises(ValueError):
+            pos_enc.forward(x)
+
+    def test_wrong_ndim_input_raises(self):
+        """WHAT: A non-3D input (e.g. 4D) raises ValueError."""
+        pos_enc = PositionalEncoding(max_seq_len=100, embed_dim=64)
+        x = Tensor(rng.standard_normal((2, 3, 50, 64)))
+        with pytest.raises(ValueError):
+            pos_enc.forward(x)
+
+    def test_embed_dim_mismatch_raises(self):
+        """WHAT: An embed_dim mismatch between input and config raises ValueError."""
+        pos_enc = PositionalEncoding(max_seq_len=100, embed_dim=64)
+        x = Tensor(rng.standard_normal((2, 50, 32)))
+        with pytest.raises(ValueError):
+            pos_enc.forward(x)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

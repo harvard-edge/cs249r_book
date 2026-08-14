@@ -31,7 +31,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d
+from tinytorch.core.spatial import Conv2d, MaxPool2d, AvgPool2d, BatchNorm2d
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
 
@@ -356,6 +356,111 @@ class TestConvGradientFlow:
             "Conv weights didn't receive gradients.\n"
             "This means the conv layer cannot learn."
         )
+
+
+class TestInputValidation:
+    """
+    Test that spatial layers reject malformed input shapes with clear errors.
+
+    CONCEPT: Conv2d, MaxPool2d, and AvgPool2d all require 4D NCHW input.
+    Passing the wrong number of dimensions should fail fast with ValueError,
+    not silently produce garbage output.
+    """
+
+    def test_conv2d_rejects_3d_input(self):
+        """WHAT: Conv2d.forward raises ValueError on a 3D input (missing batch dim)."""
+        conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
+        x = Tensor(rng.standard_normal((1, 8, 8)))
+        with pytest.raises(ValueError):
+            conv.forward(x)
+
+    def test_maxpool2d_rejects_2d_input(self):
+        """WHAT: MaxPool2d.forward raises ValueError on a 2D input."""
+        pool = MaxPool2d(kernel_size=2, stride=2)
+        x = Tensor(rng.standard_normal((8, 8)))
+        with pytest.raises(ValueError):
+            pool.forward(x)
+
+    def test_avgpool2d_rejects_5d_input(self):
+        """WHAT: AvgPool2d.forward raises ValueError on a 5D input."""
+        pool = AvgPool2d(kernel_size=2, stride=2)
+        x = Tensor(rng.standard_normal((1, 1, 3, 8, 8)))
+        with pytest.raises(ValueError):
+            pool.forward(x)
+
+    def test_avgpool2d_rejects_1d_input(self):
+        """WHAT: AvgPool2d.forward raises ValueError on a 1D input."""
+        pool = AvgPool2d(kernel_size=2, stride=2)
+        x = Tensor(rng.standard_normal(8))
+        with pytest.raises(ValueError):
+            pool.forward(x)
+
+
+class TestConv2dNoGradPropagation:
+    """
+    Test that Conv2d does not attach gradient tracking when neither the
+    input nor the weight requires gradients.
+    """
+
+    def test_no_grad_when_weight_and_input_both_frozen(self):
+        enable_autograd()
+
+        conv = Conv2d(in_channels=1, out_channels=1, kernel_size=3)
+        conv.weight.requires_grad = False
+        x = Tensor(rng.standard_normal((1, 1, 8, 8)), requires_grad=False)
+
+        result = conv.forward(x)
+
+        assert result.requires_grad is False
+        assert getattr(result, "_grad_fn", None) is None
+
+
+class TestBatchNorm2d:
+    """
+    Test BatchNorm2d construction, forward pass, and input validation.
+
+    CONCEPT: BatchNorm2d normalizes each channel across the batch and
+    spatial dimensions, then applies a learnable scale (gamma) and shift
+    (beta).
+    """
+
+    def test_batchnorm2d_creation(self):
+        bn = BatchNorm2d(num_features=4)
+        assert bn.gamma.shape == (4,)
+        assert bn.beta.shape == (4,)
+        assert bn.training is True
+
+    def test_batchnorm2d_forward_valid_4d_input(self):
+        bn = BatchNorm2d(num_features=3)
+        x = Tensor(rng.standard_normal((2, 3, 4, 4)))
+        output = bn.forward(x)
+        assert output.shape == (2, 3, 4, 4)
+
+    def test_batchnorm2d_forward_normalizes_output(self):
+        """Per-channel mean should be near 0 and variance near 1 after normalization."""
+        bn = BatchNorm2d(num_features=2)
+        x = Tensor(rng.standard_normal((16, 2, 4, 4)))
+        output = bn.forward(x)
+        channel_mean = np.mean(output.data, axis=(0, 2, 3))
+        np.testing.assert_allclose(channel_mean, np.zeros(2), atol=1e-5)
+
+    def test_batchnorm2d_validate_input_rejects_3d(self):
+        bn = BatchNorm2d(num_features=3)
+        x = Tensor(rng.standard_normal((3, 4, 4)))
+        with pytest.raises(ValueError):
+            bn._validate_input(x)
+
+    def test_batchnorm2d_validate_input_rejects_2d(self):
+        bn = BatchNorm2d(num_features=3)
+        x = Tensor(rng.standard_normal((4, 4)))
+        with pytest.raises(ValueError):
+            bn._validate_input(x)
+
+    def test_batchnorm2d_validate_input_rejects_channel_mismatch(self):
+        bn = BatchNorm2d(num_features=3)
+        x = Tensor(rng.standard_normal((2, 5, 4, 4)))
+        with pytest.raises(ValueError):
+            bn._validate_input(x)
 
 
 if __name__ == "__main__":

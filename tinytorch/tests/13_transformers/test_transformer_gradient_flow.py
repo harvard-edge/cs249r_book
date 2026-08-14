@@ -86,6 +86,22 @@ def test_layernorm_gradient_flow():
     print("✅ LayerNorm gradient flow works correctly")
 
 
+def test_layernorm_no_grad_when_all_inputs_frozen():
+    """LayerNorm should not attach gradient tracking when gamma, beta,
+    and x all have requires_grad=False."""
+    batch_size, seq_len, embed_dim = 2, 8, 16
+
+    ln = LayerNorm(embed_dim)
+    ln.gamma.requires_grad = False
+    ln.beta.requires_grad = False
+
+    x = Tensor(rng.standard_normal((batch_size, seq_len, embed_dim)), requires_grad=False)
+    output = ln.forward(x)
+
+    assert output.requires_grad is False
+    assert getattr(output, "_grad_fn", None) is None
+
+
 def test_mlp_gradient_flow():
     """Test that MLP parameters receive gradients."""
     print("Testing MLP gradient flow...")
