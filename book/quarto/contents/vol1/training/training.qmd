@@ -210,7 +210,7 @@ The chapter follows that dependency chain. The iron law of training performance 
 
 Before formalizing the iron law, consider how these constraints interact in practice. The theoretical framework matters because failures are expensive: a single *gradient explosion* can erase days of computation worth thousands of dollars.
 
-::: {#cs-training-palm-loss-spikes .callout-case-study title="The PaLM loss spikes (2022)"}
+::: {#ws-training-palm-loss-spikes .callout-war-story title="The PaLM loss spikes (2022)"}
 
 **Context**: During training of the 540B-parameter PaLM model, the largest run exhibited training-instability behavior that smaller runs did not show [@chowdhery2022palm].
 
@@ -274,12 +274,8 @@ Training speed is governed by the utilization of hardware peaks.
 **The Utilization Gap**
 
 - [ ] **Peak vs. real**: Why does sustained end-to-end utilization remain below the arithmetic peak?
-- [ ] **Batch size physics**: Why does increasing batch size generally improve hardware utilization?
+- [ ] **Utilization losses**: Which pipeline stalls introduced earlier reduce $\eta_{\text{hw}}$, and which can prefetching or overlap hide?
 - [ ] **Order of magnitude**: A frontier run needs on the order of $10^{23}$ FLOPs at a utilization $\eta_{\text{hw}}$ well below 1. Estimate which lever shortens wall-clock time more, doubling $R_{\text{peak}}$ or doubling $\eta_{\text{hw}}$, and why the iron law says the two are not interchangeable in practice.
-
-**Precision Economics**
-
-- [ ] **Mixed precision**: When do FP16 or BF16 activate faster hardware paths, and what limits the realized gain?
 
 :::
 
@@ -329,7 +325,7 @@ class GPT2LighthouseSpecs:
 
 ### Running example: Training GPT-2 {#sec-model-training-running-example-training-gpt2-19cd}
 
-GPT-2 is large enough to expose real training bottlenecks yet small enough to reason about without trillion-parameter infrastructure. In inference, GPT-2 serves as the Bandwidth Hog lighthouse; in training, the same model exposes a different constraint mix: activation memory, accelerator utilization, and data-pipeline throughput. It recurs as a worked example so each optimization has a concrete model, dataset, and hardware target.
+In inference, GPT-2 serves as the Bandwidth Hog lighthouse. Here it recurs as the chapter's stable workload for testing each training cost and optimization.
 
 ::: {#lhs-training-lighthouse-example-training-gpt-2 .callout-lighthouse title="Lighthouse example: Training GPT-2"}
 
@@ -358,7 +354,7 @@ Training systems occupy a critical position in the machine learning pipeline: th
 
 [^fn-training-model-parallelism]: **Model Parallelism**: Partitions the model's layers across devices when it exceeds single-device memory. Activations must transfer between devices at every partition boundary, and naive partitioning creates "pipeline bubbles" where downstream devices idle while waiting. Microbatch pipelining, as in GPipe and PipeDream, recovers much of this lost efficiency [@huang2019gpipe; @narayanan2019]. \index{Model Parallelism!pipeline bubbles}
 
-GPT-2's `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` WebText corpus sits at the lower end of this data scale spectrum. Larger corpora can change the data path qualitatively. A sufficiently provisioned host may cache a corpus of this size in memory, but tokenization, shuffling, host-to-device transfer, and repeated access still consume time and bandwidth. When a corpus exceeds local memory or storage throughput, systems may need parallel readers, prefetching, caching, or distributed storage to keep data delivery from limiting accelerator throughput.
+GPT-2's `{python} GPT2LighthouseSpecs.gpt2_dataset_size_gb_str` WebText corpus sits at the lower end of this data scale spectrum. Larger corpora can change the data path qualitatively.
 
 ::: {#psp-training-10-gb-10-tb-scale-factor .callout-perspective title="The 10 GB to 10 TB scale factor"}
 
@@ -776,7 +772,7 @@ However, processing single examples creates new system challenges. Modern accele
 
 ##### Mini-batch processing {#sec-model-training-minibatch-processing-4eb0}
 
-Mini-batch gradient descent\index{Mini-Batch Processing!accelerator efficiency} emerges as a practical compromise between full-batch and stochastic methods, an algorithm-machine co-design that computes gradients over small batches of examples aligned with modern accelerator architectures [@dean2012large]. GPUs contain thousands of cores designed for parallel computation, and mini-batch processing allows these cores to simultaneously compute gradients for multiple examples. The batch size $B$ becomes a key system parameter, influencing both computational efficiency and memory requirements.
+Mini-batch gradient descent\index{Mini-Batch Processing!accelerator efficiency} emerges as a practical compromise between full-batch and stochastic methods, an algorithm-machine co-design that computes gradients over small batches of examples aligned with modern accelerator architectures [@dean2012large]. The batch size $B$ becomes a key system parameter, influencing both computational efficiency and memory requirements.
 
 ::: {#dfn-training-batch-processing .callout-definition title="Batch processing"}
 
@@ -1002,7 +998,7 @@ A representative GPT-2 XL training configuration uses the Adam optimizer with fi
 - Weight decay: 0.01
 - Gradient clipping: Global norm clipping at 1.0
 
-**Memory Overhead Calculation**\index{Adam Optimizer!memory overhead}
+**Math**:\index{Adam Optimizer!memory overhead}
 
 For GPT-2's `{python} GPT2Optimizer.model_params_b_str` parameters in FP32 (`{python} GPT2Optimizer.bytes_fp32_value_str` bytes each), the memory breaks down across four components:
 
@@ -1018,7 +1014,7 @@ This explains why GPT-2's `{python} GPT2Optimizer.total_static_fp32_gb_str` stat
 1. Mixed precision training (FP16) reduces operation precision but requires keeping FP32 master weights, maintaining the static memory footprint at ~`{python} GPT2Optimizer.total_static_amp_gb_str`.
 2. Gradient accumulation (splitting effective batches into smaller micro-batches) allows effective batch size $B=512$ despite memory limits.
 
-This illustrative configuration shows how Adam's moment buffers constrain capacity. Any convergence benefit relative to SGD or momentum must be measured under a matched model, data, schedule, batch size, and stopping criterion.
+**Systems insight**: This illustrative configuration shows how Adam's moment buffers constrain capacity. Any convergence benefit relative to SGD or momentum must be measured under a matched model, data, schedule, batch size, and stopping criterion.
 
 :::
 
@@ -1292,7 +1288,7 @@ This exceeds a single V100's `{python} GPT2ActivationMemory.v100_mem_capacity_gb
 3. Mixed precision: FP16 activations (already applied) vs. FP32 (would be `{python} GPT2ActivationMemory.act_fp32_gb_str`)
 4. Reduced micro-batch size and gradient accumulation: Build a larger effective batch from multiple memory-feasible forward/backward passes
 
-Even after selective recomputation, the modeled activations plus static state total about `{python} GPT2ActivationMemory.ckpt_peak_gb_str`, slightly above the raw `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` V100 capacity before workspace and allocator overhead. Full recomputation, sharding, offload, or a smaller micro-batch is therefore still required for this representation.
+**Systems insight**: Even after selective recomputation, the modeled activations plus static state total about `{python} GPT2ActivationMemory.ckpt_peak_gb_str`, slightly above the raw `{python} GPT2ActivationMemory.v100_mem_capacity_gb_str` V100 capacity before workspace and allocator overhead. Full recomputation, sharding, offload, or a smaller micro-batch is therefore still required for this representation.
 
 :::
 
@@ -2507,7 +2503,7 @@ Transformer architectures introduce attention mechanisms\index{Attention Mechani
 
 Throughout these networks, element-wise operations play a supporting role. Activation functions like ReLU and sigmoid transform values independently and, as established in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446, are memory-bandwidth-bound rather than compute bound. Batch normalization presents similar challenges, computing statistics and normalizing values across batch dimensions while creating synchronization points in the computation pipeline.
 
-Modern hardware accelerators, particularly GPUs, optimize these diverse computations through massive parallelization. Achieving peak performance requires careful attention to hardware architecture. GPUs process data in fixed-size groups of threads called warps\index{Warp!GPU execution unit}[^fn-warp-training] on NVIDIA architectures or wavefronts on AMD architectures. Efficient matrix dimensions depend on the kernel's thread-block and tile mapping, including any alignment requirements imposed by Tensor Core instructions. This fixed-granularity execution model creates a subtle but consequential effect that practitioners frequently overlook.
+Modern hardware accelerators, particularly GPUs, optimize these diverse computations through massive parallelization. Achieving peak performance requires careful attention to hardware architecture. GPUs process data in fixed-size groups of threads called warps\index{Warp!GPU execution unit}[^fn-warp-training] on NVIDIA architectures or wavefronts on AMD architectures. Efficient matrix dimensions depend on the kernel's thread-block and tile mapping, including any alignment requirements imposed by Tensor Core instructions.
 
 [^fn-warp-training]: **Warp**: From textile weaving, where a "warp" is the set of threads held taut on a loom while a shuttle weaves across them. NVIDIA adopted the term because GPU threads within a warp execute the same instruction in lockstep, analogous to parallel threads moving together on the loom. An NVIDIA warp contains 32 threads. \index{Warp!etymology and hardware constraint}
 
@@ -3087,7 +3083,7 @@ The preceding pipeline architecture established the structural *what* of trainin
 
 Blueprint knowledge is not diagnosis\index{Training Bottleneck!profiling}. Knowing that attention operations consume 50 percent of FLOPs and data loading takes 25 percent of wall-clock time does not reveal which constraint to attack first; that depends on *which resource is actually saturated*\index{Training Bottleneck!compute-bound vs. memory-bound} during execution.
 
-The diagnostic methodology that transforms blueprint knowledge into actionable optimization decisions begins with a meaningful measure of training efficiency. Raw accelerator utilization percentages can be misleading because an accelerator may remain active while executing recomputation, padding, or other work outside the model-FLOP accounting. **Model FLOPs Utilization (MFU)**\index{Model FLOPs Utilization!origin}[^fn-mfu] compares an analytical estimate of model FLOPs per step with the accelerator's peak FLOP budget over the measured step time.
+The diagnostic methodology that transforms blueprint knowledge into actionable optimization decisions begins with a meaningful measure of training efficiency. Raw accelerator utilization percentages can be misleading because an accelerator may remain active while executing recomputation, padding, or other work outside the model-FLOP accounting. **Model FLOPs Utilization (MFU)**\index{Model FLOPs Utilization!origin}[^fn-mfu] supplies that comparison.
 
 ```{python}
 #| echo: false
@@ -3148,7 +3144,7 @@ Training bottlenecks fall into three categories that map directly to the D·A·M
 
 : **D·A·M Taxonomy Applied to Training Bottlenecks**: Each axis of the D·A·M taxonomy (Data, Algorithm, Machine) maps to a distinct training bottleneck with characteristic symptoms. Profiling reveals which axis is the limiting factor, guiding practitioners to the appropriate optimization technique. {#tbl-dam-training-bottlenecks tbl-colwidths="[13,18,44,35]"}
 
-The data-bound category is the most commonly misdiagnosed bottleneck in practice. A training job with 40 percent MFU and a GPU utilization trace full of idle gaps looks like a hardware problem, but the root cause is often a software serialization bottleneck in the input pipeline. When the CPU-side data loader cannot prepare batches faster than the accelerator consumes them, no amount of GPU tuning can close the gap.
+The data-bound category is the most commonly misdiagnosed bottleneck in practice.
 
 ::: {#exmp-training-gil-locked-gpu .callout-example title="The GIL-locked GPU"}
 
@@ -6443,10 +6439,9 @@ class TrainingCarbonFootprint:
 4.  **Time**: ≈ `{python} TrainingCarbonFootprint.cf_time_days_str` on `{python} TrainingCarbonFootprint.cf_num_gpus_str`.
 5.  **Energy**: (`{python} TrainingCarbonFootprint.cf_num_gpus_str` $\times$ `{python} TrainingCarbonFootprint.cf_gpu_tdp_w_str` + `{python} TrainingCarbonFootprint.cf_hosts_str` $\times$ `{python} TrainingCarbonFootprint.cf_cpu_tdp_per_host_w_str`) $\times$ `{python} TrainingCarbonFootprint.cf_time_hours_str` ≈ `{python} TrainingCarbonFootprint.cf_energy_kwh_str`
 
-**Systems insight**: Using the scenario's 900 kWh-per-household-month comparison, the modeled energy equals `{python} TrainingCarbonFootprint.cf_household_months_str` of average household electricity use.
+**Result**: Under the scenario's household-energy comparison, the modeled energy equals `{python} TrainingCarbonFootprint.cf_household_months_str` of average household electricity use.
 
-- **The optimization dividend**: If useful throughput doubles while modeled cluster power remains constant, time and energy halve. Under the stated average grid intensity, the avoided energy is ~`{python} TrainingCarbonFootprint.cf_energy_saved_kwh_str` and the avoided location-based emissions are `{python} TrainingCarbonFootprint.cf_co2_str`.
-- **The limitation**: Higher utilization can also raise power, so measured energy—not utilization alone—must support an environmental claim.
+**Systems insight**: If useful throughput doubles while modeled cluster power remains constant, time and energy halve. Under the stated average grid intensity, the avoided energy is ~`{python} TrainingCarbonFootprint.cf_energy_saved_kwh_str` and the avoided location-based emissions are `{python} TrainingCarbonFootprint.cf_co2_str`. Higher utilization can also raise power, so measured energy—not utilization alone—must support an environmental claim.
 
 :::
 

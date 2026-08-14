@@ -101,6 +101,10 @@ insertPreamble = function(doc, classDefs, fmt)
           for calloutType, _ in pairs(classDefs) do
             -- Convert hyphens to underscores for icon filename (e.g., callout-quiz-question -> callout_quiz_question)
             local iconFileName = calloutType:gsub("-", "_")
+            -- War stories retain the established red incident icon.
+            if iconFileName == "callout_war_story" then
+              iconFileName = "callout_case_study"
+            end
             iconCSS = iconCSS .. "details." .. calloutType .. " > summary::before {\n"
             iconCSS = iconCSS .. "  background-image: url(\"" .. iconPath .. "/icon_" .. iconFileName .. "." .. iconFormat .. "\");\n"
             iconCSS = iconCSS .. "}\n"

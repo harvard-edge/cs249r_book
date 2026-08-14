@@ -281,7 +281,7 @@ TinyML\index{TinyML!model compression} makes optimization a deployment requireme
 
 This deployment-time pressure is not new. The first major deep-learning success ran into the same memory wall during training itself, and the architecture itself carries the scar to this day.
 
-::: {#cs-model-compression-alexnet-2012 .callout-case-study title="AlexNet's two-GPU split (2012)"}
+::: {#exmp-model-compression-alexnet-2012 .callout-example title="AlexNet's two-GPU split (2012)"}
 
 **Context**: In 2012, Alex Krizhevsky, Ilya Sutskever, and Geoffrey Hinton at the University of Toronto set out to train a convolutional network larger than anything previously attempted on ImageNet [@krizhevsky2012imagenet].
 
@@ -2133,9 +2133,9 @@ where $k \ll m, n$ is the approximation rank. This is typically computed via sin
 
 [^fn-svd-rank-tradeoff]: **Singular Value Decomposition (SVD)**: The Eckart-Young theorem\index{Eckart-Young Theorem!SVD optimality} (1936) proves that retaining the top $k$ singular values yields an optimal rank-$k$ approximation in the Frobenius and spectral norms. The key systems trade-off is whether the high, one-time compute cost of this factorization—$\mathcal{O}(mn \cdot \min(m,n))$—is amortized by the memory and bandwidth savings from using the smaller model in repeated inference calls. \index{SVD!rank-bandwidth trade-off}
 
-This factorization reveals a recurring systems trade-off: executing two smaller factor operations introduces another kernel boundary but can reduce both arithmetic and data movement when the retained rank is small.
+The deployment question is whether the reduction in stored weights and matrix-vector work is large enough to justify a second factor operation.
 
-::: {#nbk-model-compression-bandwidth-compute-tradeoff .callout-notebook title="The bandwidth-compute trade-off"}
+::: {#psp-model-compression-bandwidth-compute-tradeoff .callout-perspective title="The bandwidth-compute trade-off"}
 
 Low-rank factorization can reduce both arithmetic and bandwidth demand when the retained rank is small, though it adds a second factor operation and possible kernel-launch overhead\index{Bandwidth Reduction!low-rank factorization}. Storing a `{python} LowRankFactorization.mat_dim_str` by `{python} LowRankFactorization.mat_dim_str` matrix requires `{python} LowRankFactorization.full_mb_str` (at FP32). Fetching this matrix for a single inference imposes substantial memory traffic, especially when execution is limited by physical memory bandwidth.
 
@@ -2668,13 +2668,13 @@ Beyond convolutional networks, NAS has been applied to transformer architectures
 
 The structural techniques covered so far (pruning, distillation, factorization, and NAS) all optimize *what* computations the model performs, including which parameters exist, which connections remain, and how the architecture is structured. These techniques can substantially reduce parameter counts and theoretical FLOPs. Regardless of structural efficiency, every surviving weight and activation must still be stored and processed at some numerical precision.
 
-::: {#chk-model-compression-structural-optimization .callout-checkpoint title="Structural optimization checkpoint"}
+::: {#chk-model-compression-structural-optimization .callout-checkpoint title="Choosing a structural method"}
 
-Test your understanding of the structural optimization techniques covered so far:
+Structural methods relocate deployment cost in different ways.
 
-- [ ] **Structured vs. unstructured**: Can you explain the key difference between structured and unstructured pruning in terms of hardware efficiency? Consider how each interacts with GPU and TPU execution patterns.
-- [ ] **Distillation vs. pruning**: Do you understand why knowledge distillation typically preserves accuracy better than aggressive pruning? Think about what information each method retains from the original model.
-- [ ] **When to use NAS**: Can you identify when to choose neural architecture search over manual architecture design? Consider the trade-offs in computational cost, design space coverage, and hardware-specific optimization.
+- [ ] **Structured vs. unstructured pruning**: Compare how each pattern interacts with GPU and TPU execution.
+- [ ] **Distillation vs. pruning**: Explain why a dense student may preserve accuracy better than aggressive pruning while requiring additional training.
+- [ ] **NAS selection**: Identify when hardware-specific constraints and deployment scale justify architecture search rather than manual design.
 
 :::
 
@@ -3086,7 +3086,7 @@ The framework section's energy hierarchy already exposed this asymmetry; here it
 
 These energy savings take on a different character for models where memory capacity, not compute, is the binding constraint\index{DLRM!embedding quantization}.
 
-The DLRM example shows quantization as a way to make a huge memory object placeable. The same logic reappears at the other end of the scale, where the object is small but the device is smaller still: the keyword spotting (KWS) DS-CNN\index{Keyword Spotting!quantization imperative} lighthouse faces a TinyML deployment where compression becomes an existential requirement.
+Recommendation models turn the same energy argument into a placement problem: quantization must make the dominant memory object small enough for the machine that serves it.
 
 ::: {#lhs-model-compression-dlrm-embedding-quantization .callout-lighthouse title="DLRM and embedding quantization"}
 
@@ -3382,7 +3382,7 @@ class SIMDThroughput:
 2.  **FP32 capacity**: `{python} SIMDThroughput.simd_register_bits_value_str`/`{python} SIMDThroughput.simd_fp32_bits_value_str` = `{python} SIMDThroughput.simd_fp32_elements_value_str` elements per vector instruction.
 3.  **INT8 capacity**: `{python} SIMDThroughput.simd_register_bits_value_str`/`{python} SIMDThroughput.simd_int8_bits_value_str` = `{python} SIMDThroughput.simd_int8_elements_value_str` elements per vector instruction.
 
-**Multiplier**: Switching to INT8 packs `{python} SIMDThroughput.simd_gain_mult_str` more elements into the same register.
+**Result**: Switching to INT8 packs `{python} SIMDThroughput.simd_gain_mult_str` more elements into the same register.
 $\text{Throughput Gain} = \text{INT8 elements/inst} / \text{FP32 elements/inst}$ = `{python} SIMDThroughput.simd_int8_elements_value_str`/`{python} SIMDThroughput.simd_fp32_elements_value_str` = `{python} SIMDThroughput.simd_gain_mult_str`
 
 **Systems insight**: Quantization delivers up to `{python} SIMDThroughput.simd_gain_mult_str` speedup on compute-bound layers from vector packing alone, on hardware whose INT8 vector instructions have comparable throughput to FP32, even before considering memory bandwidth savings.
@@ -4764,19 +4764,19 @@ These timing and granularity decisions interact with the broader choice of quant
 
 PTQ is the low-effort starting point; QAT spends training budget when PTQ misses the accuracy target, while dynamic quantization spends runtime work to track input-dependent ranges. Before proceeding to advanced techniques, a quick checkpoint tests comprehension of these core quantization modes.
 
-::: {#chk-model-compression-quantization-gate .callout-checkpoint title="The quantization gate"}
+::: {#chk-model-compression-quantization-gate .callout-checkpoint title="Calibration and range choices"}
 
-Precision reduction is the most impactful deployment optimization.
+Quantization succeeds only when the range policy matches deployment data and runtime constraints.
 
-**Quantization Modes**
+**Range design**
 
-- [ ] **Post-training quantization (PTQ)**: Explain why PTQ is the first attempt for many CNN deployments.
-- [ ] **Quantization-aware training (QAT)**: Explain why compact models often require training-time exposure to quantization noise.
+- [ ] **Calibration data**: Explain how an unrepresentative calibration set creates clipping or wastes integer levels.
+- [ ] **Granularity**: Compare per-tensor and per-channel ranges by the error and metadata trade-off each creates.
+- [ ] **Static vs. dynamic ranges**: Select a range policy when activation distributions shift across inputs and runtime overhead is constrained.
 
-**System Implications**
+**System estimate**
 
-- [ ] **Latency vs. throughput**: Distinguish the hardware mechanism that turns INT8 into higher throughput from the one that turns it into lower single-request latency.
-- [ ] **Quantization payoff**: For a 7B-parameter model served from HBM, estimate the weight memory in FP16 versus INT4 and the rough decode-throughput gain, given that autoregressive decode is memory-bandwidth-bound.
+- [ ] **Quantization payoff**: For a 7B-parameter model served from HBM, estimate FP16 versus INT4 weight memory and the rough decode-throughput gain for memory-bandwidth-bound inference.
 
 :::
 
@@ -7236,11 +7236,7 @@ Sequencing matters because these levers interact through the same weights and ac
 
 :::
 
-A mobile BERT pipeline\index{BERT!mobile deployment pipeline} makes that sequencing dependency concrete.
-
-This example illustrates why sequencing must be validated: pruning changes the surviving weight distribution, so subsequent quantization can become easier or harder depending on range and outliers. Applying quantization first likewise changes later pruning behavior. Effective combination requires understanding these dependencies and developing application sequences that maximize cumulative benefits.
-
-With dozens of techniques across three optimization dimensions, rigorous measurement is essential for validating that optimizations achieve their intended goals. A practitioner who prunes, quantizes, and fuses without profiling the actual impact on target hardware is optimizing blindly.
+A mobile BERT pipeline\index{BERT!mobile deployment pipeline} makes that sequencing dependency concrete by combining pruning, distillation, and quantization under one deployment target.
 
 ::: {#exmp-model-compression-bert-base-mobile-deployment-pipeline .callout-example title="BERT-Base mobile deployment pipeline"}
 

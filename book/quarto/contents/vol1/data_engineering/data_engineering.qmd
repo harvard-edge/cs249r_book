@@ -73,7 +73,7 @@ The workflow becomes concrete in the data pipeline: raw inputs pass through coll
 
 :::
 
-Data engineering is not merely "data cleaning," but **Dataset Compilation**\index{Dataset Compilation!definition}. Just as a compiler transforms human-readable source code into an optimized binary executable, a data pipeline transforms raw, noisy observations into a clean, optimized training set that the model consumes. The analogy to compiler design is instructive. A compiler transforms source code through a series of increasingly refined representations (tokens, abstract syntax trees, intermediate representations, machine code), and a data pipeline transforms raw observations into training-ready tensors, the numeric arrays consumed by models, through analogous stages. Filtering corrupted records, outliers, and irrelevant features corresponds to *dead code elimination*: stripping material that contributes nothing to the learned representation. Augmentation, which synthetically expands limited examples by rotating images, pitch-shifting audio, or injecting noise, mirrors *loop unrolling*, exposing the model to more variations of the underlying pattern without collecting new data. **Deduplication**\index{Deduplication!definition}\index{Deduplication!duplicate removal} plays the role of *common subexpression elimination*, identifying and merging duplicate records that would otherwise bias gradient estimates and waste compute. Schema validation, enforcing strict types and ranges on every record, is the data pipeline's *type checker*, rejecting malformed inputs before they crash the "runtime" of model training.
+The **Dataset Compilation**\index{Dataset Compilation!definition} analogy makes the infrastructure concrete. Just as a compiler transforms human-readable source code into an optimized binary executable, a data pipeline transforms raw, noisy observations into a clean, optimized training set that the model consumes. The analogy to compiler design is instructive. A compiler transforms source code through a series of increasingly refined representations (tokens, abstract syntax trees, intermediate representations, machine code), and a data pipeline transforms raw observations into training-ready tensors, the numeric arrays consumed by models, through analogous stages. Filtering corrupted records, outliers, and irrelevant features corresponds to *dead code elimination*: stripping material that contributes nothing to the learned representation. Augmentation, which synthetically expands limited examples by rotating images, pitch-shifting audio, or injecting noise, mirrors *loop unrolling*, exposing the model to more variations of the underlying pattern without collecting new data. **Deduplication**\index{Deduplication!definition}\index{Deduplication!duplicate removal} plays the role of *common subexpression elimination*, identifying and merging duplicate records that would otherwise bias gradient estimates and waste compute. Schema validation, enforcing strict types and ranges on every record, is the data pipeline's *type checker*, rejecting malformed inputs before they crash the "runtime" of model training.
 
 The engineering implication is that datasets must be versioned (like git), unit-tested (data quality checks), and debugged. *Deleting a row of training data can change the learned artifact, just as deleting a line of code can change a compiled binary; retraining is the corresponding recompilation step.* Compilation also forces a trust boundary between dataset partitions. The training set is allowed to shape parameters; the validation set is allowed to shape modeling and pipeline choices; the test set is reserved for estimating generalization after those choices have been made. Leakage occurs when information crosses those boundaries: duplicate examples appearing in multiple splits, augmented variants of the same source record landing on both sides of the split, user records from the same household appearing in both training and test, or time-derived features computed using future observations. For the keyword-spotting case study used throughout this chapter, this means speaker-independent and time-aware splits are not bookkeeping details; they are the difference between measuring memorization of familiar voices and measuring performance on the deployment population.
 
@@ -320,17 +320,13 @@ These principles operate at the level of individual files and batches. At data c
 
 **Problem**: A `{python} DataGravity.dataset_pb_str` training dataset resides in a US East data center, while a remote accelerator pod is available in US West. Is it faster to move the data or to move the compute?
 
-**Physics**:
+**Math**:
 
-1.  **Network bandwidth**: A dedicated `{python} DataGravity.network_gbit_per_s_str` line carries `{python} DataGravity.network_gb_per_s_str`.
-2.  **Transfer time**: Moving `{python} DataGravity.dataset_gb_str` at `{python} DataGravity.network_gb_per_s_str` takes `{python} DataGravity.transfer_seconds_str`, approximately \mbox{`{python} DataGravity.transfer_hours_str`.}
-3.  **Cost**: At `{python} DataGravity.egress_cost_per_gb_str` egress, moving `{python} DataGravity.dataset_pb_str` costs `{python} DataGravity.transfer_cost_str`. (Baseline: AWS data transfer out pricing, 2024.)
+1.  **Network bandwidth**: `{python} DataGravity.network_gbit_per_s_str` $\div 8 =$ `{python} DataGravity.network_gb_per_s_str`.
+2.  **Transfer time**: `{python} DataGravity.dataset_gb_str` $\div$ `{python} DataGravity.network_gb_per_s_str` $=$ `{python} DataGravity.transfer_seconds_str`, approximately \mbox{`{python} DataGravity.transfer_hours_str`.}
+3.  **Cost**: `{python} DataGravity.dataset_gb_str` $\times$ `{python} DataGravity.egress_cost_per_gb_str` $=$ `{python} DataGravity.transfer_cost_str`. (Baseline: AWS data transfer out pricing, 2024.)
 
-**Systems insight**:
-If training takes less than `{python} DataGravity.transfer_hours_str`, data transfer takes longer than training.
-If training costs less than `{python} DataGravity.transfer_cost_str` (approximately `{python} DataGravity.tpu_hours_str`), bandwidth costs more than compute.
-
-**Rule of thumb**: For petabyte-scale data, code moves to data\index{Data Locality!code-to-data}. For gigabyte-scale data, data moves to code\index{Data Locality!data-to-code}.
+**Systems insight**: If training takes less than `{python} DataGravity.transfer_hours_str`, data transfer takes longer than training. If training costs less than `{python} DataGravity.transfer_cost_str` (approximately `{python} DataGravity.tpu_hours_str`), bandwidth costs more than compute. For petabyte-scale data, code moves to data\index{Data Locality!code-to-data}; for gigabyte-scale data, data moves to code\index{Data Locality!data-to-code}.
 
 :::
 
@@ -741,7 +737,7 @@ Data quality provides the foundation, as the cascade pattern in @sec-data-engine
 
 Reliability asks whether the same enrollment pipeline keeps working when the device, network, or user behavior is imperfect. A pipeline that produces excellent wake-word examples in a laboratory but fails during intermittent connectivity, battery pressure, or microphone glitches delivers no value in the user's home. Error handling, retries, local buffering, and graceful degradation turn the quality rule into a usable system: the device can request another utterance, defer upload until connectivity returns, or preserve a known-good enrollment rather than silently accepting corrupted audio.
 
-Scalability asks whether that same decision survives growth. A manual review policy that works for a thousand recordings collapses when the product expands to millions of users, dozens of languages, and long-tail acoustic conditions. The system must scale validation, storage, labeling, and retraining without letting infrastructure cost grow faster than the value of better coverage. Our recommendation lighthouse illustrates this challenge at its most extreme.
+Scalability asks whether that same decision survives growth. A manual review policy that works for a thousand recordings collapses when the product expands to millions of users, dozens of languages, and long-tail acoustic conditions. The system must scale validation, storage, labeling, and retraining without letting infrastructure cost grow faster than the value of better coverage. The limiting resource therefore depends on the workload.
 
 ::: {#lhs-data-engineering-dlrm-recommendation-lighthouse .callout-lighthouse title="DLRM recommendation lighthouse"}
 
@@ -2000,7 +1996,7 @@ scale=0.6, every node/.append style={transform shape}]
 
 :::
 
-Synthetic data\index{Synthetic Data!rare event coverage}\index{Synthetic Data!simulation} is particularly valuable for rare event coverage and data augmentation. Simulation environments enable controlled generation of edge cases that are impractical to collect naturally [@nvidia_simulation]. For image data, augmentation methods such as AutoAugment [@cubuk2019] and RandAugment [@cubuk2020] search over transformations that improve generalization, while broader image-augmentation practice is surveyed by @shorten2019. For audio, SpecAugment\index{SpecAugment!audio augmentation} masks time and frequency regions to improve speech recognition robustness [@park2019]. For KWS, speech synthesis [@werchniak2021] and audio augmentation fill the coverage gaps that remain after real collection, creating wake word variations across acoustic environments, speaker characteristics, and background conditions. A short exercise turns these techniques into a concrete workflow.
+Synthetic data\index{Synthetic Data!rare event coverage}\index{Synthetic Data!simulation} is particularly valuable for rare event coverage and data augmentation. Simulation environments enable controlled generation of edge cases that are impractical to collect naturally [@nvidia_simulation]. For image data, augmentation methods such as AutoAugment [@cubuk2019] and RandAugment [@cubuk2020] search over transformations that improve generalization, while broader image-augmentation practice is surveyed by @shorten2019. For audio, SpecAugment\index{SpecAugment!audio augmentation} masks time and frequency regions to improve speech recognition robustness [@park2019]. For KWS, speech synthesis [@werchniak2021] and audio augmentation fill the coverage gaps that remain after real collection, creating wake word variations across acoustic environments, speaker characteristics, and background conditions. The KWS case makes the coverage role of these techniques concrete.
 
 ::: {#exmp-data-engineering-synthetic-data-generation .callout-example title="Synthetic data generation"}
 
@@ -2120,7 +2116,7 @@ Consider a self-driving-car pipeline in which 15 percent of LiDAR point-cloud la
 
 Quality represents the foundation of reliable ML systems, and this example illustrates why. Pipelines implement quality through systematic validation and monitoring at every stage. Data pipeline issues represent a major source of ML failures.\index{Pipeline!failure modes} Schema changes breaking downstream processing, distribution drift degrading model accuracy, and data corruption silently introducing errors are concrete examples of the data-dependency and monitoring debt described by @sculley2015hidden. These failures are insidious because they rarely cause obvious system crashes; instead, they slowly degrade model performance in ways that become apparent only after affecting users. Achieving quality therefore demands proactive monitoring and validation that catches issues before they cascade into model failures.
 
-::: {#cs-data-engineering-microsoft-tay-2016 .callout-case-study title="Microsoft Tay (2016)"}
+::: {#ws-data-engineering-microsoft-tay-2016 .callout-war-story title="Microsoft Tay (2016)"}
 
 **Context**: In March 2016, Microsoft launched Tay, a Twitter chatbot targeted at 18-to-24-year-olds in the United States for entertainment purposes [@microsoft2016tay]. Its public interactions exposed the system to inputs from an open, adversarial environment.
 
@@ -2135,6 +2131,8 @@ Production teams implement monitoring at scale through severity-based alerting s
 A recommendation system processing user interaction events at 50,000 records per second makes these severity tiers concrete. Its monitoring system tracks several interdependent signals. Instantaneous throughput alerts fire if processing drops below 40,000 records per second for more than 10 minutes, accounting for normal traffic variation while catching genuine capacity or processing problems. Each feature in the data stream has its own quality profile: if a feature like user_age shows null values in more than 5 percent of records when the training data contained less than 1 percent nulls, something has likely broken in the upstream data source. Duplicate detection runs on sampled data, watching for the same event appearing multiple times—a pattern that might indicate retry logic gone wrong or a database query accidentally returning the same records repeatedly.
 
 These monitoring dimensions become particularly important when considering end-to-end latency. The system must track both whether data arrives and how long it takes to flow through the entire pipeline from the moment an event occurs to when the resulting features become available for model inference. When 95th percentile latency exceeds 30 seconds in a system with a 10-second service level agreement, the monitoring system needs to pinpoint which pipeline stage introduced the delay: ingestion, transformation, validation, or storage.
+
+Schema and latency alerts expose structural and timing failures; detecting a continuous-feature distribution shift requires a statistical comparison with the training baseline.
 
 ```{python}
 #| echo: false
@@ -2276,9 +2274,9 @@ if not results.success:
 
 :::
 
-::: {#psp-data-engineering-mechanical-vs-semantic-quality .callout-perspective title="Mechanical vs. semantic quality"}
+Executable expectations catch properties a suite can encode; the remaining question is what valid-looking data can still get wrong.
 
-Data validation differs from unit testing because software defects are binary and deterministic, while data quality has a probabilistic dimension that schema checks alone cannot capture.
+::: {#psp-data-engineering-mechanical-vs-semantic-quality .callout-perspective title="Mechanical vs. semantic quality"}
 
 In traditional software, many checks are *mechanical*. A null dereference is a runtime error in languages with null references, while integer-overflow behavior depends on the language and type.
 
@@ -3005,7 +3003,7 @@ The stakes are high: violating the consistency imperative silently degrades mode
 Training-serving skew is a common cause of silent production degradation.
 
 - [ ] **Definition**: Can you define training-serving skew in terms of the training and live-request processing paths?
-- [ ] **Mechanism**: Can you explain why using `mean=0.5` in training and `mean=0.0` in serving makes live data look "alien" to the model?
+- [ ] **Mechanism**: Can you explain why recomputing normalization means independently in training and serving can make live data look unfamiliar to the model?
 - [ ] **Invariant**: Can you explain how shared logic, synchronized state, and parity checks reduce skew?
 
 :::
@@ -3435,6 +3433,8 @@ Pre-annotation\index{Pre-annotation!workflow}\index{AI-Assisted Labeling!preanno
 [^fn-weak-supervision-cost]: **Weak Supervision**: A "data programming" paradigm motivated by the observation that domain experts write heuristic rules faster than they label examples. This method exchanges manual annotation labor for the upfront effort of writing programmatic "labeling functions," each of which can then label millions of data points at near-zero marginal cost, whereas manual labeling costs scale linearly with dataset size. \index{Weak Supervision!cost trade-off}
 
 Large Language Models (LLMs)\index{LLM!labeling assistance} have further transformed labeling pipelines by generating rich text descriptions, creating labeling guidelines from examples, and explaining their reasoning for label assignments. Content moderation systems, for instance, use LLMs for initial content classification with explanations that human reviewers validate. However, LLM integration introduces systems challenges: provider- and model-dependent inference costs and rate limits, as well as the need for systematic output validation because LLMs can produce confident but incorrect labels. Many organizations adopt tiered approaches, using smaller specialized models for routine cases while reserving larger LLMs for complex scenarios requiring nuanced judgment.
+
+Active learning makes the complementary trade-off: it spends model inference to reduce human labeling, so the relevant question is whether that compute fits inside the same budget.
 
 ```{python}
 #| echo: false

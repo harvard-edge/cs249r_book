@@ -122,7 +122,7 @@ A convolutional neural network (CNN) encodes an inductive bias of spatial locali
 
 Machine learning systems face a core engineering trade-off: **representational power vs. computational efficiency**\index{Architecture!representational power vs. efficiency}. Under the iron law of ML systems (principle \ref{pri-iron-law}), architectural choice is the primary determinant of the operation-count term $O$. A transformer's attention mechanism enables global relationships but scales as $\mathcal{O}(S^2)$ operations with sequence length $S$; a CNN exploits spatial locality to reduce operations to linear scaling in the number of spatial positions. Matching the right inductive biases to a workload's data while setting a manageable operation-count budget defines the practice of neural architecture selection.
 
-::: {#cs-nn-architectures-netflix-prize-ensemble .callout-case-study title="The ensemble Netflix did not ship"}
+::: {#ws-nn-architectures-netflix-prize-ensemble .callout-war-story title="The ensemble Netflix did not ship"}
 
 **Context**: Netflix launched the Netflix Prize in 2006, offering one million dollars to any team that could improve the root-mean-square error of its Cinematch rating predictor by 10 percent. After three years of competition, the team BellKor's Pragmatic Chaos---Yehuda Koren, Bob Bell, Chris Volinsky, Andreas Toscher, Michael Jahrer, Martin Piotte, and Martin Chabbert---won in 2009 with a 10.06 percent improvement, blending more than a hundred component models into a single ensemble [@johnston2012netflixprize].
 
@@ -579,7 +579,7 @@ Match the architectural choice to its systems implication:
 
 - [ ] **Weight reuse (CNNs)**: How does reusing the same weights across many inputs change arithmetic intensity?
 - [ ] **Large embedding tables (DLRM)**: How do massive embedding tables change the balance between data movement and computation?
-- [ ] **Sequential attention (GPT)**: Why does token-by-token generation change the batching and bandwidth picture?
+- [ ] **Autoregressive decoding (GPT-2)**: Why does token-by-token generation change the batching and bandwidth picture?
 
 :::
 
@@ -1970,7 +1970,7 @@ With the hardware-mapping caveat in mind, the architectural efficiency of CNNs a
 
 The system implications mentioned earlier assume standard CNN architectures with full convolutions. However, standard convolutions scale as $\mathcal{O}(N \times K^2 \times C_{\text{in}} \times C_{\text{out}})$, a cost often prohibitive for the always-on edge devices introduced with our KWS Lighthouse. To bridge this gap, efficient architectures like **Depthwise Separable CNNs (DS-CNN)**\index{Depthwise Separable Convolution}\index{Convolution!depthwise separable} decompose the standard convolution into two cheaper operations. This factorization, introduced by Sifre in the context of feature extraction [@sifre2014rigid] and popularized by MobileNet [@howard2017mobilenets], reduces cost by separating spatial and channel-wise computation. The depthwise convolution\index{Convolution!depthwise} applies filters to each input channel independently ($K \times K \times C_{\text{in}}$ parameters), and the pointwise convolution\index{Convolution!pointwise} uses a $1{\times}1$ convolution to project channels to the output dimension ($1 \times 1 \times C_{\text{in}} \times C_{\text{out}}$ parameters).
 
-This decomposition reduces parameter count and FLOPs by a factor of roughly $1/C_{\text{out}} + 1/K^2$ (approximately $1/K^2$ for large $C_{\text{out}}$), making real-time audio processing feasible on tiny hardware. KWS thus serves as the chapter's TinyML lighthouse, illustrating power-constrained design at its most extreme.
+This decomposition reduces parameter count and FLOPs by a factor of roughly $1/C_{\text{out}} + 1/K^2$ (approximately $1/K^2$ for large $C_{\text{out}}$), making real-time audio processing feasible on tiny hardware.
 
 ::: {#lhs-nn-architectures-kws-tinyml-lighthouse .callout-lighthouse title="KWS (TinyML lighthouse)"}
 
@@ -2835,6 +2835,7 @@ class AttentionMemory:
 1.  **Matrix size**: The attention score matrix $(\mathbf{Q}\mathbf{K}^T)$ has dimensions $S{\times}S$ per head, across $N_{\text{heads}}$ heads (`{python} AttentionMemory.num_heads_str` heads in this example).
 2.  **Elements**: `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.seq_len_str` $\times$ `{python} AttentionMemory.num_heads_str` heads = `{python} AttentionMemory.elements_str` elements.
 3.  **Memory**: At FP16 (`{python} AttentionMemory.bytes_per_element_value_str` bytes/element): `{python} AttentionMemory.elements_str` $\times$ `{python} AttentionMemory.bytes_per_element_value_str` bytes = `{python} AttentionMemory.single_layer_gb_str`.
+4.  **Retained layers**: `{python} AttentionMemory.single_layer_gb_str` per layer $\times$ `{python} AttentionMemory.num_layers_str` retained layers = `{python} AttentionMemory.total_gb_str`.
 
 **Systems insight**: A materialized attention matrix consumes `{python} AttentionMemory.single_layer_gb_str` per layer. Naive training that retains all `{python} AttentionMemory.num_layers_str` layers' scores for backward would require `{python} AttentionMemory.total_gb_str`, far exceeding any single GPU's capacity. This memory wall motivates two broad implementation strategies developed later: avoid materializing the full matrix by tiling the computation, or reduce the number of scores computed in the first place.
 
@@ -2848,8 +2849,8 @@ Attention computation divides into two main phases: generating attention weights
 
 Long-context scaling is shaped by the cost of attention. Verify your intuition:
 
-- [ ] **Complexity**: Do you understand why doubling sequence length quadruples dense score interactions and a materialized score matrix?
-- [ ] **Implication**: Can you explain why the $\mathcal{O}(S^2)$ dense computation makes long-context models more expensive, even when tiling removes full-matrix storage?
+- [ ] **Quadratic growth**: Can you explain why doubling sequence length quadruples dense score interactions and a materialized score matrix?
+- [ ] **Tiling boundary**: Can you explain why long-context dense attention remains more expensive even when tiling removes full-matrix storage?
 
 :::
 
@@ -2903,7 +2904,7 @@ class TransformerComplexityAnchor:
     long_context_ratio_mult_str = fmt_multiple(long_context_ratio, precision=0, commas=False)
 ```
 
-::: {#psp-nn-architectures-quadratic-wall .callout-perspective title="The quadratic wall"}
+::: {#exmp-nn-architectures-quadratic-wall .callout-example title="The quadratic wall"}
 
 **Context**: BERT-style transformer models set new accuracy records across NLP benchmarks, but common implementations fixed a short maximum input sequence length, often 512 tokens [@devlin2019].
 
@@ -3623,6 +3624,8 @@ At 100 million IDs and 128 FP32 values per ID, one embedding table already consu
 2.  **Vector size**: `{python} CapacityWall.cw_embed_dim_str` elements.
 3.  **Precision**: FP32 (`{python} CapacityWall.cw_bytes_per_param_str` bytes per element).
 4.  **Table size**: `{python} CapacityWall.cw_num_items_str` items $\times$ `{python} CapacityWall.cw_embed_dim_str` $\times$ `{python} CapacityWall.cw_bytes_per_param_str` bytes ≈ `{python} CapacityWall.cw_table_gb_str`.
+5.  **Capacity share**: `{python} CapacityWall.cw_table_gb_str` $\div$ `{python} CapacityWall.a100_mem_gb_str` = `{python} CapacityWall.cw_utilization_pct_str` of device capacity.
+6.  **Two-table check**: Two tables at `{python} CapacityWall.cw_utilization_pct_str` each exceed 100 percent of device capacity.
 
 **Systems insight**: A single embedding table for one feature (Items) already consumes `{python} CapacityWall.cw_utilization_pct_str` of an `{python} CapacityWall.a100_mem_gb_str` A100 GPU. Adding a User table of the same size means the embedding tables no longer fit on a single `{python} CapacityWall.a100_mem_gb_str`, motivating either smaller tables, off-device memory, or partitioning across memory resources. DLRM is *capacity bound*: the first question is not how many FLOPs the accelerator can deliver, but where the embedding state can physically reside.
 
@@ -4678,6 +4681,9 @@ class ThroughputCeilingCalc:
 1.  **Model cost**: ResNet-50 requires ~`{python} ThroughputCeilingCalc.tc_resnet_gflop_str` per $224{\times}224$ image.
 2.  **Frame rate**: `{python} ThroughputCeilingCalc.tc_fps_str` required.
 3.  **Sustained throughput**: `{python} ThroughputCeilingCalc.tc_fps_str` $\times$ `{python} ThroughputCeilingCalc.tc_resnet_gflop_str` = `{python} ThroughputCeilingCalc.tc_sustained_gflop_per_s_str`.
+4.  **Effective throughput**: `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` peak $\times$ 50--60 percent utilization = `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str`.
+5.  **ResNet-50 headroom**: `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str` $\div$ `{python} ThroughputCeilingCalc.tc_sustained_gflop_per_s_str` = `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str`.
+6.  **Detection-model check**: `{python} ThroughputCeilingCalc.tc_fps_str` $\times$ `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` = `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str`, leaving `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom at the lower effective-throughput estimate.
 
 **Systems insight**: A mid-range GPU delivering `{python} ThroughputCeilingCalc.tc_gpu_tflop_per_s_str` theoretical peak achieves ~50--60 percent utilization in this planning scenario, yielding `{python} ThroughputCeilingCalc.tc_effective_low_tflop_per_s_str`--`{python} ThroughputCeilingCalc.tc_effective_high_tflop_per_s_str` effective. For ResNet-50 at `{python} ThroughputCeilingCalc.tc_fps_str`, the system has `{python} ThroughputCeilingCalc.tc_headroom_factor_mult_str` headroom. Switching to an object detection model at `{python} ThroughputCeilingCalc.tc_objdet_gflop_str` per frame, however, requires `{python} ThroughputCeilingCalc.tc_objdet_sustained_tflop_per_s_str` sustained, leaving only `{python} ThroughputCeilingCalc.tc_objdet_headroom_factor_mult_str` headroom. Batch size constraints or multi-stream processing quickly push the system toward the compute ceiling. ResNet-50 is compute-bound, but the margin depends on the accelerator and utilization achieved.
 

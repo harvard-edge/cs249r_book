@@ -236,11 +236,12 @@ The parallel fraction $p$ can differ substantially between workload archetypes r
 
 ::: {#chk-hw-acceleration-parallelism-gate .callout-checkpoint title="The parallelism gate"}
 
-Hardware speedups are capped by sequential bottlenecks.
+The following checks turn Amdahl's bound into a hardware-selection test.
 
 **Amdahl's Reality**
 
 - [ ] **Serial bottlenecks**: Use Amdahl's bound to explain why a 1,000$\times$ faster GPU may only speed up training by 5$\times$ when data loading is slow.
+- [ ] **Speedup ceiling**: For $p=0.95$ and $G_{\text{accel}}=100$, estimate total speedup and compare it with the infinite-accelerator ceiling.
 - [ ] **Workload variation**: Compare the parallelizable fractions of ResNet-50\index{ResNet-50!compute-bound workload} and MobileNet, then predict which benefits more from accelerator throughput.
 
 :::
@@ -782,7 +783,7 @@ class CpuMlInefficiency:
 
 Machine learning constitutes a computational domain with unique characteristics that have driven the development of specialized hardware architectures. Unlike traditional computing workloads that exhibit irregular memory access patterns and diverse instruction streams, neural networks are characterized by predictable patterns\index{Neural Network!predictable computation patterns}: dense matrix multiplications, regular data flow, and tolerance for reduced precision. These characteristics enable specialized hardware optimizations that would be ineffective for general-purpose computing but provide substantial speedups for ML workloads. The hardware built to exploit these patterns constitutes a class of devices known as ML accelerators, and the economic trigger for specialization appears when those regular neural-network patterns dominate a fleet rather than a benchmark.
 
-::: {#cs-hw-acceleration-google-tpu-voice-search .callout-case-study title="The TPU capacity cliff"}
+::: {#exmp-hw-acceleration-google-tpu-voice-search .callout-example title="The TPU capacity cliff"}
 
 **Context**: Google had considered an application-specific chip for neural networks as early as 2006 but did not treat it as urgent: existing data-center capacity absorbed the early deep-learning workloads [@jouppi2017].
 
@@ -854,7 +855,7 @@ The success of application-specific accelerators demonstrates that no single arc
 
 ::: {#chk-hw-acceleration-accelerator-gate .callout-checkpoint title="The accelerator gate"}
 
-Hardware specialization is driven by energy physics.
+Use the energy hierarchy to decide when specialization pays.
 
 **The Energy Inversion**
 
@@ -2301,8 +2302,6 @@ There is no "perfect" accelerator. A chip optimized for Weight-Stationary flow (
 
 :::
 
-Because systolic arrays physically fix how data flows\index{Dataflow!weight-stationary vs. output-stationary} through the grid, designers must decide which operand to keep stationary, a choice that permanently shapes the hardware's affinity for certain workloads. This is not merely an implementation detail but a permanent architectural commitment: the decision made at chip design time determines which neural network operations will achieve high utilization and which will be starved for data.
-
 The synchronized data flow ensures that matrix element $A_{ik}$ encounters corresponding $B_{kj}$ elements at precise temporal intervals, executing the multiply-accumulate operations required for matrix multiplication $C_{ij} = \sum_k A_{ik}\times B_{kj}$. This systematic reuse of operands across multiple processing elements substantially reduces memory bandwidth requirements by eliminating redundant data fetches from external memory subsystems.
 
 Consider the multiplication of $2{\times}2$ matrices A and B within a systolic array. During the first computational cycle, element $A_{0,0}=2$ propagates horizontally while $B_{0,0}=1$ moves vertically, converging at processing element $\text{PE}(0,0)$ to execute the multiplication $2 \times 1 = 2$. In the subsequent cycle, the same $A_{0,0}=2$ advances to $\text{PE}(0,1)$ where it encounters $B_{0,1}=3$, computing $2 \times 3 = 6$. Concurrently, $A_{0,1}=4$ enters $\text{PE}(0,0)$ to engage with the next B matrix element. This coordinated data movement enables systematic operand reuse across multiple computational operations, eliminating redundant memory accesses and exemplifying the efficiency principle underlying systolic array architectures.
@@ -2573,7 +2572,7 @@ Unlike conventional workloads, ML models require frequent access to large volume
 
 ### Understanding the AI memory wall {#sec-hardware-acceleration-understanding-ai-memory-wall-3ea9}
 
-The AI memory wall\index{Memory Wall!definition}\index{Memory Wall!compute-memory divergence} represents the primary bottleneck constraining modern accelerator performance: the growing disparity between computational throughput and memory bandwidth\index{Memory Bandwidth!compute gap} that prevents accelerators from achieving their theoretical capabilities. While compute units can execute millions of operations per second through specialized primitives like vector operations and matrix multiplications, they depend critically on memory systems to supply the continuous stream of weights, activations, and intermediate results these operations require.
+The issue is whether the memory system can supply operands and absorb results quickly enough to sustain the specialized primitives introduced above.
 
 ::: {#dfn-hw-acceleration-ai-memory-wall .callout-definition title="AI memory wall"}
 
@@ -3274,13 +3273,12 @@ class SpeedOfLightLimitCalc:
 
 **Problem**: Why is on-chip SRAM necessary instead of fetching all data from HBM?
 
-**Physics**:
+**Math**:
 
 1.  **Distance**: On an H100-class `{python} SpeedOfLightLimitCalc.h100_die_area_mm2_str` die, signals travel ~20 mm.
-2.  **Speed**: Signals in silicon travel at $\approx 0.5c$ (half speed of light).
-3.  **Latency**: 20 mm takes $\approx 130 \text{ ps}$.
-4.  **Clock cycle**: At 2 GHz, a cycle is $500 \text{ ps}$.
-5.  **DRAM**: Off-chip HBM sits millimeters away on the package, but DRAM access latency plus protocol overhead = 100+ cycles.
+2.  **Propagation latency**: At $\approx 0.5c$ in silicon, $20\text{ mm}/(0.5c) \approx 130\text{ ps}$.
+3.  **Clock cycle**: At 2 GHz, $1/(2\text{ GHz}) = 500\text{ ps}$.
+4.  **DRAM**: Off-chip HBM sits millimeters away on the package, but DRAM access latency plus protocol overhead = 100+ cycles.
 
 **Systems insight**: The 20 mm propagation estimate is about 130 ps, less than one 500 ps clock cycle, so distance alone does not prove a one-cycle access impossible. A real HBM access includes DRAM-array latency, serialization, protocol traversal, interconnect delay, and queuing, producing the 100-plus-cycle path above. Local registers and SRAM are therefore required to feed compute units at 2 GHz. For transformer models, this complete access path is why weights must be staged in SRAM in tiles rather than read on demand from HBM, and why repeatedly streaming an entire KV cache can collapse inference throughput when its memory traffic cannot be hidden behind arithmetic.
 
@@ -3293,6 +3291,8 @@ On-chip memory\index{On-Chip Memory!definition} is the fast local storage locate
 To reduce the need for constant data movement between registers and external memory, small but fast caches serve as an intermediary buffer. These caches store recently accessed activations, weights, and intermediate values, ensuring that frequently used data remains available with minimal delay. However, the size of caches is limited, making them insufficient for storing full feature maps or large weight tensors in machine learning models. As a result, only the most frequently used portions of a model's parameters or activations can reside here at any given time.
 
 For larger working datasets, many AI accelerators include scratchpad memory, which offers more storage than caches but with a key difference: it allows explicit software control over what data is stored and when it is evicted. Unlike caches, which rely on hardware-based eviction policies, scratchpad memory enables machine learning workloads to retain key values such as activations and filter weights for multiple layers of computation. This capability is useful in models like convolutional neural networks, where the same input feature maps and filter weights are reused across multiple operations. By keeping this data in scratchpad memory rather than reloading it from external memory, accelerators can significantly reduce unnecessary memory transfers and improve overall efficiency [@chen2017]. On NVIDIA GPUs, the hardware exposes scratchpad memory to programmers as *shared memory*: a fast, software-managed SRAM region that all threads in a thread block can read and write, distinct from the hardware-managed L1/L2 caches. Custom ML kernels written in CUDA or Triton control this memory explicitly. FlashAttention achieves its substantial throughput gains for transformer attention layers precisely by exploiting this mechanism: rather than materializing the full $S{\times}S$ attention score matrix in HBM, it tiles queries, keys, and values through SRAM/shared memory and writes only the final output back to HBM [@dao2022]. The reduction in HBM round-trips—not fewer arithmetic operations—is the primary source of the speedup.
+
+Locality is not enough: an operation must also match the accelerator's supported execution path.
 
 ::: {#exmp-hw-acceleration-tensor-core-contract .callout-example title="The Tensor Core contract"}
 
@@ -3685,7 +3685,7 @@ class RooflineGap:
 
 :::
 
-Arithmetic intensity (AI) measures floating-point operations per byte of memory traffic. The operation count $O$ is a dimensionless count of floating-point operations and the data volume $D_{\text{vol}}$ is measured in bytes, so AI has units of FLOP/byte. @Eq-arithmetic-intensity defines this ratio.
+With $O$ as the dimensionless operation count and $D_{\text{vol}}$ as data volume in bytes, @eq-arithmetic-intensity makes the definition operational.
 $$I = \frac{O}{D_{\text{vol}}}$$ {#eq-arithmetic-intensity}
 
 The roofline visualization shows performance (TFLOP/s) on the vertical axis and arithmetic intensity (FLOP/byte) on the horizontal axis. At low arithmetic intensity, performance increases linearly with intensity (memory-bound region). Above the ridge point, performance saturates at peak compute (compute-bound region). @Sec-appdx-dam-taxonomy-bottleneck-diagnostic-3fc9 maps each regime to the optimizations that pay off and the ones that waste effort, so that classifying a workload as memory-bound or compute-bound tells the engineer directly whether a faster accelerator or more bandwidth is the binding investment.
@@ -3715,7 +3715,7 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 
 ::: {#nbk-hw-acceleration-utilization-gap .callout-notebook title="The utilization gap"}
 
-**The utilization physics**: Why is it harder to get `{python} RooflineGap.full_util_pct_str` utilization on an H100 than a V100?
+**Problem**: Why is it harder to get `{python} RooflineGap.full_util_pct_str` utilization on an H100 than a V100?
 
 **Metric**: The ridge point $I_{\text{ridge}} = R_{\text{peak}} / \text{BW}$ (FLOP/byte) from @sec-hardware-acceleration-hardware-balance: how many math operations the hardware must perform for every byte of data loaded to keep the compute units busy.
 
@@ -3725,9 +3725,9 @@ These ridge point values reveal a surprising trend: as hardware has become more 
 *   **A100 (`{python} RooflineGap.a100_year_str`)**: `{python} RooflineGap.a100_fp16_tflop_per_s_str` / `{python} RooflineGap.a100_bw_tb_per_s_str` ≈ `{python} RooflineGap.a100_ridge_str`.
 *   **H100 (`{python} RooflineGap.h100_year_str`)**: `{python} RooflineGap.h100_fp16_tflop_per_s_str` / `{python} RooflineGap.h100_bw_tb_per_s_str` ≈ `{python} RooflineGap.h100_ridge_str`.
 
-**Systems insight**: The "bar" for compute intensity has doubled. An algorithm with $I$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte was compute-bound (good) on A100 but is bandwidth-bound (bad) on H100. This explains why "legacy" code often sees only `{python} RooflineGap.bandwidth_ratio_mult_str` speedup on H100 (bandwidth ratio) instead of the advertised `{python} RooflineGap.flops_ratio_mult_str` (FLOPs ratio).
+**Result**: The "bar" for compute intensity has doubled. An algorithm with $I$ = `{python} RooflineGap.legacy_ai_str` FLOP/byte was compute-bound (good) on A100 but is bandwidth-bound (bad) on H100. This explains why "legacy" code often sees only `{python} RooflineGap.bandwidth_ratio_mult_str` speedup on H100 (bandwidth ratio) instead of the advertised `{python} RooflineGap.flops_ratio_mult_str` (FLOPs ratio).
 
-**Practical examples**: A standard ReLU performs 1 operation for every 8 bytes (0.125 FLOP/byte), placing it `{python} RooflineGap.relu_below_roofline_mult_str` below the H100 roofline. A well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` dense MatMul reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, making it compute bound even on H100. Most operations fall short of the ridge point, which is why kernel fusion is the most important optimization, as explored in @sec-hardware-acceleration-kernel-fusion-7faf.
+**Systems insight**: A standard ReLU performs 1 operation for every 8 bytes (0.125 FLOP/byte), placing it `{python} RooflineGap.relu_below_roofline_mult_str` below the H100 roofline. A well-tiled `{python} RooflineGap.dense_matmul_dim_str` $\times$ `{python} RooflineGap.dense_matmul_dim_str` dense MatMul reaches about `{python} RooflineGap.dense_matmul_ai_str` FLOP/byte, making it compute bound even on H100. Most operations fall short of the ridge point, which is why kernel fusion is the most important optimization, as explored in @sec-hardware-acceleration-kernel-fusion-7faf.
 
 :::
 
@@ -3833,7 +3833,7 @@ For a transformer with hidden_dim = `{python} TransformerLayerCalc.t_hidden_str`
 - Bytes: `{python} TransformerLayerCalc.t_batch_str` $\times$ `{python} TransformerLayerCalc.t_heads_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times$ `{python} TransformerLayerCalc.t_seq_str` $\times 2 \times 2$ = `{python} TransformerLayerCalc.softmax_mb_str`
 - AI = `{python} TransformerLayerCalc.softmax_mflop_str` / `{python} TransformerLayerCalc.softmax_mb_str` = `{python} TransformerLayerCalc.softmax_ai_str` FLOP/byte under this simple operation count, which is memory-bound. Counts that weight exponentials and division as multiple operations produce a larger numerical intensity without changing the bottleneck classification.
 
-This analysis explains why FlashAttention\index{FlashAttention!memory optimization}\index{Attention Mechanism!memory-bound softmax} focuses on reducing memory traffic in attention rather than reducing FLOPs.
+**Systems insight**: This analysis explains why FlashAttention\index{FlashAttention!memory optimization}\index{Attention Mechanism!memory-bound softmax} focuses on reducing memory traffic in attention rather than reducing FLOPs.
 
 :::
 
@@ -3938,7 +3938,7 @@ Consider a Conv2D\index{Roofline Analysis!conv2d layer} layer with input shape (
 **Arithmetic intensity**:
 $I$ = `{python} Conv2dAnalysisCalc.conv_total_gflop_str` / `{python} Conv2dAnalysisCalc.conv_total_mb_str` = `{python} Conv2dAnalysisCalc.conv_ai_str` FLOP/byte
 
-This is well above A100's ridge point of `{python} Conv2dAnalysisCalc.a100_ridge_str`, so the simple Roofline Model places the operation in the compute-limited region. Peak throughput of ~`{python} Conv2dAnalysisCalc.a100_fp16_tflop_per_s_str` (FP16 with Tensor Cores) is therefore the ceiling, but realized performance still depends on tiling, occupancy, instruction mix, and library efficiency.
+**Systems insight**: This is well above A100's ridge point of `{python} Conv2dAnalysisCalc.a100_ridge_str`, so the simple Roofline Model places the operation in the compute-limited region. Peak throughput of ~`{python} Conv2dAnalysisCalc.a100_fp16_tflop_per_s_str` (FP16 with Tensor Cores) is therefore the ceiling, but realized performance still depends on tiling, occupancy, instruction mix, and library efficiency.
 
 :::
 
@@ -4030,7 +4030,7 @@ $I$ = `{python} DenseLayerAnalysisCalc.dense_total_mflop_str` / `{python} DenseL
 This is below A100's ridge point of `{python} DenseLayerAnalysisCalc.a100_ridge_str`, making this operation memory-bound. Attainable performance:
 $R_{\text{attain}}$ = `{python} DenseLayerAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} DenseLayerAnalysisCalc.dense_ai_flops_per_byte_str` = `{python} DenseLayerAnalysisCalc.dense_attainable_tflop_per_s_str`
 
-This is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, demonstrating the memory wall effect for small batch sizes.
+**Systems insight**: This is only `{python} DenseLayerAnalysisCalc.dense_util_pct_str` of peak compute capability, demonstrating the memory wall effect for small batch sizes.
 
 :::
 
@@ -4126,7 +4126,7 @@ $I$ = `{python} LayernormAnalysisCalc.ln_total_mflop_str` / `{python} LayernormA
 This is severely memory-bound (`{python} LayernormAnalysisCalc.ln_ridge_gap_mult_str` below the A100 ridge point). Performance is limited to:
 $R_{\text{attain}}$ = `{python} LayernormAnalysisCalc.a100_bw_gb_per_s_str` $\times$ `{python} LayernormAnalysisCalc.ln_ai_str` FLOP/byte = `{python} LayernormAnalysisCalc.ln_attainable_tflop_per_s_str`
 
-This represents only about 1 percent of A100's compute capacity, explaining why normalization layers can contribute significant latency despite their small FLOP count.
+**Systems insight**: This represents only about 1 percent of A100's compute capacity, explaining why normalization layers can contribute significant latency despite their small FLOP count.
 
 :::
 
@@ -4199,7 +4199,7 @@ Example: Dense layer with M=N=`{python} BatchAiCalc.matrix_dim_str` (FP16)
 - Batch = `{python} BatchAiCalc.batch_medium_str`: AI ≈ `{python} BatchAiCalc.batch32_ai_flops_per_byte_str` (memory bound)
 - Batch = `{python} BatchAiCalc.batch_large_str`: AI ≈ `{python} BatchAiCalc.batch256_ai_flops_per_byte_str` (compute bound on A100)
 
-This explains why batching can produce large throughput improvements in production inference systems, as MLPerf Inference\index{MLPerf!inference benchmarking}, the standardized benchmark suite covered in @sec-benchmarking, demonstrates by separating bulk-throughput runs from latency-constrained serving runs [@reddi2020].
+**Systems insight**: This explains why batching can produce large throughput improvements in production inference systems, as MLPerf Inference\index{MLPerf!inference benchmarking}, the standardized benchmark suite covered in @sec-benchmarking, demonstrates by separating bulk-throughput runs from latency-constrained serving runs [@reddi2020].
 
 :::
 
@@ -4316,7 +4316,7 @@ As this derivation demonstrates, the Roofline Model provides the diagnostic fram
 
 ## Hardware Mapping {#sec-hardware-acceleration-hardware-mapping-fundamentals-neural-networks-f9a9}
 
-Consider a $3{\times}3$ convolution running on an accelerator tile. The mathematical operation is fixed, but the execution plan is not. One schedule can keep a filter in local registers while many output pixels stream past it; another can advance pixel by pixel and reload the same filter values repeatedly from a slower memory tier. Both schedules compute the same tensor. Only one turns the reuse in the convolution into real bandwidth savings. Hardware mapping is the discipline that makes that difference explicit: it decides where the work runs, where the data lives while it is reused, and when each loop or kernel executes so the accelerator is fed rather than idle.
+Consider a $3{\times}3$ convolution running on an accelerator tile. The mathematical operation is fixed, but the execution plan is not. One schedule can keep a filter in local registers while many output pixels stream past it; another can advance pixel by pixel and reload the same filter values repeatedly from a slower memory tier. Both schedules compute the same tensor. Only one turns the reuse in the convolution into real bandwidth savings.
 
 ::: {#dfn-hw-acceleration-mapping-ai-acceleration .callout-definition title="Mapping in AI acceleration"}
 
@@ -5882,14 +5882,6 @@ Teams deploy high-throughput training accelerators (A100, H100) for latency-sens
 **Fallacy**: *Vendor-specific optimizations have no long-term portability cost.*
 
 Organizations optimize exclusively for specific vendors to maximize performance without considering system flexibility. As discussed in @sec-hardware-acceleration-compiler-support-172e, deep integration with vendor-specific libraries (CUDA, TensorRT, XLA) and custom kernels creates lock-in\index{Vendor Lock-In!portability trade-off}. A codebase with many hand-written accelerator kernels can require substantial engineering effort to port to a different vendor, delaying hardware upgrades and preventing multi-vendor deployments. Vendor-specific optimizations should therefore be isolated behind hardware abstraction layers\index{Hardware Abstraction Layer!portability}. Maintaining portable code paths enables vendor competition, hardware flexibility, and faster adoption of emerging accelerators while still capturing most performance benefits through framework-level optimizations.
-
-:::
-
-::: {.fallacy-pitfall}
-
-**Pitfall**: *Embedding vendor-specific kernels directly into application logic.*
-
-The portability cost becomes hardest to manage when accelerator-specific code is scattered through model code, preprocessing, build scripts, and serving paths. A cleaner design localizes vendor kernels behind capability checks, framework dispatch layers, or narrow operator libraries, so the system can keep a fast path without making every higher-level component vendor-aware. The engineering goal is not to avoid specialization; it is to keep specialization replaceable when the hardware fleet changes.
 
 :::
 
