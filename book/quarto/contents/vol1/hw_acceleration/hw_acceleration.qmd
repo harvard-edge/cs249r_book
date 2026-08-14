@@ -2246,6 +2246,12 @@ A fundamental mismatch exists between the *computational graph* (which sees a si
 
 To process our `{python} TilingPrinciple.layer_dim_str`-wide worked-example layer on a `{python} TilingPrinciple.array_dim_str`-wide systolic array, the compiler decomposes the result into `{python} TilingPrinciple.output_tile_count_str` output tiles. Each output tile accumulates across 32 reduction-dimension tiles, so the complete matrix multiplication executes `{python} TilingPrinciple.tile_product_count_str` $\mathbf{A}$-tile-by-$\mathbf{B}$-tile products. This is not merely a software convenience; it is a physical requirement. Operand tiles are fetched from slow HBM, staged in fast SRAM, and pulsed through the systolic array. @Algo-tiled-gemm states the loop nest a compiler emits for this decomposition: stream tiles of $\mathbf{A}$ and $\mathbf{B}$ on chip and accumulate their product into a tile of $\mathbf{C}$ before writing it back.
 
+::: {.column-margin}
+![](images/svg/vol1_hw_acceleration_margin_001.svg){width="100%" fig-alt="An efficiency curve that holds high up to a tile width of 128, then drops sharply at 129 where a fringe tile appears; the region past the cliff is shaded red."}
+
+*One extra dimension past the tile width tips utilization off a cliff.*
+:::
+
 The tile sizes are the lever. A larger tile reuses each loaded byte across more multiply-accumulate operations, raising the kernel's arithmetic intensity and pushing it toward the compute-bound side of the roofline; the ceiling is how much of $\mathbf{A}$, $\mathbf{B}$, and $\mathbf{C}$ fits in fast on-chip memory at once. This tiling pattern is the central mechanism behind high-performance ML systems. It allows the hardware to maintain high system efficiency $(\eta_{\text{hw}})$ by ensuring that for every byte loaded from main memory, the data is reused `{python} TilingPrinciple.reuse_factor_mult_str` within the systolic grid. An engineer who understands tiling understands the "silicon contract": if a layer's dimensions are not multiples of the tile size (for example, a width of 129 on a 128 array), the system pays a *fringe tax* in underutilized silicon, where 127 units sit idle while one unit finishes the "remainder" tile.
 
 ```pseudocode
@@ -2271,12 +2277,6 @@ The tile sizes are the lever. A larger tile reuses each loaded byte across more 
 \end{algorithmic}
 \end{algorithm}
 ```
-
-::: {.column-margin}
-![](images/svg/vol1_hw_acceleration_margin_001.svg){width="100%" fig-alt="An efficiency curve that holds high up to a tile width of 128, then drops sharply at 129 where a fringe tile appears; the region past the cliff is shaded red."}
-
-*One extra dimension past the tile width tips utilization off a cliff.*
-:::
 
 The systolic array architecture achieves computational efficiency through synchronized data movement across a structured grid of processing elements. Systolic arrays organize computation around four components:
 
@@ -3332,12 +3332,6 @@ These bandwidth characteristics directly influence deployment decisions: cloud t
 
 Machine learning accelerators, such as GPUs and TPUs, achieve high computational throughput through parallel execution. However, their efficiency is often constrained by host-accelerator data movement\index{Host-Accelerator Communication!transfer bottleneck} between the CPU and accelerator memory. Compared to many traditional workloads that keep most data within a single memory domain, AI workloads can require frequent transfers between CPU memory and accelerator memory, introducing latency, consuming bandwidth, and affecting overall performance.
 
-::: {.column-margin}
-![](images/svg/vol1_hw_acceleration_margin_002.svg){width="100%" fig-alt="Vertical log-scale ladder of violet bandwidth bars, widest at top: HBM, then NVLink, then PCIe, down to a narrow network bar at the bottom."}
-
-*Bandwidth tapers steeply as data moves farther from the accelerator.*
-:::
-
 Host-accelerator data movement follows a structured sequence, shown in @fig-host-accelerator-data-movement for a GPU as the concrete accelerator (its "Memory for GPU" lane is the accelerator's memory). Before computation begins, data is copied from CPU memory to the accelerator's memory (step 1). The CPU then issues execution instructions (step 2), and the accelerator processes the data in parallel (step 3). Once computation completes, the accelerator writes its output to accelerator memory (the "Store results" arrow), and that result is copied back to the CPU (step 4). Consider the latency cost at every arrow: each transfer represents a potential bottleneck that must be managed to optimize end-to-end performance.
 
 ::: {#fig-host-accelerator-data-movement fig-env="figure" fig-pos="htb" fig-cap="**Host-Accelerator Data Transfer**: AI workloads require frequent data movement between CPU memory and accelerators. The four sequential steps of copying input data, issuing execution instructions, parallel computation, and transferring results each introduce potential performance bottlenecks." fig-alt="Four-step data flow diagram: (1) copy data from main memory to GPU memory, (2) CPU instructs GPU, (3) GPU executes in parallel, (4) results copy back to main memory."}
@@ -3471,6 +3465,12 @@ class InterconnectHierarchy:
         rf"\begin{{aligned}} \text{{HBM ({taper_hbm.to(GB/second).magnitude:.0f} GB/s)}} &\gg \text{{NVLink ({taper_nvlink.to(GB/second).magnitude:.0f} GB/s)}} \\ &\gg \text{{PCIe ({taper_pcie.to(GB/second).magnitude:.0f} GB/s)}} \gg \text{{Network ({taper_net.to(GB/second).magnitude:.0f} GB/s)}} \end{{aligned}}"
     )
 ```
+
+::: {.column-margin}
+![](images/svg/vol1_hw_acceleration_margin_002.svg){width="100%" fig-alt="Vertical log-scale ladder of violet bandwidth bars, widest at top: HBM, then NVLink, then PCIe, down to a narrow network bar at the bottom."}
+
+*Bandwidth tapers steeply as data moves farther from the accelerator.*
+:::
 
 At node level, three links define the bandwidth taper:
 
