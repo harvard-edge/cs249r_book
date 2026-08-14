@@ -2315,7 +2315,7 @@ class BatchingTax:
 
 While Little's Law relates queue depth to throughput, it does not account for the **Batching Tax**\index{Batching!tax, latency penalty}: the deliberate delay introduced to maximize hardware utilization. This delay creates a queuing problem.
 
-When an inference server batches requests, it introduces two distinct sources of latency. Batch formation delay $(L_{\text{lat,form}})$\index{Batching!batch formation delay, definition} is the time the first request in a batch waits for the last request to arrive. Inference inflation\index{Inference Inflation!definition} is the growth in inference time $T_{\text{inf}}(B)$ when the GPU processes $B$ samples instead of 1. The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} is the set of configurations where one cannot improve throughput without paying a "tax" in increased latency. We can quantify the total batched-request latency for a batch size $B$ and arrival rate $\lambda_{\text{arr}}$ as @eq-batching-tax:
+When an inference server uses request-triggered fixed-size batching, it introduces two distinct sources of latency. Batch formation delay $(L_{\text{lat,form}})$\index{Batching!batch formation delay, definition} is the time each request waits for the batch to fill; the first request waits longest, and the last waits zero. Inference inflation\index{Inference Inflation!definition} is the growth in inference time $T_{\text{inf}}(B)$ when the GPU processes $B$ samples instead of 1. The resulting latency-throughput Pareto frontier\index{Pareto Frontier!serving trade-offs} is the set of configurations where one cannot improve throughput without paying a "tax" in increased latency. Under stationary Poisson arrivals, @eq-batching-tax approximates the average per-request latency for batch size $B$ and arrival rate $\lambda_{\text{arr}}$:
 $$ L_{\text{lat,total}} \approx \underbrace{ \frac{B-1}{2\lambda_{\text{arr}}} }_{\text{Formation delay}} + \underbrace{ T_{\text{inf}}(B) }_{\text{Inference time}} $$ {#eq-batching-tax}
 
 This equation reveals the "cost of throughput." Increasing $B$ to saturate the GPU amortizes the hardware cost, but inflates the per-request latency. Concretely, at 500 QPS, moving from batch-1 to batch-32 increases wait-time from `{python} BatchingTax.wait_time_b1_ms_str` to `{python} BatchingTax.wait_time_b32_ms_str`, contributing to a `{python} BatchingTax.penalty_ratio_mult_str` total latency penalty (`{python} BatchingTax.lat_b1_ms_str` → `{python} BatchingTax.lat_b32_ms_str`). For a systems engineer, this tax is the primary regulator of economic efficiency: the engineer chooses the batch size that maximizes throughput (minimizing cost per query) without violating the latency SLO $(L_{\text{lat}})$.
@@ -3066,6 +3066,8 @@ This simple relationship has direct implications. A `{python} BatchingBudgetCalc
 For fixed calendar windows, the number of requests collected during $T_{\text{window}}$ follows a Poisson distribution with mean $\lambda_{\text{arr}} T_{\text{window}}$. @Eq-batch-distribution formalizes this relationship:
 $$\Pr(\text{batch size} = k) = \frac{(\lambda_{\text{arr}} T_{\text{window}})^k e^{-\lambda_{\text{arr}} T_{\text{window}}}}{k!}$$ {#eq-batch-distribution}
 
+Here $k$ is a nonnegative integer count of arrivals in the window.
+
 ```{python}
 #| echo: false
 #| label: batch-variability-calc
@@ -3238,7 +3240,7 @@ The throughput gains in @tbl-batching-throughput trace directly back to the fixe
 ::: {#nbk-model-serving-iron-law-batching-efficiency .callout-notebook title="The iron law of batching efficiency"}
 
 *Iron law connection*:
-In serving, batching improves throughput by amortizing fixed per-batch work such as scheduling, kernel launch, and weight reads; queue wait remains a separate latency cost. The same iron-law decomposition from @eq-compute-time shows why:
+In serving, batching improves throughput by amortizing fixed per-batch scheduling and kernel-launch work; it can also amortize weight traffic across requests, while queue wait remains a separate latency cost. Holding the data-movement term outside this illustrative two-term comparison, @eq-compute-time isolates compute and fixed overhead:
 $$ T = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}} + L_{\text{lat}} $$ {#eq-compute-time}
 
 *Deriving the sweet spot*:

@@ -12,7 +12,7 @@ This appendix is designed as a *reference*. Reach for it when debugging "slow tr
 
 Conventions used here follow the book-wide notation (for example, $B$ is reserved for batch size and $\text{BW}$ denotes bandwidth).
 
-- **When data will not move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-appdx-data-foundations-data-engineering-foundations-0c20.
+- **When data will not move**: Start with @tbl-data-gravity and the transfer-time equation in @sec-appdx-data-foundations-napkin-math-physics-data-gravity-9ae0.
 - **When the accelerator is starving**: Use @tbl-serialization-cost and the layout discussion in @sec-appdx-data-foundations-row-vs-columnar-formats-bca2.
 - **When pipelines explode in cost**: Use the primitives in @sec-appdx-data-foundations-algebra-data-9792, especially join-induced shuffles.
 - **When "average looks fine" but users complain**: Use @sec-appdx-data-foundations-distributions-long-tail-901f and session-level tail probability.
@@ -104,7 +104,7 @@ Data gravity[^fn-data-gravity] is a metaphor grounded in transfer-time calculati
 
 [^fn-data-gravity]: **Data Gravity**: Coined by Dave McCrory in 2010 to describe how large datasets attract services and applications toward them, much as massive bodies attract smaller ones in physics [@mccrory2010datagravity]. The analogy is apt: the "escape velocity" required to move a petabyte-scale dataset is often measured in weeks.
 
-The ideal line-rate transfer time is $T = D_{\text{vol}} / \text{BW}$ (for the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320). @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
+The ideal line-rate transfer time is $T = D_{\text{vol}} / \text{BW}$ after converting data volume and bandwidth to compatible units (the calculations below convert decimal bytes and bits per second explicitly). For the large volumes here, latency is negligible; the full equation appears in @sec-appdx-machine-foundations-bandwidth-vs-latency-5320. @Tbl-data-gravity gives lower bounds; protocol overhead and endpoint limits increase them.
 
 | **Data Volume** |   **1 Gbps  \mbox{(Standard WAN)}**   |   **10 Gbps \mbox{(High-End WAN)}**    |   **100 Gbps \mbox{(Direct Connect)}**  |   **Truck \mbox{(Illustrative)}**    |
 |:----------------|:-------------------------------------:|:--------------------------------------:|:---------------------------------------:|:------------------------------------:|
@@ -425,7 +425,7 @@ Under this model, a 100-request session is more likely than not to include an ev
 
 Because distributions have long tails where the most dangerous failures hide, simple metrics like "mean shift" are insufficient. We need tools that compare the *entire shape* of the distribution. Detecting drift between the serving distribution ($P_t$) and training distribution ($P_0$) requires measuring the "distance" between distributions.
 
-@Eq-appdx-data-kl-divergence expresses KL divergence[^fn-kl] as the expected extra coding cost of approximating $P_t$ with $P_0$ [@kullback1951; @cover2006].
+For discrete outcomes $x$, @eq-appdx-data-kl-divergence expresses KL divergence[^fn-kl] as the expected extra coding cost of approximating $P_t$ with $P_0$ [@kullback1951; @cover2006]. The displayed form is finite only when $P_0(x) > 0$ wherever $P_t(x) > 0$; production implementations therefore need explicit smoothing or zero handling.
 $$ \mathcal{D}_{\text{KL}}(P_t \lVert P_0) = \sum_x P_t(x) \log \frac{P_t(x)}{P_0(x)} $$ {#eq-appdx-data-kl-divergence}
 
 ```{python}
@@ -564,7 +564,7 @@ print(r"\vspace{-6mm}")
 print(KLDrift.kl_pq_calc_eq)
 ```
 
-Notice the asymmetry: $\mathcal{D}_{\text{KL}}(P_0 \lVert P_t) \neq \mathcal{D}_{\text{KL}}(P_t \lVert P_0)$. The Population Stability Index (PSI) symmetrizes this:
+Notice the asymmetry: $\mathcal{D}_{\text{KL}}(P_0 \lVert P_t) \neq \mathcal{D}_{\text{KL}}(P_t \lVert P_0)$. The Population Stability Index (PSI) symmetrizes this; the calculation below uses natural logarithms:
 ```{python}
 #| echo: false
 #| output: asis
@@ -632,7 +632,7 @@ class LogitOverflowExample:
     logit_val_str = fmt(logit_val, precision=0, commas=False)
 ```
 
-Neural-network classifiers commonly output *logits*[^fn-logit] (unnormalized scores), which the softmax function converts to probabilities:
+Neural-network classifiers commonly output a vector of *logits*[^fn-logit] $\mathbf{z}$ (unnormalized scores). For class index $i$, softmax normalizes $z_i$ over all class indices $j$ to produce a probability:
 
 [^fn-logit]: **Logit**: Joseph Berkson coined the term in 1944 by analogy with *probit*. The logit function is the inverse of the logistic (sigmoid) function: $\text{logit}(p) = \log(p/(1-p))$. In deep learning, "logits" refers more loosely to the raw, unnormalized output of the final linear layer before any activation function is applied.
 $$ \text{Softmax}(z_i) = \frac{e^{z_i}}{\sum e^{z_j}} $$
@@ -743,7 +743,7 @@ class LogSumExp:
 
 ::: {#exmp-appendix-data-log-sum-exp-action .callout-example title="Log-sum-exp in action"}
 
-**Setup**: A three-class classifier outputs logits $z =$ `{python} LogSumExp.z_math`.
+**Setup**: A three-class classifier outputs logits $\mathbf{z} =$ `{python} LogSumExp.z_math`.
 
 **Without the trick (naive softmax)**:
 
@@ -751,9 +751,9 @@ class LogSumExp:
 
 These numbers are representable in FP64 but overflow FP32 (max $\approx 3.4 \times 10^{38}$). With FP16 (max $\approx 65{,}504$), even $e^{12}$ overflows. Raw logits rarely reach magnitude 100, but large intermediate values do arise (for example, unscaled attention scores or overconfident outputs), and because FP16 and BF16 are the standard training precisions, a naive softmax risks overflow often enough that the stable form is used by default.
 
-**With the trick**: Subtract $a = \max(z) =$ `{python} LogSumExp.a_str`:
+**With the trick**: Subtract $a = \max(\mathbf{z}) =$ `{python} LogSumExp.a_str`:
 
-Shifted logits: $z - a =$ `{python} LogSumExp.shifted_math`
+Shifted logits: $\mathbf{z} - a =$ `{python} LogSumExp.shifted_math`
 
 Exponentials: `{python} LogSumExp.stable_exp0_eq`, `{python} LogSumExp.stable_exp1_eq`, `{python} LogSumExp.stable_exp2_eq`
 

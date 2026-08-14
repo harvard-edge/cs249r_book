@@ -762,7 +762,7 @@ Gradient descent\index{Gradient Descent!parameter optimization}\index{Gradient D
 
 The computational demands of gradient descent scale with both model size and dataset size. Computing gradients requires storing intermediate activations during the forward pass for backpropagation. These activations consume memory proportional to the depth of the network and the number of examples being processed.
 
-Traditional gradient descent processes the entire dataset before each parameter update. For a training set with one million examples, the system must compute an aggregate gradient over all examples before taking one step. Let $B_{\text{micro}}$ denote the examples resident for one forward/backward pass; gradient accumulation composes multiple micro-batches into one larger effective batch. The peak-memory relation in @eq-gd-memory and the step-time relation in @eq-gd-time capture the implementation distinction:
+Traditional gradient descent processes the entire dataset before each parameter update. For a training set with one million examples, the system must compute an aggregate gradient over all examples before taking one step. Let $D$ denote the number of examples in the training dataset, let $B_{\text{micro}}$ denote the examples resident for one forward/backward pass, and let $T_{\text{forward+backward per example}}$ denote the amortized forward/backward time per example under the chosen micro-batch execution regime. Gradient accumulation composes multiple micro-batches into one larger effective batch. The peak-memory relation in @eq-gd-memory and the step-time relation in @eq-gd-time capture the implementation distinction:
 $$ \text{Peak Activation Memory} \propto B_{\text{micro}} \times \text{Activation Memory per Example} $$ {#eq-gd-memory}
 $$ T_{\text{step}} \propto D \times T_{\text{forward+backward per example}} $$ {#eq-gd-time}
 
@@ -819,7 +819,7 @@ While momentum smooths gradient direction, it does not address the different sca
 
 ##### Adam optimization {#sec-model-training-adam-optimization-5c42}
 
-Adam\index{Adam Optimizer!convergence properties}\index{Adam Optimizer!Kingma and Ba}[^fn-adam-optimizer-memory] combines the benefits of both momentum and RMSprop: momentum's gradient smoothing addresses noisy updates, while RMSprop's adaptive scaling handles parameter-specific step sizes. This combination maintains two moving averages for each parameter:
+Adam\index{Adam Optimizer!convergence properties}\index{Adam Optimizer!Kingma and Ba}[^fn-adam-optimizer-memory] combines the benefits of both momentum and RMSprop: momentum's gradient smoothing addresses noisy updates, while RMSprop's adaptive scaling handles parameter-specific step sizes. This combination maintains two moving averages for each parameter. Here $m_t$ and $v_t$ are the first- and second-moment buffers, $\beta_1$ and $\beta_2$ are their decay factors, and $\epsilon$ is the numerical-stability constant in the denominator:
 \begin{gather*}
 m_t = \beta_1 m_{t-1} + (1-\beta_1)\nabla \mathcal{L}(\theta_t)
 \\[0.5ex]
@@ -1316,7 +1316,7 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 #### Memory-computation trade-offs {#sec-model-training-memorycomputation-tradeoffs-411e}
 
-Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-Computation Tradeoff!training systems}. Each forward pass generates values that backward rules may request. For a simplified network model with $N_L$ layers, let $s_\ell$ represent saved intermediate computations (like $\mathbf{Z}^{(\ell)}$) and $a_\ell$ represent saved activation outputs at layer $\ell$. If both terms scale linearly with batch size, their storage is approximated by @eq-activation-memory-per-batch:
+Training systems must balance memory usage\index{Training!memory management} against computational efficiency\index{Memory-Computation Tradeoff!training systems}. Each forward pass generates values that backward rules may request. For a simplified network model with $N_L$ layers, let $s_\ell$ denote the bytes of saved intermediate state per example at layer $\ell$ and $a_\ell$ the bytes of saved activation outputs per example. Under this per-example convention, their storage scales linearly with batch size and is approximated by @eq-activation-memory-per-batch:
 
 $$ \text{Memory per batch} = B \times \sum_{\ell=1}^{N_L} (s_\ell + a_\ell) $$ {#eq-activation-memory-per-batch}
 
@@ -2122,7 +2122,7 @@ where $\text{BW}_{\text{disk}}$ is the physical disk bandwidth and $\text{BW}_{\
 
 #### Preprocessing {#sec-model-training-preprocessing-523c}
 
-Once data arrives from storage, preprocessing transforms raw inputs into model-ready tensors. This process builds on the data pipeline patterns established in @sec-data-engineering, typically implemented through extract, load, transform (ELT) pipelines where raw data is loaded first and transformed on-demand during training. Preprocessing throughput scales with parallelism, as expressed in @eq-preprocess-throughput:
+Once data arrives from storage, preprocessing transforms raw inputs into model-ready tensors. This process builds on the data pipeline patterns established in @sec-data-engineering, typically implemented through extract, load, transform (ELT) pipelines where raw data is loaded first and transformed on-demand during training. Under ideal independent-worker scaling, preprocessing throughput grows with worker count as expressed in @eq-preprocess-throughput:
 $$R_{\text{preprocessing}} = \frac{N_{\text{workers}}}{T_{\text{transform}}}$$ {#eq-preprocess-throughput}
 where $N_{\text{workers}}$ parallel processing threads each perform transformations requiring $T_{\text{transform}}$ seconds. Training architectures employ multiple workers to ensure preprocessing keeps pace with accelerator consumption rates---a single thread performing image augmentation at 30 ms per batch cannot feed an accelerator that computes a forward pass in 10 ms.
 
@@ -4695,6 +4695,8 @@ Accumulation preserves the total example-level arithmetic but can change efficie
 $$
 T_{\text{effective}} = \sum_{j=1}^{k} T_{\text{micro},j} + T_{\text{sync}} + T_{\text{update}}
 $$ {#eq-gradient-accumulation-overhead}
+
+Here $T_{\text{micro},j}$ is the measured forward/backward time for micro-batch $j$, $T_{\text{sync}}$ is the synchronization time paid for the accumulated update, and $T_{\text{update}}$ is the optimizer-step time.
 
 The wall-clock penalty relative to processing the effective batch at once is workload-dependent. It must be measured rather than inferred from the memory-reduction factor.
 

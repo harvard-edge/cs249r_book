@@ -215,10 +215,10 @@ ML systems must make silent failures\index{Silent Failure!gradual degradation} v
 
 #### Cost-aware automation {#sec-ml-operations-principle-5-costaware-automation-631e}
 
-Cost-aware automation\index{Cost-Aware Automation!retraining decisions} should balance computational costs against accuracy improvements. @Eq-retrain-decision models this trade-off:
+Cost-aware automation\index{Cost-Aware Automation!retraining decisions} should balance computational costs against accuracy improvements. Let $\Delta\text{Accuracy}$ be the expected gain in accuracy percentage points, $\text{Value per Point}$ the monetary value of one percentage-point gain over the decision horizon, $\text{Training Cost}$ the compute and labor cost of a retraining run, and $\text{Deployment Risk}$ the expected cost of validation and rollout failure. @Eq-retrain-decision models this trade-off:
 $$\text{Retrain if: } \Delta\text{Accuracy} \times \text{Value per Point} > \text{Training Cost} + \text{Deployment Risk}$$ {#eq-retrain-decision}
 
-The response should match both the failure signature and the cost of acting too early. @Tbl-degradation-types pairs each observable time signature with an appropriate detector and operational response.
+The inequality is a decision gate, not an automatic trigger: retrain only when outcome evidence makes the expected gain exceed both run cost and release risk. @Tbl-degradation-types pairs each observable failure signature with an appropriate detector and operational response.
 
 ```{=latex}
 \begingroup
@@ -1710,9 +1710,9 @@ class ABSampleSize:
 
 A valid A/B test starts with four controls that make the later deployment decision statistically meaningful. The **Randomization Unit**\index{A/B Testing!randomization unit} defines what gets randomly assigned to treatment vs. control. User-level randomization ensures consistent experience but requires larger sample sizes. Request-level randomization enables faster experiments but can confuse users seeing different results.
 
-@Eq-ab-sample-size translates the effect size, variance, confidence, and power targets into required traffic before launch.
+Under a common-variance Normal approximation, let $n$ be the required users per variant, $\delta$ the minimum detectable effect, $\sigma$ the outcome standard deviation, and $z_{\alpha/2}$ and $z_{\beta}$ the positive standard-Normal critical values for the chosen two-sided confidence and power. The worked scenario uses `{python} ABSampleSize.confidence_pct_str` confidence and `{python} ABSampleSize.power_pct_str` power. @Eq-ab-sample-size translates those design targets into required traffic before launch.
 $$n = \frac{2(z_{\alpha/2} + z_{\beta})^2 \sigma^2}{\delta^2}$$ {#eq-ab-sample-size}
-where $\delta$ is the minimum detectable effect, $\sigma$ is outcome standard deviation, and $z$ values depend on desired confidence (typically `{python} ABSampleSize.confidence_pct_str`) and power (typically `{python} ABSampleSize.power_pct_str`). For a `{python} ABSampleSize.relative_lift_pct_str` relative lift on a `{python} ABSampleSize.baseline_pct_str` baseline conversion rate (`{python} ABSampleSize.baseline_pct_str` to `{python} ABSampleSize.target_pct_str`) and `{python} ABSampleSize.power_pct_str` power, expect roughly `{python} ABSampleSize.users_per_variant_str` users per variant; `{python} ABSampleSize.comparison_users_per_variant_str` users per variant would only detect a much larger lift, about `{python} ABSampleSize.detectable_pct_points_str` absolute.
+For a `{python} ABSampleSize.relative_lift_pct_str` relative lift on a `{python} ABSampleSize.baseline_pct_str` baseline conversion rate (`{python} ABSampleSize.baseline_pct_str` to `{python} ABSampleSize.target_pct_str`) and `{python} ABSampleSize.power_pct_str` power, expect roughly `{python} ABSampleSize.users_per_variant_str` users per variant; `{python} ABSampleSize.comparison_users_per_variant_str` users per variant would only detect a much larger lift, about `{python} ABSampleSize.detectable_pct_points_str` absolute.
 
 **Guardrail Metrics**\index{Guardrail Metrics!A/B test constraints}: Define metrics that must not degrade even if primary metric improves. A recommendation model improving click-through rate by 10 percent while increasing page load time by 500 ms may fail guardrail checks.
 
@@ -2072,7 +2072,7 @@ For large language model (LLM) serving on a single GPU or server, the KV-cache\i
 
 ##### Cost-per-inference tracking {.unnumbered}
 
-Translate hardware metrics into business-relevant cost-per-inference\index{Cost-per-Inference!calculation} metrics using @eq-inference-cost:
+Let $\text{Hourly GPU cost}$ be the billed cost of the serving GPU for one hour and $\text{Inferences per hour}$ its sustained throughput over the same interval. @Eq-inference-cost converts those hardware metrics into business-relevant cost-per-inference\index{Cost-per-Inference!calculation}:
 $$\text{Cost per 1K inferences} = \frac{\text{Hourly GPU cost} \times 1000}{\text{Inferences per hour}}$$ {#eq-inference-cost}
 
 ```{python}
@@ -2389,10 +2389,10 @@ class ObservabilitySampling:
 
 ::: {#nbk-ml-ops-economics-observability .callout-notebook title="The economics of observability"}
 
-**Trade-off**: "Measure everything" is physically impossible at scale. @Eq-observability-cost expresses how observability cost depends on metric cardinality, sample frequency, bytes per sample, retention, and provider-specific ingestion and storage rates:
+**Trade-off**: "Measure everything" is physically impossible at scale. Let $N_{\text{series}}$ be the expanded series count, $f_{\text{sample}}$ the sampling frequency per series, $B_{\text{sample}}$ the bytes per sample, and $T_{\text{retention}}$ the retention duration; $C_{\text{ingest/sample}}$ and $C_{\text{storage/byte-time}}$ are provider-specific ingestion and storage prices. @Eq-observability-cost combines these terms into an operating cost rate:
 $$ \text{Cost rate} \approx N_{\text{series}} f_{\text{sample}} \left(C_{\text{ingest/sample}} + B_{\text{sample}} T_{\text{retention}} C_{\text{storage/byte-time}}\right) $$ {#eq-observability-cost}
 
-Here $N_{\text{series}}$ is the expanded series count, $f_{\text{sample}}$ is samples per series per unit time, $B_{\text{sample}}$ is bytes per sample, and the $C$ terms are provider-specific unit prices. The product is an operating cost rate, not a one-time setup cost.
+The product is an operating cost rate, not a one-time setup cost.
 
 ```{=latex}
 \tcbbreak
@@ -2474,13 +2474,17 @@ Schema validation catches structural corruption (missing columns, wrong types, n
 \endgroup
 ```
 
-Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)\index{Population Stability Index!drift quantification}[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (@sec-appdx-data-foundations-measuring-drift-divergence-a6dd develops the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring). @Eq-psi formalizes this:
+Understanding *why* we use these thresholds requires looking at the math. The Population Stability Index (PSI)\index{Population Stability Index!drift quantification}[^fn-psi-origin] quantifies distributional shift by comparing expected (training) vs. actual (serving) frequencies across bins (@sec-appdx-data-foundations-measuring-drift-divergence-a6dd develops the mathematical foundations of KL divergence, PSI, and information theory for systems monitoring). Here $n$ is the number of fixed bins, and $\text{expected}_i$ and $\text{actual}_i$ are aligned, strictly positive bin proportions that sum to one in each distribution. @Eq-psi formalizes this:
 $$ \text{PSI} = \sum_{i=1}^{n} (\text{actual}_i - \text{expected}_i) \times \ln\left(\frac{\text{actual}_i}{\text{expected}_i}\right) $$ {#eq-psi}
+
+Production monitors therefore need a documented zero-bin policy, such as smoothing, and must preserve bin boundaries across comparison periods; PSI is a drift signal, not an automatic retraining trigger.
 
 [^fn-psi-origin]: **Population Stability Index (PSI)**\index{Population Stability Index!credit risk origin}: PSI is widely used in credit-risk scorecard monitoring to compare expected and observed binned populations; Yurdakul and Naranjo analyze its statistical properties [@yurdakul2020]. The common 0.1 and 0.25 bands are useful operational conventions, not universal statistical laws. ML operations adopted PSI because it works on binned categorical or continuous features and provides an interpretable drift score that non-specialists can review.
 
-For discrete or binned distributions, Kullback-Leibler (KL) divergence\index{Kullback-Leibler Divergence!distribution comparison} provides another comparison. @Eq-kl-divergence defines the local KL-specific notation $\mathcal{D}_{\text{KL}}$; elsewhere in this volume, $\mathcal{D}(P_t \lVert P_0)$ denotes a generic statistical divergence in the degradation equation:
+For discrete or binned distributions, Kullback-Leibler (KL) divergence\index{Kullback-Leibler Divergence!distribution comparison} provides another comparison. Let $p$ be the monitored serving distribution and $q$ the training reference distribution. @Eq-kl-divergence defines the local KL-specific notation $\mathcal{D}_{\text{KL}}$; elsewhere in this volume, $\mathcal{D}(P_t \lVert P_0)$ denotes a generic statistical divergence in the degradation equation:
 $$ \mathcal{D}_{\text{KL}}(p \lVert q) = \sum_{x} p(x) \log\left(\frac{p(x)}{q(x)}\right) $$ {#eq-kl-divergence}
+
+Because KL divergence is asymmetric and becomes infinite when $p(x)>0$ where $q(x)=0$, operational monitors must preserve direction and apply an explicit support policy, such as smoothing previously unseen bins.
 
 To see this in practice, consider a recommendation system monitoring user age. A shift from "younger" to "older" demographics might look subtle on a histogram but generates a clear PSI signal, decomposed bin by bin in @tbl-psi-age-example:
 

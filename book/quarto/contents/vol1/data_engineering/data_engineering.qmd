@@ -164,6 +164,7 @@ class DataGravity:
 
 **Task-relevant signal**\index{Task-Relevant Signal!data density} is a heuristic for the useful information a dataset contributes to a particular task, not Shannon entropy computed from raw bytes. A dataset of 1 million identical images has high gravity but little additional task-relevant information beyond the repeated image. A dataset of 10,000 diverse edge cases may have lower gravity but greater task-relevant signal. Let this heuristic measure useful signal per byte and data gravity capture movement cost. Their ratio represents a dataset's return on movement cost:
 $$ \text{Data Selection Gain} \propto \frac{\text{Task-Relevant Signal}}{\text{Data Gravity}} $$ {#eq-data-selection-gain}
+The heuristic favors datasets whose marginal task signal justifies their movement cost, so deduplication and active learning improve the selection decision when they remove redundant bytes or prioritize informative examples.
 
 ```{python}
 #| echo: false
@@ -2184,10 +2185,10 @@ class KSTest:
 **Analysis**: Apply the Kolmogorov-Smirnov test to compare the empirical cumulative distribution functions:
 
 1.  **Compute CDFs**: Calculate cumulative distribution functions for both datasets.
-2.  **Calculate statistic** $(\mathcal{D}_{\text{KS}})$: Find the maximum absolute difference between the CDFs. Let $F_{P_0}(x)$ and $F_{P_t}(x)$ denote the cumulative distribution functions of the training baseline $(P_0)$ and current serving $(P_t)$ datasets.
+2.  **Calculate statistic** $(\mathcal{D}_{\text{KS}})$: Find the maximum absolute difference between the CDFs. Let $F_{P_0}(x)$ and $F_{P_t}(x)$ denote the empirical cumulative distribution functions of the training baseline $(P_0)$ and current serving $(P_t)$ datasets, evaluated at value $x$.
     $$\mathcal{D}_{\text{KS}} = \max_x |F_{P_0}(x) - F_{P_t}(x)|$$
 
-3.  **Determine significance**: Compare $\mathcal{D}_{\text{KS}}$ to critical value $\mathcal{D}_{\text{crit}}$ based on training-baseline sample size $n_0$, serving sample size $n_t$, and significance level $(\alpha = 0.05)$.
+3.  **Determine significance**: For two independent samples, compare $\mathcal{D}_{\text{KS}}$ to critical value $\mathcal{D}_{\text{crit}}$ based on training-baseline sample size $n_0$ and serving sample size $n_t$. The coefficient 1.36 is the large-sample approximation for significance level $\alpha = 0.05$.
     $$\mathcal{D}_{\text{crit}} \approx 1.36\sqrt{\frac{n_0 + n_t}{n_0 n_t}}$$
 **Result**: With sample sizes `{python} KSTest.sample_sizes_math`, the critical value is approximately `{python} KSTest.ks_dcrit_str`:
 $$\mathcal{D}_{\text{crit}} \approx 1.36\sqrt{(1000 + 1000)/(1000 \cdot 1000)}.$$
@@ -2360,7 +2361,7 @@ $$ {#eq-cohens-kappa}
 
 Monitoring $\kappa$ over time windows reveals degradation trends. A medical imaging annotation project might establish a baseline $\kappa = 0.85$ (almost perfect agreement) during initial data collection, then observe decline to $\kappa = 0.72$ (substantial agreement) after six months as new annotators join without receiving equivalent domain training.
 
-For systems with calibrated model probabilities, predictive entropy\index{Predictive Entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$. @Eq-label-entropy defines this measure:
+For systems with calibrated model probabilities, predictive entropy\index{Predictive Entropy} provides an additional uncertainty signal. Let $p_i$ represent the model's probability assigned to label category $i$, and let $\log$ denote the natural logarithm, so entropy is measured in nats. @Eq-label-entropy defines this measure:
 
 $$
 H_{\text{pred}} = -\sum_i p_i \log p_i
@@ -3994,11 +3995,11 @@ The storage options now have a concrete target: saturating this accelerator requ
 \setlength{\belowdisplayshortskip}{0pt}
 ```
 
-The `{python} StorageBandwidth.sata_bw_mb_per_s_str` figure represents effective SATA III sequential read throughput (the interface ceiling is `{python} StorageBandwidth.sata_max_bw_mb_per_s_str`), and real-world random read performance with small files can be significantly lower. That caveat reinforces the general principle governing data pipelines: @eq-training-throughput bounds training throughput by compute capacity and the data supply rate defined in @eq-data-supply. Under full overlap, the min-of-rates form corresponds to the $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{io}})$ lower bound from @sec-data-engineering-data-ingestion-8efc; with incomplete overlap, actual step time is higher.
+The `{python} StorageBandwidth.sata_bw_mb_per_s_str` figure represents effective SATA III sequential read throughput (the interface ceiling is `{python} StorageBandwidth.sata_max_bw_mb_per_s_str`), and real-world random read performance with small files can be significantly lower. That caveat reinforces the general principle governing data pipelines: @eq-training-throughput bounds training throughput by compute capacity and the data supply rate defined in @eq-data-supply. Let $R_{\text{train}}$, $R_{\text{compute}}$, and $R_{\text{data}}$ denote rates in samples per second; let $B_{\text{storage}}$ be storage bandwidth in bytes per second, $\eta_{\text{overhead}}$ the dimensionless fraction lost to overhead, and $S_{\text{sample}}$ the bytes per sample. Under full overlap, the min-of-rates form corresponds to the $T_{\text{step}} = \max(T_{\text{compute}}, T_{\text{io}})$ lower bound from @sec-data-engineering-data-ingestion-8efc; with incomplete overlap, actual step time is higher.
 $$R_{\text{train}} \leq \min(R_{\text{compute}}, R_{\text{data}})$$ {#eq-training-throughput}\index{Throughput!training, compute vs. data}
 $$R_{\text{data}} = \frac{B_{\text{storage}}(1-\eta_{\text{overhead}})}{S_{\text{sample}}}$$ {#eq-data-supply}\index{Data Supply Rate!bandwidth constraint}
 
-Here, $R_{\text{train}}$, $R_{\text{compute}}$, and $R_{\text{data}}$ are measured in samples per second, $B_{\text{storage}}$ in bytes per second, and $S_{\text{sample}}$ in bytes per sample.
+Once $R_{\text{data}}$ is the smaller rate, additional accelerator compute cannot raise training throughput; the remedy must increase usable storage bandwidth or reduce bytes per sample.
 
 ```{=latex}
 \vspace{-1.25ex}
@@ -4053,9 +4054,9 @@ class FormatEfficiency:
 
 ::: {#nbk-data-engineering-format-efficiency .callout-notebook title="Format efficiency"}
 
-Storage formats determine how much "waste" data must move to retrieve the signal needed for training. @Eq-effective-bandwidth quantifies this: the fraction of bytes that actually carry useful features scales the raw disk bandwidth into the throughput the training pipeline can exploit:
+Storage formats determine how much "waste" data must move to retrieve the signal needed for training. Let $\eta_{\text{format}}$ be the dimensionless fraction of bytes read that carry selected features, from 0 to 1. @Eq-effective-bandwidth shows how that fraction scales physical bandwidth into usable pipeline bandwidth:
 $$ \text{Effective Bandwidth} = \text{Physical Bandwidth} \times \eta_{\text{format}} $$ {#eq-effective-bandwidth}
-Here, $\eta_{\text{format}}$ is a dimensionless useful-byte fraction between 0 and 1: 1 means every byte read contributes to the selected features, while lower values mean the format forces the pipeline to scan irrelevant bytes.
+Values below 1 mean the format spends part of the physical data path on irrelevant bytes; improving layout can therefore raise usable throughput without changing the storage device.
 
 **Scenario**: Training a fraud model using `{python} FormatEfficiency.needed_cols_str` features from a `{python} FormatEfficiency.total_cols_str`-column table.
 

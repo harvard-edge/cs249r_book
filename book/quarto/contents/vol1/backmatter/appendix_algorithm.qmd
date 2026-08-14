@@ -100,10 +100,10 @@ class GemmIntensityExample:
     )
 ```
 
-The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n{\times}n$ matrices in FP16 (`{python} GemmIntensityExample.bytes_fp16_value_str` bytes/element):
+The arithmetic intensity of GEMM scales linearly with matrix dimension. For square $n{\times}n$ matrices in FP16 (`{python} GemmIntensityExample.bytes_fp16_value_str` bytes/element), the ideal $\beta=0$ bound reads $\mathbf{A}$ and $\mathbf{B}$ once and writes $\mathbf{C}$ once:
 `{python} GemmIntensityExample.intensity_formula_math`
 
-This ideal bound assumes $\beta=0$: read $A$ and $B$, then write $C$. Reading the old $C$ when $\beta \ne 0$ changes it to $n/4$ FLOP/byte. This explains several important phenomena:
+Reading the old $\mathbf{C}$ when $\beta \ne 0$ changes the intensity to $n/4$ FLOP/byte. This explains several important phenomena:
 
 - **Larger batches can improve efficiency**: Batching increases effective matrix dimensions when it forms larger GEMMs or enables reuse; merely queuing independent small GEMMs does not raise intensity.
 - **Aligned dimensions help**: Hardware tensor cores are optimized for precision- and architecture-specific tile multiples. Dimensions that align with these multiples avoid padding overhead and improve kernel efficiency, but they do not need to be powers of two.
@@ -279,7 +279,7 @@ The gradient edges retrace the forward dependencies, so each backward step requi
 
 #### Forward pass {.unnumbered}
 
-Start at $x$, the input. Multiply by $W_1$ to get hidden activation $h$. Cache $h$ because the backward pass will need it later. Multiply $h$ by $W_2$ to get output $y$. Cache $y$. Compare $y$ to the target label to compute loss $\mathcal{L}$.
+Using row-vector activations, omitting biases, and retaining intermediate activations for backward, start at $x$, the input. Multiply by $W_1$ to get hidden activation $h$. Cache $h$ because the backward pass will need it later. Multiply $h$ by $W_2$ to get output $y$. Cache $y$. Compare $y$ to the target label to compute loss $\mathcal{L}$.
 
 At this point, the loss has been computed and memory contains the input $x$, the cached activation $h$, the cached output $y$, and the loss $\mathcal{L}$. For a large model, these cached activations can dominate memory usage.
 
@@ -300,7 +300,7 @@ Each step backward requires two things: the gradient flowing in from above $\lef
 
 ### The true cost of training memory {#sec-appdx-algorithm-foundations-true-cost-training-memory-e54e}
 
-A common mistake is to assume that training memory equals model size. This assumption leads to immediate OOM errors because it ignores three other components that often dwarf the weights themselves. The actual memory footprint of training is:
+A common mistake is to assume that training memory equals model size. This assumption leads to immediate OOM errors because weights are only one of four components. Training memory comprises weights, gradients, optimizer state, and retained activations:
 $$ M_{\text{total}} = M_{\text{weights}} + M_{\text{gradients}} + M_{\text{optimizer}} + M_{\text{activations}} $$
 
 For a standard Adaptive Moment Estimation (Adam) optimizer [@kingma2014adam] in mixed precision [@micikevicius2017mixed]:
@@ -423,7 +423,7 @@ class GPT2TrainingMem:
 ```
 **Activations (scale with batch)**:
 
-Per-layer retained activations for this quick estimate are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. This estimate assumes the implementation does not retain the full $B \times H \times S^2$ attention-score tensor, as in recomputation- or tiled-attention-friendly accounting. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
+Per-layer retained activations for this quick estimate are approximately $12 \times B \times S \times d$ BF16 elements, or $12 \times B \times S \times d \times 2$ bytes, where $B$ is batch size and $S$ is sequence length. The factor twelve accounts for the major intermediate tensors retained for backpropagation: input activations, QKV projections ($3d$), attention output, FFN intermediate ($4d$), and layer norm/dropout masks. This estimate assumes the implementation does not retain the full $B \times N_{\text{heads}} \times S^2$ attention-score tensor, as in recomputation- or tiled-attention-friendly accounting. With `{python} GPT2TrainingMem.layers_str` layers, batch size `{python} GPT2TrainingMem.batch_small_str`, and sequence length `{python} GPT2TrainingMem.seq_len_str`:
 
 `{python} GPT2TrainingMem.act_small_display_math`
 

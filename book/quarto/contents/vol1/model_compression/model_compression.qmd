@@ -2139,13 +2139,13 @@ This factorization reveals a recurring systems trade-off: executing two smaller 
 
 Low-rank factorization can reduce both arithmetic and bandwidth demand when the retained rank is small, though it adds a second factor operation and possible kernel-launch overhead\index{Bandwidth Reduction!low-rank factorization}. Storing a `{python} LowRankFactorization.mat_dim_str` by `{python} LowRankFactorization.mat_dim_str` matrix requires `{python} LowRankFactorization.full_mb_str` (at FP32). Fetching this matrix for a single inference imposes substantial memory traffic, especially when execution is limited by physical memory bandwidth.
 
-If we factorize it with rank $k$ = `{python} LowRankFactorization.rank_k_value_str`, we store two matrices (`{python} LowRankFactorization.mat_dim_str` by `{python} LowRankFactorization.rank_k_value_str` and `{python} LowRankFactorization.rank_k_value_str` by `{python} LowRankFactorization.mat_dim_str`), totaling only `{python} LowRankFactorization.factored_mb_str`, a `{python} LowRankFactorization.data_reduction_mult_str` reduction in data movement. When inference uses the two factors directly, matrix-vector compute also falls from $\mathcal{O}(mn)$ to $\mathcal{O}(k(m+n))$ for small $k$. This can produce a substantial speedup because the processor moves less data and performs fewer operations than with the original dense matrix. Explicitly materializing $\mathbf{U}\mathbf{V}$ would add $\mathcal{O}(mkn)$ work and defeat the purpose.
+If we factorize it with rank $k$ = `{python} LowRankFactorization.rank_k_value_str`, we store two matrices (`{python} LowRankFactorization.mat_dim_str` by `{python} LowRankFactorization.rank_k_value_str` and `{python} LowRankFactorization.rank_k_value_str` by `{python} LowRankFactorization.mat_dim_str`), totaling only `{python} LowRankFactorization.factored_mb_str`, a `{python} LowRankFactorization.data_reduction_mult_str` reduction in data movement. When inference uses the two factors directly, matrix-vector compute also falls from $\mathcal{O}(mn)$ to $\mathcal{O}(k(m+n))$ for small $k$. This can produce a substantial speedup because the processor moves less data and performs fewer operations than with the original dense matrix. Explicitly materializing $\mathbf{U}\mathbf{V}^T$ would add $\mathcal{O}(mkn)$ work and defeat the purpose.
 
 :::
 
 This bandwidth-compute trade-off is the local version of the memory wall: execution becomes bottlenecked by moving weights rather than multiplying them. @Sec-hardware-acceleration-understanding-ai-memory-wall-3ea9 later examines the same phenomenon from the hardware side.
 
-To see why this matters, study @fig-matrix-factorization. The matrix $\mathbf{M}$ can be approximated by the product of matrices $\mathbf{U}_k$ and $\mathbf{V}_k^T$. For intuition, most fully connected layers in networks are stored as a projection matrix $\mathbf{M}$, which requires $m{\times}n$ parameters to be loaded during computation. By decomposing and approximating it as the product of two lower-rank matrices, we need to store only $m \times k + k \times n$ parameters. Applying the factors directly costs $\mathcal{O}(k(m+n))$ for a vector input instead of $\mathcal{O}(mn)$ for the original dense matrix; explicitly forming the dense product $\mathbf{U}\mathbf{V}$ would cost $\mathcal{O}(mkn)$ and should be avoided in inference [@Denton2014].
+To see why this matters, study @fig-matrix-factorization. The matrix $\mathbf{M}$ can be approximated by the product of matrices $\mathbf{U}_k$ and $\mathbf{V}_k^T$. For intuition, most fully connected layers in networks are stored as a projection matrix $\mathbf{M}$, which requires $m{\times}n$ parameters to be loaded during computation. By decomposing and approximating it as the product of two lower-rank matrices, we need to store only $m \times k + k \times n$ parameters. Applying the factors directly costs $\mathcal{O}(k(m+n))$ for a vector input instead of $\mathcal{O}(mn)$ for the original dense matrix; explicitly forming the dense product $\mathbf{U}\mathbf{V}^T$ would cost $\mathcal{O}(mkn)$ and should be avoided in inference [@Denton2014].
 
 ::: {#fig-matrix-factorization fig-env="figure" fig-pos="htb" fig-cap="**Low-Rank Factorization**: A weight matrix $\mathbf{M}$ of size $m{\times}n$ is approximated by two smaller factors, labeled $\mathbf{L}_k$ $(m{\times}k)$ and $\mathbf{R}_k^T$ $(k{\times}n)$ in the diagram and corresponding to $\mathbf{U}_k$ and $\mathbf{V}_k^T$ in the surrounding notation. Storage falls from $m \times n$ to $m \times k + k \times n$ parameters, while one dense operation becomes two factor operations." fig-alt="Three rectangular boxes show matrix factorization. A large M matrix of size m by n approximately equals the product of a narrower L-k matrix of size m by k and a wider R-k-transpose matrix of size k by n."}
 
@@ -4033,7 +4033,7 @@ Post-training quantization (PTQ) reduces numerical precision after training, con
 
 PTQ's key advantage is low computational cost: it requires no retraining and usually no labeled training set, although activation calibration typically needs a small representative calibration dataset. However, reducing precision introduces quantization error\index{Quantization!error} that can degrade accuracy, especially for tasks requiring fine-grained numerical precision. Machine learning frameworks\index{Framework Toolkit!quantization support} such as TensorFlow Lite, Open Neural Network Exchange (ONNX) Runtime, and PyTorch provide built-in PTQ support.
 
-The core mechanism of PTQ is **uniform quantization**\index{Uniform Quantization!definition}\index{Quantization!uniform}, which maps floating-point values to discrete integer levels using a consistent scaling factor\index{Quantization!scaling factor}. Because the interval between each quantized value is constant, uniform quantization simplifies implementation and enables efficient hardware execution. The quantized value $q$ is computed as:
+The core mechanism of PTQ is **uniform quantization**\index{Uniform Quantization!definition}\index{Quantization!uniform}, which maps floating-point values to discrete integer levels using a consistent scaling factor\index{Quantization!scaling factor}. Because the interval between each quantized value is constant, uniform quantization simplifies implementation and enables efficient hardware execution. For the symmetric form shown here, $s$ is chosen from the maximum absolute value so that the resulting integers stay within the target range. The quantized value $q$ is computed as:
 $$
 q = \text{round} \left(\frac{x}{s} \right)
 $$
@@ -4412,7 +4412,7 @@ class QuantizationMathCalc:
 
 ::: {#exmp-model-compression-scale-zero-point .callout-example title="Calculating scale and zero-point"}
 
-**The affine quantization formula**\index{Quantization!affine}: An affine map sends a floating-point range $[\alpha, \beta]$ to an integer range $[0, 2^b-1]$ (for example, UINT8) via the following construction.
+**The affine quantization formula**\index{Quantization!affine}: An affine map sends a floating-point range $[\alpha, \beta]$ that includes zero to an integer range $[0, 2^b-1]$ (for example, UINT8) via the following construction.
 
 **Analysis**:
 We need a linear mapping $x \approx s(x_q - z)$, where $s$ is the **scale**\index{Quantization!scale} (step size) and $z$ is the **zero-point**\index{Quantization!zero-point} (integer value corresponding to real zero). The affine quantization process consists of three steps:
@@ -4917,7 +4917,7 @@ x_{\text{fake}} &= q_{\text{level}} \times s
 $$
 where $s = \frac{\max(|x|)}{2^{b-1} - 1}$ is the scale factor computed from the input distribution, and $x_{\text{fake}}$ represents the fake-quantized output that mimics INT8 values but remains in floating-point format.
 
-For asymmetric quantization supporting unsigned integers:
+For asymmetric quantization supporting unsigned integers, assume the observed range has been extended to include zero:
 $$
 \begin{aligned}
 s &= \frac{\max(x) - \min(x)}{2^b - 1} \\
@@ -5095,7 +5095,7 @@ The same logic extends beyond convolutional models. Transformer layers, attentio
 
 If the profile shows that a small set of convolutional operators dominates arithmetic, reducing the whole model uniformly is wasteful. The better response is to change the expensive operator. Modern efficient architectures do this by factorizing dense computations into cheaper pieces that preserve the representation needed for accuracy.
 
-Depthwise separable convolutions\index{Depthwise Separable Convolution}\index{Model Compression!depthwise separable convolution}, popularized by MobileNet, exemplify this approach by decomposing standard convolutions into two stages: depthwise convolution (applying separate filters to each input channel independently) and pointwise convolution ($1{\times}1$ convolution mixing outputs across channels). The computational complexity of standard convolution with input size $h{\times}w$, $C_{\text{in}}$ input channels, and $C_{\text{out}}$ output channels is:
+Depthwise separable convolutions\index{Depthwise Separable Convolution}\index{Model Compression!depthwise separable convolution}, popularized by MobileNet, exemplify this approach by decomposing standard convolutions into two stages: depthwise convolution (applying separate filters to each input channel independently) and pointwise convolution ($1{\times}1$ convolution mixing outputs across channels). For batch size one, unit stride, padding that preserves an $h{\times}w$ spatial size, and a square kernel of width $k$, the computational complexity of standard convolution with $C_{\text{in}}$ input channels and $C_{\text{out}}$ output channels is:
 $$
 \mathcal{O}(h w C_{\text{in}} C_{\text{out}} k^2)
 $$
@@ -5141,7 +5141,7 @@ Consider a typical neural network layer: convolution followed by batch normaliza
 
 ***Operator Fusion***\index{Operator Fusion!definition}\index{Operator Fusion!GEMM fusion}\index{Architectural Efficiency!operator fusion} is a compiler and runtime optimization that combines adjacent tensor operations into a single fused kernel so intermediate values remain in registers or on-chip memory instead of being written to and reread from accelerator global memory.
 
-1.  **Significance**: For $N$ unfused operations over an $M$-byte tensor, intermediate memory traffic scales as $2NM$ because each operation reads and writes global memory. Fusion reduces this to approximately $2M$ by reading the inputs once, computing the sequence locally, and writing only the final output. The savings directly reduce the $D_{\text{vol}}/\text{BW}$ term and eliminate repeated kernel launch overhead.
+1.  **Significance**: For $N$ unfused operations over an $M$-byte tensor, global-memory traffic scales as $2NM$ because each operation reads and writes global memory. Fusion reduces this to approximately $2M$ by reading the inputs once, computing the sequence locally, and writing only the final output. The savings directly reduce the $D_{\text{vol}}/\text{BW}$ term and eliminate repeated kernel launch overhead.
 2.  **Distinction**: Unlike pruning, quantization, or distillation, operator fusion does not change the model's parameters, precision, or architecture. It changes the execution schedule of mathematically equivalent operations, preserving model outputs while improving latency and throughput on memory-bound workloads.
 3.  **Common pitfall**: A frequent misconception is that more fusion is always better. Fusion is constrained by data dependencies, tensor shapes, register pressure, and cache capacity; over-fusing can reduce occupancy or force spills back to memory, erasing the benefit.
 
