@@ -568,6 +568,42 @@ class TestTensorPyTorchCompat:
         assert np.array_equal(stacked.data[0], t1.data)
         assert np.array_equal(stacked.data[1], t2.data)
 
+    def test_tensor_from_empty_list(self):
+        """Tensor([]) constructs successfully with shape (0,)."""
+        t = Tensor([])
+        assert t.shape == (0,)
+
+    def test_matmul_1d_self_2d_other(self):
+        """matmul with a 1D self tensor and a 2D other tensor works."""
+        t1 = Tensor([1, 2, 3])
+        t2 = Tensor(rng.standard_normal((3, 4)))
+        result = t1.matmul(t2)
+        assert result.shape == (4,)
+
+    def test_reshape_scalar_arg(self):
+        """reshape accepts a single scalar argument, not just a tuple."""
+        t = Tensor(np.arange(6))
+        reshaped = t.reshape(6)
+        assert reshaped.shape == (6,)
+
+    def test_transpose_only_dim0_raises(self):
+        """transpose() with only dim0 specified (dim1 omitted) raises ValueError."""
+        t = Tensor(np.arange(6).reshape(2, 3))
+        with pytest.raises(ValueError):
+            t.transpose(dim0=0)
+
+    def test_reshape_multiple_negative_one_raises(self):
+        """reshape() with more than one -1 dimension raises ValueError."""
+        t = Tensor(np.arange(6).reshape(2, 3))
+        with pytest.raises(ValueError):
+            t.reshape(-1, -1)
+
+    def test_reshape_indivisible_negative_one_raises(self):
+        """reshape() raises ValueError when size isn't divisible for -1 inference."""
+        t = Tensor(np.arange(7))
+        with pytest.raises(ValueError):
+            t.reshape(2, -1)
+
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])

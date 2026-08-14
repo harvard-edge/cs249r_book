@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.layers import Layer
+from tinytorch.core.layers import Layer, Sequential, Linear, ReLU, Dropout
 from tinytorch.core.tensor import Tensor
 
 
@@ -486,6 +486,75 @@ class TestLayerUtilities:
                 f"  Expected output: (32, 20)\n"
                 f"  Got: {out_shape}"
             )
+
+
+class TestSequentialRealImplementation:
+    """
+    Test the real tinytorch.core.layers.Sequential container.
+
+    CONCEPT: Sequential accepts layers either as separate positional
+    arguments (Sequential(l1, l2)) or as a single list (Sequential([l1, l2])).
+    Both forms must produce a working, correctly shaped forward pass.
+    """
+
+    def test_sequential_positional_args_construction_and_shape(self):
+        """
+        WHAT: Sequential(Linear(2, 2), ReLU()) built from positional args.
+
+        WHY: Students commonly write Sequential(layer1, layer2, ...) the
+        same way they would in PyTorch, without wrapping layers in a list.
+
+        STUDENT LEARNING: The real Sequential supports both call styles.
+        """
+        model = Sequential(Linear(2, 2), ReLU())
+        assert len(model.layers) == 2
+
+        x = Tensor(np.array([[1.0, -1.0]]))
+        output = model(x)
+        assert output.shape == (1, 2), (
+            f"Sequential(Linear(2,2), ReLU()) forward shape wrong.\n"
+            f"  Expected: (1, 2)\n"
+            f"  Got: {output.shape}"
+        )
+
+
+class TestDropoutLayer:
+    """
+    Test the Dropout layer's validation and training/inference behavior.
+
+    CONCEPT: Dropout only zeros elements during training and only when
+    p > 0. It must also reject invalid probabilities at construction.
+    """
+
+    def test_dropout_valid_construction(self):
+        """Dropout(0.5) constructs successfully and stores p."""
+        dropout = Dropout(0.5)
+        assert dropout.p == 0.5
+
+    def test_dropout_negative_p_raises(self):
+        """Dropout(-0.1) raises ValueError."""
+        with pytest.raises(ValueError):
+            Dropout(-0.1)
+
+    def test_dropout_p_above_one_raises(self):
+        """Dropout(1.1) raises ValueError."""
+        with pytest.raises(ValueError):
+            Dropout(1.1)
+
+    def test_should_apply_dropout_training_and_p_positive(self):
+        """_should_apply_dropout is True when training=True and p > 0."""
+        dropout = Dropout(0.5)
+        assert dropout._should_apply_dropout(training=True) is True
+
+    def test_should_apply_dropout_false_when_not_training(self):
+        """_should_apply_dropout is False when training=False."""
+        dropout = Dropout(0.5)
+        assert dropout._should_apply_dropout(training=False) is False
+
+    def test_should_apply_dropout_false_when_p_zero(self):
+        """_should_apply_dropout is False when p=0, even during training."""
+        dropout = Dropout(0.0)
+        assert dropout._should_apply_dropout(training=True) is False
 
 
 if __name__ == "__main__":

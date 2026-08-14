@@ -14,7 +14,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.core.autograd import enable_autograd
+from tinytorch.core.autograd import enable_autograd, Function
 from tinytorch.core.activations import GELU
 # Try to import transformer for mean/sqrt monkey-patches (Module 13)
 # This is optional - tests will skip if not available
@@ -146,6 +146,63 @@ def test_reshape_gradient_flow():
     assert x.grad.shape == x.shape, "Gradient shape should match input shape"
 
     print("✅ Reshape gradient flow works correctly")
+
+
+def test_sum_axis0_backward():
+    """Test that sum(axis=0).backward(gradient) propagates the gradient to every row."""
+    print("Testing sum(axis=0) backward pass...")
+
+    x = Tensor(np.random.randn(3, 4), requires_grad=True)
+    y = x.sum(axis=0)
+    assert y.shape == (4,)
+
+    y.backward(np.ones(4))
+
+    assert x.grad.shape == (3, 4), "Gradient shape should match input shape"
+    assert np.allclose(x.grad, 1.0), "Every element's gradient should be 1.0"
+
+    print("✅ sum(axis=0) backward pass correct")
+
+
+def test_sum_axis1_backward():
+    """Test that sum(axis=1).backward(gradient) propagates the gradient to every column."""
+    print("Testing sum(axis=1) backward pass...")
+
+    x = Tensor(np.random.randn(3, 4), requires_grad=True)
+    y = x.sum(axis=1)
+    assert y.shape == (3,)
+
+    y.backward(np.ones(3))
+
+    assert x.grad.shape == (3, 4), "Gradient shape should match input shape"
+    assert np.allclose(x.grad, 1.0), "Every element's gradient should be 1.0"
+
+    print("✅ sum(axis=1) backward pass correct")
+
+
+def test_function_apply_not_implemented():
+    """Test that the base Function.apply() raises NotImplementedError."""
+    print("Testing bare Function.apply()...")
+
+    x = Tensor(np.array([1.0, 2.0]))
+    fn = Function(x)
+
+    with pytest.raises(NotImplementedError):
+        fn.apply(1.0)
+
+    print("✅ Function.apply() raises NotImplementedError as expected")
+
+
+def test_backward_without_gradient_on_nonscalar_raises():
+    """Test that backward() with no gradient argument on a non-scalar tensor raises ValueError."""
+    print("Testing backward() without gradient on non-scalar tensor...")
+
+    x = Tensor(np.random.randn(3, 4), requires_grad=True)
+
+    with pytest.raises(ValueError):
+        x.backward()
+
+    print("✅ backward() without gradient on non-scalar tensor raises ValueError")
 
 
 if __name__ == "__main__":

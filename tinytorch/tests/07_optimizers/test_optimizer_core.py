@@ -283,5 +283,58 @@ class TestMultipleParameters:
             )
 
 
+class TestSGDMomentumState:
+    """
+    Test SGD momentum state introspection and checkpointing.
+
+    CONCEPT: has_momentum(), get_momentum_state(), and set_momentum_state()
+    give checkpointing code (Module 08) a safe API to save and restore
+    momentum buffers without using hasattr() checks.
+    """
+
+    def test_has_momentum_false_without_momentum(self):
+        """has_momentum() returns False when momentum=0.0."""
+        param = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+        optimizer = SGD([param], lr=0.1, momentum=0.0)
+        assert optimizer.has_momentum() is False
+
+    def test_has_momentum_true_with_momentum(self):
+        """has_momentum() returns True when momentum > 0."""
+        param = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+        optimizer = SGD([param], lr=0.1, momentum=0.9)
+        assert optimizer.has_momentum() is True
+
+    def test_momentum_state_round_trip(self):
+        """
+        WHAT: Save momentum state from one SGD optimizer and restore it
+        into a fresh SGD optimizer built on equivalent parameters.
+
+        WHY: Training checkpoints must be able to resume momentum exactly,
+        otherwise resumed training diverges from an uninterrupted run.
+        """
+        param = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+        optimizer = SGD([param], lr=0.1, momentum=0.9)
+
+        param.grad = np.array([1.0, 1.0, 1.0])
+        optimizer.step()
+
+        saved_state = optimizer.get_momentum_state()
+
+        # Fresh optimizer with the same params structure (new tensors, same shape)
+        fresh_param = Tensor([1.0, 2.0, 3.0], requires_grad=True)
+        fresh_optimizer = SGD([fresh_param], lr=0.1, momentum=0.9)
+        fresh_optimizer.set_momentum_state(saved_state)
+
+        restored_state = fresh_optimizer.get_momentum_state()
+
+        assert len(restored_state) == len(saved_state)
+        for original_buf, restored_buf in zip(saved_state, restored_state):
+            assert np.array_equal(original_buf, restored_buf), (
+                f"Restored momentum buffer does not match saved state.\n"
+                f"  Saved: {original_buf}\n"
+                f"  Restored: {restored_buf}"
+            )
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
