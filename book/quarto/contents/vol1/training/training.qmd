@@ -289,7 +289,7 @@ Training speed is governed by the utilization of hardware peaks.
 
 :::
 
-The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the binding constraint has shifted over time as hardware and algorithms co-evolved. In 1986, backpropagation was formalized [@rumelhart1986], and training a three-layer network on toy datasets required days on CPU workstations---the bottleneck was raw compute throughput $(R_{\text{peak}})$. In 2012, AlexNet demonstrated GPU training [@krizhevsky2012imagenet], reducing ImageNet training from weeks to days and launching the deep learning era. By 2017, transformers\index{Transformer!training evolution} [@vaswani2017] shifted attention toward large-scale sequence modeling and high-throughput accelerator kernels. GPT-3 in 2020 consumed about $3.14 \times 10^{23}$ FLOPs [@brown2020language], making utilization $(\eta_{\text{hw}})$ critical. By 2023, training efficiency improved through the techniques examined in this chapter: FlashAttention reduces memory traffic while improving $\eta_{\text{hw}}$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation was motivated by a specific iron law bottleneck.
+The iron law provides a static framework for reasoning about training performance, but the history of deep learning reveals how the binding constraint has shifted over time as hardware and algorithms co-evolved. In 1986, Rumelhart and colleagues popularized backpropagation for multilayer neural networks [@rumelhart1986]. In 2012, AlexNet trained an ImageNet classifier in five to six days on two GPUs [@krizhevsky2012imagenet], demonstrating how well neural-network parallelism mapped to graphics hardware. By 2017, transformers\index{Transformer!training evolution} [@vaswani2017] shifted attention toward large-scale sequence modeling and high-throughput accelerator kernels. GPT-3 in 2020 consumed about $3.14 \times 10^{23}$ FLOPs [@brown2020language], making utilization $(\eta_{\text{hw}})$ critical. By 2023, training efficiency improved through the techniques examined in this chapter: FlashAttention reduces memory traffic while improving $\eta_{\text{hw}}$; gradient checkpointing trades additional $O$ for memory capacity; mixed precision increases $R_{\text{peak}}$. Each innovation addresses a specific iron-law bottleneck.
 
 ```{python}
 #| echo: false
@@ -380,7 +380,7 @@ The same hardware-software boundary that frameworks exposed in @sec-ml-framework
 
 [^fn-transformer-training]: **Transformer Training Interconnect Sensitivity**: Self-attention's $\mathcal{O}(S^2)$ memory and compute scaling increases activation size with sequence length. In pipeline parallelism, activations cross devices at model-partition boundaries, while data parallelism synchronizes gradients whose volume scales with parameter count. The resulting communication cost depends on the parallelism strategy, topology, message size, and degree of overlap, making interconnect choice a first-order training-system decision. \index{Training!transformer, interconnect sensitivity}
 
-These scaling challenges share a common thread: every bottleneck traces back to the cost of specific mathematical operations---matrix multiplications that consume trillions of FLOPs, activation functions constrained by memory bandwidth, and optimizer states that triple the memory footprint. Before we can design effective systems to execute these operations at scale, we need to understand exactly what they cost [@goto2008].
+These scaling challenges share a common thread: every bottleneck traces back to the cost of specific mathematical operations. Dense matrix multiplication is a well-studied systems kernel [@goto2008], while activation functions consume memory bandwidth and optimizer states increase the resident memory footprint. Designing systems to execute these operations at scale begins with accounting for each cost separately.
 
 ## Mathematical Foundations {#sec-model-training-mathematical-foundations-d894}
 
@@ -399,9 +399,9 @@ Together, these dimensions provide the vocabulary for analyzing the computationa
 
 Neural network training consists of repeated matrix operations and nonlinear transformations. These operations are conceptually simple but create the system-level challenges that dominate modern training infrastructure. The introduction of backpropagation\index{Backpropagation!historical introduction}[^fn-backprop-provenance] by @rumelhart1986 and the development of efficient matrix computation libraries such as Basic Linear Algebra Subprograms (BLAS)\index{BLAS!matrix computation foundation}[^fn-blas-training] [@dongarra1988] laid the groundwork for modern training architectures.
 
-[^fn-backprop-provenance]: **Backpropagation Provenance**: The algorithm was independently derived by @linnainmaa1970representation for automatic differentiation of computer programs and by @werbos1974beyond in a Harvard PhD thesis on economic modeling—over a decade before @rumelhart1986 popularized it for neural networks. This delay between derivation and broad adoption recurs in ML systems history: attention mechanisms predated transformers by decades, but the 2017 Transformer showed that attention-heavy models could train efficiently on contemporary GPU systems; later TPU and GPU clusters enabled much larger deployments. Every modern framework's `backward()` call implements Linnainmaa's reverse-mode AD, not textbook chain rule—the difference is that graph-reverse topological traversal enables parallel gradient computation across independent subgraphs. \index{Backpropagation!provenance}
+[^fn-backprop-provenance]: **Backpropagation Provenance**: The algorithm was independently derived by @linnainmaa1970representation for automatic differentiation of computer programs and by @werbos1974beyond in a Harvard PhD thesis on economic modeling—over a decade before @rumelhart1986 popularized it for neural networks. This delay between derivation and broad adoption recurs in ML systems history: attention mechanisms predated transformers by decades, but the 2017 Transformer showed that attention-heavy models could train efficiently on contemporary GPU systems; later TPU and GPU clusters enabled much larger deployments. A framework's backward pass traverses the computational graph in reverse topological order and applies the chain rule; independent subgraphs may expose parallel work during that traversal. \index{Backpropagation!provenance}
 
-[^fn-blas-training]: **BLAS**: The original BLAS specification standardized reusable Fortran-callable vector operations [@lawson1979]. Later BLAS extensions added matrix-vector and matrix-matrix routines, giving the familiar Level 1, Level 2, and Level 3 hierarchy [@dongarra1988]. Training is dominated by Level 3 operations precisely because their high arithmetic intensity---$\mathcal{O}(n)$ FLOP/byte---saturates hardware compute units rather than starving on memory bandwidth. cuBLAS and oneDNN implement these as the kernel layer beneath every framework's matrix multiplication. \index{BLAS!training compute hierarchy}
+[^fn-blas-training]: **BLAS**: The original BLAS specification standardized reusable Fortran-callable vector operations [@lawson1979]. Later BLAS extensions added matrix-vector and matrix-matrix routines, giving the familiar Level 1, Level 2, and Level 3 hierarchy [@dongarra1988]. Training is dominated by Level 3 operations precisely because their high arithmetic intensity---$\mathcal{O}(n)$ FLOP/byte---can sustain high compute utilization. Frameworks commonly dispatch dense matrix multiplication to optimized libraries such as cuBLAS and oneDNN or to compiler-generated kernels. \index{BLAS!training compute hierarchy}
 
 #### Mathematical operations in neural networks {#sec-model-training-mathematical-operations-neural-networks-ddac}
 
@@ -607,7 +607,7 @@ Not all operations in neural networks involve large matrix-matrix multiplication
 
 Recognizing the limitations of matrix-vector operations, the introduction of batching\index{Batching!hardware utilization} transformed matrix computation in neural networks. By processing multiple inputs simultaneously, training systems convert matrix-vector operations into more efficient matrix-matrix operations. This approach improves hardware utilization but increases memory demands for storing intermediate results. Modern implementations must balance batch sizes against available memory, leading to specific optimizations in memory management and computation scheduling.
 
-The progression from matrix-vector to batched matrix-matrix operations explains the hardware design choices in modern accelerators. Hardware accelerators like Google's TPU\index{TPU!matrix unit design} [@jouppi2017] reflect this evolution, incorporating specialized matrix units and memory hierarchies optimized for batched operations. These hardware adaptations enable training of large-scale models like GPT-3 [@brown2020language] through efficient handling of the matrix-matrix multiplication patterns that batching produces.
+The progression from matrix-vector to batched matrix-matrix operations helps explain the hardware design choices in modern accelerators. Google's first TPU\index{TPU!matrix unit design}, designed for inference, incorporated a specialized matrix unit and memory hierarchy for dense operations [@jouppi2017]. At a different scale, GPT-3 training used distributed accelerators to execute the matrix-matrix multiplication patterns exposed by large batches [@brown2020language].
 
 ::: {#psp-training-why-gpus-dominate-training .callout-perspective title="Why GPUs dominate training"}
 
@@ -4567,7 +4567,7 @@ In practice, deep learning frameworks handle much of FlashAttention's integratio
 
 1. Ensure tensor layouts match library expectations (contiguous memory, correct dimension ordering)
 2. Use FP16 or BF16 for maximum speedup (FlashAttention optimized for mixed precision)
-3. Combine with gradient checkpointing for further memory savings (4--8$\times$ larger models trainable)
+3. Combine with gradient checkpointing when additional activation-memory savings are needed.
 
 The integration is often a single-line change---swapping a manual attention call for `F.scaled_dot_product_attention` (as shown in @lst-flash-attention-comparison). The engineering decision is still the same one established by the roofline analysis: use the optimized primitive when the bottleneck is HBM traffic, and let the library manage the tiling and SRAM scheduling needed to remove it.
 
@@ -4581,8 +4581,8 @@ The same byte-movement principle reappears in communication-efficient distribute
 
 FlashAttention transforms practical model training capabilities. By eliminating the $\mathcal{O}(S^2)$ memory bottleneck, FlashAttention enables three capabilities:
 
-- **Longer sequences**: Enables 4$\times$ context length on the same hardware, moving GPT-2 on A100 from 2K to 8K context.
-- **Larger batch sizes**: Doubles batch size through freed memory, improving convergence behavior.
+- **Longer sequences**: In this illustrative configuration, enables 4$\times$ context length on the same hardware, moving GPT-2 on A100 from 2K to 8K context.
+- **Larger batch sizes**: In the same configuration, doubles batch size through freed memory, potentially improving utilization; convergence effects still require validation.
 - **Deeper models**: Reduces activation memory so more layers fit in the same memory budget.
 
 For a 7-billion-parameter model training on A100 GPUs, FlashAttention can transform the memory feasibility calculation from OOM at a 2K context to an 8K-context run with room for batch size 32 under the chapter's scenario assumptions.

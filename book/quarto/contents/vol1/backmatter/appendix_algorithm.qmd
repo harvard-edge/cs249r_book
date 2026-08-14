@@ -64,7 +64,7 @@ This geometric interpretation is why dot products appear everywhere in modern ar
 
 GEMM[^fn-gemm-blas] is the computational workhorse of deep learning. For matrices of size $M{\times}K$ and $K{\times}N$, GEMM performs $2MNK$ floating-point operations (multiply-accumulate counts as two operations).
 
-[^fn-gemm-blas]: **General Matrix Multiply (GEMM)**: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$ and is a performance-critical routine in deep learning. See @sec-model-training for how GEMM shapes determine training throughput.
+[^fn-gemm-blas]: **General Matrix Multiply (GEMM)**: The BLAS (Basic Linear Algebra Subprograms) family began with vector routines standardized in 1979 [@lawson1979]; GEMM was standardized later as a Level 3 routine. The "GE" prefix stands for "general," as opposed to symmetric or triangular forms. GEMM computes $\mathbf{C} = \alpha \mathbf{A}\mathbf{B} + \beta \mathbf{C}$ and is a performance-critical routine in deep learning. @Sec-model-training-matrix-operations-1f21 explains how GEMM shapes determine training throughput.
 
 ```{python}
 #| echo: false
@@ -115,9 +115,7 @@ This ideal bound assumes $\beta=0$: read $A$ and $B$, then write $C$. Reading th
 
 ### Sparse matrix formats {#sec-appdx-algorithm-foundations-sparse-matrix-formats-0bd0}
 
-When most elements in a matrix are zero, specialized storage formats avoid wasting memory on zeros and enable computations that skip them entirely.
-
-The **Compressed Sparse Row (CSR)**\index{Compressed Sparse Row!definition} format uses three arrays:
+When most elements in a matrix are zero, specialized storage formats avoid wasting memory on zeros and enable computations that skip them entirely. The **Compressed Sparse Row (CSR)**\index{Compressed Sparse Row!definition} format uses three arrays:
 
 - `Values`: The nonzero elements, stored in row order
 - `Col_Idx`: The column index of each nonzero element
@@ -217,14 +215,14 @@ Operations like `transpose()` or `view()` often just change the *strides*, not t
 
 ### Broadcasting {#sec-appdx-algorithm-foundations-broadcasting-ec16}
 
-Broadcasting allows arithmetic operations on tensors of different shapes. The rule is: compare dimensions from the last to the first. Two dimensions are compatible if:
+Broadcasting allows arithmetic operations on tensors of different shapes. Compare dimensions from the last to the first. Two dimensions are compatible when:
 
 1.  They are equal.
 2.  One of them is 1.
 
-The dimension with size one is "stretched" to match the other, as illustrated in @fig-broadcasting-rules. This stretching is **virtual**\index{Virtual broadcasting}: the data is not copied in memory. Instead, the stride for that dimension is set to 0, allowing the hardware to read the same value repeatedly with $\mathcal{O}(1)$ memory overhead.
+The dimension with size one is "stretched" to match the other, as illustrated in @fig-broadcasting-rules. This stretching is virtual\index{Virtual broadcasting}: the data is not copied in memory. Instead, the stride for that dimension is set to 0, allowing the hardware to read the same value repeatedly with $\mathcal{O}(1)$ memory overhead.
 
-::: {#fig-broadcasting-rules fig-env="figure" fig-pos="htb" fig-cap="**Tensor Broadcasting Rules**: Visualization of how tensors (3,1) and (1,4) expand to a shared (3,4) result. This stretching is a virtual operation that modifies strides without allocating new memory." fig-alt="Diagram showing two tensors (3,1) and (1,4) expanding to a shared (3,4) grid."}
+::: {#fig-broadcasting-rules fig-env="figure" fig-pos="htb" fig-cap="**Tensor Broadcasting Rules**: A singleton column and singleton row repeat along complementary dimensions to form the shared (3,4) view." fig-alt="Diagram showing two tensors (3,1) and (1,4) expanding to a shared (3,4) grid."}
 ![](images/svg/broadcasting_rules.svg)
 :::
 
@@ -249,7 +247,7 @@ $$ \frac{\partial y}{\partial x} = \frac{\partial f_3}{\partial f_2} \cdot \frac
 
 Each factor in this product is a *local* derivative—computed at one layer using only that layer's inputs and outputs. This locality is what makes the algorithm tractable: the entire network never needs to be differentiated as a monolithic function. Instead, each layer computes its own local derivative during the backward pass and multiplies it by the gradient flowing in from the layer above.
 
-Modern frameworks use **reverse-mode automatic differentiation**\index{Reverse-mode automatic differentiation}, which computes gradients for all $P$ parameters in a single backward pass. The key insight is that starting from the output and working backward (reverse mode) requires one pass regardless of the number of parameters, whereas starting from each input and working forward (forward mode) would require $P$ passes—one per parameter. This is why a training step is a small constant multiple of inference, commonly about 2--3$\times$ a forward pass for dense networks, rather than $P$ passes.
+Modern frameworks use reverse-mode automatic differentiation\index{Reverse-mode automatic differentiation}, which computes gradients for all $P$ parameters in a single backward pass. The key insight is that starting from the output and working backward (reverse mode) requires one pass regardless of the number of parameters, whereas starting from each input and working forward (forward mode) would require $P$ passes—one per parameter. This is why a training step is a small constant multiple of inference, commonly about 2--3$\times$ a forward pass for dense networks, rather than $P$ passes.
 
 ### The backpropagation algorithm {#sec-appdx-algorithm-foundations-backpropagation-algorithm-93f7}
 
@@ -281,7 +279,7 @@ Backpropagation[^fn-backprop] implements the chain rule efficiently through two 
 ```
 :::
 
-The diagram lays out a simple two-layer network with both passes annotated, providing a roadmap for the forward and backward passes that follow.
+The gradient edges retrace the forward dependencies, so each backward step requires values retained from the corresponding forward operation.
 
 #### Forward pass {.unnumbered}
 
@@ -467,9 +465,7 @@ Without fusion, each operation in a chain like `MatMul → Add (bias) → ReLU` 
 
 Fusion combines consecutive operations into a single kernel that reads the input once, applies all operations in registers or shared memory, and writes the final result once. For a sequence of $k$ elementwise operations on a tensor of size $N$ bytes, fusion reduces memory traffic from $2kN$ bytes (each op reads and writes) to $2N$ bytes (one read, one write)—a $k\times$ reduction.
 
-FlashAttention is an IO-aware tiled attention algorithm: it computes the score, softmax, and value-product stages in SRAM tiles without materializing the full attention matrix in HBM, reducing HBM traffic and auxiliary attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$. The original work reports up to 3$\times$ wall-clock speedups on its evaluated workloads [@dao2022]; realized gains depend on shape and hardware.
-
-Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built.
+FlashAttention is an IO-aware tiled attention algorithm: it computes the score, softmax, and value-product stages in SRAM tiles without materializing the full attention matrix in HBM, reducing HBM traffic and auxiliary attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$. The original work reports up to 3$\times$ wall-clock speedups on its evaluated workloads [@dao2022]; realized gains depend on shape and hardware. Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built.
 
 ```{python}
 #| echo: false
