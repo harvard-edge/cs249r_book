@@ -34,6 +34,7 @@ from tinytorch.perf.quantization import (
     QuantizedLinear,
     quantize_int8,
     dequantize_int8,
+    quantize_model,
 )
 
 
@@ -141,6 +142,36 @@ class TestQuantizationAdvanced:
                     f"Sign not preserved for value {original.data[i]}: "
                     f"recovered {recovered.data[i]}"
                 )
+
+
+class TestQuantizeModelValidation:
+    """Test quantize_model() error paths for unsupported model shapes."""
+
+    def test_quantize_model_rejects_bare_linear(self):
+        """
+        WHAT: Verify quantize_model raises ValueError for a bare Linear
+        layer (not wrapped in a Sequential).
+
+        WHY: quantize_model modifies a model in-place by replacing entries
+        in its .layers list. A bare Linear layer has no container to
+        modify, so it must be rejected instead of silently doing nothing.
+        """
+        linear = Linear(4, 4)
+        with pytest.raises(ValueError):
+            quantize_model(linear)
+
+    def test_quantize_model_rejects_unsupported_type(self):
+        """
+        WHAT: Verify quantize_model raises ValueError for an object with
+        no .layers attribute and that is not a Linear layer.
+
+        WHY: quantize_model only knows how to handle Sequential-style
+        containers (.layers) or a bare Linear layer. Anything else is an
+        unsupported model type and must fail clearly.
+        """
+        unsupported = object()
+        with pytest.raises(ValueError):
+            quantize_model(unsupported)
 
 
 class TestQuantizedLinear:

@@ -88,6 +88,38 @@ class TestProfilerBasics:
         )
 
 
+class TestCountFlopsDispatch:
+    """Test count_flops dispatch logic for non-Linear/Conv2d models."""
+
+    def test_count_flops_routes_unnamed_layers_holder_to_sequential(self):
+        """
+        WHAT: A mock model with a `.layers` attribute but a class name other
+        than 'Sequential' is still routed to the sequential-flops handling.
+
+        WHY: count_flops dispatches on `model_name == 'Sequential' or
+        hasattr(model, 'layers')`, so any object exposing `.layers` should
+        be treated as a container of sub-layers, not fall through to the
+        generic "1 FLOP per element" branch.
+        """
+        class LayerStack:
+            def __init__(self, layers):
+                self.layers = layers
+
+        model = Linear(10, 5)
+        mock = LayerStack([model])
+
+        profiler = Profiler()
+        input_shape = (1, 10)
+
+        dispatched = profiler.count_flops(mock, input_shape)
+        direct = profiler._count_sequential_flops(mock, input_shape)
+
+        assert dispatched == direct, (
+            "count_flops should route objects with a .layers attribute to "
+            "_count_sequential_flops even when the class isn't named 'Sequential'"
+        )
+
+
 class TestLatencyMeasurement:
     """Test timing and latency measurement."""
 

@@ -28,7 +28,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
-from tinytorch.perf.memoization import KVCache
+from tinytorch.core.transformers import GPT
+from tinytorch.perf.memoization import KVCache, enable_kv_cache, disable_kv_cache
 
 
 class TestKVCacheBasics:
@@ -175,6 +176,46 @@ class TestKVCacheAdvanced:
         # Valid layers are 0 and 1
         with pytest.raises(ValueError):
             cache.update(layer_idx=5, key=K, value=V)  # Invalid layer
+
+
+class TestKVCacheEnableDisable:
+    """Test enable_kv_cache / disable_kv_cache lifecycle edge cases."""
+
+    def test_disable_kv_cache_without_enable_does_not_crash(self):
+        """
+        WHAT: Verify disable_kv_cache on a model that never had
+        enable_kv_cache called on it does not raise, and prints a warning
+        instead.
+
+        WHY: disable_kv_cache should be safe to call defensively (e.g. in
+        cleanup code) even if caching was never turned on.
+        """
+        model = GPT(vocab_size=20, embed_dim=16, num_layers=2, num_heads=2, max_seq_len=32)
+
+        disable_kv_cache(model)
+
+        assert not getattr(model, '_cache_enabled', False)
+
+    def test_disable_kv_cache_twice_is_safe(self):
+        """
+        WHAT: Verify calling disable_kv_cache a second time (after caching
+        was already disabled) also hits the early-return path cleanly
+        instead of raising or corrupting model state.
+
+        WHY: Callers may disable caching defensively more than once (e.g.
+        in overlapping cleanup paths). The second call must be a no-op.
+        """
+        model = GPT(vocab_size=20, embed_dim=16, num_layers=2, num_heads=2, max_seq_len=32)
+
+        enable_kv_cache(model)
+        assert model._cache_enabled
+
+        disable_kv_cache(model)
+        assert not model._cache_enabled
+
+        # Second disable call should not raise and should leave state intact.
+        disable_kv_cache(model)
+        assert not model._cache_enabled
 
 
 if __name__ == "__main__":

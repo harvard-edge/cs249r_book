@@ -100,6 +100,61 @@ class TestAccelerationBasics:
         )
 
 
+class TestAccelerationShapeValidation:
+    """Test shape validation error paths for matmul acceleration functions."""
+
+    def test_vectorized_matmul_rejects_1d_a(self):
+        """
+        WHAT: Verify vectorized_matmul raises ValueError when a is 1D.
+
+        WHY: Matrix multiplication requires at least 2D operands. A 1D
+        first argument must be rejected with a clear error, not silently
+        misinterpreted.
+        """
+        a = Tensor([1, 2, 3])
+        b = Tensor([[1], [2], [3]])
+        with pytest.raises(ValueError):
+            vectorized_matmul(a, b)
+
+    def test_vectorized_matmul_rejects_inner_dim_mismatch(self):
+        """
+        WHAT: Verify vectorized_matmul raises ValueError on inner dimension
+        mismatch.
+
+        WHY: a.shape[-1] must equal b.shape[-2] for matmul to be valid.
+        A mismatch must be caught, not passed through to a confusing
+        NumPy broadcasting error.
+        """
+        a = Tensor(np.zeros((2, 3)))
+        b = Tensor(np.zeros((4, 2)))
+        with pytest.raises(ValueError):
+            vectorized_matmul(a, b)
+
+    def test_tiled_matmul_rejects_1d_a(self):
+        """
+        WHAT: Verify tiled_matmul raises ValueError when a is 1D.
+
+        WHY: Same shape contract as vectorized_matmul; tiling must not
+        bypass input validation.
+        """
+        a = Tensor([1, 2, 3])
+        b = Tensor([[1], [2], [3]])
+        with pytest.raises(ValueError):
+            tiled_matmul(a, b)
+
+    def test_tiled_matmul_rejects_inner_dim_mismatch(self):
+        """
+        WHAT: Verify tiled_matmul raises ValueError on inner dimension
+        mismatch.
+
+        WHY: Same shape contract as vectorized_matmul.
+        """
+        a = Tensor(np.zeros((2, 3)))
+        b = Tensor(np.zeros((4, 2)))
+        with pytest.raises(ValueError):
+            tiled_matmul(a, b)
+
+
 class TestMemoryOptimization:
     """Test memory-related optimizations."""
 
