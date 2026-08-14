@@ -185,7 +185,10 @@ def _inline_python_latex_operator_warnings(text: str) -> List[str]:
 # rendering string that bypasses the escape. See mlsysim/mlsysim/fmt.py and
 # the project math rules.
 
-CITATION_REF_PATTERN = re.compile(r"@([A-Za-z0-9_:\-.]+)")
+# A bibliography citation begins at a token boundary.  The negative lookbehind
+# prevents MakeIndex sort/display separators such as
+# ``\index{DAM Taxonomy@D·A·M Taxonomy}`` from being read as bare citations.
+CITATION_REF_PATTERN = re.compile(r"(?<![A-Za-z0-9])@([A-Za-z0-9_:\-.]+)")
 CITATION_BRACKET_PATTERN = re.compile(r"\[-?@[A-Za-z0-9_:\-.]+(?:;\s*-?@[A-Za-z0-9_:\-.]+)*\]")
 
 LABEL_DEF_PATTERNS = {
@@ -7783,14 +7786,18 @@ class ValidateCommand:
 
         def_line = re.compile(r"^\[\^(fn-[a-z0-9-]+)\]:\s*(.*)$")
         offset_prefix = re.compile(r"^\[offset=[^\]]+\]\s*")
+        # Index payloads may contain one nested brace pair for see/seealso
+        # targets, for example ``\index{FAISS|see{Facebook AI Similarity
+        # Search}}``.  Accept that canonical MakeIndex form in S2/S3 heads.
+        index_tag = r"\\index\{(?:[^{}]|\{[^{}]*\})+\}"
         # S3: **Term** (…): or **Term**\index{}… (…): — gloss colon after closing )
         pat_etymology = re.compile(
-            r"^\*\*.+?\*\*(?:\\index\{[^}]+\}\s*)*\s*\([^)]*\):\s*",
+            rf"^\*\*.+?\*\*(?:{index_tag}\s*)*\s*\([^)]*\):\s*",
             re.DOTALL,
         )
         # S2: **Term**\index{}…+: before colon
         pat_index_first = re.compile(
-            r"^\*\*.+?\*\*\s*(?:\\index\{[^}]+\}\s*)+:\s*",
+            rf"^\*\*.+?\*\*\s*(?:{index_tag}\s*)+:\s*",
             re.DOTALL,
         )
         # S1/S5: **Term**: — bold span then colon
