@@ -52,12 +52,12 @@ RULE_TEXT = (
 # ID-discovery: match every defined anchor in the corpus.
 # Matches `{#sec-foo}`, `{#fig-bar-baz}`, `{#tbl-xyz .class}`, etc.
 # Also picks up the Quarto YAML cell-option form `#| label: fig-xyz`.
-_ID_ANCHOR_RE = re.compile(r"\{#((?:sec|fig|tbl|eq|lst|alg)-[\w.:-]+)")
+_ID_ANCHOR_RE = re.compile(r"\{#((?:sec|fig|tbl|eq|lst|algo?)-[\w.:-]+)")
 _ID_YAML_LABEL_RE = re.compile(
-    r"^\s*#\|\s*label:\s*((?:sec|fig|tbl|eq|lst|alg)-[\w.:-]+)"
+    r"^\s*#\|\s*label:\s*((?:sec|fig|tbl|eq|lst|algo?)-[\w.:-]+)"
 )
 _ID_JUPYTER_LABEL_RE = re.compile(
-    r"^\s*%%\|\s*label:\s*((?:sec|fig|tbl|eq|lst|alg)-[\w.:-]+)"
+    r"^\s*%%\|\s*label:\s*((?:sec|fig|tbl|eq|lst|algo?)-[\w.:-]+)"
 )
 
 # Reference-discovery: match every @sec-/@fig-/@tbl-/@eq-/@lst-/@alg- usage in prose.
@@ -65,7 +65,7 @@ _ID_JUPYTER_LABEL_RE = re.compile(
 # matching the LABEL_REF_PATTERN convention in book/cli/commands/validate.py.
 # Trailing punctuation (`,`, `.`, `;`, `:`, `)`) is NOT part of the slug.
 _XREF_RE = re.compile(
-    r"(?<![\w@!])@((?:sec|fig|tbl|eq|lst|alg)-[A-Za-z0-9][\w-]*)"
+    r"(?<![\w@!])@((?:sec|fig|tbl|eq|lst|algo?)-[A-Za-z0-9][\w-]*)"
 )
 
 # Citation prefixes that look like xrefs but are bibliography keys. Quarto

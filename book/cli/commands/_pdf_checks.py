@@ -21,7 +21,7 @@ PDF_BY_VOLUME = {
     "vol2": "Machine-Learning-Systems-Vol2.pdf",
 }
 
-XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|alg)"
+XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|algo?)"
 RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
 BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
 LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
@@ -43,7 +43,7 @@ PYTHON_LEAK = re.compile(
 )
 LAYOUT_OFFSET_LEAK = re.compile(r"\[(?:[+-]?\d+(?:\.\d+)?)mm\]")
 QUARTO_XREF_WARN = re.compile(
-    r"Unable to resolve crossref (@(?:sec|fig|tbl|eq|lst)-[\w.-]+)"
+    r"Unable to resolve crossref (@(?:sec|fig|tbl|eq|lst|algo)-[\w.-]+)"
 )
 OVERFULL_HBOX = re.compile(
     r"Overfull \\hbox \((\d+(?:\.\d+)?)pt too wide\)"

@@ -68,7 +68,7 @@ _ATTR_RE = re.compile(
 
 # Quarto cross-references: @sec-foo, @fig-foo, @tbl-foo, @eq-foo, @lst-foo, @alg-foo
 # Slug allows letters, digits, hyphens, underscores, dots.
-_XREF_RE = re.compile(r"@(?:sec|fig|tbl|eq|lst|alg)-[\w.-]+")
+_XREF_RE = re.compile(r"@(?:sec|fig|tbl|eq|lst|algo?)-[\w.-]+")
 
 # Pandoc citations: [@key], [-@key], [@key1; @key2], [see @key pp. 33-35],
 # and bare "As @vaswani2017 showed". We use two patterns:

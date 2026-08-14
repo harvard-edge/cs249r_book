@@ -4362,7 +4362,7 @@ class ValidateCommand:
         # Hex literal pattern to exclude matches like 0x61, 0xff
         hex_literal_pat = re.compile(r"0x[0-9a-fA-F]")
         # Cross-reference ID pattern: @tbl-foo300x, @fig-bar2x, @sec-baz1x — these are labels not multiplication
-        xref_id_pat = re.compile(r"@(?:tbl|fig|sec|eq|lst)-[a-z0-9_-]+x\b", re.IGNORECASE)
+        xref_id_pat = re.compile(r"@(?:tbl|fig|sec|eq|lst|algo)-[a-z0-9_-]+x\b", re.IGNORECASE)
         # Quarto attribute blocks can contain IDs such as
         # {#tbl-assumptions-mi300x tbl-colwidths="[...]"}; those are
         # identifiers, not prose multiplication.
@@ -4574,7 +4574,7 @@ class ValidateCommand:
         chapter_hdr = re.compile(r"^#\s+[^#].*\{#sec-")
         numbered_h2 = re.compile(r"^##\s+[^#]")
         unnumbered_h2 = re.compile(r"^##\s+.*\{.*\.unnumbered.*\}")
-        starts_xref = re.compile(r"^\s*@(sec|fig|tbl|lst|eq)-")
+        starts_xref = re.compile(r"^\s*@(sec|fig|tbl|lst|eq|algo)-")
         starts_link = re.compile(r"^\s*\[")
         starts_inline = re.compile(r"^\s*`")
         yaml_fence = re.compile(r"^---\s*$")
