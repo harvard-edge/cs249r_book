@@ -3,7 +3,14 @@
 import { useState } from "react";
 import { Calculator, ChevronDown, ChevronRight } from "lucide-react";
 import clsx from "clsx";
-import { HARDWARE_SPECS, FORMULAS, HardwareSpec } from "@/lib/hardware";
+import { HARDWARE_SPECS, INTERCONNECTS, FORMULAS, HardwareSpec } from "@/lib/hardware";
+
+// AllReduce crosses the interconnect, not the GPU's own HBM. Mirror the
+// simulator's convention (8 GPUs/node, NVLink within a node, InfiniBand
+// between nodes) so both tools teach the same network model.
+const GPUS_PER_NODE = 8;
+const INTRA_NODE_LINK = INTERCONNECTS.find(i => i.name === 'NVLink H100')!;
+const INTER_NODE_LINK = INTERCONNECTS.find(i => i.name === 'InfiniBand NDR')!;
 
 type CalcMode = 'model_memory' | 'training_time' | 'allreduce' | 'ridge_point' | 'kv_cache';
 
@@ -22,7 +29,7 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
   // Inputs
   const [paramsB, setParamsB] = useState('70');
   const [bytesPerParam, setBytesPerParam] = useState('2');
-  const [tokensB, setTokensB] = useState('1');
+  const [tokensT, setTokensT] = useState('1');
   const [numGpus, setNumGpus] = useState('64');
   const [mfu, setMfu] = useState('0.4');
   const [hwIdx, setHwIdx] = useState(0);
@@ -38,7 +45,7 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
   const compute = () => {
     const p = parseFloat(paramsB) || 0;
     const bpp = parseFloat(bytesPerParam) || 2;
-    const t = parseFloat(tokensB) || 1;
+    const t = parseFloat(tokensT) || 1; // trillions, per the "Tokens (T)" label
     const g = parseInt(numGpus) || 1;
     const m = parseFloat(mfu) || 0.4;
     const l = parseInt(layers) || 80;
@@ -53,7 +60,8 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
         return { result: `${mem.toFixed(1)} GB`, detail: `${p}B params × ${bpp} bytes = ${mem.toFixed(1)} GB` };
       }
       case 'training_time': {
-        const flops = FORMULAS.training_flops(p, t);
+        // training_flops() takes tokens_b in BILLIONS; this input is trillions.
+        const flops = FORMULAS.training_flops(p, t * 1000);
         const days = FORMULAS.training_time_days(flops, hw.compute_tflops, g, m);
         return {
           result: days > 365 ? `${(days / 365).toFixed(1)} years` : `${days.toFixed(1)} days`,
@@ -62,10 +70,11 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
       }
       case 'allreduce': {
         const gradSize = FORMULAS.model_memory_gb(p, bpp);
-        const time = FORMULAS.allreduce_time_ms(gradSize, hw.bandwidth_tbs * 1000, g);
+        const link = g > GPUS_PER_NODE ? INTER_NODE_LINK : INTRA_NODE_LINK;
+        const time = FORMULAS.allreduce_time_ms(gradSize, link.bandwidth_gbs, g);
         return {
           result: `${time.toFixed(1)} ms`,
-          detail: `${gradSize.toFixed(1)} GB gradients across ${g} GPUs via ring AllReduce`,
+          detail: `${gradSize.toFixed(1)} GB gradients across ${g} GPUs via ring AllReduce | ${link.name} @ ${link.bandwidth_gbs} GB/s`,
         };
       }
       case 'ridge_point': {
@@ -146,7 +155,7 @@ export default function NapkinCalc({ defaultOpen = false }: { defaultOpen?: bool
               <>
                 <div className="flex items-center gap-2">
                   <label className="text-[9px] text-textTertiary w-16">Tokens (T)</label>
-                  <input value={tokensB} onChange={e => setTokensB(e.target.value)}
+                  <input value={tokensT} onChange={e => setTokensT(e.target.value)}
                     className="flex-1 bg-background border border-border rounded px-2 py-1 text-xs font-mono text-textPrimary focus:outline-none focus:border-accentBlue/50" />
                 </div>
                 <div className="flex items-center gap-2">
