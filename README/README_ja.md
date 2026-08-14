@@ -211,11 +211,11 @@ AIは稲妻のように速く変わりますが、それを動かすエンジニ
 
 [![Stars](https://img.shields.io/github/stars/harvard-edge/cs249r_book?style=for-the-badge&logo=github&color=gold)](https://github.com/harvard-edge/cs249r_book/stargazers)
 
-<a href="https://star-history.com/#harvard-edge/cs249r_book&Date">
+<a href="https://star-history.dera.page/#harvard-edge/cs249r_book&Date">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left&theme=dark">
-    <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left">
-    <img src="https://api.star-history.com/chart?repos=harvard-edge/cs249r_book&type=date&legend=top-left" alt="Star History Chart">
+    <source media="(prefers-color-scheme: dark)" srcset="https://star-history.dera.page/svg?repos=harvard-edge/cs249r_book&type=date&legend=top-left&theme=dark">
+    <source media="(prefers-color-scheme: light)" srcset="https://star-history.dera.page/svg?repos=harvard-edge/cs249r_book&type=date&legend=top-left">
+    <img src="https://star-history.dera.page/svg?repos=harvard-edge/cs249r_book&type=date&legend=top-left" alt="Star History Chart">
   </picture>
 </a>
 
