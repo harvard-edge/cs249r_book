@@ -4,11 +4,7 @@ engine: jupyter
 
 # Algorithm Foundations {#sec-appdx-algorithm-foundations}
 
-## Purpose {.unnumbered}
-
-_What algorithmic building blocks determine both what neural networks compute and how efficiently systems can run them?_
-
-Many performance problems that look hardware-bound are actually rooted in the algorithm's structure: a model may be dominated by matrix multiplies, but its shapes, layouts, and sparsity patterns decide whether those multiplies hit fast matrix units or fall back to slow kernels. Likewise, training instabilities often trace back to the mechanics of differentiation and the memory footprint of activations. This appendix collects the compact linear algebra and learning mechanics that show up repeatedly in profiling traces and back-of-the-envelope estimates: general matrix multiply intensity, tensor shapes and strides, sparse storage overheads, and the true components of training memory. In D·A·M terms, these algorithmic structures are the algorithm axis made concrete, because they determine how much work the machine must execute and how much data must move.
+This foundations appendix is a reference for tracing algorithmic structure to computational work, memory movement, and training state. It collects reusable models and derivations for matrix multiplication, tensor shapes and layouts, sparse storage, differentiation, and training memory so that profiling symptoms and back-of-the-envelope estimates can be reduced to concrete algorithmic causes. This separation lets the main chapters stay focused on system behavior and design trade-offs while the underlying mechanics remain close at hand. The guide that follows maps common symptoms to the relevant reference sections.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -467,34 +463,6 @@ Fusion combines consecutive operations into a single kernel that reads the input
 
 FlashAttention is an IO-aware tiled attention algorithm: it computes the score, softmax, and value-product stages in SRAM tiles without materializing the full attention matrix in HBM, reducing HBM traffic and auxiliary attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$. The original work reports up to 3$\times$ wall-clock speedups on its evaluated workloads [@dao2022]; realized gains depend on shape and hardware. Together, the linear algebra foundations, tensor programming mechanics, and training memory model covered in this appendix form the algorithmic substrate on which all ML systems are built.
 
-```{python}
-#| echo: false
-#| label: sparse-break-even-recap
-# ┌── LEGO ───────────────────────────────────────────────
-# │ Context: Summary — sparse format break-even densities
-# │ Goal: CSR/COO metadata break-even density thresholds
-from mlsysim.fmt import fmt
-
-class SparseBreakEvenRecap:
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    csr_bytes_per_nonzero = BYTES_FP32.to(byte).magnitude + BYTES_INT32.to(byte).magnitude
-    coo_bytes_per_nonzero = BYTES_FP32.to(byte).magnitude + 2 * BYTES_INT32.to(byte).magnitude
-    csr_break_even_density_pct = BYTES_FP32.to(byte).magnitude / csr_bytes_per_nonzero * 100
-    coo_break_even_density_pct = BYTES_FP32.to(byte).magnitude / coo_bytes_per_nonzero * 100
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    csr_break_even_density_pct_str = fmt_percent(csr_break_even_density_pct / 100, precision=0, commas=False, style='prose')
-```
-
 ## Summary {.unnumbered}
 
-::: {.callout-takeaways title="When 'hardware-bound' is really algorithm-bound"}
-
-* **GEMM arithmetic intensity**: Under the ideal $\beta=0$ compulsory-traffic model it scales as $n/3$ for square FP16 matrices ($n/4$ when $C$ must also be read), so small matrices tend to be memory bound. Larger GEMMs or fused work and tile-aligned dimensions can improve throughput.
-* **Sparse storage formats**: They reduce memory once density falls below the approximately `{python} SparseBreakEvenRecap.csr_break_even_density_pct_str` metadata break-even point for CSR with FP32 values and INT32 indices when row-pointer overhead is small. Useful sparse-kernel speedups often require substantially higher sparsity; the threshold depends on structure, kernel, and hardware.
-* **Tensor layout bugs are silent**: Tensor shapes, strides, and broadcasting are the source of many subtle bugs: a noncontiguous tensor can silently degrade kernel performance, and an incorrect broadcast can produce a result of the wrong shape without raising an error.
-* **Training memory is activation-sensitive**: Training memory is dominated by four components—weights, gradients, optimizer states, and activations—and the last of these grows with batch size and sequence length and can exceed the model's weight footprint.
-* **Backpropagation trades memory for compute**: Backpropagation's efficiency comes from computing all parameter gradients in a single backward pass, but it requires forward-pass activations to be available during backward, creating a fundamental memory–compute trade-off that gradient checkpointing partially resolves.
-* **Computational graphs enable compiler optimization**: Computational graph representations enable compiler optimizations like operator fusion, which eliminates memory round-trips between consecutive operations and can dramatically improve throughput for memory-bound workloads.
-
-:::
+The reusable models in this appendix connect algorithmic structure to systems behavior: matrix shapes and layouts determine computational intensity and memory traffic, sparse formats trade storage for metadata, and training memory is often set by activations rather than weights. Backpropagation and computational graphs expose the memory–compute trade-offs that optimization techniques must navigate.

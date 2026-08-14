@@ -4,11 +4,7 @@ engine: jupyter
 
 # Machine Foundations {#sec-appdx-machine-foundations}
 
-## Purpose {.unnumbered}
-
-_What reference numbers and physical laws should every ML systems engineer carry into design decisions?_
-
-In ML systems, performance failures often masquerade as software problems: a training step mysteriously slows down, a serving stack misses its latency objective, or an accelerator upgrade fails to deliver the expected speedup. Many of these surprises are not bugs but the predictable consequences of physics (latency, bandwidth, energy) and architecture (memory hierarchy, precision, parallel scaling). This appendix collects the reference numbers and compact models for quick quantitative reasoning: numbers to know, roofline analysis, dimensional analysis, scaling laws, and precision trade-offs. In D·A·M terms, these numbers define the machine axis, the physical limits that algorithm choices and data movement must respect.
+This foundations appendix provides the durable reference models and order-of-magnitude values needed to reason about machine constraints in ML systems. It collects compact treatments of latency, bandwidth, energy, roofline analysis, dimensional analysis, scaling laws, and numerical precision so readers can diagnose bottlenecks and evaluate design trade-offs. The main chapters use these models as shared anchors; this appendix is where readers can inspect the assumptions and rebuild the estimates.
 
 ## How to Use This Appendix {.unnumbered}
 
@@ -20,7 +16,7 @@ Conventions used here follow the book-wide notation (for example, $B$ is reserve
 - **Diagnose the dominant ceiling**: Use the Roofline Model in @sec-appdx-machine-foundations-roofline-model-2529 to decide whether the workload is compute bound or memory bound.
 - **Reason about scaling limits**: Use Amdahl's and Gustafson's Laws in @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 to understand why adding accelerators may not reduce time-to-train.
 - **Choose the right precision**: Use @sec-appdx-machine-foundations-floatingpoint-format-comparison-1836 to reason about FP32 vs. BF16/FP16 vs. INT8 as a systems trade-off.
-- **Cross-reference for depth**: When you want the full narrative, jump back to @sec-hardware-acceleration, @sec-model-training, and @sec-model-serving.
+- **Follow the chapter treatment**: For the full narrative, use @sec-hardware-acceleration, @sec-model-training, and @sec-model-serving.
 
 The hardware market is a veritable zoo of accelerators, interconnects, and form factors, but the physical laws and bottleneck formulas detailed here govern them all.
 
@@ -341,13 +337,13 @@ Consider a model that achieves good accuracy, but inference takes 200 ms when th
 
 :::
 
-### The roofline model {#sec-appdx-machine-foundations-roofline-model-2529}
+### The Roofline model {#sec-appdx-machine-foundations-roofline-model-2529}
 
 The Roofline Model [@williams2009] bounds how fast a workload can run on a given hardware target. The answer depends on whether you run out of compute or memory bandwidth first.
 
 Every operation has an **arithmetic intensity**: the ratio of computations performed to bytes moved from memory. Matrix multiplication has high arithmetic intensity because each loaded element is reused many times. Element-wise operations like rectified linear unit (ReLU) have low intensity because each operation loads a number, performs one computation, and writes it back. As @fig-roofline illustrates, each workload is bounded by either memory bandwidth or compute throughput, and its arithmetic intensity determines which ceiling it hits first.
 
-::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline model**: Performance ceiling for a hypothetical accelerator. The sloped line represents memory bandwidth limits; the horizontal line represents peak compute. Every workload can be plotted on this diagram to determine its optimization strategy." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled memory bound, and a horizontal line labeled compute bound. They meet at the ridge point."}
+::: {#fig-roofline fig-env="figure" fig-pos="htb" fig-cap="**The Roofline Model**: Performance ceiling for a hypothetical accelerator. The sloped line represents memory bandwidth limits; the horizontal line represents peak compute. Every workload can be plotted on this diagram to determine its optimization strategy." fig-alt="A plot with arithmetic intensity on the x-axis and performance on the y-axis. Two lines form a roofline shape: a diagonal line rising from the origin labeled memory bound, and a horizontal line labeled compute bound. They meet at the ridge point."}
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=1.1]
   \tikzset{
@@ -441,7 +437,7 @@ $$ T [s] = \underbrace{ \frac{D_{\text{vol}} [\text{bytes}]}{\text{BW} [\text{by
 
 The equation is physically consistent. Apply this technique to any systems equation: if the dimensions do not match, the formula is wrong. "FLOPs" and "Bandwidth" cannot be traded directly because they have different units. Any such trade-off must convert through Time, which is precisely what the iron law quantifies.
 
-The fundamental limits of scaling across multiple devices are the subject of @sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741.
+Once an equation is dimensionally sound, the next question is how its time terms scale across devices. @Sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741 answers that question with two complementary bounds.
 
 ### Amdahl's Law and Gustafson's Law {#sec-appdx-machine-foundations-amdahls-law-gustafsons-law-b741}
 
@@ -1232,18 +1228,6 @@ $$ x_{\text{uint8}} = \text{round}\left(\frac{x - x_{\min}}{s_{\text{quant}}} \t
 
 The choice between symmetric and asymmetric quantization depends on your tensor's distribution and has measurable accuracy implications.
 
-With the full toolkit assembled---reference numbers, performance models, architectural constraints, and numerical trade-offs---use the reference numbers and models in this appendix as your first line of defense whenever a system behaves unexpectedly. A quick back-of-envelope calculation often reveals whether the culprit is physics, architecture, or a genuine software bug.
-
 ## Summary {.unnumbered}
 
-::: {.callout-takeaways title="Numbers every engineer should know"}
-
-* **Energy dominates**: In the cited 45 nm reference, a 32-bit DRAM read uses roughly `{python} NumbersToKnow.dram_vs_compute_ratio_mult_str` the energy of one FP16 multiply. The ratio varies by platform, but it makes arithmetic intensity and reuse central design metrics.
-* **The Roofline model**: The Roofline Model shows whether compute throughput or memory bandwidth is the active ceiling. Batch-1 weight-streaming inference is often below the ridge; batching can raise intensity, but shape, precision, reuse, and the ridge point determine whether it crosses.
-* **Amdahl's Law**: Amdahl's Law caps strong-scaling speedup at $1/s$ (where $s$ is the serial fraction). Gustafson's Law shows that scaling the problem alongside hardware yields near-linear throughput gains—the paradigm that makes large-scale training feasible.
-* **Little's Law**: $Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$ links mean population, throughput, and time in system; memory also depends on where queued and executing state resides.
-* **Memory hierarchy**: The memory hierarchy spans five orders of magnitude in latency (register at ~0.3 ns to SSD at ~100,000 ns). Keeping data close to compute is not merely a tuning detail; it is a central optimization.
-* **Numerical precision**: Numerical precision is a systems lever, not just a modeling choice. BF16 preserves FP32's normal exponent range at half the storage; INT8 speedups depend on hardware, kernels, and calibration.
-* **Physics is nonnegotiable**: Speed of light sets propagation floors, and data-movement costs constrain efficiency. Software cannot violate those bounds, although technology and workload determine observed values.
-
-:::
+The reference numbers, performance models, architectural constraints, and numerical trade-offs in this appendix provide a first check whenever a system behaves unexpectedly. A quick back-of-envelope calculation can reveal whether the culprit is physics, architecture, or a software defect.
