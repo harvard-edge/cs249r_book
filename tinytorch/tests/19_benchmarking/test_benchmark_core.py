@@ -167,5 +167,30 @@ class TestBenchmarkMetrics:
                 )
 
 
+class TestMLPerfUnknownBenchmarkName:
+    """Test MLPerf.run_standard_benchmark rejects unregistered benchmark names.
+
+    This exact case was already checked in the source notebook's own inline
+    test_unit_mlperf_run(), but that inline test only runs manually via
+    `if __name__ == "__main__":` in the source file and is never collected
+    by pytest (pyproject.toml's testpaths is restricted to tests/), so CI
+    never actually exercised this path. This promotes it to a real,
+    CI-collected test.
+    """
+
+    def test_unknown_benchmark_name_raises_value_error(self):
+        from tinytorch.perf.benchmarking import MLPerf
+
+        class MockModel:
+            def forward(self, x):
+                return x
+
+        perf = MLPerf(random_seed=42)
+        model = MockModel()
+
+        with pytest.raises(ValueError, match="Unknown MLPerf benchmark"):
+            perf.run_standard_benchmark(model, 'nonexistent')
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
