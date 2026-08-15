@@ -346,11 +346,13 @@ class MilestoneSystem:
             "milestones": {},
             "overall_progress": 0,
             "total_unlocked": 0,
+            "total_completed": 0,
             "next_milestone": None
         }
 
         total_milestones = len(self.MILESTONES)
         unlocked_count = 0
+        completed_count = 0
 
         for milestone_id, milestone in self.MILESTONES.items():
             # Check if all required modules are complete (no more checkpoint dependencies)
@@ -360,8 +362,12 @@ class MilestoneSystem:
                 for mod in required_modules
             )
 
-            # Check if milestone is unlocked
+            # Check if milestone is unlocked (ready to run, not the same as actually
+            # run and achieved -- see is_completed below)
             is_unlocked = milestone_id in milestone_data.get("unlocked_milestones", [])
+
+            # Check if the milestone has actually been run and passed
+            is_completed = milestone_id in milestone_data.get("completed_milestones", [])
 
             # Check if trigger module is completed (if trigger_module exists)
             trigger_module = milestone.get("trigger_module", "")
@@ -384,18 +390,22 @@ class MilestoneSystem:
                 "required_complete": required_complete,
                 "trigger_complete": trigger_complete,
                 "is_unlocked": is_unlocked,
+                "is_completed": is_completed,
                 "can_unlock": required_complete and trigger_complete and not is_unlocked,
                 "unlock_date": milestone_data.get("unlock_dates", {}).get(milestone_id)
             }
 
             status["milestones"][milestone_id] = milestone_status
 
+            if is_completed:
+                completed_count += 1
             if is_unlocked:
                 unlocked_count += 1
             elif milestone_status["can_unlock"] and not status["next_milestone"]:
                 status["next_milestone"] = milestone_id
 
         status["total_unlocked"] = unlocked_count
+        status["total_completed"] = completed_count
         status["overall_progress"] = (unlocked_count / total_milestones) * 100 if total_milestones > 0 else 0
 
         return status
@@ -700,12 +710,19 @@ class MilestoneCommand(BaseCommand):
         milestone_system = MilestoneSystem(self.config)
         status = milestone_system.get_milestone_status()
 
-        # Show header with overall progress
+        # Show header with overall progress. Note: status['overall_progress']
+        # is unlock-based (it also drives the timeline progress bar elsewhere,
+        # where that's the correct meaning), so it isn't used here -- showing
+        # it next to "Milestones Achieved" would be contradictory (e.g. "0/6
+        # achieved" beside "100%"). This header's percentage is achievement-
+        # based instead, to actually match the achieved count shown above it.
         total_milestones = len(milestone_system.MILESTONES)
+        achievement_progress = (status['total_completed'] / total_milestones) * 100 if total_milestones > 0 else 0
         console.print(Panel(
             f"[bold cyan]🎮 TinyTorch Milestone Progress[/bold cyan]\n\n"
             f"[bold]Capabilities Unlocked:[/bold] {status['total_unlocked']}/{total_milestones} milestones\n"
-            f"[bold]Overall Progress:[/bold] {status['overall_progress']:.0f}%\n\n"
+            f"[bold]Milestones Achieved:[/bold] {status['total_completed']}/{total_milestones} milestones\n"
+            f"[bold]Overall Progress:[/bold] {achievement_progress:.0f}%\n\n"
             f"[dim]Transform from student to ML Systems Engineer![/dim]",
             title="🚀 Your Epic Journey",
             border_style="bright_blue"
@@ -728,14 +745,22 @@ class MilestoneCommand(BaseCommand):
                 title="Next Milestone",
                 border_style="bright_green"
             ))
-        elif status["total_unlocked"] == total_milestones:
+        elif status["total_completed"] == total_milestones:
             console.print(Panel(
                 f"[bold green]🏆 QUEST COMPLETE! 🏆[/bold green]\n\n"
-                f"[green]You've unlocked all {total_milestones} epic milestones![/green]\n"
+                f"[green]You've achieved all {total_milestones} epic milestones![/green]\n"
                 f"[bold white]You are now an ML Systems Engineer![/bold white]\n\n"
                 f"[cyan]Share your achievement and inspire others![/cyan]",
                 title="🌟 FULL MASTERY ACHIEVED",
                 border_style="bright_green"
+            ))
+        elif status["total_unlocked"] == total_milestones:
+            console.print(Panel(
+                f"[bold yellow]⚡ All milestones unlocked![/bold yellow]\n\n"
+                f"[yellow]Every milestone is ready to run.[/yellow]\n"
+                f"[dim]Run each with tito milestone run <id> to actually achieve it.[/dim]",
+                title="🔓 All Milestones Ready",
+                border_style="bright_yellow"
             ))
 
         return 0
@@ -745,7 +770,11 @@ class MilestoneCommand(BaseCommand):
         console = self.console
 
         # Status indicator
-        if milestone["is_unlocked"]:
+        if milestone["is_completed"]:
+            status_icon = "✅"
+            status_color = "bold green"
+            status_text = "ACHIEVED"
+        elif milestone["is_unlocked"]:
             status_icon = "🔓"
             status_color = "green"
             status_text = "UNLOCKED"

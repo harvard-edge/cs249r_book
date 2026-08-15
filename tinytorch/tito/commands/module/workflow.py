@@ -323,9 +323,15 @@ class ModuleWorkflowCommand(BaseCommand):
                 return 1
 
         # Prerequisites met! Check if module needs to be created from src/
-        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
+        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config).
+        # Check for the notebook file itself, not just the directory: a directory
+        # can exist but be empty if a previous conversion attempt failed partway
+        # (e.g. jupytext wasn't on PATH yet), and directory-existence alone would
+        # then make this look already done, silently skipping regeneration.
         module_dir = self.config.project_root / "modules" / module_name
-        if not module_dir.exists():
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_file = module_dir / f"{short_name}.ipynb"
+        if not notebook_file.exists():
             # Create module from src/ using export
             src_dir = self.config.project_root / "src" / module_name
             if not src_dir.exists():
@@ -407,10 +413,15 @@ class ModuleWorkflowCommand(BaseCommand):
             return 1
 
         module_name = module_mapping[normalized]
-        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config)
+        # Notebooks are in modules/ directory, not src/ (which is modules_dir in config).
+        # Check for the notebook file itself, not just the directory: see the
+        # matching comment in start_module for why directory-existence alone is
+        # not a reliable signal that a notebook actually exists.
         module_dir = self.config.project_root / "modules" / module_name
+        short_name = module_name.split("_", 1)[1] if "_" in module_name else module_name
+        notebook_file = module_dir / f"{short_name}.ipynb"
 
-        if not module_dir.exists():
+        if not notebook_file.exists():
             self.console.print(f"[yellow]⚠️  Module {normalized} not started yet[/yellow]")
             self.console.print(f"💡 Run: [bold cyan]tito module start {normalized}[/bold cyan]")
             return 1
@@ -997,20 +1008,30 @@ class ModuleWorkflowCommand(BaseCommand):
         """Run progressive integration tests using pytest."""
         project_root = Path.cwd()
 
-        # Find integration test file. Files are named
+        # Find integration test file(s). Most modules are named
         # tests/<module>/test_<module>_progressive.py (e.g. test_01_tensor_progressive.py),
         # so match that first and fall back to any test_*_progressive.py in the dir.
+        # Some modules (e.g. 15_quantization, 16_compression, 17_acceleration,
+        # 19_benchmarking, 20_capstone) instead use test_<topic>_core.py /
+        # test_<topic>_integration.py naming with no "_progressive" in the name at
+        # all, so if neither of the above match anything, fall back further to
+        # every test_*.py file in the module's test directory.
         module_test_dir = project_root / "tests" / module_name
-        integration_test_file = module_test_dir / f"test_{module_name}_progressive.py"
-        if not integration_test_file.exists() and module_test_dir.exists():
+        integration_test_targets = []
+        primary_test_file = module_test_dir / f"test_{module_name}_progressive.py"
+        if primary_test_file.exists():
+            integration_test_targets = [primary_test_file]
+        elif module_test_dir.exists():
             matches = sorted(module_test_dir.glob("test_*_progressive.py"))
             if matches:
-                integration_test_file = matches[0]
+                integration_test_targets = matches
+            else:
+                integration_test_targets = sorted(module_test_dir.glob("test_*.py"))
 
-        if not integration_test_file.exists():
+        if not integration_test_targets:
             # No integration tests for this module yet
             if verbose:
-                self.console.print(f"   [dim yellow]No integration tests found: {integration_test_file}[/dim yellow]")
+                self.console.print(f"   [dim yellow]No integration tests found: {primary_test_file}[/dim yellow]")
             return {'passed': 0, 'failed': 0, 'tests': [], 'returncode': 0}
 
         # Run pytest with verbose output
@@ -1019,7 +1040,7 @@ class ModuleWorkflowCommand(BaseCommand):
                 sys.executable,
                 "-m",
                 "pytest",
-                str(integration_test_file),
+                *[str(f) for f in integration_test_targets],
                 "-v",
                 "--tb=short",
                 "-o",
