@@ -367,11 +367,11 @@ The trade-off curve demonstrates several key insights:
 3. **SLO-constrained optimum**\index{SLO!constrained optimum}: When an SLO bounds maximum latency, the optimal point is where the curve intersects the SLO boundary.
 4. **Diminishing returns**\index{Diminishing Returns}: Beyond the knee, doubling batch size may increase throughput by only 10--20 percent while doubling latency.
 
-The queuing-theoretic framework provides the mathematical foundation for the batching strategies examined in the following sections. Where intuition might suggest "larger batches are better for throughput," stability constraints, latency targets, and diminishing returns create a well-defined optimal operating region that varies by model type and deployment requirements.
+The queuing-theoretic framework provides the mathematical foundation for the batching strategies introduced in @sec-inference-scale-batching-strategies-scale-6733. Where intuition might suggest "larger batches are better for throughput," stability constraints, latency targets, and diminishing returns create a well-defined optimal operating region that varies by model type and deployment requirements.
 
 ### KV cache fundamentals {#sec-appdx-inference-scale-kv-cache-fundamentals-2ccd}
 
-The formal definition of the KV cache appears in the main inference memory-management section (@sec-inference-scale-framework-selection-criteria-6c20). This appendix expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
+The formal definition of the KV cache appears in the main inference memory-management section (as introduced in @sec-inference-scale-framework-selection-criteria-6c20). This appendix expands the sizing math behind that definition: why the cache reduces per-token compute, why its memory grows with sequence length and batch size, and why unmanaged allocation can fragment HBM [@kwon2023].
 
 Autoregressive generation without caching requires $\mathcal{O}(t^2)$ computation per token because each transformer layer must recompute attention keys and values for all previous tokens. The KV cache stores these computed key and value vectors, reducing generation to $\mathcal{O}(t)$ per token. For serving at scale, this compute saving creates a critical memory-management challenge since KV cache memory can exceed model weights for long contexts.
 
@@ -379,14 +379,13 @@ The cache size grows with context as calculated by @eq-kv-cache-size:
 
 $$M_{\text{KV}} = 2 \times N_L \times d \times S \times B \times s_{\text{elem}}$$ {#eq-kv-cache-size}
 
-where:
+where $N_L$ is the number of layers, $d$ is the hidden dimension, $S$ is sequence length, $B$ is batch size, $s_{\text{elem}}$ is storage size per element in bytes, and the factor of 2 accounts for both keys and values.
 
-- $N_L$ = number of layers
-- $d$ = hidden dimension
-- $S$ = sequence length
-- $B$ = batch size
-- $s_{\text{elem}}$ = storage size per element in bytes
-- Factor of 2 accounts for both keys and values
+For the 175B GPT-3 model ($N_L=96$, $d=12288$, FP16 $s_{\text{elem}}=2$ bytes) at sequence length $S=2048$, each request requires:
+
+$$M_{\text{KV/req}} = 2 \times 96 \times 12288 \times 2048 \times 2 \approx 9.66 \text{ GB/request}$$
+
+Across 8$\times$ A100 80 GB GPUs (640 GB total HBM), storing model weights in FP16 consumes 350 GB, leaving 290 GB for activation and KV cache memory. Unmanaged contiguous allocation limits the maximum concurrent batch size to $B_{\text{max}} \le 290/9.66 \approx 30$ requests before running out of memory (OOM), demonstrating how KV cache capacity bounds serving throughput.
 
 ## Summary {.unnumbered}
 
