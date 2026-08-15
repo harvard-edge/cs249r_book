@@ -3124,13 +3124,23 @@ The primitives compose into the communication patterns that define each parallel
 
 Many engineering teams who scale cluster capacity by $4\times$ find that their training iterations take longer to complete, reflecting a fundamental misunderstanding of distributed training physics. The following misconceptions capture errors that waste compute resources and delay research.
 
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Linear speedup is achievable with sufficient engineering effort.*
 
 Amdahl's Law establishes hard limits: any sequential component bounds maximum speedup regardless of parallelism. In distributed training, gradient synchronization is inherently sequential since all gradients must be collected before any update proceeds. As @sec-distributed-training-systems-systems-distributed-training-efficiency-metrics-9488 demonstrates, the scaling efficiency equation $\eta_{\text{scaling}} = 1/(1 + N(T_{\text{comm}}(N) + T_{\text{sync}}(N) - T_{\text{overlap}})/T_{\text{compute}})$ reveals how communication and synchronization overhead dominate as $N$ increases. Even with perfect overlap and ideal algorithms, communication overhead grows with cluster size. For data parallelism, AllReduce time increases logarithmically with tree algorithms or linearly in the latency term with ring algorithms as GPU count grows. A 1000-GPU cluster will never train 1000$\times$ faster than a single GPU; achieving 500$\times$ speedup would be exceptional, and 100--200$\times$ is more typical for communication-heavy workloads. Organizations that budget projects assuming linear scaling inevitably miss deadlines and overspend on compute.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Pitfall**: *Optimizing MFU without considering scaling efficiency.*
 
 A team achieves 50 percent MFU on a single node, scales to 1,024 GPUs, and expects 512 GPU-equivalents of useful work. Scaling efficiency at 1,024 GPUs can be near 50 percent for communication-heavy workloads, so actual useful throughput is roughly $0.50 \times 0.50 = 0.25$ of peak, or 256 GPU-equivalents: half the expected value. MFU and scaling efficiency are independent multiplicative factors. Optimizing one without measuring the other produces capacity estimates that are off by 2$\times$ or more. Capacity planning at fleet scale requires reporting both metrics together and tracking their product as "useful goodput."
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Fallacy**: *Hyperparameters tuned on small clusters transfer directly to large-scale training.*
 
@@ -3141,6 +3151,10 @@ Engineers tune hyperparameters on 8-GPU workstations then deploy to 256-GPU clus
 [^fn-linear-scaling]: **Linear Scaling Rule**\index{Linear Scaling Rule!convergence}: Established by @goyal2017accurate at Facebook AI Research, who trained ResNet-50 on ImageNet in one hour across 256 GPUs with a batch size of 8,192 while matching small-batch accuracy. The rule -- multiply learning rate by $k$ when batch size increases by $k$ -- works only while the large-batch approximation remains valid. Above the workload's measured critical-batch-size regime, gradient noise drops below the useful signal scale and additional parallelism yields diminishing convergence returns [@mccandlish2018empirical; @Shallue2019measuring].
 
 Beyond the critical batch size, this relationship breaks down in a model-, data-, and optimizer-dependent way. A team that takes a small-cluster learning rate, multiplies it mechanically with GPU count, and jumps directly to a much larger global batch may see lower final quality or slower sample efficiency even though hardware throughput improved. Warmup schedules, weight decay adjustment, layer-wise optimizers such as LARS/LAMB, and careful momentum tuning can recover accuracy in some regimes, but require systematic experimentation at target scale. Organizations that skip these scaling studies waste thousands of GPU-hours on suboptimal runs.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Pitfall**: *Adding GPUs to data-parallel jobs without modeling communication.*
 
@@ -3160,25 +3174,49 @@ class A100CapacityFallacies:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Memory capacity alone determines the parallelism strategy.*
 
 Engineers see that a 70B model exceeds `{python} A100CapacityFallacies.a100_mem_gb_str` memory and immediately choose tensor parallelism or pipeline parallelism to split weights. In a deployed run, the effective strategy depends on the interaction between memory pressure, computation patterns, and communication topology. As @sec-distributed-training-systems-systems-parallelism-strategy-comparison-d92a explains, tensor parallelism splits each layer across devices with AllReduce synchronization per layer, achieving even memory distribution but placing communication on the critical path. Pipeline parallelism assigns complete layers to stages with point-to-point transfers between stages, reducing per-step communication but introducing pipeline bubble overhead that wastes 10--30 percent of cycles. For a `{python} A100CapacityFallacies.frontier_params_b_str` model on 64 A100 GPUs where tensor parallelism degree-8 enables training, pipeline parallelism with 8 stages achieves 23 percent higher throughput due to reduced all-to-all communication despite similar memory footprints. The decision requires profiling communication patterns and bubble overhead, not just checking if weights fit in memory.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Pitfall**: *Applying FSDP or ZeRO without measuring efficiency trade-offs.*
 
 Engineers adopt FSDP universally after reading that it "reduces memory and enables larger models". In a deployed run, sharding introduces 10--25 percent communication overhead that only pays off when memory pressure justifies it. FSDP reduces memory footprint by sharding optimizer state, gradients, and optionally parameters across GPUs, but requires AllGather operations before each forward pass and ReduceScatter after backward pass. For a 7B model on A100-`{python} A100CapacityFallacies.a100_mem_gb_str` with batch size 4, standard DDP achieves 145 samples/second while FSDP achieves only 118 samples/second (19 percent slower) because the model fits comfortably without sharding and the added communication overhead provides no benefit. FSDP provides value when model plus optimizer state exceeds single-GPU memory, when enabling larger per-GPU batch sizes justifies the overhead, or when ZeRO-Offload to CPU memory extends capacity. A 65B model that cannot fit on `{python} A100CapacityFallacies.a100_mem_gb_str` becomes trainable with FSDP ZeRO-3, accepting 15 percent throughput loss to enable training at all. Applying FSDP universally without measuring memory pressure wastes performance.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Parallelism overhead is roughly constant regardless of model size.*
 
 Engineers benchmark parallelism strategies on convenient small models then apply conclusions to large-scale training. At scale, the ratio between computation and communication time changes dramatically with model size, inverting strategic decisions. AllReduce communication time depends primarily on gradient tensor size and network bandwidth, growing roughly linearly with parameter count, while forward and backward pass computation time grows superlinearly due to larger matrix operations. For a 1B parameter model where forward/backward pass takes 50 ms and AllReduce takes 25 ms, communication overhead consumes 33 percent of step time. For a 70B parameter model where forward/backward takes 2400 ms and AllReduce takes 180 ms, communication overhead drops to 7 percent despite the gradient size being 70$\times$ larger. Decisions made on small models ("pipeline parallelism's 15 percent bubble overhead makes it always slower than data parallelism") can invert at scale where data parallelism's communication overhead reaches 25--40 percent. Reliable strategy selection requires either profiling at target scale or analytical models that account for how computation scales as $\mathcal{O}(n^2)$ to $\mathcal{O}(n^3)$ while communication scales as $\mathcal{O}(n)$.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Pitfall**: *Treating scaling efficiency as a property of the hardware alone.*
 
 Vendor benchmarks publish "85 percent scaling efficiency at 1,024 GPUs" and procurement teams plan capacity as if that number is a cluster constant. Scaling efficiency is a joint property of four things: the workload's communication-to-computation ratio, the parallelism strategy (data, pipeline, tensor, hybrid), the network topology (fat-tree vs. torus vs. dragonfly), and the software stack (NCCL version, kernel fusion, overlap quality). Reference numbers from large-language-model training benchmarks may overstate scaling for graph neural networks with irregular communication, and they may understate scaling for embedding-heavy recommendation models with mostly local computation. Capacity planning should use measured scaling on the target workload, not a vendor hero benchmark.
 
+:::
+
+::: {.fallacy-pitfall}
+
 **Fallacy**: *Gradient accumulation is free.*
 
 Engineers use gradient accumulation to simulate larger batch sizes, reducing synchronization frequency from every step to every $K$ steps. The technique appears cost-free since it eliminates $(K-1)/K$ of synchronization events. In a real training loop, accumulation introduces update latency, memory-residency, and numerical precision risks. Standard implementations accumulate into one resident gradient buffer rather than allocating a separate full gradient tensor per microstep; for a 7B model, that FP16 gradient buffer is still 14 GB and must remain live throughout the accumulation window. If the implementation retains computation graphs, overlaps multiple outstanding microbatches, or increases local microbatch size, activation memory can grow further and exhaust HBM. Effective optimizer-step latency increases proportionally with accumulation steps, so accumulating 8 steps means optimizer updates occur 8$\times$ less frequently, potentially slowing convergence despite higher throughput. Most critically, accumulated FP16 gradients risk overflow when summing hundreds of gradient tensors, particularly in early training when loss values are large. A team training a transformer model with 16-step gradient accumulation in FP16 experienced loss spikes and divergence at step 1200; switching to 4-step accumulation with more frequent synchronization resolved the instability despite higher communication costs. Gradient accumulation trades communication frequency for update latency, memory residency, and numerical stability.
+
+:::
+
+::: {.fallacy-pitfall}
 
 **Pitfall**: *Using fixed checkpoint intervals regardless of system characteristics.*
 
@@ -3277,6 +3315,8 @@ class YoungDaly:
 ```
 
 The formula sets the optimal checkpoint interval to $\tau_{\text{opt}} = \sqrt{2 \cdot T_{\text{write}} \cdot \text{MTBF}_{\text{system}}}$, where $T_{\text{write}}$ is checkpoint write time and $\text{MTBF}_{\text{system}}$ is mean time between system failures. For a `{python} YoungDaly.num_gpus_str`-GPU cluster at the canonical `{python} YoungDaly.gpu_mttf_hours_str` per-GPU MTBF, the cluster-level $\text{MTBF}_{\text{system}}$ is `{python} YoungDaly.cluster_mtbf_hr_str` ($\text{MTBF}_{\text{GPU}}/N$). With a `{python} YoungDaly.t_write_min_str` checkpoint time, the optimal interval is approximately `{python} YoungDaly.t_opt_min_str` (~`{python} YoungDaly.t_opt_hr_str`), with an unavoidable checkpoint-plus-rework tax of `{python} YoungDaly.opt_overhead_pct_str`. Checkpointing every `{python} YoungDaly.safe_interval_min_str` "to be safe" raises the total tax to `{python} YoungDaly.safe_loss_pct_str`, while checkpointing every `{python} YoungDaly.sparse_interval_hr_str` risks losing significant work on failure. For larger models where checkpoint time increases to 15 minutes due to model size and storage bandwidth, the optimal interval shifts again. The cost of guessing scales with the cluster: a 1024-GPU run loses approximately `{python} YoungDaly.daily_savings_str` per day to excessive checkpointing when it uses a 15-minute interval instead of the Young-Daly optimum.
+
+:::
 
 ::: {.column-margin}
 ![](images/svg/distributed_training_young_daly_optimum.svg){width="100%" fig-alt="Compact checkpoint-interval curve marking 15 minutes as too frequent, about 2.9 hours as the Young-Daly optimum, and 8 hours as sparse."}
