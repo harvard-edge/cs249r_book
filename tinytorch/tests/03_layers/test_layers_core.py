@@ -28,7 +28,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from tinytorch.core.layers import Layer
+from tinytorch.core.layers import Layer, Sequential
 from tinytorch.core.tensor import Tensor
 
 
@@ -373,14 +373,6 @@ class TestLayerComposition:
         STUDENT LEARNING: Sequential is like a list of layers.
         forward() runs each layer in order on the input.
         """
-        class Sequential(Layer):
-            def __init__(self, layers):
-                self.layers = layers
-            def forward(self, x):
-                for layer in self.layers:
-                    x = layer(x)
-                return x
-
         class LinearLayer(Layer):
             def __init__(self, weights):
                 self.weights = Tensor(weights)
