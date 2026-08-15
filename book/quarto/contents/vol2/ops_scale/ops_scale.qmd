@@ -978,7 +978,13 @@ The cost of regression becomes concrete when one model must preserve every capab
 
 ::: {#lhs-ops-scale-archetype-gpt-4-llama-3-cost-regression .callout-lighthouse title="Archetype A (GPT-4/Llama-3): cost of regression"}
 
-Archetype A (GPT-4/Llama-3), the general-purpose LLM introduced in @sec-vol2-introduction-archetypes, faces the "Generalist's Dilemma." Because the model serves millions of distinct use cases, a fine-tuning update to improve Python coding might silently degrade haiku writing. The release gate therefore combines broad capability benchmarks such as Massive Multitask Language Understanding (MMLU) and HumanEval with policy-based safety checks before any production rollout.
+**Context**: Archetype A (GPT-4/Llama-3), introduced in @sec-vol2-introduction-archetypes, represents ultra-large generalist models ($70\text{B}\text{--}405\text{B}$ parameters) serving millions of concurrent requests across diverse tasks.
+
+**Mechanism**: The "Generalist's Dilemma" occurs when targeted fine-tuning (e.g., optimizing Python code generation) causes catastrophic forgetting in unmonitored domains (e.g., creative writing or reasoning). Evaluating candidate weights across 10,000+ benchmark prompts imposes a substantial validation compute cost $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$, requiring hundreds of GPU-hours before approval.
+
+**Impact**: A silent degradation in secondary metrics forces costly emergency rollbacks, wasting serving capacity and breaching latency targets $L_{\text{lat}}$.
+
+**Systems lesson**: Release gates for large generalist LLMs must combine broad capability benchmarks (MMLU, HumanEval) with policy-based safety checks. Automated gate evaluation must be budgeted into the operational deployment overhead $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ rather than treated as a zero-cost pre-flight check.
 
 :::
 
@@ -1004,21 +1010,17 @@ A key metric that captures this operational urgency is feature freshness latency
 
 ::: {#exmp-ops-scale-feature-freshness-latency .callout-example title="Feature freshness latency"}
 
-**Scenario**: A user clicks a "Basketball" video. The time required for their feed to show more basketball content is the feature freshness latency.
+**Scenario**: A recommendation service processes incoming user event logs to update real-time feature vectors during an active user session.
 
-**Math**:
-$$T_{\text{freshness}} = T_{\text{available}} - T_{\text{event}}$$
+**Mechanism**: Feature freshness latency is defined physically by event availability:
+$$T_{\text{freshness}} = T_{\text{available}} - T_{\text{event}} = \frac{D_{\text{vol}}}{\text{BW}} + L_{\text{lat}}$$
 
-**Setup**:
+**Trade-off**:
 
-* Batch Pipeline (Daily): Events are aggregated at midnight.
-    *   $T_{\text{freshness}} \approx 12\text{--}24 \text{ hours}$.
-    *   **Impact**: User leaves session before recommendations update.
-* Streaming Pipeline (Real-time): Events flow through Kafka/Flink to Feature Store.
-    *   $T_{\text{freshness}} \approx 1\text{--}5 \text{ seconds}$.
-    *   **Impact**: Next page load reflects the interest.
+- **Batch pipeline (daily)**: Events aggregate overnight ($T_{\text{freshness}} \approx 12\text{--}24\text{ h}$), leaving session state static and causing users to abandon sessions before feed updates land.
+- **Streaming pipeline (real-time)**: Events stream via Kafka/Flink into an online key-value store ($T_{\text{freshness}} \approx 1\text{--}5\text{ s}$), updating feature vectors before the subsequent request.
 
-**Systems insight**: For session-based recommendations, moving from Batch $(T_{\text{freshness}} \approx 24\text{ h})$ to Streaming $(T_{\text{freshness}} \approx 5\text{ s})$ often yields a 10--20 percent lift in engagement, justifying the increased infrastructure cost.
+**Systems insight**: Replacing batch materialization with streaming ingestion ($T_{\text{freshness}} \approx 5\text{ s}$) yields a 10 to 20 percent lift in session engagement, justifying the added $D_{\text{vol}}/\text{BW}$ ingestion infrastructure costs.
 
 :::
 
@@ -2183,13 +2185,13 @@ Latency gates catch overt performance violations, but some regressions pass ever
 
 ::: {#exmp-ops-scale-silent-model-regression .callout-example title="Silent model regression"}
 
-**Scenario**: A product ranking model passes offline validation gates but causes a measurable business regression after deployment.
+**Scenario**: A high-throughput product ranking model ($25,000\text{ QPS}$) passes all offline validation gates ($L_{\text{lat}} < 12\text{ ms}$) but causes a 3.2 percent conversion rate drop post-deployment.
 
-**Failure mode**: The culprit is a silent failure in an upstream feature pipeline. A schema change causes a key behavioral feature to return `null` for a small slice of users. The model serving infrastructure, designed for robustness, automatically imputes these nulls as `0.0`.
+**Mechanism**: An upstream feature pipeline schema change causes a critical user affinity feature to return `null` for 8 percent of incoming traffic. The serving layer's fallback handler imputes `null` as `0.0`—a valid scalar within the model's feature space.
 
-**Consequence**: Since `0.0` is a valid value in the feature space, no errors are logged. The model simply makes worse predictions for those users until a business metric monitor catches the regression.
+**Impact**: Because imputed values generate valid float outputs without raising exceptions, latency $L_{\text{lat}}$ and HTTP error rates remain nominal, allowing the silent failure to persist unalerted for 48 hours.
 
-**Systems insight**: Semantic silence is more dangerous than loud failure: syntactically valid feature values can hide production regressions until business metrics move.
+**Systems insight**: Syntactically valid feature imputations create semantically silent failures; production data validation gates must evaluate feature distribution shifts ($\Delta D_{\text{vol}}$) alongside system uptime and latency bounds.
 
 :::
 
@@ -4431,9 +4433,15 @@ Feature freshness represents the delay between real-world events and their refle
 
 The freshness requirement is particularly acute for recommendation systems, where stale features become a direct tax on engagement.
 
-::: {#lhs-ops-scale-archetype-b-dlrm-at-scale-staleness-tax .callout-lighthouse title="Archetype B (DLRM at Scale): The staleness tax"}
+::: {#lhs-ops-scale-archetype-b-dlrm-at-scale-staleness-tax .callout-lighthouse title="Archetype B (DLRM at Scale): staleness tax"}
 
-Archetype B (DLRM at Scale), the DLRM workload, is uniquely sensitive to freshness. Unlike Archetype A (GPT-4/Llama-3), where grammar rules do not change, this archetype's "ground truth" changes every second. If a user clicks a video about baking, and the feature store has a 10-minute lag, the next 100 recommendations will miss this new intent. This "staleness tax" directly degrades engagement, forcing DLRM systems to adopt expensive streaming pipelines over cheaper batch ones.
+**Context**: Archetype B (DLRM at Scale) recommendation workloads maintain multi-terabyte sparse embedding tables ($M_{\text{capacity}} > 1\text{ TB}$) across distributed memory, processing over $100,000\text{ QPS}$ under tight latency budgets ($L_{\text{lat}} < 10\text{ ms}$).
+
+**Mechanism**: Ground truth user intent shifts continuously. If the feature materialization pipeline exhibits a 10-minute update lag ($T_{\text{staleness}} = 600\text{ s}$), serving queries consume stale embedding vectors $D_{\text{vol}}$, causing downstream rankers to recommend irrelevant items.
+
+**Impact**: Ingestion delays $D_{\text{vol}}/\text{BW}$ degrade click-through rates (CTR) by 5 to 15 percent, imposing a severe revenue penalty ("staleness tax").
+
+**Systems lesson**: DLRM operations must prioritize feature materialization throughput $D_{\text{vol}}/\text{BW}$ and low-latency streaming infrastructure over offline batch jobs, aligning stream ingestion capacity directly with the real-time intent decay rate of the user base.
 
 :::
 
@@ -4954,13 +4962,13 @@ When production debugging consumes a large share of engineering attention, platf
 
 ::: {#ws-ops-scale-meta-2021-outage .callout-war-story title="The control plane that disappeared"}
 
-**Context**: Meta's global services depended on a backbone network that connected data centers and carried the internal control traffic needed to operate Facebook, Instagram, WhatsApp, and related systems [@meta2021outage].
+**Context**: Meta's global infrastructure relied on a high-capacity backbone network connecting data centers globally, carrying internal control traffic, DNS requests, and synchronization signals across thousands of model-serving instances [@meta2021outage].
 
-**Failure mode**: On October 4, 2021, a command intended to assess backbone capacity unintentionally disconnected Facebook data centers from each other. The resulting routing withdrawal also broke access to the DNS and internal tools needed for remote recovery.
+**Failure mode**: On October 4, 2021, a routine audit command intended to evaluate backbone capacity unintentionally severed all backbone links. This triggered an automated BGP routing withdrawal, dropping all authoritative DNS routes and driving communication latency $T_{\text{comm}} \to \infty$, which broke internal authentication and out-of-band management tools required for remote remediation.
 
-**Consequence**: Major services were unavailable globally for hours while teams restored connectivity through constrained operational paths.
+**Consequence**: Facebook, Instagram, and WhatsApp experienced a 5.5-hour global outage affecting over 3.5 billion users, while synchronization time $T_{\text{sync}}$ for model-serving states collapsed due to unreachable feature stores and control registries.
 
-**Systems lesson**: Platform-scale operations must treat the control plane as a dependency with its own blast radius. Runbooks, out-of-band access, and staged network changes matter because the tools used to fix an outage can depend on the system that is down. ML platforms expose the same trap at fleet scale: training schedulers, model registries, feature stores, and inference routers often share the auth, DNS, and network plane an incident takes down, so recovery requires explicit isolation between the control plane and the ML systems that depend on it.
+**Systems lesson**: Platform-scale operations must treat the control plane as a hard dependency with a defined blast radius. ML platforms present identical failure risks at fleet scale: training schedulers, model registries, feature stores, and inference routers share the underlying auth, DNS, and network planes. When network partitions force $T_{\text{comm}} \to \infty$, recovery requires strict physical and logical isolation between the control plane and inference serving infrastructure.
 
 :::
 
@@ -5016,13 +5024,13 @@ The diagnostic sequence then tests the highest-probability shared causes before 
 
 ::: {#exmp-ops-scale-feature-pipeline-cascade .callout-example title="Feature pipeline cascade"}
 
-**Scenario**: A platform team updates the normalization logic for a shared "User Engagement Score" feature, switching from a 30-day z-score to a 7-day min-max scale to better capture trends. They update the feature store definition and backfill the data.
+**Scenario**: A core platform team alters the transformation logic of a shared `user_engagement_score` feature, changing its normalization from a 30-day z-score to a 7-day min-max scaling to capture rapid trend shifts.
 
-**Failure mode**: Multiple downstream models, owned by different teams, suffer significant accuracy degradation because they all consumed the feature as an implicit interface.
+**Mechanism**: The update mutates the shared feature store table in-place. Fourteen downstream models across five engineering teams consume this feature as an implicit interface without explicit schema versioning.
 
-**Consequence**: Without explicit lineage tracking, each team debugs its own model architecture and recent deployments before noticing the shared feature change.
+**Impact**: In-place feature mutation invalidates model expectations across all 14 consumers, causing up to a 12 percent drop in ranking accuracy and inducing 18 hours of cross-team debugging toil before the shared root cause is identified.
 
-**Systems insight**: Shared features need immutable versions (for example, `engagement_score_v2`) because feature semantics are production interfaces, not implementation details.
+**Systems lesson**: Shared feature definitions are production interfaces that mandate immutable versioning (e.g., `user_engagement_score_v2`). In-place schema mutations break synchronization $T_{\text{sync}}$ across dependent model fleets.
 
 :::
 

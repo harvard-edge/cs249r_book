@@ -1570,17 +1570,16 @@ class A100HardwareScenario:
 
 ::: {#exmp-inference-debugging-high-p99-latency .callout-example title="Debugging high P99 latency"}
 
-**Scenario**: An LLM serving system exhibits unexpectedly high tail latency. P50 latency is `{python} A100HardwareScenario.p50_latency_ms_str` and P95 is `{python} A100HardwareScenario.p95_latency_ms_str`, both within SLO, but P99 spikes to `{python} A100HardwareScenario.p99_latency_ms_str` against a `{python} A100HardwareScenario.p99_target_ms_str` target. GPU utilization appears healthy at `{python} A100HardwareScenario.gpu_utilization_pct_str`.
+**Scenario**: An LLM serving system exhibits high tail latency: P50 = `{python} A100HardwareScenario.p50_latency_ms_str` and P95 = `{python} A100HardwareScenario.p95_latency_ms_str` maintain SLO, but P99 spikes to $L_{\text{lat}} =$ `{python} A100HardwareScenario.p99_latency_ms_str` against a `{python} A100HardwareScenario.p99_target_ms_str` target despite GPU utilization $\eta_{\text{hw}} =$ `{python} A100HardwareScenario.gpu_utilization_pct_str`.
 
-**Setup**: The system runs on `{python} A100HardwareScenario.num_gpus_str` A100-`{python} A100HardwareScenario.a100_mem_gb_str` GPUs connected via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. Memory bandwidth per GPU is `{python} A100HardwareScenario.a100_mem_bw_tb_per_s_str` (HBM2e), adequate for decode operations, but PCIe limits tensor-parallel communication. For a batch requiring `{python} A100HardwareScenario.activation_transfer_mb_str` activation transfers between GPUs, raw bandwidth math gives approximately `{python} A100HardwareScenario.pcie_transfer_ms_str` per synchronization point over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The scheduling policy is the real problem: dynamic request-level batching uses max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, and the largest `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches experience head-of-line blocking because FIFO batching holds short requests behind long-sequence requests.
+**Diagnosis**: The system runs across `{python} A100HardwareScenario.num_gpus_str` A100 GPUs linked via PCIe Gen4 (`{python} A100HardwareScenario.pcie_gen4_gb_per_s_str` per GPU) rather than NVLink. For `{python} A100HardwareScenario.activation_transfer_mb_str` tensor-parallel transfers, inter-GPU communication latency is $T_{\text{comm}} \approx$ `{python} A100HardwareScenario.pcie_transfer_ms_str` over PCIe versus `{python} A100HardwareScenario.nvlink_transfer_ms_str` over NVLink. The scheduling policy uses max batch size `{python} A100HardwareScenario.max_batch_size_str` and timeout `{python} A100HardwareScenario.batch_timeout_ms_str`, causing `{python} A100HardwareScenario.affected_batch_share_pct_str` of batches to experience head-of-line queuing delay $T_{\text{queue}}$: short prompt requests wait behind long-sequence generations.
 
-**Systems lesson**: The root cause is not the hardware layer but the scheduling policy. Implement priority-aware scheduling with separate batch size limits by request type:
+**Systems lesson**: Root-cause tail latency stems from scheduling policy and interconnect bottlenecks. Implementing priority-aware scheduling with differentiated batch size limits by request type:
 
-1. **Request classification**\index{Request Classification}: Tag requests by expected output length (short: under `{python} A100HardwareScenario.short_token_threshold_str` tokens, medium: `{python} A100HardwareScenario.short_token_threshold_str` to `{python} A100HardwareScenario.medium_token_threshold_str` tokens, long: over `{python} A100HardwareScenario.medium_token_threshold_str` tokens) based on prompt patterns or user-provided hints
-2. **Differentiated batching**\index{Batching!differentiated}: Limit short-request batches to `{python} A100HardwareScenario.short_batch_size_str`, medium to `{python} A100HardwareScenario.medium_batch_size_str`, long to `{python} A100HardwareScenario.long_batch_size_str`
-3. **Priority preemption**\index{Priority Preemption}: Allow short requests to preempt long-running sequences when P99 approaches SLO
+1. **Request classification**: Classify requests by expected output length (short: under `{python} A100HardwareScenario.short_token_threshold_str` tokens, medium: `{python} A100HardwareScenario.short_token_threshold_str` to `{python} A100HardwareScenario.medium_token_threshold_str` tokens, long: over `{python} A100HardwareScenario.medium_token_threshold_str` tokens)
+2. **Differentiated batching**: Limit short batches to `{python} A100HardwareScenario.short_batch_size_str`, medium to `{python} A100HardwareScenario.medium_batch_size_str`, long to `{python} A100HardwareScenario.long_batch_size_str`
 
-After implementing these changes, P99 dropped to `{python} A100HardwareScenario.p99_after_ms_str`. High average GPU utilization can mask head-of-line blocking that affects only a small percentage of requests but drives P99; @sec-inference-scale-multitenancy-isolation-688c develops the full isolation framework for keeping one workload's tail from degrading another.
+This dropped P99 latency to $L_{\text{lat}} =$ `{python} A100HardwareScenario.p99_after_ms_str`.
 
 :::
 
@@ -3835,7 +3834,7 @@ If ten model replicas are actively serving traffic, and a new request arrives as
 
 ::: {#lhs-inference-archetype-b-dlrm-at-scale-tail-at-scale .callout-lighthouse title="Archetype B (DLRM at Scale): The tail at scale"}
 
-Archetype B (DLRM at Scale) is the canonical victim of tail latency [@dean2013]. Processing 10 million QPS means that a 1-in-10,000 latency spike happens 1,000 times every second. For Archetype B (DLRM at Scale), sophisticated load balancing, such as routing each request to the less-loaded of two sampled replicas, is mandatory to suppress these outliers; simple Round-Robin would allow queues to build up, causing the 99th percentile latency to collapse into unacceptable slowness.
+Archetype B (DLRM at Scale) relies on $P_{99} \le 100\text{ ms}$ performance boundaries. Because high-throughput serving aggregates $10^7$ QPS, $10^{-4}$ tail latency events occur $1{,}000$ times per second. This necessitates two-choice routing to suppress the queuing delay $T_{\text{queue}}$ that otherwise dominates physical compute $T_{\text{compute}}$.
 
 :::
 

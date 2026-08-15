@@ -212,13 +212,13 @@ Before formalizing the iron law, consider how these constraints interact in prac
 
 ::: {#ws-training-palm-loss-spikes .callout-war-story title="The PaLM loss spikes (2022)"}
 
-**Context**: During training of the 540B-parameter PaLM model\index{PaLM}, the largest run exhibited training-instability behavior that smaller runs did not show [@chowdhery2022palm].
+**Context**: During training of the 540-billion-parameter PaLM model across 6,144 TPU v4 chips (two 3,072-chip Pods linked by Optical Circuit Switches), the largest run exhibited severe training-instability spikes that smaller 8B and 62B runs did not show [@chowdhery2022palm].
 
-**Failure mode**: The training loss spiked roughly 20 times despite gradient clipping. The spikes occurred irregularly, sometimes late in training, and were not explained by a simple "bad data batch" story.
+**Failure mode**: The training loss spiked roughly 20 times during the 780-billion-token run despite gradient clipping. The spikes occurred irregularly, often hundreds of steps after a numerical anomaly began, rendering standard learning-rate decay ineffective.
 
-**Resolution**: The practical mitigation was operational: restart from a checkpoint about 100 steps before the spike and skip roughly 200--500 data batches around the failure window. The mitigation avoided recurrence at the same point and showed that very large training runs require planned recovery paths alongside optimizer theory.
+**Resolution**: The operational mitigation was to restart training from an uncorrupted checkpoint roughly 100 steps prior to each spike and skip approximately 200--500 data batches around the failure window. Because each 100-step rollback discarded $\sim 3.2 \times 10^{17}$ FLOPs of computation, frequent 3-hour automated checkpointing was required to limit wasted compute.
 
-**Systems lesson**: Large-scale training stability is an operational problem as much as an optimization problem. Checkpoint cadence, automated loss-spike detection, batch skipping, and numerically robust formats such as BF16\index{BF16!dynamic range advantage} are part of the training system, not afterthoughts.
+**Systems lesson**: Operational fault tolerance directly governs the utilization factor $\eta_{\text{hw}}$ in the iron law of training performance (@eq-training-iron-law). Automated loss-spike detection, checkpoint cadence, and batch skipping are core system mechanisms required to protect cluster compute efficiency $R_{\text{peak}} \cdot \eta_{\text{hw}}$ at frontier scale.
 
 :::
 
@@ -341,8 +341,8 @@ GPT-2 (1.5 billion parameters) serves as our primary case study because it is la
 
 : **GPT-2 (1.5 billion parameters) lighthouse model specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates—memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
 
-**Challenge**:
-Training GPT-2 combines a substantial memory-capacity requirement for model and training state with compute-intensive matrix multiplications. The resulting pipeline must manage capacity, data delivery, computation, and synchronization together.
+**Mechanism**:
+Training GPT-2 couples a total operation count of $O \approx 6 \cdot P \cdot D_{\text{tokens}} = 1.4 \times 10^{20} \text{ FLOPs}$ with a strict memory footprint $M_{\text{state}} = M_{\text{weights}} + M_{\text{grads}} + M_{\text{opt}} + M_{\text{act}}$. Balancing execution time $T_{\text{train}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator HBM capacity.
 
 :::
 
@@ -2272,16 +2272,16 @@ class StorageBandwidthNvme:
 
 ::: {#exmp-training-gpt-2-language-model-data-pipeline .callout-example title="GPT-2 language model data pipeline"}
 
-**Scenario**: This illustrative GPT-2 pipeline uses assumed tokenization, storage-access, and end-to-end utilization values to show how a practitioner can compare pipeline stages.
+**Scenario**: This GPT-2 data pipeline walkthrough quantifies how storage access, CPU tokenization, and PCIe transfers interact to supply an 8-V100 accelerator cluster.
 
 **Stage trace**:
 
-1. **Raw text storage**: The WebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from an NVMe SSD can reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`. Under the scenario's assumed effective-access factor of `{python} GPT2DataPipeline.f_access_str`, document sampling reduces effective bandwidth to roughly `{python} GPT2DataPipeline.random_access_gb_per_s_str`.
-2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} with a `{python} GPT2DataPipeline.bpe_vocab_str` vocabulary converts raw text into subword token IDs. With global batch size `{python} GPT2DataPipeline.b_assign_math` across the cluster and sequence length `{python} GPT2DataPipeline.s_assign_math`, each training step needs `{python} GPT2DataPipeline.tokens_per_batch_str`; at the assumed rate of `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` per CPU core, one core spends `{python} GPT2DataPipeline.tokenization_ms_str` preparing a batch.
-3. **Batching and padding**: The pipeline pads sequences to a uniform length and packs them into an int64 tensor with `{python} GPT2DataPipeline.batch_size_seq_str` by `{python} GPT2DataPipeline.seq_len_token_str`, for `{python} GPT2DataPipeline.batch_kb_str` per batch.
-4. **PCIe transfer**: Moving that tensor across a Gen3 x16 link with `{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` of theoretical bandwidth takes only `{python} GPT2DataPipeline.transfer_ms_str`, so optimizing the copy would not materially improve this pipeline.
+1. **Raw text storage**: The WebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from NVMe SSD storage reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`. Under document sampling with access factor `{python} GPT2DataPipeline.f_access_str`, random-access storage bandwidth drops to `{python} GPT2DataPipeline.random_access_gb_per_s_str`, giving $T_{\text{read}} = D_{\text{vol}} / \text{BW}_{\text{storage}} \approx 0.1\text{ ms}$.
+2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} (`{python} GPT2DataPipeline.bpe_vocab_str` vocabulary) converts text into token IDs. For batch size $B =$ `{python} GPT2DataPipeline.b_assign_math` and sequence length $S =$ `{python} GPT2DataPipeline.s_assign_math` (`{python} GPT2DataPipeline.tokens_per_batch_str` total), a single CPU core processing `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` takes $T_{\text{tokenize}} \approx$ `{python} GPT2DataPipeline.tokenization_ms_str` per batch.
+3. **Batching and padding**: Padding and packing generate an int64 tensor of shape `{python} GPT2DataPipeline.batch_size_seq_str` $\times$ `{python} GPT2DataPipeline.seq_len_token_str`, producing `{python} GPT2DataPipeline.batch_kb_str` per batch.
+4. **PCIe transfer**: Transferring the tensor across a PCIe Gen3 x16 bus (`{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` bandwidth) takes $T_{\text{transfer}} =$ `{python} GPT2DataPipeline.transfer_ms_str`, making bus transfer negligible.
 
-**Systems insight**: Under these assumptions, storage and PCIe movement are not the binding terms; CPU tokenization is close to the `{python} GPT2DataPipeline.accelerator_step_ms_str` accelerator training step. Parallelizing and overlapping tokenization addresses that bottleneck. With ideal worker scaling, `{python} GPT2DataPipeline.n_cpu_workers_str` CPU workers reduce its service time to about `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching prepares the next batch during the current accelerator step. The assumed `{python} GPT2DataPipeline.utilization_pct_str` end-to-end utilization implies a cluster-wide throughput of `{python} GPT2DataPipeline.throughput_samples_str` global samples per second on `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
+**Systems insight**: When single-core CPU preparation time ($T_{\text{prep}} \approx 180\text{ ms}$) exceeds accelerator step time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), the GPU starves, collapsing $\eta_{\text{hw}} \to 0$. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces tokenization latency to $T_{\text{tokenize}} / N_{\text{worker}} \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $T_{\text{prep}}$ with $T_{\text{step}}$ to restore hardware utilization to `{python} GPT2DataPipeline.utilization_pct_str`, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
 
 :::
 
@@ -3148,11 +3148,11 @@ The data-bound category is the most commonly misdiagnosed bottleneck in practice
 
 ::: {#exmp-training-gil-locked-gpu .callout-example title="The GIL-locked GPU"}
 
-**Scenario**: A team writes its data loading pipeline in standard Python, using a simple loop to read images, augment them, and feed the GPU.
+**Scenario**: A team writes its data loading pipeline in standard Python using `threading` to read images, apply augmentations, and feed a GPU cluster.
 
-**Failure mode**: Python expert David Beazley demonstrated that the Global Interpreter Lock (GIL) ensures only one thread executes Python bytecode at a time [@beazley2010understanding]. In this illustrative failure mode, the data loader runs as a serialized CPU bottleneck: it processes one image, the GPU consumes it quickly, and then the GPU waits for the next item. The CPU can appear busy on one core while the accelerator fleet spends long intervals idle. The accelerator trace shows white space: the GPU is healthy, but it is starved by the input pipeline.
+**Diagnosis**: Python's Global Interpreter Lock (GIL) ensures only one thread executes Python bytecode at a time [@beazley2010understanding]. When CPU-bound preprocessing runs in Python threads, CPU execution serializes into a bottleneck where prep latency ($T_{\text{prep}} \sim 250 \text{ ms}$) vastly exceeds accelerator forward/backward time ($T_{\text{step}} \approx 12 \text{ ms}$). Profiler traces reveal white space where host-to-device queues empty and accelerator units sit idle.
 
-**Systems insight**: Amdahl's Law\index{Amdahl's Law!serial data pipeline} imposes a strict limit. A serial data pipeline renders a parallel accelerator useless. High-performance training requires multiprocessing to bypass Python-side serialization or offloading preprocessing to the accelerator, as in systems such as NVIDIA DALI, to keep the compute units fed.
+**Systems insight**: Under serial GIL bottlenecks, effective hardware efficiency collapses ($\eta_{\text{hw}} = \frac{T_{\text{step}}}{T_{\text{step}} + T_{\text{prep}}} \approx 4.6\%$). Bypassing this bottleneck requires process-based multiprocessing (`torch.utils.data.DataLoader(num_workers=N)`) or offloading preprocessing entirely to GPU kernels (e.g., NVIDIA DALI) to ensure $T_{\text{prep}} / N < T_{\text{step}}$ and maintain $\eta_{\text{hw}} \to 1.0$.
 
 :::
 
@@ -6197,14 +6197,14 @@ class NetworkWall:
 
 **Problem**: A team scales training to `{python} NetworkWall.n_gpus_str`, one per node, connected by a 100 Gbps fabric. Is the network the bottleneck?
 
-**Math**: For a `{python} NetworkWall.model_params_b_str`-parameter model with FP16 gradients:
+**Mechanism**: For a `{python} NetworkWall.model_params_b_str`-parameter model with FP16 gradients:
 
 1. **Gradient size** (FP16): `{python} NetworkWall.gradient_size_gb_str` per step.
 2. **AllReduce cost**: Ring AllReduce passes gradient shards around a logical ring, so each worker ends up sending nearly two full copies of the gradient: $2(N_{\text{GPU}}-1)/N_{\text{GPU}}$, which equals `{python} NetworkWall.allreduce_factor_mult_str` for `{python} NetworkWall.n_gpus_str`. That gives `{python} NetworkWall.allreduce_factor_value_str` $\times$ `{python} NetworkWall.gradient_size_gb_str` = `{python} NetworkWall.allreduce_gb_str` total.
-3. **Bandwidth-only lower bound**: At `{python} NetworkWall.network_bw_gb_per_s_str` per worker on the assumed 100 Gbps fabric, `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` = `{python} NetworkWall.network_time_s_str`. Protocol overhead, latency, contention, and topology can increase this time.
-4. **Compute comparison**: If the nonoverlapped forward and backward work takes 1 s, this idealized communication bound already exceeds it.
+3. **Bandwidth-only lower bound**: At `{python} NetworkWall.network_bw_gb_per_s_str` per worker on the 100 Gbps fabric, synchronization latency is $T_{\text{comm}} = D_{\text{comm}} / \text{BW}_{\text{net}} =$ `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` $=$ `{python} NetworkWall.network_time_s_str`.
+4. **Compute comparison**: If the nonoverlapped forward and backward work takes $T_{\text{compute}} \approx 1\text{ s}$, communication latency $T_{\text{comm}} \approx 2.24\text{ s}$ dominates.
 
-**Systems insight**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{communication}} > T_{\text{computation}}$. Solutions include gradient compression, which sends fewer or lower-precision gradient bytes while checking convergence impact; using bandwidth-efficient ring AllReduce, as implemented in Horovod [@sergeev2018horovod]; and keeping the most frequent communication on faster links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` within a node vs. `{python} NetworkWall.network_bw_gb_per_s_str` between nodes).
+**Systems lesson**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{comm}} > T_{\text{compute}}$, causing accelerator efficiency $\eta_{\text{hw}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}}}$ to plummet below 31 percent. Mitigations include gradient compression (reducing $D_{\text{comm}}$), ring AllReduce primitives [@sergeev2018horovod], and hierarchical topologies that confine high-frequency transfers to fast intra-node links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs `{python} NetworkWall.network_bw_gb_per_s_str` inter-node).
 
 :::
 
@@ -6431,17 +6431,17 @@ class TrainingCarbonFootprint:
 
 ::: {#nbk-training-carbon-footprint-training .callout-notebook title="The carbon footprint of training"}
 
-**Scenario**: Training large models can require substantial energy as well as computation. The physical ceiling\index{Scaling!physical ceiling} appears in the energy corollary to the iron law, which lets us quantify the environmental impact of scaling training:
+**Context**: Training large models requires substantial energy and compute. The physical ceiling\index{Scaling!physical ceiling} appears in the energy corollary to the iron law ($E_{\text{total}} = P_{\text{fleet}} \cdot T_{\text{train}}$), quantifying environmental scale:
 
 1.  **Workload**: Training a `{python} TrainingCarbonFootprint.cf_params_b_str`-parameter model for `{python} TrainingCarbonFootprint.cf_tokens_str` tokens.
-2.  **Compute**: ≈ `{python} TrainingCarbonFootprint.cf_flops_eqn_str`.
+2.  **Compute**: $O \approx$ `{python} TrainingCarbonFootprint.cf_flops_eqn_str`.
 3.  **Efficiency**: `{python} TrainingCarbonFootprint.cf_sustained_tflop_per_s_str` sustained on A100 (`{python} TrainingCarbonFootprint.cf_gpu_tdp_w_str` TDP).
-4.  **Time**: ≈ `{python} TrainingCarbonFootprint.cf_time_days_str` on `{python} TrainingCarbonFootprint.cf_num_gpus_str`.
-5.  **Energy**: (`{python} TrainingCarbonFootprint.cf_num_gpus_str` $\times$ `{python} TrainingCarbonFootprint.cf_gpu_tdp_w_str` + `{python} TrainingCarbonFootprint.cf_hosts_str` $\times$ `{python} TrainingCarbonFootprint.cf_cpu_tdp_per_host_w_str`) $\times$ `{python} TrainingCarbonFootprint.cf_time_hours_str` ≈ `{python} TrainingCarbonFootprint.cf_energy_kwh_str`
+4.  **Execution time**: $T_{\text{train}} \approx$ `{python} TrainingCarbonFootprint.cf_time_days_str` on `{python} TrainingCarbonFootprint.cf_num_gpus_str` GPUs.
+5.  **Energy footprint**: $E_{\text{total}} = P_{\text{cluster}} \cdot T_{\text{train}} = (N_{\text{GPU}} \cdot P_{\text{GPU}} + N_{\text{host}} \cdot P_{\text{host}}) \cdot T_{\text{train}}$ evaluates to (`{python} TrainingCarbonFootprint.cf_num_gpus_str` $\times$ `{python} TrainingCarbonFootprint.cf_gpu_tdp_w_str` + `{python} TrainingCarbonFootprint.cf_hosts_str` $\times$ `{python} TrainingCarbonFootprint.cf_cpu_tdp_per_host_w_str`) $\times$ `{python} TrainingCarbonFootprint.cf_time_hours_str` $\approx$ `{python} TrainingCarbonFootprint.cf_energy_kwh_str`.
 
-**Result**: Under the scenario's household-energy comparison, the modeled energy equals `{python} TrainingCarbonFootprint.cf_household_months_str` of average household electricity use.
+**Impact**: The energy consumed equals `{python} TrainingCarbonFootprint.cf_household_months_str` of average household electricity use.
 
-**Systems insight**: If useful throughput doubles while modeled cluster power remains constant, time and energy halve. Under the stated average grid intensity, the avoided energy is ~`{python} TrainingCarbonFootprint.cf_energy_saved_kwh_str` and the avoided location-based emissions are `{python} TrainingCarbonFootprint.cf_co2_str`. Higher utilization can also raise power, so we must support environmental claims with measured energy, not utilization alone.
+**Systems lesson**: Doubling hardware throughput $\eta_{\text{hw}}$ at constant cluster power $P_{\text{cluster}}$ halves execution time $T_{\text{train}}$ and total energy $E_{\text{total}}$. Under average grid carbon intensity, doubling efficiency saves ~`{python} TrainingCarbonFootprint.cf_energy_saved_kwh_str` of electricity and avoids `{python} TrainingCarbonFootprint.cf_co2_str` of emissions. Environmental audits must measure $E_{\text{total}} = \int P(t) dt$ rather than relying on GPU utilization metrics alone.
 
 :::
 

@@ -1637,11 +1637,21 @@ Experiments on production cluster traces from Microsoft and Alibaba show 40 to 6
 
 ### Gandiva: Iteration-aware scheduling {#sec-fleet-orchestration-gandiva}
 
-**Gandiva**\index{Gandiva} [@xiao2018gandiva] exploits a characteristic that general-purpose schedulers completely ignore: the iterative nature of deep learning training. Each training iteration follows a predictable, repeating pattern: a GPU-intensive forward pass, a GPU-intensive backward pass, a communication-intensive gradient synchronization, and then a CPU-intensive data loading and preprocessing phase before the next iteration. During the data loading phase, the GPU sits partially idle, computing at less than full utilization while waiting for the next batch of data to be prepared.
-
-Gandiva uses **iteration-boundary time slicing**\index{Gandiva!iteration-boundary time slicing}, enabling higher utilization through controlled oversubscription. A cluster with 100 GPUs might support 120 concurrent jobs if each spends 20 percent of its iteration time waiting for data, because the scheduler can interleave data loading from one job with GPU computation from another on the same device. The critical insight that makes this practical is that iteration boundaries provide natural preemption points where GPU state is minimal. Between iterations, only model weights and optimizer state reside on the GPU; the intermediate activations from forward and backward passes have been freed. This minimal state makes context switching cheap (seconds rather than minutes), unlike preempting mid-iteration when the full activation memory is in use.
+**Gandiva**\index{Gandiva} [@xiao2018gandiva] exploits iteration-boundary time slicing, enabling higher utilization through controlled oversubscription. A cluster with 100 GPUs might support 120 concurrent jobs if each spends 20 percent of its iteration time waiting for data, because the scheduler can interleave data loading from one job with GPU computation from another on the same device. The critical insight that makes this practical is that iteration boundaries provide natural preemption points where GPU state is minimal. Between iterations, only model weights and optimizer state reside on the GPU; the intermediate activations from forward and backward passes have been freed. This minimal state makes context switching cheap (seconds rather than minutes), unlike preempting mid-iteration when the full activation memory is in use.
 
 Gandiva also implements **grow-shrink elasticity**\index{Grow-Shrink Elasticity} at a finer granularity than the framework-level elastic training discussed in @sec-fleet-orchestration-elastic-training. Gandiva automatically adjusts data parallelism degree based on real-time resource availability, using profiled iteration times to predict the throughput impact of adding or removing workers. When a high-priority job arrives, Gandiva shrinks lower-priority jobs by reducing their worker count rather than killing them entirely, preserving their progress while freeing resources. When resources become available again, it grows jobs back to their preferred parallelism degree. This fine-grained elasticity, informed by actual iteration-level profiling data, enables scheduling decisions that general-purpose systems cannot make because they lack visibility into job internals.
+
+::: {#ws-fleet-orchestration-limping-switch .callout-war-story title="The limping switch"}
+
+**Context**: In a 16,384 GPU distributed cluster, a foundation-model training job experienced severe throughput degradation despite healthy GPU execution metrics [@sigler2021openai_kubernetes].
+
+**Mechanism**: A single transceiver on an inter-rack spine switch experienced elevated bit-error rates, degrading link throughput from 100 Gbps to 1 Gbps ($100\times$ bandwidth collapse). Standard ping/up health checks reported green, but AllReduce gradient synchronization $T_{\text{sync}}$ stalled across all 16,384 GPUs waiting for the straggling link.
+
+**Impact**: Cluster-wide hardware efficiency $\eta_{\text{hw}}$ collapsed from 45 percent to 8 percent, wasting $>15,000$ GPU-hours per day until network-level telemetry flagged the degraded switch port.
+
+**Systems lesson**: Binary up/down health monitoring is insufficient for distributed scaling. Schedulers require continuous, performance-aware telemetry (switch counters, packet retransmission rates, collective benchmarks) to quarantine degraded network paths automatically.
+
+:::
 
 ### Themis: Finish-time fairness {#sec-fleet-orchestration-themis}
 

@@ -272,7 +272,7 @@ The dominant failure modes and monitoring priorities differ across workload arch
 \end{minipage}
 ```
 
-**Systems insight**: Ground truth availability determines monitoring strategy. ResNet-50 (image classification) can use explicit labels; GPT-2 relies on proxy metrics (perplexity); DLRM uses implicit feedback (clicks); DS-CNN, a depthwise-separable convolutional neural network (CNN), monitors operational metrics (energy, false positives). The illustrative retraining cadence spans roughly two orders of magnitude, from daily recommendation updates to much slower embedded-device updates.
+**Systems insight**: Ground truth availability and physical bottlenecks govern monitoring design. Compute-bound vision models (ResNet-50) bound by $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ track holdout accuracy; memory-bandwidth-bound language and recommendation models (GPT-2, DLRM) bound by $D_{\text{vol}}/\text{BW}$ rely on perplexity or implicit clicks; micro-controller models (DS-CNN) bound by strict latency $L_{\text{lat}}$ and energy limits monitor duty cycles and false wake rates. Retraining cadences scale inversely with label delay and system deployment constraints.
 
 :::
 
@@ -877,11 +877,11 @@ As the consistency imperative quantified (@sec-ml-operations-principle-3-consist
 
 ::: {#exmp-ml-ops-uber-michelangelo-feature-store .callout-example title="Uber Michelangelo feature store"}
 
-**Context**: Uber's Michelangelo platform\index{Michelangelo!Uber ML platform} helped establish the production feature-store pattern\index{Feature Store!Uber case study} [@hermann2017michelangelo], addressing training-serving skew and reuse across many models and teams powering ride pricing, ETA prediction, and fraud detection.
+**Context**: Uber's Michelangelo platform\index{Michelangelo!Uber ML platform} established the production feature-store pattern\index{Feature Store!Uber case study} [@hermann2017michelangelo], serving thousands of deployed models at over $10^5\text{ QPS}$ across ride pricing, ETA prediction, and fraud detection.
 
-**Insight**: Data scientists computed features in Spark for training, while engineers reimplemented the same logic in Java for serving. Michelangelo's feature store moved feature computation into a shared system that served training through Hive and production through Cassandra, with feature definitions written once and compiled into batch and online implementations.
+**Mechanism**: Data scientists originally computed offline features in Spark, while software engineers reimplemented the same logic in Java for online serving. Dual implementations caused training-serving skew $\Delta \text{accuracy}$ and latency spikes ($L_{\text{lat}} > 50\text{ ms}$). Michelangelo moved feature storage into a shared system serving batch training via Hive and low-latency online inference via Cassandra ($L_{\text{fetch}} \le 10\text{ ms}$), compiling feature definitions once for both paths to decouple memory footprint $D_{\text{vol}}$ from serving latency $L_{\text{lat}}$.
 
-**Systems lesson**: Feature stores and versioning systems can preserve shared definitions and versions, supporting semantic parity. Point-in-time correctness\index{Point-in-Time Correctness!feature retrieval} additionally requires timestamped historical feature values and as-of retrieval or joins that exclude information unavailable at prediction time. A centralized catalog also supports reuse across large model portfolios.
+**Systems lesson**: Feature stores preserve semantic parity by enforcing a single feature contract across training and serving. Point-in-time correctness\index{Point-in-Time Correctness!feature retrieval} requires timestamped historical feature snapshots and as-of joins to eliminate data leakage, ensuring feature fetch latency $L_{\text{fetch}}$ stays bounded by memory bandwidth $D_{\text{vol}}/\text{BW}$.
 
 :::
 
@@ -1149,11 +1149,11 @@ CI/CD pipelines play a central role in enabling scalable, repeatable, and safe M
 
 ::: {#exmp-ml-ops-google-tfx-production-ml-pipelines .callout-example title="Google TFX production ML pipelines"}
 
-**Context**: TensorFlow Extended (TFX)\index{TensorFlow Extended!production pipelines} emerged from Google's production ML infrastructure, providing reusable components for data validation, transformation, training, model analysis, and deployment [@baylor2017].
+**Context**: TensorFlow Extended (TFX)\index{TensorFlow Extended!production pipelines} emerged from Google's production ML infrastructure [@baylor2017], processing petabyte-scale daily telemetry ($D_{\text{vol}} > 10^{15}\text{ bytes}$) across hundreds of production models.
 
-**Insight**: Before TFX, teams built bespoke pipelines for each ML project, repeatedly solving data validation, schema enforcement, model validation, and deployment gating. TFX standardized those steps through components such as ExampleGen, StatisticsGen, SchemaGen, ExampleValidator, Transform, Trainer, Evaluator, and Pusher.
+**Mechanism**: Before TFX, ad hoc pipelines created unvalidated data handoffs and non-reproducible training runs. TFX standardized workflow steps via Apache Beam and C++ execution engines through versioned components (ExampleGen, StatisticsGen, SchemaGen, ExampleValidator, Transform, Trainer, Evaluator, Pusher), bounding validation compute overhead $O/(R_{\text{peak}} \cdot \eta_{\text{hw}})$ and gating releases on strict statistical contracts.
 
-**Systems lesson**: Production ML pipelines need artifact discipline, not just task orchestration. TFX makes each step produce versioned artifacts with metadata, so production issues can be traced back through the exact data, code, and configuration that produced the deployed model.
+**Systems lesson**: Production ML pipelines require immutable artifact discipline, not just DAG task orchestration. TFX ensures every pipeline step produces versioned artifacts with ML Metadata (MLMD), allowing root-cause analysis to trace production accuracy loss back to exact dataset snapshots $D_{\text{vol}}$ and training configurations.
 
 :::
 
@@ -1591,11 +1591,11 @@ Production deployment requires frameworks that handle model packaging, versionin
 
 ::: {#ws-ml-ops-knight-capital-error-2012 .callout-war-story title="The Knight Capital error (2012)"}
 
-**Context**: Knight Capital Group was a major market maker in US equities. In 2012, they deployed new software to seven of eight servers but missed the 8th [@sec2013knight].
+**Context**: Knight Capital Group was a major market maker in US equities handling over 17 percent of NYSE volume. In August 2012, an operational deployment updated SMARS order-routing software on seven of eight production servers but omitted the eighth [@sec2013knight].
 
-**Failure mode**: The new code went into SMARS, Knight's automated, high-speed algorithmic order router, and repurposed a flag formerly used to activate obsolete Power Peg functionality. On the seven updated servers, setting that flag engaged the new code as intended. On the eighth server, which still carried the Power Peg code, the same flag activated Power Peg instead, and because the cumulative-share counter that told it when to stop had been relocated years earlier, it emitted repeated child orders. In forty-five minutes, the defective router generated millions of erroneous orders, accumulated an unintended multi-billion-dollar portfolio, and ultimately cost Knight more than \$460 million. The company needed emergency financing within days.
+**Mechanism**: The deployment repurposed a binary feature flag that activated legacy Power Peg code on the un-updated eighth server. Because the cumulative-share counter had been relocated in prior refactoring, the stale server entered an un-throttled loop, transmitting parent order requests at $\sim 1,400\text{ orders/sec}$ ($T_{\text{comm}} < 1\text{ ms}$). In 45 minutes, the router executed 4 million transactions (440 million shares), incurring a \$460 million loss because execution latency $L_{\text{lat}}$ outstripped monitoring loop synchronization time $T_{\text{sync}}$.
 
-**Systems lesson**: Deployment is a systems problem that extends well beyond code. Configuration drift and partial rollouts are catastrophic failure modes in automated systems. ML deployments inherit the same risk surface: a model registry pointing at the wrong version, a feature schema drifting between training and serving, or a partial canary that wedges half the fleet on a stale routing rule each reproduce the Knight Capital shape with the model in place of the trading engine.
+**Systems lesson**: Automated deployment is a physical control problem where configuration drift across heterogeneous nodes causes catastrophic failure. ML deployments share this exact vulnerability: a model registry version mismatch, un-synchronized feature schemas ($T_{\text{sync}}$ delay), or partial canary routing can flood production with corrupted inference requests before telemetry alerts fire.
 
 :::
 
@@ -2408,11 +2408,11 @@ The remaining question is how alerting mechanisms convert statistical signals in
 
 ::: {#exmp-ml-ops-recommender-monitoring-at-scale .callout-example title="Recommendation monitoring at scale"}
 
-**Context**: A large streaming recommendation service\index{Model Monitoring!recommendation systems} must monitor ranking quality while viewing patterns, content catalogs, and regional cohorts evolve.
+**Context**: A large streaming recommendation service\index{Model Monitoring!recommendation systems} serving $10^5\text{ QPS}$ with a strict $L_{\text{lat}} \le 50\text{ ms}$ P99 inference SLA must monitor ranking quality as user viewing patterns and content catalogs evolve.
 
-**Insight**: Traditional infrastructure monitoring can miss ML-specific degradation as viewing patterns shift, content libraries change, and user cohorts evolve across regions. A stronger monitoring system combines statistical process control\index{Statistical Process Control!anomaly detection} (control charts for detecting metric excursions), cohort-based monitoring\index{Cohort-Based Monitoring!subpopulation tracking} (tracking subpopulations separately), counterfactual evaluation\index{Counterfactual Evaluation!holdout groups} (estimating what would have happened under another ranking or policy), and interleaving experiments\index{Interleaving Experiments!online ranking evaluation} (mixing two rankers in one user experience to compare preference signals) to catch quality loss that aggregate metrics hide.
+**Mechanism**: Traditional infrastructure telemetry (CPU/GPU utilization, HTTP error rates) stays green even when model predictions degrade under concept drift. The monitoring architecture combines statistical process control\index{Statistical Process Control!anomaly detection}, cohort-based subpopulation tracking, counterfactual evaluation, and online interleaving experiments. This multi-layered telemetry filters high-cardinality feature payload volume $D_{\text{vol}}$ against memory bandwidth capacity $\text{BW}$, catching localized cohort decay before aggregate CTR drops.
 
-**Systems lesson**: Alerting is only useful when the monitored signal matches the failure mode. Recommendation systems need cohort and counterfactual signals because global averages can remain stable while specific user groups or content regions degrade.
+**Systems lesson**: Monitoring telemetry is effective only when the signal matches the failure mode. High-throughput recommendation engines require cohort-level and counterfactual signals because global metrics mask regional or subpopulation accuracy degradation.
 
 :::
 
@@ -2925,7 +2925,7 @@ The attribution plot identifies features the model relied on within the failing 
 
 Long-lived production models often accumulate features whose original owners, semantics, or intended use have faded. A feature can be deprecated in application code while still flowing through a feature store, training dataset, or serialized model input contract. The model may learn to ignore it, split signal across a duplicate, or depend on a preprocessing artifact that nobody still owns. Removing such a feature is therefore no longer a local cleanup: it becomes a compatibility change that can affect retraining, serving, monitoring, and downstream analysis.
 
-Features in ML systems do not disappear just because code owners stop thinking about them. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that consumes resources and complicates debugging [@sculley2015hidden].
+Features in ML systems do not disappear just because code owners stop thinking about them. Unused feature payload volume $D_{\text{vol}}$ inflates serialization overhead and consumes memory bandwidth $\text{BW}$ without improving accuracy. Without explicit deprecation policies and feature-store governance, models accumulate "dead code" that degrades $D_{\text{vol}}/\text{BW}$ and complicates debugging [@sculley2015hidden].
 
 :::
 
