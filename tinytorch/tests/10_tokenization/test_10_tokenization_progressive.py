@@ -4,6 +4,11 @@ Tests that Module 10 (Tokenization) works correctly AND that Foundation + Archit
 
 DEPENDENCY CHAIN: 01_tensor → ... → 05_dataloader → ... → 08_training → 09_convolutions → 10_tokenization
 This is where text processing begins for NLP pipelines.
+
+TestModule10TokenizationCore below is what actually exercises Module 10 itself
+(CharTokenizer, BPETokenizer). The remaining classes are regression checks
+confirming modules 01-09 are still stable once Module 10 is in place, they
+previously made up the entire file despite the module-10 framing above.
 """
 
 import numpy as np
@@ -13,6 +18,50 @@ from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
+
+from tinytorch.core.tokenization import CharTokenizer, BPETokenizer
+
+
+class TestModule10TokenizationCore:
+    """Tests Module 10 (Tokenization) itself.
+
+    The rest of this file (below) checks that modules 01-09 remain stable
+    once Module 10 is in place, this class is what actually exercises
+    Module 10's own functionality, which this file's docstring and
+    dependency-chain comment already claimed to do.
+    """
+
+    def test_char_tokenizer_encode_decode_roundtrip(self):
+        """WHAT: Verify CharTokenizer.decode(encode(text)) recovers the text."""
+        tokenizer = CharTokenizer()
+        tokenizer.build_vocab(["hello world"])
+
+        tokens = tokenizer.encode("hello")
+        decoded = tokenizer.decode(tokens)
+
+        assert decoded == "hello"
+
+    def test_bpe_tokenizer_encode_produces_valid_token_ids(self):
+        """WHAT: Verify BPETokenizer.encode produces integer ids within vocab range."""
+        tokenizer = BPETokenizer(vocab_size=64)
+        tokenizer.train(["the quick brown fox jumps over the lazy dog"])
+
+        tokens = tokenizer.encode("the fox")
+
+        assert isinstance(tokens, list)
+        assert len(tokens) > 0
+        assert all(isinstance(t, int) for t in tokens)
+        assert all(0 <= t < len(tokenizer.vocab) for t in tokens)
+
+    def test_bpe_tokenizer_decode_recovers_readable_text(self):
+        """WHAT: Verify BPETokenizer.decode produces non-empty, related text."""
+        tokenizer = BPETokenizer(vocab_size=64)
+        tokenizer.train(["the quick brown fox jumps over the lazy dog"])
+
+        tokens = tokenizer.encode("the fox")
+        decoded = tokenizer.decode(tokens)
+
+        assert len(decoded.strip()) > 0
 
 
 class TestPriorStackStillWorking:
