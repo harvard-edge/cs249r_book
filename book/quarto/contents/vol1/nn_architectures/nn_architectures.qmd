@@ -144,9 +144,7 @@ Choosing an architectural backbone sets the primary memory layout and compute pa
 
 : **Neural Architecture Families**: Each family targets a distinct data structure and exposes a distinct system bottleneck. The bottleneck column reads directly from the iron law: MLPs stress memory bandwidth through dense activations, CNNs stress compute throughput because convolution reuses filters across many pixels, RNNs stress sequential dependencies that prevent parallelism, transformers compute quadratic score interactions and may materialize quadratic score storage, and DLRM stresses memory capacity at terabyte scale through embedding tables. {#tbl-architecture-families}
 
-Five specific model architectures recur throughout this book as Lighthouse Models: consistent reference points that ground abstract concepts in concrete systems reality. These examples are concrete implementations of the Workload Archetypes (Compute Beast, Bandwidth Hog, etc.) introduced in @sec-ml-systems-workload-archetypes-fd10.
-
-To understand *why* these specific models were chosen, consider the history of model evolution through the lens of the Pareto frontier\index{Pareto Frontier} (@fig-efficiency-frontier).
+Five specific model architectures recur throughout this book as Lighthouse Models: consistent reference points that ground abstract concepts in concrete systems reality. These examples are concrete implementations of the Workload Archetypes (Compute Beast, Bandwidth Hog, etc.) introduced in @sec-ml-systems-workload-archetypes-fd10. To understand *why* these specific models were chosen, consider the history of model evolution through the lens of the Pareto frontier\index{Pareto Frontier} (@fig-efficiency-frontier).
 
 ::: {#fig-efficiency-frontier fig-env="figure" fig-pos="htb" fig-cap="**The Efficiency Frontier**: ImageNet Top-1 Accuracy vs. Computational Cost (GMACs). Representative points are compiled from published model reports for AlexNet, VGG, ResNet, Inception, MobileNetV2, EfficientNet, ViT, Swin Transformer, and ConvNeXt [@krizhevsky2012imagenet; @simonyan2014very; @he2016; @szegedy2015; @sandler2018; @tan2019efficientnet; @dosovitskiy2021image; @liu2021swin; @liu2022convnet]. The dashed 'Pareto frontier' is an illustrative trade-off curve rather than a benchmark rerun; exact accuracy and reported compute values vary by model variant, training recipe, implementation, and operation-counting convention (multiply-accumulates vs. floating-point operations). The legend distinguishes six families: legacy CNNs (gray), dense CNNs (blue), efficient Mobile architectures (green), EfficientNet-class models (violet), modern CNNs (orange), and Transformers (red). The frontier is led by the efficient and modern-CNN families; the Transformers trade substantial compute for flexible long-range modeling without dominating it, and ViT-B/16 sits below the frontier." fig-alt="Scatter plot of ImageNet top-1 accuracy against compute cost on a logarithmic horizontal axis. Ten labeled model points use six colors for architecture families, and a gray dashed line connects MobileNet-v2, EfficientNet-B0, ConvNeXt-T, and EfficientNet-B7."}
 
@@ -703,9 +701,7 @@ Three factors create the *learnability gap*\index{Learnability Gap}:
 
 1. **Sample complexity**\index{Sample Complexity}: The UAT provides no bounds on training examples needed. For 28 by 28 images, an MLP treats `{python} MLPDim.mlp_28_dim_str` pixels independently, requiring exponentially many samples to learn spatial correlations. A CNN embeds locality bias, drastically reducing sample requirements. Mathematically, sample complexity can scale exponentially with input dimension for MLPs but polynomially for architectures matching data structure.
 2. **Parameter efficiency**\index{Architecture!parameter efficiency}: The UAT guarantees some width suffices, but provides no constructive bounds. Some function classes require widths that grow rapidly with input dimension, while architectures with a matching compositional structure can represent them more compactly.
-3. **Optimization difficulty**\index{Optimization Difficulty}: Even when optimal weights exist, gradient descent may not find them. MLP loss surfaces exhibit complex topology without the regularizing effect of architectural constraints. Specialized architectures reduce the search space, introducing symmetries that gradient descent exploits.
-
-The classic MNIST\index{MNIST} handwritten digit benchmark illustrates this gap between *representation* and *learnability* concretely.
+3. **Optimization difficulty**\index{Optimization Difficulty}: Even when optimal weights exist, gradient descent may not find them. MLP loss surfaces exhibit complex topology without the regularizing effect of architectural constraints. Specialized architectures reduce the search space, introducing symmetries that gradient descent exploits. The classic MNIST\index{MNIST} handwritten digit benchmark illustrates this gap between *representation* and *learnability* concretely.
 
 ```{python}
 #| echo: false
@@ -1902,6 +1898,8 @@ class CNNLighthouseProfile:
     resnet_3x3_share_pct_str = fmt_percent(round(resnet_3x3_share_pct) / 100, precision=0, commas=False, style='symbol')
 ```
 
+These memory, compute, and data-movement patterns converge in one model that serves as the chapter's reference point for compute-bound vision workloads: the ResNet-50 architecture.
+
 ::: {#lhs-nn-architectures-resnet-50-vision-lighthouse .callout-lighthouse title="ResNet-50 (vision lighthouse)"}
 
 **Why it matters**: ResNet-50 is a reference point for regular, convolution-heavy vision workloads. Its architecture consists almost entirely of dense convolutional layers, making it highly regular and efficient on GPUs. Under batched execution with good data reuse, ResNet-50 performance is typically limited by floating-point throughput (FLOP/s), making it a useful lighthouse for explaining data parallelism, quantization, and batching strategies. @Tbl-nn-architectures-resnet50-profile summarizes the quantitative properties and their system consequences:
@@ -1925,8 +1923,6 @@ class CNNLighthouseProfile:
 \endgroup
 ```
 :::
-
-These memory, compute, and data-movement patterns converge in one model that serves as the chapter's reference point for compute-bound vision workloads: the ResNet-50 architecture.
 
 ::: {#lhs-nn-architectures-mobilenet-efficiency-lighthouse .callout-lighthouse title="MobileNetV2 (efficiency lighthouse)"}
 
@@ -1968,9 +1964,7 @@ With the hardware-mapping caveat in mind, the architectural efficiency of CNNs a
 
 ### Efficient architectures: Keyword spotting {#sec-network-architectures-efficient-architectures-keyword-spotting-0625}
 
-The system implications mentioned earlier assume standard CNN architectures with full convolutions. However, standard convolutions scale as $\mathcal{O}(N \times K^2 \times C_{\text{in}} \times C_{\text{out}})$, a cost often prohibitive for the always-on edge devices introduced with our KWS Lighthouse. To bridge this gap, efficient architectures like **Depthwise Separable CNNs (DS-CNN)**\index{Depthwise Separable Convolution}\index{Convolution!depthwise separable} decompose the standard convolution into two cheaper operations. This factorization, introduced by Sifre in the context of feature extraction [@sifre2014rigid] and popularized by MobileNet [@howard2017mobilenets], reduces cost by separating spatial and channel-wise computation. The depthwise convolution\index{Convolution!depthwise} applies filters to each input channel independently ($K \times K \times C_{\text{in}}$ parameters), and the pointwise convolution\index{Convolution!pointwise} uses a $1{\times}1$ convolution to project channels to the output dimension ($1 \times 1 \times C_{\text{in}} \times C_{\text{out}}$ parameters).
-
-This decomposition reduces parameter count and FLOPs by a factor of roughly $1/C_{\text{out}} + 1/K^2$ (approximately $1/K^2$ for large $C_{\text{out}}$), making real-time audio processing feasible on tiny hardware.
+The system implications mentioned earlier assume standard CNN architectures with full convolutions. However, standard convolutions scale as $\mathcal{O}(N \times K^2 \times C_{\text{in}} \times C_{\text{out}})$, a cost often prohibitive for the always-on edge devices introduced with our KWS Lighthouse. To bridge this gap, efficient architectures like **Depthwise Separable CNNs (DS-CNN)**\index{Depthwise Separable Convolution}\index{Convolution!depthwise separable} decompose the standard convolution into two cheaper operations. This factorization, introduced by Sifre in the context of feature extraction [@sifre2014rigid] and popularized by MobileNet [@howard2017mobilenets], reduces cost by separating spatial and channel-wise computation. The depthwise convolution\index{Convolution!depthwise} applies filters to each input channel independently ($K \times K \times C_{\text{in}}$ parameters), and the pointwise convolution\index{Convolution!pointwise} uses a $1{\times}1$ convolution to project channels to the output dimension ($1 \times 1 \times C_{\text{in}} \times C_{\text{out}}$ parameters). This decomposition reduces parameter count and FLOPs by a factor of roughly $1/C_{\text{out}} + 1/K^2$ (approximately $1/K^2$ for large $C_{\text{out}}$), making real-time audio processing feasible on tiny hardware.
 
 ::: {#lhs-nn-architectures-kws-tinyml-lighthouse .callout-lighthouse title="KWS (TinyML lighthouse)"}
 
@@ -3275,11 +3269,9 @@ During training, all token positions can be processed in parallel, while dense a
 
 Autoregressive decoding generates one token at a time and is often *memory-bandwidth bound* at batch one or small batch sizes. To generate a token, the system performs three broad operations:
 
-1.  Read model weights, with reuse determined by batching and the memory hierarchy (for example, a 70-billion-parameter model stores 140 GB of FP16 weights).
+1.  Read model weights, with reuse determined by batching and the memory hierarchy (for example, a 70-billion-parameter model stores 140 GB of FP16 weights; GPT-2 XL makes the cost of that first step concrete).
 2.  Perform matrix-vector multiplications.
 3.  Read/write the KV Cache.
-
-GPT-2 XL makes the cost of that first step concrete.
 
 ```{python}
 #| echo: false
@@ -3555,7 +3547,7 @@ The architecture therefore breaks the single-device assumption that worked for t
 *   **Move the tables**: Embeddings can live in CPU memory, host memory, or a storage-backed feature system, but every lookup then pays a data-movement cost.
 *   **Partition the tables**: Tables can be split across multiple memory resources so no one device stores the whole model, but each request may need vectors from several partitions.
 
-This chapter only needs the architectural consequence: DLRM turns recommendation into a capacity-management problem before it becomes a compute-optimization problem. The corresponding execution strategies include training-time partitioning in @sec-model-training and hardware support for fast data movement in @sec-hardware-acceleration.
+This chapter only needs the architectural consequence: DLRM turns recommendation into a capacity-management problem before it becomes a compute-optimization problem (for example, at 100 million IDs and 128 FP32 values per ID, one embedding table already consumes most of an 80 GB accelerator budget). The corresponding execution strategies include training-time partitioning in @sec-model-training and hardware support for fast data movement in @sec-hardware-acceleration.
 
 ```{python}
 #| echo: false
@@ -3605,8 +3597,6 @@ class CapacityWall:
 
 # Note: Use CapacityWall.cw_num_items_str directly.
 ```
-
-At 100 million IDs and 128 FP32 values per ID, one embedding table already consumes most of an 80 GB accelerator budget.
 
 ::: {.column-margin}
 ![](images/svg/nn_architectures_capacity_wall.svg){width="100%" fig-alt="Three stacked memory bars: a single item embedding table at 51 GB fits below an 80 GB A100 capacity bar, but an item-plus-user pair at 102 GB overshoots it, no longer fitting on one device."}
@@ -3810,7 +3800,7 @@ $$
 y_i = \gamma \hat{x}_i + \beta
 $$ {#eq-batchnorm-transform}
 
-The parameters $\gamma$ (scale) and $\beta$ (shift) are learned during training, while $\epsilon$ (typically $10^{-5}$) prevents division by zero. The affine transform restores learned scale and shift flexibility, but fixed $\gamma$ and $\beta$ cannot exactly invert varying statistics for every batch.
+The parameters $\gamma$ (scale) and $\beta$ (shift) are learned during training, while $\epsilon$ (typically $10^{-5}$) prevents division by zero. The affine transform restores learned scale and shift flexibility, but fixed $\gamma$ and $\beta$ cannot exactly invert varying statistics for every batch. Normalization often permits larger learning rates in some architectures and training regimes, which can accelerate convergence relative to an otherwise comparable unnormalized network.
 
 ::: {#thrm-nn-architectures-normalization-jacobian-conditioning .callout-theorem title="Normalization Jacobian conditioning"}
 
@@ -3823,8 +3813,6 @@ where $\delta_{ij}$ is the Kronecker delta. This Jacobian couples examples withi
 Batch normalization can improve optimization empirically by standardizing intermediate scales, but it does not by itself prevent vanishing or exploding gradients through an entire network. Its quantitative effect depends on architecture, batch statistics, optimization, and parameterization rather than a universal two-to-fourfold gradient range.
 
 :::
-
-Normalization often permits larger learning rates in some architectures and training regimes, which can accelerate convergence relative to an otherwise comparable unnormalized network.
 
 #### Layer normalization: Architecture independence {#sec-network-architectures-layer-normalization-architecture-independence-24ba}
 

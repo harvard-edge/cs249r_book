@@ -81,11 +81,9 @@ The "source code" is the model architecture (the $O$ term). The framework's job 
 2.  Maximize **Utilization $(\eta_{\text{hw}})$** by matching operations to specialized hardware units like Tensor Cores.
 3.  Minimize **Overhead $(L_{\text{lat}})$** through efficient asynchronous dispatch and graph capture.
 
-Choosing a framework means choosing the compiler that determines *how* efficiently a model uses hardware.
+Choosing a framework means choosing the compiler that determines *how* efficiently a model uses hardware; precision matters: a definition that captures all three responsibilities separates genuine frameworks from numerical libraries that address only one.
 
 :::
-
-Precision matters: a definition that captures all three responsibilities separates genuine frameworks from numerical libraries that address only one.
 
 ::: {#dfn-frameworks-machine-learning-frameworks .callout-definition title="Machine learning frameworks"}
 
@@ -1131,11 +1129,9 @@ fill=green!03](F2){};
 
 ##### Ahead-of-time optimization {.unnumbered}
 
-Because the framework has the complete graph before execution, it can perform ahead-of-time optimization\index{Ahead-of-Time Optimization} [optimizing the graph before runtime] unavailable across uncaptured eager calls. The kernel fusion\index{Kernel Fusion!static graph optimization} opportunity introduced in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 becomes actionable here: because the framework sees `y = x * 2` and `z = y + 1` together in the graph, it can fuse them into `z = x * 2 + 1`, eliminating the intermediate `y` and halving idealized memory traffic. When tensor shapes and lifetimes are known, the compiler can plan memory before execution and reuse buffers whose lifetimes do not overlap; dynamic dimensions may require bounds or runtime allocation. Tensor layouts can also be transformed globally (for example, NCHW to NHWC) to match hardware preferences, though physical layout conversions may still require copies. Dead-code elimination (DCE)[^fn-dce-graph-optimization]\index{Dead Code Elimination} removes operations whose results are unused, and constant folding\index{Constant Folding} precomputes operations on constant values when their inputs are known.
+Because the framework has the complete graph before execution, it can perform ahead-of-time optimization\index{Ahead-of-Time Optimization} [optimizing the graph before runtime] unavailable across uncaptured eager calls. The kernel fusion\index{Kernel Fusion!static graph optimization} opportunity introduced in @sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8 becomes actionable here: because the framework sees `y = x * 2` and `z = y + 1` together in the graph, it can fuse them into `z = x * 2 + 1`, eliminating the intermediate `y` and halving idealized memory traffic. When tensor shapes and lifetimes are known, the compiler can plan memory before execution and reuse buffers whose lifetimes do not overlap; dynamic dimensions may require bounds or runtime allocation. Tensor layouts can also be transformed globally (for example, NCHW to NHWC) to match hardware preferences, though physical layout conversions may still require copies. Dead-code elimination (DCE)[^fn-dce-graph-optimization]\index{Dead Code Elimination} removes operations whose results are unused, and constant folding\index{Constant Folding} precomputes operations on constant values when their inputs are known. These optimizations map directly to iron law terms: kernel fusion can reduce $D_{\text{vol}}$ by avoiding intermediate memory writes, constant folding reduces repeated work, planned allocation can reduce runtime overhead, and dead code elimination removes work and associated data movement when unused computations are present.
 
 [^fn-dce-graph-optimization]: **Dead Code Elimination (DCE)**\index{Dead Code Elimination!graph optimization}: Removes graph nodes whose results are not used by any observable output or side effect. In ML graphs, dead code can arise from unused branches, instrumentation, or computations left behind by graph transformations. Dependency and side-effect analysis determines whether removal is safe.
-
-These optimizations map directly to iron law terms: kernel fusion can reduce $D_{\text{vol}}$ by avoiding intermediate memory writes, constant folding reduces repeated work, planned allocation can reduce runtime overhead, and dead code elimination removes work and associated data movement when unused computations are present.
 
 Compilation frameworks like **XLA (Accelerated Linear Algebra)**\index{XLA!definition}\index{XLA!graph compilation}[^fn-xla-compiler] [@GoogleXLA] take this further, compiling TensorFlow graphs to optimized executables for specific hardware. The benefit is not a fixed multiplier: XLA helps when it can fuse operations, specialize layouts and shapes, and reduce launch or memory overhead, so gains depend on graph structure, backend support, and input-shape stability.
 
@@ -1201,9 +1197,7 @@ traced = torch.jit.trace(conditional_forward, torch.tensor([1.0]))
 
 Tracing records the branch executed by the example input. In this example, converting the tensor condition to a Python Boolean commonly produces a `TracerWarning`; the resulting trace can still follow the captured branch for later inputs that require the other branch. Treating trace warnings as correctness failures is therefore essential when data-dependent Python control flow is present.
 
-TorchScript's historical alternative, scripting\index{JIT Compilation!scripting}, analyzed supported Python source directly and compiled it to TorchScript IR without tracing a sample path [@pytorchTorchScriptDocs]. The scripting compiler preserved supported branching structure but accepted only a restricted Python subset. Current projects should follow the supported `torch.export` and target-runtime guidance rather than select between TorchScript tracing and scripting for new deployment pipelines [@pytorchExportDocs].
-
-Within the historical TorchScript workflow, tracing fit feed-forward models whose tensor paths remained stable for the supported inputs, while scripting handled supported data-dependent control flow without a Python interpreter.
+TorchScript's historical alternative, scripting\index{JIT Compilation!scripting}, analyzed supported Python source directly and compiled it to TorchScript IR without tracing a sample path [@pytorchTorchScriptDocs]. The scripting compiler preserved supported branching structure but accepted only a restricted Python subset. Current projects should follow the supported `torch.export` and target-runtime guidance rather than select between TorchScript tracing and scripting for new deployment pipelines [@pytorchExportDocs]. Within the historical TorchScript workflow, tracing fit feed-forward models whose tensor paths remained stable for the supported inputs, while scripting handled supported data-dependent control flow without a Python interpreter.
 
 Scripting's key advantage was its ability to preserve supported conditionals in the IR, as @lst-torchscript-conditional shows.
 
@@ -1514,9 +1508,7 @@ Where:
 - $T_{\text{compiled}}$ = time per execution in compiled mode (seconds)
 - $T_{\text{compile}}$ = time per compilation or recompilation (seconds; assumed constant)
 
-This model assumes that the compiled artifact remains valid between development changes and that the initial compilation and each recompilation have the same cost.
-
-The decision rule is to compile when $\text{Compilation Benefit} > 1$. The ratio is dimensionless.
+This model assumes that the compiled artifact remains valid between development changes and that the initial compilation and each recompilation have the same cost; under these assumptions, the decision rule is to compile when $\text{Compilation Benefit} > 1$. The ratio is dimensionless.
 
 ```{python}
 #| echo: false
@@ -1947,9 +1939,7 @@ dc = a * db + b * da  # derivative: 1.973
 
 That paired execution propagates one seeded tangent direction alongside the primal values. Its overhead depends on the operations and implementation rather than being exactly 2$\times$. For a scalar loss with $P$ parameters, recovering the full gradient through forward mode requires $P$ independent tangent directions, which may be evaluated separately or batched but still scales with the input dimension.
 
-Forward mode is therefore inefficient for the usual training shape of one scalar loss and millions of parameters. It remains useful when the number of seeded input directions is small and in mixed-mode methods for specialized derivatives such as Jacobian-vector and Hessian-vector products.
-
-For the usual scalar-loss training objective, reverse mode reverses this scaling: one backward traversal computes the requested gradients for all parameters that influence the loss.
+Forward mode is therefore inefficient for the usual training shape of one scalar loss and millions of parameters. It remains useful when the number of seeded input directions is small and in mixed-mode methods for specialized derivatives such as Jacobian-vector and Hessian-vector products. For the usual scalar-loss training objective, reverse mode reverses this scaling: one backward traversal computes the requested gradients for all parameters that influence the loss.
 
 #### Reverse mode {#sec-ml-frameworks-reverse-mode-d328}
 
@@ -2505,9 +2495,7 @@ The execution models covered in @sec-ml-frameworks-execution-problem-e1e1, namel
 - **TensorFlow** [@abadi2016tensorflow] (in its 1.x incarnation) performed symbolic differentiation during graph construction, enabling ahead-of-time optimization. Modern TensorFlow 2.x uses eager execution by default but provides `tf.function` for graph compilation when performance matters [@tensorflowFunctionGuide].
 - **JAX** [@frostig2018compiling] transforms functions rather than tracking operations. The `jax.grad()` transformation returns a new function that computes gradients, enabling composition with `jax.vmap()` for vectorization and `jax.jit()` for compilation. This approach requires pure functions but enables composable program transformations that chain differentiation, vectorization, and compilation in a single expression.
 
-Autodiff implementation differences determine how much debugging visibility, compiler optimization, and deployment portability a team can expect from each framework.
-
-A recurring tension runs through every AD design decision: mathematical correctness demands storing computational history, but hardware imposes strict memory limits. Every framework resolves this tension differently, choosing which activations to checkpoint, which operations to fuse, and how aggressively to trade recomputation for memory. These choices determine which models can train on which hardware, making AD system design one of the most consequential engineering decisions in any framework.
+Autodiff implementation differences determine how much debugging visibility, compiler optimization, and deployment portability a team can expect from each framework. A recurring tension runs through every AD design decision: mathematical correctness demands storing computational history, but hardware imposes strict memory limits. Every framework resolves this tension differently, choosing which activations to checkpoint, which operations to fuse, and how aggressively to trade recomputation for memory. These choices determine which models can train on which hardware, making AD system design one of the most consequential engineering decisions in any framework.
 
 ::: {#chk-frameworks-systems-cost-gradients .callout-checkpoint title="The systems cost of gradients"}
 
@@ -3715,9 +3703,7 @@ for name, param in layer.named_parameters():
 | **JAX/Flax**\index{Flax!JAX neural network library} | `variables["params"]` after `variables = model.init(key, x)` | Separate variable collections (for example, `batch_stats`) |
 | **TensorFlow**                                      | `module.trainable_variables`                                 | `module.non_trainable_variables`                           |
 
-: **Parameter Discovery APIs Across Frameworks**: Each framework exposes a different surface for distinguishing trainable parameters from nontrainable buffers, but all four solve the same underlying problem of letting optimizers find weights to update while preserving state (running statistics, frozen tensors) across forward passes. {#tbl-frameworks-parameter-discovery-apis tbl-colwidths="[23,38,38]"}
-
-Across all four rows, the durable pattern consists of a trainable-parameter accessor for the optimizer and a separate nontrainable-state channel for values that must persist but must not receive gradients.
+: **Parameter Discovery APIs Across Frameworks**: Each framework exposes a different surface for distinguishing trainable parameters from nontrainable buffers, but all four solve the same underlying problem of letting optimizers find weights to update while preserving state (running statistics, frozen tensors) across forward passes. Across all four rows, the durable pattern consists of a trainable-parameter accessor for the optimizer and a separate nontrainable-state channel for values that must persist but must not receive gradients. {#tbl-frameworks-parameter-discovery-apis tbl-colwidths="[23,38,38]"}
 
 ### Mode-dependent behavior { .unnumbered}
 
@@ -4529,13 +4515,11 @@ The model estimates ~`{python} MnistTrainingStepCalc.mnist_total_mflop_str` of w
 - $T_{\text{memory}} \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
 - Assuming `{python} MnistTrainingStepCalc.mnist_n_ops_str` launches, $T_{\text{overhead}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
 
-Under the stated launch-count and per-launch assumptions, the modeled training step is overhead-bound\index{Overhead-Bound!small model training}. Small models are often sensitive to Python dispatch and kernel launch costs, which drives three common production practices:
+Under the stated launch-count and per-launch assumptions, the modeled training step is overhead-bound\index{Overhead-Bound!small model training}. Small models are often sensitive to Python dispatch and kernel launch costs, which drives three common production practices that all serve to reduce the dispatch term rather than changing the model's mathematical work:
 
 - `torch.compile` can speed favorable small-operation workloads by fusing operations and reducing kernel launches
 - Batch size increases help amortize per-batch overhead
 - Production training uses much larger models where compute dominates
-
-All three responses reduce the dispatch term rather than changing the model's mathematical work.
 
 ### Phase 4: Hardware abstraction (solving the abstraction problem) {.unnumbered}
 
