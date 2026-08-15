@@ -436,7 +436,7 @@ These measurement failures share a deeper limitation: a benchmark on a static da
 # │          fix the 4x slowdown and 10x beam expansion.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, check
+from mlsysim.fmt import fmt, check, fmt_multiple
 
 class GoodhartBLEUCalc:
     """BLEU leaderboard gain that violates the serving latency budget."""
@@ -475,20 +475,11 @@ class GoodhartBLEUCalc:
 
 ::: {#exmp-benchmarking-goodharts-law-action .callout-example title="Goodhart's Law in action"}
 
-**Trap**: Optimizing for a single metric often degrades others.
+**Scenario**: An engineering team optimizes an NMT translation model for offline BLEU score, increasing beam search size from 1 to `{python} GoodhartBLEUCalc.optimized_beam_size_str`.
 
-**Scenario**: A team optimizes a translation model for BLEU score\index{BLEU!metric trap example}, creating a Goodhart's Law\index{Goodhart's Law!BLEU score example} failure.
+**Diagnosis**: The larger beam search achieves a `{python} GoodhartBLEUCalc.bleu_gain_str`-point BLEU gain on paper but increases candidate evaluations by `{python} GoodhartBLEUCalc.candidate_ratio_mult_str`, causing inference latency to explode from `{python} GoodhartBLEUCalc.original_latency_ms_str` to `{python} GoodhartBLEUCalc.optimized_latency_ms_str` (`{python} GoodhartBLEUCalc.latency_slowdown_mult_str` slowdown).
 
-*   **Original model**: BLEU = `{python} GoodhartBLEUCalc.original_bleu_str`, Inference = `{python} GoodhartBLEUCalc.original_latency_ms_str`.
-*   **Optimized model**: BLEU = `{python} GoodhartBLEUCalc.optimized_bleu_str` (a `{python} GoodhartBLEUCalc.bleu_gain_str`-point gain), Inference = `{python} GoodhartBLEUCalc.optimized_latency_ms_str` (`{python} GoodhartBLEUCalc.latency_slowdown_mult_str` slower).
-
-**Analysis**:
-
-*   The `{python} GoodhartBLEUCalc.bleu_gain_str` BLEU gain comes from a larger beam search, which keeps the $k$ most promising partial translations at each decoding step instead of one (beam_size = `{python} GoodhartBLEUCalc.optimized_beam_size_str` vs. beam_size = `{python} GoodhartBLEUCalc.original_beam_size_str`).
-*   **Cost**: `{python} GoodhartBLEUCalc.candidate_ratio_mult_str` more candidate evaluations per step.
-*   **Result**: The optimized model wins the leaderboard while violating the deployed system's latency budget.
-
-**Systems lesson**: Always constrain the optimization. Maximize Accuracy subject to Latency < `{python} GoodhartBLEUCalc.latency_budget_ms_str`.
+**Systems lesson**: Optimizing a single offline model accuracy metric without latency constraints leads to Goodhart's Law failures. Production benchmarks must enforce strict serving latency SLOs (e.g., Latency < `{python} GoodhartBLEUCalc.latency_budget_ms_str`).
 
 :::
 
@@ -1646,29 +1637,11 @@ class MobileNetTradeoffCalc:
 
 ::: {#exmp-benchmarking-benchmarking-vision-model-edge-deployment .callout-example title="Benchmarking a vision model for edge deployment"}
 
-**Scenario**: A team evaluates MobileNetV2 [@sandler2018] for a wildlife camera trap on a Raspberry Pi 4 using the illustrative values below.
+**Scenario**: An edge AI team evaluates MobileNetV2 for a wildlife camera trap on a Raspberry Pi 4 under strict latency and model size limits [@sandler2018].
 
-The critical question is whether the accuracy cost of INT8 is acceptable for this deployment. @Tbl-benchmarking-mobilenet-int8-tradeoff shows that quantization trades a modest accuracy drop for substantial latency and size improvements:
+**Diagnosis**: FP32 execution yields `{python} MobileNetTradeoffCalc.latency_fp32_ms_str` latency (`{python} MobileNetTradeoffCalc.fps_fp32_str` FPS) and `{python} MobileNetTradeoffCalc.size_fp32_mb_str` size. INT8 quantization speeds up inference by `{python} MobileNetTradeoffCalc.latency_speedup_mult_str` to `{python} MobileNetTradeoffCalc.latency_int8_ms_str` (`{python} MobileNetTradeoffCalc.fps_int8_str` FPS) and reduces model size by `{python} MobileNetTradeoffCalc.size_reduction_mult_str`, at a cost of `{python} MobileNetTradeoffCalc.acc_drop_str` Top-1 accuracy.
 
-```{=latex}
-\begingroup
-\renewcommand{\arraystretch}{1.2}
-```
-
-| **Precision** |                   **Latency (ms)**                   |              **Accuracy (Top-1)**             |                   **Model Size**                  |
-|:--------------|:----------------------------------------------------:|:---------------------------------------------:|:-------------------------------------------------:|
-| **FP32**      | `{python} MobileNetTradeoffCalc.latency_fp32_ms_str` | `{python} MobileNetTradeoffCalc.acc_fp32_str` | `{python} MobileNetTradeoffCalc.size_fp32_mb_str` |
-| **INT8**      | `{python} MobileNetTradeoffCalc.latency_int8_ms_str` | `{python} MobileNetTradeoffCalc.acc_int8_str` | `{python} MobileNetTradeoffCalc.size_int8_mb_str` |
-
-: **MobileNetV2 INT8 quantization trade-off**: Illustrative FP32 and INT8 latency, accuracy, and model-size values; not controlled Raspberry Pi measurements. {#tbl-benchmarking-mobilenet-int8-tradeoff}
-
-```{=latex}
-\endgroup
-\vspace*{-1.5ex}
-```
-
-**Systems insight**:
-The `{python} MobileNetTradeoffCalc.latency_speedup_mult_str` speedup and `{python} MobileNetTradeoffCalc.size_reduction_mult_str` size reduction from quantization come at a cost of `{python} MobileNetTradeoffCalc.acc_drop_str` top-1 accuracy. Under these assumptions, INT8 enables about `{python} MobileNetTradeoffCalc.fps_int8_str` compared with `{python} MobileNetTradeoffCalc.fps_fp32_str`; deployment still requires controlled measurement.
+**Systems lesson**: Edge model benchmarking requires evaluating multi-dimensional trade-offs across latency, accuracy, and memory payload. Quantization enables high-throughput edge execution when modest accuracy drops meet product requirements.
 
 :::
 
@@ -1798,18 +1771,11 @@ As a concrete example, a smartphone camera AI for real-time object detection may
 
 ::: {#exmp-benchmarking-benchmarking-edge .callout-example title="Benchmarking the edge"}
 
-**Scenario**: An engineering team is selecting a device for a smart doorbell. The vendor claims the chip runs "AI at 1 W."
+**Scenario**: An edge engineering team benchmarks a smart doorbell chip with a vendor-advertised "1 W AI" power specification.
 
-**Setup**: A continuous object detection loop is run.
+**Diagnosis**: Early burst-mode testing matches vendor claims, but continuous inference loop execution builds up junction heat, triggering thermal throttling and dropping steady-state throughput.
 
-**Observation**:
-
-1.  **Early burst**: The chip runs quickly at the advertised power point.
-2.  **Heat buildup**: Sustained inference raises junction temperature.
-3.  **Thermal throttling**: The clock speed drops to stay inside the thermal envelope.
-4.  **Steady state**: The chip stabilizes at a lower throughput than the burst result.
-
-**Systems insight**: The peak result is not the product reality. A user experience designed around burst throughput is broken from the start. Always benchmark sustained performance, not just peak.
+**Systems lesson**: Short burst benchmarks obscure long-term thermal throttling. Benchmarking edge ML workloads requires continuous, sustained execution testing to reflect true operational hardware limits.
 
 :::
 
@@ -2587,11 +2553,11 @@ A critical distinction in inference benchmarking is between component latency (t
 
 ::: {#exmp-benchmarking-json-serialization-trap .callout-example title="The JSON serialization trap"}
 
-**Scenario**: Researchers at Berkeley developed Clipper, a low-latency model serving system. Their evaluation decomposed serving latency into model execution, queueing, serialization and deserialization, and network-stack overhead [@crankshaw2017clipper].
+**Scenario**: Researchers evaluating the Clipper low-latency model serving system decomposed end-to-end request latency across network, CPU serialization, and model execution [@crankshaw2017clipper].
 
-**Failure mode**: For lightweight models, serialization, deserialization, and language/runtime boundaries can consume more time than model execution. Text encodings can add CPU parsing cost, while cross-language boundaries can add copies and serialization. Whether these costs dominate depends on the model and workload.
+**Diagnosis**: For lightweight models, CPU-side JSON deserialization and IPC data copying consume more wall-clock time than accelerator neural network execution.
 
-**Systems insight**: Serving-protocol overhead must be measured rather than assumed. Clipper found its RPC overhead minimal on the tested GPU workloads, while lighter models can expose more of the surrounding wrapper cost [@crankshaw2017clipper]. Binary protocols can reduce text parsing, and shared-memory formats can avoid repeated serialization when processes run on the same host.
+**Systems lesson**: Reporting isolated model inference latency misses end-to-end serving bottlenecks. Production benchmarking must account for CPU data parsing, IPC serialization, and network transport overhead.
 
 :::
 

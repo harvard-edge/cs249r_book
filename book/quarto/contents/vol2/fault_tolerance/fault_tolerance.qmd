@@ -2120,11 +2120,11 @@ Tools like **Fidelity**\index{Fidelity} [@he2020fidelity] address this gap by ma
 
 ::: {#exmp-fault-tolerance-software-fault-injection-limits .callout-example title="Software fault injection limits"}
 
-**Scenario**: A team validates a training system with software fault injection and concludes that a particular tensor bit flip always corrupts model output.
+**Scenario**: An engineering team validates a distributed training pipeline using software fault injection, concluding that tensor bit-flips always corrupt model gradient updates.
 
-**Mechanism**: Physical beam testing can produce a different result because hardware includes **masking effects**\index{Masking Effect} below the software abstraction. A bit flip in a hardware register might be corrected by ECC memory or masked by logical gates before it ever reaches the variable that software tools mutate directly.
+**Diagnosis**: Physical beam testing reveals that software injection bypasses low-level hardware masking effects (such as ECC memory correction and gate-level masking) that prevent register-level bit-flips from ever mutating software variables.
 
-**Systems lesson**: Software fault injection is useful for fast coverage of model-visible states, but it can overstate vulnerability when it bypasses circuit-level defenses. Production resilience claims therefore need a hardware-calibrated fault model, not software injection alone.
+**Systems lesson**: Software fault injection overstates vulnerability when it bypasses circuit-level hardware defenses. Production resilience validation requires hardware-calibrated fault models rather than isolated software state mutation alone.
 
 :::
 
@@ -2571,11 +2571,11 @@ class CheckpointStorm:
     storm_payload_tb_str = fmt_qty(payload, TB, precision=0, commas=False)
 ```
 
-**Scenario**: A training job saves a distributed checkpoint from thousands of accelerators at the same instant.
+**Scenario**: A `{python} CheckpointStorm.storm_workers_str` distributed training cluster flushes per-worker model/embedding shards (`{python} CheckpointStorm.storm_shard_gb_str` each) to shared storage at the same step instant.
 
-**Mechanism**: For the `{python} CheckpointOverheadCalc.archA_ckpt_tb_str` mixed-precision optimizer footprint in the Archetype A row above—not the `{python} CheckpointOverheadCalc.archA_fp32_tb_str` full FP32 total—`{python} CheckpointOverheadCalc.archA_workers_str` would each write roughly `{python} CheckpointOverheadCalc.archA_shard_gb_str` of state. The same mechanism becomes catastrophic in embedding-heavy recommendation or trillion-parameter mixture-of-experts jobs: `{python} CheckpointStorm.storm_workers_str`, each holding a `{python} CheckpointStorm.storm_shard_gb_str` shard of model or embedding state, can flood the network fabric with `{python} CheckpointStorm.storm_payload_tb_str` of simultaneous writes.
+**Diagnosis**: Simultaneous un-coordinated writes emit `{python} CheckpointStorm.storm_payload_tb_str` of network traffic at once. Switch buffers overflow, packet drops spike, and shared storage controllers lock up, stalling the cluster.
 
-**Systems lesson**: A checkpoint storm occurs when massive parallel writes overwhelm the cluster's I/O infrastructure, causing switch buffers to overflow and storage controllers to lock up.
+**Systems lesson**: Simultaneous worker checkpointing triggers catastrophic I/O storms. Distributed platforms must stagger checkpoint flushes or buffer writes through asynchronous host-memory staging drives.
 
 :::
 
@@ -2673,47 +2673,11 @@ class CheckpointDebug:
 
 ::: {#exmp-fault-tolerance-debugging-checkpoint-overhead .callout-example title="Debugging checkpoint overhead"}
 
-**Problem**: A team training a `{python} CheckpointDebug.params_b_str` parameter model observes that checkpointing takes `{python} CheckpointDebug.observed_write_min_str` per checkpoint, far exceeding their expected `{python} CheckpointDebug.target_write_min_str` target. Training throughput has dropped `{python} CheckpointDebug.overhead_pct_str` because the cluster sits idle during checkpoints. Diagnose the bottleneck and identify the recovery path.
+**Scenario**: A `{python} CheckpointDebug.n_nodes_str`-node cluster training a `{python} CheckpointDebug.params_b_str` parameter model spends `{python} CheckpointDebug.observed_write_min_str` per checkpoint (a `{python} CheckpointDebug.overhead_pct_str` throughput penalty), missing the `{python} CheckpointDebug.target_write_min_str` target.
 
-**Diagnosis**: The fleet stack exposes where the checkpoint overhead comes from.
+**Diagnosis**: All `{python} CheckpointDebug.n_nodes_str` compete synchronously for a single 10 Gbps shared NFS link (`{python} CheckpointDebug.nfs_gb_per_s_str`), reducing per-node write bandwidth to `{python} CheckpointDebug.per_node_mb_per_s_str`. The 10-minute pause is a physical bandwidth bottleneck that adding more workers cannot resolve.
 
-The fleet stack framework in @fig-fleet-stack structures our investigation across three layers.
-
-**Analysis**: The infrastructure layer reveals the hardware constraints.
-
-The diagnosis begins at the bottom of the stack:
-
-- **Model state size**\index{Model State Size}: `{python} CheckpointDebug.params_b_str` parameters $\times$ `{python} CheckpointDebug.bytes_per_param_weights_value_str` bytes (BF16) = `{python} CheckpointDebug.weights_gb_str` for weights, plus `{python} CheckpointDebug.optimizer_gb_str` for FP32 Adam optimizer states (first and second moments), totaling approximately `{python} CheckpointDebug.total_ckpt_gb_str` per checkpoint before gradients, master weights, metadata, or framework overhead
-- **Storage system**\index{Storage!system}: Shared NFS filer with 10 Gbps network attachment
-- **Theoretical bandwidth**\index{Bandwidth!theoretical}: 10 Gbps = `{python} CheckpointDebug.nfs_gb_per_s_str` maximum throughput
-- **Minimum write time**\index{Minimum Write Time}: `{python} CheckpointDebug.total_ckpt_gb_str` / `{python} CheckpointDebug.nfs_gb_per_s_str` = `{python} CheckpointDebug.min_write_s_str` (`{python} CheckpointDebug.min_write_min_str`)
-
-The infrastructure layer reveals our first insight: even with perfect efficiency, the NFS bandwidth cannot achieve a 2-minute checkpoint for this model size.
-
-**Analysis**: The distribution layer shifts the diagnosis from raw bandwidth to checkpoint coordination.
-
-- **Checkpoint mode**: Synchronous, all `{python} CheckpointDebug.n_gpus_str` pause and wait
-- **Write pattern**\index{Write Pattern}: All `{python} CheckpointDebug.n_nodes_str` writing simultaneously to shared NFS
-- **Observed behavior**\index{Observed Behavior}: writes that take `{python} CheckpointDebug.observed_write_min_str` instead of the `{python} CheckpointDebug.min_write_min_str` theoretical minimum
-
-The Distribution Layer reveals the shared-storage bottleneck. With `{python} CheckpointDebug.n_nodes_str` competing for 10 Gbps, each node effectively receives only `{python} CheckpointDebug.per_node_mb_per_s_str`, the 10 Gbps link split evenly across all `{python} CheckpointDebug.n_nodes_str`. If the checkpoint is sharded evenly, each node writes about `{python} CheckpointDebug.per_node_shard_gb_str`, so the write still lands near `{python} CheckpointDebug.per_node_write_min_str`. The observed `{python} CheckpointDebug.observed_write_min_str` is therefore close to the bandwidth floor, not something more simultaneous NFS writers can solve.
-
-**Analysis**: The governance layer connects the bottleneck to the completion target.
-
-- **SLA requirement**\index{SLA!requirement}: Training must complete within `{python} CheckpointDebug.sla_weeks_str`
-- **Current trajectory**: `{python} CheckpointDebug.overhead_pct_str` overhead extends training to `{python} CheckpointDebug.extended_weeks_str`
-- **Budget impact**: Extended training incurs additional `{python} CheckpointDebug.extra_cost_k_str` in compute costs
-
-**Fix**: A layer-aware checkpoint path removes the critical-path storage bottleneck.
-
-1. **Infrastructure layer**\index{Infrastructure Layer}: Install local Non-Volatile Memory Express (NVMe) staging drives (`{python} CheckpointDebug.nvme_bw_gb_per_s_str` per node).
-2. **Distribution Layer**\index{Distribution Layer}: Implement asynchronous checkpointing:
-   - Phase 1: GPU $\rightarrow$ CPU memory copy (fast, `{python} CheckpointDebug.pcie_gb_per_s_str` PCIe)
-   - Phase 2: CPU $\rightarrow$ local NVMe (`{python} CheckpointDebug.nvme_bw_gb_per_s_str`, training resumes)
-   - Phase 3: Background NVMe $\rightarrow$ NFS copy (overlapped with training)
-3. **Validation**\index{Validation}: The critical-path data copy drops to approximately `{python} CheckpointDebug.gpu_cpu_parallel_s_str` if GPU-to-CPU staging proceeds in parallel across `{python} CheckpointDebug.n_nodes_str` (or `{python} CheckpointDebug.gpu_cpu_single_path_s_str` if serialized through one `{python} CheckpointDebug.pcie_gb_per_s_str` path), reducing training impact from `{python} CheckpointDebug.overhead_pct_str` to under `{python} CheckpointDebug.residual_overhead_pct_str` once background NVMe and NFS copies are overlapped.
-
-**Systems lesson**: Diagnosing distributed systems failures requires examining all layers. A purely algorithmic fix (Distribution Layer) would fail because the physical bandwidth was insufficient. A purely hardware fix (infrastructure layer) would be wasteful without understanding the coordination pattern. The solution required changes at multiple layers working in concert.
+**Systems lesson**: Checkpoint overhead cannot be solved by algorithmic adjustments alone when physical I/O bandwidth is saturated. Implementing asynchronous NVMe staging (GPU $\to$ host CPU $\to$ local NVMe $\to$ background NFS) reduces critical-path pause time to under `{python} CheckpointDebug.residual_overhead_pct_str`.
 
 :::
 

@@ -400,16 +400,11 @@ class AutoPlacement:
 
 ::: {#exmp-sustainable-ai-automated-carbon-aware-scheduling-tier-3-optimizer .callout-example title="Automated carbon-aware placement"}
 
-**Scenario**: A team is planning a large training run requiring `{python} AutoPlacement.energy_mwh_str` of energy, choosing between three regions with different electricity prices and carbon intensities.
+**Scenario**: A team is planning a large training run requiring `{python} AutoPlacement.energy_mwh_str` of energy, choosing between three candidate data center regions with different electricity prices and carbon intensities.
 
-**Problem**: With an internal carbon tax of `{python} AutoPlacement.carbon_tax_str`, which region minimizes the true Total Cost of Ownership (TCO)\index{Total Cost of Ownership!carbon-aware placement}?
+**Diagnosis**: Evaluating raw electricity rates alone favors regions with cheap fossil power. With an internal carbon tax of `{python} AutoPlacement.carbon_tax_str`, the `PlacementOptimizer` synthesizes grid carbon intensity and regional rates, selecting `{python} AutoPlacement.best_region_str` for a total cost of `{python} AutoPlacement.total_tco_str`.
 
-**Approach**: The `PlacementOptimizer` synthesizes grid carbon intensity, regional electricity rates, and the carbon tax into a single optimization objective, then evaluates the design space to select the global minimum.
-
-*   **Optimal region**: Carbon-aware scheduling\index{Carbon-Aware Scheduling!optimal region} selects `{python} AutoPlacement.best_region_str`.
-*   **Total projected cost**: `{python} AutoPlacement.total_tco_str` (including carbon penalty).
-
-**Systems insight**: In a pure energy-cost-only model, engineers might choose the region with the lowest raw electricity rate. Once a carbon tax is introduced, the optimization objective internalizes a cost that would otherwise sit outside the engineering budget. The optimizer shows that the hydro-powered grid in `{python} AutoPlacement.best_region_str` is the most cost-effective choice, because the carbon savings more than offset any marginal difference in electricity pricing.
+**Systems lesson**: Carbon-aware placement internalizes environmental externalities into the fleet scheduling objective. The optimizer proves that high-renewables grids minimize true TCO when carbon penalties are factored into ML workload placement.
 
 :::
 
@@ -1470,17 +1465,15 @@ The **energy roofline model**\index{Energy Roofline Model} (@fig-energy-roofline
 
 To make this framework concrete, we can apply it to the most common operation in deep learning: matrix multiplication.
 
-::: {#exmp-sustainable-ai-matmul-energy-analysis .callout-example title="MatMul energy analysis"}
+::: {#nbk-sustainable-ai-matmul-energy-analysis .callout-notebook title="MatMul energy analysis"}
 
-Consider matrix multiplication $\mathbf{C} = \mathbf{A} \times \mathbf{B}$ for $N_{\text{mat}}{\times}N_{\text{mat}}$ matrices in FP32 precision on a GPU with the energy characteristics above.
+**Problem**: How do matrix dimensions $N_{\text{mat}}$ dictate whether arithmetic energy $E_{\text{compute}}$ or memory energy $E_{\text{move}}$ dominates matrix multiplication $\mathbf{C} = \mathbf{A} \times \mathbf{B}$?
 
-**Step 1**: Calculate FLOPs and bytes.
+**Math**:
 
-- FLOPs: $2N_{\text{mat}}^3$ (one multiply-add for each of $N_{\text{mat}}^2$ output elements, accumulating over $N_{\text{mat}}$ elements)
-- Bytes: $3N_{\text{mat}}^2 \times 4$ bytes (read matrices $\mathbf{A}$ and $\mathbf{B}$, write matrix $\mathbf{C}$, each FP32 = 4 bytes)
-- Arithmetic intensity: $\text{AI} = \frac{2N_{\text{mat}}^3}{12N_{\text{mat}}^2} = \frac{N_{\text{mat}}}{6}$ FLOP/byte
-
-**Step 2**: Determine the energy-limiting factor. @Tbl-matmul-energy-bottleneck-comparison compares the three regimes directly.
+1. **Operation & byte count**: $2N_{\text{mat}}^3$ FLOPs and $12N_{\text{mat}}^2$ bytes (FP32 precision).
+2. **Arithmetic intensity**: $\text{AI} = \frac{N_{\text{mat}}}{6}$ FLOP/byte.
+3. **Regime comparison**: @Tbl-matmul-energy-bottleneck-comparison compares energy terms across small, large, and vector work.
 
 | **Workload**                                                                 | **Arithmetic intensity**                                   | **Compute energy**                                    | **Memory energy**                                    | **Optimization priority**           |
 |:-----------------------------------------------------------------------------|:-----------------------------------------------------------|:------------------------------------------------------|:-----------------------------------------------------|:------------------------------------|
@@ -1674,9 +1667,9 @@ class TrainingEmissions:
     embodied_quebec_total_share_pct_str = fmt_percent(embodied_quebec_total_share_pct / 100, precision=1, commas=False, style='prose')
 ```
 
-::: {#exmp-sustainable-ai-training-emissions-calculation .callout-example title="Training emissions calculation"}
+::: {#nbk-sustainable-ai-training-emissions-calculation .callout-notebook title="Training emissions calculation"}
 
-Consider training a 7 billion parameter model on `{python} TrainingEmissions.n_gpus_str` A100 GPUs for `{python} TrainingEmissions.training_days_str`:
+**Problem**: Quantify the operational carbon footprint of training a 7B parameter model on `{python} TrainingEmissions.n_gpus_str` A100 GPUs for `{python} TrainingEmissions.training_days_str`.
 
 ```{python}
 #| echo: false
@@ -1692,27 +1685,11 @@ class A100PowerScenario:
     a100_tdp_w_str = fmt_power(a100_tdp, unit=watt, precision=0, commas=False)
 ```
 
-**Step 1**: Compute energy.
+**Math**:
 
-- GPU power: `{python} A100PowerScenario.a100_tdp_w_str` per A100 at typical training utilization
-- Training time: `{python} TrainingEmissions.training_days_str` $\times$ `{python} TrainingEmissions.hours_per_day_str` = `{python} TrainingEmissions.training_hours_str`
-- GPU energy: `{python} TrainingEmissions.n_gpus_str` $\times$ `{python} A100PowerScenario.a100_tdp_w_str` $\times$ `{python} TrainingEmissions.training_hours_str` = `{python} TrainingEmissions.gpu_energy_wh_str` = `{python} TrainingEmissions.gpu_energy_kwh_str`
-
-**Step 2**: Add IT support power and apply PUE.
-
-- IT energy after rack-profile support load: `{python} TrainingEmissions.it_energy_kwh_str`
-- Facility PUE: `{python} TrainingEmissions.pue_str` (efficient hyperscale data center)
-- Total facility energy: `{python} TrainingEmissions.it_energy_kwh_str` $\times$ `{python} TrainingEmissions.pue_str` = `{python} TrainingEmissions.facility_energy_kwh_str`
-
-**Step 3**: Calculate emissions.
-
-- Grid carbon intensity: `{python} TrainingEmissions.grid_ci_g_per_kwh_str` CO~2~ (US average)
-- Operational emissions: `{python} TrainingEmissions.facility_energy_kwh_str` $\times$ `{python} TrainingEmissions.grid_ci_g_per_kwh_str` = `{python} TrainingEmissions.emissions_kg_str` = `{python} TrainingEmissions.emissions_tons_str`
-
-**Analysis**: Same training in low-carbon region.
-
-- Quebec grid intensity: `{python} TrainingEmissions.quebec_ci_g_per_kwh_str` (low-carbon grid)
-- Emissions: `{python} TrainingEmissions.facility_energy_kwh_str` $\times$ `{python} TrainingEmissions.quebec_ci_g_per_kwh_str` = `{python} TrainingEmissions.quebec_emissions_kg_str`
+1. **Compute energy**: `{python} TrainingEmissions.n_gpus_str` GPUs $\times$ `{python} A100PowerScenario.a100_tdp_w_str` $\times$ `{python} TrainingEmissions.training_hours_str` hours = `{python} TrainingEmissions.gpu_energy_kwh_str`.
+2. **Apply PUE & IT support**: Total facility energy = `{python} TrainingEmissions.it_energy_kwh_str` $\times$ `{python} TrainingEmissions.pue_str` = `{python} TrainingEmissions.facility_energy_kwh_str`.
+3. **Calculate emissions**: On US average grid (`{python} TrainingEmissions.grid_ci_g_per_kwh_str` $\text{CO}_2$/kWh), emissions = `{python} TrainingEmissions.emissions_tons_str`. On Quebec hydro grid (`{python} TrainingEmissions.quebec_ci_g_per_kwh_str`), emissions = `{python} TrainingEmissions.quebec_emissions_kg_str`.
 
 **Systems insight**: The geographic choice alone produces a `{python} TrainingEmissions.emissions_ratio_mult_str` difference in training emissions. Carbon-aware placement changes the environmental cost without changing the model architecture.
 
@@ -2666,13 +2643,11 @@ In a training cluster, the picture is radically different. All accelerators exec
 
 ::: {#exmp-sustainable-ai-power-ramp-sizing .callout-example title="Power-ramp sizing"}
 
-**Scenario**: A 512-GPU training cluster experiences intermittent node resets during synchronized training steps. The failures appear unrelated to the model code.
+**Scenario**: A 512-GPU training cluster experiences intermittent node resets during synchronized training steps.
 
-**Failure mode**: Hardware diagnostics show no component defects. The likely root cause is the power delivery chain: synchronous training steps can create a few-hundred-kilowatt load step -- roughly 300 kW for a 600 W idle-to-peak swing across 512 GPUs before facility overhead -- that exceeds the response time of upstream power-conditioning equipment.
+**Diagnosis**: Synchronous matrix multiplication steps create a 300 kW load step within microseconds (600 W idle-to-peak swing per GPU), exceeding upstream power-conditioning response times. Resulting voltage sags trigger accelerator undervoltage protection and hard resets.
 
-**Consequence**: Voltage sags can trigger accelerator undervoltage protection circuits and force hard resets. The mitigation is local ride-through capacity, such as supercapacitor banks, that smooths the transient until slower UPS and facility systems respond.
-
-**Systems insight**: ML clusters do not behave like traditional data center workloads: the *temporal correlation* of power demand across thousands of chips creates a qualitatively different electrical engineering challenge.
+**Systems lesson**: Synchronous training steps create microsecond power ramps that stress data center power delivery. Adding local ride-through capacity (supercapacitor banks) smooths transient load steps until UPS and facility systems respond.
 
 :::
 
@@ -3333,29 +3308,21 @@ $$P_{\text{average}} = 0.30 \text{ mW} + 0.032 \text{ mW} = 0.33 \text{ mW}$$
 
 At this average power, a 250 mAh coin cell battery (at 3.0V nominal) provides approximately 2,270 hours of operation, nearly 95 days of continuous always-on AI inference. This calculation demonstrates how TinyML enables sustainable AI deployment scenarios impossible with higher-power platforms. These power-aware design principles carry directly into practical industrial deployment scenarios.
 
-::: {#exmp-sustainable-ai-battery-life-tinyml .callout-example title="Battery life for TinyML"}
+::: {#nbk-sustainable-ai-battery-life-tinyml .callout-notebook title="Battery life for TinyML"}
 
-Consider deploying an anomaly detection model on a factory sensor node:
+**Problem**: Calculate the operating lifetime of an anomaly-detection TinyML autoencoder deployed on a factory sensor node running on two AA batteries (3000 mAh at 3.0V).
 
-**System parameters**:
+**Variables**:
 
-- Model: Autoencoder for vibration anomaly detection
 - MCU: ARM Cortex-M4 at 80 MHz
-- Inference latency: 5 ms per sample
-- Sampling rate: 10 Hz (100 ms period)
-- Active power: 12 mW during inference
-- Sleep power: 5 microamps at 3.3V (16.5 microwatts)
-- Battery: two AA cells (3000 mAh at 3.0V)
+- Active power: 12 mW during 5 ms inference at 10 Hz (5 percent duty cycle)
+- Sleep power: 16.5 $\mu\text{W}$ (5 $\mu\text{A}$ at 3.3V) during 95 ms sleep
 
-**Step 1**: Calculate duty cycle and average power.
-$$\delta_{\text{duty}} = \frac{5 \text{ ms}}{100 \text{ ms}} = 0.05 \text{ (5\% duty cycle)}$$
+**Math**:
 
-$$P_{\text{avg}} = 12 \text{ mW} \times 0.05 + 0.0165 \text{ mW} \times 0.95 = 0.60 + 0.016 = 0.616 \text{ mW}$$
-
-**Step 2**: Calculate battery life.
-$$E_{\text{battery}} = 3000 \text{ mAh} \times 3.0 \text{ V} = 9000 \text{ mWh}$$
-
-$$t_{\text{life}} = \frac{9000 \text{ mWh}}{0.616 \text{ mW}} = 14,610 \text{ hours} \approx 1.7 \text{ years}$$
+1. **Average power**: $P_{\text{avg}} = 12 \text{ mW} \times 0.05 + 0.0165 \text{ mW} \times 0.95 = 0.616 \text{ mW}$.
+2. **Battery capacity**: $E_{\text{battery}} = 3000 \text{ mAh} \times 3.0 \text{ V} = 9000 \text{ mWh}$.
+3. **Battery lifetime**: $t_{\text{life}} = \frac{9000 \text{ mWh}}{0.616 \text{ mW}} \approx 14,610 \text{ hours} \approx 1.7 \text{ years}$.
 
 **Systems insight**: The deployment achieves continuous AI-powered monitoring for nearly two years on standard batteries, demonstrating the sustainability potential of TinyML systems designed with power-aware principles.
 

@@ -383,30 +383,24 @@ class FairnessWorkedExample:
     fpr_b_pct_str = fmt_percent(round(fpr_b, 2), precision=0, commas=False, style='prose')
 ```
 
-::: {#exmp-responsible-ai-calculating-fairness-metrics .callout-example title="Calculating fairness metrics"}
+::: {#nbk-responsible-ai-calculating-fairness-metrics .callout-notebook title="Calculating fairness metrics"}
 
-Consider a simplified loan approval model evaluated on 200 applicants, evenly split between two demographic groups (Group A and Group B). The model makes predictions, and we later observe actual repayment outcomes:
+**Problem**: Calculate Demographic Parity across two demographic groups (100 applicants each) for a loan approval model.
 
-**Group A (100 applicants)**:
+**Variables**:
 
-- Model approved: 70 applicants (40 actually repaid, 30 defaulted)
-- Model rejected: 30 applicants (5 actually would have repaid, 25 would have defaulted)
+- Group A: 70 approved (40 repaid, 30 defaulted), 30 rejected.
+- Group B: 40 approved (30 repaid, 10 defaulted), 60 rejected.
 
-**Group B (100 applicants)**:
+**Math**:
 
-- Model approved: 40 applicants (30 actually repaid, 10 defaulted)
-- Model rejected: 60 applicants (20 actually would have repaid, 40 would have defaulted)
+1. **Group A approval rate**: $\Pr(h(x) = 1 \mid A = a) = \frac{70}{100} = 0.70$.
+2. **Group B approval rate**: $\Pr(h(x) = 1 \mid A = b) = \frac{40}{100} = 0.40$.
+3. **Parity gap**: `{python} FairnessWorkedExample.parity_gap_math` (30 percentage point gap).
 
-**Calculating demographic parity**:
-\begin{gather*}
-\Pr(h(x) = 1 \mid A = a) = \frac{70}{100} = 0.70
-\\
-\Pr(h(x) = 1 \mid A = b) = \frac{40}{100} = 0.40
-\end{gather*}
+**Systems insight**: Evaluating Demographic Parity exposes group approval rate disparities regardless of ground-truth repayment capability, requiring explicit metric selection during model threshold calibration.
 
-**Disparity**: `{python} FairnessWorkedExample.parity_gap_math` (30 percentage point gap)
-
-The model violates demographic parity by approving Group A applicants at substantially higher rates, regardless of actual repayment ability.
+:::
 
 **Calculating equality of opportunity (true positive rate)**:
 
@@ -787,56 +781,43 @@ class CostOfFairness:
     acc_constrained_pct_str = fmt_percent(acc_constrained, precision=0, commas=False, style='prose')
 ```
 
-::: {#exmp-responsible-ai-engineering-metric-cost-fairness .callout-example title="Engineering metric: The cost of fairness"}
+::: {#nbk-responsible-ai-engineering-metric-cost-fairness .callout-notebook title="Engineering metric: The cost of fairness"}
 
-**Trade-off**: Satisfying a fairness constraint often requires deviating from the optimal accuracy threshold. This deviation is the "fairness tax."
+**Problem**: Quantify the overall accuracy drop ("fairness tax") when imposing Demographic Parity on a credit scoring model across Group A (majority) and Group B (minority).
 
-**Scenario**: A credit model scores applicants from 0 to 100, using the same held-out credit validation set as the fairness-tax example.
+**Variables**:
 
-*   **Group A (majority)**: Mean score 70, High repayment rate. Optimal $\text{Threshold} = 60$.
-*   **Group B (minority)**: Mean score 50, Lower repayment rate (due to systemic factors).
+- Group A: Mean score 70, repayment rate high, unconstrained threshold = 60.
+- Group B: Mean score 50, repayment rate lower, unconstrained threshold = 60.
 
-**Unconstrained optimization (max profit)**:
+**Math**:
 
-*   $\text{Threshold} = 60$ for everyone.
-*   $\text{Approval}_A =$ `{python} CostOfFairness.approval_a_pct_str`, $\text{Approval}_B =$ `{python} CostOfFairness.approval_b_pct_str`.
-*   $\text{Accuracy} =$ `{python} CostOfFairness.acc_unconstrained_pct_str`.
+1. **Unconstrained optimization**: Single threshold = 60 yields overall accuracy = `{python} CostOfFairness.acc_unconstrained_pct_str`.
+2. **Demographic parity constraint**: Equalizing Group B approval with Group A requires lowering Group B threshold to 50.
+3. **Fairness tax**: Overall accuracy drops to `{python} CostOfFairness.acc_constrained_pct_str`, incurring a `{python} CostOfFairness.tax_pp_str` absolute accuracy penalty (`{python} CostOfFairness.tax_relative_pct_str` relative drop).
 
-**Fairness constrained (demographic parity)**:
-
-*   Constraint: Group B Approval must equal Group A (`{python} CostOfFairness.approval_a_pct_str`).
-*   New $\text{Threshold}_B = 50$.
-*   **Result**: Group B false positives increase. Overall accuracy drops to `{python} CostOfFairness.acc_constrained_pct_str`.
-
-**Systems insight**: The "Cost of Fairness" is `{python} CostOfFairness.tax_pp_str` of accuracy, about a `{python} CostOfFairness.tax_relative_pct_str` relative accuracy drop in this scenario. The engineering decision requires weighing this measured accuracy trade-off against social equity gains.
+**Systems insight**: The "Cost of Fairness" is `{python} CostOfFairness.tax_pp_str` of accuracy. System designers must weigh this measured accuracy trade-off against social equity gains when configuring production thresholding rules.
 
 :::
 
 The preceding example measured the aggregate accuracy drop from imposing demographic parity, but it did not show how the system enforces the constraint at decision time. In practice, equalization requires setting group-specific thresholds: one threshold for the majority group and a different, lower threshold for the minority group. Differential thresholds require access to sensitive attributes at inference time and raise concerns about explicit group-based treatment, which may itself be considered unfair or illegal in certain jurisdictions. The mechanics become clearer in a concrete threshold-setting scenario.
 
-::: {#exmp-responsible-ai-threshold-equal-opportunity .callout-example title="Threshold for equal opportunity"}
+::: {#nbk-responsible-ai-threshold-equal-opportunity .callout-notebook title="Threshold for equal opportunity"}
 
-Consider a credit scoring model that outputs a probability $s(x) \in [0,1]$. Historical data shows:
+**Problem**: Calculate group-specific thresholds required to equalize True Positive Rates (Equal Opportunity) across Group A and Group B in a credit scoring model.
 
-**Group A**: 1000 applicants, 600 would repay ($Y=1$), 400 would default ($Y=0$)
+**Variables**:
 
-- Score distribution for $Y=1$: Mean $\mu_A^+ = 0.72$, SD $\sigma_A^+ = 0.15$
-- Score distribution for $Y=0$: Mean $\mu_A^- = 0.45$, SD $\sigma_A^- = 0.18$
+- Group A ($Y=1$): $\mu_A^+ = 0.72$, $\sigma_A^+ = 0.15$.
+- Group B ($Y=1$): $\mu_B^+ = 0.65$, $\sigma_B^+ = 0.16$.
 
-**Group B**: 1000 applicants, 400 would repay ($Y=1$), 600 would default ($Y=0$)
+**Math**:
 
-- Score distribution for $Y=1$: Mean $\mu_B^+ = 0.65$, SD $\sigma_B^+ = 0.16$
-- Score distribution for $Y=0$: Mean $\mu_B^- = 0.40$, SD $\sigma_B^- = 0.17$
+1. **Single threshold ($\tau = 0.60$)**: Yields $\text{TPR}_a \approx 0.79$ vs. $\text{TPR}_b \approx 0.62$ (a 17 percentage point gap).
+2. **Equalizing thresholds**: Lowering Group B's threshold to $\tau_b = 0.52$ while holding $\tau_a = 0.60$ equalizes $\text{TPR}_b \approx 0.79$.
+3. **Trade-off**: Group B's false positive rate increases from 0.12 to 0.24, dropping precision for Group B from 0.78 to 0.69.
 
-Assuming the conditional score distributions are approximately normal with the stated means and standard deviations, using a single threshold $\tau_{\text{thr}} = 0.60$ for both groups yields true positive rates:
-\begin{align*}
-\text{TPR}_a &= \Pr(s(x) \geq 0.60 \mid A=a, Y=1) \approx 0.79 \\
-\text{TPR}_b &= \Pr(s(x) \geq 0.60 \mid A=b, Y=1) \approx 0.62
-\end{align*}
-
-This 17 percentage point gap violates equal opportunity. To equalize Group B's TPR to Group A's approximately 0.79 rate, we could lower Group B's threshold to $\tau_{\text{thr},b} = 0.52$ while keeping $\tau_{\text{thr},a} = 0.60$. However, this adjustment increases Group B's false positive rate from about 0.12 to about 0.24, degrading precision for Group B applicants from about 0.78 to about 0.69.
-
-**Systems insight**: This illustrates the fundamental trade-off: achieving equal opportunity through threshold adjustment increases false positives and lowers precision for the group receiving the lower threshold. The threshold policy does not alter calibration of the underlying score model, but it can make positive decisions carry different predictive values across groups. The decision involves weighing opportunity equity against prediction reliability.
+**Systems insight**: Achieving Equal Opportunity through threshold adjustment increases false positives and lowers precision for the group receiving the lower threshold. Threshold policies do not alter underlying score calibration, requiring designers to weigh opportunity equity against precision degradation.
 
 :::
 
@@ -1069,11 +1050,11 @@ The principles and techniques examined above provide the conceptual and technica
 
 ::: {#exmp-responsible-ai-fairness-audit .callout-example title="Choosing a fairness metric"}
 
-**Scenario**: A hiring recommendation model must choose the critical fairness metric before launch.
+**Scenario**: A hiring recommendation engine must select its primary fairness constraint before production launch across heterogeneous applicant pools.
 
-**Question**: Which metric best matches a setting where qualified candidates should have comparable opportunity across groups?
+**Diagnosis**: Demographic Parity forces equal selection rates regardless of candidate qualification, while Calibration only ensures equal score precision across groups. Equal Opportunity specifically mandates equal True Positive Rates among qualified applicants ($\text{TPR}_A = \text{TPR}_B$), directly matching the goal of equal opportunity for qualified talent.
 
-**Answer**: Equality of opportunity directly matches this goal because it requires equal true positive rates among qualified candidates. Equalized odds would add a separate requirement that false positive rates also be equal. Demographic parity can force rejection of qualified candidates when base rates differ, while calibration only ensures that a score such as 0.8 has the same meaning across groups.
+**Systems lesson**: Metric selection is a governance decision that sets the operational objective of the serving pipeline. System designers must align the mathematical constraint with the domain's legal and ethical requirements before training or thresholding.
 
 :::
 
@@ -2480,9 +2461,7 @@ Responsible machine learning cannot be reduced to the optimization of a single o
 
 **Scenario**: An adolescent mental health crisis detection pipeline must balance competing stakeholder objectives across real-time inference and data retention paths.
 
-**Trade-off**: Optimizing clinical efficacy via aggressive alert dispatch conflicts with patient autonomy and privacy protocols. Restricting data retention to protect user privacy limits offline retraining and explanation auditing, while routing high-confidence alerts to human counselors increases per-query serving cost and latency ($L_{\text{lat}}$).
-
-**Mechanism**: The system encodes trade-offs into architectural constraints before model training: local differential privacy bounds input exposure, on-device thresholding gates emergency escalation, and strict SLA budgets ($L_{\text{lat}} < 200\text{ ms}$) cap human-in-the-loop review queues.
+**Diagnosis**: Optimizing clinical efficacy via aggressive alert dispatch conflicts with patient autonomy and privacy protocols. Restricting data retention to protect user privacy limits offline retraining and explanation auditing, while routing high-confidence alerts to human counselors increases per-query serving cost and latency ($L_{\text{lat}}$). Local differential privacy bounds input exposure while strict SLA budgets ($L_{\text{lat}} < 200\text{ ms}$) cap human-in-the-loop review queues.
 
 **Systems lesson**: Responsible AI trade-offs are hard architectural requirements, not after-the-fact policy notes. The deployment pipeline must encode stakeholder choices into explicit latency ($L_{\text{lat}}$) and privacy budgets before optimization begins.
 

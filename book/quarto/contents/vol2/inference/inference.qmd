@@ -1045,26 +1045,11 @@ class DynamicBatchingResNet50:
 
 ::: {#exmp-dynamic-batching-resnet50 .callout-example title="Dynamic batching for ResNet-50"}
 
-Consider a vision classification service with the following requirements:
+**Scenario**: A vision classification service receives requests at `{python} DynamicBatchingResNet50.arrival_qps_str` with a `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99 latency SLO across `{python} DynamicBatchingResNet50.replicas_str` replicas.
 
-- **Arrival rate**: `{python} DynamicBatchingResNet50.arrival_qps_str`
-- **Latency SLO**: `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99
-- **Batch service time**: `{python} DynamicBatchingResNet50.svc_b1_ms_str` at batch=1, `{python} DynamicBatchingResNet50.svc_b32_ms_str` total for batch=32
-- **Number of replicas**: `{python} DynamicBatchingResNet50.replicas_str` (each handling `{python} DynamicBatchingResNet50.per_replica_qps_str`)
+**Diagnosis**: Serving requests individually (no batching) overloads the system (`{python} DynamicBatchingResNet50.rho_a_eq_math` utilization). Implementing dynamic batching windows (Option B: `{python} DynamicBatchingResNet50.twindow_b_ms_str`, Option C: `{python} DynamicBatchingResNet50.twindow_c_ms_str`) packs requests to lower per-request compute time, achieving up to `{python} DynamicBatchingResNet50.capacity_gain_pct_str` higher per-replica capacity within the latency SLO.
 
-For a single replica with Poisson arrivals at $\lambda_{\text{arr}} =$ `{python} DynamicBatchingResNet50.per_replica_qps_str`:
-
-The three choices in @tbl-dynamic-batching-resnet50-policy differ only in how much latency budget they convert into batch size:
-
-| **Policy**  | **Batching window**                                 | **Expected batch**                                   | **Per-request compute**                             | **Utilization**                                  | **Latency outcome**                                               |
-|:------------|:----------------------------------------------------|:-----------------------------------------------------|:----------------------------------------------------|:-------------------------------------------------|:------------------------------------------------------------------|
-| No batching | 0 ms                                                | 1 request                                            | `{python} DynamicBatchingResNet50.svc_b1_ms_str`    | `{python} DynamicBatchingResNet50.rho_a_eq_math` | Overloaded; cannot meet demand                                    |
-| Dynamic B   | `{python} DynamicBatchingResNet50.twindow_b_ms_str` | `{python} DynamicBatchingResNet50.eb_b_str` requests | `{python} DynamicBatchingResNet50.per_req_b_ms_str` | `{python} DynamicBatchingResNet50.rho_b_eq_math` | ~`{python} DynamicBatchingResNet50.lat_b_ms_str` mean, ~30 ms P99 |
-| Dynamic C   | `{python} DynamicBatchingResNet50.twindow_c_ms_str` | `{python} DynamicBatchingResNet50.eb_c_str` requests | `{python} DynamicBatchingResNet50.per_req_c_ms_str` | `{python} DynamicBatchingResNet50.rho_c_eq_math` | ~`{python} DynamicBatchingResNet50.lat_c_ms_str` mean, ~42 ms P99 |
-
-: **Dynamic batching policy comparison**: Option C achieves about `{python} DynamicBatchingResNet50.capacity_gain_pct_str` higher per-replica capacity, or `{python} DynamicBatchingResNet50.util_drop_pct_str` lower utilization, at the cost of higher average latency. Both dynamic batching policies meet the `{python} DynamicBatchingResNet50.latency_slo_ms_str` P99 SLO. {#tbl-dynamic-batching-resnet50-policy}
-
-**Systems insight**: Dynamic batching is useful only when the latency budget has slack. The serving policy converts unused latency headroom into higher throughput, but the same window would violate an already tight SLO.
+**Systems lesson**: Dynamic batching is effective when the latency budget has unused slack. The serving policy converts latency headroom into throughput, but requires careful tuning to prevent SLO violations.
 
 :::
 
@@ -1136,13 +1121,11 @@ The following implementation study examines how vLLM realizes continuous batchin
 
 ::: {#exmp-inference-continuous-batching-vllm .callout-example title="Continuous batching in vLLM"}
 
-vLLM implements continuous batching with several key mechanisms. Iteration-level scheduling evaluates at each decode step which sequences have generated end-of-sequence tokens (remove from batch), which waiting sequences can fit in available KV cache slots (add to batch), and which sequences should be preempted if memory pressure exists (swap to CPU). Memory management uses PagedAttention (detailed in @sec-inference-scale-kv-cache-management-04ed), which enables dynamic allocation without fragmentation. When a sequence completes, its KV cache pages are immediately available for new sequences. The batched decode kernel processes all active sequences in a single batched operation despite dynamic batch composition. Sequences at different generation lengths are padded to a common shape within the kernel.
+**Scenario**: An LLM serving engine (vLLM) manages autoregressive generation for incoming requests with highly variable output sequence lengths [@kwon2023].
 
-**Preemption and swapping**\index{Preemption and Swapping}. A critical challenge in continuous batching is memory contention. As sequences grow during generation, they consume more KV cache pages. If the GPU memory fills up, the system cannot simply crash; it must preempt running requests.
+**Diagnosis**: Static batching leaves compute cores idle for over 50 percent of decode steps waiting for the longest request in a batch to finish. Continuous batching evaluates sequence termination at every iteration step, immediately releasing completed KV-cache pages and admitting waiting requests. Under memory pressure, low-priority requests are swapped to CPU DRAM.
 
-vLLM implements a virtual memory mechanism similar to an operating system's swap. When memory is exhausted, the scheduler identifies low-priority requests (for example, those most recently started) and swaps their KV cache blocks from GPU HBM to CPU DRAM. These requests are paused until memory becomes available, at which point they are swapped back in and resumed. This mechanism ensures system stability under heavy load at the cost of increased latency for preempted requests.
-
-**Measured performance**: Across the workloads evaluated in the vLLM study, the complete vLLM system delivered 2--4$\times$ higher throughput than FasterTransformer and Orca at a comparable latency level [@kwon2023]. The gain varied with model size, sequence length, and decoding method, so this range is an empirical result for those configurations rather than a general law for continuous batching.
+**Systems lesson**: Continuous batching decouples batch membership from request-level boundaries. Combining iteration-level scheduling with dynamic paged memory (PagedAttention) yields 2–4$\times$ throughput gains over static batching.
 
 :::
 
@@ -1694,41 +1677,11 @@ class RecsysLatencyBreakdown:
 
 ::: {#exmp-inference-recsys-batching-at-meta-scale .callout-example title="RecSys batching at Meta scale"}
 
-Consider Meta's recommendation infrastructure serving `{python} RecsysLatencyBreakdown.platform_qps_str` across the platform:
+**Scenario**: Meta-scale recommendation infrastructure serves `{python} RecsysLatencyBreakdown.platform_qps_str`, querying `{python} RecsysLatencyBreakdown.lookups_per_request_str` sparse embeddings per request across `{python} RecsysLatencyBreakdown.embedding_shards_str` shards.
 
-**Request characteristics**:
+**Diagnosis**: Single-threaded per-request embedding lookups fail at `{python} RecsysLatencyBreakdown.lookups_per_shard_per_second_million_str` lookups/sec per shard. Accumulating requests over a `{python} RecsysLatencyBreakdown.accumulation_window_ms_str` window forms batches of `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` per shard, converting random memory reads into sequential accesses.
 
-- Each request queries approximately `{python} RecsysLatencyBreakdown.candidate_items_str` (candidate ranking)
-- Each item requires `{python} RecsysLatencyBreakdown.lookups_per_item_str` (user features, item features, cross features)
-- Total per request: `{python} RecsysLatencyBreakdown.lookups_per_request_str`
-- Embedding table size: `{python} RecsysLatencyBreakdown.embedding_table_size_tb_str` across `{python} RecsysLatencyBreakdown.embedding_shards_str`
-
-**Batching strategy**:
-
-With `{python} RecsysLatencyBreakdown.platform_qps_str` and `{python} RecsysLatencyBreakdown.embedding_shards_str`, each shard receives:
-
-$$\text{Lookups per shard} = \frac{\text{QPS} \times \text{lookups/request}}{\text{shards}}$$
-
-In this scenario, the rate is `{python} RecsysLatencyBreakdown.lookups_per_shard_per_second_million_str` per second per shard.
-
-Single-threaded processing cannot sustain that rate. Instead, the system uses a batch accumulation window\index{Batching!batch, accumulation window} of `{python} RecsysLatencyBreakdown.accumulation_window_ms_str`, which yields batches of `{python} RecsysLatencyBreakdown.requests_per_batch_str` at `{python} RecsysLatencyBreakdown.platform_qps_str` and about `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` per shard per batch.
-
-Each embedding shard processes `{python} RecsysLatencyBreakdown.lookups_per_shard_per_batch_k_str` in a batched operation, achieving high memory bandwidth utilization through sequential memory access patterns.
-
-Evaluating the per-phase latency\index{Latency!breakdown} composition (@tbl-inference-recsys-latency-breakdown) highlights how execution time distributes across request routing, batch accumulation, embedding lookup\index{Embedding Lookup}, feature processing, and ranking:
-
-| **Phase**              |                    **Duration**                    |          **Notes**          |
-|:-----------------------|:--------------------------------------------------:|:---------------------------:|
-| **Request routing**    |                       0.2 ms                       | Consistent hashing to shard |
-| **Batch accumulation** |                    0.5 ms (avg)                    |         1 ms window         |
-| **Embedding lookup**   |                        2 ms                        |     Batched, SSD-backed     |
-| **Feature processing** |                        1 ms                        |      Dense computation      |
-| **Ranking model**      |                       1.5 ms                       |        Final scoring        |
-| **Total**              | **`{python} RecsysLatencyBreakdown.total_ms_str`** |       Within 10 ms SLO      |
-
-: **Latency breakdown for a recommender request**: Per-phase contribution to end-to-end latency for a single recommender request at the request volume and shard count in the batching example. {#tbl-inference-recsys-latency-breakdown}
-
-**Systems insight**: Recommendation batching is organized around sparse feature access, not around identical request tensors. The system wins by batching embedding lookups at the shard where memory bandwidth is consumed.
+**Systems lesson**: Recommendation batching is organized around sparse feature locality rather than dense tensor shapes. Batching lookups at the embedding shard level maximizes memory bandwidth utilization within a `{python} RecsysLatencyBreakdown.total_ms_str` end-to-end latency budget.
 
 :::
 
@@ -1746,36 +1699,11 @@ where all components must complete within the inter-frame interval. A streaming 
 
 ::: {#exmp-inference-streaming-speech-recognition-pipeline .callout-example title="Streaming speech recognition pipeline"}
 
-Consider a streaming speech-to-text system with 20 ms audio frames:
+**Scenario**: A real-time streaming speech-to-text pipeline processes 20 ms audio frames under a strict 100 ms end-to-end latency budget (5 frames max delay).
 
-**Latency budget**\index{Latency Budget}: 100 ms end-to-end (5 frames of delay)
+**Diagnosis**: Traditional batching introduces intolerable waiting latency. The pipeline must process frames incrementally ($T_{\text{streaming}} = T_{\text{capture}} + T_{\text{transfer}} + T_{\text{inference}} + T_{\text{action}}$), overlapping audio capture with acoustic model evaluation.
 
-@Tbl-inference-streaming-speech-pipeline traces the per-stage latency\index{Pipeline!stages}, including feature extraction\index{Feature Extraction}, that the pipeline must hit to stay within the 100 ms budget:
-
-| **Stage**              |    **Duration**   |          **Notes**          |
-|:-----------------------|:-----------------:|:---------------------------:|
-| **Audio capture**      | 0 ms (continuous) |      Microphone buffer      |
-| **Network to server**  |       20 ms       |   Including jitter buffer   |
-| **Feature extraction** |        5 ms       |       MFCC computation      |
-| **Encoder inference**  |       30 ms       |     Streaming Conformer     |
-| **Decoder step**       |       15 ms       |  CTC or transducer decoding |
-| **Text formatting**    |        5 ms       | Capitalization, punctuation |
-| **Network to client**  |       15 ms       |    Response transmission    |
-| **Total**              |     **90 ms**     |     Within 100 ms budget    |
-
-: **Streaming speech recognition pipeline latency**: Per-stage latency for a streaming speech-to-text pipeline operating on 20 ms audio frames against a 100 ms end-to-end budget. {#tbl-inference-streaming-speech-pipeline}
-
-Here, a Streaming Conformer is the low-latency speech encoder, while CTC and transducer decoding are incremental decoders that emit text from frame-level acoustic states without waiting for the full utterance.
-
-**Key constraints**:
-
-- No batching: Each frame processes individually
-- Stateful model: Encoder maintains context across frames
-- Pipeline parallelism: While frame N is in decoder, frame N+1 is in encoder
-
-GPU utilization is typically 30--50 percent for streaming workloads, traded for latency guarantee.
-
-**Systems insight**: Streaming inference deliberately sacrifices accelerator utilization to preserve end-to-end latency. The binding constraint is the inter-frame deadline, not average throughput.
+**Systems lesson**: Streaming inference prioritizes per-frame latency over batch throughput. When inter-frame intervals are tight, batching is removed and execution is optimized for continuous incremental pipelining.
 
 :::
 
@@ -2089,7 +2017,7 @@ class KVCacheCapacityEstimator:
     )
 ```
 
-::: {#exmp-inference-kv-cache-capacity-estimator .callout-example title="KV-cache capacity estimator"}
+::: {#nbk-inference-kv-cache-capacity-estimator .callout-notebook title="KV-cache capacity estimator"}
 
 **Problem**: A deployment serves Llama-3-70B (FP16 weights $\approx$ `{python} KVCacheCapacityEstimator.weight_gb_str`) on an `{python} KVCacheCapacityEstimator.node_gpus_str`$\times$ H100 node (`{python} KVCacheCapacityEstimator.total_hbm_gb_str` total HBM). The goal is to determine the maximum batch size for a context length of 128K tokens.
 
@@ -2190,60 +2118,11 @@ Together, these properties turn KV cache capacity into a schedulable resource ra
 
 ::: {#exmp-inference-pagedattention-implementation-details .callout-example title="PagedAttention implementation details"}
 
-**Memory layout**\index{Memory Layout}:
+**Scenario**: An LLM inference server allocates KV cache memory contiguously for incoming sequences based on maximum sequence length (e.g., 4,096 tokens).
 
-```
-Physical blocks (16 tokens by hidden_dim by 2 by precision):
-Block 0:  [K₀...K₁₅, V₀...V₁₅]
-Block 1:  [K₀...K₁₅, V₀...V₁₅]
-...
-Block N:  [K₀...K₁₅, V₀...V₁₅]
-```
+**Diagnosis**: Contiguous pre-allocation suffers from internal and external memory fragmentation, wasting 60 to 70 percent of GPU HBM (30 to 40 percent pool utilization). PagedAttention maps virtual sequence pages to non-contiguous physical HBM blocks (e.g., 16 tokens/block) via per-sequence page tables, executing non-contiguous gather operations in custom attention kernels.
 
-**Page table per sequence**\index{Page Table Per Sequence}:
-
-```{.python}
-class PageTable:
-    def __init__(self, max_blocks):
-        self.block_map = {}  # logical_block -> physical_block
-
-    def allocate_block(self, logical_idx, physical_block):
-        self.block_map[logical_idx] = physical_block
-
-    def get_physical(self, logical_idx):
-        return self.block_map[logical_idx]
-```
-
-**Attention kernel modification**:
-
-Standard attention: `output = softmax(Q @ K.T/sqrt(d)) @ V`
-
-PagedAttention:
-```{.python}
-def paged_attention(Q, page_table, physical_blocks, block_size):
-    # Gather K, V from noncontiguous physical blocks.
-    key_blocks = []
-    value_blocks = []
-    for logical_idx in range(len(page_table)):
-        physical_idx = page_table[logical_idx]
-        key_blocks.append(physical_blocks[physical_idx].K)
-        value_blocks.append(physical_blocks[physical_idx].V)
-
-    # Normalize over every logical token, not independently per block.
-    K = concatenate(key_blocks, axis=-2)
-    V = concatenate(value_blocks, axis=-2)
-    attention_scores = Q @ K.T / sqrt(d)
-    return softmax(attention_scores, axis=-1) @ V
-```
-
-**Systems insight**: The throughput impact\index{PagedAttention!throughput impact} of gather operations is small compared to the memory savings; @tbl-inference-pagedattention-throughput shows the 2.5--4$\times$ throughput improvement coming from fitting more concurrent sequences in the same memory.
-
-| **Approach**       | **KV Cache Pool Utilization** | **Throughput (relative)** |
-|:-------------------|:-----------------------------:|:-------------------------:|
-| **Contiguous**     |             30-40%            |   1.0$\times$ (baseline)  |
-| **PagedAttention** |              95%+             |       2.5--4$\times$      |
-
-: **PagedAttention vs. Contiguous KV Cache**: KV cache pool utilization and relative serving throughput for contiguous allocation against PagedAttention. {#tbl-inference-pagedattention-throughput}
+**Systems lesson**: PagedAttention eliminates internal and external memory fragmentation. Increasing KV cache pool utilization from 30 to 40 percent to over 95 percent allows serving engines to pack significantly more concurrent sequences, achieving 2.5–4$\times$ higher throughput.
 
 :::
 
@@ -2403,7 +2282,7 @@ class PrefixCachingAnalysis:
     kv_cached_factors_math = fmt_math(rf"\times {n_kv_pairs} \times {n_layers} \times {hidden_dim} \times {bytes_per_element} =")
 ```
 
-::: {#exmp-inference-prefix-caching-at-scale .callout-example title="Prefix caching at scale"}
+::: {#nbk-inference-prefix-caching-at-scale .callout-notebook title="Prefix caching at scale"}
 
 **Scenario**: A chatbot service uses a `{python} PrefixCachingAnalysis.system_prompt_tokens_str`-token system prompt and serves `{python} PrefixCachingAnalysis.concurrent_users_str` concurrent users.
 
@@ -2728,119 +2607,21 @@ That budget determines how many sequences can coexist before the scheduler must 
 
 ::: {#exmp-inference-kv-cache-memory-hierarchy .callout-example title="KV cache memory hierarchy"}
 
-Production systems manage KV-cache memory pressure across the three-tier hierarchy in @tbl-inference-kv-cache-memory-hierarchy, paging from GPU HBM down to CPU DRAM and NVMe SSD as the active working set exceeds each tier's capacity:
+**Scenario**: A multi-tenant LLM serving system experiences KV-cache HBM exhaustion (80 GB limit) during peak concurrency.
 
-| **Tier**     | **Capacity** | **Latency** | **Use Case**      |
-|:-------------|:------------:|:-----------:|:------------------|
-| **GPU HBM**  |    80 GB     |     0 ms    | Active sequences  |
-| **CPU DRAM** |     1 TB     |    1–5 ms   | Swapped sequences |
-| **NVMe SSD** |    10 TB     |   10–50 ms  | Long-term cache   |
+**Diagnosis**: Pure HBM allocation limits node concurrency to 50 active sequences. Evicting or dropping requests degrades user experience. Implementing a 3-tier memory hierarchy (HBM $\to$ CPU DRAM $\to$ NVMe SSD) allows swapping inactive sequence pages to CPU DRAM (1–5 ms swap latency) or NVMe (10–50 ms).
 
-: **KV cache memory hierarchy**: Capacity, swap-in latency, and intended use case for the three tiers production inference servers use to manage KV-cache memory pressure. {#tbl-inference-kv-cache-memory-hierarchy tbl-colwidths="[20,20,16,44]"}
-
-**Swap implementation**:
-
-```{.python}
-async def swap_to_cpu(sequence_id):
-    kv_cache = gpu_cache[sequence_id]
-    cpu_cache[sequence_id] = kv_cache.cpu()  # Async transfer
-    gpu_cache.free(sequence_id)
-
-
-async def swap_to_gpu(sequence_id):
-    cpu_kv = cpu_cache[sequence_id]
-    gpu_cache[sequence_id] = cpu_kv.cuda()  # Async transfer
-    cpu_cache.free(sequence_id)
-```
-
-**Observed performance**:
-
-- GPU-only (no swapping): 50 concurrent sequences
-- GPU+CPU swapping: 500 concurrent sequences (10$\times$)
-- Average swap latency: 3 ms (acceptable for nonurgent requests)
-
-**Systems insight**: Treating CPU DRAM and NVMe as overflow tiers behind HBM raises concurrency by an order of magnitude at the cost of millisecond swap latency, so paging is a throughput lever for non-urgent traffic but not a substitute for HBM capacity on the latency-critical path.
+**Systems lesson**: Multi-tier KV-cache paging increases concurrent sequence capacity by 10$\times$ (50 to 500 sequences). Paging to CPU DRAM serves as a throughput lever for non-urgent traffic, but swap latency makes it unviable for latency-critical decode steps.
 
 :::
-
-The mismatch swapping papers over remains structural: a single GPU must handle both the compute-heavy prompt processing and the bandwidth-heavy token generation. Separating those phases onto different hardware pools eliminates this mismatch entirely.
-
-### Disaggregated serving: Splitting the workload {#sec-inference-scale-disaggregated-serving-splitting-workload-b8f9}
-
-LLM inference consists of two distinct phases with different computational characteristics, requiring different batching strategies within the same request. @Fig-disaggregated-serving illustrates how this architectural split separates the two phases onto dedicated hardware pools, and @tbl-prefill-decode contrasts their resource profiles.
-
-::: {#fig-disaggregated-serving fig-env="figure" fig-pos="htb" fig-cap="**Disaggregated Serving Architecture**: Separating the compute-bound prefill phase from the bandwidth-bound decode phase. Requests enter the Prefill Pool for prompt processing, and the resulting KV cache is migrated to the Decode Pool for token generation. This allows each phase to run on hardware optimized for its specific bottleneck, improving overall fleet efficiency." fig-alt="System diagram showing Request entering a Prefill Pool of high-compute GPUs. Red dashed arrow labeled KV Cache Transfer points to a Decode Pool of high-memory-bandwidth GPUs. Response exits from the Decode Pool."}
-![](images/svg/disaggregated-serving.svg)
-:::
-
-::: {#dfn-inference-prefill-decode-phases .callout-definition title="Prefill and decode phases"}
-
-***Prefill and Decode Phases***\index{Prefill and Decode!definition}\index{Inference!prefill vs. decode} are the two distinct computational regimes of transformer-based LLM inference.
-
-1.  **Significance**: The Prefill Phase\index{Prefill Phase} (processing the prompt) is compute bound $(R_{\text{peak}})$ with high arithmetic intensity, while the Decode Phase\index{Decode Phase} (generating tokens) is bandwidth bound $(\text{BW})$\index{Bandwidth-Bound} with extremely low arithmetic intensity. This mismatch means a single request's efficiency $(\eta_{\text{hw}})$ varies wildly during its lifecycle.
-2.  **Distinction**: Unlike Single-Pass Inference (for example, ImageNet), where the resource bottleneck is constant, LLM inference switches between these regimes at every request, requiring Iteration-Level Scheduling to maintain utilization.
-3.  **Common pitfall**: A frequent misconception is that both phases should be batched together naively. In reality, because they have opposing hardware requirements, mixing them in the same batch without Chunked Prefill or similar techniques can lead to significant queuing delays $(L_{\text{lat}})$ for decoding tokens.
-
-:::
-
-The prefill phase processes the entire input prompt in parallel. Computation scales with prompt length, and the memory access pattern\index{Memory Access} is compute-bound with high arithmetic intensity[^fn-arithmetic-intensity-serving].
-
-[^fn-arithmetic-intensity-serving]: **Arithmetic Intensity (Prefill vs. Decode)**\index{Arithmetic Intensity!serving}: Measured in FLOP/byte of memory accessed, this ratio determines whether a workload is compute-bound or bandwidth-bound. Prefill achieves 100+ FLOP/byte (compute-bound); decode achieves 1--10 FLOP/byte (bandwidth-bound). This 10--100$\times$ gap is why mixing the two phases in a single batch wastes either compute or bandwidth, motivating disaggregated serving architectures.
-
-The decode phase, by contrast, generates output tokens one at a time. Each token requires loading the entire model weights, making the memory access pattern bandwidth-bound with low arithmetic intensity. @Sec-appdx-fleet-foundations-roofline places these two phases on the roofline: decode sits far below the ridge point of @eq-fleet-ridge-point, where throughput is set by HBM bandwidth rather than peak FLOP/s, while prefill's high arithmetic intensity (@eq-fleet-arithmetic-intensity) pushes it past the ridge into the compute-bound regime.
-
-| **Phase**   | **Computation**                                                                                                | **Memory Access**              | **Bottleneck** | **Optimal Batch**                         |
-|:------------|:---------------------------------------------------------------------------------------------------------------|:-------------------------------|:--------------:|:------------------------------------------|
-| **Prefill** | $\mathcal{O}(\text{prompt length}^2)$                                                                          | Activation and attention tiles |    Compute     | Moderate request batches or large chunks  |
-| **Decode**  | $\mathcal{O}(1)$ dense weight work plus $\mathcal{O}(\text{context length})$ attention over KV cache per token | Weight and KV-cache reads      |   Bandwidth    | Large continuous batches of active tokens |
-
-: **Prefill vs. Decode Characteristics**: The two phases have opposite optimization requirements. {#tbl-prefill-decode}
-
-Because decode is bandwidth-bound, hardware that shrinks the bytes moved per token attacks that phase's binding constraint directly.
-
-::: {#psp-inference-fp4-decode-bandwidth .callout-perspective title="FP4 as a bandwidth lever for decode"}
-
-Native hardware support for narrow formats is the current manifestation of this approach. The Blackwell (B200) architecture introduces native **FP4 support**\index{FP4 Support}, making 4-bit inference a first-class hardware target rather than a framework-specific workaround. Halving weight and KV-cache bytes relative to FP8 raises token throughput and concurrent-sequence capacity without increasing clock speed, which is what loosens the decode-pool sizing in a disaggregated deployment. The product is point-in-time, and the exact cost-per-token gain depends on model architecture, kernel maturity, batch shape, and the fraction of time spent in prefill versus decode, so production systems should validate FP4 with workload-specific benchmarks rather than assuming a fixed multiplier.
-
-:::
-
-The dichotomy creates a scheduling challenge: prefill operations are long-running and compute-intensive, while decode operations are short and bandwidth-limited. Mixing them in the same batch can cause interference. The GPU remains powered and allocated even when decode steps expose little useful compute, so low-utilization decode traffic can dominate energy cost unless the scheduler keeps the hardware busy with compatible work.
-
-**Chunked prefill**\index{Chunked Prefill!latency}[^fn-chunked-prefill-latency] addresses this by breaking long prompts into fixed-size chunks that interleave with decode operations:
-
-[^fn-chunked-prefill-latency]: **Chunked Prefill**: Without chunking, a long prompt can block decode while prefill completes, violating inter-token latency SLOs for concurrent users. Chunking divides the prompt into smaller work units processed between decode iterations, bounding decode stalls at the cost of slightly longer total prefill time. The trade-off is a classic latency-vs.-throughput decision: interactive applications favor smaller chunks; batch workloads can favor larger ones.
-
-$$\text{Chunk latency} = \frac{\text{Chunk size}}{\text{Prefill throughput}}$$
-
-With chunk size chosen to match decode iteration time, prefill and decode can share GPU resources without decode latency spikes.
-
-Prefill-decode disaggregation takes this separation further by running prefill and decode on separate GPU pools. The prefill pool\index{Prefill Pool} is optimized for compute intensity, using nodes with high TFLOP/s, moderate request batches, or large token chunks to maximize throughput without blocking decode. The decode pool\index{Disaggregated Serving!decode pool} is optimized for memory bandwidth, using nodes with maximum HBM capacity, the Tier 0 storage resource discussed in @sec-storage-tier0-hbm, to handle thousands of concurrent autoregressive streams.
-
-Independent scaling follows directly: prefill capacity scales with input volume while decode capacity scales with output volume. Crucially, this architecture relies on the high-speed, RDMA-enabled networking fabric established in @sec-network-fabrics. When a prefill finishes, the resulting KV cache (often megabytes of data) must be migrated to a decode node within the inter-token latency budget, typically under 10 ms. InfiniBand's low-microsecond latency and high bisection bandwidth are the physical enablers of this logical disaggregation, a displacement of overhead that trades communication bandwidth for specialized prefill and decode hardware.
-
-Chunked prefill can be formalized into a practical scheduling algorithm that limits decode stalls from long prompts.
 
 ::: {#exmp-inference-sarathi-chunked-prefill-implementation .callout-example title="Sarathi: Chunked prefill implementation"}
 
-The Sarathi-Serve system [@agrawal2024sarathi] implements chunked prefills with stall-free scheduling:
+**Scenario**: An LLM inference server receives a mix of long input prompts (10k+ tokens) and interactive short decode requests [@agrawal2024sarathi].
 
-**Chunk sizing**\index{Chunked Prefill!chunk sizing}: Chunks are sized so prefill work can be interleaved with decode iterations. For example, if a deployment targets a 20 ms scheduling quantum and observes 10,000 prefill tokens/second, one chunk would process about 200 tokens. The right chunk size is workload- and hardware-dependent.
+**Diagnosis**: Un-chunked prompt prefills monopolize GPU compute engines for hundreds of milliseconds, blocking decode steps for concurrent requests and triggering severe inter-token latency spikes.
 
-**Interleaving schedule**\index{Chunked Prefill!interleaving schedule}: Each GPU iteration processes either:
-
-- One prefill chunk for a new request, OR
-- One decode step for all active sequences
-
-The schedule reduces decode stalls caused by long incoming prompts.
-
-**KV-cache handoff**\index{KV Cache!handoff}: When a prefill chunk completes, the scheduler has enough KV state to continue the request through later decode work. In disaggregated prefill/decode systems, any physical KV-cache transfer is a separate networking and placement budget rather than a guarantee supplied by Sarathi-Serve itself.
-
-**Performance impact**:
-
-- Without chunking: long prompts can create decode latency spikes for other active requests.
-- With chunking: prefill work is broken into bounded units, so decode iterations can continue to make progress while long prompts enter the system.
-
-**Systems insight**: Chunked prefill turns a long prompt from one blocking request into bounded work units that can coexist with decode traffic.
+**Systems lesson**: Chunked prefill (Sarathi-Serve) divides long prompt prefills into fixed-size chunks (e.g., 200 tokens/chunk), interleaving prefill chunks with decode iterations. Bounding prefill execution time per iteration prevents decode stalls and maintains inter-token SLOs.
 
 :::
 
@@ -3090,48 +2871,11 @@ class TpSpeedupCalc:
 
 ::: {#exmp-inference-tensor-parallelism-llama-70b .callout-example title="Tensor parallelism for Llama-70B"}
 
-Consider serving Llama-70B with the following configuration: [@touvron2023llama2]
+**Scenario**: An engineering team deploys Llama-70B (`{python} TpSpeedupCalc.parameters_b_str` parameters, FP16 footprint `{python} TpSpeedupCalc.weight_fp16_gb_str`) across an 8-GPU H100 node with NVLink [@touvron2023llama2].
 
-**Model specifications**:
+**Diagnosis**: Fitting the model on 2 GPUs (`{python} TpSpeedupCalc.weight_fp16_gb_str`/80 GB) suffers from compute bottlenecks (`{python} TpSpeedupCalc.seq_per_layer_ms_str` per layer). Applying 8-way Tensor Parallelism shards attention and feed-forward layers across all 8 GPUs, reducing per-layer execution to `{python} TpSpeedupCalc.tp8_per_layer_ms_str` despite AllReduce communication overhead.
 
-- Parameters: `{python} TpSpeedupCalc.parameters_b_str`
-- Hidden dimension: `{python} TpSpeedupCalc.hidden_dim_str`
-- Attention heads: `{python} TpSpeedupCalc.attention_heads_str`
-- Layers: `{python} TpSpeedupCalc.n_layers_str`
-
-**Memory per GPU** (weight only, FP16):
-
-`{python} TpSpeedupCalc.mem_70b_eq_math`
-
-**Minimum sharding**: 2-way (`{python} TpSpeedupCalc.weight_fp16_gb_str`/`{python} TpSpeedupCalc.h100_mem_gb_str` per H100)
-
-**Recommended sharding**: 8-way for optimal latency
-
-@Tbl-inference-tp8-layer-breakdown decomposes the per-layer cost of 8-way tensor parallelism on 8$\times$ H100 (NVLink interconnect) into compute and AllReduce phases, exposing the realized 6.9$\times$ speedup as compute scaling minus a small communication tax.
-
-| **Component**             |               **Sequential (1 GPU)**              |                    **8-way TP**                   |                   **Speedup**                    |
-|:--------------------------|:-------------------------------------------------:|:-------------------------------------------------:|:------------------------------------------------:|
-| **Attention compute**     |      `{python} TpSpeedupCalc.att_seq_ms_str`      |       `{python} TpSpeedupCalc.att_tp_ms_str`      |  `{python} TpSpeedupCalc.att_speedup_mult_str`   |
-| **AllReduce (attention)** |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
-| **Feed-forward compute**  |       `{python} TpSpeedupCalc.ff_seq_ms_str`      |       `{python} TpSpeedupCalc.ff_tp_ms_str`       |   `{python} TpSpeedupCalc.ff_speedup_mult_str`   |
-| **AllReduce (FF)**        |                        0 ms                       |    `{python} TpSpeedupCalc.allreduce_tp_ms_str`   |                       N/A                        |
-| **Total per layer**       | **`{python} TpSpeedupCalc.seq_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp8_per_layer_ms_str`** | **`{python} TpSpeedupCalc.tp_speedup_mult_str`** |
-
-: **8-Way Tensor Parallelism Per-Layer Breakdown**: Sequential vs. 8-way tensor-parallel timings for attention, feed-forward, and AllReduce phases of one Llama-70B transformer layer, decomposing the realized 6.9$\times$ speedup into compute scaling and communication tax. {#tbl-inference-tp8-layer-breakdown}
-
-**Layer-stack estimate** (`{python} TpSpeedupCalc.n_layers_str` layers on the same prefill workload):
-
-- Sequential: `{python} TpSpeedupCalc.seq_total_ms_str` for the full prefill pass
-- 8-way TP: `{python} TpSpeedupCalc.tp8_total_ms_str` for the full prefill pass
-
-The `{python} TpSpeedupCalc.tp_speedup_mult_str` speedup (vs. theoretical `{python} TpSpeedupCalc.tp_theoretical_mult_str`) reflects communication overhead. At `{python} TpSpeedupCalc.nvlink_h100_gb_per_s_str`, moving a `{python} TpSpeedupCalc.activation_mb_str` activation payload would take only about 0.01 ms by raw bandwidth math; the 0.3 ms budget shown here includes collective launch, synchronization, ring protocol, and framework overheads.
-
-**Time-to-first-token** (1024-token prompt):
-
-- Prefill compute: ~`{python} TpSpeedupCalc.tp8_total_ms_str` on 8-way TP (compute-bound, near-linear scaling minus communication overhead)
-- Total TTFT: ~400 ms with preprocessing and serving overhead
-
-**Systems insight**: Tensor parallelism buys latency by spending communication. It works for Llama-70B only because the interconnect keeps the collective tax small relative to the compute saved by sharding.
+**Systems lesson**: 8-way Tensor Parallelism over NVLink achieves a 6.9$\times$ end-to-end speedup (prefill time reduced from `{python} TpSpeedupCalc.seq_total_ms_str` to `{python} TpSpeedupCalc.tp8_total_ms_str`). Sharding attention and FFN layers across intra-node NVLink interconnects buys latency by trading low-overhead NVLink transfers for compute acceleration.
 
 :::
 
@@ -3404,40 +3148,11 @@ class Mixtral8x7BSpec:
 
 ::: {#exmp-inference-expert-parallelism-mixtral-8x7b .callout-example title="Expert parallelism for Mixtral-8x7B"}
 
-Mixtral-8x7B uses `{python} Mixtral8x7BSpec.experts_str` experts per MoE layer with top-`{python} Mixtral8x7BSpec.active_experts_str` routing:
+**Scenario**: Mixtral-8x7B (`{python} Mixtral8x7BSpec.total_params_b_str` total parameters, ~`{python} Mixtral8x7BSpec.active_params_b_str` active per token) is served across a 4-device GPU cluster using top-`{python} Mixtral8x7BSpec.active_experts_str` routing.
 
-**Model characteristics**:
+**Diagnosis**: Replicating all 8 experts across all 4 GPUs causes severe memory redundancy. Sharding 2 experts per GPU (4-way Expert Parallelism) requires AllToAll dispatch/gather collectives (~0.4 ms) to route tokens to expert devices.
 
-- Total parameters: `{python} Mixtral8x7BSpec.total_params_b_str` (but only ~`{python} Mixtral8x7BSpec.active_params_b_str` active per token)
-- Experts per layer: `{python} Mixtral8x7BSpec.experts_str`
-- Active experts per token: `{python} Mixtral8x7BSpec.active_experts_str` (top-$k$ = `{python} Mixtral8x7BSpec.active_experts_str`)
-- MoE layers: Every feed-forward layer (each FFN replaced by a `{python} Mixtral8x7BSpec.experts_str`-expert MoE block)
-
-**Sharding strategy** (4-way expert parallelism):
-
-- Experts 0-1 on Device 0
-- Experts 2-3 on Device 1
-- Experts 4-5 on Device 2
-- Experts 6-7 on Device 3
-
-**Mechanism**: The per-token communication pattern has four steps:
-
-1. Gating: Determine which 2 experts to use (~0.1 ms)
-2. AllToAll dispatch: Send token to devices hosting selected experts (~0.2 ms)
-3. Expert compute: Process token through selected experts (~1 ms each, parallel)
-4. AllToAll gather: Collect results back (~0.2 ms)
-
-**Total MoE layer time**: ~1.5 ms (vs. ~4 ms for equivalent dense layer)
-
-**Systems insight**: Routing imbalance directly erodes GPU utilization and throughput across the eight experts; @tbl-inference-moe-load-balancing quantifies the degradation\index{Load Balancing!metrics}. Production systems monitor routing statistics and may retrain or fine-tune gating to improve balance.
-
-| **Routing Distribution**     | **GPU Utilization** | **Throughput Impact** |
-|:-----------------------------|:-------------------:|:---------------------:|
-| **Perfectly balanced**       |         100%        |        Baseline       |
-| **Moderate imbalance (20%)** |         83%         |          -17%         |
-| **Severe imbalance (50%)**   |         67%         |          -33%         |
-
-: **MoE Routing Load Balance vs. Throughput**: GPU utilization and throughput impact as routing imbalance grows across the eight experts of a Mixtral-8x7B MoE layer with 4-way expert parallelism. {#tbl-inference-moe-load-balancing}
+**Systems lesson**: Expert Parallelism trades AllToAll communication for reduced per-GPU parameter memory. Processing tokens through 2 sharded experts per GPU lowers MoE layer execution time to ~1.5 ms (vs ~4 ms for an equivalent dense layer).
 
 :::
 
@@ -4000,19 +3715,11 @@ class HeterogeneousGpuCluster:
 
 ::: {#exmp-inference-heterogeneous-gpu-cluster .callout-example title="Heterogeneous GPU cluster"}
 
-**Scenario**: A serving cluster mixes two GPU tiers and must route requests without overloading the slower tier.
+**Scenario**: A serving cluster mixes `{python} HeterogeneousGpuCluster.n_h100_str` H100 GPUs (`{python} HeterogeneousGpuCluster.h100_cap_qps_str` QPS each) and `{python} HeterogeneousGpuCluster.n_a100_str` A100 GPUs (`{python} HeterogeneousGpuCluster.a100_cap_qps_str` QPS each), processing `{python} HeterogeneousGpuCluster.target_qps_str` target traffic.
 
-**Given**:
+**Diagnosis**: Unweighted round-robin routes equal request counts (`{python} HeterogeneousGpuCluster.equal_load_qps_str` QPS) to all nodes, leaving H100s underutilized (`{python} HeterogeneousGpuCluster.h100_util_equal_pct_str`) while overloading A100s (`{python} HeterogeneousGpuCluster.a100_util_equal_pct_str`). Weighted routing assigns H100s a weight of `{python} HeterogeneousGpuCluster.h100_weight_pct_str` and A100s a weight of `{python} HeterogeneousGpuCluster.a100_weight_pct_str`, balancing utilization across tiers (`{python} HeterogeneousGpuCluster.h100_util_pct_str` vs `{python} HeterogeneousGpuCluster.a100_util_pct_str`).
 
-- `{python} HeterogeneousGpuCluster.n_h100_str` `{python} HeterogeneousGpuCluster.h100_name_str` GPUs at `{python} HeterogeneousGpuCluster.h100_cap_qps_str` each.
-- `{python} HeterogeneousGpuCluster.n_a100_str` `{python} HeterogeneousGpuCluster.a100_name_str` GPUs at `{python} HeterogeneousGpuCluster.a100_cap_qps_str` each.
-- Total capacity is `{python} HeterogeneousGpuCluster.total_cap_qps_str`; target traffic is `{python} HeterogeneousGpuCluster.target_qps_str`.
-
-At target traffic of `{python} HeterogeneousGpuCluster.target_qps_str`, weighted assignment\index{Weighted Assignment} gives each H100 a weight of `{python} HeterogeneousGpuCluster.h100_weight_pct_str` and each A100 a weight of `{python} HeterogeneousGpuCluster.a100_weight_pct_str`. The expected per-server load\index{Expected Load Per Server} becomes `{python} HeterogeneousGpuCluster.h100_load_qps_str` for H100s and `{python} HeterogeneousGpuCluster.a100_load_qps_str` for A100s, leaving the two server types at `{python} HeterogeneousGpuCluster.h100_util_pct_str` and `{python} HeterogeneousGpuCluster.a100_util_pct_str` utilization.
-
-**Without weighting**: Equal distribution would send `{python} HeterogeneousGpuCluster.equal_load_qps_str` to every server, leaving H100s underutilized at `{python} HeterogeneousGpuCluster.h100_util_equal_pct_str` and A100s with reduced latency headroom at `{python} HeterogeneousGpuCluster.a100_util_equal_pct_str`.
-
-**Systems insight**: Heterogeneous clusters need capacity-weighted routing. Equal request counts are not equal load when each hardware tier has a different service rate.
+**Systems lesson**: Heterogeneous inference clusters require capacity-weighted routing. Equal request volumes produce unbalanced load when hardware tiers have different service rates.
 
 :::
 
@@ -4034,19 +3741,11 @@ The challenge is maintaining accurate connection counts in a distributed system.
 
 ::: {#exmp-inference-least-connections-llm-serving .callout-example title="Least-connections for LLM serving"}
 
-LLM inference has highly variable request durations because output length changes service time. A short 10-token response might take 500 ms, while a 500-token response might take 25 seconds, a 50$\times$ difference. With round-robin at 100 QPS across 10 servers, each server receives 10 requests per second regardless of whether it is already handling long responses. A server that receives several long requests falls behind while other servers sit idle. Least-connections routes new work away from those busy servers, so replicas that finish short requests receive new work immediately and load balances around actual work remaining.
+**Scenario**: An LLM serving fleet handles requests with highly variable output sequence lengths (500 ms for 10 tokens vs 25 seconds for 500 tokens).
 
-@Tbl-inference-llm-routing-comparison reports the observed improvement in production LLM serving across routing algorithms:
+**Diagnosis**: Round-robin routing assigns work based on historical request count, leaving nodes processing long generations overloaded (P99 = 45s) while idle nodes wait. Least-connections routes new work to nodes with the fewest active in-flight requests.
 
-| **Algorithm**         | **P99 Latency** | **Load Variance** |
-|:----------------------|:---------------:|:-----------------:|
-| **Round-robin**       |       45s       |    3.2 requests   |
-| **Least-connections** |       28s       |    0.8 requests   |
-| **Two-choices + LC**  |       26s       |    0.5 requests   |
-
-: **LLM routing algorithm comparison**: Observed p99 latency and load variance under round-robin, least-connections, and least-connections-plus-two-choices routing for highly variable LLM workloads, quantifying how routing choices reshape tail latency. {#tbl-inference-llm-routing-comparison tbl-colwidths="[42,25,33]"}
-
-**Systems insight**: Least-connections reduces P99 by 38 percent; combining with two-choices provides additional improvement because routing follows current work rather than request count alone.
+**Systems lesson**: Least-connections routing accounts for in-flight work remaining rather than historical assignment count. For LLM serving with variable output lengths, least-connections drops P99 tail latency by 38 percent (45s to 28s).
 
 :::
 
@@ -4066,40 +3765,11 @@ The important properties are determinism\index{Consistent Hashing!determinism}, 
 
 ::: {#exmp-inference-consistent-hashing-kv-cache-affinity .callout-example title="Consistent hashing for KV cache affinity"}
 
-**Scenario**: An LLM serving system maintains user-specific KV cache state across conversation turns.
+**Scenario**: A multi-turn LLM chat service routes user queries across a cluster of inference replicas without session affinity.
 
-**Without affinity**:
+**Diagnosis**: Un-affinitized routing sends subsequent conversation turns to different replicas, forcing every turn to rebuild the KV cache from scratch (500 ms penalty, wasting 4.5s over a 10-turn conversation). Consistent hashing maps user IDs deterministically to specific replicas.
 
-- User sends message, routed to Server A, KV cache built
-- Next message routes to Server B (random)
-- KV cache rebuilt from scratch, 500 ms penalty
-- Average conversation: 10 turns, 4.5 seconds wasted on cache rebuilds
-
-**With consistent hashing**:
-
-- User ID hashed to Server A
-- All messages from this user route to Server A
-- KV cache reused across turns
-- Rebuild only on server changes or cache eviction
-
-**Implementation with virtual nodes**\index{Consistent Hashing!virtual nodes}:
-
-Each physical server has 100 virtual nodes on the hash ring, ensuring even distribution despite server heterogeneity.
-
-```
-Hash ring positions:
-Server A: [0.01, 0.03, 0.07, 0.12, ...]  (100 positions)
-Server B: [0.02, 0.05, 0.09, 0.15, ...]  (100 positions)
-...
-
-Request for user "alice":
-hash("alice") = 0.0834
-Nearest server clockwise: Server A (at 0.09)
-```
-
-**Handling server failures**\index{Consistent Hashing!failure handling}: When Server A fails, its 100 virtual nodes drop from the ring and the affected requests reroute to the next server clockwise, so only $\sim 1/N_{\text{servers}}$ of all requests are touched.
-
-**Systems insight**: Stateful serving turns load balancing into a cache-locality problem. The routing layer must preserve affinity without making failure recovery disruptive.
+**Systems lesson**: Consistent hashing preserves KV cache locality across multi-turn sessions. Hashing user sessions to virtual nodes on a hash ring eliminates redundant prefill KV-cache reconstruction while ensuring minimal key remapping ($1/N_{\text{servers}}$) during server failures or autoscaling.
 
 :::
 
@@ -4189,49 +3859,19 @@ Body: {"prompt": "test"}
 Response: 200 OK with valid output, or error
 ```
 
-Deep health checks are the primary defense against a failure mode that does not exist in traditional web servers: silent hardware degradation. A GPU with degraded HBM modules may continue to respond to process-level probes while producing output corrupted by NaN propagation or silent bit errors in activation tensors. The replica returns HTTP 200 and passes every liveness and readiness probe, yet every generated sequence is nonsense. Deep health checks catch this by validating the tensor output of a known probe input against expected bounds, checking, for example, that logit distributions stay within a plausible entropy range and that no NaN or Inf values appear in the output. Standard health checks are necessary but insufficient for GPU-accelerated servers, which face these hardware-specific failure modes.
+Deep health checks are the primary defense against a failure mode that does not exist in traditional web servers: silent hardware degradation. A GPU with degraded HBM modules may continue to respond to process-level HTTP 200 checks while failing silently on real requests due to memory pressure or un-warmed model state.
+
+**Diagnosis**: Standard probes fail to check GPU memory allocation (`MIN_REQUEST_MEMORY`) or model warmup state, allowing degraded nodes to receive production traffic and cause generation failures.
+
+**Systems lesson**: GPU inference health checking requires tiered probing (Liveness, Readiness, Deep Health). Readiness probes must validate GPU memory availability and warm-up state, while deep health checks validate logit output distributions against expected bounds.
 
 ::: {#exmp-inference-health-checks-gpu-inference .callout-example title="Health checks for GPU inference"}
 
-**Scenario**: GPU inference servers can pass ordinary process health checks while still being unable to serve real requests.
+**Scenario**: GPU inference servers pass standard process-level HTTP 200 checks while failing silently on real requests due to memory pressure or un-warmed model state.
 
-**GPU memory pressure**\index{GPU Memory!pressure}: Server may be alive but unable to allocate memory for new requests.
+**Diagnosis**: Standard probes fail to check GPU memory allocation (`MIN_REQUEST_MEMORY`) or model warmup state, allowing degraded nodes to receive production traffic and cause generation failures.
 
-```{.python}
-def readiness_check():
-    free_memory, _total_memory = torch.cuda.mem_get_info()
-    if free_memory < MIN_REQUEST_MEMORY:
-        return {
-            "status": "not_ready",
-            "reason": "insufficient GPU memory",
-        }
-    return {"status": "ready"}
-```
-
-**Model warm-up**\index{Model Warm-Up}: First inference after load is slower. Mark ready only after warm-up.
-
-```{.python}
-async def startup():
-    model = load_model()
-    # Warm up with dummy requests
-    for _ in range(10):
-        model.generate(dummy_input)
-    # Now mark as ready
-    global ready
-    ready = True
-```
-
-The three probe tiers each balance fast outage detection against GPU-resident probing cost; @tbl-inference-health-check-cadences fixes interval, timeout, and failure-threshold values for liveness, readiness, and deep-health probes\index{Health Check!timeout configuration}. The cadences form a gradient: readiness probes run fastest because routing decisions depend on them, liveness probes run slower because they only catch a dead process, and deep health checks run rarest because they consume GPU resources to validate model output.
-
-| **Check Type**  | **Interval** | **Timeout** | **Failure Threshold** |
-|:----------------|:------------:|:-----------:|:---------------------:|
-| **Liveness**    |     10s      |      5s     |       3 failures      |
-| **Readiness**   |      5s      |      3s     |       2 failures      |
-| **Deep health** |     30s      |     10s     |       1 failure       |
-
-: **GPU Inference Health-Check Cadences**: Liveness, readiness, and deep-health probe intervals, timeouts, and failure thresholds for GPU inference servers, balancing fast outage detection against the cost of GPU-resident probes. {#tbl-inference-health-check-cadences tbl-colwidths="[30,18,18,34]"}
-
-**Systems lesson**: A serving process being alive is not the same as a model replica being ready. GPU memory, warm-up state, and model-output validity must be part of the health contract.
+**Systems lesson**: GPU inference health checking requires tiered probing (Liveness, Readiness, Deep Health). Readiness probes must validate GPU memory availability and warm-up state, while deep health checks validate logit output distributions against expected bounds.
 
 :::
 
@@ -4299,36 +3939,11 @@ class CircuitBreakerServingProfile:
 
 ::: {#exmp-inference-cascading-failure-prevention .callout-example title="Cascading failure prevention"}
 
-Consider a scenario where one server becomes slow (thermal throttling):
+**Scenario**: A single GPU inference server experiences thermal throttling (latency spiking from 50 ms to 500 ms) in a multi-replica serving fleet.
 
-**Without circuit breaker**:
+**Diagnosis**: Unprotected load balancers continue sending traffic to the slow replica, filling queues and generating client retries that cascade overload to healthy neighboring servers.
 
-1. Server A slows down (processing 500 ms instead of 50 ms)
-2. Load balancer continues routing to Server A
-3. Requests queue on Server A, timeouts begin
-4. Retry logic sends failed requests to other servers
-5. Other servers overload from retry traffic
-6. System-wide failure
-
-**With circuit breaker**:
-
-1. Server A slows down
-2. Error rate on Server A rises above `{python} CircuitBreakerServingProfile.error_threshold_pct_str`
-3. Circuit breaker opens for Server A
-4. All requests route to Servers B, C, D
-5. System operates at reduced capacity but remains stable
-6. After `{python} CircuitBreakerServingProfile.open_duration_s_str`, the breaker admits probe requests and closes if they succeed
-
-**Systems lesson**: For GPU inference\index{Inference!configuration for gpu}, the canonical thresholds and recovery settings appear in @tbl-inference-circuit-breaker-gpu. Circuit breakers preserve partial capacity by stopping retries from amplifying one slow replica into a system-wide overload.
-
-| **Parameter**          |                                  **Value**                                  | **Rationale**                         |
-|:-----------------------|:---------------------------------------------------------------------------:|:--------------------------------------|
-| **Error threshold**    |     `{python} CircuitBreakerServingProfile.error_threshold_pct_tbl_str`     | GPU OOM failures are serious          |
-| **Latency threshold**  | `{python} CircuitBreakerServingProfile.latency_threshold_mult_str` baseline | Detect throttling early               |
-| **Open duration**      |         `{python} CircuitBreakerServingProfile.open_duration_s_str`         | Probe only after the queue drains     |
-| **Half-open requests** |     `{python} CircuitBreakerServingProfile.half_open_requests_count_str`    | Careful testing before full reopening |
-
-: **Circuit-Breaker Settings for GPU Inference**: Error and latency thresholds, open duration, and half-open probe count chosen so that a single throttling GPU is isolated quickly without prematurely failing healthy nodes. {#tbl-inference-circuit-breaker-gpu}
+**Systems lesson**: Circuit breakers isolate degraded GPU replicas before retry traffic causes fleet-wide failure. Opening the breaker when error or latency thresholds are breached (`{python} CircuitBreakerServingProfile.error_threshold_pct_str` error rate) fails fast and preserves capacity across remaining replicas.
 
 :::
 
@@ -4368,102 +3983,21 @@ GPU memory contention is the most severe: a tenant with unexpectedly long sequen
 
 ::: {#exmp-inference-quantifying-noisy-neighbor-impact .callout-example title="Quantifying noisy neighbor impact"}
 
-**Problem**: How does one tenant's burst change latency for every tenant in an unprotected shared pool?
+**Scenario**: An inference platform serves 10 tenants on shared H100 GPUs at `{python} NoisyNeighborImpact.tenant_base_qps_str` each under a `{python} NoisyNeighborImpact.slo_ms_str` P99 SLO.
 
-```{python}
-#| echo: false
-#| label: noisy-neighbor-quota-scenario
-# ┌─────────────────────────────────────────────────────────────────────────────
-# │ NOISY NEIGHBOR QUOTA SCENARIO (LEGO)
-# ├─────────────────────────────────────────────────────────────────────────────
-# │ Context: Noisy-neighbor tables in §Multi-tenancy and isolation.
-# │
-# │ Goal: Keep SLO status labels aligned with the latency threshold.
-# │ Show: 10 ms SLO; protected tenants at 10 ms meet it; bursting tenant violates.
-# │ How: Status is "Met" iff p99 latency <= SLO.
-# │
-# └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_int, check, fmt, MarkdownStr, fmt_percent, fmt_rate, fmt_time
+**Diagnosis**: Tenant 3 bursts to `{python} NoisyNeighborImpact.tenant_burst_qps_str` (5$\times$ baseline). Without isolation, KV cache memory and compute contention cascade into P99 latency violations (22–45 ms) for all 10 tenants on the shared pool.
 
-class NoisyNeighborImpact:
-    """Shared baseline for the unprotected-pool noisy-neighbor walkthrough."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    slo_ms = 10
-    tenant_base_qps = 100
-    tenant_burst_qps = 500
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    slo_ms_str = fmt_time(round(slo_ms), 'millisecond', precision=0, commas=False)
-    tenant_base_qps_str = fmt_rate(tenant_base_qps, "QPS", commas=False)
-    tenant_burst_qps_str = fmt_rate(tenant_burst_qps, "QPS", commas=False)
-    # Bare numbers for table cells whose column header already reads "QPS"
-    tenant_base_qps_num_str = fmt_int(tenant_base_qps, commas=False)
-    tenant_burst_qps_num_str = fmt_int(tenant_burst_qps, commas=False)
-    gpu_util_pct_str = fmt_percent(round(70) / 100, precision=0, commas=False, style='prose')
-
-class NoisyNeighborQuotaScenario:
-    """Resource-quota scenario with computed SLO statuses."""
-
-    # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    slo_ms = NoisyNeighborImpact.slo_ms
-    tenant_throttled_qps = 120
-    protected_p99_ms = 10
-    burst_p99_ms = 50
-
-    # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
-    protected_status = "Met" if protected_p99_ms <= slo_ms else "Violated"
-    burst_status = "Violated" if burst_p99_ms > slo_ms else "Met"
-
-    # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(protected_status == "Met", "Protected tenants should meet the SLO")
-    check(burst_status == "Violated", "Bursting tenant should violate the SLO")
-
-    # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    tenant_throttled_qps_str = fmt_rate(tenant_throttled_qps, "QPS", commas=False)
-    protected_p99_ms_str = fmt_time(protected_p99_ms, 'millisecond', precision=0, commas=False)
-    burst_p99_ms_str = fmt_time(burst_p99_ms, 'millisecond', precision=0, commas=False)
-    protected_status_str = MarkdownStr(protected_status)
-    burst_status_str = MarkdownStr(burst_status)
-```
-
-Consider an inference platform serving 10 tenants on shared H100 GPUs:
-
-**Baseline (even load)**:
-
-- Each tenant: `{python} NoisyNeighborImpact.tenant_base_qps_str`, `{python} NoisyNeighborImpact.slo_ms_str` P99 latency
-- GPU utilization: `{python} NoisyNeighborImpact.gpu_util_pct_str`
-- All SLOs met
-
-Tenant 3 bursts to `{python} NoisyNeighborImpact.tenant_burst_qps_str` (5$\times$ baseline). Without per-tenant quotas, the burst cascades into SLO violations for all ten tenants on the shared pool (@tbl-inference-noisy-neighbor-no-isolation):
-
-| **Tenant**       |                           **QPS**                           | **P99 Latency** | **SLO Status** |
-|:-----------------|:-----------------------------------------------------------:|:---------------:|:--------------:|
-| **Tenant 1**     |    `{python} NoisyNeighborImpact.tenant_base_qps_num_str`   |      25 ms      |    Violated    |
-| **Tenant 2**     |    `{python} NoisyNeighborImpact.tenant_base_qps_num_str`   |      28 ms      |    Violated    |
-| **Tenant 3**     |   `{python} NoisyNeighborImpact.tenant_burst_qps_num_str`   |      45 ms      |    Violated    |
-| **Tenants 4-10** | `{python} NoisyNeighborImpact.tenant_base_qps_num_str` each |     22-30 ms    |    Violated    |
-
-: **Noisy neighbor without isolation (unprotected pool)**: All tenants violate their latency SLO when one tenant bursts. {#tbl-inference-noisy-neighbor-no-isolation tbl-colwidths="[26,20,24,30]"}
-
-**Systems insight**: Shared capacity raises utilization only if the serving system also enforces isolation. Without quotas, the effective SLO becomes the worst burst any tenant can generate.
+**Systems lesson**: Shared capacity increases utilization only when coupled with strict isolation. Unprotected shared pools collapse effective SLOs to the worst-case burst of any single tenant.
 
 :::
 
 ::: {#exmp-inference-noisy-neighbor-quotas .callout-example title="Noisy neighbor with per-tenant quotas"}
 
-Enabling per-tenant quotas contains the impact to the offending tenant alone (@tbl-inference-noisy-neighbor-quotas):
+**Scenario**: Tenant 3 bursts to `{python} NoisyNeighborImpact.tenant_burst_qps_str` on a shared inference cluster with per-tenant resource quotas enabled.
 
-| **Tenant**       |                              **QPS (actual)**                              |                      **P99 Latency**                       |                             **SLO Status**                             |
-|:-----------------|:--------------------------------------------------------------------------:|:----------------------------------------------------------:|:----------------------------------------------------------------------:|
-| **Tenant 1**     |           `{python} NoisyNeighborImpact.tenant_base_qps_num_str`           | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
-| **Tenant 2**     |           `{python} NoisyNeighborImpact.tenant_base_qps_num_str`           | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
-| **Tenant 3**     | `{python} NoisyNeighborQuotaScenario.tenant_throttled_qps_str` (throttled) |   `{python} NoisyNeighborQuotaScenario.burst_p99_ms_str`   | `{python} NoisyNeighborQuotaScenario.burst_status_str` (only for them) |
-| **Tenants 4-10** |        `{python} NoisyNeighborImpact.tenant_base_qps_num_str` each         | `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` |       `{python} NoisyNeighborQuotaScenario.protected_status_str`       |
+**Diagnosis**: Quota enforcement throttles Tenant 3 to `{python} NoisyNeighborQuotaScenario.tenant_throttled_qps_str` (violating only Tenant 3's SLO), while Tenants 1–2 and 4–10 maintain normal `{python} NoisyNeighborQuotaScenario.protected_p99_ms_str` latency.
 
-: **Noisy neighbor with per-tenant quotas**: Per-tenant QPS, p99 latency, and SLO status after enabling per-tenant resource quotas in the same workload. {#tbl-inference-noisy-neighbor-quotas}
-
-**Systems insight**: Quotas turn a platform-wide failure into a local admission-control decision: the bursting tenant is throttled, while protected tenants keep their latency contract.
+**Systems lesson**: Per-tenant quotas transform platform-wide failures into isolated admission-control decisions, protecting co-located tenants from noisy-neighbor bursts.
 
 :::
 
@@ -4583,323 +4117,43 @@ Failure isolation follows naturally from bulkhead boundaries. When a tenant subm
 
 ::: {#exmp-inference-bulkhead-configuration-api-tiers .callout-example title="Bulkhead configuration for API tiers"}
 
-**Scenario**: A typical LLM API has enterprise, professional, and free service tiers.
+**Scenario**: An LLM API platform serves Enterprise, Professional, and Free service tiers across shared and dedicated hardware.
 
-**Setup**: The enterprise tier runs on a dedicated GPU pool with hardware isolation and a 99.9 percent availability SLO -- no other tenant's traffic can affect it. The professional tier shares a GPU pool but receives 70 percent of that pool's capacity through resource quotas and can preempt the free tier when contention arises. The free tier receives the remaining 30 percent on a best-effort basis with rate limiting (for example, 10 QPS) and no SLO guarantee.
+**Diagnosis**: Unpartitioned multi-tenant pools allow Free-tier traffic spikes or malformed requests to degrade Enterprise SLOs. Bulkhead isolation isolates Enterprise on dedicated GPU pools (99.9 percent availability), allocates 70 percent capacity to Professional, and caps Free tier at 30 percent best-effort capacity.
 
-**Systems lesson**: Bulkheads concentrate isolation cost where the business requirement justifies it while still allowing shared infrastructure to run at high utilization.
-
-:::
-
-### Model isolation {#sec-inference-scale-model-isolation-ef31}
-
-When multiple models run on shared infrastructure, isolation must span memory, compute, and model loading. Memory isolation partitions GPU memory so that one model's allocation cannot encroach on another's. On an 80 GB H100, for example, reserving 40 GB for one model and 30 GB for a second leaves a 10 GB shared pool for transient needs -- each model's KV cache growth is bounded regardless of the other's request pattern.
-
-Compute isolation addresses the latency variance that GPU time-sharing introduces. MIG (Multi-Instance GPU)[^fn-mig-partitioning] provides the strongest guarantee by spatially partitioning the GPU into hardware-isolated instances, each with dedicated SMs, memory bandwidth, and L2 cache. Time-slicing offers a softer alternative with higher overhead, while dedicating entire GPUs per model trades utilization for complete isolation.
-
-[^fn-mig-partitioning]: **MIG (Multi-Instance GPU)**\index{MIG!partitioning}: Introduced with NVIDIA's A100 [@NVIDIA2020], MIG spatially partitions a single GPU into up to 7 isolated instances, each with dedicated compute SMs, memory bandwidth, and L2 cache. Unlike time-slicing, which shares resources and introduces latency variance of 2--5$\times$, MIG provides hardware-enforced isolation with predictable performance, making it a strong mechanism for serving multiple small models on a single expensive data center GPU when partition sizes match model requirements.
-
-Model loading\index{Model Loading!isolation} presents a subtler isolation challenge: loading a new model should not evict a running model from GPU memory. @Lst-model-loading-isolation implements that policy as a fail-closed memory check: evict only lower-priority, evictable models, and reject the load when the remaining memory is protected.
-
-::: {#lst-model-loading-isolation lst-cap="**Model Loading Isolation**: Priority-aware memory management that prevents model eviction from violating tenant isolation constraints."}
-
-```{.python}
-class ModelManager:
-    def load_model(self, model_id, priority):
-        required_memory = get_model_size(model_id)
-        available = get_free_gpu_memory()
-
-        if required_memory > available:
-            memory_deficit = required_memory - available
-            evictable = get_evictable_memory(priority)
-            if memory_deficit > evictable:
-                raise InsufficientMemoryError(
-                    "Cannot load model without violating tenant isolation constraints"
-                )
-            evict_lower_priority_models(priority, memory_deficit)
-
-        load_to_gpu(model_id)
-```
+**Systems lesson**: Bulkheads concentrate isolation overhead where business requirements dictate. Hardware partitioning guarantees SLA compliance for high-value tiers while maximizing utilization across lower tiers.
 
 :::
-
-That rejection path is the isolation guarantee. It may lower utilization in the moment, but it prevents a control-plane load request from turning into an unplanned model eviction or a tenant-visible outage.
-
-### Observability for multi-tenancy {#sec-inference-scale-observability-multitenancy-8637}
-
-Effective multi-tenancy requires per-tenant visibility into resource consumption and performance. The essential metrics span four dimensions: request volume and latency distribution (P50, P95, P99), GPU memory and KV cache utilization, throttling and preemption event counts, and error rates broken down by error type. Together, these metrics reveal whether each tenant is receiving its contracted quality of service.
-
-Three alerting thresholds transform these metrics into actionable signals:
-
-- **SLO violation**: An alert fires when a tenant's P99 latency exceeds its target by more than 10 percent for five consecutive minutes.
-- **Quota exhaustion**: An alert triggers when usage reaches 90 percent of the tenant's allocation, providing advance warning before hard limits cause request rejection.
-- **Noisy neighbor detection**: An alert identifies tenants consuming more than twice their fair share for five minutes, flagging interference before it cascades to other tenants.
-
-Chargeback and attribution close the operational loop by mapping resource consumption -- GPU-seconds, KV cache GB-hours, network egress -- to individual tenants for billing and capacity planning. Without per-tenant attribution, organizations cannot distinguish between tenants that need more capacity and tenants that are simply inefficient, making informed provisioning decisions impossible.
-
-Proper isolation allows us to securely pack workloads onto a fixed set of servers. Traffic on the internet, however, is rarely fixed. To handle viral product launches or deep nocturnal lulls without burning cash, our isolated inference services must dynamically grow and shrink across global data centers through intelligent autoscaling.
-
-## Autoscaling and Global Infrastructure {#sec-inference-scale-autoscaling-168d}
-
-A viral social media post drives a 10$\times$ spike in traffic to a generative AI application in under five minutes. If the infrastructure team relies on manual scaling or slow, CPU-based metrics to spin up new GPU instances, the service collapses before new replicas even finish downloading the model weights. Autoscaling for ML inference requires predictive, custom-metric strategies to handle these massive load dynamics.
-
-That response has four coupled dimensions: how capacity is added, how long new replicas take to become useful, how predictive signals avoid cold-start lag, and how global routing moves traffic when capacity or regions fail. Treating autoscaling as a replica-count knob misses the interaction between model loading, cache warmup, spot capacity, and user geography.
-
-### Scaling dimensions {#sec-inference-scale-scaling-dimensions-befc}
-
-Inference systems can scale along three dimensions, each with distinct cost, latency, and speed characteristics. @Tbl-scaling-dimensions contrasts these approaches.
-
-A common approach is horizontal scaling\index{Scaling!horizontal}: adding or removing model replicas to adjust aggregate throughput. Total capacity scales linearly as $\text{Capacity} = \text{Replicas} \times \text{Per-replica throughput}$, but each new replica requires provisioning time measured in minutes.
-
-When replica count is fixed, vertical scaling replaces existing GPUs with more powerful ones to increase per-replica throughput. Cost efficiency is $\text{Throughput} / \text{GPU cost}$, but vertical scaling requires redeployment and is the slowest scaling response.
-
-The fastest response comes from batch size scaling\index{Scaling!batch size}, which adjusts how many requests the system processes simultaneously. Increasing batch size trades higher per-request latency for greater throughput, with no provisioning delay. This makes batch size the first knob to turn during a traffic spike, buying time for horizontal scaling to take effect. These scaling dimension trade-offs\index{Scaling!dimension tradeoffs} are summarized in @tbl-scaling-dimensions.
-
-| **Scaling Type**              | **Latency** |  **Cost** |        **Speed**         |
-|:------------------------------|:-----------:|:---------:|:------------------------:|
-| **Horizontal (add replicas)** |  Unchanged  |   Linear  |      Slow (minutes)      |
-| **Batch size**                |  Increases  | Unchanged |         Instant          |
-| **Vertical (better GPU)**     |  Unchanged  | Nonlinear | Very slow (redeployment) |
-
-: **Scaling Dimension Tradeoffs**: Horizontal scaling preserves per-request latency but waits on provisioning, batch-size scaling reacts immediately by trading latency for throughput, and vertical scaling changes the hardware envelope but requires redeployment. {#tbl-scaling-dimensions}
-
-### The cold start problem {#sec-inference-scale-cold-start-problem-ecf9}
-
-Cold start latency represents a significant challenge for serverless inference because model loading often dominates the total startup time. Unlike stateless web services that start in seconds, inference services must provision hardware, load weights, and warm runtime kernels before serving traffic, as @eq-cold-start-time defines:
-
-$$T_{\text{cold start}} = T_{\text{provision}} + T_{\text{load}} + T_{\text{warmup}}$$ {#eq-cold-start-time}
-
-The provisioning phase ($T_{\text{provision}}$) acquires a GPU instance, which takes 30 seconds to several minutes depending on cloud provider and GPU type.[^fn-cold-start-gpu] This delay alone exceeds the total cold start time of a stateless web service.
-
-[^fn-cold-start-gpu]: **Cold Start (GPU vs. Serverless)**\index{Cold Start!GPU inference}: Serverless functions cold-start in 100 ms--1 s; GPU inference cold-starts in 1--10 minutes due to GPU allocation, model weight transfer, and CUDA context initialization. This 100$\times$ gap means reactive autoscaling alone cannot absorb traffic spikes, making predictive scaling and warm pools essential design requirements for any GPU serving fleet with latency SLOs.
-
-Once the instance is available, model loading ($T_{\text{load}}$) transfers weights from storage to GPU memory. Loading time scales with model size and depends heavily on storage tier, as @tbl-model-load-time shows:
-
-| **Model Size**    | **Load Time (SSD)** | **Load Time (S3)** |
-|:------------------|:-------------------:|:------------------:|
-| **7B (14 GB)**    |          5s         |        30s         |
-| **70B (140 GB)**  |         25s         |        5min        |
-| **175B (350 GB)** |         1min        |       12min        |
-
-: **Model Load Time by Storage Tier**: Local SSD loads weights at roughly 6 GB/s; remote object storage (S3) loads at roughly 0.5 GB/s before additional validation and runtime overhead. The 12$\times$ gap matters most for the largest models: a 175B model takes about 1 minute from SSD (350 GB at 6 GB/s) vs. 12 minutes from S3, dominating the cold-start budget for any serving deployment that has to pull weights from object storage on each scale-up. {#tbl-model-load-time}
-
-Even after weights reside in GPU memory, the first inference runs slower than steady state because just-in-time (JIT) kernel compilation, CUDA context initialization, memory pool allocation, and cache population must complete. This warmup phase ($T_{\text{warmup}}$) typically requires 10--30 dummy inferences, adding 5--30 seconds. The phase-by-phase timeline for Llama-70B shows how these delays accumulate in practice.
 
 ::: {#exmp-inference-cold-start-timeline-llama-70b .callout-example title="Cold start timeline for Llama-70B"}
 
-@Tbl-inference-cold-start-timeline-llama70b traces the per-phase and cumulative duration of bringing up a new replica for Llama-70B on H100:
+**Scenario**: An autoscaling engine provisions a new Llama-70B serving replica on an H100 GPU instance during a sudden traffic surge.
 
-| **Phase**                     | **Duration** | **Cumulative** |
-|:------------------------------|:------------:|:--------------:|
-| **Cloud API request**         |      5s      |       5s       |
-| **GPU instance provisioning** |     60s      |      65s       |
-| **Container startup**         |     10s      |      75s       |
-| **Model download (S3)**       |     300s     |      375s      |
-| **Model load to GPU**         |     25s      |      400s      |
-| **CUDA warmup**               |     15s      |      415s      |
-| **Readiness probe pass**      |      5s      |      420s      |
-| **Total cold start**          |  **7 min**   |                |
+**Diagnosis**: Bringing up a fresh replica takes ~7 minutes ($T_{\text{cold start}} = T_{\text{provision}} + T_{\text{load}} + T_{\text{warmup}}$), dominated by 5 minutes downloading 140 GB of model weights from S3 and 1 minute GPU loading/warmup. Reactive autoscaling fails to absorb the surge before requests time out.
 
-: **Cold-start timeline for a Llama-70B replica (H100)**: Per-phase and cumulative duration for bringing up a fresh Llama-70B serving replica on an H100 instance. {#tbl-inference-cold-start-timeline-llama70b tbl-colwidths="[52,20,28]"}
-
-**Systems insight**: Scaling decisions must anticipate demand several minutes in advance. Reactive scaling alone cannot handle sudden traffic spikes.
-
-@Fig-cold-start-breakdown visualizes the cumulative timeline:
+**Systems lesson**: Cold-start latency for multi-gigabyte LLMs is dominated by weight download and initialization time. Scaling engines must maintain pre-warmed spare pools or trigger predictive scale-ups 5–10 minutes ahead of anticipated demand spikes.
 
 :::
-
-::: {#fig-cold-start-breakdown fig-env="figure" fig-pos="htb" fig-cap="**Anatomy of a Cold Start**: Bringing up a new GPU inference replica is a multi-step process taking minutes. While container startup is fast, provisioning the specialized instance and downloading massive model weights (100 GB+) dominate the timeline. CUDA context initialization and \"warmup\" inference passes add further delay. This roughly 7-minute lag makes purely reactive scaling dangerous for handling sudden traffic spikes." fig-alt="Horizontal stacked bar timeline from 0 to 7 minutes. Four segments: Provision (0-1.25m), Model Download (1.25-6.25m, largest), Load (6.25-6.7m), Warmup (6.7-7m). Brace above shows total cold start is about 7 minutes."}
-
-```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, xscale=0.02, yscale=0.8]
-  % xscale: 1cm = 50 seconds. Total 420s = 8.4cm
-  \definecolor{ProvColor}{HTML}{FCE4CC}
-  \definecolor{DownColor}{HTML}{D1E6F3}
-  \definecolor{LoadColor}{HTML}{D4EFDF}
-  \definecolor{WarmColor}{HTML}{F5D2D5}
-
-  \tikzset{
-    bar/.style={draw=black!70, minimum height=0.8cm, font=\tiny\usefont{T1}{phv}{m}{n}, inner sep=0pt, anchor=west}
-  }
-
-  % Axis
-  \draw[->] (0, 0) -- (430, 0) node[right] {Seconds};
-  \foreach \x/\label in {0/0s, 60/1m, 120/2m, 180/3m, 240/4m, 300/5m, 360/6m, 420/7m} {
-      \draw (\x, 0.1) -- (\x, -0.1) node[below, font=\scriptsize\usefont{T1}{phv}{m}{n}] {\label};
-  }
-
-  % Bar Stack
-  \node[bar, fill=ProvColor, minimum width=1.5cm] (prov) at (0, 1.5) {Provision};
-  \node[bar, fill=DownColor, minimum width=6.0cm, right=0cm of prov] (down) {Model Download (Big!)};
-  \node[bar, fill=LoadColor, minimum width=0.5cm, right=0cm of down] (load) {Load};
-  \node[bar, fill=WarmColor, minimum width=0.4cm, right=0cm of load] (warm) {Warm};
-
-  % Connect total
-  \draw[decorate, decoration={brace, amplitude=5pt, raise=5pt}] (prov.south west |- 0, 2) -- (warm.south east |- 0, 2) node[midway, above=10pt, font=\bfseries\usefont{T1}{phv}{b}{n}] {Total Cold Start: ~7 Minutes};
-
-  % Legend
-  \node[anchor=west, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (0, 3.5) {\textbf{Breakdown for 70B Model}};
-
-\end{tikzpicture}
-```
-
-:::
-
-### Reactive scaling {#sec-inference-scale-reactive-scaling-9fc1}
-
-Reactive scaling adjusts capacity after the system observes pressure. It is useful for gradual demand changes, but it cannot solve the cold-start problem by itself because the signal arrives after traffic has already reached the fleet.
-
-Metric-based scaling\index{Scaling!metric-based} is a thresholded control loop. @Lst-metric-based-scaling separates the target operating point from the scale-up and scale-down thresholds, while the cooldown period prevents the controller from undoing its own last decision before the new replicas affect the metric.
-
-::: {#lst-metric-based-scaling lst-cap="**Metric-Based Scaling**: Autoscaling policy driven by utilization thresholds with a cooldown period to prevent oscillation."}
-
-```{.yaml}
-autoscaling:
-  metric: cpu_utilization  # or gpu_utilization, queue_depth
-  target_value: 70%
-  scale_up_threshold: 80%
-  scale_down_threshold: 50%
-  cooldown_period: 300s
-```
-
-:::
-
-Those fields encode the responsiveness-stability trade-off. Tighter thresholds react sooner but can oscillate under noisy utilization; longer cooldowns dampen oscillation but leave the fleet overloaded longer after a real spike.
-
-A more responsive alternative scales on queue depth rather than utilization, targeting a maximum queue length per replica:
-
-$$\text{Desired replicas} = \left\lceil \frac{\text{Queue depth}}{\text{Queue target}} \times \text{Current replicas} \right\rceil$$
-
-When the primary concern is SLO compliance rather than utilization, latency-based scaling adjusts replicas to maintain a target P99 latency:
-
-$$\text{Desired replicas} = \left\lceil \frac{\text{P99}_{\text{observed}}}{\text{P99}_{\text{target}}} \times \text{Current replicas} \right\rceil$$
-
-All reactive approaches share three fundamental limitations:
-
-- **Cold start vulnerability**: Cold start time prevents rapid response to sudden spikes.
-- **Oscillation risk**: Metric-based triggers can create oscillation between scale-up and scale-down cycles.
-- **Over-provisioning requirement**: The system must over-provision during the cold start window to absorb load that new replicas cannot yet handle.
-
-These limits show up most sharply during a traffic spike, where replicas must exist before cold-started capacity becomes usable.
-
-::: {#nbk-inference-reactive-scaling-response-analysis .callout-notebook title="Reactive scaling response analysis"}
-
-Consider traffic spike from 1000 to 3000 QPS:
-
-**Current state**: 10 replicas, 100 QPS each, 70 percent utilization
-
-**Target state**: 30 replicas for 3000 QPS
-
-**Without prewarming**\index{Scaling!prewarming}:
-
-- T=0: Spike detected, scale-up triggered
-- T=0 to T=5min: Cold start for 20 new replicas
-- T=0 to T=5min: Existing 10 replicas handle 3000 QPS (300 QPS each)
-- Utilization: 210 percent (overloaded)
-- P99 latency: 500 ms+ (SLO violated)
-
-**With sufficient warm spares (20 replicas)**:
-
-- T=0: Spike detected, warm spares activated immediately
-- T=0: 30 replicas handle 3000 QPS (100 QPS each)
-- T=0 to T=5min: Replenish 20 warm spares in the background
-- Utilization: 70 percent (headroom preserved)
-- P99 latency: 80 ms (SLO maintained)
-
-Warm spares convert cold-start delay into idle-capacity cost: the system pays for extra replicas before the spike so the user does not pay for provisioning latency during the spike.
-
-:::
-
-At internet-launch scale, the same cold-start window turns from a capacity-planning nuisance into an infrastructure survival problem.
 
 ::: {#exmp-inference-chatgpt-traffic-spike .callout-example title="The ChatGPT traffic spike"}
 
-**Context**: When ChatGPT scaled from zero to 100 million users in two months, the engineering challenge shifted from model quality to survival.
+**Scenario**: ChatGPT scaled from 0 to 100 million active users in two months, creating unprecedented traffic surges across global inference clusters.
 
-**Failure mode**: The service faced an unprecedented cold-start problem: provisioning thousands of GPUs while managing a KV cache memory footprint that grew linearly with context length and request concurrency. Early serving infrastructure had to evolve rapidly toward optimized serving layers, aggressive batching and quantization, and geographic load balancing to keep per-token latency acceptable despite the deluge.
+**Diagnosis**: Rapid user adoption triggered severe cold-start bottlenecks and extreme KV cache memory pressure, causing fleet-wide queue saturation and request timeouts under unoptimized serving stacks.
 
-**Systems lesson**: Successful model launch can create an infrastructure failure mode. At serving scale, demand growth, state memory, and provisioning latency become part of the product architecture.
-
-:::
-
-### Predictive scaling {#sec-inference-scale-predictive-scaling-ee73}
-
-Predictive scaling\index{Predictive Scaling} anticipates demand before it occurs, initiating scaling ahead of traffic changes. The simplest and most effective approach uses time-series forecasting on historical traffic patterns. @Lst-predictive-scaling shows a simplified forecasting function combining daily and weekly seasonality with trend estimation. For generative LLM services, however, forecasting request volume alone is insufficient: a volume spike of long-context summarization requests exhausts KV cache far faster than the same volume of short-context chat completions, because each long-context request can hold tens of thousands of tokens in active KV cache while decode completes. Accurate predictive scaling for LLM fleets must therefore forecast the *mix* of request types alongside total volume, treating a shift toward long-context requests as a memory-bound demand increase even when request count is unchanged.
-
-::: {#lst-predictive-scaling lst-cap="**Predictive Scaling**: Time-series demand forecasting combining daily seasonality, weekly seasonality, and trend estimation."}
-
-```{.python}
-def predict_demand(current_time, history):
-    # Seasonal decomposition
-    daily_pattern = extract_daily_seasonality(history)
-    weekly_pattern = extract_weekly_seasonality(history)
-
-    # Trend estimation
-    trend = estimate_trend(history)
-
-    # Forecast
-    predicted = (
-        daily_pattern[current_time.hour]
-        * weekly_pattern[current_time.weekday()]
-        * trend
-    )
-    return predicted
-```
+**Systems lesson**: Internet-scale traffic spikes transform cold-start latency and KV-cache footprint from infrastructure tuning details into binding system architecture constraints. Sustaining rapid growth requires combining pre-warmed GPU pools with iteration-level continuous batching and stateful routing.
 
 :::
-
-Event-driven scaling\index{Scaling!event-driven} is useful when demand has an external clock the platform can trust. @Lst-event-driven-scaling schedules capacity before a product launch or recurring batch window, using the ramp-up field to hide cold start and the duration field to release extra replicas after the event.
-
-::: {#lst-event-driven-scaling lst-cap="**Event-Driven Scaling**: Scheduled scaling rules that preprovision capacity for product launches and recurring traffic spikes."}
-
-```{.yaml}
-scheduled_scaling:
-  - event: "product_launch"
-    time: "2024-03-15 09:00 UTC"
-    target_replicas: 50  # 5x normal
-    ramp_up: 30min  # Start scaling 30min before
-
-  - event: "nightly_rag_embedding_refresh"
-    cron: "0 2 * * *"  # Every night at 2am
-    target_replicas: 20  # 2x normal; batch embedding workload exhausts KV-cache headroom
-    duration: 2h
-```
-
-:::
-
-This pattern works for launches, batch refreshes, and calendar-driven traffic; it does not replace reactive control for unplanned demand because the schedule is only as good as the event model.
-
-In practice, neither forecasting nor event schedules alone suffice. Production systems combine a predictive baseline with reactive adjustment to handle both anticipated patterns and unexpected deviations:
-
-$$\text{Target replicas} = \max(\text{Predicted}, \text{Reactive}) + \text{Buffer}$$
-
-Daily patterns make the proactive side of this rule concrete.
 
 ::: {#exmp-inference-predictive-scaling-traffic .callout-example title="Predictive scaling for traffic"}
 
-@Tbl-inference-chatbot-daily-traffic shows a chatbot service's predictable diurnal traffic:
+**Scenario**: A commercial chatbot service faces predictable diurnal traffic patterns, ramping from 500 QPS at night to 3,000 QPS at peak.
 
-| **Time (UTC)** | **Typical QPS** | **Replicas Needed** |
-|:---------------|:---------------:|:-------------------:|
-| 00:00-06:00    |       500       |          5          |
-| 06:00-09:00    |       1500      |     15 (ramp up)    |
-| 09:00-17:00    |       3000      |      30 (peak)      |
-| 17:00-20:00    |       2000      |    20 (ramp down)   |
-| 20:00-00:00    |       1000      |          10         |
+**Diagnosis**: Reactive scaling triggers scale-ups only after traffic arrives, causing 7-minute cold-start latency overloads during morning traffic ramps (06:00 and 09:00 UTC).
 
-: **Daily traffic pattern for a chatbot service**: Hourly QPS bands and the number of replicas required to absorb each band for a chatbot with predictable diurnal traffic. {#tbl-inference-chatbot-daily-traffic tbl-colwidths="[34,28,38]"}
+**Systems lesson**: Predictive autoscaling converts diurnal time-series forecasts into scheduled pre-warming windows. Triggering scale-up actions 30 minutes before expected ramps ensures replicas are fully warmed before traffic arrives.
 
-A predictive autoscaler converts that demand curve into the schedule in @tbl-inference-chatbot-predictive-schedule, where each scale-up action leads its ramp by roughly 30 minutes (10 replicas warming at 05:30 for the 06:00 ramp, 15 more at 08:30 for the 09:00 peak). That deliberate lead time is what absorbs the cold-start delay the reactive knob cannot anticipate.
-
-| **Time** |  **Action**  | **Replicas Active** | **Replicas Starting** |
-|:---------|:------------:|:-------------------:|:---------------------:|
-| 05:30    |   Scale up   |          5          |      +10 warming      |
-| 06:00    | Traffic ramp |          15         |           -           |
-| 08:30    |   Scale up   |          15         |      +15 warming      |
-| 09:00    | Peak traffic |          30         |           -           |
-| 17:00    |  Scale down  |          20         |    -10 terminating    |
-| 20:00    |  Scale down  |          10         |    -10 terminating    |
-| 00:00    |  Scale down  |          5          |     -5 terminating    |
+:::
 
 : **Predictive scaling schedule**: Per-time-bucket scaling actions, active replicas, and replicas in cold-start warming for the same chatbot service. {#tbl-inference-chatbot-predictive-schedule}
 

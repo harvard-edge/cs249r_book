@@ -2274,16 +2274,11 @@ class StorageBandwidthNvme:
 
 ::: {#exmp-training-gpt-2-language-model-data-pipeline .callout-example title="GPT-2 language model data pipeline"}
 
-**Scenario**: This GPT-2 data pipeline walkthrough quantifies how storage access, CPU tokenization, and PCIe transfers interact to supply an 8-V100 accelerator cluster.
+**Scenario**: Quantifying storage access, CPU tokenization, and PCIe host-to-device transfers supplying an 8-V100 GPU cluster training GPT-2.
 
-**Stage trace**:
+**Diagnosis**: Single-core CPU tokenization latency ($T_{\text{prep}} \approx 180 \text{ ms}$) exceeds GPU step execution time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), causing GPU starvation and hardware utilization collapse ($\eta_{\text{hw}} \to 0$).
 
-1. **Raw text storage**: The WebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from NVMe SSD storage reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`. Under document sampling with access factor `{python} GPT2DataPipeline.f_access_str`, random-access storage bandwidth drops to `{python} GPT2DataPipeline.random_access_gb_per_s_str`, giving $T_{\text{read}} = D_{\text{vol}} / \text{BW}_{\text{storage}} \approx 0.1\text{ ms}$.
-2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} (`{python} GPT2DataPipeline.bpe_vocab_str` vocabulary) converts text into token IDs. For batch size $B =$ `{python} GPT2DataPipeline.b_assign_math` and sequence length $S =$ `{python} GPT2DataPipeline.s_assign_math` (`{python} GPT2DataPipeline.tokens_per_batch_str` total), a single CPU core processing `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` takes $T_{\text{tokenize}} \approx$ `{python} GPT2DataPipeline.tokenization_ms_str` per batch.
-3. **Batching and padding**: Padding and packing generate an int64 tensor of shape `{python} GPT2DataPipeline.batch_size_seq_str` $\times$ `{python} GPT2DataPipeline.seq_len_token_str`, producing `{python} GPT2DataPipeline.batch_kb_str` per batch.
-4. **PCIe transfer**: Transferring the tensor across a PCIe Gen3 x16 bus (`{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` bandwidth) takes $T_{\text{transfer}} =$ `{python} GPT2DataPipeline.transfer_ms_str`, making bus transfer negligible.
-
-**Systems insight**: When single-core CPU preparation time ($T_{\text{prep}} \approx 180\text{ ms}$) exceeds accelerator step time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), the GPU starves, collapsing $\eta_{\text{hw}} \to 0$. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces tokenization latency to $T_{\text{tokenize}} / N_{\text{worker}} \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $T_{\text{prep}}$ with $T_{\text{step}}$ to restore hardware utilization to `{python} GPT2DataPipeline.utilization_pct_str`, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
+**Systems lesson**: Data pipeline preparation throughput must exceed GPU step consumption rates ($R_{\text{pipeline}} > R_{\text{compute}}$). Scaling parallel DataLoader workers and prefetching overlaps CPU tokenization with GPU execution to maximize accelerator utilization.
 
 :::
 
@@ -3150,11 +3145,11 @@ The data-bound category is the most commonly misdiagnosed bottleneck in practice
 
 ::: {#exmp-training-gil-locked-gpu .callout-example title="The GIL-locked GPU"}
 
-**Scenario**: A team writes its data loading pipeline in standard Python using `threading` to read images, apply augmentations, and feed a GPU cluster.
+**Scenario**: An engineering team builds a PyTorch data loading pipeline using standard Python `threading` to preprocess images for a GPU cluster.
 
-**Diagnosis**: Python's Global Interpreter Lock (GIL) ensures only one thread executes Python bytecode at a time [@beazley2010understanding]. When CPU-bound preprocessing runs in Python threads, CPU execution serializes into a bottleneck where prep latency ($T_{\text{prep}} \sim 250 \text{ ms}$) vastly exceeds accelerator forward/backward time ($T_{\text{step}} \approx 12 \text{ ms}$). Profiler traces reveal white space where host-to-device queues empty and accelerator units sit idle.
+**Diagnosis**: Python's Global Interpreter Lock (GIL) serializes CPU-bound preprocessing threads, making host preparation time ($T_{\text{prep}} \approx 250 \text{ ms}$) vastly exceed GPU execution time ($T_{\text{step}} \approx 12 \text{ ms}$), collapsing hardware utilization to $\eta_{\text{hw}} \approx 4.6\%$.
 
-**Systems insight**: Under serial GIL bottlenecks, effective hardware efficiency collapses ($\eta_{\text{hw}} = \frac{T_{\text{step}}}{T_{\text{step}} + T_{\text{prep}}} \approx 4.6\%$). Bypassing this bottleneck requires process-based multiprocessing (`torch.utils.data.DataLoader(num_workers=N)`) or offloading preprocessing entirely to GPU kernels (e.g., NVIDIA DALI) to ensure $T_{\text{prep}} / N < T_{\text{step}}$ and maintain $\eta_{\text{hw}} \to 1.0$.
+**Systems lesson**: Multi-threaded Python data loaders serialize on the GIL and starve GPUs. Using process-based multiprocessing (`num_workers > 0`) or GPU-accelerated input pipelines (NVIDIA DALI) eliminates CPU serialization overhead.
 
 :::
 
@@ -5116,7 +5111,7 @@ class GPT2WalkthroughCalc:
     summary_o_total_mem_gb_str = fmt_memory(summary_o_total, unit=GB, precision=1, commas=False)
 ```
 
-::: {#exmp-training-gpt-2-optimization-v100 .callout-example title="GPT-2 optimization on V100"}
+::: {#nbk-training-gpt-2-optimization-v100 .callout-notebook title="GPT-2 optimization on V100"}
 
 **Step 1**: Establish the baseline memory footprint.
 

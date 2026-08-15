@@ -1161,11 +1161,11 @@ The original breakthrough was a change in how engineers understood the bottlenec
 
 ::: {#exmp-performance-engineering-flashattention-breakthrough .callout-example title="The FlashAttention breakthrough"}
 
-**Context**: In 2022, Tri Dao and coauthors introduced FlashAttention [@dao2022], showing that the attention mechanism's performance bottleneck could be treated as an IO-aware data-movement problem rather than only as a matrix multiplication tuning problem.
+**Scenario**: Standard Transformer attention materializes a full $S \times S$ attention score matrix in high-latency GPU HBM, creating a quadratic memory and bandwidth bottleneck as sequence length $S$ grows [@dao2022].
 
-**Mechanism**: The bottleneck was memory hierarchy, not compute. Standard attention materialized the massive $S{\times}S$ attention score matrix in high-latency HBM. FlashAttention restructured the algorithm using tiling to keep running statistics in on-chip SRAM, computing the softmax without ever writing the full matrix to global memory. This reduced memory complexity to linear $\mathcal{O}(S)$ and wall-clock time by 2--4$\times$ on relevant attention workloads.
+**Diagnosis**: The bottleneck was memory hierarchy and HBM bandwidth, not compute throughput. FlashAttention restructures attention via block-by-block tiling and online softmax, holding intermediate statistics in fast SRAM to compute attention without writing the $S \times S$ matrix to global memory.
 
-**Systems lesson**: FlashAttention matters because it changes where the attention state lives. The durable optimization is not "a faster kernel" but a data-movement reduction that keeps quadratic intermediates out of HBM.
+**Systems lesson**: FlashAttention demonstrates IO-aware algorithm design: trading a small amount of extra re-computation in fast SRAM to eliminate quadratic HBM writes yields 2–4$\times$ wall-clock speedups for long-context LLM workloads.
 
 :::
 
@@ -2371,26 +2371,11 @@ class ProfilerDetective:
 
 ::: {#exmp-performance-engineering-profiler-detective .callout-example title="The profiler detective"}
 
-**Problem**: A 7B parameter LLM runs on a single H100 and shows `{python} ProfilerDetective.observed_tps_tokens_per_s_str` during autoregressive generation at batch size 1. The pure FP16 weight-read roofline is higher, but after budgeting roughly `{python} ProfilerDetective.decode_traffic_gb_str` of total per-token traffic for weights, KV-cache reads, sampling, synchronization, and launch overhead, the bandwidth-limited full-decode ceiling is approximately `{python} ProfilerDetective.ceiling_tps_tokens_per_s_str`. Where is the remaining `{python} ProfilerDetective.hidden_performance_pct_str` of realizable decode-step performance hiding?
+**Scenario**: A 7B parameter LLM running autoregressive generation on an H100 GPU at batch size 1 achieves `{python} ProfilerDetective.observed_tps_tokens_per_s_str`, falling below the `{python} ProfilerDetective.ceiling_tps_tokens_per_s_str` memory-bandwidth decode ceiling.
 
-**Investigation**:
+**Diagnosis**: Nsight Compute shows the primary FP16 GEMM operates efficiently (`{python} ProfilerDetective.gemm_bandwidth_tb_per_s_str` bandwidth), but Nsight Systems reveals `{python} ProfilerDetective.non_gemm_share_pct_str` of step time is lost to un-fused LayerNorm/GELU kernels, sampling, and CPU launch gaps across `{python} ProfilerDetective.kernels_per_layer_str` launches per layer.
 
-Step 1: Kernel-level analysis. Run Nsight Compute on the dominant GEMM kernel. Result: achieves `{python} ProfilerDetective.gemm_bandwidth_tb_per_s_str` effective bandwidth out of the H100's `{python} MemoryWallProfilingRecap.h100_hbm_bw_tb_per_s_str` peak. Efficiency: `{python} ProfilerDetective.gemm_efficiency_pct_str`. This kernel is performing well.
-
-Step 2: Trace-level analysis. Run Nsight Systems on a full decode step. Result: `{python} ProfilerDetective.gemm_time_share_pct_str` of step time is spent in GEMM kernels. The remaining `{python} ProfilerDetective.non_gemm_share_pct_str` is split between:
-
-- Attention kernels (including KV cache reads): `{python} ProfilerDetective.attn_share_pct_str`
-- Layer normalization and activation kernels: `{python} ProfilerDetective.layernorm_share_pct_str`
-- Softmax and top-$k$ sampling: `{python} ProfilerDetective.softmax_share_pct_str`
-- Kernel launch gaps: `{python} ProfilerDetective.launch_gap_pct_str`
-
-Step 3: Identify optimization targets.
-
-- The KV cache attention kernel achieves only `{python} ProfilerDetective.kv_cache_bandwidth_tb_per_s_str` bandwidth because of irregular memory access patterns. Fix: Implement KV cache quantization (INT8) with better memory layout.
-- Kernel launch gaps (`{python} ProfilerDetective.launch_gap_pct_str` of time) come from `{python} ProfilerDetective.kernels_per_layer_str`+ individual kernel launches per layer. Fix: Apply `torch.compile` to fuse element-wise operations, reducing to ~`{python} ProfilerDetective.fused_kernels_per_layer_str` kernels per layer.
-- Layer normalization and activation kernels are unfused. Fix: Fused LayerNorm-GELU kernel via Triton.
-
-**Systems insight**: The dominant GEMM is near-optimal, but secondary operations and launch overhead consume over half the execution time. Systematic profiling reveals that the bottleneck is not where intuition suggests (the largest kernel) but in the accumulated overhead of many small operations.
+**Systems lesson**: Systematic profiling reveals bottlenecks where intuition fails. Optimizing GEMM kernels yields diminishing returns when accumulated launch overhead and un-fused elementwise operations consume over half the step duration; kernel fusion via `torch.compile` or Triton is required to reach the hardware decode roofline.
 
 :::
 

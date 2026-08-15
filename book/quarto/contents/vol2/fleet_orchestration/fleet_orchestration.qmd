@@ -483,16 +483,11 @@ class GangSchedulingDeadlock:
 
 ::: {#exmp-fleet-orchestration-physics-deadlock .callout-example title="The physics of deadlock"}
 
-**Problem**: A `{python} GangSchedulingDeadlock.gs_n_gpus_str`-GPU cluster receives `{python} GangSchedulingDeadlock.gs_n_jobs_str` large training jobs from separate teams, each requiring the full cluster. A naive non-gang scheduler allocates `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team A and `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team B, then waits for more GPUs to become available. What is the steady-state outcome?
+**Scenario**: A `{python} GangSchedulingDeadlock.gs_n_gpus_str`-GPU cluster receives `{python} GangSchedulingDeadlock.gs_n_jobs_str` large distributed training jobs requiring `{python} GangSchedulingDeadlock.gs_gpus_per_job_str` GPUs each. A naive scheduler allocates `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team A and `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs to Team B.
 
-**Analysis**:
+**Diagnosis**: Neither job can proceed without its full node allocation, creating a hold-and-wait deadlock: Team A waits for Team B's GPUs while Team B waits for Team A. Aggregate throughput drops to zero while consuming `{python} GangSchedulingDeadlock.gs_waste_m_str`/hour in idle compute cost.
 
-1. **Team A status**: Holds `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs, Needs `{python} GangSchedulingDeadlock.gs_gpus_per_job_str` GPUs. Progress = 0 percent.
-2. **Team B status**: Holds `{python} GangSchedulingDeadlock.gs_partial_gpus_str` GPUs, Needs `{python} GangSchedulingDeadlock.gs_gpus_per_job_str` GPUs. Progress = 0 percent.
-3. **Cluster status**: `{python} GangSchedulingDeadlock.gs_n_gpus_str` GPUs allocated, 0 samples processed.
-4. **Waste**: `{python} GangSchedulingDeadlock.gs_waste_m_str` per hour in idle electricity and capital.
-
-**Systems insight**: This is a circular dependency\index{Deadlock!circular dependency}: Team A is waiting for Team B's GPUs, and Team B is waiting for Team A's. Without gang scheduling (all-or-nothing allocation), cluster efficiency drops to zero. In a large fleet, even a 5-minute deadlock can cost thousands of dollars. Batch schedulers and Kubernetes batch extensions address this by enforcing a job-level admission boundary: if the full gang cannot start, the job should remain queued rather than hold a partial allocation.
+**Systems lesson**: Distributed training workloads require atomic all-or-nothing (gang) scheduling. Fleet orchestrators must enforce job-level admission boundaries so that jobs remain queued until the entire requested GPU quota is available simultaneously.
 
 :::
 
@@ -1118,13 +1113,11 @@ Migration is not free; it requires a coordinated checkpoint, a job kill, a resch
 
 ::: {#exmp-fleet-orchestration-limping-switch .callout-example title="The limping switch"}
 
-**Scenario**: A foundation-model training job shows a large throughput regression. The GPUs are healthy, the code is unchanged, and the static topology map says the job has full bisection bandwidth.
+**Scenario**: A multi-node foundation model training job exhibits a 30% throughput drop while static topology maps show full bandwidth and GPU hardware health checks report green.
 
-**Failure mode**: A single switch or transceiver can remain technically "up" while producing high CRC error rates, packet drops, or retransmissions. Binary health checks report green; collective communication performance reports red.
+**Diagnosis**: A single leaf switch transceiver experienced high CRC error rates and packet retransmissions. Binary up/down probes passed, but degraded bisection bandwidth stalled AllReduce communication across the entire training job.
 
-**Consequence**: If the scheduler relies on a static topology map, it continues to schedule communication-intensive jobs onto a degraded rack, assuming full bandwidth that no longer exists.
-
-**Systems insight**: Binary health checks (up/down) are insufficient. Schedulers need performance-aware topology monitoring\index{Performance-Aware Topology Monitoring} that incorporates switch counters, retransmission rates, and collective bandwidth tests. Nodes connected to a "limping" switch should be dynamically marked ineligible for communication-intensive jobs until the hardware is repaired.
+**Systems lesson**: Binary health checks are insufficient for distributed training fabrics. Schedulers require performance-aware topology monitoring that tracks retransmissions and collective bandwidth, dynamically quarantining degraded network links.
 
 :::
 
@@ -2301,13 +2294,11 @@ A concrete quota scenario shows how quickly idle reservations become expensive.
 
 ::: {#exmp-fleet-orchestration-quota-hoarding .callout-example title="Quota hoarding"}
 
-**Scenario**: A team reserves a block of `{python} QuotaHoardingCost.hoarding_gpus_str` GPUs for a "critical" urgent model refresh.
+**Scenario**: A research team reserves a static block of `{python} QuotaHoardingCost.hoarding_gpus_str` GPUs for an upcoming model refresh.
 
-**Failure mode**: Upstream data delays postpone the training jobs, but the team retains the reservation to ensure availability "when the data arrives."
+**Diagnosis**: Upstream data delays postpone training, but the team retains the reservation to ensure future availability. The GPUs sit idle for three weeks, accumulating `{python} QuotaHoardingCost.hoarding_cost_str` in capital waste while other teams' queues back up.
 
-**Consequence**: The GPUs sit idle for three weeks, a capital waste of roughly `{python} QuotaHoardingCost.hoarding_cost_str`, while other teams' queues grow.
-
-**Systems insight**: The infrastructure team implemented a "use it or lose it" policy. Any reserved quota group operating below 20 percent utilization for 72 consecutive hours is automatically reclaimed and converted to spot capacity for the general pool. Reclaiming the quota requires VP-level approval, effectively eliminating "parking" on idle hardware.
+**Systems lesson**: Static quota reservations cause severe capacity hoarding. Fleet orchestrators must implement dynamic "use it or lose it" reclamation policies, automatically demoting idle reserved nodes (<20% utilization for 72h) to preemptible spot pools.
 
 :::
 
@@ -2535,34 +2526,11 @@ The debugging method is to compare scheduler state with physical capability, ins
 
 ::: {#exmp-fleet-orchestration-debugging-low-gpu-utilization .callout-example title="Debugging low GPU utilization"}
 
-**Problem**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization, below the `{python} DebugValueCalc.debug_target_util_pct_str` operating target, despite a full queue with over `{python} DebugValueCalc.pending_jobs_str` pending jobs. Dashboards show idle GPUs, but users still wait. Identify the binding constraint and the diagnostic path.
+**Scenario**: A `{python} DebugValueCalc.debug_cluster_comma_str`-GPU cluster reports `{python} DebugValueCalc.debug_util_before_pct_str` average utilization despite over `{python} DebugValueCalc.pending_jobs_str` pending jobs in queue.
 
-The fleet stack framework in @fig-fleet-stack structures the diagnosis: inspect hardware capability first, then scheduling policy, then the mismatch between them.
+**Diagnosis**: Over-specification (users copying A100-80GB templates for `{python} DebugValueCalc.large_job_peak_memory_str` memory jobs), pool fragmentation, and legacy V100 avoidance leave A100-40GB and V100 nodes idle while large jobs wait for A100-80GB allocations. The scheduler correctly enforced policies written for a homogeneous fleet that no longer matched the heterogeneous infrastructure.
 
-The first diagnostic step is infrastructure-layer analysis\index{Infrastructure Layer!analysis}. The hardware inventory in @tbl-fleet-orchestration-debug-inventory separates physical capability before the scheduler policy is examined: A100 nodes can run tensor-parallel jobs over NVLink, while the V100 pool is confined to data parallelism over PCIe.
-
-The second diagnostic step is distribution-layer analysis\index{Distribution Layer!analysis}. The Slurm scheduler implements gang scheduling with strict resource type matching. Examining the job specifications reveals the demand pattern:
-
-- `{python} DebugValueCalc.large_job_count_str` large training jobs requesting at least `{python} DebugValueCalc.large_job_min_gpus_str` of A100-80 GB capacity, with aggregate demand of `{python} DebugValueCalc.large_job_total_gpus_str`.
-- `{python} DebugValueCalc.medium_job_count_str` medium jobs requesting `{python} DebugValueCalc.medium_job_gpus_str` of A100-40 GB capacity, with aggregate demand of `{python} DebugValueCalc.medium_job_total_gpus_str`.
-- `{python} DebugValueCalc.v100_job_count_str` jobs explicitly request V100 resources.
-
-The scheduler's allocation log shows A100-80 GB GPUs nearly saturated by a few running jobs, while the remaining large jobs stay pending because no full `{python} DebugValueCalc.large_job_min_gpus_str` A100-80 GB allocation can be formed. The result is not a standard Slurm partial-allocation deadlock; it is a policy-induced utilization gap where strict resource requests leave A100-40 GB and V100 pools idle while A100-80 GB jobs wait.
-
-**Analysis**: Multiple pathologies compound to create low utilization:
-
-1. **Over-specification**\index{Over-Specification}: Model memory analysis reveals that most large jobs actually require only `{python} DebugValueCalc.large_job_peak_memory_str` peak memory per GPU, well within A100-40 GB capacity. Users copied job templates specifying A100-80 GB without recalculating requirements.
-2. **Pool fragmentation**\index{Pool Fragmentation}: The strict homogeneity requirement means a `{python} DebugValueCalc.large_job_min_gpus_str` job requesting "A100-80 GB" cannot use any A100-40 GB GPUs, even when `{python} DebugValueCalc.idle_a100_40_count_str` sit idle.
-3. **Stranded resources**\index{Stranded Resources}: No jobs target V100 hardware because researchers perceive it as "legacy." The `{python} DebugValueCalc.v100_count_str` contribute zero productive work despite consuming power and cooling.
-4. **Atomic-allocation starvation**\index{Gang Scheduling!starvation}: Large jobs remain pending until a full compatible allocation appears, while other resource pools sit idle because policy prevents compatible substitutions or backfill.
-
-**Diagnosis**: Job templates and organizational practices evolved for a homogeneous A100-80 GB cluster. When infrastructure expanded with heterogeneous hardware, the Distribution Layer policies were never updated. The scheduler correctly implements its configured policy; the policy itself creates the utilization gap.
-
-**Solution**: Implement tiered resource matching with topology awareness. The policy changes are durable: express capability requirements instead of exact GPU SKUs, reserve NVLink-connected nodes for jobs that need tensor parallelism, backfill compatible smaller jobs into otherwise idle pools, seed appropriate workloads onto older accelerators with lower cost accounting, and make the correct resource request easier than the over-specified template.
-
-**Impact**: After implementing tiered matching and backfill scheduling, a two-week validation run recovered idle capacity across every pool, with the per-pool before-and-after allocation reported in @tbl-fleet-orchestration-debug-results.
-
-**Systems lesson**: Surface-level diagnosis suggested a scheduling algorithm problem. Deeper analysis showed a policy-infrastructure mismatch: the scheduler correctly implemented policies written for a homogeneous A100-80 GB cluster, but the infrastructure had become heterogeneous. Many utilization problems have this shape. The fix is not always a new scheduler; often it is updating the operational policy so it matches the fleet that actually exists.
+**Systems lesson**: Surface-level diagnosis often mistakes policy-infrastructure mismatches for scheduling algorithm bugs. Updating distribution layer policies to support automatic capability matching, dynamic memory profiling, and backfilling raises cluster utilization to `{python} DebugValueCalc.debug_util_after_pct_str`, recovering `{python} DebugValueCalc.debug_annual_usd_str` in annual compute capacity.
 
 :::
 

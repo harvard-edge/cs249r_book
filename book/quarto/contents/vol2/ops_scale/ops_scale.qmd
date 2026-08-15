@@ -1010,17 +1010,11 @@ A key metric that captures this operational urgency is feature freshness latency
 
 ::: {#exmp-ops-scale-feature-freshness-latency .callout-example title="Feature freshness latency"}
 
-**Scenario**: A recommendation service processes incoming user event logs to update real-time feature vectors during an active user session.
+**Scenario**: A real-time recommendation service processes user interaction logs to compute feature vectors during an active user session.
 
-**Mechanism**: Feature freshness latency is defined physically by event availability:
-$$T_{\text{freshness}} = T_{\text{available}} - T_{\text{event}} = \frac{D_{\text{vol}}}{\text{BW}} + L_{\text{lat}}$$
+**Diagnosis**: Daily batch feature pipelines suffer high freshness latency ($T_{\text{freshness}} \approx 12\text{--}24\text{ h}$), leaving recommendations static and causing session abandonment. Streaming pipelines (Kafka/Flink) drop freshness latency to $T_{\text{freshness}} \approx 1\text{--}5\text{ s}$, updating feature vectors before the subsequent user action.
 
-**Trade-off**:
-
-- **Batch pipeline (daily)**: Events aggregate overnight ($T_{\text{freshness}} \approx 12\text{--}24\text{ h}$), leaving session state static and causing users to abandon sessions before feed updates land.
-- **Streaming pipeline (real-time)**: Events stream via Kafka/Flink into an online key-value store ($T_{\text{freshness}} \approx 1\text{--}5\text{ s}$), updating feature vectors before the subsequent request.
-
-**Systems insight**: Replacing batch materialization with streaming ingestion ($T_{\text{freshness}} \approx 5\text{ s}$) yields a 10 to 20 percent lift in session engagement, justifying the added $D_{\text{vol}}/\text{BW}$ ingestion infrastructure costs.
+**Systems lesson**: Feature freshness latency is a physical system metric ($T_{\text{freshness}} = T_{\text{available}} - T_{\text{event}}$). Transitioning from batch to streaming ingestion delivers a 10 to 20 percent engagement lift that justifies real-time feature store operational costs.
 
 :::
 
@@ -2185,13 +2179,11 @@ Latency gates catch overt performance violations, but some regressions pass ever
 
 ::: {#exmp-ops-scale-silent-model-regression .callout-example title="Silent model regression"}
 
-**Scenario**: A high-throughput product ranking model ($25,000\text{ QPS}$) passes all offline validation gates ($L_{\text{lat}} < 12\text{ ms}$) but causes a 3.2 percent conversion rate drop post-deployment.
+**Scenario**: A high-throughput product ranking model ($25,000\text{ QPS}$) passes offline validation and serving latency gates ($L_{\text{lat}} < 12\text{ ms}$), but causes a 3.2 percent conversion rate drop post-deployment.
 
-**Mechanism**: An upstream feature pipeline schema change causes a critical user affinity feature to return `null` for 8 percent of incoming traffic. The serving layer's fallback handler imputes `null` as `0.0`—a valid scalar within the model's feature space.
+**Diagnosis**: An upstream schema change caused a key user-affinity feature to return `null` for 8 percent of queries. The serving layer silently imputed `null` as `0.0`—a valid float value—so HTTP error rates and latency remained normal while prediction quality degraded unalerted for 48 hours.
 
-**Impact**: Because imputed values generate valid float outputs without raising exceptions, latency $L_{\text{lat}}$ and HTTP error rates remain nominal, allowing the silent failure to persist unalerted for 48 hours.
-
-**Systems insight**: Syntactically valid feature imputations create semantically silent failures; production data validation gates must evaluate feature distribution shifts ($\Delta D_{\text{vol}}$) alongside system uptime and latency bounds.
+**Systems lesson**: Syntactically valid feature imputations cause semantically silent production failures. Automated release pipelines and monitoring systems must evaluate distribution shifts ($\Delta D_{\text{vol}}$) alongside system uptime and latency SLAs.
 
 :::
 
@@ -5026,13 +5018,11 @@ The diagnostic sequence then tests the highest-probability shared causes before 
 
 ::: {#exmp-ops-scale-feature-pipeline-cascade .callout-example title="Feature pipeline cascade"}
 
-**Scenario**: A core platform team alters the transformation logic of a shared `user_engagement_score` feature, changing its normalization from a 30-day z-score to a 7-day min-max scaling to capture rapid trend shifts.
+**Scenario**: A core platform team alters the transformation logic of a shared `user_engagement_score` feature in-place, changing its normalization from a 30-day z-score to a 7-day min-max scale.
 
-**Mechanism**: The update mutates the shared feature store table in-place. Fourteen downstream models across five engineering teams consume this feature as an implicit interface without explicit schema versioning.
+**Diagnosis**: Fourteen downstream models across five engineering teams consumed the feature as an un-versioned interface. The in-place mutation invalidated feature distribution assumptions, causing a 12 percent drop in ranking accuracy and 18 hours of cross-team debugging toil.
 
-**Impact**: In-place feature mutation invalidates model expectations across all 14 consumers, causing up to a 12 percent drop in ranking accuracy and inducing 18 hours of cross-team debugging toil before the shared root cause is identified.
-
-**Systems lesson**: Shared feature definitions are production interfaces that mandate immutable versioning (e.g., `user_engagement_score_v2`). In-place schema mutations break synchronization $T_{\text{sync}}$ across dependent model fleets.
+**Systems lesson**: Shared feature definitions are production API contracts that mandate explicit, immutable versioning (`user_engagement_score_v2`). In-place schema mutations break contract expectations across dependent model fleets.
 
 :::
 

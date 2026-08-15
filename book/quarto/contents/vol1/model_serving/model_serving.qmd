@@ -104,22 +104,11 @@ class BlackFridayCalc:
 
 ::: {#exmp-model-serving-black-friday-traffic-spike .callout-example title="The 'Black Friday' traffic spike"}
 
-**Scenario**: An e-commerce recommendation system runs comfortably at `{python} BlackFridayCalc.bf_latency_ms_str` with `{python} BlackFridayCalc.bf_qps_normal_str`.
+**Scenario**: An e-commerce recommendation serving system experiences a `{python} BlackFridayCalc.bf_spike_factor_mult_str` traffic surge (`{python} BlackFridayCalc.bf_qps_spike_str` QPS) during Black Friday sales events.
 
-**Failure mode**: On Black Friday, traffic spikes `{python} BlackFridayCalc.bf_spike_factor_mult_str` to `{python} BlackFridayCalc.bf_qps_spike_str`. The system does not slow down `{python} BlackFridayCalc.bf_spike_factor_mult_str`; it collapses. Latency hits `{python} BlackFridayCalc.bf_collapse_latency_s_str`, then requests start timing out. The servers are `{python} BlackFridayCalc.bf_full_util_pct_str` loaded, but useful throughput drops to near zero because most completed requests have already timed out from the client's perspective.
+**Diagnosis**: When server utilization approaches `{python} BlackFridayCalc.bf_full_util_pct_str`, queue lengths explode nonlinearly, increasing latency to `{python} BlackFridayCalc.bf_collapse_latency_s_str` and causing client request timeouts.
 
-**Physics**: This previews the queueing theory formalized later in @sec-model-serving-queuing-theory-tail-latency-29a6. As utilization approaches `{python} BlackFridayCalc.bf_full_util_pct_str`, queue lengths diverge nonlinearly rather than linearly. The system spends more time managing the queue (context switching, thrashing) than doing useful work.
-
-**Fix**:
-
-1.  **Load shedding**\index{Load Shedding!coordinated}: Reject excess requests immediately to keep the queue short.
-2.  **Autoscaling**: Use an operational control loop to spin up more serving replicas before utilization hits the "knee" of the curve.
-3.  **Degradation**: Serve cached/dumber recommendations to reduce compute cost per query.
-
-```{=latex}
-\vspace*{-1.5ex}
-```
-**Systems lesson**: High average throughput does not protect a serving system from collapse. Tail latency control requires keeping utilization below the queueing knee, honoring the machine constraint even if that means shedding load or serving a cheaper model.
+**Systems lesson**: High average throughput does not prevent queueing collapse under traffic surges. Maintaining tail latency SLOs requires proactive load shedding, dynamic model degradation, and autoscaling before utilization hits queueing knees.
 
 :::
 
@@ -217,13 +206,11 @@ Beyond the technical limits of latency, serving economics have also changed rapi
 
 ::: {#exmp-model-serving-facebook-inference-tax .callout-example title="The inference tax at Facebook"}
 
-**Context**: In 2018, Kim Hazelwood and Facebook's AI Infrastructure team described a production ML workload that touched nearly every user-facing surface: News Feed ranking, Ads ranking, Search, image understanding (Lumos), face recognition (Facer), anomaly detection (Sigma), automated video captioning, and a Translate system serving roughly 4.5 billion translated post impressions per day across more than two thousand translation directions [@hazelwood2018].
+**Scenario**: Production ML serving systems at Meta execute tens of trillions of inferences daily across global user-facing services [@hazelwood2018].
 
-**Failure mode**: The expensive part of ML had moved into serving. Inference ran tens of trillions of times per day under strict tail-latency targets, where live request arrivals constrained batching and an Ads Ranking model retrained daily performed worse than one retrained hourly---forcing aggressive retraining alongside aggressive serving.
+**Diagnosis**: Recurring inference serving compute and energy costs dwarf initial offline model training expenses. Live request arrival patterns and strict latency bounds constrain GPU batching.
 
-**Resolution**: Facebook treated inference as a first-class data-center infrastructure problem, co-designing models, accelerators, memory systems, and serving platforms together rather than treating serving as an afterthought to training.
-
-**Systems lesson**: Training creates the model; serving pays the recurring bill. At fleet scale, a model architecture that is cheap to train can still be too expensive, too memory-bound, or too variable in tail latency to serve.
+**Systems lesson**: Model architectures cheap to train can prove unviable to serve at fleet scale. Production serving infrastructure requires hardware-software co-design to balance tail latency, batch size, and recurring operational TCO.
 
 :::
 
@@ -2610,16 +2597,11 @@ A model that performed well during validation may silently degrade when deployed
 
 ::: {#exmp-model-serving-resnet-50-image-preprocessing-skew .callout-example title="ResNet-50: Image preprocessing skew"}
 
-**Scenario**: For ResNet-50 serving, three preprocessing choices commonly diverge between training and serving pipelines.
+**Scenario**: ResNet-50 vision serving models experience silent prediction accuracy degradation between offline training and online serving pipelines.
 
-- **Resize interpolation**\index{Resize Interpolation!skew source}: Training uses `PIL.BILINEAR` while OpenCV defaults to `cv2.INTER_LINEAR`. These can produce pixel-level differences whose task-level accuracy effect must be measured on the deployed pipeline.
-- **Color space handling**: JPEG loading in different libraries may produce BGR vs. RGB ordering. If the model trained on RGB but serves BGR inputs, predictions can degrade severely.
-- **Normalization constants**: ImageNet normalization uses specific mean/std values. Using `mean=[0.5, 0.5, 0.5]` instead of `mean=[0.485, 0.456, 0.406]` shifts inputs out of the training distribution.
+**Diagnosis**: The serving pipeline implemented C++/OpenCV preprocessing (`cv2.INTER_LINEAR`, BGR order) while training used Python/PIL (`PIL.BILINEAR`, RGB order, different normalization constants).
 
-```{=latex}
-\vspace*{-1.5ex}
-```
-**Systems lesson**: The safest approach is to export the exact preprocessing code used during training and run it identically in serving, or use a framework like NVIDIA DALI that can help standardize preprocessing across training and serving environments.
+**Systems lesson**: Preprocessing divergence causes silent training-serving skew without raising runtime exceptions. Standardizing data transformation pipelines across training and serving environments prevents input distribution corruption.
 
 :::
 
@@ -3780,14 +3762,11 @@ Autonomous vehicles\index{Streaming Traffic!sensor synchronization}, video analy
 
 ::: {#exmp-model-serving-multi-camera-autonomous-vehicle-serving .callout-example title="Multi-camera autonomous vehicle serving"}
 
-The timeline in @tbl-model-serving-multicamera-timeline fixes the serving problem through a set of hard constraints rather than the statistical arrival rates that govern Poisson traffic:
+**Scenario**: An autonomous vehicle vision system processes 6-camera video streams under a strict 33 ms real-time frame deadline.
 
-- Hard deadline: 33 ms per frame set (real-time requirement)
-- Batch size: Fixed at six (one per camera)
-- Synchronization budget: 12 ms of 33 ms total (36 percent for jitter tolerance)
-- Timeout policy: If camera frame not received by $T + 20$ ms, use previous frame
+**Diagnosis**: Sensor arrival jitter causes variable multi-camera batch assembly delays, risking frame deadline misses. Implementing a 12 ms synchronization budget and fallback rules (reusing previous frames on timeout) bounds latency.
 
-**Systems insight**: Unlike Poisson traffic where dynamic batching optimizes throughput, streaming traffic fixes both batch size and deadline externally, so the serving system must spend its budget on synchronization policies that handle sensor jitter while still meeting the hard deadline.
+**Systems lesson**: Synchronized multi-sensor streaming workloads enforce deterministic real-time deadlines. Serving pipelines must implement explicit synchronization timeout policies to prevent sensor jitter from breaching latency budgets.
 
 :::
 
@@ -4469,14 +4448,11 @@ class SafetensorsLoadingSpeed:
 
 ::: {#exmp-model-serving-loading-speed-safetensors-vs-pickle .callout-example title="Loading speed: Safetensors vs. Pickle"}
 
-**Scenario**: A cold-start replica has to load a `{python} SafetensorsLoadingSpeed.checkpoint_size_gb_str` Stable Diffusion v1.5 checkpoint before it can absorb traffic.
+**Scenario**: A serverless inference replica loads a `{python} SafetensorsLoadingSpeed.checkpoint_size_gb_str` model checkpoint during cold-start scaling events.
 
-**Analysis**:
+**Diagnosis**: PyTorch `torch.load()` (Pickle) requires CPU object reconstruction, taking `{python} SafetensorsLoadingSpeed.pickle_load_s_str` to initialize. Safetensors memory-mapping bypasses CPU parsing, loading weights in `{python} SafetensorsLoadingSpeed.safetensors_load_s_str` (`{python} SafetensorsLoadingSpeed.load_speedup_mult_str` faster).
 
-- **Pickle path**: The PyTorch pickle-based loader takes `{python} SafetensorsLoadingSpeed.pickle_load_s_str` in this scenario because Python has to reconstruct objects before tensors are usable.
-- **Safetensors path**: The same weights stored with Safetensors load in `{python} SafetensorsLoadingSpeed.safetensors_load_s_str`, a `{python} SafetensorsLoadingSpeed.load_speedup_mult_str` improvement.
-
-**Systems insight**: With memory-mapped Safetensors files, loading speed becomes limited mainly by the disk's read speed—for example `{python} SafetensorsLoadingSpeed.nvme_bw_gb_per_s_str` on local Gen3 NVMe—rather than by CPU parsing overhead.
+**Systems lesson**: Zero-copy tensor formats decouple cold-start initialization latency from CPU parsing overhead. Memory-mapped checkpoint loading enables rapid replica scaling during sudden traffic spikes.
 
 :::
 
@@ -4494,16 +4470,11 @@ A useful trace reading is bottleneck-first. Empty spaces in the GPU bar mean idl
 
 ::: {#exmp-model-serving-profiling-loop .callout-example title="The profiling loop"}
 
-**Scenario**: A serving node has high P99 latency even though average accelerator utilization looks acceptable, and a trace of warm requests shows large blank regions in the accelerator timeline between short kernels.
+**Scenario**: An inference serving node exhibits high P99 tail latency despite low average GPU compute utilization.
 
-**Approach**:
+**Diagnosis**: Timeline profiling (Nsight Systems / PyTorch Profiler) reveals large idle gaps between tiny GPU kernels caused by CPU host-side preprocessing bottlenecks and kernel launch overhead.
 
-1. **Setup**: Run a warmup, then capture ten to fifty representative requests in Chrome Tracing, Nsight, or the runtime's profiler.
-2. **Diagnosis**: Find the largest idle gap or longest blocking event in the trace.
-3. **Fix**: Apply the smallest targeted fix, such as fusion for kernel-launch fragmentation, pinning for CPU locality, zero-copy loading for startup, or scheduling changes for host-device stalls.
-4. **Verification**: Capture the trace again and confirm that the targeted gap disappeared or moved.
-
-**Systems lesson**: Profiling is credible only when the next trace changes in the expected direction. The loop prevents optimization from becoming a list of tricks detached from measured bottlenecks.
+**Systems lesson**: Serving node optimization requires empirical timeline profiling. Iteratively identifying trace bottlenecks (kernel launch overhead, host-device copy stalls) guides targeted optimizations like operator fusion and pinned memory.
 
 :::
 

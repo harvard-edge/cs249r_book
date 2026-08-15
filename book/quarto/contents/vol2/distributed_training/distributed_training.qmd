@@ -489,32 +489,11 @@ class HierarchicalAllReduceDebug:
 
 ::: {#exmp-distributed-training-debugging-slow-gradient-synchronization .callout-example title="Debugging slow gradient synchronization"}
 
-**Scenario**: An AllReduce of a `{python} HierarchicalAllReduceDebug.tensor_gb_str` gradient tensor across `{python} HierarchicalAllReduceDebug.nodes_str` (`{python} HierarchicalAllReduceDebug.total_gpus_str`) takes `{python} HierarchicalAllReduceDebug.observed_ms_str`. This chapter treats AllReduce as the synchronization primitive created by data parallelism; @sec-collective-communication derives the ring, tree, and hierarchical algorithms in detail. For now, the useful debugging move is to compare the observation against two coarse bounds: a pessimistic flat communication path and a topology-aware path that separates fast intra-node traffic from slower inter-node traffic.
+**Scenario**: An AllReduce of a `{python} HierarchicalAllReduceDebug.tensor_gb_str` gradient tensor across `{python} HierarchicalAllReduceDebug.nodes_str` ({python} HierarchicalAllReduceDebug.total_gpus_str` GPUs) takes `{python} HierarchicalAllReduceDebug.observed_ms_str`.
 
-**Context**:
+**Diagnosis**: Latency falls well below the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring bound, confirming NCCL uses a hierarchical algorithm. However, switch counters reveal inter-node InfiniBand links run at only `{python} HierarchicalAllReduceDebug.ib_util_pct_str` utilization due to uplink congestion.
 
-- **Topology**: `{python} HierarchicalAllReduceDebug.nodes_str`, `{python} HierarchicalAllReduceDebug.gpus_per_node_str` per node
-- **Fast local path**: NVLink at `{python} HierarchicalAllReduceDebug.nvlink_a100_gb_per_s_str` bidirectional between GPUs
-- **Slower network path**: InfiniBand HDR at `{python} HierarchicalAllReduceDebug.ib_hdr_gbit_per_s_str` (`{python} HierarchicalAllReduceDebug.ib_hdr_bw_gb_per_s_str`) per port
-- **Diagnostic bounds**: A flat all-GPU path over the network would land near `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`; a topology-aware local-then-network path predicts roughly `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` because each node sends only its share across the slower link
-
-**Analysis**:
-
-- **Diagnosis**: The collective library is using a hierarchical path that treats the node boundary as the expensive communication boundary
-- **Expected behavior**: The inter-node phase should scale with each node's reduced share rather than with the full tensor from every GPU
-- **Diagnosis check**: A flat single ring over all `{python} HierarchicalAllReduceDebug.total_gpus_str` would have measured close to `{python} HierarchicalAllReduceDebug.flat_ring_ms_str`, so the algorithm is already hierarchical
-
-**Observation**:
-
-- **Observed latency**: `{python} HierarchicalAllReduceDebug.observed_ms_str` (well below the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring upper bound, but about `{python} HierarchicalAllReduceDebug.residual_ms_str` above the hierarchical ideal)
-- **Bandwidth utilization**: Switch counters during the inter-node phase show only `{python} HierarchicalAllReduceDebug.ib_util_pct_str` of theoretical InfiniBand throughput on the affected uplinks (end-to-end efficiency is lower still, since the intra-node phases add time)
-- **Network counters**: Show congestion on specific switch uplinks
-
-**Diagnosis**: NCCL is already using a hierarchical algorithm (`{python} HierarchicalAllReduceDebug.observed_ms_str` vs. the `{python} HierarchicalAllReduceDebug.flat_ring_ms_str` flat-ring prediction confirms this). The remaining gap between observed and modeled latency can come from switch congestion on a handful of inter-node uplinks, effective-bandwidth loss, or implementation overhead, not from a fully flat algorithm.
-
-**Solution**: Monitor InfiniBand switch port utilization to identify hot spots. Consider the rail-optimized topology in @sec-network-fabrics-rail-optimized or further tuning of the hierarchical hand-off so it explicitly partitions intra-node (NVLink) from inter-node (InfiniBand) communication. The residual gap likely represents achievable optimization through better network provisioning and bandwidth utilization rather than a wholesale algorithm change.
-
-**Systems lesson**: The analysis demonstrates how the fleet stack layers interact: Physical constraints (bandwidth) bound Operational choices (algorithm), which manifest in Service metrics (latency). Debugging requires examining all three layers, not just tuning one in isolation.
+**Systems lesson**: Debugging collective communication requires evaluating physical link utilization against algorithmic bounds. The gap between `{python} HierarchicalAllReduceDebug.hierarchical_total_ms_str` theoretical and `{python} HierarchicalAllReduceDebug.observed_ms_str` observed latency stems from network fabric uplink contention, requiring rail-optimized topologies rather than algorithm changes.
 
 :::
 
@@ -2631,15 +2610,11 @@ class AutoParallelism:
 
 ::: {#exmp-distributed-training-automated-design-space-search-tier-3-optimizer .callout-example title="Automated design space search (Tier 3 optimizer)"}
 
-**Scenario**: An engineering team needs to schedule Archetype A (a `{python} AutoParallelism.params_b_str` parameter model) on a cluster of `{python} AutoParallelism.gpu_count_str` H100 GPUs. Manually searching the 3D-parallelism space (TP $\times$ PP $\times$ DP) is error-prone: a split that maximizes DP might exceed the `{python} AutoParallelism.hbm_gb_str` HBM capacity, while a split that maximizes TP might saturate the NVLink interconnect.
+**Scenario**: An engineering team schedules a `{python} AutoParallelism.params_b_str` parameter model across `{python} AutoParallelism.gpu_count_str` H100 GPUs (80 GB HBM each), navigating the multi-dimensional 3D-parallelism search space (TP $\times$ PP $\times$ DP).
 
-**Approach**: Instead of trial and error, we invoke a constrained design-space search over TP, PP, and DP factorizations, implemented here as the Tier 3 Optimizer (`ParallelismOptimizer`) in our physics engine, configured to maximize Model FLOPs Utilization (MFU). The optimizer performs a constrained grid search over all valid algebraic factorizations and, in under a second, selects the best strategy under the stated objective:
+**Diagnosis**: Manual trial-and-error risks memory overflow (exceeding 80 GB HBM) or saturating NVLink. The `ParallelismOptimizer` evaluates all factorizations, selecting TP=`{python} AutoParallelism.opt_tp_str`, PP=`{python} AutoParallelism.opt_pp_value_str`, and DP=`{python} AutoParallelism.opt_dp_value_str` to maximize MFU without exceeding HBM capacity.
 
-*   **Tensor parallelism (TP)**: `{python} AutoParallelism.opt_tp_str`
-*   **Pipeline parallelism (PP)**: `{python} AutoParallelism.opt_pp_value_str`
-*   **Data parallelism (DP)**: `{python} AutoParallelism.opt_dp_value_str`
-
-**Systems insight**: The optimizer formalizes what engineers discover empirically: TP should match the intra-node GPU count (`{python} AutoParallelism.opt_tp_str`) to avoid traversing the slower inter-node fabric, while the best pipeline depth under this objective is only PP=`{python} AutoParallelism.opt_pp_value_str` once tensor parallelism and sharded state make the memory budget fit. Deeper pipelines would reduce per-stage memory further, but they also increase the pipeline bubble and reduce MFU. This automated synthesis achieves a projected `{python} AutoParallelism.opt_mfu_str` MFU, demonstrating that empirical engineering heuristics often reflect structural mathematical laws.
+**Systems lesson**: Automated design-space search formalizes empirical heuristics: Tensor Parallelism should be confined within single-node NVLink bounds (TP=`{python} AutoParallelism.opt_tp_str`), while Pipeline Parallelism (PP=`{python} AutoParallelism.opt_pp_value_str`) should be minimized to avoid pipeline bubble overhead while satisfying memory constraints, achieving `{python} AutoParallelism.opt_mfu_str` projected MFU.
 
 :::
 

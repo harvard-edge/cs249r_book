@@ -1087,42 +1087,11 @@ class RingTrace:
 
 ::: {#exmp-collective-communication-ring-allreduce-step-by-step-trace-4-gpus .callout-example title="Ring AllReduce: Step-by-step trace (4 GPUs)"}
 
-**Setup**: `{python} RingTrace.n_gpus_str` GPUs in a ring $(0 \to 1 \to 2 \to 3 \to 0)$. Each GPU holds a vector of `{python} RingTrace.vec_len_str` values. We use concrete numbers for clarity:
+**Scenario**: Four GPUs ($0 \to 1 \to 2 \to 3 \to 0$) perform a Ring AllReduce on local vectors $[1, 5, 3, 7]$, $[2, 6, 4, 8]$, $[3, 7, 5, 9]$, and $[4, 8, 6, 10]$ to compute the element-wise sum $[10, 26, 18, 34]$.
 
-- GPU 0: $[1, 5, 3, 7]$
-- GPU 1: $[2, 6, 4, 8]$
-- GPU 2: $[3, 7, 5, 9]$
-- GPU 3: $[4, 8, 6, 10]$
+**Diagnosis**: Standard parameter servers suffer from a central reducer bandwidth bottleneck ($O(N)$ data transfer). Ring AllReduce splits vectors into $N=4$ chunks, executing $N-1$ Scatter-Reduce steps to aggregate sums followed by $N-1$ AllGather steps to distribute results.
 
-**Expected result** (element-wise sum): $[10, 26, 18, 34]$.
-
-Each GPU "owns" one chunk: GPU 0 owns chunk A (element 0), GPU 1 owns chunk B (element 1), and so on.
-
-**Phase 1: Scatter-Reduce (3 steps)**
-
-Each GPU sends one chunk or partial sum to its right neighbor, which adds the received value to its local copy. @Tbl-collective-communication-ring-scatter-reduce-trace traces the three sequential steps across all four GPUs:
-
-| **Step** |     **GPU 0 sends**      |     **GPU 1 sends**      |     **GPU 2 sends**      |     **GPU 3 sends**      | **After receive and add**:                                                                     |
-|:---------|:------------------------:|:------------------------:|:------------------------:|:------------------------:|:-----------------------------------------------------------------------------------------------|
-| 1        | chunk A $(1) \to$ GPU 1  | chunk B $(6) \to$ GPU 2  | chunk C $(5) \to$ GPU 3  | chunk D $(10) \to$ GPU 0 | GPU 0: D=$17$, GPU 1: A=$3$, GPU 2: B=$13$, GPU 3: C=$11$                                      |
-| 2        | chunk D $(17) \to$ GPU 1 | chunk A $(3) \to$ GPU 2  | chunk B $(13) \to$ GPU 3 | chunk C $(11) \to$ GPU 0 | GPU 0: C=$14$, GPU 1: D=$25$, GPU 2: A=$6$, GPU 3: B=$21$                                      |
-| 3        | chunk C $(14) \to$ GPU 1 | chunk D $(25) \to$ GPU 2 | chunk A $(6) \to$ GPU 3  | chunk B $(21) \to$ GPU 0 | GPU 0: B=$\mathbf{26}$, GPU 1: C=$\mathbf{18}$, GPU 2: D=$\mathbf{34}$, GPU 3: A=$\mathbf{10}$ |
-: **Ring AllReduce Scatter-Reduce trace**: Three sequential steps across 4 GPUs. {#tbl-collective-communication-ring-scatter-reduce-trace}
-
-After Phase 1, each GPU holds the *complete sum* for exactly one chunk: GPU 0 has the global sum for element B (26), GPU 1 for C (18), GPU 2 for D (34), GPU 3 for A (10).
-
-**Phase 2: AllGather (3 steps)**
-
-Each GPU sends its fully reduced chunk around the ring so all GPUs receive all results. @Tbl-collective-communication-ring-allgather-trace shows the three forwarding steps that complete the collective:
-
-| **Step** | **Action**                                      | **Result**                           |
-|:---------|:------------------------------------------------|:-------------------------------------|
-| 4        | Each sends its complete chunk to right neighbor | Each GPU now has 2 of 4 final chunks |
-| 5        | Continue forwarding                             | Each GPU now has 3 of 4 final chunks |
-| 6        | Final forwarding                                | All GPUs hold $[10, 26, 18, 34]$     |
-: **Ring AllReduce AllGather trace**: Three sequential steps in which each GPU forwards its fully-reduced chunk around the ring. {#tbl-collective-communication-ring-allgather-trace}
-
-The total data movement per GPU\index{Ring AllReduce!data movement per GPU} is fixed by the ring schedule: in each of the $2(N-1)$ = `{python} RingTrace.steps_str` steps, each GPU sends exactly $M/N$ = `{python} RingTrace.elem_str` element. Total per GPU: `{python} RingTrace.steps_str` $\times$ `{python} RingTrace.elem_str` = `{python} RingTrace.total_str` elements sent, `{python} RingTrace.total_str` received.
+**Systems lesson**: Ring AllReduce achieves optimal bandwidth utilization: each GPU sends $2\frac{N-1}{N}M$ total data regardless of cluster size $N$, decoupling byte-transfer volume from node count.
 
 :::
 
@@ -1920,18 +1889,11 @@ The error-feedback trace in @tbl-error-feedback runs the same sequence with a re
 
 ::: {#exmp-collective-communication-error-feedback-mechanism .callout-example title="Error feedback mechanism"}
 
-**Problem**: A single parameter receives small gradients (all below 0.5) over five training steps. A greedy compressor transmits only values $\geq 0.5$ (rounding to nearest integer: values in $[0, 0.5) \to 0$, values in $[0.5, 1.5) \to 1$, etc.). After five steps, how much gradient information does naive compression lose, and how does an error-feedback accumulator recover it?
+**Scenario**: A gradient compression pipeline applies thresholding to small gradient values (<0.5) over 5 training steps during distributed data-parallel training.
 
-**Naive compression outcome**: In @tbl-error-feedback-naive, after 5 steps the system has transmitted `{python} ErrorFeedbackTrace.naive_str` but the true cumulative gradient is `{python} ErrorFeedbackTrace.true_str`. The parameter never updates, and `{python} ErrorFeedbackTrace.naive_loss_pct_str` of gradient information is lost.
+**Diagnosis**: Naive greedy compression discards values below threshold, transmitting `{python} ErrorFeedbackTrace.naive_str` when true cumulative gradient is `{python} ErrorFeedbackTrace.true_str` (`{python} ErrorFeedbackTrace.naive_loss_pct_str` gradient loss). Adding error feedback ($e_t$) telescopes residual errors across steps, transmitting `{python} ErrorFeedbackTrace.cum_str` with `{python} ErrorFeedbackTrace.error_str` residual error.
 
-**Error-feedback outcome**: In @tbl-error-feedback, the accumulator $e_t$ telescopes the residual across steps. After 5 steps, the system has transmitted `{python} ErrorFeedbackTrace.cum_str` with a remaining error of `{python} ErrorFeedbackTrace.error_str`. The true cumulative is `{python} ErrorFeedbackTrace.true_str`, so transmitted $+$ error = `{python} ErrorFeedbackTrace.conservation_str` = `{python} ErrorFeedbackTrace.true_str` ✓
-
-**Systems insight**:
-
-1. **No information is lost**: The sum (transmitted + error buffer) always equals the cumulative true gradient.
-2. **Small gradients accumulate**: Individual gradients of 0.3–0.4 were too small to transmit alone, but they accumulated until crossing the threshold.
-3. **Error oscillates around zero**: The error buffer $e_t$ does not grow unboundedly; it oscillates as gradients are "paid back" through transmission.
-4. **Convergence preserved**: Over time, the model receives approximately the correct total gradient, with some delay.
+**Systems lesson**: Error feedback preserves convergence in lossy gradient compression. By storing untransmitted residual vectors in local host memory ($e_{t+1} = g_t + e_t - v_t$), small gradients accumulate over steps until crossing the transmission threshold without information loss.
 
 :::
 

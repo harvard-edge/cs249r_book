@@ -162,11 +162,11 @@ The programming model distinction between GPUs and TPUs has practical implicatio
 
 ::: {#exmp-compute-infrastructure-tpu-origin-story .callout-example title="The TPU origin story"}
 
-**Context**: In 2013, Google engineers projected that if users spoke to their Android phones for just three minutes per day using voice search, the company would need to double its data center compute capacity to handle the inference load [@jouppi2017]. The cost was prohibitive.
+**Scenario**: In 2013, Google projected that if users spoke to Android phones for 3 minutes per day using voice search, handling the inference load on general-purpose CPUs would require doubling data center compute capacity at prohibitive cost [@jouppi2017].
 
-**Insight**: Google's TPU analysis framed production neural-network inference as a dense-linear-algebra workload large enough that voice-search growth alone could have doubled serving capacity needs. This finding led directly to the TPU v1, a purpose-built inference accelerator with a $256{\times}256$ systolic array that could deliver 92 TOPS (INT8) within a 75 W power envelope. The first TPUs were deployed in 2015 and served production inference workloads including RankBrain and portions of Google Neural Machine Translation [@jouppi2017]; the AlphaGo match-play system is documented separately [@silver2016].
+**Diagnosis**: Standard CPU architectures paid a heavy generality tax—spending significant silicon area and power on out-of-order execution, branch prediction, and complex caches rather than matrix multiplication throughput.
 
-**Systems lesson**: Specialization became economically justified because the workload was stable, massive, and dominated by one operation class. The TPU story is a generality-tax case, not merely a faster-chip story.
+**Systems lesson**: Hardware specialization is economically justified when a workload is massive, stable, and dominated by a single mathematical kernel (MatMul). The TPU v1 hardwired a $256 \times 256$ systolic array to deliver 92 TOPS (INT8) within a 75 W footprint, establishing custom ASIC accelerators in production serving infrastructure.
 
 :::
 
@@ -1779,35 +1779,11 @@ The same arithmetic-intensity calculation separates the running model's inferenc
 
 ::: {#exmp-compute-infrastructure-roofline-analysis-training-vs-inference .callout-example title="Roofline analysis: Training vs. inference"}
 
-```{python}
-#| echo: false
-# ┌── LEGO ───────────────────────────────────────────────
-class InfraFrontierMemoryMxRecap:
+**Scenario**: An engineering team evaluates hardware choices for serving (decode batch size 1) versus training (batch size `{python} RooflineInferenceMath.batch_size_str`) a `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str` parameter model on an H100 GPU (ridge point `{python} RooflineCalloutRecap.h100_ridge_str` FLOP/byte).
 
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
-```
+**Diagnosis**: Single-token decode achieves arithmetic intensity $I =$ `{python} RooflineInferenceMath.inf_intensity_str` FLOP/byte $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str`, bounding throughput to `{python} RooflineInferenceMath.inf_peak_pct_str` of peak FLOPs due to HBM bandwidth. Training batching increases intensity to $I =$ `{python} RooflineInferenceMath.train_intensity_str` FLOP/byte $\gg$ `{python} RooflineCalloutRecap.h100_ridge_str`, shifting the workload to compute-bound peak TFLOPs.
 
-```{python}
-#| echo: false
-from mlsysim.fmt import fmt_qty
-
-# ┌── LEGO ───────────────────────────────────────────────
-class RooflineCalloutRecap:
-    # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_fp16_tflop_per_s_str = fmt_qty(Hardware.Cloud.H100.compute.peak_flops, TFLOP / second, precision=0, commas=False)
-    h100_ridge_str = fmt_arithmetic_intensity(
-        (Hardware.Cloud.H100.compute.peak_flops / Hardware.Cloud.H100.memory.bandwidth), unit=flop / byte, precision=1, commas=False
-    )
-```
-
-Consider our `{python} InfraFrontierMemoryMxRecap.frontier_params_b_str` model on an H100 with `{python} RooflineInferenceMath.h100_fp16_tflop_per_s_str` peak compute and `{python} RooflineInferenceMath.h100_bw_tb_per_s_str` memory bandwidth. The ridge point is `{python} RooflineCalloutRecap.h100_ridge_str`.
-
-**Inference (decode, batch size 1)**: Each token loads `{python} RooflineInferenceMath.inf_weight_gb_str` of FP16 weights and performs `{python} RooflineInferenceMath.inf_flops_math` FLOPs. Arithmetic intensity: $I =$ `{python} RooflineInferenceMath.inf_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineCalloutRecap.h100_ridge_str` (the ridge point), the workload is deeply memory bound. The achievable throughput is `{python} RooflineInferenceMath.inf_throughput_math` TFLOP/s, which is about `{python} RooflineInferenceMath.inf_peak_pct_str` of the H100's peak `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`. No amount of additional compute will help; only more memory bandwidth improves throughput.
-
-**Training forward pass** (batch size `{python} RooflineInferenceMath.batch_size_str`): The same weight tensor is multiplied by a batch of `{python} RooflineInferenceMath.batch_size_str` activation vectors simultaneously, turning matrix-vector operations into matrix-matrix operations. The FLOPs increase by `{python} RooflineInferenceMath.batch_size_str`$\times$ while the weight loading remains constant: $I =$ `{python} RooflineInferenceMath.train_intensity_math` FLOP/byte. Since `{python} RooflineInferenceMath.train_intensity_str` $\gg$ `{python} RooflineCalloutRecap.h100_ridge_str`, the workload is compute bound. The achievable throughput is now limited by the peak compute ceiling of `{python} RooflineCalloutRecap.h100_fp16_tflop_per_s_str`, and the memory bandwidth is irrelevant. Adding more TFLOP/s (through a newer GPU generation) directly improves performance.
-
-**Systems insight**: The contrast explains why organizations sometimes use different hardware for training and inference: *training* benefits from peak FLOP/s, while *inference* benefits from memory bandwidth per dollar.
+**Systems lesson**: Hardware selection must align with operational arithmetic intensity: training platforms prioritize peak compute (TFLOPs), while single-batch inference platforms prioritize memory bandwidth per dollar.
 
 :::
 
@@ -2900,13 +2876,11 @@ class BandwidthHierarchyPcieExampleRecap:
 
 ::: {#exmp-compute-infrastructure-nvlink-bandwidth-surprise .callout-example title="The NVLink bandwidth surprise"}
 
-<!-- lego-ok-block: PCIe-vs-NVLink tensor-parallel diagnostic narrative -->
-**Scenario**: Early users of multi-GPU nodes often attempted tensor parallelism over PCIe, expecting the `{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth to suffice.
+**Scenario**: Early users of multi-GPU nodes attempted Tensor Parallelism across PCIe Gen5 interconnects (`{python} BandwidthHierarchyPcieExampleRecap.pcie_bw_gb_per_s_str` bandwidth), expecting sufficient performance.
 
-**Diagnosis**: Tensor parallelism requires collectives throughout the Transformer stack, not just *once* per training step. In this simplified scenario, a model with `{python} TensorParallelAllReduce.layers_str` layers generates `{python} TensorParallelAllReduce.layers_str` AllReduce operations per forward pass and another `{python} TensorParallelAllReduce.layers_str` during the backward pass, totaling `{python} TensorParallelAllReduce.sync_events_str` synchronization events per step. Including the ideal ring traffic factor, each PCIe AllReduce for a `{python} TensorParallelAllReduce.hidden_str`-dimensional hidden state takes approximately `{python} TensorParallelAllReduce.pcie_per_allreduce_ms_str`, accumulating to `{python} TensorParallelAllReduce.pcie_cumulative_ms_str` of pure communication time per step. With a `{python} TensorParallelAllReduce.compute_step_ms_str` compute-step anchor and no overlap, the accelerators spend roughly `{python} TensorParallelAllReduce.pcie_wait_pct_str` of combined time waiting for PCIe transfers. Switching to NVLink reduces the ideal lower bound to `{python} TensorParallelAllReduce.per_allreduce_ms_str` per AllReduce and `{python} TensorParallelAllReduce.cumulative_ms_str` total; computation then accounts for `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str` of combined time before overlap.
+**Diagnosis**: Tensor Parallelism executes `{python} TensorParallelAllReduce.sync_events_str` AllReduce events per step across `{python} TensorParallelAllReduce.layers_str` layers. PCIe transfer latency accumulates to `{python} TensorParallelAllReduce.pcie_cumulative_ms_str` per step, causing GPUs to spend `{python} TensorParallelAllReduce.pcie_wait_pct_str` of execution time stalled on communication.
 
-**Systems lesson**: For communication-heavy tensor parallelism, NVLink cuts the ideal transfer-time floor by about an order of magnitude relative to PCIe, while achieved performance still depends on overlap, collective implementation, and contention.
-<!-- end lego-ok-block -->
+**Systems lesson**: Communication-intensive Tensor Parallelism requires high-bandwidth interconnects like NVLink (`{python} TensorParallelAllReduce.per_allreduce_ms_str` per AllReduce), which cuts transfer latency by an order of magnitude and increases compute efficiency to `{python} TensorParallelAllReduce.nvlink_compute_fraction_pct_str`.
 
 :::
 
@@ -3312,43 +3286,11 @@ To solidify the memory planning concepts, consider a concrete sizing exercise fo
 
 ::: {#exmp-compute-infrastructure-memory-budget-175b-training-dgx-h_h100 .callout-example title="Memory budget for 175B training on DGX H100"}
 
-**Given**:
+**Scenario**: An engineering team calculates the memory budget for training a `{python} InfraFrontierNodeModelRecap.frontier_params_b_str` parameter model using 8-way Tensor Parallelism on an 8-GPU DGX H100 node (`{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM per GPU).
 
-- Model: `{python} InfraFrontierNodeModelRecap.frontier_params_b_str` parameters
-- Node: `{python} InfraFrontierNodeModelRecap.node_gpus_str`$\times$ H100 GPUs, `{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM each (`{python} InfraFrontierNodeModelRecap.total_hbm_gb_str` total HBM)
-- Host: `{python} InfraFrontierNodeModelRecap.host_ddr_tb_str` DDR5
-- Parallelism: 8-way tensor parallelism within the node
+**Diagnosis**: Un-sharded optimizer state alone requires `{python} InfraFrontierNodeModelRecap.opt_state_gb_str` per GPU, causing per-GPU memory (`{python} InfraFrontierNodeModelRecap.total_per_gpu_gb_str`) to exceed the 80 GB HBM limit. Activation memory adds 100–200 GB per GPU without activation checkpointing.
 
-**Step 1**: Weight Distribution
-With 8-way TP, each GPU holds 1/8 of every weight tensor.
-Per-GPU weight memory: `{python} InfraFrontierNodeModelRecap.weight_per_gpu_gb_str` (FP16).
-
-**Step 2**: Optimizer State with ZeRO Stage 1
-ZeRO Stage 1 shards the optimizer states across data-parallel workers. Within a single node using only TP (no data parallelism), the optimizer is not sharded. Each GPU stores the full optimizer state for its TP shard: `{python} InfraFrontierNodeModelRecap.weight_per_gpu_gb_str` $\times$ 4 (FP32 $m$ and $v$) = `{python} InfraFrontierNodeModelRecap.opt_state_gb_str`.
-
-The total exceeds the `{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM capacity. The fix is to offload optimizer states to host DDR5. The `{python} InfraFrontierNodeModelRecap.host_ddr_tb_str` of DDR5 can hold the full `{python} InfraFrontierNodeModelRecap.optimizer_pool_gb_str` of optimizer state with room to spare.
-
-**Step 3**: Activations
-<!-- lego-ok-block: activation-memory pedagogical ranges for checkpointing narrative -->
-With activation checkpointing (recomputing every other layer), the activation memory for a microbatch of 4 sequences at 2,048 token length is approximately 15--25 GB per GPU. Without checkpointing, it would be 100--200 GB per GPU, which is impossible.
-<!-- end lego-ok-block -->
-
-**Step 4**: Gradient Accumulation
-Gradients match the weight size: `{python} InfraFrontierNodeModelRecap.grad_gb_str` per GPU in FP16.
-
-**Total per-GPU HBM usage**\index{HBM!per-GPU usage}:
-
-- Weights: `{python} InfraFrontierNodeModelRecap.weight_per_gpu_gb_str`
-- Activations: ~`{python} InfraFrontierNodeModelRecap.act_gb_str` (with checkpointing)
-- Gradients: `{python} InfraFrontierNodeModelRecap.grad_gb_str`
-- Buffers and fragmentation: ~`{python} InfraFrontierNodeModelRecap.buf_gb_str`
-- **Total**: ~`{python} InfraFrontierNodeModelRecap.total_per_gpu_gb_str` (exceeds `{python} InfraFrontierNodeModelRecap.h100_mem_gb_str` HBM)
-
-<!-- lego-ok-block: post-mitigation HBM envelope after gradient accumulation/offloading -->
-**Resolution**: Reduce the per-GPU microbatch size to lower peak activation memory, then use gradient accumulation\index{Gradient Accumulation} over 2--4 such microbatches before synchronization and the optimizer update to preserve the effective batch size. Gradient offloading\index{Gradient Offloading} stores inactive gradient shards in DDR5. With these techniques, the per-GPU HBM usage drops to approximately 70--75 GB, fitting within the 80 GB envelope with a small margin for NCCL communication buffers.
-<!-- end lego-ok-block -->
-
-**Systems insight**: Model capacity is not the only memory constraint. Training fits only when weights, gradients, optimizer state, activations, communication buffers, and fragmentation are managed together.
+**Systems lesson**: Sizing training memory requires managing weights, gradients, optimizer states, activations, and buffers holistically. Offloading optimizer states to host DDR5 and applying activation checkpointing reduces per-GPU HBM usage to 70–75 GB, fitting within the 80 GB envelope.
 
 :::
 
