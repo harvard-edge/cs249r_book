@@ -3326,6 +3326,15 @@ def _calculate_improvements(base_metrics: Dict[str, float], opt_metrics: Dict[st
         else:
             improvements['accuracy_retention'] = 1.0
 
+    if not improvements and base_metrics and opt_metrics:
+        warnings.warn(
+            "_calculate_improvements found no overlapping metric keys between "
+            f"base_metrics ({sorted(base_metrics.keys())}) and opt_metrics "
+            f"({sorted(opt_metrics.keys())}), returning an empty result. This "
+            "usually means the two metrics dicts came from different "
+            "measurements and aren't directly comparable."
+        )
+
     return improvements
     ### END SOLUTION
 

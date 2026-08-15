@@ -24,6 +24,7 @@ import numpy as np
 rng = np.random.default_rng(7)
 import statistics
 import sys
+import warnings
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
@@ -165,6 +166,72 @@ class TestBenchmarkMetrics:
                     f"  Raw values: {result.values}\n"
                     "Median absolute deviation relative to median should be < 100%."
                 )
+
+
+class TestCalculateImprovementsMismatchedKeys:
+    """Test _calculate_improvements' handling of non-overlapping metric dicts."""
+
+    def test_matching_keys_still_computed_normally(self):
+        """
+        WHAT: Verify metrics present in both dicts are still computed as
+        before, this is a regression guard, not a behavior change.
+        """
+        from tinytorch.perf.benchmarking import _calculate_improvements
+
+        base = {'latency': 10.0, 'accuracy': 0.9}
+        opt = {'latency': 5.0, 'accuracy': 0.85}
+
+        improvements = _calculate_improvements(base, opt)
+
+        assert improvements['latency_speedup'] == 2.0
+        assert np.isclose(improvements['accuracy_retention'], 0.85 / 0.9)
+
+    def test_fully_mismatched_keys_warns_instead_of_failing_silently(self):
+        """
+        WHAT: Verify that when base_metrics and opt_metrics share no
+        overlapping keys, a warning is raised so the caller has some
+        signal that nothing could be compared, instead of just getting
+        back an empty dict with no indication anything went wrong.
+        """
+        from tinytorch.perf.benchmarking import _calculate_improvements
+
+        base = {'latency': 10.0}
+        opt = {'memory': 5.0}
+
+        with pytest.warns(UserWarning, match="no overlapping metric keys"):
+            improvements = _calculate_improvements(base, opt)
+
+        assert improvements == {}
+
+    def test_partially_overlapping_keys_computes_only_shared_metrics(self):
+        """
+        WHAT: Verify partial overlap (some shared metrics, some not) is
+        still handled gracefully and does not warn, since this is
+        legitimate, expected usage, not a caller mistake.
+        """
+        from tinytorch.perf.benchmarking import _calculate_improvements
+
+        base = {'latency': 10.0, 'memory': 4.0}
+        opt = {'latency': 5.0}
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            improvements = _calculate_improvements(base, opt)
+
+        assert improvements == {'latency_speedup': 2.0}
+
+    def test_empty_inputs_do_not_warn(self):
+        """
+        WHAT: Verify calling with two empty dicts does not spuriously warn,
+        there's nothing mismatched about two empty inputs.
+        """
+        from tinytorch.perf.benchmarking import _calculate_improvements
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            improvements = _calculate_improvements({}, {})
+
+        assert improvements == {}
 
 
 if __name__ == "__main__":
