@@ -1,8 +1,6 @@
 # StaffML Vault — Corpus Hardening Plan
 
 **Status:** draft for user review (2026-05-02)
-**Branch:** `yaml-audit`
-**Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
 **Supersedes:** `RELEASE_AUDIT_PLAN.md` (which assumed sampling; we now know full-corpus audit is feasible at ~270 calls)
 
 ---

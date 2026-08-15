@@ -49,9 +49,9 @@ What changed:
 - The smoke harness started a Marimo server for each notebook, loaded it in Chromium, scrolled the page, switched canonical tracks, clicked visible tabs, clicked safe radio options, checked page and console errors, checked stale output, measured horizontal overflow/offscreen elements, and wrote screenshots plus JSON reports.
 - Visually inspected representative screenshots for V1-02, V1-10, V2-05, V2-17, and the modality catalog.
 - Classified MLSysBook worktrees before merge/retirement:
-  - Protected dev checkout: `/Users/VJ/GitHub/MLSysBook`.
-  - Lab integration worktree: `/Users/VJ/GitHub/MLSysBook-labs`.
-  - Lab pilot worktrees: `/Users/VJ/GitHub/MLSysBook-lab-v1-02`, `/Users/VJ/GitHub/MLSysBook-lab-v1-10`, `/Users/VJ/GitHub/MLSysBook-lab-v2-10`.
+  - Protected dev checkout: the main `MLSysBook` checkout.
+  - Lab integration worktree: `MLSysBook-labs`.
+  - Lab pilot worktrees: `MLSysBook-lab-v1-02`, `MLSysBook-lab-v1-10`, `MLSysBook-lab-v2-10`.
   - Unrelated worktrees left untouched: autolayout, betterbib, cover-assets, cover-labels, readthrough-fixes, and vol3-sketch.
 - Compared the three pilot notebooks against the integrated lab branch. The integrated notebooks supersede the pilots: V1-02 adds prediction/consequence scaffolding, V1-10 adds the deeper distillation storyline, and V2-10 adds phase accounting, rejected-alternative logic, and edge carry-forward.
 
@@ -92,7 +92,7 @@ Tests or checks run:
 
 Follow-up:
 - Merge `codex/labs` into the protected `dev` checkout only after committing this final audited state and reconciling current `dev`.
-- Retire only the lab integration/pilot worktrees after verifying exact absolute paths and confirming the protected `/Users/VJ/GitHub/MLSysBook` checkout is not targeted.
+- Retire only the lab integration/pilot worktrees after verifying exact absolute paths and confirming the protected main `MLSysBook` checkout is not targeted.
 
 ### 2026-06-13 - Parallel Concept-Module Pilot Implementation
 
@@ -110,7 +110,7 @@ Files touched:
 - `labs/vol2/lab_10_inference.py`
 
 What changed:
-- Ran the first parallel concept-module implementation wave from private AIConfigs packets.
+- Ran the first parallel concept-module implementation wave.
 - Converted V1-02 from a linear deployment-envelope lab into four tabbed concept modules plus synthesis: Physics Before Preference, Iron Law And The Bottleneck, Operating Envelope And First Wall, and Placement And Hybrid Design Review.
 - Reworked V1-10 so the main learning path is solver-backed by `CompressionModel.candidate()` and `CompressionModel.sweep()`, with modules for feasibility, precision cliff/calibration, sparsity/distillation, and recipe release gate.
 - Reworked V2-10 around serving cost inversion, state/KV cache wall, batching under variance, and serving design challenge. Removed the overclaim that continuous batching is universally better and fixed the throughput/waste formula consistency.

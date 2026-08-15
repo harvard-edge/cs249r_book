@@ -1,8 +1,6 @@
 # StaffML Vault — Release Audit Plan
 
-**Status:** ready to execute (handoff doc)
-**Branch:** `yaml-audit` at `a74c98576` (sync'd with origin/dev)
-**Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
+**Status:** ready to execute
 **Daily Gemini cap:** 250 calls
 
 ---
@@ -214,22 +212,21 @@ Also extend `vault new`'s scaffold to include the template stubs.
 
 ---
 
-## Resume instructions for the new session
+## Prerequisites before executing
 
-### What the new session will see
+### What this run depends on
 
-- Branch: `yaml-audit` at `a74c98576` (or wherever it is at start)
 - This document at `interviews/vault-cli/docs/RELEASE_AUDIT_PLAN.md`
 - All tooling under `interviews/vault-cli/scripts/`
 - Format-audit findings already cached at
   `interviews/vault/_pipeline/format-audit-full.json` (rerun if stale)
 
-### Before doing anything, the new session must
+### Before doing anything
 
-1. Confirm worktree + branch:
+1. Confirm the working tree is on the intended branch and clean:
    ```bash
-   pwd          # /Users/VJ/GitHub/MLSysBook-yaml-audit
-   git branch   # * yaml-audit
+   git branch --show-current
+   git status --short
    git log --oneline -5
    ```
 2. Run baseline validators:

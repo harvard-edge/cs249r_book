@@ -1,25 +1,23 @@
 # Vault Chain Coverage Roadmap
 
 **Status:** Phase 1 + 2 complete · Phase 3 pilot landed (4 drafts pending review) · Phase 4 housekeeping mostly shipped
-**Branch:** `yaml-audit` (off `dev`)
-**Worktree:** `/Users/VJ/GitHub/MLSysBook-yaml-audit`
-**Last updated:** 2026-05-02 (Phase 3 batch landed; corpus-wide release audit plan in `RELEASE_AUDIT_PLAN.md` — fresh session executes)
+**Last updated:** 2026-05-02 (Phase 3 batch landed; corpus-wide release audit plan in `RELEASE_AUDIT_PLAN.md`)
 
-This document is the canonical resumable plan for the vault chain rebuild
-+ corpus growth work. **Future Claude sessions: read the "Resume Here"
-section first, then the "Progress Log" to see what was done, then the
-relevant Phase section for the step you're picking up.**
+This document is the canonical plan for the vault chain rebuild + corpus
+growth work. **Start with "Current State", then the "Progress Log" to see
+what was done, then the relevant Phase section for the step being picked
+up.**
 
 ---
 
-## Resume Here (read first)
+## Current State (read first)
 
-### How to resume in a new session
+### How to pick this work back up
 
-1. **Confirm worktree + branch:**
+1. **Confirm branch and tree state:**
    ```bash
-   pwd          # /Users/VJ/GitHub/MLSysBook-yaml-audit
-   git branch   # * yaml-audit
+   git branch --show-current
+   git status --short
    git log --oneline -5
    ```
 2. **Run baseline validators** to confirm tree is in known-good state:
@@ -1404,13 +1402,13 @@ format, and post-audit cleanup → `paper.tech` update path.
 **Deliberately NOT shipped this session:**
 - Full-corpus audit (would be ~27,400 calls / ~110 days — infeasible)
 - Re-authoring `edge-2543` (content unrecoverable from disk)
-- Multi-day quota-aware audit script (build it in the new session — recommended extension of `audit_math.py`)
+- Multi-day quota-aware audit script (still to be built — recommended extension of `audit_math.py`)
 
 **Files committed in this entry:**
 - `interviews/vault-cli/docs/RELEASE_AUDIT_PLAN.md` (new)
 - This Progress Log entry
 
-**Next step:** *new session* — read `RELEASE_AUDIT_PLAN.md` top-to-bottom, then execute "Resume instructions for the new session" §.
+**Next step:** read `RELEASE_AUDIT_PLAN.md` top-to-bottom, then execute its "Prerequisites before executing" §.
 
 ---
 
