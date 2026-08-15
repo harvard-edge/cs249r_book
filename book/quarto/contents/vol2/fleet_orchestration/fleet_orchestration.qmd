@@ -1641,13 +1641,15 @@ Experiments on production cluster traces from Microsoft and Alibaba show 40 to 6
 
 Gandiva also implements **grow-shrink elasticity**\index{Grow-Shrink Elasticity} at a finer granularity than the framework-level elastic training discussed in @sec-fleet-orchestration-elastic-training. Gandiva automatically adjusts data parallelism degree based on real-time resource availability, using profiled iteration times to predict the throughput impact of adding or removing workers. When a high-priority job arrives, Gandiva shrinks lower-priority jobs by reducing their worker count rather than killing them entirely, preserving their progress while freeing resources. When resources become available again, it grows jobs back to their preferred parallelism degree. This fine-grained elasticity, informed by actual iteration-level profiling data, enables scheduling decisions that general-purpose systems cannot make because they lack visibility into job internals.
 
-::: {#ws-fleet-orchestration-limping-switch .callout-war-story title="The limping switch"}
+::: {#ws-fleet-orchestration-limping-switch .callout-war-story title="The limping switch (2021)"}
 
 **Context**: In a 16,384 GPU distributed cluster, a foundation-model training job experienced severe throughput degradation despite healthy GPU execution metrics [@sigler2021openai_kubernetes].
 
 **Mechanism**: A single transceiver on an inter-rack spine switch experienced elevated bit-error rates, degrading link throughput from 100 Gbps to 1 Gbps ($100\times$ bandwidth collapse). Standard ping/up health checks reported green, but AllReduce gradient synchronization $T_{\text{sync}}$ stalled across all 16,384 GPUs waiting for the straggling link.
 
 **Impact**: Cluster-wide hardware efficiency $\eta_{\text{hw}}$ collapsed from 45 percent to 8 percent, wasting $>15,000$ GPU-hours per day until network-level telemetry flagged the degraded switch port.
+
+**Fix**: Engineers implemented automated micro-benchmark probes and packet-error telemetry to automatically isolate and quarantine degraded switch ports before scheduling job allocation.
 
 **Systems lesson**: Binary up/down health monitoring is insufficient for distributed scaling. Schedulers require continuous, performance-aware telemetry (switch counters, packet retransmission rates, collective benchmarks) to quarantine degraded network paths automatically.
 
@@ -1706,9 +1708,11 @@ The risk is not only implementation cost; scheduler behavior can also fail to ma
 
 **Context**: OpenAI scaled Kubernetes clusters to 7,500 nodes for workloads including GPT-3, CLIP, and DALL-E. Their large training jobs used MPI-style execution, where all workers in a group had to be scheduled simultaneously before training could make progress [@sigler2021openai_kubernetes].
 
-**Failure mode**: Default Kubernetes scheduling did not guarantee that all of one job's workers would be placed before scheduling started filling another job. If two experiments each requested the whole cluster, Kubernetes could schedule half of each job instead of all of one job, leaving both jobs unable to run.
+**Mechanism**: Default Kubernetes scheduling placed pods incrementally without all-or-nothing constraints. When two large experiments requested cluster capacity, Kubernetes scheduled half of each job's pods across nodes.
 
-**Consequence**: The cluster could appear busy while no experiment made useful training progress: a classic gang-scheduling deadlock caused by partial allocation.
+**Impact**: Both training jobs stalled indefinitely while holding allocated GPUs, producing zero training progress and deadlocking cluster resources.
+
+**Fix**: OpenAI developed custom Kubernetes gang-scheduling operators that enforce atomic all-or-nothing pod placement.
 
 **Systems lesson**: Distributed ML scheduling must encode the job's execution semantics. For MPI-style training, "some pods scheduled" is not partial progress; it is wasted allocation. Production schedulers need gang scheduling, quota controls, and workload-aware policies rather than generic pod placement alone.
 

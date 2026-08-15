@@ -2569,13 +2569,15 @@ The challenge of meeting these tail latency targets is that the source of the ta
 
 ::: {#ws-benchmarking-discord-read-states-2019 .callout-war-story title="Discord Read States rewrite (2019)"}
 
-**Context**: Discord, a real-time chat platform supporting millions of concurrent users, originally implemented its Read States service in Go. The service tracks which channels and messages each user has read and is accessed on every connection, every message sent, and every read event, making it one of the platform's hottest data paths [@discord2020rust].
+**Context**: Discord, a real-time chat platform supporting millions of concurrent users, originally implemented its Read States service in Go, tracking which channels and messages each user read [@discord2020rust].
 
-**Failure mode**: Engineers observed latency spikes every two minutes that matched Go's forced minimum garbage-collection interval. The LRU cache held tens of millions of Read States across millions of users with hundreds of thousands of updates per second, so every "stop-the-world" GC pass had to scan an enormous heap. Tuning the GC Percent setting and partitioning the cache across servers made no difference: the spikes were structural, not configurable.
+**Mechanism**: Go's forced garbage collection passes scanned an LRU cache holding tens of millions of entries, causing periodic "stop-the-world" GC pauses every two minutes regardless of memory tuning.
 
-**Resolution**: In 2019, Discord rewrote Read States in Rust, which has no garbage collector. Average response time dropped from milliseconds to microseconds, and the periodic latency spikes disappeared.
+**Impact**: Tail latency ($P_{99}$) spiked dramatically every two minutes, degrading user experience across millions of active connections.
 
-**Systems lesson**: Average latency is a vanity metric; tail latency is the user experience. Language-runtime choices (managed GC vs. ownership-based memory management) set a floor on the tail that no amount of tuning can lower. This failure mode is structurally embedded in ML serving stacks: feature stores that serve real-time embeddings for DLRM-style recommendation models are commonly implemented in Java or Go, and their garbage-collector pauses inflate the p99 latency of every downstream inference request that waits for a retrieved embedding. No model optimization closes that gap, because the bottleneck is in the retrieval path, not the model itself. The Discord incident is the clearest documented example of this mechanism: a managed-runtime GC pause defines the tail just as decisively for an ML inference pipeline as it did for a chat service.
+**Fix**: In 2019, Discord rewrote the Read States service in Rust, eliminating garbage collection pauses and dropping average response times to microseconds.
+
+**Systems lesson**: Average latency is a vanity metric; tail latency is the user experience. Language-runtime choices set a floor on the tail that no amount of tuning can lower.
 
 :::
 
