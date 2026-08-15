@@ -447,6 +447,8 @@ class ValidateCommand:
             Scope("div-syntax", "_run_figure_div_syntax"),
             Scope("label-required", "_run_figure_label_required",
                   note="![](...) markdown images in body prose need {#fig-X}"),
+            Scope("margin-caption-required", "_run_margin_caption_required",
+                  note=".column-margin figures need a one-line italic *caption*"),
             # flow: deferred to copyeditor's PDF layout pass (2026-05-03).
             # The "near first reference" heuristic conflicts with the
             # repositioning the copyeditor does to balance pages in print.
@@ -3946,6 +3948,112 @@ class ValidateCommand:
     # by convention. They carry fig-alt for accessibility but no #fig-
     # label. Skip them in the label-required check.
     _COVER_IMAGE_RE = re.compile(r"!\[[^\]]*\]\s*\([^)]*/cover_[\w-]+\.(png|jpg|jpeg|svg|gif|webp)")
+
+    # ------------------------------------------------------------------
+    # Margin-figure captions  (margin-figures.md §2)
+    # ------------------------------------------------------------------
+
+    _COLUMN_MARGIN_OPEN = re.compile(r"^(:{3,})\s*\{[^}]*\.column-margin[^}]*\}\s*$")
+    _MARGIN_IMAGE = re.compile(r"!\[[^\]]*\]\s*\(")
+    # A caption line is the whole line wrapped in single asterisks. The
+    # negative lookaheads keep `**Bold**` and `***Term***` from matching.
+    _MARGIN_CAPTION = re.compile(r"^\*(?!\*)(.+?)(?<!\*)\*$")
+
+    def _run_margin_caption_required(self, root: Path) -> ValidationRunResult:
+        """Every `.column-margin` figure carries a one-line italic caption.
+
+        `margin-figures.md` §2 makes the caption STANDARD, not optional:
+        each margin illustration ends with a single `*…*` italic line
+        stating why the figure is there. Margin figures are unnumbered
+        and never `@fig-` referenced, so no other check covers them —
+        a dropped caption is silent. This is the margin-figure analogue
+        of `table-caption-required` and `listing-caption-required`.
+
+        Flags, per `.column-margin` block that contains an image:
+          * no italic caption line at all;
+          * the caption sitting *above* the image instead of below it;
+          * a bold `**…**` line used where the italic caption belongs.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        raw_issues: List[ValidationIssue] = []
+        for file in files:
+            if self._captions_skip_file(file):
+                continue
+            lines = self._read_text(file).splitlines()
+            idx = 0
+            while idx < len(lines):
+                opener = self._COLUMN_MARGIN_OPEN.match(lines[idx].rstrip())
+                if not opener:
+                    idx += 1
+                    continue
+                fence = opener.group(1)
+                open_line = idx + 1
+                body: List[str] = []
+                cursor = idx + 1
+                while cursor < len(lines) and lines[cursor].strip() != fence:
+                    body.append(lines[cursor])
+                    cursor += 1
+
+                image_at = [
+                    i for i, ln in enumerate(body)
+                    if self._MARGIN_IMAGE.search(ln) or "\\includegraphics" in ln
+                ]
+                if image_at:
+                    caption_at = [
+                        i for i, ln in enumerate(body)
+                        if self._MARGIN_CAPTION.match(ln.strip())
+                    ]
+                    bold_at = [
+                        i for i, ln in enumerate(body)
+                        if re.match(r"^\*\*[^*].*\*\*:?$", ln.strip())
+                    ]
+                    if not caption_at:
+                        detail = (
+                            "a bold line is used instead"
+                            if bold_at else "no italic line found"
+                        )
+                        raw_issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=open_line,
+                            code="margin_figure_missing_caption",
+                            message=(
+                                "Margin figure has no italic caption "
+                                f"({detail}). Add a one-line `*…*` caption "
+                                "below the image saying why the figure is "
+                                "shown (margin-figures.md §2)."
+                            ),
+                            severity="error",
+                            context=lines[idx].strip()[:120],
+                        ))
+                    elif caption_at[0] < image_at[0]:
+                        raw_issues.append(ValidationIssue(
+                            file=self._relative_file(file),
+                            line=open_line + caption_at[0] + 1,
+                            code="margin_figure_caption_above_image",
+                            message=(
+                                "Margin-figure caption sits above the image. "
+                                "The italic caption follows the image "
+                                "(margin-figures.md §2)."
+                            ),
+                            severity="error",
+                            context=body[caption_at[0]].strip()[:120],
+                        ))
+                idx = cursor + 1
+
+        issues = self._apply_captions_baseline(
+            raw_issues, "margin_caption_required"
+        )
+        return ValidationRunResult(
+            name="margin-caption-required",
+            description=(
+                "`.column-margin` figures must carry a one-line italic "
+                "*caption* below the image (margin-figures.md §2)"
+            ),
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_figure_label_required(self, root: Path) -> ValidationRunResult:
         """Flag `![](...)` markdown image figures with no `{#fig-X}` label.
