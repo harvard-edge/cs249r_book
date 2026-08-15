@@ -1375,7 +1375,7 @@ Operations with high arithmetic intensity are compute bound: their performance i
 
 : **Training Operation Classification Conditions**: Operation families exhibit common arithmetic-intensity tendencies, but classification requires comparing the measured implementation with the target hardware's ridge point. Memory-sensitive kernels may benefit from reducing traffic or increasing fusion, while compute-bound kernels benefit from additional arithmetic throughput. {#tbl-training-arithmetic-intensity tbl-colwidths="[33,33,33]"}
 
-The roofline view in @fig-training-roofline turns that table into a hardware diagnostic: the same operation classification now appears relative to a concrete ridge point.
+Hardware efficiency during model training depends directly on kernel arithmetic intensity. Locate the operation points in @fig-training-roofline along the logarithmic arithmetic intensity axis, comparing memory-bandwidth bound operators on the sloped ceiling against compute-bound operators on the flat peak.
 
 ::: {#fig-training-roofline fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Training Roofline**: An A100 roofline with assumed operation coordinates illustrates how arithmetic intensity changes the attainable-performance ceiling. The points are not a profile of one GPT-2 execution. FlashAttention is shown moving right because it reduces HBM traffic; whether a real attention kernel crosses the ridge depends on shape, precision, hardware, and implementation." fig-alt="Log-log A100 roofline with assumed points for Softmax, LayerNorm, standard attention, MatMul, and FlashAttention; an arrow points from standard attention toward FlashAttention at higher arithmetic intensity."}
 
@@ -1587,7 +1587,7 @@ The system-level pipeline coordinates these stages across real hardware with fin
 
 This orchestration is not a single monolithic process but rather three interconnected subsystems, each with distinct responsibilities and resource demands. @Fig-training-pipeline traces how these subsystems connect: the data pipeline handles ingestion and preprocessing\index{Data Pipeline!ingestion and preprocessing}, the training loop executes forward passes, backward passes, and parameter updates, and the evaluation pipeline periodically assesses model quality\index{Evaluation Pipeline!validation metrics}. The flow between these components is where bottlenecks emerge—the interconnection points expose the binding constraints.
 
-::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Training System Overview**: Machine learning systems organize training through interconnected data, training, and evaluation pipelines. Processed batches flow from the data pipeline to the training loop, and evaluation feedback returns to the training loop." fig-alt="Block diagram with data pipeline, training loop, and evaluation pipeline boxes. Arrows connect the three stages and show feedback returning to training."}
+::: {#fig-training-pipeline fig-env="figure" fig-pos="htb" fig-cap="**Training System Overview**: The training lifecycle coordinates data preparation, core forward/backward computation, and validation evaluation. The interfaces between these three pipelines represent critical synchronization boundaries where I/O delays or evaluation pauses can throttle accelerator utilization." fig-alt="Block diagram with data pipeline, training loop, and evaluation pipeline boxes. Arrows connect the three stages and show feedback returning to training."}
 
 ```{.tikz}
 \begin{tikzpicture}[
@@ -1767,9 +1767,9 @@ A single training iteration involves three subsystems executing in sequence: a d
 
 A training system is easiest to reason about from its boundaries inward. The data pipeline loads raw records from storage, applies transformations such as resizing, augmentation, and normalization, and assembles the resulting examples into batches; input normalization is a long-standing training aid [@lecun2012]. The evaluation pipeline sits at the other boundary. At configurable intervals, it runs held-out validation data through the current model, computes metrics such as accuracy or loss, and exposes convergence problems such as overfitting, where training loss improves while validation loss degrades. Because evaluation consumes accelerator time, its cadence trades finer-grained feedback against training throughput.
 
-The training loop\index{Training Loop!forward and backward passes}\index{Training Loop!parameter update cycle} is the computational core of the pipeline, where the model learns from the prepared data. The data path in @fig-training-loop traces how this process unfolds through three sequential steps on a single accelerator: the forward pass generates predictions from input data, gradient computation propagates error signals backward through the network, and parameter updates apply the optimizer to minimize the loss function.
+The core engine of neural network learning sequences forward predictions, backward error propagation, and parameter optimization into a closed loop. Follow the cyclic data path in @fig-training-loop across the three sequential stages: forward pass, gradient calculation, and weight updates.
 
-::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**Training Loop**: A single iteration flows through three steps—(1) forward pass from batch to predictions, (2) loss and gradients via backpropagation, and (3) optimizer update—with the dashed arrow returning to the next iteration." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Training Batch, labeled Next Iteration."}
+::: {#fig-training-loop fig-env="figure" fig-pos="htb" fig-cap="**The Iterative Training Loop**: Each iteration sequences forward prediction (retaining activations), backward error propagation (computing gradients via the chain rule), and optimizer state updates. Inter-stage data dependencies and memory residency dictate the minimum execution time and memory floor of every training step." fig-alt="Flow diagram with three labeled steps. Step 1 Predict: Training Batch to Forward Pass (Model) to Predicted Labels. Step 2 Gradients: Predicted Labels and Ground Truth feed Loss Function (Error Calculation), which flows to Backward Pass (Chain Rule) to Parameter Gradients. Step 3 Update: Parameter Gradients to Optimizer (Adam/SGD) to Update Parameters. A dashed arrow loops from Update Parameters back to Training Batch, labeled Next Iteration."}
 
 ```{.tikz}
 \begin{tikzpicture}[
@@ -1854,7 +1854,7 @@ The architectural overview identified the data pipeline as the first component i
 
 The data pipeline running on the CPU bridges raw data storage and accelerator computation. @Fig-data-pipeline breaks down this architecture into three distinct zones.
 
-::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Three distinct zones compose the data pipeline: the storage zone houses raw data on disk, the CPU preprocessing zone handles format conversion, processing, and batching, and the GPU training zone distributes preprocessed batches across multiple accelerator workers for parallel computation." fig-alt="Block diagram showing data flow through three zones: Storage zone with raw data, CPU preprocessing zone with format, process, and batch stages, and GPU training zone with three GPU workers."}
+::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Training data transitions through storage, CPU preprocessing, and GPU execution zones. Each stage represents a potential throughput gate; disk read bandwidth, transformation latency, and PCIe host-to-device transfers must collectively sustain the GPU consumption rate to keep accelerators fully utilized." fig-alt="Block diagram showing data flow through three zones: Storage zone with raw data, CPU preprocessing zone with format, process, and batch stages, and GPU training zone with three GPU workers."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
@@ -2882,7 +2882,7 @@ The bars make the ranking concrete: BF16 Adam alone pushes past the single-GPU b
 
 #### Batch size and parameter updates {#sec-model-training-batch-size-parameter-updates-4d0b}
 
-The batch size--utilization relationship established in @sec-model-training-minibatch-processing-4eb0 showed that larger batches can improve accelerator utilization. However, batch size\index{Batch Size!convergence impact} also affects the parameter update process in ways that become critical at scale. A larger batch usually reduces gradient variance, but it also produces fewer parameter updates per epoch. Increasing batch size without retuning the learning rate and schedule can therefore slow optimization. The loss curves in @fig-linear-scaling-failure illustrate this interaction and motivate the scaling rule that follows.
+Scaling batch size without adjusting learning rate schedules leads to severe convergence degradation. Compare the loss trajectories in @fig-linear-scaling-failure, observing how naive linear scaling diverges from optimal loss reduction over training epochs.
 
 ::: {#fig-linear-scaling-failure fig-env="figure" fig-pos="htb" fig-cap="**Illustrative Linear-Scaling Scenario**: Synthetic training-loss curves (arbitrary units) compare a batch-32 baseline with batch 256 under a fixed or linearly scaled learning rate. The curves illustrate why increasing batch size may require retuning; they are not measured traces or a guarantee that linear scaling preserves convergence." fig-alt="Synthetic line chart of loss vs. epochs. A batch-32 baseline and a batch-256 run with a scaled learning rate converge faster than the illustrative batch-256 run with a fixed learning rate."}
 
@@ -3158,7 +3158,7 @@ The data-bound category is the most commonly misdiagnosed bottleneck in practice
 
 Profiling tools reveal which bottleneck dominates a given workload. @Fig-tf-bottleneck-trace captures the data-bound pathology from the callout: white gaps between repeated compute blocks mark intervals with no GPU kernels visible in the device timeline.
 
-::: {#fig-tf-bottleneck-trace fig-env="figure" fig-pos="htb" fig-cap="**Data-Bound Profiler Trace**: TensorFlow profiler output shows repeated GPU compute blocks separated by white gaps in the device timeline; the screenshot does not include a utilization counter." fig-alt="TensorFlow trace-view screenshot with multiple device-stream rows, repeated colored compute blocks, white intervals between the blocks, and host-side TensorFlow operation rows below."}
+::: {#fig-tf-bottleneck-trace fig-env="figure" fig-pos="htb" fig-cap="**Data-Bound Profiler Trace**: In this timeline trace, isolated GPU compute blocks are separated by prominent white intervals. These idle gaps mark periods where accelerator streams stall waiting for CPU-side batch preparation and host-to-device transfers, providing a characteristic signature of an input-bound pipeline." fig-alt="TensorFlow trace-view screenshot with multiple device-stream rows, repeated colored compute blocks, white intervals between the blocks, and host-side TensorFlow operation rows below."}
 
 ![](images/png/tf_profiler.png)
 
@@ -4591,7 +4591,7 @@ Gradient accumulation and activation checkpointing operate on distinct principle
 
 ##### Gradient accumulation {#sec-model-training-gradient-accumulation-308f}
 
-Gradient accumulation\index{Gradient Accumulation!micro-batch processing}\index{Gradient Accumulation!effective batch size} simulates larger batch sizes by splitting a single effective batch into smaller "micro-batches." Follow the data flow in @fig-grad-accumulation to see this in action: three independent batches (green, red, blue) each compute their own loss ($\mathcal{L}_1$, $\mathcal{L}_2$, $\mathcal{L}_3$) and gradients ($\delta_1$, $\delta_2$, $\delta_3$), which then sum to produce the combined gradient $\delta_1+\delta_2+\delta_3$ used for a single parameter update. Under the averaging and state assumptions stated below, this approach reproduces the gradient of a batch three times larger without requiring memory for all samples simultaneously.
+To execute large batch training on memory-constrained accelerators, systems split effective batches across smaller sequential micro-batches. In @fig-grad-accumulation, trace how micro-batch gradient vectors $\delta_1, \delta_2, \delta_3$ accumulate into a single unified gradient tensor before triggering an optimizer update.
 
 ::: {#fig-grad-accumulation fig-env="figure" fig-pos="htb" fig-cap="**Gradient Accumulation**: Three micro-batches each compute independent losses and gradients, which sum into a single combined gradient for one parameter update. This simulates training with a batch three times larger without requiring the memory to hold all samples simultaneously." fig-alt="Block diagram showing three batches computing individual losses and gradients. Arrows flow from batch 1, 2, 3 through losses to gradients boxes, then combine into a single summed gradient output."}
 
@@ -4702,7 +4702,7 @@ When gradient accumulation is combined with distributed data parallelism across 
 
 Activation checkpointing\index{Activation Checkpointing!memory-compute trade-off}\index{Activation Checkpointing!optimal placement} reduces memory usage during the backward pass by discarding and selectively recomputing activations. In standard training, activations from the forward pass are stored in memory for use in gradient computations during backpropagation. However, these activations can consume gigabytes of memory, particularly in deep networks.
 
-With checkpointing\index{Activation Checkpointing!selective checkpointing}, only a subset of the activations is retained during the forward pass. The two-pass structure in @fig-activation-checkpointing illustrates this memory-compute trade-off: during the forward pass (top row), only checkpoint nodes (green, solid) are retained while intermediate nodes (white, dashed) are discarded. During the backward pass (bottom row), these discarded activations are recomputed on demand (orange nodes) from the nearest checkpoint. The memory savings and runtime overhead depend on segment boundaries, layer costs, and the framework implementation.
+Activation memory can be reduced by trading FLOPs for memory bandwidth during backpropagation. Contrast the forward pass in the top row of @fig-activation-checkpointing with the backward pass in the bottom row, observing how intermediate activations are discarded and recomputed on demand from solid green checkpoint tensors.
 
 ::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb" fig-cap="**Activation Checkpointing**: Trading memory usage for recomputation during backpropagation enables training deeper neural networks. By storing only a subset of activations from the forward pass and recomputing others on demand, this technique reduces peak memory requirements at the cost of increased training time." fig-alt="Two-row diagram showing activation checkpointing. Top row: forward pass with checkpointed nodes (filled) and discarded nodes (dashed). Bottom row: backward pass recomputing discarded activations from checkpoints."}
 
@@ -5912,9 +5912,9 @@ below=4mm of B5.south,anchor= north](DT3){Loss gradient};
 
 :::
 
-One form of model parallelism partitions a network by layers. In @fig-layers-blocks, a 24-layer transformer is distributed across four devices: Device one handles blocks 1--6, Device two handles blocks 7--12, and so forth. This layerwise partitioning communicates activations and their gradients at partition boundaries.
+When a model exceeds the memory capacity of a single accelerator, its depth can be partitioned across sequential devices. Examine the pipeline stage assignment in @fig-layers-blocks, observing how contiguous groups of transformer blocks map onto distinct devices across the execution chain.
 
-::: {#fig-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Partitioning**: A 24-layer transformer distributed across four devices, with each device responsible for six consecutive transformer blocks. Communication occurs only at partition boundaries." fig-alt="Diagram showing transformer blocks 1 – 6 on Device 1, blocks 7 – 12 on Device 2, blocks 13 – 18 on Device 3, and blocks 19 – 24 on Device 4."}
+::: {#fig-layers-blocks fig-env="figure" fig-pos="htb" fig-cap="**Layer-Wise Model Partitioning**: Distributing consecutive transformer layers across sequential devices bounds network communication to intermediate activations (forward) and boundary gradients (backward). However, sequential layer dependencies leave downstream devices idle during forward passes unless micro-batches are pipelined." fig-alt="Diagram showing transformer blocks 1 – 6 on Device 1, blocks 7 – 12 on Device 2, blocks 13 – 18 on Device 3, and blocks 19 – 24 on Device 4."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]

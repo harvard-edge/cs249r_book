@@ -121,9 +121,9 @@ In 1979, writing a matrix multiplication in Fortran that used the hardware effic
 
 [^fn-theano-origin]: **Theano**\index{Theano!computational graph origin}: Developed at the Montreal Institute for Learning Algorithms (MILA) under Yoshua Bengio starting in 2007, Theano was an early and influential Python framework that compiled symbolic mathematical expressions into optimized CPU and GPU code via computational graphs [@bergstra2010; @al2016theano]. It demonstrated that a Python-defined computation graph could be compiled for GPU execution without requiring the researcher to write CUDA code. Mila ended active development of Theano in 2017 [@milaTheanoDevelopment].
 
-As @fig-mlfm-timeline illustrates, frameworks bridge the gap between mathematical intent and silicon reality. Moving up the ladder increases *productivity* while reducing *transparency*, a trade-off explored in @sec-ml-frameworks-execution-problem-e1e1.
+Machine learning frameworks evolved by progressively abstracting hardware execution details into higher-level API primitives. Trace the historical progression from 1979 to 2018 in @fig-mlfm-timeline, observing how numerical software moved up the ladder from low-level linear algebra routines to compiled graph execution engines.
 
-::: {#fig-mlfm-timeline fig-env="figure" fig-pos="htb" fig-cap="**Computational Library Evolution**: Modern machine learning frameworks build on decades of numerical computing advancements, transitioning from low-level routines like BLAS and LAPACK to high-level abstractions in NumPy, and finally to deep learning frameworks such as Theano [@bergstra2010], TensorFlow, and PyTorch. Theano implemented graph-based deep learning workflows in Python, building on the BLAS, LAPACK, and NumPy foundations that had already established Python's role in scientific computing." fig-alt="Horizontal timeline from 1979 to 2018 marking key milestones: 1979 BLAS introduced, 1992 LAPACK extends BLAS, 2006 NumPy becomes Python's numerical backbone, 2007 Theano introduces computational graphs, 2015 TensorFlow, 2016 PyTorch, 2018 JAX."}
+::: {#fig-mlfm-timeline fig-env="figure" fig-pos="htb" fig-cap="**Computational Library Evolution**: A timeline of numerical computing milestones spanning 1979 to 2018. Each era automates what the layer below exposed—from BLAS and LAPACK hardware routines to NumPy vectorized syntax and graph-based automatic differentiation in modern frameworks—trading low-level transparency for developer velocity." fig-alt="Horizontal timeline from 1979 to 2018 marking key milestones: 1979 BLAS introduced, 1992 LAPACK extends BLAS, 2006 NumPy becomes Python's numerical backbone, 2007 Theano introduces computational graphs, 2015 TensorFlow, 2016 PyTorch, 2018 JAX."}
 
 ```{.tikz}
 \begin{tikzpicture}[node distance=1mm,outer sep=0pt,font=\small\usefont{T1}{phv}{m}{n}]
@@ -211,9 +211,9 @@ A framework can only fuse operations it can see together. If operations execute 
 
 Kernel fusion is the key optimization for memory-bound operations, but fusion requires seeing multiple operations together. Frameworks make this visibility possible through the computational graph\index{Computational Graph!definition (DAG)}, a directed acyclic graph (DAG) where nodes represent operations and edges represent data dependencies. This graph is the framework's internal model of the computation.
 
-To ground this abstraction, examine @fig-comp-graph: computing $z = f(x, y)$ maps onto two input nodes ($x$ and $y$), one operation node ($f$), and one output node ($z$). The execution problem turns on *when* this graph is constructed and *when* it is executed.
+Mathematical operations can be decoupled from physical execution through graph representations. Examine the directed acyclic graph in @fig-comp-graph, noting how tensor variables map to data nodes while operations map to transformation nodes.
 
-::: {#fig-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Simple Computational Graph**: The computation $z = f(x, y)$ represented as a graph, where nodes define operations and edges specify data flow." fig-alt="Simple directed graph with nodes x and y flowing into function f(x,y) which outputs z."}
+::: {#fig-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Simple Computational Graph**: Representing $z = f(x, y)$ as a directed acyclic graph decouples mathematical dependencies from physical execution order, providing the structural blueprint frameworks require to track gradients and schedule operations across devices." fig-alt="Simple directed graph with nodes x and y flowing into function f(x,y) which outputs z."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
@@ -245,7 +245,7 @@ To ground this abstraction, examine @fig-comp-graph: computing $z = f(x, y)$ map
 
 Real machine learning models require much more complex graph structures. @Fig-mlfm-comp-graph extends this representation to show a neural network computation graph alongside the system components that reason about it. In the left panel, notice how data flows through six operation nodes in a directed acyclic graph---each node's output becomes the next node's input. The right panel reveals what the framework gains by having this graph: it can query the structure to plan memory allocation for each tensor's lifetime, and it can assign operations to devices based on data dependencies rather than execution order. The critical insight is that the graph exists independently of execution, enabling the framework to optimize before any arithmetic occurs.
 
-::: {#fig-mlfm-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Computation Graph with System Interactions**: A neural network computation graph (left) alongside system components including memory management and device placement (right) that interact with the graph to optimize resource allocation before execution." fig-alt="Left side shows computational graph with six operation nodes connected by data flow edges. Right side shows system components box with memory management and device placement nodes that interact with the computational graph."}
+::: {#fig-mlfm-comp-graph fig-env="figure" fig-pos="htb" fig-cap="**Computation Graph with System Interactions**: A neural network DAG (left) interfaces with framework runtime components (right). By maintaining an explicit graph representation independent of execution, the framework can analyze tensor lifetimes for memory reuse and assign operations to target accelerators before issuing arithmetic." fig-alt="Left side shows computational graph with six operation nodes connected by data flow edges. Right side shows system components box with memory management and device placement nodes that interact with the computational graph."}
 
 ```{.tikz}
 \scalebox{0.9}{%
@@ -510,7 +510,7 @@ After `backward()` completes, the autograd graph is normally released. The next 
 
 :::
 
-Follow this "define-by-run" execution model step by step in @fig-mlfm-dynamic-graph-flow. Notice the alternating pattern: define, dispatch, define, dispatch. On a CPU, an operation commonly finishes before Python proceeds; accelerator work such as CUDA kernels is normally queued asynchronously. Standard Python debuggers can still inspect eager program state between calls, though reading a pending accelerator result may require synchronization. This contrasts with static graphs, where operations are staged before graph execution.
+In eager execution frameworks, operations evaluate imperatively as host code encounters them. Trace the execution loop in @fig-mlfm-dynamic-graph-flow, following the define-and-dispatch sequence that sends individual operations directly to device stream queues.
 
 ::: {#fig-mlfm-dynamic-graph-flow fig-env="figure" fig-pos="htb" fig-cap="**Dynamic Graph Execution Flow**: In eager execution, each operation is issued as the program encounters it. Accelerator work may execute asynchronously after dispatch. This define-by-run model enables natural debugging and data-dependent control flow while limiting optimization across Python calls." fig-alt="Left-to-right flowchart with Start, Define Operation under Python Dispatch, Execute Operation under GPU Kernel, a More operations? decision, and End. A Yes branch loops back to Define Operation; a No branch continues to End."}
 
@@ -837,11 +837,11 @@ with tf.Session() as sess:
 
 :::
 
-Compare this with the dynamic model by examining @fig-mlfm-static-graph. Notice the clear boundary between phases: in the definition phase (left), the framework builds a complete blueprint without touching any data; in the execution phase (right), data flows through an already-optimized graph. This separation enables the framework to resolve questions during the definition phase that are unreachable operation-by-operation: which intermediate tensors can share memory, which operations can fuse into a single kernel, and what the total memory footprint will be. By the time execution begins, these optimizations are already baked in.
+Static graph compilation separates graph construction from tensor execution. Observe the phase division in @fig-mlfm-static-graph, noting how symbolic graph definition on the left precedes ahead-of-time optimization and runtime execution on the right.
 
 The key difference from eager execution is that during construction, `x`, `y`, and `z` are not tensors containing values but rather symbolic nodes in a graph. Operations like `*` and `+` add nodes to the graph definition without performing any arithmetic. The `print(y)` line in the code example would reveal this distinction---it would print tensor metadata, not a computed value. Execution is triggered explicitly through `sess.run()`, at which point the framework analyzes the complete graph, optimizes it, and executes the optimized version with the provided input data.
 
-::: {#fig-mlfm-static-graph fig-env="figure" fig-pos="htb" fig-cap="**Static Graph: Define Then Execute**: The two phases of static graph execution. The definition phase (left) declares operations and builds the graph. The execution phase (right) loads data, runs the optimized graph, and produces results." fig-alt="Flow diagram showing two phases. Definition phase: Define operations, declare variables, build graph. Execution phase: Load data, run graph, get results. Arrows connect boxes left to right."}
+::: {#fig-mlfm-static-graph fig-env="figure" fig-pos="htb" fig-cap="**Static Graph Execution Lifecycle**: Separating symbolic graph definition (left) from concrete execution (right) provides global visibility over the computation, allowing compilers to apply ahead-of-time optimizations—such as operator fusion, buffer reuse, and layout transforms—before any tensors are materialized." fig-alt="Flow diagram showing two phases. Definition phase: Define operations, declare variables, build graph. Execution phase: Load data, run graph, get results. Arrows connect boxes left to right."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
@@ -1377,7 +1377,7 @@ Fusion wins on two fronts at once. Collapsing two launches into one halves the p
 
 @Fig-python-tax makes the dispatch tax visible: eager execution creates gaps where the GPU sits idle while Python dispatches the next kernel. The blue compute regions are short; the red dispatch regions are comparatively long. Compilation fuses these operations into a single kernel launch, replacing many dispatch gaps with one dispatch block and one fused compute block.
 
-::: {#fig-python-tax fig-env="figure" fig-pos="htb" fig-cap="**The Python Tax**: A schematic execution timeline contrasts repeated host dispatch and short GPU kernels in eager execution with one dispatch and one fused compute block after compilation." fig-alt="Gantt chart of execution timeline. Eager mode shows alternating red Python dispatch and blue GPU kernel blocks. Compiled mode shows one red dispatch block followed by one fused blue compute block."}
+::: {#fig-python-tax fig-env="figure" fig-pos="htb" fig-cap="**The Python Tax**: Execution timelines show how eager mode incurs repeated host dispatch latency ($L_{\text{lat}}$) between short GPU kernels, leaving the accelerator periodically idle. Compilation fuses these operations into a single kernel launch, eliminating intermediate dispatch gaps and maximizing hardware occupancy." fig-alt="Gantt chart of execution timeline. Eager mode shows alternating red Python dispatch and blue GPU kernel blocks. Compiled mode shows one red dispatch block followed by one fused blue compute block."}
 
 ```{python}
 #| echo: false
@@ -2745,9 +2745,9 @@ The illustrative ResNet-50 breakdown in @sec-ml-frameworks-principle-2-memorycom
 
 #### Tensor structure and dimensions {#sec-ml-frameworks-tensor-structure-dimensions-4a14}
 
-A tensor generalizes the familiar hierarchy\index{Tensor!rank hierarchy} of scalars (rank 0), vectors (rank 1), and matrices (rank 2) to arbitrary rank, with each rank adding one axis of organization; @fig-tensor-data-structure-a compares the four lowest ranks side by side.
+Tensors structure numerical data by adding organizational axes to linear memory layouts. Trace the rank expansion from left to right in @fig-tensor-data-structure-a, observing how rank 0 scalars evolve into rank 3 volume tensors.
 
-::: {#fig-tensor-data-structure-a fig-env="figure" fig-pos="htb" fig-cap="**Tensor Rank Hierarchy**: Four shapes illustrate ascending tensor ranks, from a single value (rank 0, scalar) to a column of values (rank 1, vector), a grid of values (rank 2, matrix), and a cube of values (rank 3, three-dimensional tensor)." fig-alt="Four shapes showing tensor ranks left to right: single box labeled Rank 0, vertical column of numbers labeled Rank 1, 2D grid of numbers labeled Rank 2, and 3D cube labeled Rank 3."}
+::: {#fig-tensor-data-structure-a fig-env="figure" fig-pos="htb" fig-cap="**Tensor Rank Hierarchy**: Ascending tensor ranks (0 to 3) generalize multi-dimensional indexing from scalars to volume tensors. Each additional rank adds an organizational axis that the framework must linearize into physical memory addresses via strides." fig-alt="Four shapes showing tensor ranks left to right: single box labeled Rank 0, vertical column of numbers labeled Rank 1, 2D grid of numbers labeled Rank 2, and 3D cube labeled Rank 3."}
 
 ```{.tikz}
 \scalebox{0.77}{%
@@ -2796,9 +2796,9 @@ minimum width=18,minimum height=18](3R){0};
 
 :::
 
-In ML data terms, a color image is a rank-3 tensor of height, width, and three color channels (@fig-tensor-data-structure-b), and a batch of $B$ images is rank-4: $[B, 3, H, W]$ in PyTorch's channel-first convention, $[B, H, W, 3]$ in channel-last layouts. That layout choice matters because every convolutional layer consumes and produces these rank-4 tensors, and the layout determines the memory access pattern the hardware sees.
+In vision applications, raw image inputs map directly onto multi-dimensional tensor layouts. Examine the rank 3 tensor structure in @fig-tensor-data-structure-b, observing how red, green, and blue color channels stack along the channel dimension.
 
-::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as RGB Tensor**: Three stacked grids representing the red, green, and blue color channels of an image, with dimension labels showing width, height, and channel depth forming a rank-3 tensor. Adapted from [Niklas Lang, ‘From Vectors to Tensors: Exploring the Mathematics of Tensor Algebra’](https://towardsdatascience.com/what-are-tensors-in-machine-learning-5671814646ff)." fig-alt="Three stacked grids in red, green, and blue representing RGB channels. Dimension labels show width three pixels, height three pixels, and three color channels, forming a rank-3 tensor for image data."}
+::: {#fig-tensor-data-structure-b fig-env="figure" fig-pos="htb" fig-cap="**Image as an RGB Tensor**: Decomposing a 2D color image into stacked height, width, and channel dimensions forms a rank-3 tensor. In ML systems, the ordering of these dimensions (such as channel-first vs. channel-last) determines memory access locality and cache efficiency during convolution operations." fig-alt="Three stacked grids in red, green, and blue representing RGB channels. Dimension labels show width three pixels, height three pixels, and three color channels, forming a rank-3 tensor for image data."}
 
 ```{.tikz}
 \scalebox{0.67}{%
@@ -3422,7 +3422,7 @@ The data structures examined so far---tensors, device managers, data pipelines, 
 
 When an engineer writes `y = torch.matmul(x, w)`, the gap between Python and the GPU is larger than it appears. The gap between a single line of Python and thousands of parallel GPU threads is bridged by three groups of operations\index{Operator Kernel!dispatch hierarchy} working in coordination. @Fig-mlfm-core-ops shows the full stack: hardware abstraction operations manage platform-specific execution, basic numerical operations implement mathematical computation, and system-level operations coordinate scheduling, memory, and resources across the graph. The prose follows that build-up from the hardware-specific kernel path toward system orchestration.
 
-::: {#fig-mlfm-core-ops fig-env="figure" fig-pos="htb" fig-cap="**Core Operations Stack**: Three groups show how frameworks bridge Python code to hardware: system-level operations coordinate resources and execution, numerical operations implement GEMM and element-wise computation, and hardware operations manage kernel dispatch, memory abstraction, and execution control." fig-alt="Three grouped boxes connected left to right by arrows. System level: Scheduling, memory management, resource optimization. Numerical: GEMM, BLAS, element-wise operations. Hardware: Kernel management, memory abstraction, execution control."}
+::: {#fig-mlfm-core-ops fig-env="figure" fig-pos="htb" fig-cap="**Core Operations Stack**: Three functional tiers bridge high-level Python code to physical execution. Hardware operations manage low-level kernel dispatch and memory transfers, basic numerical operations execute dense GEMM and element-wise routines, and system-level operations coordinate graph scheduling and memory lifetimes across accelerators." fig-alt="Three grouped boxes connected left to right by arrows. System level: Scheduling, memory management, resource optimization. Numerical: GEMM, BLAS, element-wise operations. Hardware: Kernel management, memory abstraction, execution control."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
@@ -3895,7 +3895,7 @@ TensorFlow's architecture\index{TensorFlow!graph-first architecture} spans eager
 
 Within a captured `tf.function`, TensorFlow can apply graph optimizations such as constant folding, operator fusion, and layout planning. @Fig-tensorflow-architecture maps the broader training-to-deployment pipeline from data preprocessing and distributed training to SavedModel export\index{SavedModel!TensorFlow export format}, TensorFlow Serving\index{TensorFlow Serving!production deployment}, TensorFlow Lite, TensorFlow.js\index{TensorFlow.js!browser deployment}, and language bindings.
 
-::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline**: Two-column diagram showing the training path (left) from data preprocessing through tf.keras and distribution strategy across CPU, GPU, and TPU, and the deployment path (right) from SavedModel export to TensorFlow Serving, Lite, JS, and language bindings. Adapted from [TensorFlow, ‘What’s Coming in TensorFlow 2.0’](https://blog.tensorflow.org/2019/01/whats-coming-in-tensorflow-2-0.html)." fig-alt="Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
+::: {#fig-tensorflow-architecture fig-env="figure" fig-pos="htb" fig-cap="**TensorFlow Training-to-Deployment Pipeline**: The SavedModel format serves as the central decoupling boundary between training and deployment. It captures graph structure, weights, and signatures from heterogeneous training setups (left) and exports them directly to target-specific runtimes (right)—including TF Serving, TF Lite, and TF.js—without requiring Python in production." fig-alt="Two-column diagram. Training: data preprocessing, tf.keras, TensorFlow Hub, Premade Estimators, Distribution Strategy across CPU/GPU/TPU. Deployment via SavedModel to TensorFlow Serving, Lite, JS, and language bindings."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\usefont{T1}{phv}{m}{n}\small]
