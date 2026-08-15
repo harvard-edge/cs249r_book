@@ -1423,6 +1423,7 @@ This test validates submissions conform to the required schema.
 """
 
 # %% nbgrader={"grade": true, "grade_id": "test-submission-schema", "locked": true, "points": 10}
+#| export
 def validate_submission_schema(submission: Dict[str, Any]) -> bool:
     """
     Validate submission JSON conforms to required schema.

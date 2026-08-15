@@ -174,5 +174,68 @@ class TestEndToEndIntegration:
         )
 
 
+class TestValidateSubmissionSchema:
+    """Test validate_submission_schema is importable and rejects bad input.
+
+    This function previously wasn't exported to the built tinytorch package
+    at all (missing #| export marker), so it was unreachable from pytest or
+    from anything outside the source notebook. These tests both confirm the
+    import path works and exercise its actual validation logic, which had
+    never been tested against malformed input before.
+    """
+
+    def _valid_submission(self):
+        from tinytorch.olympics import validate_submission_schema
+        return validate_submission_schema, {
+            'tinytorch_version': '0.1.0',
+            'submission_type': 'capstone_benchmark',
+            'timestamp': '2026-01-01T00:00:00',
+            'system_info': {'platform': 'test', 'python_version': '3.11'},
+            'baseline': {
+                'model_name': 'baseline_model',
+                'metrics': {
+                    'parameter_count': 1024,
+                    'model_size_mb': 4.0,
+                    'accuracy': 0.9,
+                    'latency_ms_mean': 12.5,
+                },
+            },
+        }
+
+    def test_importable_from_package(self):
+        """WHAT: Verify the function can actually be imported from tinytorch.olympics."""
+        from tinytorch.olympics import validate_submission_schema
+        assert validate_submission_schema is not None
+
+    def test_valid_submission_passes(self):
+        """WHAT: Verify a well-formed submission validates successfully."""
+        validate_submission_schema, submission = self._valid_submission()
+        assert validate_submission_schema(submission) is True
+
+    def test_missing_required_field_raises(self):
+        """WHAT: Verify a submission missing a required top-level field is rejected."""
+        validate_submission_schema, submission = self._valid_submission()
+        del submission['tinytorch_version']
+
+        with pytest.raises(AssertionError):
+            validate_submission_schema(submission)
+
+    def test_accuracy_above_valid_range_raises(self):
+        """WHAT: Verify an out-of-range accuracy value (> 1) is rejected."""
+        validate_submission_schema, submission = self._valid_submission()
+        submission['baseline']['metrics']['accuracy'] = 1.5
+
+        with pytest.raises(AssertionError):
+            validate_submission_schema(submission)
+
+    def test_accuracy_below_valid_range_raises(self):
+        """WHAT: Verify an out-of-range accuracy value (< 0) is rejected."""
+        validate_submission_schema, submission = self._valid_submission()
+        submission['baseline']['metrics']['accuracy'] = -0.1
+
+        with pytest.raises(AssertionError):
+            validate_submission_schema(submission)
+
+
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
