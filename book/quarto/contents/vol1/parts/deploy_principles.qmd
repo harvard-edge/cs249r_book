@@ -14,7 +14,7 @@ The verification gap means finite evaluation can only estimate behavior on a def
 
 ::: {#pri-statistical-drift .callout-principle title="The Statistical Drift Diagnostic"}
 
-**Invariant**: Over a measured deployment range, accuracy declines as the production distribution diverges from the baseline, an effect labeled outcomes can fit as:
+**Invariant**: Divergence between the production and baseline distributions does not by itself determine whether accuracy changes; over a measured deployment range, labeled outcomes can fit a local linear relationship:
 $$ \text{Accuracy}(t) \approx \text{Accuracy}_0 - \lambda \cdot \mathcal{D}(P_t \lVert P_0) $$
 where $P_0$ is the baseline distribution, $\text{Accuracy}_0$ is the model's performance on $P_0$, $\mathcal{D}(P_t \lVert P_0)$ is the statistical divergence between the current and baseline distributions, and $\lambda$ is fitted from labeled outcomes rather than inferred from divergence alone. Consider a credit scoring model trained on 2020 borrower behavior. Two years later, inflation rises, interest rates change, and lending policies shift. The system still produces scores, but the statistical relationship between inputs and outcomes may have changed; labeled outcome monitoring determines whether real accuracy declined while conventional error logs remained quiet. Unlike many traditional software failures, which are often surfaced by crashes, exceptions, or explicit service-health signals, ML systems can fail silently because the *environment* changes even when the code and infrastructure remain unchanged. This first-order linearization applies only over the measured range; the relationship is model-dependent and may be nonlinear for large drift.
 
@@ -26,7 +26,7 @@ External drift is not the only threat. Even when the world holds still, the serv
 
 ::: {#pri-training-serving-skew .callout-principle title="The Training-Serving Skew Diagnostic"}
 
-**Invariant**: For scalar model scores, training-serving divergence is the expected absolute difference between the training and serving functions over a stated comparison-input distribution:
+**Invariant**: Training and serving code paths can diverge on identical inputs, and that divergence is measurable without labels. For scalar model scores, define training-serving divergence as the expected absolute difference between the two functions over a stated comparison-input distribution:
 $$ S_{\text{skew}} = \mathbb{E}[|f_{\text{serve}}(x) - f_{\text{train}}(x)|] $$
 The exact relationship between $S_{\text{skew}}$ and accuracy depends on the loss function, decision boundary geometry, and production distribution. Unexplained divergence weakens the assumption that offline validation estimates production behavior and can cause silent accuracy loss, but $S_{\text{skew}}$ is not a universal accuracy-loss equation. This divergence arises from inconsistent preprocessing logic, different library implementations, stale feature values, or environmental state changes between the two code paths.
 
@@ -38,9 +38,9 @@ Beneath all these reliability concerns lies a nonnegotiable constraint: time. A 
 
 ::: {#pri-latency-budget .callout-principle title="The Latency Budget Principle"}
 
-**Invariant**: Under serial request-path accounting, end-to-end latency is the sum of network, preprocessing, inference, postprocessing, and queueing delays. In latency-sensitive serving, the product selects a deadline $D$ and an acceptable completion quantile $q$, such as 0.95, 0.99, or 0.999; throughput is optimized within that constraint:
+**Invariant**: Under serial request-path accounting, end-to-end latency is the sum of network, preprocessing, inference, postprocessing, and queueing delays, and a deployment meets its deadline only at a stated completion quantile:
 $$ L_{\text{lat,total}} = L_{\text{lat,net}} + L_{\text{lat,pre}} + L_{\text{lat,infer}} + L_{\text{lat,post}} + L_{\text{lat,queue}}, \qquad \Pr[L_{\text{lat,total}} \leq D] \geq q $$
-**Implication**: Serving systems must implement tail-latency controls (for example, bounded-delay dynamic batching or hedged requests). Serving systems must be willing to sacrifice overall throughput to meet the latency deadline of the oldest request in the queue.
+**Implication**: In latency-sensitive serving, the product selects the deadline and the acceptable completion quantile, such as 0.95, 0.99, or 0.999, and throughput is optimized within that constraint. Serving systems must implement tail-latency controls (for example, bounded-delay dynamic batching or hedged requests). Serving systems must be willing to sacrifice overall throughput to meet the latency deadline of the oldest request in the queue.
 
 :::
 
@@ -48,7 +48,7 @@ A system can satisfy its latency SLOs, detect measured distributional shifts, an
 
 ::: {#pri-bias-feedback .callout-principle title="The Bias Feedback Model"}
 
-**Invariant**: When outputs influence future inputs, disparity compounds across feedback intervals. Let $\Delta_g(k) \geq 0$ denote the disparity magnitude for group $g$ relative to a specified reference group after $k$ fixed feedback intervals. With no effective intervention and an approximately constant dimensionless feedback factor $\alpha_{\text{fb}} > 0$, disparity may evolve as:
+**Invariant**: When outputs influence future inputs, today's disparity becomes an input to the next training cycle, so disparity evolves as a dynamical system rather than staying fixed. Let $\Delta_g(k) \geq 0$ denote the disparity magnitude for group $g$ relative to a specified reference group after $k$ fixed feedback intervals. With no effective intervention and an approximately constant dimensionless feedback factor $\alpha_{\text{fb}} > 0$, disparity may evolve as:
 $$ \Delta_g(k) \approx \Delta_g(0) \cdot \alpha_{\text{fb}}^k $$
 where $\Delta_g(0)$ is the initial disparity magnitude relative to that reference group and $\alpha_{\text{fb}}$ is fitted per feedback interval. Consider a loan approval model that denies credit at higher rates to applicants from historically underserved communities. Denied applicants cannot build credit history, which makes future applications weaker, which increases future denial rates. The model's accuracy on its training distribution remains stable, but the population it serves has been reshaped by its own decisions. When $\alpha_{\text{fb}} > 1$ under these assumptions, the feedback loop is self-reinforcing; when $\alpha_{\text{fb}} \leq 1$, the modeled dynamics are stable or damped. Real deployments may also be nonlinear, saturating, or changed by intervention.
 
