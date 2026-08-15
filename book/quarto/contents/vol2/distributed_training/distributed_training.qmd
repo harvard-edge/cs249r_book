@@ -221,7 +221,7 @@ The decision tree reveals that parallelism strategy selection is not a preferenc
 
 ## The Distributed Training Step {#sec-distributed-training-systems-systems-distributed-training-fundamentals-97da}
 
-The selection constraints of the previous section assumed the job must be split; the question now is what a distributed step must guarantee. The central challenge is ensuring that 1,024 GPUs, operating completely independently, agree on a single, mathematically rigorous set of updated weights at the end of each training iteration.
+Partitioning a training job across accelerators requires preserving the mathematical semantics of a single optimization step. The central challenge is ensuring that 1,024 GPUs, operating completely independently, agree on a single, mathematically rigorous set of updated weights at the end of each training iteration.
 
 ::: {#dfn-distributed-training-distributed-training .callout-definition title="Distributed training"}
 
@@ -293,7 +293,7 @@ $$
 g_{\text{global}} = \frac{1}{|B_{\text{total}}|} \sum_{x_i \in B_{\text{total}}} \nabla_{\theta} \mathcal{L}(\theta, x_i)
 $$
 
-For unequal local batch sizes, the combined-batch gradient is the weighted average $g_{\text{global}} = (1/|B_{\text{total}}|)\sum_k |B_k|g_k$. The equivalence shows *why* data parallelism maintains the statistical properties of SGD training: distributing distinct data subsets across devices, computing local gradients independently, and averaging them approximates the full-batch gradient. The averaging step itself is an AllReduce over the local gradient tensors; @sec-appdx-comm-foundations-allreduce derives the ring and tree AllReduce cost models that set the price of this synchronization, so the reader can predict when it overtakes the local compute saved by parallelism.
+For unequal local batch sizes, the combined-batch gradient is the weighted average $g_{\text{global}} = (1/|B_{\text{total}}|)\sum_k |B_k|g_k$. The equivalence shows why data parallelism maintains the statistical properties of SGD training: distributing distinct data subsets across devices, computing local gradients independently, and averaging them approximates the full-batch gradient. The averaging step itself is an AllReduce over the local gradient tensors; @sec-appdx-comm-foundations-allreduce derives the ring and tree AllReduce cost models that set the price of this synchronization, so the reader can predict when it overtakes the local compute saved by parallelism.
 
 ::: {#chk-distributed-training-data-parallelism-mechanics .callout-checkpoint title="Data parallelism mechanics"}
 
@@ -3327,16 +3327,16 @@ The parallelism strategies explored throughout this chapter (data, tensor, pipel
 
 ::: {.callout-takeaways title="Parallelism relocates the tax"}
 
-* **Splitting work moves the bottleneck**: Distributed training does not make the underlying computation smaller; it converts memory pressure into communication volume, synchronization delay, or idle pipeline time. The winning strategy is the split that sends overhead to the least binding part of the fleet.
+* **Splitting work moves the bottleneck**: Distributed training does not make the underlying computation smaller; it converts memory pressure into communication volume, synchronization delay, or idle pipeline time (principle \ref{pri-scaling-efficiency}). The winning strategy is the split that sends overhead to the least binding part of the fleet.
 * **Data parallelism ends at convergence**: Replicas scale throughput cleanly only while larger global batches still improve optimization. Past the critical batch size, AllReduce cost and reduced gradient noise turn "more workers" into slower or less stable learning unless schedules, warmup, and accumulation change.
-* **Sharding buys memory with messages**: ZeRO and FSDP make 100B+ parameter models feasible by partitioning optimizer state, gradients, and parameters. The price is a stricter communication schedule of ReduceScatter and AllGather operations that must be overlapped or hidden.
-* **Tensor parallelism belongs near NVLink**: Tensor parallelism splits matrix operations inside layers, so it needs the high-bandwidth intra-node fabric that A100 and H100 NVLink provide. Stretching that traffic across racks turns a memory-capacity solution into a communication bottleneck.
-* **Pipeline parallelism trades bytes for bubbles**: Layer staging reduces communication frequency, but fill and drain slots leave accelerators idle. Microbatching with $m \gg p$ is the mechanism that turns model depth into throughput rather than pipeline slack.
-* **The 3D cube is a hardware map**: Real frontier training combines data, tensor, pipeline, expert, and sharded parallelism because no single axis fits the model and the fleet. Logical groups must map to HBM, NVLink, InfiniBand, and failure domains together.
+* **Sharding buys memory with messages**: ZeRO and FSDP make 100B+ parameter models feasible by partitioning optimizer state, gradients, and parameters (principle \ref{pri-memory-capacity-gap}). The price is a stricter communication schedule of ReduceScatter and AllGather operations that must be overlapped or hidden.
+* **Tensor parallelism belongs near NVLink**: Tensor parallelism splits matrix operations inside layers, so it needs the high-bandwidth intra-node fabric that A100 and H100 NVLink provide (principle \ref{pri-bandwidth-latency-tradeoff}). Stretching that traffic across racks turns a memory-capacity solution into a communication bottleneck.
+* **Pipeline parallelism trades bytes for bubbles**: Layer staging reduces communication frequency, but fill and drain slots leave accelerators idle (principle \ref{pri-distributed-step-time}). Microbatching with $m \gg p$ is the mechanism that turns model depth into throughput rather than pipeline slack.
+* **The 3D cube is a hardware map**: Real frontier training combines data, tensor, pipeline, expert, and sharded parallelism because no single axis fits the model and the fleet (principle \ref{pri-universal-scaling}). Logical groups must map to HBM, NVLink, InfiniBand, and failure domains together.
 
 :::
 
-Beneath the cube and its three axes lies a single trade. No way of splitting a model makes the underlying work smaller; each only moves it, turning a memory limit into a communication cost or a communication cost into idle time. Data, tensor, and pipeline parallelism spend communication to win the memory headroom no single accelerator has, and coordination is the tax paid to keep the split consistent. This is displacement of overhead, the law the rest of the volume turns on: the execution tax of scale cannot be removed, only relocated among compute, communication, and coordination. The cube is the map of where the tax can be sent; the engineering is choosing the destination that binds least.
+Beneath the cube and its three axes lies a single trade. No way of splitting a model makes the underlying work smaller; each only moves it, turning a memory limit into a communication cost or a communication cost into idle time. Data, tensor, and pipeline parallelism spend communication to win the memory headroom no single accelerator has, and coordination is the tax paid to keep the split consistent. This is the displacement of overhead (principle \ref{pri-conservation-overhead}), the law the rest of the volume turns on: the execution tax of scale cannot be removed, only relocated among compute, communication, and coordination. The cube is the map of where the tax can be sent; the engineering is choosing the destination that binds least.
 
 ::: {.callout-chapter-connection title="From logic to traffic"}
 
