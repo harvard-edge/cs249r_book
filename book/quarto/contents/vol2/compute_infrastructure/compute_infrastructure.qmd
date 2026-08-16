@@ -866,13 +866,13 @@ class InfraFrontierMemoryIntroRecap:
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_qty, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MemoryBandwidthCacheRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    h100_l2_bytes_str = fmt_qty(Hardware.Cloud.H100.memory.l2_cache, 'megabyte', precision=0, commas=False)
+    h100_l2_bytes_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.l2_cache, unit=MiB, precision=0, commas=False)
     h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
     h100_bw_tb_per_s_str = fmt_qty(Hardware.Cloud.H100.memory.bandwidth, TB / second, precision=2, commas=False)
 ```
@@ -1012,19 +1012,22 @@ from mlsysim.fmt import check, fmt_memory_capacity, fmt_percent, fmt_usd
 class HbmB200Recap:
     """Registry-derived B200 capacity, cost range, and GPT-3 weight fraction."""
 
-    capacity = Hardware.Cloud.B200.memory.capacity.to(GB)
+    # Capacity is stored in binary GiB; the vendor nameplate ("180 GB") is that
+    # binary magnitude, while the weight fraction must use the true byte count.
+    capacity = Hardware.Cloud.B200.memory.capacity.to(GiB)
+    nameplate_gb = round(capacity.magnitude)
     low_cost_per_gb = 10
     high_cost_per_gb = 15
-    low_cost = capacity.magnitude * low_cost_per_gb
-    high_cost = capacity.magnitude * high_cost_per_gb
+    low_cost = nameplate_gb * low_cost_per_gb
+    high_cost = nameplate_gb * high_cost_per_gb
     gpt3_fp16_weights = Models.Language.GPT3.size_in_bytes(BYTES_FP16)
     gpt3_weight_fraction = (capacity / gpt3_fp16_weights).to("").magnitude
 
-    check(round(capacity.magnitude) == 180, "B200 capacity should match the 180 GB nameplate specification.")
-    check(round(gpt3_weight_fraction * 100) == 51, "B200 should hold about 51 percent of GPT-3 FP16 weights.")
+    check(nameplate_gb == 180, "B200 capacity should match the 180 GB nameplate specification.")
+    check(round(gpt3_weight_fraction * 100) == 55, "B200 should hold about 55 percent of GPT-3 FP16 weights.")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────
-    capacity_gb_str = fmt_memory_capacity(capacity, unit=GB, precision=0, commas=False)
+    capacity_gb_str = fmt_memory_capacity(capacity, unit=GiB, precision=0, commas=False)
     low_cost_str = fmt_usd(low_cost, precision=0, commas=True)
     high_cost_str = fmt_usd(high_cost, precision=0, commas=True)
     gpt3_weight_fraction_str = fmt_percent(gpt3_weight_fraction, precision=1, commas=False, style="prose")
@@ -1779,9 +1782,9 @@ The same arithmetic-intensity calculation separates the running model's inferenc
 
 ::: {#exmp-compute-infrastructure-roofline-analysis-training-vs-inference .callout-example title="Roofline analysis: Training vs. inference"}
 
-**Scenario**: An engineering team evaluates hardware choices for serving (decode batch size 1) versus training (batch size `{python} RooflineInferenceMath.batch_size_str`) a `{python} RooflineInferenceMath.params_b_str` parameter model on an H100 GPU (ridge point `{python} RooflineInferenceMath.h100_ridge_str` FLOP/byte).
+**Scenario**: An engineering team evaluates hardware choices for serving (decode batch size 1) versus training (batch size `{python} RooflineInferenceMath.batch_size_str`) a `{python} RooflineInferenceMath.params_b_str` parameter model on an H100 GPU (ridge point `{python} RooflineInferenceMath.h100_ridge_str`).
 
-**Diagnosis**: Single-token decode achieves arithmetic intensity $I =$ `{python} RooflineInferenceMath.inf_intensity_str` FLOP/byte $\ll$ `{python} RooflineInferenceMath.h100_ridge_str`, bounding throughput to `{python} RooflineInferenceMath.inf_peak_pct_str` of peak FLOPs due to HBM bandwidth. Training batching increases intensity to $I =$ `{python} RooflineInferenceMath.train_intensity_str` FLOP/byte $\gg$ `{python} RooflineInferenceMath.h100_ridge_str`, shifting the workload to compute-bound peak TFLOPs.
+**Diagnosis**: Single-token decode achieves arithmetic intensity $I =$ `{python} RooflineInferenceMath.inf_intensity_str` $\ll$ `{python} RooflineInferenceMath.h100_ridge_str`, bounding throughput to `{python} RooflineInferenceMath.inf_peak_pct_str` of peak FLOPs due to HBM bandwidth. Training batching increases intensity to $I =$ `{python} RooflineInferenceMath.train_intensity_str` $\gg$ `{python} RooflineInferenceMath.h100_ridge_str`, shifting the workload to compute-bound peak TFLOPs.
 
 **Systems lesson**: Hardware selection must align with operational arithmetic intensity: training platforms prioritize peak compute (TFLOPs), while single-batch inference platforms prioritize memory bandwidth per dollar.
 
@@ -2532,6 +2535,7 @@ The node bridges this gap by aggregating the HBM of multiple accelerators into d
 The economic argument for multi-accelerator nodes is equally compelling. Consider the alternative: building a single accelerator with enough HBM to hold a 175B model (350 GB in FP16). Current packages provide roughly 16--24 GB per HBM stack, so a 350 GB single-accelerator design would require on the order of 15--22 HBM stacks, far beyond the 5-stack H100 or 8-stack B200-class package. The manufacturing cost of such a package would be prohibitive (yield decreases with package and interposer area), and the power delivery to a single chip with enough Tensor Cores to use all that bandwidth would exceed any practical cooling solution. Distributing the computation across 8 accelerators connected by NVLink allows the node to achieve the aggregate memory capacity and compute throughput of this hypothetical super-chip while remaining within manufacturable and coolable boundaries.
 
 ```{python}
+from mlsysim.fmt import fmt_memory_capacity
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 class InfraFrontierNodeBudgetRecap:
@@ -2771,7 +2775,7 @@ Consider the NVIDIA DGX H100 architecture\index{DGX}. Eight H100 GPUs sit on a s
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_qty, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class NodeCapacityDenseRecap:
@@ -2910,6 +2914,7 @@ As the "data center tax" on host CPUs has grown, with up to 30 percent of CPU cy
 #### Alternative node architectures {#sec-compute-infrastructure-alternative-node-architectures-2e3c}
 
 ```{python}
+from mlsysim.fmt import fmt_memory_capacity
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 class AlternativeNodeArchitectureRecap:
@@ -3124,7 +3129,7 @@ class InfraFrontierNodeWeightsRecap:
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt_int, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class NodeCapacityTrainMemRecap:
@@ -3155,7 +3160,7 @@ class NodeCapacityTrainMemRecap:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     node_hbm_cap_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
-    host_dram_tb_str = fmt_memory(host_dram, unit=TB, precision=0, commas=False)
+    host_dram_tb_str = fmt_memory_capacity(host_dram, unit=TiB, precision=0, commas=False)
     weights_gb_str = fmt_memory(weights, unit=GB, precision=0, commas=True)
     gradients_gb_str = fmt_memory(gradients, unit=GB, precision=0, commas=True)
     optimizer_gb_str = fmt_memory(optimizer, unit=GB, precision=0, commas=True)
@@ -3196,7 +3201,7 @@ The pipelining ensures that each layer's computation can proceed without waiting
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_qty
+from mlsysim.fmt import fmt_qty, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class MemoryBandwidthNodeTableRecap:
@@ -3214,7 +3219,7 @@ class MemoryBandwidthNodeTableRecap:
     hbm_per_gpu_gb_str = fmt_memory_capacity(hbm_per_gpu, unit=GiB, precision=0, commas=False)
     gpus_per_node_str = fmt(gpus_per_node, precision=0, commas=False)
     node_hbm_gb_str = fmt_memory_capacity(node_hbm, unit=GiB, precision=0, commas=False)
-    host_dram_tb_str = fmt_qty(host_dram, TB, precision=0, commas=False)
+    host_dram_tb_str = fmt_memory_capacity(host_dram, unit=TiB, precision=0, commas=False)
     nvme_bw_gb_per_s_str = fmt_qty(nvme.bandwidth, GB / second, precision=0, commas=False)
     nvme_latency_us_str = fmt_time(nvme.latency, microsecond, precision=0, commas=False)
 ```
@@ -3251,7 +3256,7 @@ class InfraFrontierNodeSizingRecap:
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int
+from mlsysim.fmt import fmt_int, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class InfraFrontierNodeModelRecap:
@@ -3272,7 +3277,7 @@ class InfraFrontierNodeModelRecap:
     node_gpus_str = fmt_count(node_gpus, precision=0, commas=False)
     h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
     total_hbm_gb_str = fmt_memory_capacity(h100_mem * node_gpus, unit=GiB, precision=0, commas=False)
-    host_ddr_tb_str = fmt_memory(host_ddr, unit=TB, precision=0, commas=False)
+    host_ddr_tb_str = fmt_memory_capacity(host_ddr, unit=TiB, precision=0, commas=False)
     weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=2, commas=False)
     opt_state_gb_str = fmt_memory(opt_state, unit=GB, precision=0, commas=False)
     act_gb_str = fmt_memory(act, unit=GB, precision=0, commas=False)
@@ -3417,6 +3422,7 @@ class InfraFrontierNodeCapacityRecap:
     frontier_params_b_str = fmt_params(Models.Language.GPT3.parameters, scale="B", precision=0, commas=False)
 ```
 ```{python}
+from mlsysim.fmt import fmt_memory_capacity
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 class NodeCapacityTransitionRecap:
@@ -3818,7 +3824,7 @@ At this scale, the unit of analysis is no longer a rack or pod of independent se
 
 ::: {#dfn-compute-infrastructure-warehouse-scale-computer-wsc .callout-definition title="Warehouse-scale computer (WSC)"}
 
-*Warehouse-Scale Computer (WSC)*\index{Warehouse-Scale Computer!definition}\index{WSC!data center scale} is a building-scale computing system in which thousands of servers are operated as a single coherent machine (with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system), enabling training workloads that would be physically impossible on any single machine.
+***Warehouse-Scale Computer (WSC)***\index{Warehouse-Scale Computer!definition}\index{WSC!data center scale} is a building-scale computing system in which thousands of servers are operated as a single coherent machine (with the network fabric serving as the system bus, distributed storage as the disk subsystem, and a cluster orchestrator as the operating system), enabling training workloads that would be physically impossible on any single machine.
 
 1.  **Significance**: A WSC of `{python} WscThroughput.n_gpus_str` H100 GPUs delivers approximately `{python} WscThroughput.wsc_fp16_eflop_per_s_str` FP16 peak (and ~`{python} WscThroughput.wsc_fp8_eflop_per_s_str` at FP8), enabling 175B-class training workloads at scales impossible on a single node. However, the system is only as fast as its bisection bandwidth: non-blocking InfiniBand at 50 GB/s per GPU provides `{python} WscThroughput.wsc_inject_tb_per_s_str` aggregate injection bandwidth; if the fabric is 4:1 oversubscribed, effective bisection bandwidth drops to `{python} WscThroughput.wsc_oversub_tb_per_s_str`, potentially bottlenecking AllReduce and dropping training throughput by 30–60 percent.
 2.  **Distinction**: Unlike a general-purpose compute cluster (which runs many independent jobs on separate nodes with no requirement for tight coupling), a WSC training cluster operates as a single synchronous instrument in which every node must participate in every AllReduce, making the failure or slowdown of a single node a cluster-wide performance event.
@@ -3867,6 +3873,7 @@ These physical constraints define warehouse-scale computer design. New technolog
 ## Infrastructure Technologies That Move the Walls {#sec-compute-emerging}
 
 ```{python}
+from mlsysim.fmt import fmt_memory_capacity
 #| echo: false
 # ┌── LEGO ───────────────────────────────────────────────
 class EmergingInfrastructureRecap:
@@ -3892,7 +3899,7 @@ class EmergingInfrastructureRecap:
     h100_hbm_bw_tb_per_s_str = fmt_bandwidth(h100.memory.bandwidth, unit=TB / second, precision=2, commas=False)
     cxl_bw_gb_per_s_str = fmt_bandwidth(cxl.bandwidth, unit=GB / second, precision=0, commas=False)
     cxl_vs_hbm_gap_mult_str = fmt_multiple(round(cxl_vs_hbm_gap.to_base_units().magnitude), precision=0, commas=False)
-    wse_sram_gb_str = fmt_memory(wse.memory.capacity, unit=GB, precision=0, commas=False)
+    wse_sram_gb_str = fmt_memory_capacity(wse.memory.capacity, unit=GiB, precision=0, commas=False)
     wse_memoryx_bw_tb_per_s_str = fmt_bandwidth(wse.interconnect.bandwidth, unit=TB / second, precision=1, commas=False)
 ```
 
@@ -4110,7 +4117,7 @@ Accelerator power draw varies dynamically between communication phases (lower po
 
 ```{python}
 #| echo: false
-from mlsysim.fmt import fmt_int, fmt_time
+from mlsysim.fmt import fmt_int, fmt_time, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class A100FallaciesRecap:

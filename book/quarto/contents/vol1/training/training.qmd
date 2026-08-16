@@ -778,7 +778,7 @@ Mini-batch gradient descent\index{Mini-Batch Processing!accelerator efficiency} 
 
 ::: {#dfn-training-batch-processing .callout-definition title="Batch processing"}
 
-*Batch Processing*\index{Batch Processing!definition} aggregates multiple training examples into tensor operations that amortize fixed per-step overhead across $B$ examples and can expose more parallel work. Increasing $B$ may improve occupancy and arithmetic intensity, but it does not guarantee that every operation becomes compute bound.
+***Batch Processing***\index{Batch Processing!definition} aggregates multiple training examples into tensor operations that amortize fixed per-step overhead across $B$ examples and can expose more parallel work. Increasing $B$ may improve occupancy and arithmetic intensity, but it does not guarantee that every operation becomes compute bound.
 
 1.  Significance: Throughput often increases with batch size until the target hardware is sufficiently occupied, while the number and quality of updates needed for convergence follow a separate workload-dependent curve. Goyal et al. demonstrated a ResNet-50 ImageNet recipe at $B=8{,}192$ using linear learning-rate scaling and warmup [@goyal2017accurate]. That result is a configuration-specific demonstration rather than a universal critical batch size\index{Critical Batch Size!throughput-convergence limit}.
 2.  Distinction: A mini-batch update averages gradients over $B$ examples. Under independent, similarly distributed samples, the standard deviation of this mean decreases approximately as $1/\sqrt{B}$. The update processes more data than a single-example update, so its net data movement and time depend on reuse, implementation, and how batch size changes the number of updates required.
@@ -2276,9 +2276,14 @@ class StorageBandwidthNvme:
 
 **Scenario**: Quantifying storage access, CPU tokenization, and PCIe host-to-device transfers supplying an 8-V100 GPU cluster training GPT-2.
 
-**Diagnosis**: Single-core CPU tokenization latency ($T_{\text{prep}} \approx 180 \text{ ms}$) exceeds GPU step execution time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), causing GPU starvation and hardware utilization collapse ($\eta_{\text{hw}} \to 0$).
+**Stage trace**:
 
-**Systems lesson**: Data pipeline preparation throughput must exceed GPU step consumption rates ($R_{\text{pipeline}} > R_{\text{compute}}$). Scaling parallel DataLoader workers and prefetching overlaps CPU tokenization with GPU execution to maximize accelerator utilization.
+1. **Raw text storage**: The WebText corpus contributes about `{python} GPT2DataPipeline.dataset_gb_str` of raw text. Sequential reads from NVMe SSD storage reach `{python} StorageBandwidthNvme.nvme_bw_gb_per_s_str`. Under document sampling with access factor `{python} GPT2DataPipeline.f_access_str`, random-access storage bandwidth drops to `{python} GPT2DataPipeline.random_access_gb_per_s_str`, giving $T_{\text{read}} = D_{\text{vol}} / \text{BW}_{\text{storage}} \approx 0.1\text{ ms}$.
+2. **Tokenization**: A BPE tokenizer\index{Byte Pair Encoding!tokenization} (`{python} GPT2DataPipeline.bpe_vocab_str` vocabulary) converts text into token IDs. For batch size $B =$ `{python} GPT2DataPipeline.b_assign_math` and sequence length $S =$ `{python} GPT2DataPipeline.s_assign_math` (`{python} GPT2DataPipeline.tokens_per_batch_str` total), a single CPU core processing `{python} GPT2DataPipeline.token_rate_tokens_per_s_str` takes $T_{\text{tokenize}} \approx$ `{python} GPT2DataPipeline.tokenization_ms_str` per batch.
+3. **Batching and padding**: Padding and packing generate an int64 tensor of shape `{python} GPT2DataPipeline.batch_size_seq_str` $\times$ `{python} GPT2DataPipeline.seq_len_token_str`, producing `{python} GPT2DataPipeline.batch_kb_str` per batch.
+4. **PCIe transfer**: Transferring the tensor across a PCIe Gen3 x16 bus (`{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` bandwidth) takes $T_{\text{transfer}} =$ `{python} GPT2DataPipeline.transfer_ms_str`, making bus transfer negligible.
+
+**Systems insight**: When single-core CPU preparation time ($T_{\text{prep}} \approx 180\text{ ms}$) exceeds accelerator step time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), the GPU starves, collapsing $\eta_{\text{hw}} \to 0$. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces tokenization latency to $T_{\text{tokenize}} / N_{\text{worker}} \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $T_{\text{prep}}$ with $T_{\text{step}}$ to restore hardware utilization to `{python} GPT2DataPipeline.utilization_pct_str`, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
 
 :::
 
@@ -3123,7 +3128,7 @@ class MFUExampleCalc:
 
 ::: {#dfn-training-model-flops-utilization-mfu .callout-definition title="Model FLOPs utilization (MFU)"}
 
-*Model FLOPs Utilization (MFU)*\index{Model FLOPs Utilization!definition} is the efficiency metric $\text{MFU} = O_{\text{model}} / (R_{\text{peak}} \cdot T_{\text{step}})$, where $O_{\text{model}}$ is the useful per-step model FLOP count (forward plus backward, excluding rematerialization) and $T_{\text{step}}$ is the measured wall-clock time per training step, expressing what fraction of peak hardware throughput is doing useful model computation.
+***Model FLOPs Utilization (MFU)***\index{Model FLOPs Utilization!definition} is the efficiency metric $\text{MFU} = O_{\text{model}} / (R_{\text{peak}} \cdot T_{\text{step}})$, where $O_{\text{model}}$ is the useful per-step model FLOP count (forward plus backward, excluding rematerialization) and $T_{\text{step}}$ is the measured wall-clock time per training step, expressing what fraction of peak hardware throughput is doing useful model computation.
 
 1.  Significance: MFU makes the effective-throughput term in the iron law concrete. For a `{python} MFUExampleCalc.params_b_str`-parameter transformer processing `{python} MFUExampleCalc.tokens_per_step_str` per step on an A100 (`{python} MFUExampleCalc.a100_tflop_per_s_str` FP16/BF16 Tensor Core peak), a `{python} MFUExampleCalc.step_time_s_str` step gives model FLOPs divided by the available peak-rate FLOP budget of approximately `{python} MFUExampleCalc.mfu_str` (`{python} MFUExampleCalc.mfu_pct_str`). The remaining `{python} MFUExampleCalc.lost_pct_str` is not credited as model FLOPs and can reflect memory traffic, communication, bubbles, non-model operations, or idle time. Whether a value is good depends on the model, hardware, precision, and parallelization strategy; diagnosis requires a profile rather than a universal threshold.
 2.  Distinction: Hardware utilization reports whether device engines are active, whereas MFU credits the analytical model-FLOP estimate used in its numerator. It can therefore exclude recomputation and padding even when those operations keep the device busy. Comparisons across accelerators remain sensitive to the selected peak-throughput specification and FLOP-counting convention.
@@ -4590,7 +4595,7 @@ Gradient accumulation and activation checkpointing operate on distinct principle
 
 To execute large batch training on memory-constrained accelerators, systems split effective batches across smaller sequential micro-batches. In @fig-grad-accumulation, trace how micro-batch gradient vectors $\delta_1, \delta_2, \delta_3$ accumulate into a single unified gradient tensor before triggering an optimizer update.
 
-::: {#fig-grad-accumulation fig-env="figure" fig-pos="htb" fig-cap="Gradient Accumulation: Three micro-batches each compute independent losses and gradients, which sum into a single combined gradient for one parameter update. This simulates training with a batch three times larger without requiring the memory to hold all samples simultaneously." fig-alt="Block diagram showing three batches computing individual losses and gradients. Arrows flow from batch 1, 2, 3 through losses to gradients boxes, then combine into a single summed gradient output."}
+::: {#fig-grad-accumulation fig-env="figure" fig-pos="htb" fig-cap="**Gradient Accumulation**: Three micro-batches each compute independent losses and gradients, which sum into a single combined gradient for one parameter update. This simulates training with a batch three times larger without requiring the memory to hold all samples simultaneously." fig-alt="Block diagram showing three batches computing individual losses and gradients. Arrows flow from batch 1, 2, 3 through losses to gradients boxes, then combine into a single summed gradient output."}
 
 ```{.tikz}
 \begin{tikzpicture}[  font=\small\usefont{T1}{phv}{m}{n}]
@@ -4701,7 +4706,7 @@ Activation checkpointing\index{Activation Checkpointing!memory-compute trade-off
 
 Activation memory can be reduced by trading FLOPs for memory bandwidth during backpropagation. Contrast the forward pass in the top row of @fig-activation-checkpointing with the backward pass in the bottom row, observing how intermediate activations are discarded and recomputed on demand from solid green checkpoint tensors.
 
-::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb" fig-cap="Activation Checkpointing: Trading memory usage for recomputation during backpropagation enables training deeper neural networks. By storing only a subset of activations from the forward pass and recomputing others on demand, this technique reduces peak memory requirements at the cost of increased training time." fig-alt="Two-row diagram showing activation checkpointing. Top row: forward pass with checkpointed nodes (filled) and discarded nodes (dashed). Bottom row: backward pass recomputing discarded activations from checkpoints."}
+::: {#fig-activation-checkpointing fig-env="figure" fig-pos="htb" fig-cap="**Activation Checkpointing**: Trading memory usage for recomputation during backpropagation enables training deeper neural networks. By storing only a subset of activations from the forward pass and recomputing others on demand, this technique reduces peak memory requirements at the cost of increased training time." fig-alt="Two-row diagram showing activation checkpointing. Top row: forward pass with checkpointed nodes (filled) and discarded nodes (dashed). Bottom row: backward pass recomputing discarded activations from checkpoints."}
 
 ```{.tikz}
 \begin{tikzpicture}[line cap=round,line join=round,font=\small\usefont{T1}{phv}{m}{n}]
@@ -5518,7 +5523,7 @@ The two foundational strategies, data parallelism and model parallelism, represe
 
 Data parallelism\index{Data Parallelism!gradient synchronization}\index{Data Parallelism!framework implementation} replicates the entire model on each GPU, with each processing different batches. After computing gradients locally, GPUs synchronize via gradient averaging\index{Data Parallelism!gradient averaging}. @Fig-train-data-parallelism shows the data flow: input data splits into nonoverlapping batches, each accelerator computes forward and backward passes independently, then gradients aggregate before updating the shared model.
 
-::: {#fig-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="Data Parallelism: Each GPU holds a complete model copy, processes a different data shard, and synchronizes gradients. Throughput can approach linear scaling only while computation dominates synchronization, input, and imbalance costs." fig-alt="Diagram showing input data splitting into four batches, each assigned to a GPU for forward and backward computation, followed by gradient aggregation."}
+::: {#fig-train-data-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Data Parallelism**: Each GPU holds a complete model copy, processes a different data shard, and synchronizes gradients. Throughput can approach linear scaling only while computation dominates synchronization, input, and imbalance costs." fig-alt="Diagram showing input data splitting into four batches, each assigned to a GPU for forward and backward computation, followed by gradient aggregation."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
@@ -5732,7 +5737,7 @@ Unsharded data parallelism has a hard constraint: every GPU holds a complete mod
 
 Model parallelism\index{Model Parallelism!memory constraints}\index{Distributed Training!scaling efficiency}\index{Model Parallelism!layer-wise partitioning} partitions the model itself across GPUs, which becomes necessary when the model exceeds single-GPU memory. AlexNet used a simple form: certain layers resided on GPU 1, others on GPU 2, with activations passing between them. @Fig-model-parallelism shows the forward and backward paths: data moves through model partitions on different devices, with gradients flowing backward during training.
 
-::: {#fig-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="Model Parallelism: The model is partitioned across devices, with intermediate activations passing between them. This enables training models larger than single-GPU memory at the cost of sequential dependencies." fig-alt="Diagram showing input flowing through model parts on different devices, with forward pass going right and backward pass returning left."}
+::: {#fig-model-parallelism fig-env="figure" fig-pos="htb" fig-cap="**Model Parallelism**: The model is partitioned across devices, with intermediate activations passing between them. This enables training models larger than single-GPU memory at the cost of sequential dependencies." fig-alt="Diagram showing input flowing through model parts on different devices, with forward pass going right and backward pass returning left."}
 
 ```{.tikz}
 \begin{tikzpicture}[line join=round,font=\usefont{T1}{phv}{m}{n}\small]
@@ -6433,7 +6438,7 @@ class TrainingCarbonFootprint:
 1.  Workload: Training a `{python} TrainingCarbonFootprint.cf_params_b_str`-parameter model for `{python} TrainingCarbonFootprint.cf_tokens_str` tokens.
 2.  Compute: $O \approx$ `{python} TrainingCarbonFootprint.cf_flops_eqn_str`.
 3.  Efficiency: `{python} TrainingCarbonFootprint.cf_sustained_tflop_per_s_str` sustained on A100 (`{python} TrainingCarbonFootprint.cf_gpu_tdp_w_str` TDP).
-4.  **Execution time**: $T_{\text{train}} \approx$ `{python} TrainingCarbonFootprint.cf_time_days_str` on `{python} TrainingCarbonFootprint.cf_num_gpus_str` GPUs.
+4.  **Execution time**: $T_{\text{train}} \approx$ `{python} TrainingCarbonFootprint.cf_time_days_str` on `{python} TrainingCarbonFootprint.cf_num_gpus_str`.
 5.  **Energy footprint**: $E_{\text{total}} = P_{\text{cluster}} \cdot T_{\text{train}} = (N_{\text{GPU}} \cdot P_{\text{GPU}} + N_{\text{host}} \cdot P_{\text{host}}) \cdot T_{\text{train}}$ evaluates to (`{python} TrainingCarbonFootprint.cf_num_gpus_str` $\times$ `{python} TrainingCarbonFootprint.cf_gpu_tdp_w_str` + `{python} TrainingCarbonFootprint.cf_hosts_str` $\times$ `{python} TrainingCarbonFootprint.cf_cpu_tdp_per_host_w_str`) $\times$ `{python} TrainingCarbonFootprint.cf_time_hours_str` $\approx$ `{python} TrainingCarbonFootprint.cf_energy_kwh_str`.
 
 **Impact**: The energy consumed equals `{python} TrainingCarbonFootprint.cf_household_months_str` of average household electricity use.

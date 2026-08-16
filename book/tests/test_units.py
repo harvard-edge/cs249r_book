@@ -351,7 +351,7 @@ def test_extended_gpu_specs():
     # B200
     ok &= check("B200 FP16", B200_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 2250.0)
     ok &= check("B200 BW", B200_MEM_BW.to(TB / second).magnitude, 8.0)
-    ok &= check("B200 Mem", B200_MEM_CAPACITY.to(GB).magnitude, 180.0)
+    ok &= check("B200 Mem", B200_MEM_CAPACITY.to(GiB).magnitude, 180.0)
 
     # MI300X
     ok &= check("MI300X FP16", MI300X_FLOPS_FP16_TENSOR.to(TFLOPs / second).magnitude, 1307.0, tol=0.01)

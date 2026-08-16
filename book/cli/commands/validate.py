@@ -478,7 +478,7 @@ class ValidateCommand:
             # same schema vol1 uses; flip to True once `--scope callout-schema`
             # is clean on dev for both volumes.
             Scope("callout-schema", "_run_callout_schema", default=False,
-                  note="per-type bold-label structure (war-story = Context/Failure mode/Systems lesson)"),
+                  note="per-type bold-label structure (war-story = Context/Mechanism/Impact/Fix/Systems lesson, per callouts.md)"),
             Scope("dropcaps", "_run_dropcaps"),
         ],
         "prose": [
@@ -605,6 +605,9 @@ class ValidateCommand:
                   note="hardcoded numbers in callout walkthroughs that share {python} refs"),
             Scope("lego-prose-units", "_run_lego_prose_units",
                   note="unit/currency tokens after {python} *_str refs", default=False),
+            Scope("rendered-doubled-words", "_run_rendered_doubled_words",
+                  note="doubled words visible only after {python} substitution "
+                       "(executes cells; no Quarto build)", default=False),
             Scope("lego-load-pint", "_run_lego_load_pint",
                   note="physical *_value assignments must use ureg/registry", default=False),
             Scope("lego-equations", "_run_lego_equations",
@@ -6925,7 +6928,14 @@ class ValidateCommand:
             ("Context", "Failure mode", "Consequence", "Systems lesson"),
             ("Context", "Failure mode", "Resolution", "Systems lesson"),
         ),
+        # callouts.md is the operational owner of per-type callout structure and
+        # mandates the 5-part arc: Context -> Mechanism -> Impact -> Fix ->
+        # Systems lesson. The three Failure-mode shapes below are the older arc,
+        # kept so any not-yet-migrated box still validates. (Aligned 2026-08-16:
+        # the corpus was standardized to the 5-part arc and this table had gone
+        # stale, producing 30 false mismatches against correct content.)
         "callout-war-story": (
+            ("Context", "Mechanism", "Impact", "Fix", "Systems lesson"),
             ("Context", "Failure mode", "Systems lesson"),
             ("Context", "Failure mode", "Consequence", "Systems lesson"),
             ("Context", "Failure mode", "Resolution", "Systems lesson"),
@@ -6937,7 +6947,7 @@ class ValidateCommand:
         """Enforce a uniform bold-label structure per callout type.
 
         Some callout types carry a fixed narrative schema: every
-        ``.callout-war-story`` is Context / Failure mode / Systems lesson, and
+        ``.callout-war-story`` follows the callouts.md 5-part arc, and
         every ``.callout-definition`` opens with a single ``***Term***`` head.
         This scope flags any instance of an enforced type whose bold
         paragraph-lead labels deviate, keeping the structure consistent across
@@ -10755,6 +10765,36 @@ class ValidateCommand:
         return ValidationRunResult(
             name="lego-prose-units",
             description=f"LEGO prose unit-after-_str scan ({len(qmd_files)} files)",
+            files_checked=len(qmd_files),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_rendered_doubled_words(self, root: Path) -> ValidationRunResult:
+        """code --scope rendered-doubled-words: doubled words after substitution.
+
+        Source-level scans cannot see these: in ```{python} X.fps_str` FPS`` the
+        source holds one "FPS" and the render shows two. Executes LEGO cells.
+        """
+        from cli.commands._registry_checks import (
+            check_rendered_doubled_words,
+            repo_root_from_here,
+        )
+
+        t0 = time.time()
+        repo = repo_root_from_here()
+        qmd_files = self._qmd_files(root)
+        raw = check_rendered_doubled_words(repo, paths=qmd_files)
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="rendered-doubled-words",
+            description=f"doubled words in substituted prose ({len(qmd_files)} files)",
             files_checked=len(qmd_files),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),

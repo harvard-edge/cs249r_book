@@ -392,7 +392,7 @@ where $N_L$ is the number of layers, $d$ is the hidden dimension, $S$ is sequenc
 # │ How: 2 * N_L * d * S * s_elem for GPT-3 (96 layers, 12288 dim) on 8x A100 GPUs.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import Models
+from mlsysim import GB, Models, byte
 from mlsysim.fmt import check
 
 class AppdxKVCacheSizing:
@@ -404,7 +404,7 @@ class AppdxKVCacheSizing:
 
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     kv_bytes_per_req = 2 * n_layers * hidden_dim * seq_len * s_elem
-    kv_gb_per_req = kv_bytes_per_req / (1024**3)
+    kv_gb_per_req = (kv_bytes_per_req * byte).to(GB).magnitude
 
     num_gpus = 8
     gpu_mem = 80  # GB
@@ -418,9 +418,13 @@ class AppdxKVCacheSizing:
     check(max_batch_size == 30, f"Max batch size should be 30, got {max_batch_size}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    from mlsysim.fmt import fmt, fmt_int
+    from mlsysim.fmt import fmt, fmt_display_math, fmt_int
 
     kv_gb_per_req_str = fmt(kv_gb_per_req, precision=2)
+    kv_per_req_display_math = fmt_display_math(
+        f" M_{{\\text{{KV/req}}}} = 2 \\times 96 \\times 12288 \\times 2048 \\times 2 \\text{{ B}}"
+        f" \\approx {kv_gb_per_req_str} \\text{{ GB/request}} "
+    )
     max_batch_size_str = fmt_int(max_batch_size)
     remaining_mem_str = fmt_int(remaining_mem)
     total_hbm_str = fmt_int(total_hbm)
@@ -430,7 +434,7 @@ class AppdxKVCacheSizing:
 
 For the 175B GPT-3 model ($N_L=96$, $d=12288$, FP16 $s_{\text{elem}}=2$ bytes) at sequence length $S=2048$, each request requires:
 
-$$M_{\text{KV/req}} = 2 \times 96 \times 12288 \times 2048 \times 2 \text{ B} \approx \{python} AppdxKVCacheSizing.kv_gb_per_req_str\}\text{ GB/request}$$
+`{python} AppdxKVCacheSizing.kv_per_req_display_math`
 
 Across `{python} AppdxKVCacheSizing.num_gpus_str`$\times$ A100 80-GB GPUs (`{python} AppdxKVCacheSizing.total_hbm_str` GB total HBM), storing model weights in FP16 consumes `{python} AppdxKVCacheSizing.weights_mem_str` GB, leaving `{python} AppdxKVCacheSizing.remaining_mem_str` GB for activation and KV cache memory. Unmanaged contiguous allocation limits the maximum concurrent batch size to $B_{\text{max}} \le 290/9.66 \approx$ `{python} AppdxKVCacheSizing.max_batch_size_str` requests before running out of memory (OOM), demonstrating how KV cache capacity bounds serving throughput.
 
