@@ -55,7 +55,7 @@ IO OS RTOS VM JVM JIT AOT RPC REST RESTful HTTP HTTPS TCP UDP IP DNS CDN TLS SSL
 API APIs SDK CLI IDE GUI SLA SLAs SLI SLO SLOs RAID SSD HDD EEPROM SRE QA KPI
 US UK EU USA FAA FDA IRB NHTSA DARPA NSF NIH IEEE ACM OSDI NSDI NeurIPS ICML ICLR CVPR ECCV ICCV ACL EMNLP NAACL KDD SIGMOD SIGCOMM SOSP FAST ATC HotOS MICRO ISCA HPCA SC
 ImageNet BERT GPT PaLM T5 BART ViT CLIP ResNet AlexNet GoogLeNet MobileNet MobileNets EfficientNet VGG Inception YOLO DLRM BLOOM Gemini Claude Mistral Qwen Kaplan Chinchilla LLaMA Llama
-PyTorch TensorFlow JAX NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM MLflow OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang Michelangelo FBLearner Vertex Kubeflow Sagemaker
+PyTorch TensorFlow JAX Triton NumPy SciPy Pandas XGBoost ONNX TensorRT TVM MLIR LLVM MLflow OpenAI DeepMind Horovod DeepSpeed Megatron ZeRO FSDP DDP vLLM SGLang Michelangelo FBLearner Vertex Kubeflow Sagemaker
 AllReduce AllGather ReduceScatter AllToAll Broadcast Scatter Gather FlashAttention PagedAttention RoPE ALiBi MoE KV
 MLPerf MLCommons LAPACK LINPACK D·A·M DAM C³ C^3 CCC C3
 TinyML AutoML AutoAugment RandAugment NAS

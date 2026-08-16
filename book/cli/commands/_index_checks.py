@@ -122,8 +122,11 @@ def check_anti_patterns(root: Path) -> list[IndexIssue]:
     return issues
 
 
+FIRST_DEF_LC_RE = re.compile(r"\*\*([a-z][^*\n]+?)\*\*\s*\\index\{[^}]*!definition\}")
+
+
 def check_tag_placement(root: Path) -> list[IndexIssue]:
-    """\\index{} inside bold/code/headings."""
+    """\\index{} inside bold/code/headings and first-definition capitalization."""
     issues: list[IndexIssue] = []
     for f in _iter_qmd_files(root):
         rel = str(f.relative_to(root))
@@ -136,6 +139,8 @@ def check_tag_placement(root: Path) -> list[IndexIssue]:
                 continue
             if in_code_block or "\\index{" not in line:
                 continue
+            for m in FIRST_DEF_LC_RE.finditer(line):
+                issues.append(IndexIssue(rel, i, "V5_lowercase_first_def", f"First-definition bold term '**{m.group(1)}**' must be Title Cased"))
             if stripped.startswith("#") and not stripped.startswith("# │"):
                 issues.append(IndexIssue(rel, i, "V4_heading", "\\index{} on heading line"))
                 continue
