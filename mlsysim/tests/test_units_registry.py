@@ -15,6 +15,7 @@ from mlsysim.core.units import (
     Kparam,
     L,
     MB,
+    MiB,
     Mparam,
     MJ,
     MS,
@@ -221,7 +222,7 @@ def test_serving_profile_anchors():
 
     profile = ReferenceStats.ServingProfiles
 
-    assert profile.H100VendorMemoryBudget.to(GB).magnitude == pytest.approx(80.0)
+    assert profile.H100VendorMemoryBudget.to(GiB).magnitude == pytest.approx(80.0)
     assert float(profile.PrecisionDividendTensorParallelDegree) == pytest.approx(8.0)
     assert float(profile.PrecisionDividendContextLengthTokens) == pytest.approx(4096.0)
     assert not hasattr(profile, "PrecisionDividendGpuMemoryBudget")
@@ -263,7 +264,7 @@ def test_edge_device_spectrum_anchors():
     assert float(spectrum.MobileCpuThroughputMips) == pytest.approx(100_000.0)
     assert spectrum.SensorPowerLow.to(microwatt).magnitude == pytest.approx(10.0)
     assert spectrum.MicrocontrollerBoardCost.to(USD).magnitude == pytest.approx(10.0)
-    assert spectrum.LowEndEdgeRam.to(MB).magnitude == pytest.approx(512.0)
+    assert spectrum.LowEndEdgeRam.to(MiB).magnitude == pytest.approx(512.0)
     assert spectrum.LowEndEdgeCompute.to(GFLOPs / second).magnitude == pytest.approx(1.0)
     assert spectrum.FlagshipPhonePowerHigh.to(watt).magnitude == pytest.approx(5.0)
     assert spectrum.IotMicrocontrollerComputeLow.to(TOPS).magnitude == pytest.approx(0.03)
