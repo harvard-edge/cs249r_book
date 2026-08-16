@@ -166,3 +166,17 @@ Run before any push; each catches a class found here.
 
 Verified against the pre-fix revision: `check_lego_health` reports all 19
 original defects; `check_inline_ref_order` pinpoints the exact line.
+
+### Sign-off state
+
+Both volumes build clean (36 + 38 pages, exit 0). Gates 1 and 2 pass with zero
+findings. Gate 3 reports 34, all accounted for:
+
+| Class | Count | Status |
+|---|---|---|
+| `offset-directive` | 31 | layout-owned; markers left exactly as placed |
+| `doubled-unit` | 3 | false positives: math-stripped `6 x params x tokens`, and a step boundary |
+
+The doubled-unit check now requires a plural first unit, since only a
+self-labeling formatter emits one ("128 GPUs accelerators"). A singular first
+unit is ordinary English ("64 GPU workers") and no longer fires.

@@ -46,7 +46,11 @@ CHECKS: list[tuple[str, re.Pattern[str]]] = [
     ("traceback", re.compile(r"Traceback \(most recent call last\)")),
     ("offset-directive", re.compile(r"\[offset=[-0-9.]+mm\]")),
     ("latex-macro", re.compile(r"\\(?:mbox|hbox|vbox|phantom|hspace|vspace)\b")),
-    ("doubled-unit", re.compile(rf"\b\d[\d,\.]*\s+{UNITS}\s+{UNITS}\b", re.I)),
+    # Only a PLURAL first unit indicates a self-labeling formatter value
+    # ("128 GPUs accelerators"). A singular first unit is an ordinary compound
+    # noun where the unit modifies the noun ("64 GPU workers", "8 GPU nodes"),
+    # which is correct English and must not be flagged.
+    ("doubled-unit", re.compile(rf"\b\d[\d,\.]*\s+{UNITS}s\s+{UNITS}\b", re.I)),
 ]
 
 
