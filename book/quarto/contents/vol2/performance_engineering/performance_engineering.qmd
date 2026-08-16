@@ -269,7 +269,7 @@ The capacity-bandwidth tension shapes the optimization space. Operator fusion re
 
 ### The GPU memory hierarchy {#sec-performance-engineering-memory-hierarchy}
 
-To understand why the memory wall exists, consider the physical structure of a GPU memory system. @Tbl-performance-engineering-memory-hierarchy summarizes the four levels by scale, access cost, and the optimization constraint each one imposes.
+The physical structure of a GPU memory system dictates the limits of data movement. @Tbl-performance-engineering-memory-hierarchy summarizes the four levels by scale, access cost, and the optimization constraint each one imposes.
 
 | **Level**                            | **Scale on H100**                                                                                                                                                               | **Access cost**                                                                                                       | **Optimization constraint**                                                                                                                                        |
 |:-------------------------------------|:--------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|:----------------------------------------------------------------------------------------------------------------------|:-------------------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -785,7 +785,7 @@ class BatchMfuAnchors:
 
 At large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving `{python} BatchMfuAnchors.mfu_b1_pct_str` utilization at batch size 1 may achieve `{python} BatchMfuAnchors.mfu_batched_pct_str` utilization at large batch sizes. The economic implication is stark: the cost per token decreases by roughly `{python} BatchMfuAnchors.cost_mult_str` as batching carries the workload from the memory-bound to the compute-bound regime.
 
-The constraint is memory: each additional request in the batch requires its own KV cache (the per-request store of attention keys and values for every token generated so far), and the total KV cache across all requests must fit in GPU memory alongside the model weights. The 70B-model-on-8-H100 deployment introduced here is the chapter's recurring example, revisited with full quantitative detail in the precision dividend (@sec-performance-engineering-quant-strategies) and the case study (@sec-performance-engineering-case-study). A 70B model with 140 GB of weights in FP16 must be sharded across multiple GPUs; on an 8-GPU node that leaves about 62.5 GB per GPU for KV cache before overhead. The precision engineering techniques in this chapter address exactly this constraint: INT4 weight quantization reduces the per-GPU weight footprint to about 4.4 GB and frees roughly 13 GB per GPU for KV cache, enabling batch sizes that transform the economics of serving.
+The constraint is memory: each additional request in the batch requires its own KV cache (the per-request store of attention keys and values for every token generated so far), and the total KV cache across all requests must fit in GPU memory alongside the model weights. The 70B-model-on-8-H100 deployment is a recurring example, revisited with full quantitative detail in the precision dividend (@sec-performance-engineering-quant-strategies) and the case study (@sec-performance-engineering-case-study). A 70B model with 140 GB of weights in FP16 must be sharded across multiple GPUs; on an 8-GPU node that leaves about 62.5 GB per GPU for KV cache before overhead. Precision engineering techniques address exactly this constraint: INT4 weight quantization reduces the per-GPU weight footprint to about 4.4 GB and frees roughly 13 GB per GPU for KV cache, enabling batch sizes that transform the economics of serving.
 
 A serving scheduler can keep the effective batch full by adding new requests as older requests finish, but that policy only works when memory is available for the active requests. Performance engineering's role is to make that scheduler's job feasible by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization. Inference serving (@sec-inference-scale) develops the full scheduler; the local point here is that memory optimization expands the batch sizes the scheduler can safely admit.
 
@@ -1285,7 +1285,7 @@ FlashAttention reduces the memory wall within a single GPU by tiling across the 
 
 ## Precision Engineering {#sec-performance-engineering-precision}
 
-Fusion reduces the number of trips through HBM; precision engineering reduces the payload of each trip. Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. The engineering decision is where numerical noise can be tolerated to reduce bandwidth pressure and where quality demands higher precision. While @sec-distributed-training-fp8 examines 8-bit floating point (FP8) as a training-time primitive, this section focuses on the quantization techniques that enable efficient inference at scale.
+Fusion reduces the number of trips through HBM; precision engineering reduces the payload of each trip. Moving FP16 weights through HBM consumes twice as many bytes as FP8. For bandwidth-bound kernels, shrinking weights from 2 bytes to 1 byte can roughly halve weight-read traffic and increase effective memory bandwidth. The engineering decision is where numerical noise can be tolerated to reduce bandwidth pressure and where quality demands higher precision. While @sec-distributed-training-fp8 treats 8-bit floating point (FP8) as a training-time primitive, the quantization techniques below enable efficient inference at scale.
 
 ### Block-wise quantization {#sec-performance-engineering-block-quant}
 
@@ -1571,7 +1571,7 @@ Dynamic shapes present a fundamental tension between compilation and flexibility
 
 Despite these limitations, graph compilation remains one of the most accessible optimization techniques: it requires no model modifications, no custom kernels, and minimal code changes. For many stable-shape PyTorch workloads with launch overhead or fusible element-wise regions, a single `torch.compile` call can provide 10--40 percent speedup, making it a natural early optimization to test before considering more specialized techniques.
 
-Graph compilation has reshaped the performance engineering workflow. For workloads that match the compiler's assumptions, a single line of code can capture a significant fraction of the improvement that once required manual kernel optimization, freeing the engineer to focus on algorithmic and architectural optimizations such as speculative decoding, MoE, and precision engineering that compilers cannot automate. The compiler handles routine graph transformations; the engineer handles the workload-specific design choices. As compiler coverage improves, this division of labor makes the higher-level system design skills in this chapter more valuable relative to routine low-level kernel tuning.
+Graph compilation has reshaped the performance engineering workflow. For workloads that match the compiler's assumptions, a single line of code can capture a significant fraction of the improvement that once required manual kernel optimization, freeing the engineer to focus on algorithmic and architectural optimizations such as speculative decoding, MoE, and precision engineering that compilers cannot automate. The compiler handles routine graph transformations; the engineer handles the workload-specific design choices. As compiler coverage improves, this division of labor makes higher-level system design skills more valuable relative to routine low-level kernel tuning.
 
 ### Compilation modes and backends {#sec-performance-engineering-compilation-modes}
 
@@ -1622,7 +1622,7 @@ The programmer thinks in terms of tiles (`BLOCK_SIZE` elements), not individual 
 
 The real power of Triton emerges when fusing multiple operations. A Triton kernel that implements `y = LayerNorm(GELU(x))` loads `x` once from HBM, computes both GELU and LayerNorm in registers/shared memory, and writes `y` once to HBM. Without fusion, this sequence requires three HBM round-trips: read `x`, write `GELU(x)`, read `GELU(x)`, write `norm_input`, read `norm_input`, write `y`. The fused kernel reduces HBM traffic by 3$\times$, and for memory-bound operations, this translates directly to a 3$\times$ speedup.
 
-The performance-engineering consequence is that Triton turns many custom fusion opportunities into compiler output. When `torch.compile` identifies a fusion opportunity that requires a custom kernel, TorchInductor automatically generates Triton code for the fused operation. Many of the fusion benefits described in this section therefore come through a single `torch.compile` call, without hand-written Triton code. For advanced cases where the compiler's heuristics miss the bottleneck, hand-written Triton kernels provide a middle ground between the accessibility of PyTorch and the performance of hand-tuned CUDA.
+The performance-engineering consequence is that Triton turns many custom fusion opportunities into compiler output. When `torch.compile` identifies a fusion opportunity that requires a custom kernel, TorchInductor automatically generates Triton code for the fused operation. Many fusion benefits therefore come through a single `torch.compile` call, without hand-written Triton code. For advanced cases where the compiler's heuristics miss the bottleneck, hand-written Triton kernels provide a middle ground between the accessibility of PyTorch and the performance of hand-tuned CUDA.
 
 ```{python}
 #| echo: false
@@ -1715,7 +1715,7 @@ New time per token: `{python} CompilationDividend.new_time_eq_math`, yielding ap
 
 :::
 
-Graph compilation automates what manual kernel engineering achieves for individual operations, applying it systematically across the entire model graph. It also exposes a boundary: compilers can reorganize known operations, but they cannot invent a different computation. The next section turns to optimizations that cross that boundary.
+Graph compilation automates what manual kernel engineering achieves for individual operations, applying it systematically across the entire model graph. It also exposes a boundary: compilers can reorganize known operations, but they cannot invent a different computation. Algorithmic transformations cross that boundary.
 
 ::: {.content-visible when-format="pdf"}
 {{< pagebreak >}}
@@ -1723,7 +1723,7 @@ Graph compilation automates what manual kernel engineering achieves for individu
 
 ## Algorithmic Performance Transformations {#sec-performance-engineering-algorithmic-transformations}
 
-The preceding sections optimized the same dense computation by moving fewer bytes, using narrower formats, or letting compilers reorganize kernels. Algorithmic transformations change the work itself. Speculative decoding attacks the memory-bound decode loop by trying to accept multiple tokens per target-model pass, while MoE attacks dense-model cost by activating only the experts a token needs. Both techniques can improve the iron-law budget, but both can also create new bottlenecks if their extra control logic, communication, or imbalance exceeds the work they remove.
+Fusion, precision engineering, and graph compilation optimize the same dense computation by moving fewer bytes, using narrower formats, or letting compilers reorganize kernels. Algorithmic transformations change the work itself. Speculative decoding attacks the memory-bound decode loop by trying to accept multiple tokens per target-model pass, while MoE attacks dense-model cost by activating only the experts a token needs. Both techniques can improve the iron-law budget, but both can also create new bottlenecks if their extra control logic, communication, or imbalance exceeds the work they remove.
 
 ### Speculative decoding {#sec-performance-engineering-speculative}
 
@@ -1836,7 +1836,7 @@ A standard MoE transformer layer replaces the feed-forward network (FFN) with mu
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
-After changing the local work through fusion, precision, compilation, speculation, or sparse expert routing, the next exposed iron-law term is often communication. @Sec-communication-overlap established overlap as the technique that removes communication from the critical path when enough useful compute remains to hide it; this section supplies the single-node mechanics those chapters assumed, namely the CUDA streams, SM partitioning, and bucket hooks that actually run computation and communication concurrently on one accelerator.
+After changing the local work through fusion, precision, compilation, speculation, or sparse expert routing, the next exposed iron-law term is often communication. @Sec-communication-overlap established overlap as the technique that removes communication from the critical path when enough useful compute remains to hide it; the single-node mechanics those chapters assumed—namely the CUDA streams, SM partitioning, and bucket hooks—run computation and communication concurrently on one accelerator.
 
 ```{python}
 #| echo: false
@@ -2411,7 +2411,7 @@ Another approach is **Statistical Profiling**\index{Statistical Profiling}, wher
 
 The most challenging profiling scenario is intermittent stragglers: GPUs that are occasionally slow due to thermal throttling, memory errors, or network congestion, but fast most of the time. These stragglers may not appear in a short profiling window but can reduce training throughput by 10--20 percent over hours. Detecting them requires continuous per-GPU step-time monitoring with statistical anomaly detection, a form of profiling infrastructure that operates at the monitoring layer rather than the kernel layer.
 
-The profiling tools and techniques described in this section provide the measurement foundation for all optimization work. Without measurement, performance engineering degenerates into guesswork. With measurement, it becomes a systematic discipline guided by quantitative evidence.
+Profiling tools provide the measurement foundation for all optimization work. Without measurement, performance engineering degenerates into guesswork. With measurement, it becomes a systematic discipline guided by quantitative evidence.
 
 ## Measurement at Scale {#sec-performance-engineering-measurement-scale}
 
@@ -2573,7 +2573,7 @@ The speedups from these techniques are not additive; they interact in ways that 
 
 The interaction between optimizations creates a dependency graph that the performance engineer must navigate. Some combinations are synergistic: FlashAttention removes attention intermediates, and INT8 KV cache compression reduces KV cache memory, together freeing enough memory for larger batch sizes that transform the economics of serving. Other combinations are redundant: applying both CUDA Graphs and the `reduce-overhead` mode of `torch.compile` achieves the same result, since `reduce-overhead` internally uses CUDA Graphs. Still other combinations conflict: speculative decoding benefits most at small batch sizes (where decode is memory-bound), while many throughput optimizations work by increasing batch size. At large batch sizes, speculation adds overhead without proportional benefit.
 
-A practical heuristic for sequencing optimizations is to apply the cheapest bottleneck-moving intervention before adding new algorithmic machinery. The first step depends on the measured bottleneck. Compiler-first is a common starting point for stable-shape workloads when memory is not obviously the binding constraint. For batch-1 70B decode, precision comes first because weight bandwidth and KV capacity dominate before graph overhead does.
+A practical heuristic for sequencing optimizations is to apply the cheapest bottleneck-moving intervention before adding new algorithmic machinery. The first step depends on the measured bottleneck. Compiler-first is a common starting point for stable-shape workloads when memory is not the explicit binding constraint. For batch-1 70B decode, precision comes first because weight bandwidth and KV capacity dominate before graph overhead does.
 
 1. Primary bottleneck fix: apply `torch.compile` when the trace shows launch overhead and stable shapes, or apply weight/KV precision first when the profile is memory-capacity or bandwidth bound.
 2. FlashAttention-family kernels (library swap): Apply when attention materialization or attention HBM traffic remains visible in the profile.
@@ -2699,7 +2699,7 @@ ML system performance is nonstationary. GPU thermal throttling reduces clock spe
 
 **Pitfall**: *Optimizing for average case while ignoring tail latency.*
 
-A serving system may achieve excellent average inter-token latency (30 ms) while exhibiting P99 latency of 500 ms due to garbage collection pauses in the Python runtime, CUDA memory allocation stalls, or occasional AllReduce delays from network congestion. For interactive applications, the user experience is dominated by the worst case, not the average. Performance engineering for production systems must profile and optimize tail latency specifically, often through techniques orthogonal to the throughput optimizations in this chapter: preallocated memory pools, CUDA graph replay (which eliminates allocation variance), and priority scheduling for latency-sensitive requests.
+A serving system may achieve excellent average inter-token latency (30 ms) while exhibiting P99 latency of 500 ms due to garbage collection pauses in the Python runtime, CUDA memory allocation stalls, or occasional AllReduce delays from network congestion. For interactive applications, the user experience is dominated by the worst case, not the average. Performance engineering for production systems must profile and optimize tail latency specifically, often through techniques orthogonal to baseline throughput optimization: preallocated memory pools, CUDA graph replay (which eliminates allocation variance), and priority scheduling for latency-sensitive requests.
 
 ## Summary {#sec-performance-engineering-summary}
 
@@ -2754,7 +2754,7 @@ Hardware is sold by its theoretical peak ($R_{\text{peak}}$) but paid for by the
 
 ::: {.callout-chapter-connection title="From single-node optimization to fleet-scale serving"}
 
-Having established hardware compute and memory hierarchy fundamentals in @sec-hardware-acceleration, this chapter focused on local execution mechanics---using operator fusion, precision reduction, graph compilation, speculative decoding, and MoE to conquer the memory wall. In production, however, models do not run in isolation; they serve continuous streams of concurrent requests under tight SLA latency budgets. @Sec-inference-scale moves from local execution mechanics to fleet-scale serving architecture, showing how the per-request memory savings and arithmetic intensity gains developed here enable dynamic batching, continuous scheduling, and tail-latency protection at scale.
+With hardware compute and memory hierarchy fundamentals established in @sec-hardware-acceleration, this chapter focused on local execution mechanics---using operator fusion, precision reduction, graph compilation, speculative decoding, and MoE to conquer the memory wall. In production, however, models do not run in isolation; they serve continuous streams of concurrent requests under tight SLA latency budgets. @Sec-inference-scale moves from local execution mechanics to fleet-scale serving architecture, showing how the per-request memory savings and arithmetic intensity gains developed here enable dynamic batching, continuous scheduling, and tail-latency protection at scale.
 
 :::
 
