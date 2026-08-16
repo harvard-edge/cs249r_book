@@ -4,35 +4,35 @@ engine: jupyter
 
 # Fleet Foundations {#sec-appdx-fleet-foundations}
 
-Designing a system for a single machine requires knowledge of memory hierarchy latencies, roofline ridge points, and precision trade-offs. The moment a training job spans two machines, however, a new set of numbers takes over. Network latency replaces cache latency as the dominant concern. Component failure rates compound from negligible to inevitable. Communication overhead erodes the scaling efficiency that justifies buying more accelerators in the first place. This appendix collects the reference numbers and compact models for fleet-scale reasoning: the three system paradigms that underpin this book, the numbers every fleet engineer should know across Compute, Communication, and Coordination, and the scaling physics and thermal constraints that govern cluster design. In C³ terms, these numbers define the physical scale on which compute capacity, communication bandwidth, and coordination overhead become measurable.
+Designing a system for a single machine requires knowledge of memory hierarchy latencies, roofline ridge points, and precision trade-offs. The moment a training job spans two machines, however, a new set of numbers takes over. Network latency replaces cache latency as the dominant concern. Component failure rates compound from negligible to inevitable. Communication overhead erodes the scaling efficiency that justifies buying more accelerators in the first place. This appendix collects the reference numbers and compact models for fleet-scale reasoning: the three system paradigms that underpin this book, the numbers every fleet engineer should know across compute, communication, and coordination, and the scaling physics and thermal constraints that govern cluster design. In C³ terms, these numbers define the physical scale on which compute capacity, communication bandwidth, and coordination overhead become measurable.
 
 ## How to Use This Appendix {.unnumbered}
 
-This appendix is designed as a reference. When a fleet-scale design question arises, use it to turn a vague symptom into a specific constraint and then choose the lever that can actually move.
+This appendix is designed as a reference when translating fleet-scale design questions into specific physical constraints and identifying available optimization levers.
 
-- **"How fast can I communicate between nodes?"**: Start with the Communication Numbers in @sec-appdx-fleet-foundations-numbers-to-know for the bandwidth and latency hierarchy.
-- **"How many GPUs do I actually need?"**: Use the Scaling Physics in @sec-appdx-fleet-foundations-scaling-physics to understand why doubling GPUs does not halve training time.
-- **"How often will my cluster fail?"**: Check the Coordination Numbers in @sec-appdx-fleet-foundations-numbers-to-know for MTBF tables and failure probability calculations.
-- **"Is my cluster power-limited or compute-limited?"**: See Thermal and Power Physics in @sec-appdx-fleet-foundations-thermal-power for power density and cooling constraints.
-- **"What does a typical overhead budget look like?"**: The Coordination Numbers include the four overhead categories that erode goodput.
+- **When evaluating inter-node communication**: Consult @sec-appdx-fleet-foundations-numbers-to-know for the bandwidth and latency hierarchy.
+- **When sizing GPU allocations**: Consult @sec-appdx-fleet-foundations-scaling-physics to analyze why doubling accelerator counts does not halve training time.
+- **When calculating cluster reliability**: Check @sec-appdx-fleet-foundations-numbers-to-know for MTBF tables and failure probability models.
+- **When evaluating power and cooling limits**: Consult @sec-appdx-fleet-foundations-thermal-power for power density ceilings and cooling constraints.
+- **When budgeting runtime overhead**: Use @sec-appdx-fleet-foundations-numbers-to-know for the four overhead categories that erode goodput.
 
 ## The Three System Paradigms {#sec-appdx-fleet-foundations-system-paradigms}
 
-Machine learning infrastructure at scale inherits design DNA from two distinct computing lineages---and then breaks the assumptions of both. Understanding where ML systems borrow from High-Performance Computing (HPC) and where they borrow from Warehouse-Scale Computing (WSC) is essential for choosing the right design trade-offs. A system architect who treats ML training as "just HPC" will build infrastructure that cannot tolerate failures. One who treats it as "just web services" will build infrastructure that cannot sustain the tight coupling that synchronous training demands.
+Machine learning infrastructure at scale inherits design DNA from two distinct computing lineages---and then breaks the assumptions of both. Understanding where ML systems borrow from high-performance computing (HPC) and where they borrow from warehouse-scale computing (WSC) is essential for choosing the right design trade-offs. A system architect who treats ML training as "just HPC" will build infrastructure that cannot tolerate failures. One who treats it as "just web services" will build infrastructure that cannot sustain the tight coupling that synchronous training demands.
 
 ### High-performance computing {.unnumbered}
 
-HPC systems descend from the supercomputer tradition. Their design philosophy is to maximize FLOP/s on tightly coupled simulations---weather modeling, molecular dynamics, nuclear physics. Every node matters: they use specialized interconnects (InfiniBand), low-latency fabrics, and homogeneous hardware. Fault tolerance follows the **checkpoint/restart**\index{Checkpoint/restart} model: if one node fails, the entire job stops, rolls back to the last checkpoint, and restarts from scratch. Scheduling is batch-oriented (Slurm), with jobs requesting rigid resource shapes ("512 nodes for 24 hours"). Nodes are *pets*---individually important, individually tracked.
+HPC systems descend from the supercomputer tradition. Their design philosophy is to maximize FLOP/s on tightly coupled simulations---weather modeling, molecular dynamics, nuclear physics. Every node matters: they use specialized interconnects (InfiniBand), low-latency fabrics, and homogeneous hardware. Fault tolerance follows the **Checkpoint/Restart**\index{Checkpoint/Restart} model: if one node fails, the entire job stops, rolls back to the last checkpoint, and restarts from scratch. Scheduling is batch-oriented (Slurm), with jobs requesting rigid resource shapes ("512 nodes for 24 hours"). Nodes are pets---individually important, individually tracked.
 
 ### Warehouse-scale computing {.unnumbered}
 
-WSC systems descend from the web services tradition. Their design philosophy is to maximize queries per second across loosely coupled services---search, email, social media. Hardware is commodity Ethernet, varying generations coexist, and nodes are heterogeneous. Fault tolerance follows the **redundancy**\index{Redundancy!fault tolerance model} model: if one node fails, the load balancer reroutes traffic to another replica. The user never notices. Scheduling is dynamic (Kubernetes, Borg), with elastic bin-packing. Nodes are *cattle*---interchangeable and expendable.
+WSC systems descend from the web services tradition. Their design philosophy is to maximize queries per second across loosely coupled services---search, email, social media. Hardware is commodity Ethernet, varying generations coexist, and nodes are heterogeneous. Fault tolerance follows the **Redundancy**\index{Redundancy!fault tolerance model} model: if one node fails, the load balancer reroutes traffic to another replica. The user never notices. Scheduling is dynamic (Kubernetes, Borg), with elastic bin-packing. Nodes are cattle---interchangeable and expendable.
 
 ### The ML fleet: A hybrid architecture {.unnumbered}
 
 ML systems require the computational throughput of HPC (to train massive models with synchronous gradient updates) but must operate at the scale and unreliability of WSC (thousands of accelerators running for weeks). This creates a hybrid that borrows selectively from both traditions.
 
-Training workloads are synchronous and bandwidth-hungry like HPC, but long-running and failure-tolerant like WSC. Inference workloads are latency-sensitive like WSC, but computationally heavy like HPC. The network is a fusion: TCP/IP for control planes, InfiniBand or NVLink for data planes. Fault tolerance uses **elastic training**\index{Elastic Training!fleet fault tolerance} strategies: training jobs can shrink, expand, pause, or resume without full restarts. Scheduling combines gang allocation (all-or-nothing for training) with dynamic preemption and replacement.
+Training workloads are synchronous and bandwidth-hungry like HPC, but long-running and failure-tolerant like WSC. Inference workloads are latency-sensitive like WSC, but computationally heavy like HPC. The network is a fusion: TCP/IP for control planes, InfiniBand or NVLink for data planes. Fault tolerance uses **Elastic Training**\index{Elastic Training!fleet fault tolerance} strategies: training jobs can shrink, expand, pause, or resume without full restarts. Scheduling combines gang allocation (all-or-nothing for training) with dynamic preemption and replacement.
 
 @Tbl-fleet-paradigm-comparison summarizes the design trade-offs across the three paradigms. The key insight is that ML fleets cannot simply adopt either HPC or WSC patterns wholesale; they must selectively combine elements from each based on the workload phase.
 
@@ -53,8 +53,8 @@ Training workloads are synchronous and bandwidth-hungry like HPC, but long-runni
 
 The following provides a compact reference for the key foundational ideas that reappear throughout the distributed systems chapters.
 
-- **The iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
-- **Roofline Model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **network-bound**\index{Network-bound workload} workloads whose performance is limited by inter-node bandwidth.
+- **Iron law** ($T \approx D_{\text{vol}}/\text{BW} + O/(R_{\text{peak}} \cdot \eta_{\text{hw}}) + L_{\text{lat}}$): Performance is bounded by data movement or compute. At fleet scale, the data movement term expands to include inter-node communication, not just memory bandwidth.
+- **Roofline model**: Distinguishes compute-bound from memory-bound workloads using arithmetic intensity. At fleet scale, a third ceiling appears: **Network-Bound**\index{Network-bound workload} workloads whose performance is limited by inter-node bandwidth.
 - **Amdahl's Law**: Caps strong-scaling speedup at $1/s$ [@amdahl1967]. At fleet scale, the "serial fraction" includes not just sequential code but also synchronization barriers, collective communication, and pipeline bubbles.
 - **Training state rule**: about 14 bytes per parameter for common mixed-precision Adam checkpoint state (BF16 weights, FP32 master weights, and Adam moments), before framework metadata and implementation-specific extras. At fleet scale, this determines how model state is partitioned across nodes (ZeRO, tensor parallelism, pipeline parallelism).
 - **Little's Law** ($Q_{\text{req}} = \lambda_{\text{arr}} T_{\text{lat}}$): Sizes inference infrastructure, where $\lambda_{\text{arr}}$ is the request arrival rate and $Q_{\text{req}}$ is the expected concurrent request count [@little1961]. At fleet scale, it determines how many serving replicas are needed behind a load balancer.
@@ -65,7 +65,7 @@ The transition from single-machine to fleet-scale reasoning requires extending t
 
 ## Numbers Every Fleet Engineer Should Know {#sec-appdx-fleet-foundations-numbers-to-know}
 
-Just as single-machine analysis depends on a set of core numbers, fleet-scale engineering is governed by a set of predictable ratios and scaling behaviors. The single-machine numbers still apply within each node, but a new set of numbers governs the spaces *between* nodes. While absolute values evolve with hardware generations, the *ratios* between communication tiers and the *scaling behavior* of failure rates remain remarkably stable. Memorize the ratios and scaling trends; use the specific numbers as sanity checks.
+Just as single-machine analysis depends on a set of core numbers, fleet-scale engineering is governed by a set of predictable ratios and scaling behaviors. The single-machine numbers still apply within each node, but a new set of numbers governs the spaces between nodes. While absolute values evolve with hardware generations, the ratios between communication tiers and the scaling behavior of failure rates remain remarkably stable. The ratios and scaling trends serve as structural invariants, while specific values provide numerical sanity checks.
 
 ::: {#psp-appendix-fleet-node-level-numbers .callout-perspective title="Node-level numbers for fleet reasoning"}
 
@@ -116,7 +116,7 @@ class FleetNumbersHighlights:
 
 :::
 
-Quick reference, @tbl-fleet-numbers-quick-ref condenses the fleet-scale numbers into one place. Use it for back-of-envelope checks; use the detailed tables in each subsection when designing or debugging.
+@Tbl-fleet-numbers-quick-ref condenses the fleet-scale numbers into one place. Use it for back-of-envelope checks; use the detailed tables in each subsection when designing or debugging.
 
 ```{python}
 #| echo: false
@@ -177,7 +177,7 @@ class FleetQuickRef:
 | **Power & sustainability** | AI rack ~`{python} FleetQuickRef.rack_ai_kw_str`; air limit ~`{python} FleetQuickRef.air_limit_kw_str`                                                                                                                                            | Cooling feasibility (liquid required above air limit)                     |
 | **Power & sustainability** | PUE liquid ~`{python} FleetQuickRef.pue_liq_str`, typical ~`{python} FleetQuickRef.pue_typ_str`; H100 `{python} FleetQuickRef.h100_tdp_w_str` -> `{python} FleetQuickRef.tenk_gpus_str` ≈ `{python} FleetQuickRef.tenk_it_mw_str` IT $\times$ PUE | Facility load and carbon (see @sec-appdx-fleet-foundations-thermal-power) |
 
-: **Numbers Every Fleet Engineer Should Know (Quick Reference)**: One-page summary of the fleet-scale reference numbers in this section. See @tbl-fleet-bandwidth-hierarchy and @tbl-fleet-latency-hierarchy for Communication, @tbl-fleet-scaling-efficiency for Compute, and @tbl-fleet-mtbf for Coordination. {#tbl-fleet-numbers-quick-ref}
+: **Numbers Every Fleet Engineer Should Know (Quick Reference)**: One-page summary of the fleet-scale reference numbers in this section. See @tbl-fleet-bandwidth-hierarchy and @tbl-fleet-latency-hierarchy for communication, @tbl-fleet-scaling-efficiency for compute, and @tbl-fleet-mtbf for coordination. {#tbl-fleet-numbers-quick-ref}
 
 ```{python}
 #| echo: false
@@ -510,7 +510,7 @@ class FleetPowerNumbers:
 
 #### Power and sustainability numbers {.unnumbered}
 
-Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **rack power density**\index{Power Density!rack}, **PUE**\index{PUE}, and the **air-cooling limit**\index{Air-cooling limit}---they determine where construction is feasible and what the facility load will be. @Tbl-appendix-fleet-power-cooling-reference collects these reference values:
+Fleet-scale capacity planning and sustainability reporting require a few power numbers that every fleet engineer should know. At fleet scale, the critical numbers are **Rack Power Density**\index{Power Density!rack}, **PUE**\index{PUE}, and the **Air-Cooling Limit**\index{Air-cooling limit}---they determine where construction is feasible and what the facility load will be. @Tbl-appendix-fleet-power-cooling-reference collects these reference values:
 
 | **Quantity**               |                    **Typical value**                    | **Use**                                                                                                                                                |
 |:---------------------------|:-------------------------------------------------------:|:-------------------------------------------------------------------------------------------------------------------------------------------------------|
@@ -573,21 +573,21 @@ For scale context, a DGX H100 SuperPOD contains 32 DGX H100 nodes (256 H100 GPUs
 
 ## Scaling Physics {#sec-appdx-fleet-foundations-scaling-physics}
 
-The numbers in the previous section describe *what* the hardware can do. Scaling physics describes *what happens* when more of it is brought to bear. Reasoning starts from the ceiling on a single accelerator---the roofline---and then asks what survives as devices are added, governed by three models: Amdahl's Law extended to fleet overhead, the communication-computation ratio, and weak scaling behavior.
+The numbers in the previous section describe what the hardware can do. Scaling physics describes what happens when more of it is brought to bear. Reasoning starts from the ceiling on a single accelerator---the roofline---and then asks what survives as devices are added, governed by three models: Amdahl's Law extended to fleet overhead, the communication-computation ratio, and weak scaling behavior.
 
 ### The single-accelerator roofline {#sec-appdx-fleet-foundations-roofline}
 
-Fleet performance rests on per-accelerator performance, and a single accelerator is bounded by one of two resources: the rate its arithmetic units sustain (peak FLOP/s) or the rate its memory delivers operands (HBM bandwidth). Which one binds a given kernel depends on its **arithmetic intensity**\index{Arithmetic Intensity} $I$, the number of useful operations performed per byte moved from memory, as @eq-fleet-arithmetic-intensity defines:
+Fleet performance rests on per-accelerator performance, and a single accelerator is bounded by one of two resources: the rate its arithmetic units sustain (peak FLOP/s) or the rate its memory delivers operands (HBM bandwidth). Which one binds a given kernel depends on its **Arithmetic Intensity**\index{Arithmetic Intensity} $I$, the number of useful operations performed per byte moved from memory, as @eq-fleet-arithmetic-intensity defines:
 
 $$ I = \frac{\text{FLOPs}}{\text{bytes moved}} $$ {#eq-fleet-arithmetic-intensity}
 
-Intensity is a property of the *workload*, not the hardware. A large matrix multiply has high intensity because each weight loaded from memory is reused across many multiply-accumulates; an element-wise operation, or the generation of a single token, has low intensity because each loaded value feeds only one or two operations before the next must be fetched.
+Intensity is a property of the workload, not the hardware. A large matrix multiply has high intensity because each weight loaded from memory is reused across many multiply-accumulates; an element-wise operation, or the generation of a single token, has low intensity because each loaded value feeds only one or two operations before the next must be fetched.
 
-The **roofline model**\index{Roofline Model} [@williams2009] turns intensity into a performance ceiling. @Eq-fleet-roofline states that attainable throughput is the lesser of the compute ceiling and the bandwidth-limited slope:
+The **Roofline Model**\index{Roofline Model} [@williams2009] turns intensity into a performance ceiling. @Eq-fleet-roofline states that attainable throughput is the lesser of the compute ceiling and the bandwidth-limited slope:
 
 $$ R_{\text{attain}} = \min\!\left(R_{\text{peak}},\; I \times \text{BW}\right) $$ {#eq-fleet-roofline}
 
-Plotted against intensity, @eq-fleet-roofline traces a roof: a rising bandwidth-limited line on the left and a flat compute ceiling on the right. The two meet at the **ridge point**\index{Roofline Model!ridge point}, the intensity at which a workload first saturates the arithmetic units, defined by @eq-fleet-ridge-point:
+Plotted against intensity, @eq-fleet-roofline traces a roof: a rising bandwidth-limited line on the left and a flat compute ceiling on the right. The two meet at the **Ridge Point**\index{Roofline Model!ridge point}, the intensity at which a workload first saturates the arithmetic units, defined by @eq-fleet-ridge-point:
 
 $$ I_{\text{ridge}} = \frac{R_{\text{peak}}}{\text{BW}} $$ {#eq-fleet-ridge-point}
 
@@ -755,7 +755,7 @@ Any distributed training strategy must determine whether computation between syn
 
 $$ \rho = \frac{T_{\text{comm}}(N)}{T_{\text{compute}}/N} $$ {#eq-comm-compute-ratio}
 
-When $\rho < 1$, computation dominates and communication can be overlapped. When $\rho > 1$, the system is **communication-bound**\index{Communication-bound workload}---GPUs spend more time waiting for data than computing on it.
+When $\rho < 1$, computation dominates and communication can be overlapped. When $\rho > 1$, the system is **Communication-Bound**\index{Communication-bound workload}---GPUs spend more time waiting for data than computing on it.
 
 ```{python}
 #| echo: false
@@ -847,7 +847,7 @@ For the single `{python} FleetCommCompRatio.act_payload_mb_str` point-to-point p
 
 ### Weak scaling at fleet scale {#sec-appdx-fleet-foundations-weak-scaling-fleet}
 
-Amdahl's Law paints a pessimistic picture because it assumes a fixed problem size. In practice, fleet-scale training often follows **weak scaling**\index{Weak scaling!fleet scale}: the problem size (tokens, data, model parameters) grows proportionally with the number of GPUs. Gustafson's Law captures this more optimistic view [@gustafson1988].
+Amdahl's Law paints a pessimistic picture because it assumes a fixed problem size. In practice, fleet-scale training often follows **Weak Scaling**\index{Weak scaling!fleet scale}: the problem size (tokens, data, model parameters) grows proportionally with the number of GPUs. Gustafson's Law captures this more optimistic view [@gustafson1988].
 
 The key insight for fleet-scale ML is that weak scaling is not just a mathematical convenience---it reflects reality. Engineers do not use 8,192 GPUs to train a 7B model faster; they use them to train a 70B or 700B model in reasonable time. As models and training batches grow, engineers often increase the compute performed between synchronization points. For dense Transformers, compute is commonly estimated as about 6$\times$ parameters $\times$ tokens, while gradient communication scales with parameter bytes, so the communication-computation ratio $\rho$ depends on batch size, sequence length, accumulation, and parallelism layout rather than on parameter count alone.
 
@@ -971,7 +971,7 @@ A cluster design calling for `{python} FleetThermalRecap.tenk_gpus_str` H100 GPU
 
 ### Power density wall {#sec-appdx-fleet-foundations-power-density}
 
-The shift from traditional data center workloads to AI training has created a **power density crisis**\index{Power Density!crisis}. @Tbl-fleet-power-density-fleet quantifies the gap.
+The shift from traditional data center workloads to AI training has created a **Power Density Crisis**\index{Power Density!crisis}. @Tbl-fleet-power-density-fleet quantifies the gap.
 
 | **Configuration**             |                **Power per Rack**                | **Cooling Implication**                   |
 |:------------------------------|:------------------------------------------------:|:------------------------------------------|
