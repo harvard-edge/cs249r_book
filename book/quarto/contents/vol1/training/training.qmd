@@ -917,7 +917,7 @@ The choice of optimization algorithm creates specific patterns of computation an
 | **Hardware Efficiency**         |          Varies          |        Varies        |            Varies           |                  Varies                 |
 | **Convergence Behavior**        |          Varies          |        Varies        |            Varies           |                  Varies                 |
 
-: **Optimizer Memory Footprint**: Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. Understanding these trade-offs is important for resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[26,10,13,17,34]"}
+: **Optimizer Memory Footprint**: Different optimization algorithms impose varying auxiliary-state costs due to the storage of intermediate values like velocities and squared gradients. The multiplier row counts parameters plus optimizer auxiliary state and excludes gradients and activations; full training memory must add those terms explicitly. These trade-offs govern resource-constrained deployments and large-scale model training. {#tbl-optimizer-properties tbl-colwidths="[26,10,13,17,34]"}
 
 ```{=latex}
 \endgroup
@@ -1856,7 +1856,7 @@ The architectural overview identified the data pipeline as the first component i
 
 The data pipeline running on the CPU bridges raw data storage and accelerator computation. @Fig-data-pipeline breaks down this architecture into three distinct zones.
 
-::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Training data transitions through storage, CPU preprocessing, and GPU execution zones. Each stage represents a potential throughput gate; disk read bandwidth, transformation latency, and PCIe host-to-device transfers must collectively sustain the GPU consumption rate to keep accelerators fully utilized." fig-alt="Block diagram showing data flow through three zones: Storage zone with raw data, CPU preprocessing zone with format, process, and batch stages, and GPU training zone with three GPU workers."}
+::: {#fig-data-pipeline fig-env="figure" fig-pos="htb" fig-cap="**CPU-to-GPU Data Flow**: Training data transitions through storage, CPU preprocessing, and GPU execution zones. Each stage represents a potential throughput gate; disk read bandwidth, transformation latency, and PCIe host-to-device transfers must collectively sustain the GPU consumption rate to keep accelerators at peak utilization." fig-alt="Block diagram showing data flow through three zones: Storage zone with raw data, CPU preprocessing zone with format, process, and batch stages, and GPU training zone with three GPU workers."}
 
 ```{.tikz}
 \begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, >=stealth]
@@ -2503,7 +2503,7 @@ Modern neural architectures extend beyond these basic matrix operations to inclu
 
 Transformer architectures introduce attention mechanisms\index{Attention Mechanism!similarity computation} (see @sec-network-architectures), which compute similarity scores between sequences. These operations combine matrix multiplications with softmax normalization, requiring efficient broadcasting and reduction operations across varying sequence lengths. The computational pattern here differs significantly from convolutions, demanding flexible execution strategies from hardware accelerators.
 
-Throughout these networks, element-wise operations play a supporting role. Activation functions like ReLU and sigmoid transform values independently and, as established in @sec-model-training-arithmetic-intensity-training-bottlenecks-4446, are memory-bandwidth-bound rather than compute bound. Batch normalization presents similar challenges, computing statistics and normalizing values across batch dimensions while creating synchronization points in the computation pipeline.
+Throughout these networks, element-wise operations play a supporting role. Activation functions like ReLU and sigmoid transform values independently and (see @sec-model-training-arithmetic-intensity-training-bottlenecks-4446) are memory-bandwidth-bound rather than compute bound. Batch normalization presents similar challenges, computing statistics and normalizing values across batch dimensions while creating synchronization points in the computation pipeline.
 
 Modern hardware accelerators, particularly GPUs, optimize these diverse computations through massive parallelization. Achieving peak performance requires careful attention to hardware architecture. GPUs process data in fixed-size groups of threads called warps\index{Warp!GPU execution unit}[^fn-warp-training] on NVIDIA architectures or wavefronts on AMD architectures. Efficient matrix dimensions depend on the kernel's thread-block and tile mapping, including any alignment requirements imposed by Tensor Core instructions.
 
@@ -2547,7 +2547,7 @@ Libraries like cuDNN\index{cuDNN!optimized implementations} [@chetlur2014cudnn] 
 
 #### Memory management {#sec-model-training-memory-management-c1ec}
 
-Memory management\index{Memory Management!VRAM requirements}\index{GPU Memory!training constraints} is particularly important during the forward pass, when intermediate activations must be stored for subsequent backward propagation. Before examining how frameworks manage forward-pass memory, it is useful to estimate the total VRAM required for training. A concrete 7-billion-parameter-on-24 GB case shows how weights, gradients, optimizer state, and activations combine.
+Memory management\index{Memory Management!VRAM requirements}\index{GPU Memory!training constraints} binds during the forward pass, when intermediate activations must be stored for subsequent backward propagation. Before examining how frameworks manage forward-pass memory, it is useful to estimate the total VRAM required for training. A concrete 7-billion-parameter-on-24 GB case shows how weights, gradients, optimizer state, and activations combine.
 
 ```{python}
 #| echo: false
@@ -2640,7 +2640,7 @@ class VRAMRequirements:
 
 :::
 
-The total memory scales linearly with batch size (as established in @eq-activation-memory-per-batch), which means the practical complexity lies not in the scaling law itself but in how these costs interact across layers.
+The total memory scales linearly with batch size (@eq-activation-memory-per-batch), which means the practical complexity lies not in the scaling law itself but in how these costs interact across layers.
 
 ```{python}
 #| echo: false
@@ -2760,7 +2760,7 @@ The memory scaling patterns reveal critical hardware utilization trade-offs. Dou
 
 GPUs typically provide `{python} ResNetMemoryScaling.gpu_mem_range_min_gb_str`--`{python} ResNetMemoryScaling.gpu_mem_range_max_gb_str` of memory in high-end training configurations, which must accommodate activations, model parameters, gradients, and optimization states. Two techniques address this constraint directly: activation checkpointing\index{Activation Checkpointing!recomputation trade-off} trades recomputation for reduced activation storage, and mixed-precision training halves memory per value by using FP16 instead of FP32. Both are examined in detail in @sec-model-training-pipeline-optimizations-cd9d; here, the key insight is that memory capacity, not compute throughput, often determines the maximum feasible batch size and model depth. Practitioners frequently start with large batch sizes during initial development on smaller networks, then adjust downward when scaling to deeper architectures or memory-constrained hardware.
 
-The backward pass\index{Backward Pass!gradient computation}\index{Backward Pass!memory operations} reverses this flow, computing gradients at approximately twice the forward pass cost (as established in @sec-model-training-backpropagation-mechanics-0b64). The per-layer memory costs accumulate rapidly across the full network: deeper in ResNet-50, mid-network convolutional layers use `{python} ResNetMemoryScaling.mid_layer_filters_value_str` filters rather than the initial `{python} ResNetMemoryScaling.bwd_filters_value_str`, but smaller spatial maps offset some activation memory while convolutional work depends on kernel size and both input and output channels. Across `{python} ResNetMemoryScaling.resnet_layers_str`, the illustrative backward-pass working set reaches approximately `{python} ResNetMemoryScaling.bwd_total_grad_gb_str` before accounting for optimizer state and parameter updates. Dependencies order the layerwise gradient computations, although runtimes may overlap independent kernels and gradient communication. Peak memory reflects retained forward activations, gradients, temporary workspaces, and the framework's allocation schedule rather than the width of a single layer alone.
+The backward pass\index{Backward Pass!gradient computation}\index{Backward Pass!memory operations} reverses this flow, computing gradients at approximately twice the forward pass cost (@sec-model-training-backpropagation-mechanics-0b64). The per-layer memory costs accumulate rapidly across the full network: deeper in ResNet-50, mid-network convolutional layers use `{python} ResNetMemoryScaling.mid_layer_filters_value_str` filters rather than the initial `{python} ResNetMemoryScaling.bwd_filters_value_str`, but smaller spatial maps offset some activation memory while convolutional work depends on kernel size and both input and output channels. Across `{python} ResNetMemoryScaling.resnet_layers_str`, the illustrative backward-pass working set reaches approximately `{python} ResNetMemoryScaling.bwd_total_grad_gb_str` before accounting for optimizer state and parameter updates. Dependencies order the layerwise gradient computations, although runtimes may overlap independent kernels and gradient communication. Peak memory reflects retained forward activations, gradients, temporary workspaces, and the framework's allocation schedule rather than the width of a single layer alone.
 
 ### Parameter updates and optimizers {#sec-model-training-parameter-updates-optimizers-b1a4}
 
@@ -3837,7 +3837,7 @@ The choice between formats depends on model characteristics and hardware support
 
 Modern hardware architectures are specifically designed to accelerate reduced precision computations. NVIDIA Tensor Cores were introduced for FP16 mixed-precision operations [@nvidia_tensors_fp16_2017], and later A100-class Tensor Cores added BF16 support [@NVIDIA2020]. Google's TPUs natively support BF16, as this format was specifically designed for machine learning workloads [@google_bfloat16]. These architectural optimizations typically enable substantially higher computational throughput for reduced precision operations compared to FP32, making mixed-precision training particularly efficient on modern hardware.
 
-Mixed-precision training turns those hardware capabilities into a split numerical contract. Eligible matrix multiplications and convolutions use FP16 or BF16 inputs on Tensor Core paths, while selected reductions, accumulations, and parameter updates retain higher precision. The performance gain comes from both arithmetic and data movement. Lower-precision kernels can execute at higher throughput, and smaller activations or gradients reduce memory traffic when the recipe stores or communicates them in that format. Higher precision remains important where wide reductions, small parameter updates, or sensitive normalization can accumulate rounding error. The division is not universal. Frameworks choose dtypes per operation, kernels may accumulate in FP32, BF16 often avoids loss scaling, and optimizers may retain FP32 master weights and states. Mixed precision therefore coordinates formats across the training step instead of running every operation in one reduced precision.
+Mixed-precision training turns those hardware capabilities into a split numerical contract. Eligible matrix multiplications and convolutions use FP16 or BF16 inputs on Tensor Core paths, while selected reductions, accumulations, and parameter updates retain higher precision. The performance gain comes from both arithmetic and data movement. Lower-precision kernels can execute at higher throughput, and smaller activations or gradients reduce memory traffic when the recipe stores or communicates them in that format. Higher precision remains necessary where wide reductions, small parameter updates, or sensitive normalization can accumulate rounding error. The division is not universal. Frameworks choose dtypes per operation, kernels may accumulate in FP32, BF16 often avoids loss scaling, and optimizers may retain FP32 master weights and states. Mixed precision therefore coordinates formats across the training step instead of running every operation in one reduced precision.
 
 #### Loss scaling {#sec-model-training-loss-scaling-f9f5}
 
@@ -3875,7 +3875,7 @@ class MixedPrecisionBenefits:
 Mixed-precision benefits manifest across three dimensions that compound in practice:
 
 - **Weight memory**: Decreases by `{python} MixedPrecisionBenefits.mp_mem_savings_pct_str`. A one-billion-parameter transformer's weights require `{python} MixedPrecisionBenefits.model_1b_fp32_gb_str` in FP32 but `{python} MixedPrecisionBenefits.model_1b_fp16_gb_str` in FP16 or BF16. Total training-memory savings depend on retained higher-precision state.
-- **Computational throughput**: Can increase when eligible operations use higher-throughput Tensor Core paths, as detailed in @sec-model-training-mixedprecision-hardware-support-d7c1.
+- **Computational throughput**: Can increase when eligible operations use higher-throughput Tensor Core paths (@sec-model-training-mixedprecision-hardware-support-d7c1).
 - **Communication bandwidth**: Can decrease when the distributed strategy communicates lower-precision tensors; some strategies still reduce or communicate gradients in FP32.
 
 These benefits compound: a practitioner might simultaneously double batch size (memory savings), accelerate each iteration (Tensor Core throughput), and reduce gradient synchronization time (smaller tensors). On GPT-2, the combined effect is visible in both the memory budget and the training throughput.
@@ -3933,7 +3933,7 @@ class MixedPrecisionMemory:
 
     total_mp_value = total_mp.to(GB).magnitude
     total_fp32_value = total_fp32.to(GB).magnitude
-    check(total_mp < total_fp32, f"Mixed Precision ({total_mp_value:.1f}G) didn't save memory vs FP32 ({total_fp32_value:.1f}G).")
+    check(total_mp < total_fp32, f"Mixed Precision ({total_mp_value:.1f}G) did not save memory vs FP32 ({total_fp32_value:.1f}G).")
     check(total_ckpt < total_mp, "Checkpointing should further reduce memory.")
     check(
         abs((p_fp32 + act_fp32 + g_fp32 + opt_fp32 - total_fp32).to(GB).magnitude) < 0.1,
@@ -4139,7 +4139,7 @@ class MixedPrecisionHardwareDetail:
 
 #### Mixed-precision hardware support {#sec-model-training-mixedprecision-hardware-support-d7c1}
 
-Understanding how modern hardware implements reduced-precision arithmetic explains why mixed precision changes wall-clock time, not only memory capacity. The performance gains from FP16 and BF16 computation come from specialized hardware units designed for low-precision tensor operations[^fn-tensor-core-training]. Those units trade numerical range or precision for much higher matrix throughput, while the training recipe keeps numerically sensitive accumulations in safer formats.
+Understanding how modern hardware implements reduced-precision arithmetic explains why mixed precision changes wall-clock time in addition to memory capacity. The performance gains from FP16 and BF16 computation come from specialized hardware units designed for low-precision tensor operations[^fn-tensor-core-training]. Those units trade numerical range or precision for much higher matrix throughput, while the training recipe keeps numerically sensitive accumulations in safer formats.
 
 [^fn-tensor-core-training]: **Tensor Core**\index{Tensor Core!training throughput}: A specialized matrix-multiply-accumulate unit that supports reduced-precision inputs and higher-precision accumulation. Supported tile shapes, alignment constraints, and peak-throughput ratios vary by architecture, dtype, sparsity mode, and library kernel.
 
@@ -4180,7 +4180,7 @@ Reduced precision accelerates computation and alleviates memory bandwidth bottle
 
 Using FP16 or BF16 halves the bytes per stored value relative to FP32, but realized memory traffic also depends on caching, fusion, accumulator formats, and extra conversions. Bandwidth-bound operations can therefore speed up even without Tensor Core arithmetic, although the gain is workload-dependent rather than an automatic doubling.
 
-Modern frameworks abstract hardware complexity through automatic operation routing, as discussed in @sec-ml-frameworks. The framework runtime determines which operations benefit from reduced precision and which require FP32 for numerical stability. PyTorch's automatic mixed precision manages precision selection and loss scaling transparently, as @lst-mixed-precision illustrates.
+Modern frameworks abstract hardware complexity through automatic operation routing (@sec-ml-frameworks). The framework runtime determines which operations benefit from reduced precision and which require FP32 for numerical stability. PyTorch's automatic mixed precision manages precision selection and loss scaling transparently (@lst-mixed-precision).
 
 ::: {#lst-mixed-precision lst-cap="**Mixed Precision Training**: Autocast selects eligible lower-precision operations, while gradient scaling is enabled for the FP16 path and omitted for BF16."}
 
@@ -4278,7 +4278,7 @@ FlashAttention\index{FlashAttention!I/O-aware algorithm}\index{FlashAttention!me
 
 #### The standard attention memory bottleneck {#sec-model-training-standard-attention-memory-bottleneck-6f39}
 
-As detailed in @sec-network-architectures, standard self-attention\index{Attention!memory bottleneck}\index{Attention!quadratic complexity} computes relationships between all positions in a sequence. For an input sequence of length $S$, the mechanism computes an $S{\times}S$ attention matrix according to @eq-attention:
+Standard self-attention\index{Attention!memory bottleneck}\index{Attention!quadratic complexity} (@sec-network-architectures) computes relationships between all positions in a sequence. For an input sequence of length $S$, the mechanism computes an $S{\times}S$ attention matrix according to @eq-attention:
 
 $$ \text{Attention}(\mathbf{Q}, \mathbf{K}, \mathbf{V}) = \text{softmax}\left(\frac{\mathbf{Q}\mathbf{K}^T}{\sqrt{d_k}}\right)\mathbf{V} $$ {#eq-attention}
 
@@ -4561,7 +4561,7 @@ In practice, deep learning frameworks handle much of FlashAttention's integratio
 2. Use FP16 or BF16 for maximum speedup (FlashAttention optimized for mixed precision)
 3. Combine with gradient checkpointing when additional activation-memory savings are needed.
 
-The integration is often a single-line change---swapping a manual attention call for `F.scaled_dot_product_attention` (as shown in @lst-flash-attention-comparison). The engineering decision is still the same one established by the roofline analysis: use the optimized primitive when the bottleneck is HBM traffic, and let the library manage the tiling and SRAM scheduling needed to remove it.
+The integration is often a single-line change---swapping a manual attention call for `F.scaled_dot_product_attention` (see @lst-flash-attention-comparison). The engineering decision is still the same one established by the roofline analysis: use the optimized primitive when the bottleneck is HBM traffic, and let the library manage the tiling and SRAM scheduling needed to remove it.
 
 #### Systems implications and broader principles {#sec-model-training-systems-implications-broader-principles-c4f0}
 
@@ -4799,7 +4799,7 @@ Gradient accumulation produces an effective batch larger than the resident micro
 
 [^fn-gradient-accumulation-training]: **Gradient Accumulation**\index{Gradient Accumulation!memory-compute trade-off}: Sums or averages gradients across $k$ micro-batches before one optimizer step. It reduces resident activation memory relative to processing the same effective batch at once, while preserving total example-level arithmetic. Runtime and numerical equivalence depend on micro-batch efficiency, synchronization, stateful layers, stochastic operations, precision, and loss normalization.
 
-Activation checkpointing significantly reduces the memory footprint of intermediate activations during the forward pass, allowing training of deeper models. By discarding and recomputing activations as needed, checkpointing frees up memory for larger models, additional layers, or higher resolution data. This is especially important in advanced architectures like transformers that require substantial memory for intermediate computations.
+Activation checkpointing significantly reduces the memory footprint of intermediate activations during the forward pass, allowing training of deeper models. By discarding and recomputing activations as needed, checkpointing frees up memory for larger models, additional layers, or higher resolution data. This trade-off is critical in architectures like transformers that require substantial memory for intermediate computations.
 
 Both techniques improve scalability by reducing the memory required before adding hardware. Returning to the GPT-2 Lighthouse Model, gradient accumulation is essential for achieving the target batch size within V100 memory constraints.
 
@@ -4999,7 +4999,7 @@ The table compares techniques in isolation; the GPT-2 walkthrough shows how thos
 
 ### GPT-2 optimization walkthrough {#sec-model-training-putting-together-gpt2-optimization-walkthrough-def7}
 
-To answer that question, let us walk through the memory-feasibility path for GPT-2 (1.5 billion parameters) training on a single V100 GPU, then summarize the time, energy, and cost implications for a 32-V100 training run.
+The memory-feasibility path for GPT-2 (1.5 billion parameters) training on a single V100 GPU establishes how these optimizations combine before extending the time, energy, and cost analysis to a 32-V100 training run.
 
 ```{python}
 #| echo: false

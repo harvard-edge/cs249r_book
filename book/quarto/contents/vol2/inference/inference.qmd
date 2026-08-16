@@ -131,7 +131,7 @@ The economics of inference at scale differ fundamentally from training economics
 
 Three distinct signals indicate when distributed inference becomes necessary rather than merely optional. @Tbl-distribution-triggers categorizes these triggers by constraint type and corresponding strategy.
 
-The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4-class models dwarf that capacity: the public ~`{python} InferenceSetup.gpt4_params_t_str`-parameter mixture-of-experts estimate implies `{python} InferenceSetup.gpt4_weights_tb_str` just for weights in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM architecture[^fn-dlrm-scale] stores embedding tables that require multiple terabytes of memory.
+The first signal is memory exhaustion, which occurs when model parameters, key-value caches, or embedding tables exceed single-device capacity. A single NVIDIA H100 GPU provides `{python} InferenceSetup.h100_mem_gb_str` of HBM3[^fn-hbm3-bandwidth] memory; @sec-appdx-fleet-assumption-provenance records the provenance of this capacity figure and the other canonical hardware constants used throughout the analysis that follows. GPT-4-class models dwarf that capacity: the public ~`{python} InferenceSetup.gpt4_params_t_str`-parameter mixture-of-experts estimate implies `{python} InferenceSetup.gpt4_weights_tb_str` for weights alone in FP16 precision, forcing distribution across multiple GPUs regardless of throughput requirements. Recommendation systems with trillion-parameter embedding tables face similar constraints: Meta's DLRM architecture[^fn-dlrm-scale] stores embedding tables that require multiple terabytes of memory.
 
 [^fn-hbm3-bandwidth]: **HBM3 (High Bandwidth Memory 3)**\index{HBM3!bandwidth}: 3D-stacked DRAM delivering `{python} InferenceSetup.h100_mem_bw_tb_per_s_str` on the H100 vs. `{python} InferenceSetup.a100_mem_bw_tb_per_s_str` for HBM2e on the A100. Because large language model (LLM) decode is memory-bandwidth-bound, this improvement translates directly into higher tokens-per-second and larger feasible batch sizes, making HBM generation one major variable in inference cost-per-token.
 
@@ -283,7 +283,7 @@ class ServingCostSimple:
 3.  **Cost per Request**\index{Serving Cost!cost per request}: Assume a 70B model on H100 costs $\approx$ `{python} ServingCostSimple.cost_per_request_usd_str` (input + output).
 4.  **Annual Serving Cost**\index{Serving Cost!annual serving cost}: `{python} ServingCostSimple.annual_reqs_b_str` requests $\times$ `{python} ServingCostSimple.cost_per_request_usd_str` = `{python} ServingCostSimple.annual_serving_cost_str`.
 
-**Systems insight**: Serving costs `{python} ServingCostSimple.serving_training_ratio_mult_str` more than training in just the first year. A `{python} ServingCostSimple.efficiency_gain_pct_str` serving-cost or latency-linked efficiency improvement saves about `{python} ServingCostSimple.efficiency_savings_str` in the first year, nearly paying for the original training run.
+**Systems insight**: Serving costs `{python} ServingCostSimple.serving_training_ratio_mult_str` more than training in the first year alone. A `{python} ServingCostSimple.efficiency_gain_pct_str` serving-cost or latency-linked efficiency improvement saves about `{python} ServingCostSimple.efficiency_savings_str` in the first year, nearly paying for the original training run.
 
 :::
 
@@ -382,7 +382,7 @@ The same leverage holds across application categories with different cost struct
 
 The cost structure motivates serving optimization: every percentage point of efficiency improvement yields ongoing cost reduction over the model's operational lifetime. @Fig-serving-cost-curve illustrates why optimization matters by showing how the gap between naive and optimized serving determines whether an inference service is profitable or hemorrhaging money.
 
-::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Curve**: Cost per 1000 tokens decreases with scale and optimization. Single-GPU serving reaches break-even only at very high volume. Multi-GPU batching breaks even at moderate volume. Fully optimized serving (INT4, continuous batching, speculative decoding) achieves profitability at much lower volumes, fundamentally changing the economics of inference." fig-alt="Log-log plot of cost per 1000 tokens vs. daily volume for single-GPU, multi-GPU, and optimized serving with break-even line."}
+::: {#fig-serving-cost-curve fig-env="figure" fig-pos="htb" fig-cap="**The Serving Cost Curve**: Cost per 1000 tokens decreases with scale and optimization. Single-GPU serving reaches break-even only at high volume. Multi-GPU batching breaks even at moderate volume. Fully optimized serving (INT4, continuous batching, speculative decoding) achieves profitability at much lower volumes, fundamentally changing the economics of inference." fig-alt="Log-log plot of cost per 1000 tokens vs. daily volume for single-GPU, multi-GPU, and optimized serving with break-even line."}
 
 ```{python}
 #| echo: false
@@ -579,13 +579,13 @@ Recommendation systems often dominate high-volume consumer inference because the
 
 The distribution has direct implications for technique selection. Recommendation systems have driven important production inference innovations: dynamic batching, embedding sharding, feature store architectures, and low-latency serving were all developed primarily for recommendation workloads [@naumov2019deep; @gupta2020architectural]. LLM-specific techniques like continuous batching and KV cache management address a different slice of production inference. Text-to-image systems such as DALL-E provide one multimodal model example [@ramesh2021zero], but multimodal serving volume and latency targets remain product-specific.
 
-| **Model Type**               |       **Serving Pressure**      |  **Latency Target** |    **Key Challenge**     |
-|:-----------------------------|:-------------------------------:|:-------------------:|:------------------------:|
-| **Recommendation/ranking**   | Very high in consumer platforms | $<10\text{ ms}$ P99 |     Embedding lookup     |
-| **Vision (CNN)**             |        Workload-dependent       |      20--100 ms     |     Batch efficiency     |
-| **LLM**                      |      High cost per request      |     100 ms--10s     |     Memory bandwidth     |
-| **Speech/Audio**             |          Stream-driven          |      Real-time      |    Sequential decode     |
-| **Multimodal/text-to-image** |  Emerging and product-specific  |        Varies       | Cross-modal coordination |
+| **Model Type**               |        **Serving Pressure**       |  **Latency Target** |    **Key Challenge**     |
+|:-----------------------------|:---------------------------------:|:-------------------:|:------------------------:|
+| **Recommendation/ranking**   | High volume in consumer platforms | $<10\text{ ms}$ P99 |     Embedding lookup     |
+| **Vision (CNN)**             |         Workload-dependent        |      20--100 ms     |     Batch efficiency     |
+| **LLM**                      |       High cost per request       |     100 ms--10s     |     Memory bandwidth     |
+| **Speech/Audio**             |           Stream-driven           |      Real-time      |    Sequential decode     |
+| **Multimodal/text-to-image** |   Emerging and product-specific   |        Varies       | Cross-modal coordination |
 
 : **Production Inference Landscape**: Different model types create different serving pressure, latency requirements, and optimization challenges. The table is a qualitative workload map rather than a universal traffic-share distribution. Technique selection must match the specific workload. {#tbl-inference-landscape}
 
@@ -689,7 +689,7 @@ Disaggregated serving separates the prefill phase (processing the input prompt, 
 
 ### Stateful vs. stateless: The scaling divide {#sec-inference-scale-triton-inference-server-f0ba}
 
-A serving system's statefulness determines whether horizontal scaling is trivial or requires careful engineering. Vision models and embedding lookups are typically stateless: any replica can serve any request because no per-session state persists between requests. Horizontal scaling is straightforward -- add replicas behind a load balancer -- and failure recovery is instant because the load balancer simply routes to a healthy replica.
+A serving system's statefulness determines whether horizontal scaling is trivial or requires careful engineering. Vision models and embedding lookups are typically stateless: any replica can serve any request because no per-session state persists between requests. Horizontal scaling is straightforward -- add replicas behind a load balancer -- and failure recovery is instant because the load balancer routes to a healthy replica.
 
 LLM serving with KV cache is inherently stateful: the cache accumulated during a conversation creates replica-specific state that cannot be reconstructed without re-running the entire conversation history through prefill. This statefulness has cascading implications for system design. Load balancing requires sticky routing to direct subsequent requests in a conversation to the same replica. Autoscaling down requires draining active sessions, which can take minutes for long conversations. Failure recovery is expensive: when a stateful replica crashes, users either experience the latency of regenerating context (seconds) or lose conversation state entirely.
 
@@ -828,7 +828,7 @@ The knee occurs where the variable compute cost $(B \times T_{\text{var}})$ star
 
 1. **Vision Model** $(T_{\text{fixed}} = 2\text{ ms}, T_{\text{var}} = 1\text{ ms})$:
    - Knee: $B \approx 2\text{ ms}/1\text{ ms} =$ `{python} BatchingEfficiency.bec_vision_knee_str`.
-   - **Result**: This simplified latency model reaches its first overhead-amortization knee at a very small batch. Production CNNs often continue gaining throughput until batches of 32--64+ before hardware saturation.
+   - **Result**: This simplified latency model reaches its first overhead-amortization knee at a small batch. Production CNNs often continue gaining throughput until batches of 32--64+ before hardware saturation.
 2. **LLM Decode** $(T_{\text{fixed}} = 40\text{ ms}, T_{\text{var}} = 0.5\text{ ms})$:
    - Knee: $B \approx 40\text{ ms}/0.5\text{ ms} =$ `{python} BatchingEfficiency.bec_llm_knee_str`.
    - **Result**: LLMs require massive batches to amortize the expensive weight-loading overhead.
@@ -1809,7 +1809,7 @@ Variable work per request closes the batching story: continuous and adaptive bat
 
 ### Quantitative summary: Batching strategy selection {#sec-inference-scale-quantitative-summary-batching-strategy-selection-d5af}
 
-The selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. That match depends on where in the request path the latency budget is actually spent.
+The selection problem is to match the batching mechanism to model shape, traffic variance, and latency budget. That match depends on where in the request path the latency budget is spent.
 
 ::: {#chk-inference-batching-strategy-trade-offs .callout-checkpoint title="Batching strategy trade-offs"}
 
@@ -1867,7 +1867,7 @@ Two classes of techniques meet at this boundary. KV-state capacity techniques, s
 
 Increasing the batch size to maximize throughput in LLM serving is bounded by the KV cache wall. Model weights represent a fixed "static tax" on GPU memory, while the KV cache grows linearly with both batch size and sequence length (@fig-kv-cache-wall).
 
-::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 84 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the 80 GB line very early (~16K tokens)."}
+::: {#fig-kv-cache-wall fig-env="figure" fig-pos="htb" fig-cap="**The KV Cache Wall**: Total GPU memory usage for a 4-bit quantized 70B model (35 GB weights) on an 80 GB H100. While the model fits easily at small context lengths, the KV cache (sloped lines) eventually consumes all remaining HBM. At 128K context, a batch size of 2 is physically impossible on a single GPU (35 GB + 84 GB > 80 GB), forcing the system to either reduce batch size (killing throughput) or shard the model." fig-alt="Memory usage plot. Horizontal dashed line at 80 GB shows capacity. Solid blue region at bottom is 35 GB weights. Sloped lines for Batch 1, 2, 4, and 8 show memory rising with sequence length. Batch 8 hits the 80 GB line early (~16K tokens)."}
 
 ```{python}
 #| echo: false
@@ -2097,9 +2097,9 @@ The virtual-memory shift changes the allocation problem: capacity no longer has 
 
 Imagine a hotel where every guest might stay anywhere from 1 to 10 days, but they do not know in advance.
 
-Under contiguous allocation, the hotel manager blocks out a 10-day suite for every guest just in case. A 100-room hotel becomes "fully booked" with only 10 guests, wasting 90 percent of its capacity (Internal Fragmentation).
+Under contiguous allocation, the hotel manager blocks out a 10-day suite for every guest in advance. A 100-room hotel becomes "fully booked" with only 10 guests, wasting 90 percent of its capacity (Internal Fragmentation).
 
-Under PagedAttention (Virtual Memory), the manager assigns a guest just 1 room. If the guest stays another day, they are given whatever room is available next, even if it is on a different floor. The front desk maintains a "Block Table" to keep track of which rooms belong to which guest. The hotel can now accommodate 100 guests simultaneously, recovering the 90 percent wasted capacity.
+Under PagedAttention (Virtual Memory), the manager assigns a guest 1 room at a time. If the guest stays another day, they are given whatever room is available next, even if it is on a different floor. The front desk maintains a "Block Table" to keep track of which rooms belong to which guest. The hotel can now accommodate 100 guests simultaneously, recovering the 90 percent wasted capacity.
 
 :::
 
@@ -3815,7 +3815,7 @@ Under pipeline parallelism, each request traverses stages sequentially, with eac
 
 The critical insight from @fig-pipeline-parallel-routing is that pipeline parallelism offers no single-request latency benefit: one request still traverses all stages sequentially. Throughput scales only when multiple concurrent requests fill the pipeline, reaching steady-state throughput proportional to the number of stages.
 
-Under expert parallelism, each request is dispatched to the devices hosting its selected experts based on the gating decision. Two AllToAll communication steps bookend the expert compute, as shown in @fig-expert-parallel-routing.
+Under expert parallelism, each request is dispatched to the devices hosting its selected experts based on the gating decision. Two AllToAll communication steps bookend the expert compute (@fig-expert-parallel-routing).
 
 ::: {#fig-expert-parallel-routing fig-env="figure" fig-pos="htb" fig-cap="**Expert Parallelism (MoE) Request Flow**: Gating selects the top-$k$ experts; an AllToAll dispatch sends tokens to the GPUs hosting those experts; experts compute in parallel; a second AllToAll gathers results. The lower panel contrasts unbalanced routing (one expert bottlenecks) against balanced routing (uniform utilization via auxiliary loss)." fig-alt="Five-stage horizontal pipeline: Request, Gating, AllToAll dispatch (dashed orange), Expert Compute (three GPU boxes), AllToAll gather (dashed orange), Response. Lower panel shows two sets of three capacity bars: unbalanced with one overloaded, balanced with equal tokens."}
 
@@ -4295,7 +4295,7 @@ async def handle_spot_termination():
 
 The sequence matters because the steps are not interchangeable. Stopping admission and deregistering first prevent new requests from arriving during the drain window; the handler then completes in-flight work, persists recoverable state, and shuts down before the termination deadline.
 
-A spot-aware architecture splits traffic between on-demand and spot replicas by SLO class, as shown in @fig-spot-aware-routing. SLO-critical requests always route to on-demand capacity, while best-effort requests absorb the cost savings and interruption risk of spot instances.
+A spot-aware architecture splits traffic between on-demand and spot replicas by SLO class (@fig-spot-aware-routing). SLO-critical requests always route to on-demand capacity, while best-effort requests absorb the cost savings and interruption risk of spot instances.
 
 ::: {#fig-spot-aware-routing fig-env="figure" fig-pos="htb" fig-cap="**Spot-Aware Traffic Distribution**: The load balancer routes 70 percent of traffic to on-demand replicas (guaranteed availability) and 30 percent to spot replicas (cost savings, preemption risk). SLO-critical requests always use on-demand; best-effort requests tolerate occasional retries on eviction. In the representative discount scenario, the mixed fleet achieves roughly 18--27 percent cost reduction vs. 100 percent on-demand." fig-alt="Load Balancer box with two fan-out arrows: a solid green arrow labeled 70 percent to On-Demand Replicas box containing three active GPU workers, and a dashed orange arrow labeled 30 percent to Spot Replicas box containing two spot workers and one preempted worker."}
 
@@ -4326,7 +4326,7 @@ For interactive applications (chatbots, autocomplete), these delays compound acr
 
 #### Pattern 1: Global load balancing with regional replicas {#sec-inference-scale-pattern-1-global-load-balancing-regional-replicas-b7ac}
 
-Each region runs independent inference replicas with identical models. A global load balancer routes each user to the nearest region based on measured round-trip latency, as shown in @fig-global-inference-multiregion. A shared model registry synchronizes weights across regions during rollouts.
+Each region runs independent inference replicas with identical models. A global load balancer routes each user to the nearest region based on measured round-trip latency (@fig-global-inference-multiregion). A shared model registry synchronizes weights across regions during rollouts.
 
 ::: {#fig-global-inference-multiregion fig-env="figure" fig-pos="htb" fig-cap="**Multi-Region Inference: Global Load Balancing**: A global load balancer routes requests to three independent regional deployments (US-East, EU-West, Asia-Pacific) based on latency. Each region operates independently; a shared model registry synchronizes weights. During regional failure, the LB reroutes to the next nearest healthy region." fig-alt="Diagram with Global Load Balancer box at top fanning out to three region boxes each containing two replica boxes. Lines connect all regions to a shared Model Registry at the bottom. RTT annotations and failover note shown."}
 
@@ -4417,7 +4417,7 @@ GPU pricing varies by region. @Tbl-gpu-region-pricing shows representative H100 
 
 : **H100 Pricing and Latency by Region**: Representative spot and on-demand H100 prices alongside RTT to US users. The 20 percent price spread across regions is modest compared to the latency spread, so cost-aware routing typically sends only latency-tolerant workloads (batch inference, background processing) to the cheapest region while keeping interactive traffic local. {#tbl-gpu-region-pricing}
 
-Cost-aware routing directs latency-tolerant workloads (batch inference, background processing) to the cheapest available region, as shown in @lst-cost-aware-routing.
+Cost-aware routing directs latency-tolerant workloads (batch inference, background processing) to the cheapest available region (@lst-cost-aware-routing).
 
 ::: {#lst-cost-aware-routing lst-cap="**Cost-Aware Routing**: Priority-based routing that sends low-priority batch requests to the cheapest region while keeping interactive traffic local."}
 
@@ -4453,7 +4453,7 @@ In serving systems, quantization is not merely a model-compression technique; it
 
 :::
 
-Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs a decision model, not a method roster. The decision model in @tbl-serving-quantization-decision-model keeps the method choice tied to the serving constraint that actually binds the system.
+Quantization reduces numerical precision of model weights and activations, decreasing memory footprint by 2--4$\times$ while increasing decode throughput, which is *memory-bandwidth limited* rather than *compute limited*. The serving decision is which quantity should shrink: resident weights for fit, bytes moved per decode step for bandwidth, activations for prefill throughput, or the precision path supported by target hardware. Serving at scale also introduces distinct challenges: models must be quantized after training without access to training data, quality must be preserved across diverse inputs, and hardware deployment targets vary from data center GPUs to edge accelerators. Production inference therefore needs a decision model, not a method roster. The decision model in @tbl-serving-quantization-decision-model keeps the method choice tied to the serving constraint that binds the system.
 
 | **Binding serving constraint** | **Representation change**                       | **Method family**       | **Risk to test before rollout**             |
 |:-------------------------------|:------------------------------------------------|:------------------------|:--------------------------------------------|
@@ -4462,7 +4462,7 @@ Quantization reduces numerical precision of model weights and activations, decre
 | Prefill is compute-bound       | Quantize weights and activations                | SmoothQuant W8A8        | Activation outliers and INT8 hardware path  |
 | Outliers block low precision   | Change the coordinate basis before quantization | Rotation-based methods  | Transform overhead and limited runtime path |
 
-: **Serving Quantization Decision Model**: Quantization methods are useful only when they relax the resource that actually binds the serving system. The method family follows from the bottleneck: fit, bandwidth, prefill compute, or outlier robustness. {#tbl-serving-quantization-decision-model tbl-colwidths="[24,28,22,26]"}
+: **Serving Quantization Decision Model**: Quantization methods are useful only when they relax the resource that binds the serving system. The method family follows from the bottleneck: fit, bandwidth, prefill compute, or outlier robustness. {#tbl-serving-quantization-decision-model tbl-colwidths="[24,28,22,26]"}
 
 ### LLM-specific quantization challenges {#sec-inference-scale-llmspecific-quantization-challenges-b7a2}
 
@@ -4504,7 +4504,7 @@ AWQ [@lin2025] attacks the same weight-only serving goal from the activation sid
 |:---------------------------|:-------------------------:|:-----------------------:|
 | **Error compensation**     | Adjusts remaining weights | Scales salient channels |
 | **Calibration data**       |      128--256 samples     |       128 samples       |
-| **Quality (4-bit)**        |         Very good         |        Excellent        |
+| **Quality (4-bit)**        |            High           |        Excellent        |
 | **Speed**                  |           Faster          |     Slightly slower     |
 | **Hardware compatibility** |           Broad           |          Broad          |
 
@@ -4665,7 +4665,7 @@ A 70B model with 4-bit weights requires approximately `{python} QuantizedServing
 
 ### Quantization selection guidelines {#sec-inference-scale-quantization-selection-guidelines-24fb}
 
-The final selection matches the method to the binding constraint. Latency-sensitive paths should prefer FP16 or BF16 when quantization overhead would dominate, while throughput-oriented paths are more likely to benefit from quantization. Hardware support narrows the viable choices: H100 and H200 deployments can consider FP8 because the hardware provides native support with minimal quality loss; A100 and A10G deployments usually choose between W8A8 and W4A16 depending on the workload; consumer GPUs often require W4A16 simply to fit the model. The quality budget then sets the lower precision bound. If less than 0.5 percent degradation is acceptable, AWQ 4-bit is a plausible target; if less than 1 percent degradation is acceptable, GPTQ 4-bit or SmoothQuant W8A8 may be viable; if no degradation is acceptable, FP16 or BF16 remains the safest choice. The binding resource makes the final distinction: compute-bound prefill favors W8A8 because it can provide a 2$\times$ speedup, whereas memory-bound decode favors W4A16 because it can provide a 4$\times$ effective bandwidth increase.
+The final selection matches the method to the binding constraint. Latency-sensitive paths should prefer FP16 or BF16 when quantization overhead would dominate, while throughput-oriented paths are more likely to benefit from quantization. Hardware support narrows the viable choices: H100 and H200 deployments can consider FP8 because the hardware provides native support with minimal quality loss; A100 and A10G deployments usually choose between W8A8 and W4A16 depending on the workload; consumer GPUs often require W4A16 to fit the model. The quality budget then sets the lower precision bound. If less than 0.5 percent degradation is acceptable, AWQ 4-bit is a plausible target; if less than 1 percent degradation is acceptable, GPTQ 4-bit or SmoothQuant W8A8 may be viable; if no degradation is acceptable, FP16 or BF16 remains the safest choice. The binding resource makes the final distinction: compute-bound prefill favors W8A8 because it can provide a 2$\times$ speedup, whereas memory-bound decode favors W4A16 because it can provide a 4$\times$ effective bandwidth increase.
 
 @Tbl-quantization-serving-cost shows how quantization reshapes serving cost per million tokens:
 
@@ -5082,7 +5082,7 @@ Training and serving have different requirements. Training optimizes for aggrega
 
 **Fallacy**: *Continuous batching solves the whole LLM serving problem.*
 
-Continuous batching dramatically improves GPU utilization for LLM serving, but it addresses only one dimension of the problem. Prefill remains a bottleneck for long contexts, as the quadratic attention computation cannot be avoided regardless of how subsequent decode iterations are batched. As discussed in @sec-inference-scale-kv-cache-management-04ed, KV cache memory, not compute, often limits batch size. Network bandwidth between sharded model components can dominate latency for large models. Continuous batching is necessary but not sufficient for efficient LLM serving.
+Continuous batching dramatically improves GPU utilization for LLM serving, but it addresses only one dimension of the problem. Prefill remains a bottleneck for long contexts, as the quadratic attention computation cannot be avoided regardless of how subsequent decode iterations are batched. @sec-inference-scale-kv-cache-management-04ed demonstrates that KV cache memory, not compute, often limits batch size. Network bandwidth between sharded model components can dominate latency for large models. Continuous batching is necessary but not sufficient for efficient LLM serving.
 
 :::
 
@@ -5090,7 +5090,7 @@ Continuous batching dramatically improves GPU utilization for LLM serving, but i
 
 **Pitfall**: *Sizing the fleet by average throughput.*
 
-Queuing theory establishes that systems provisioned for average load violate SLOs during traffic peaks. At 80 percent average utilization, a modest 25 percent traffic spike pushes utilization above 100 percent, causing unbounded queue growth. As discussed in @sec-inference-scale-autoscaling-168d, the cold start problem exacerbates this: by the time new capacity is available, which can take multiple minutes for GPU instances, SLO violations have already occurred. Capacity planning must account for peak load plus headroom, not average load.
+Queuing theory establishes that systems provisioned for average load violate SLOs during traffic peaks. At 80 percent average utilization, a modest 25 percent traffic spike pushes utilization above 100 percent, causing unbounded queue growth. @sec-inference-scale-autoscaling-168d details how the cold start problem exacerbates this: by the time new capacity is available, which can take multiple minutes for GPU instances, SLO violations have already occurred. Capacity planning must account for peak load plus headroom, not average load.
 
 :::
 
@@ -5098,7 +5098,7 @@ Queuing theory establishes that systems provisioned for average load violate SLO
 
 **Fallacy**: *Load balancing does not matter much for inference.*
 
-Simple load balancing strategies like round-robin seem adequate until examined quantitatively. As shown in @sec-inference-scale-load-balancing-request-routing-4997, random assignment produces maximum queue lengths of $\mathcal{O}(\log R / \log \log R)$ across $R$ servers. Power-of-two-choices reduces this to $\mathcal{O}(\log \log R)$, an exponential improvement. For a 1,000-server cluster, this translates from ~4-5 requests maximum queue to ~2 requests. At the tail latencies that determine SLO compliance, this difference is substantial. The choice of load balancing algorithm has first-order impact on system performance.
+Simple load balancing strategies like round-robin seem adequate until examined quantitatively. @sec-inference-scale-load-balancing-request-routing-4997 shows that random assignment produces maximum queue lengths of $\mathcal{O}(\log R / \log \log R)$ across $R$ servers. Power-of-two-choices reduces this to $\mathcal{O}(\log \log R)$, an exponential improvement. For a 1,000-server cluster, this translates from ~4-5 requests maximum queue to ~2 requests. At the tail latencies that determine SLO compliance, this difference is substantial. The choice of load balancing algorithm has first-order impact on system performance.
 
 :::
 
