@@ -483,7 +483,7 @@ class EdgeDeviceSpectrum(Registry):
         description="Representative low-cost microcontroller board price used in hardware-spectrum examples.",
     )
     LowEndEdgeRam = sourced_qty(
-        512 * MiB,
+        512 * MB,
         pc.EDGE_DEVICE_SPECTRUM_ANCHORS,
         name="Low-end edge RAM target",
         description="Representative RAM envelope for low-end edge deployment pitfall examples.",

@@ -762,12 +762,6 @@ class MLPvsCNN:
     mlp_params_str = fmt_count(round((mlp_p * param).to(Mparam).magnitude) * MILLION, scale='M', precision=0, commas=False)
     cnn_params_str = fmt_count((cnn_p * param).to(param).magnitude, scale='K', precision=1, commas=False)
     param_ratio_mult_str = fmt_multiple(ratio, precision=0, commas=False)
-    mnist_train_examples_str = fmt(mnist_train_examples, precision=0)
-    # Calc-line LHS param breakdowns pinned to architecture constants.
-    mlp_params_breakdown_math = fmt_math(f"({mlp_in}{{\\times}}{mlp_h}) + ({mlp_h}{{\\times}}{mlp_h}) + ({mlp_h}{{\\times}}{mlp_out})")
-    cnn_params_breakdown_math = fmt_math(
-        f"({c1_k}{{\\times}}{c1_k}{{\\times}}{c1_in_ch}{{\\times}}{c1_out}) + ({c2_k}{{\\times}}{c2_k}{{\\times}}{c1_out}{{\\times}}{c2_out}) + ({c2_out}{{\\times}}{fc1_spatial}{{\\times}}{fc1_spatial}{{\\times}}{fc1_out}) + ({fc1_out}{{\\times}}{mlp_out})"
-    )
 ```
 
 ::: {#exmp-nn-architectures-mnist-representation-vs-learnability .callout-example title="MNIST: Representation vs. learnability"}
@@ -2877,11 +2871,7 @@ class TransformerComplexityAnchor:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     base_seq_len_str = fmt(base_seq_len, precision=0, commas=True)
-    doubled_seq_len_str = fmt(doubled_seq_len, precision=0, commas=True)
-    mid_seq_len_str = fmt(mid_seq_len, precision=0, commas=True)
     long_seq_len_str = fmt(long_seq_len, precision=0, commas=True)
-    scaling_ratio_mult_str = fmt_multiple(scaling_ratio, precision=0, commas=False)
-    mid_context_ratio_mult_str = fmt_multiple(mid_context_ratio, precision=0, commas=False)
     long_context_ratio_mult_str = fmt_multiple(long_context_ratio, precision=0, commas=False)
 ```
 
@@ -3424,6 +3414,7 @@ The DLRM\index{DLRM} architecture [@naumov2019deep] standardizes this pattern as
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Hardware
 from mlsysim.fmt import fmt_int, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3437,13 +3428,14 @@ class DLRMEmbedding:
     num_users = 1_000_000_000
     embed_dim = 128
     bytes_per_param = BYTES_FP32
+    a100_capacity = Hardware.Cloud.A100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     table_memory = num_users * embed_dim * bytes_per_param
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(
-        table_memory >= 80 * GB,
+        table_memory >= a100_capacity,
         f"DLRM table ({table_memory.to(GB).magnitude:.1f} GB) fits on an A100. It must be larger to illustrate the capacity wall.",
     )
 
@@ -3551,6 +3543,7 @@ This chapter only needs the architectural consequence: DLRM turns recommendation
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
+from mlsysim import Hardware
 from mlsysim.fmt import fmt_int, fmt, check
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -3564,11 +3557,10 @@ class CapacityWall:
     num_items = 100_000_000
     embed_dim = 128
     bytes_per_param = BYTES_FP32
-    a100_capacity_gb = 80  # marketed 80 GB HBM class (pedagogical nominal capacity)
+    a100_capacity = Hardware.Cloud.A100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     table_memory = num_items * embed_dim * bytes_per_param
-    a100_capacity = a100_capacity_gb * GB
     utilization_pct = (table_memory / a100_capacity).to("").magnitude * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -5004,7 +4996,7 @@ Engineers add attention to CNNs or convolutions to transformers expecting additi
 
 from mlsysim import Hardware
 from mlsysim.fmt import fmt_memory_capacity, fmt_memory, fmt_multiple, MarkdownStr, check
-from mlsysim.core.units import GB, GiB
+from mlsysim.core.units import GB
 
 class A100ClusterMemory:
     """Contrast datacenter and edge memory: 8-GPU A100 node vs Jetson Orin NX."""
@@ -5017,9 +5009,9 @@ class A100ClusterMemory:
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
     a100_8x_mem = a100.memory.capacity * n_gpus
     edge_mem = edge_device.memory.capacity
-    a100_8x_nominal_gb = a100_8x_mem.to(GiB).magnitude
-    # Read both sides in the same (binary) base; the branded label is still "GB".
-    edge_nominal_gb = round(edge_mem.to(GiB).magnitude)
+    a100_8x_nominal_gb = a100_8x_mem.to(GB).magnitude
+    # Read both sides in the same base; the branded label is still "GB".
+    edge_nominal_gb = round(edge_mem.to(GB).magnitude)
     memory_reduction = a100_8x_nominal_gb / edge_nominal_gb
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
@@ -5029,9 +5021,9 @@ class A100ClusterMemory:
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_8x_mem_gb_str = fmt_memory_capacity(a100_8x_mem, unit=GiB, precision=0, commas=False)
+    a100_8x_mem_gb_str = fmt_memory_capacity(a100_8x_mem, unit=GB, precision=0, commas=False)
     edge_device_name_str = MarkdownStr(edge_device.name)
-    edge_mem_gb_str = fmt_memory_capacity(edge_mem, unit=GiB, precision=0, commas=False)
+    edge_mem_gb_str = fmt_memory_capacity(edge_mem, unit=GB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(round(memory_reduction), precision=0, commas=False)
 ```
 
@@ -5058,14 +5050,16 @@ Teams design for high-end GPU clusters, then discover deployment failures on tar
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 
-from mlsysim.fmt import fmt_int, fmt, fmt_memory_capacity, check
-from mlsysim.core.units import GiB
+from mlsysim import Hardware
+from mlsysim.fmt import fmt_int, fmt, fmt_memory_capacity, fmt_qty_int, check
+from mlsysim.core.units import GB, BYTES_FP16, byte
 
 # ┌── LEGO ───────────────────────────────────────────────
 class KVCacheServingPitfall:
     """Local recap of KV-cache serving memory for final pitfalls prose."""
 
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
+    device_memory = Hardware.Cloud.A100.memory.capacity
     layers = 32
     kv_tensors = 2
     heads = 32
@@ -5096,7 +5090,7 @@ class KVCacheServingPitfall:
     per_request_gb_str = fmt_qty_int(per_request_memory, GB, commas=False)
     concurrent_2_gb_str = fmt_qty_int(concurrent_2_memory, GB, commas=False)
     concurrent_4_gb_str = fmt_qty_int(concurrent_4_memory, GB, commas=False)
-    device_memory_gb_str = fmt_memory_capacity(80 * GiB, unit=GiB, precision=0, commas=False)
+    device_memory_gb_str = fmt_memory_capacity(device_memory, unit=GB, precision=0, commas=False)
 ```
 
 ::: {.fallacy-pitfall}

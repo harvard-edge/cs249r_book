@@ -769,8 +769,9 @@ class CpuMlInefficiency:
     cpu_utilization_max_str = fmt_percent(cpu_utilization_max_value / 100, precision=0, commas=False, style='prose')
     cpu_gflop_per_s_str = fmt_flop_rate(cpu_delivered_flops, unit=GFLOP / second, precision=0, commas=False)
 
-    # A100/Mobile specs for footnote comparison
+    # A100/V100/Mobile specs for footnote comparison
     a100_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.A100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    v100_fp16_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.V100.compute.peak_flops, unit=TFLOP / second, precision=0, commas=False)
     a100_tf32_tflop_per_s_str = fmt_flop_rate(Hardware.Cloud.A100.compute.precision_flops['tf32'], unit=TFLOP / second, precision=0, commas=False)
     mobile_tops_str = fmt_ops_rate(Hardware.Mobile.iPhone15Pro.compute.peak_flops, unit=TOPS, precision=0, commas=False)
 ```
@@ -1492,7 +1493,7 @@ The `ptrue` instruction activates all available predicate lanes without encoding
 
 To address these limitations, SIMT[^fn-dally-gpu-precision] extends SIMD principles by enabling parallel execution across multiple independent threads, each maintaining its own program counter and architectural state [@lindholm2008; @nickolls2008]. This model maps naturally to matrix computations, where each thread processes different portions of a workload while still benefiting from shared instruction execution. In NVIDIA's GPU architectures, each Streaming Multiprocessor (SM)\index{Streaming Multiprocessor!GPU architecture}[^fn-sm-gpu-building-block] coordinates thousands of threads executing in parallel, allowing for efficient scaling of neural network computations. Threads are organized into warps\index{Warp!execution unit}[^fn-warp-divergence], which are the basic execution units that enable SIMT efficiency. @Lst-cuda_simt shows this parallel processing model in action.
 
-[^fn-dally-gpu-precision]: **Reduced-Precision ML**\index{Precision!reduced, architectural trade-off}: The precision-performance trade-off is quantifiable [@dally2021; @dally2023]: halving the bit-width of an operand can fit more arithmetic units in the same silicon area and halves the memory bandwidth consumed per element. NVIDIA's shift from Pascal P100 GPUs to mixed-precision Tensor Cores in Volta V100 GPUs increased peak FP16 throughput from about 21.2 to 125 TFLOP/s, roughly 6$\times$ [@nvidia_tensors_fp16_2017]. This established precision selection as a first-class architectural decision: the correct precision is the lowest one that preserves model accuracy, not the highest one the hardware supports.
+[^fn-dally-gpu-precision]: **Reduced-Precision ML**\index{Precision!reduced, architectural trade-off}: The precision-performance trade-off is quantifiable [@dally2021; @dally2023]: halving the bit-width of an operand can fit more arithmetic units in the same silicon area and halves the memory bandwidth consumed per element. NVIDIA's shift from Pascal P100 GPUs to mixed-precision Tensor Cores in Volta V100 GPUs increased peak FP16 throughput from about 21.2 to `{python} CpuMlInefficiency.v100_fp16_tflop_per_s_str`, roughly 6$\times$ [@nvidia_tensors_fp16_2017]. This established precision selection as a first-class architectural decision: the correct precision is the lowest one that preserves model accuracy, not the highest one the hardware supports.
 
 [^fn-sm-gpu-building-block]: **Streaming Multiprocessor (SM)**\index{Streaming Multiprocessor!occupancy}: The physical hardware engine that implements the SIMT model by using warp schedulers to coordinate many parallel threads. Maintaining enough active warps can help hide instruction and memory latency, but occupancy alone does not identify the bottleneck. Low occupancy may result from register use, shared-memory use, block dimensions, or insufficient parallel work, while a memory-bound kernel can still have high occupancy.
 
@@ -5721,13 +5722,15 @@ Teams expect eight GPUs to train 8$\times$ faster than one GPU. Multi-accelerato
 ```{python}
 #| echo: false
 #| label: fp-peak-vs-sustained-recap
-from mlsysim.fmt import fmt, check, fmt_flop_rate, fmt_percent
+from mlsysim.fmt import fmt, check, fmt_flop_rate, fmt_percent, fmt_multiple
 
 class FpPeakVsSustainedRecap:
     """A100 peak and sustained ranges for the peak-FLOP/s fallacy."""
 
     # LOAD
     a100_peak_flops = Hardware.Cloud.A100.compute.peak_flops
+    h100_fp16_flops = Hardware.Cloud.H100.compute.peak_flops
+    h100_fp32_flops = Hardware.Cloud.H100.compute.precision_flops["fp32"]
     transformer_flops_low = 120 * (TFLOP / second)  # scenario assumption: sustained transformer lower bound
     transformer_flops_high = 180 * (TFLOP / second)  # scenario assumption: sustained transformer upper bound
     recsys_flops_low = 10 * (TFLOP / second)  # scenario assumption: sustained recommender lower bound
@@ -5741,6 +5744,7 @@ class FpPeakVsSustainedRecap:
 
     transformer_util_low_rounded = round(transformer_util_low * 10) / 10
     transformer_util_high_rounded = round(transformer_util_high * 10) / 10
+    h100_prec_gap = (h100_fp16_flops / h100_fp32_flops).to("").magnitude
 
     # GUARD
     check(
@@ -5754,6 +5758,9 @@ class FpPeakVsSustainedRecap:
 
     # OUTPUT
     a100_fp16_tflop_per_s_str = fmt_flop_rate(a100_peak_flops, unit=TFLOP / second, precision=0, commas=False)
+    h100_fp16_tflop_per_s_str = fmt_flop_rate(h100_fp16_flops, unit=TFLOP / second, precision=0, commas=True)
+    h100_fp32_tflop_per_s_str = fmt_flop_rate(h100_fp32_flops, unit=TFLOP / second, precision=0, commas=False)
+    h100_prec_gap_mult_str = fmt_multiple(round(h100_prec_gap), precision=0, commas=False)
     transformer_low_tflop_per_s_str = fmt_flop_rate(transformer_flops_low, unit=TFLOP / second, precision=0, commas=False)
     transformer_high_tflop_per_s_str = fmt_flop_rate(transformer_flops_high, unit=TFLOP / second, precision=0, commas=False)
     transformer_util_low_str = fmt_percent(transformer_util_low_rounded, precision=0, commas=False, style='prose')
@@ -5776,7 +5783,7 @@ Vendors advertise peak FLOP/s\index{Peak FLOPS!misleading metric} as the definit
 
 **Fallacy**: *Any FLOP/s rating can estimate a low-precision workload.*
 
-Accelerators have separate datapaths for different precisions, and the peak throughput varies dramatically across them. An H100 delivers roughly 1,000 TFLOP/s in FP16 tensor operations but only about 67 TFLOP/s in FP32 CUDA-core operations: a roughly 15$\times$ gap within the same chip [@choquette2023]. Estimating training time with the FP32 number when the workload actually uses BF16 produces utilization figures that look catastrophic for no reason, and matching against the wrong roofline misclassifies kernels as compute-bound when they are memory-bound (or vice versa). Always match the peak constant to the precision the workload actually issues, and quote precision explicitly when reporting MFU.
+Accelerators have separate datapaths for different precisions, and the peak throughput varies dramatically across them. An H100 delivers roughly `{python} FpPeakVsSustainedRecap.h100_fp16_tflop_per_s_str` in FP16 tensor operations but only about `{python} FpPeakVsSustainedRecap.h100_fp32_tflop_per_s_str` in FP32 CUDA-core operations: a roughly `{python} FpPeakVsSustainedRecap.h100_prec_gap_mult_str` gap within the same chip [@choquette2023]. Estimating training time with the FP32 number when the workload actually uses BF16 produces utilization figures that look catastrophic for no reason, and matching against the wrong roofline misclassifies kernels as compute-bound when they are memory-bound (or vice versa). Always match the peak constant to the precision the workload actually issues, and quote precision explicitly when reporting MFU.
 
 :::
 

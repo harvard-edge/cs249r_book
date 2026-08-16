@@ -106,6 +106,7 @@ These principles form a layered architecture that mirrors the fleet stack synthe
 # │ How: Direct probability and rate calculations from the stated assumptions.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import HOURS_PER_DAY
 from mlsysim.fmt import check, fmt_count, fmt_int, fmt_multiple, fmt_percent, fmt_time
 
 class ConclusionScaleFacts:
@@ -114,8 +115,9 @@ class ConclusionScaleFacts:
     tail_percentile = 0.99
     llama_failures = 419
     llama_days = 54
-    hours_per_day = 24
+    hours_per_day = HOURS_PER_DAY
     straggler_speed = 0.80
+    llama_gpus = 16384
     # ┌── 2. EXECUTE ───────────────────────────────────────
     tail_hit_probability = 1 - tail_percentile**tail_servers
     llama_hours_per_failure = llama_days * hours_per_day / llama_failures
@@ -133,6 +135,7 @@ class ConclusionScaleFacts:
     llama_hours_per_failure_str = fmt_time(llama_hours_per_failure, 'hour', precision=1, commas=False, style='word')
     straggler_speed_pct_str = fmt_percent(straggler_speed, precision=0, commas=False, style='prose')
     straggler_drop_pct_str = fmt_percent(straggler_drop, precision=0, commas=False, style='prose')
+    llama_gpus_str = fmt_int(llama_gpus, commas=True)
 ```
 
 The first principle is that communication can become the binding term at scale [@jiang2024megascale; @narayanan2021]. In many synchronous training regimes, gradient synchronization and straggler effects dominate unless topology, overlap, and batching are designed around them. Production inference systems can also become latency-bound by tail effects[^fn-tail-effects] [@dean2013], where the slowest worker determines response time regardless of how fast others complete.
@@ -145,7 +148,7 @@ The first principle is that communication can become the binding term at scale [
 
 [^fn-gradient-compression]: **Gradient Compression**\index{Gradient Compression}: @Sec-collective-communication explores techniques that reduce communication volume 10--100$\times$ through sparsification, quantization, and error feedback, enabling bandwidth-limited distributed and federated training.
 
-The second principle follows directly: at distributed scale, component failures occur not occasionally but continuously. Meta's experience training Llama 3 on 16,384 GPUs documented `{python} ConclusionScaleFacts.llama_failures_str` over `{python} ConclusionScaleFacts.llama_days_str`, averaging one interruption every `{python} ConclusionScaleFacts.llama_hours_per_failure_str` [@dubey2024llama]. Hardware failures, network partitions, and service disruptions are routine occurrences that systems must handle without human intervention. The synchronous nature of large-scale ML training amplifies the cost of each failure: a single failed rank stalls every other rank in the collective, forcing the entire fleet to roll back to the last checkpoint. The computational loss from one event therefore scales linearly with cluster size, which is precisely why checkpoint cadence and recovery architecture are not afterthoughts but first-order design dimensions.
+The second principle follows directly: at distributed scale, component failures occur not occasionally but continuously. Meta's experience training Llama 3 on `{python} ConclusionScaleFacts.llama_gpus_str` GPUs documented `{python} ConclusionScaleFacts.llama_failures_str` over `{python} ConclusionScaleFacts.llama_days_str`, averaging one interruption every `{python} ConclusionScaleFacts.llama_hours_per_failure_str` [@dubey2024llama]. Hardware failures, network partitions, and service disruptions are routine occurrences that systems must handle without human intervention. The synchronous nature of large-scale ML training amplifies the cost of each failure: a single failed rank stalls every other rank in the collective, forcing the entire fleet to roll back to the last checkpoint. The computational loss from one event therefore scales linearly with cluster size, which is precisely why checkpoint cadence and recovery architecture are not afterthoughts but first-order design dimensions.
 
 @Sec-fault-tolerance-reliability establishes that architects must embed failure handling from the beginning. Checkpointing strategies balance recovery granularity against overhead. Elastic training[^fn-elastic-training] dynamically adjusts to changing cluster membership, and graceful degradation maintains service quality as capacity diminishes. Systems that treat failure as exceptional do not survive production deployment.
 
@@ -364,7 +367,7 @@ The scale of large ML infrastructure invites comparison with a highly energy-eff
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Systems
-from mlsysim.fmt import fmt_int, check, fmt, fmt_math, fmt_multiple, fmt_qty
+from mlsysim.fmt import fmt_int, check, fmt_math, fmt_multiple, fmt_power, fmt_qty
 from mlsysim.core.units import TFLOP, flop, second, watt, MW
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -409,9 +412,15 @@ class FermiEstimate:
     _brain_coeff = brain_ops / 10**_brain_exp
     brain_ops_math = fmt_math(f"{_brain_coeff:.1f} \\times 10^{{{_brain_exp}}}")
     throughput_ratio_mult_str = fmt_multiple(throughput_ratio, precision=0, commas=True)
-    n_gpus_str = fmt(n_gpus, precision=0, commas=True)
+    n_gpus_str = fmt_int(n_gpus, commas=True)
+    n_gpus_flops_calc_math = fmt_math(rf"{n_gpus:,} \times \text{{H100 FP16 tensor peak}}")
     per_gpu_tflop_per_s_str = fmt_qty(gpu_peak_flops, TFLOP / second, precision=0)
     power_calc_math = fmt_math(f"{n_gpus:,} \\times {int(gpu_tdp.to(watt).magnitude)} \\text{{ W}}")
+    brain_synapses_math = fmt_math(r"10^{14}")
+    brain_firing_rate_str = fmt_qty(brain_firing_rate, 1 / second, precision=0)
+    brain_ops_calc_math = fmt_math(r"10^{14} \times 1\text{ Hz}")
+    brain_power_w_str = fmt_power(brain_power, precision=0)
+    brain_power_w_math = fmt_math(rf"{int(brain_power.to(watt).magnitude)} \text{{ W}}")
 ```
 
 ::: {#nbk-conclusion-fermi-estimate-intelligence .callout-notebook title="The Fermi estimate of intelligence"}
@@ -421,11 +430,11 @@ class FermiEstimate:
 **Assumptions**:
 
 *   **Machine cluster**: `{python} FermiEstimate.n_gpus_str` H100 GPUs in a reference large-cluster scenario.
-*   **Machine FLOP/s**: $25{,}000 \times \text{H100 FP16 tensor peak} \approx$ `{python} FermiEstimate.machine_ops_math` FLOP/s (rounded; H100 FP16 tensor peak is `{python} FermiEstimate.per_gpu_tflop_per_s_str`).
+*   **Machine FLOP/s**: `{python} FermiEstimate.n_gpus_flops_calc_math` $\approx$ `{python} FermiEstimate.machine_ops_math` FLOP/s (rounded; H100 FP16 tensor peak is `{python} FermiEstimate.per_gpu_tflop_per_s_str`).
 *   **Machine power**: `{python} FermiEstimate.power_calc_math` $\approx$ `{python} FermiEstimate.machine_power_mw_str`.
-*   **Brain synapses**: $10^{14}$ synapses (connections).
-*   **Brain firing rate**: illustrative average spike rate $\approx 1 \text{ Hz}$; estimates vary by neuron type and brain region, and average cortical firing is far below the 100 Hz peak rates often used in casual comparisons.
-*   **Brain synaptic operation rate**: $10^{14} \times 1 =$ `{python} FermiEstimate.brain_ops_math` synaptic ops/s.
+*   **Brain synapses**: `{python} FermiEstimate.brain_synapses_math` synapses (connections).
+*   **Brain firing rate**: illustrative average spike rate $\approx$ `{python} FermiEstimate.brain_firing_rate_str`; estimates vary by neuron type and brain region, and average cortical firing is far below the 100 Hz peak rates often used in casual comparisons.
+*   **Brain synaptic operation rate**: `{python} FermiEstimate.brain_ops_calc_math` = `{python} FermiEstimate.brain_ops_math` synaptic ops/s.
 
 **Math**:
 
@@ -435,7 +444,7 @@ $$
 \frac{\text{machine peak FLOP/s}}{\text{brain synaptic ops/s}} \approx `{python} FermiEstimate.throughput_ratio_mult_str`
 $$
 
-**Systems insight**: The comparison is useful only as a caution, not as an equivalence. Machine FLOP/s are overwhelmingly dense matrix multiplications (GEMMs) mandated by Transformer architectures: structurally rigid, synchronous operations tightly orchestrated across thousands of accelerators. Biological synaptic operations are sparse, event-driven, and massively decentralized, with no equivalent of a global barrier or gradient step. The throughput ratio measures raw arithmetic volume, not intelligence, and the architectural gap between the two operation types is as significant as the numerical gap; any efficiency comparison between a $20 \text{ W}$ brain and a `{python} FermiEstimate.machine_power_mw_str` cluster depends on the operation model used for the brain.
+**Systems insight**: The comparison is useful only as a caution, not as an equivalence. Machine FLOP/s are overwhelmingly dense matrix multiplications (GEMMs) mandated by Transformer architectures: structurally rigid, synchronous operations tightly orchestrated across thousands of accelerators. Biological synaptic operations are sparse, event-driven, and massively decentralized, with no equivalent of a global barrier or gradient step. The throughput ratio measures raw arithmetic volume, not intelligence, and the architectural gap between the two operation types is as significant as the numerical gap; any efficiency comparison between a `{python} FermiEstimate.brain_power_w_math` brain and a `{python} FermiEstimate.machine_power_mw_str` cluster depends on the operation model used for the brain.
 
 :::
 
@@ -447,7 +456,7 @@ The Fermi estimate is useful precisely because it refuses a simplistic equivalen
 ```
 ![](images/svg/vol2_conclusion_margin_004.svg){width="100%" fig-alt="Two orange bars on a log scale comparing Cluster 17.5 MW with Brain 20 W; the cluster bar is far longer."}
 
-*A data center draws megawatts; the brain runs on ~20 watts.*
+*A data center draws megawatts; the brain runs on ~{python} FermiEstimate.brain_power_w_str.*
 :::
 
 The fleet stack provides the professional framework for engineering intelligence as a system: infrastructure powers the fleet, distributed protocols coordinate work across thousands of devices, serving systems deliver intelligence to users, and governance mandates keep the fleet aligned with security, sustainability, accountability, and explicit human-impact constraints. Large-scale intelligent systems need engineers who understand these principles and can apply them under constraint. The agenda is therefore threefold: systems that scale, systems that endure, and systems whose social and environmental obligations are engineered into the operating path.

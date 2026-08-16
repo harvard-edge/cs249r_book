@@ -735,7 +735,7 @@ class HbmMemoryBudget:
     check(abs(total_min_pct - 65.9) < 0.2, f"Expected ~65.9% min occupancy, got {total_min_pct}")
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
-    hbm_capacity_gb_str = fmt_memory_capacity(hbm_capacity, precision=0, commas=False)
+    hbm_capacity_gb_str = fmt_memory_capacity(80 * GB, unit=GB, precision=0, commas=False)
     weight_per_gpu_gb_str = fmt_memory(weight_per_gpu, unit=GB, precision=2, commas=False)
     optimizer_per_gpu_gb_str = fmt_memory(optimizer_per_gpu, unit=GB, precision=1, commas=False)
     gradient_per_gpu_gb_str = fmt_memory(gradient_per_gpu, unit=GB, precision=1, commas=False)
@@ -788,17 +788,23 @@ From the data pipeline's perspective, Tier 0 is not a storage tier to be managed
 # │ How:     Read Hardware.Cloud.H100.interconnect.bandwidth and Hardware.Cloud.H100.nvlink.bandwidth from constants; format GB/s.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_bandwidth
+from mlsysim.fmt import fmt_bandwidth, fmt_memory
 
 class DRAMInterconnect:
     pcie5_bw = Hardware.Cloud.H100.interconnect.bandwidth
     nvlink_bw = Hardware.Cloud.H100.nvlink.bandwidth
     pcie5_bidir_bw = 2 * pcie5_bw  # bidirectional = both directions at once
+    node_dram = 512 * GB
+    embedding_table = 200 * GB
+    remaining_dram = node_dram - embedding_table
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     pcie5_bw_gb_per_s_str = fmt_bandwidth(pcie5_bw, unit=GB / second, precision=0, commas=False)
     nvlink_bw_gb_per_s_str = fmt_bandwidth(nvlink_bw, unit=GB / second, precision=0, commas=False)
     pcie5_bidir_bw_gb_per_s_str = fmt_bandwidth(pcie5_bidir_bw, unit=GB / second, precision=0, commas=False)
+    node_dram_gb_str = fmt_memory(node_dram, unit=GB, precision=0, commas=False)
+    embedding_table_gb_str = fmt_memory(embedding_table, unit=GB, precision=0, commas=False)
+    remaining_dram_gb_str = fmt_memory(remaining_dram, unit=GB, precision=0, commas=False)
 ```
 ### Tier 1: Host DRAM {#sec-storage-tier1-dram}
 
@@ -821,7 +827,7 @@ Host DRAM also provides the **augmentation workspace**\index{Data Augmentation!w
 
 Some augmentation pipelines have moved from CPU to GPU execution, using libraries like NVIDIA Data Loading Library (DALI)\index{DALI} to perform image decoding and augmentation on the accelerator itself. This approach eliminates the CPU augmentation bottleneck and reduces the host DRAM bandwidth demand, because compressed data (smaller) is transferred to the GPU instead of decoded data (larger). The trade-off is that augmentation on the GPU consumes HBM capacity and compute cycles that would otherwise be available for training. For *compute-bound* workloads (where the GPU is already saturated with matrix multiplications), GPU-based augmentation is counterproductive. For *I/O-bound* workloads (where the GPU waits for data), it can improve overall throughput by shifting work from the bottleneck (CPU) to the resource with spare capacity (GPU).
 
-The three roles interact in subtle ways. The prefetch buffer and the augmentation workspace compete for the same physical DRAM, and embedding tables consume capacity that could otherwise serve as deeper prefetch queues. A node with 512 GB of DRAM hosting a 200 GB embedding table has only 312 GB remaining for prefetching and augmentation. If the data loader uses 8 workers, each maintaining a decode buffer of 1 GB, the effective prefetch capacity drops further. System architects must balance these competing demands by profiling the actual memory consumption of each pipeline stage and provisioning DRAM accordingly.
+The three roles interact in subtle ways. The prefetch buffer and the augmentation workspace compete for the same physical DRAM, and embedding tables consume capacity that could otherwise serve as deeper prefetch queues. A node with `{python} DRAMInterconnect.node_dram_gb_str` of DRAM hosting a `{python} DRAMInterconnect.embedding_table_gb_str` embedding table has only `{python} DRAMInterconnect.remaining_dram_gb_str` remaining for prefetching and augmentation. If the data loader uses 8 workers, each maintaining a decode buffer of 1 GB, the effective prefetch capacity drops further. System architects must balance these competing demands by profiling the actual memory consumption of each pipeline stage and provisioning DRAM accordingly.
 
 The physical layout of DRAM has performance implications that are invisible in single-socket benchmarks but critical at production scale. Multi-socket servers exhibit Non-Uniform Memory Access (NUMA) topology where each CPU socket has "local" DRAM that it can access at full bandwidth and "remote" DRAM attached to the other socket at roughly half bandwidth. In a dual-socket DGX node with eight GPUs split four per socket, a data loader thread running on socket 0 that allocates its prefetch buffer in socket 1's DRAM pays a roughly 2$\times$ bandwidth penalty on every buffer access. The fix is **NUMA-aware allocation**\index{NUMA!aware allocation}: pin each data loader worker to the same CPU socket (the same NUMA domain) as the GPUs it serves, and use `numactl` or `libnuma` to ensure memory allocation stays local. Proper NUMA pinning can improve data loading throughput by 30–50 percent on dual-socket systems, a gain that is invisible in development environments but essential when every percentage point of utilization translates to thousands of dollars per day.
 
@@ -884,6 +890,10 @@ class NvmeTierContext:
     tokenized_shard = 3 * GB  # scenario tokenized shard size assumption
     nvme_per_drive_bw = Hardware.Tech.Storage.NvmeGen4.bandwidth
     nvme_drive_capacity = 7.68 * TB  # scenario NVMe drive capacity assumption
+    raid0_bw = LOCAL_NVME_DRIVES_PER_NODE_REF.magnitude * nvme_per_drive_bw
+    hdd_bw = 100 * (MB / second)
+    zstd1_eff_bw = raid0_bw * 3
+    zstd9_eff_bw = raid0_bw * 4
     tokenized_text = training_tokens * token_id_bytes
     tokenized_shard_count_val = round((tokenized_text / tokenized_shard).to("").magnitude)
     metadata_reduction_val = (training_tokens / tokenized_shard_count_val).to(count).magnitude
@@ -898,6 +908,10 @@ class NvmeTierContext:
     check(metadata_reduction_val > 100_000_000, "Shard-level metadata access should reduce token-level opens by hundreds of millions.")
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     nvme_bw_gb_per_s_str = fmt_bandwidth(nvme_per_drive_bw, unit=GB / second, precision=0, commas=False)
+    raid0_bw_gb_per_s_str = fmt_bandwidth(raid0_bw, unit=GB / second, precision=0, commas=False)
+    hdd_bw_mb_per_s_str = fmt_bandwidth(hdd_bw, unit=MB / second, precision=0, commas=False)
+    zstd1_eff_bw_gb_per_s_str = fmt_bandwidth(zstd1_eff_bw, unit=GB / second, precision=0, commas=False)
+    zstd9_eff_bw_gb_per_s_str = fmt_bandwidth(zstd9_eff_bw, unit=GB / second, precision=0, commas=False)
     tokenized_text_tb_str = fmt_memory(tokenized_text, unit=TB, precision=0, commas=False)
     tokenized_local_stream_min_str = fmt_time(tokenized_local_stream, minute, precision=1, commas=False, style='word')
     local_nvme_capacity_tb_str = fmt_memory(local_nvme_capacity, unit=TB, precision=1, commas=False)
@@ -912,7 +926,7 @@ class NvmeTierContext:
 ```
 ### Tier 2: Local NVMe {#sec-storage-tier2-nvme}
 
-When the working set exceeds host DRAM, the system falls to Tier 2: the local NVMe\index{NVMe!ML storage tier} drives attached directly to the compute node. NVMe[^fn-nvme-protocol] provides a high-performance protocol designed specifically for solid-state drives, achieving `{python} NvmeTierContext.nvme_bw_gb_per_s_str` of sequential throughput per drive. With four drives in a RAID-0 configuration, a single node can sustain roughly 28 GB/s of sequential reads before overhead, sufficient to stream the `{python} NvmeTierContext.tokenized_text_tb_str` serialized dataset from local disk in about `{python} NvmeTierContext.tokenized_local_stream_min_str` under ideal sequential conditions.
+When the working set exceeds host DRAM, the system falls to Tier 2: the local NVMe\index{NVMe!ML storage tier} drives attached directly to the compute node. NVMe[^fn-nvme-protocol] provides a high-performance protocol designed specifically for solid-state drives, achieving `{python} NvmeTierContext.nvme_bw_gb_per_s_str` of sequential throughput per drive. With four drives in a RAID-0 configuration, a single node can sustain roughly `{python} NvmeTierContext.raid0_bw_gb_per_s_str` of sequential reads before overhead, sufficient to stream the `{python} NvmeTierContext.tokenized_text_tb_str` serialized dataset from local disk in about `{python} NvmeTierContext.tokenized_local_stream_min_str` under ideal sequential conditions.
 
 [^fn-nvme-protocol]: **NVMe (Non-Volatile Memory Express)**\index{NVMe!queue parallelism}: A storage protocol designed for SSDs, connecting directly to the CPU via PCIe lanes. NVMe replaced Advanced Host Controller Interface (AHCI)'s single queue of 32 commands with 64K queues of 64K commands each, a 130-million-fold increase in maximum outstanding I/O. This deep queue parallelism is what allows a multi-worker ML data loader to saturate the drive's bandwidth; with AHCI, 32 workers would serialize on the single command queue regardless of flash speed.
 
@@ -934,7 +948,7 @@ The third approach uses the tar-based archive format popularized by WebDataset. 
 
 For the running example, the 1.5 trillion token dataset is typically stored as a collection of 256 MB to 4 GB binary shards, each containing a contiguous sequence of tokenized text. The data loader opens a shard, reads it sequentially into a buffer, and iterates over tokens within the buffer. When the buffer is exhausted, the loader opens the next shard. The total number of `open()` calls per epoch is the number of shards (roughly `{python} NvmeTierContext.tokenized_shard_count_str` if the `{python} NvmeTierContext.tokenized_text_tb_str` serialized corpus is split into `{python} NvmeTierContext.tokenized_shard_gb_str` shards), not the number of tokens (trillions). This approximately `{python} NvmeTierContext.metadata_reduction_mult_str` reduction in metadata operations is what makes streaming from both local NVMe and remote storage feasible at training scale.
 
-At the NVMe tier, compression represents a critical trade-off between I/O bandwidth and CPU cycles. An I/O-bound pipeline, where the NVMe drives cannot keep up with accelerator demand, benefits from aggressive compression: zstd at level 9 achieves roughly 4:1 compression but decompresses at only 0.5 GB/s per CPU core. A CPU-bound pipeline, where decode and augmentation already saturate the host processor, prefers lighter compression: zstd at level 1 offers roughly 3:1 compression but decompresses at 1.5 GB/s per core. On a 28 GB/s four-drive NVMe RAID array, zstd-1 delivers an effective throughput of 84 GB/s of uncompressed data, while zstd-9 delivers 112 GB/s but requires 3$\times$ more CPU cores dedicated to decompression. The optimal compression level is therefore not a property of the data but a property of the pipeline's bottleneck, and it can change when the cluster configuration changes (adding more GPUs shifts the bottleneck toward I/O, favoring heavier compression).
+At the NVMe tier, compression represents a critical trade-off between I/O bandwidth and CPU cycles. An I/O-bound pipeline, where the NVMe drives cannot keep up with accelerator demand, benefits from aggressive compression: zstd at level 9 achieves roughly 4:1 compression but decompresses at only 0.5 GB/s per CPU core. A CPU-bound pipeline, where decode and augmentation already saturate the host processor, prefers lighter compression: zstd at level 1 offers roughly 3:1 compression but decompresses at 1.5 GB/s per core. On a `{python} NvmeTierContext.raid0_bw_gb_per_s_str` four-drive NVMe RAID array, zstd-1 delivers an effective throughput of `{python} NvmeTierContext.zstd1_eff_bw_gb_per_s_str` of uncompressed data, while zstd-9 delivers `{python} NvmeTierContext.zstd9_eff_bw_gb_per_s_str` but requires 3$\times$ more CPU cores dedicated to decompression. The optimal compression level is therefore not a property of the data but a property of the pipeline's bottleneck, and it can change when the cluster configuration changes (adding more GPUs shifts the bottleneck toward I/O, favoring heavier compression).
 
 A standard ImageNet training pipeline makes the cost of the wrong format visible.
 
@@ -968,7 +982,7 @@ class ImageNetNvmeLatency:
 
 :::
 
-The central challenge at this tier is the I/O wall: a single NVMe drive is roughly 500$\times$ slower than HBM, and even a four-drive RAID-0 stripe remains roughly 120$\times$ slower. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPUDirect Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of 100 MB/s might view 28 GB/s from a local RAID-0 stripe as superabundant. Relative to the accelerator's appetite, however, 28 GB/s is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
+The central challenge at this tier is the I/O wall: a single NVMe drive is roughly 500$\times$ slower than HBM, and even a four-drive RAID-0 stripe remains roughly 120$\times$ slower. Bridging this gap requires pipelining (overlap I/O with compute, detailed in @sec-storage-pipeline-equation) and, increasingly, GPUDirect Storage (detailed in @sec-storage-gds) to bypass CPU overhead entirely. The I/O wall at this tier is particularly insidious because NVMe performance is excellent by historical standards. A storage engineer accustomed to HDD-era throughput of `{python} NvmeTierContext.hdd_bw_mb_per_s_str` might view `{python} NvmeTierContext.raid0_bw_gb_per_s_str` from a local RAID-0 stripe as superabundant. Relative to the accelerator's appetite, however, `{python} NvmeTierContext.raid0_bw_gb_per_s_str` is a trickle. The only way to bridge the gap is to overlap storage reads with computation so thoroughly that the accelerator never perceives the storage delay.
 
 Local NVMe is also the primary tier for **local checkpoint staging**\index{Checkpointing!local checkpoint staging}. When saving a model checkpoint, the fastest strategy is to write to local NVMe at full bandwidth (minimizing the time the training pipeline is paused), then asynchronously replicate to shared storage for durability, since a per-node shard written directly to a contended parallel file system takes several times longer than the same shard written to local drives. The optimal checkpoint frequency depends on cluster failure rates and checkpoint write time, but the storage-side design goal is already clear: minimize $T_{\text{write}}$ through tiered staging by writing to local NVMe at full bandwidth, then background-copying to shared storage. @Sec-storage-checkpointing works the timings through in full.
 
@@ -1237,13 +1251,13 @@ The transition from Tier 4 to Tier 5 is driven primarily by economics: data that
 # │ How:     100 TB × 1000 GB/TB × $0.004/GB/month × 12 months.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim import GB, THOUSAND, USD, ureg
+from mlsysim import Infrastructure, GB, THOUSAND, USD, ureg
 from mlsysim.fmt import check, fmt_usd
 
 class GlacierCost:
     # ┌── 1. LOAD ─────────────────────────────────────────
     dataset_size_tb = 100
-    cost_glacier_gb_mo = 0.004
+    cost_glacier_gb_mo = Infrastructure.Pricing.Storage.GlacierStandardPerTbMonth.rate.to(USD / (GB * ureg.month)).magnitude
 
     # ┌── 2. EXECUTE ──────────────────────────────────────
     dataset_size = dataset_size_tb * THOUSAND * GB
@@ -2589,8 +2603,11 @@ from mlsysim.fmt import fmt, fmt_memory
 
 class CheckpointFleetRetention:
     # ┌── 1. LOAD (Constants) ──────────────────────────────────────────────
-    ckpt_total = Models.Language.GPT3.parameters * (10 * (byte / param))
-    checkpoint_count_val = 30 * 24 * 60 // 10
+    bytes_per_param_ckpt = ReferenceStats.StorageTrainingCorpus.CheckpointBytesPerParameter
+    training_window = ReferenceStats.StorageTrainingCorpus.TrainingWindow
+    checkpoint_interval = ReferenceStats.StorageTrainingCorpus.CheckpointInterval
+    ckpt_total = Models.Language.GPT3.parameters * bytes_per_param_ckpt
+    checkpoint_count_val = int((training_window / checkpoint_interval).to("").magnitude)
     ckpt_fleet_total = ckpt_total * checkpoint_count_val
     retention_recent = 3 * ckpt_total
     retained_every_100_count_val = checkpoint_count_val // 100

@@ -335,9 +335,11 @@ class HbmSerBudget:
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────
     fit_per_mbit_str = fmt(ser_fit_per_mbit, precision=0, commas=False)
     time_to_error_str = fmt_time(round(time_to_error_s), 'second', precision=0, commas=False, style='word')
+    cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
+    hbm_per_gpu_gb_str = fmt_qty(hbm_per_gpu, GB, precision=0, commas=False)
 ```
 
-Composition also exposes which subsystem dominates the budget, and memory is the consequential case. Consider training an Archetype A (GPT-4/Llama-3) 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs. Unprotected HBM is the binding term: at roughly `{python} HbmSerBudget.fit_per_mbit_str` FIT per megabit, the cluster's $1,024 \times 80 \text{ GB}$ of memory accumulates so many failure sites that uncorrected corruption would strike roughly every `{python} HbmSerBudget.time_to_error_str`, making large-scale training impossible. Error-correcting-code (ECC) memory protection is therefore not optional. ECC detects and corrects common single-bit errors, cutting the effective soft-error rate by roughly two orders of magnitude and pushing memory back below the logic and interconnect terms in the budget, though residual multi-bit or escaped corruptions remain as the silent-data-corruption problem.
+Composition also exposes which subsystem dominates the budget, and memory is the consequential case. Consider training an Archetype A (GPT-4/Llama-3) 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs. Unprotected HBM is the binding term: at roughly `{python} HbmSerBudget.fit_per_mbit_str` FIT per megabit, the cluster's `{python} HbmSerBudget.cluster_gpus_str` $\times$ `{python} HbmSerBudget.hbm_per_gpu_gb_str` of memory accumulates so many failure sites that uncorrected corruption would strike roughly every `{python} HbmSerBudget.time_to_error_str`, making large-scale training impossible. Error-correcting-code (ECC) memory protection is therefore not optional. ECC detects and corrects common single-bit errors, cutting the effective soft-error rate by roughly two orders of magnitude and pushing memory back below the logic and interconnect terms in the budget, though residual multi-bit or escaped corruptions remain as the silent-data-corruption problem.
 
 These per-component FIT figures describe the silicon's intrinsic soft-error budget, which is why they differ from the 50,000-hour whole-device MTTF used in the worked cascade that follows: the device MTTF folds in every field failure mode (thermal stress, power events, mechanical wear), not just the logic and memory soft-error rates isolated here. The cascade composes those whole-device rates into the cluster figure that actually sets the checkpoint interval; this estimate only establishes why memory protection is the precondition for everything that follows.
 
@@ -887,12 +889,18 @@ class FaultToleranceIntroRecap:
     m = Models.Language.GPT3
     mem_res = TrainingMemoryModel().solve(m, Hardware.Cloud.A100, batch_size=1, precision="fp32")
     gpt3_ckpt_bytes = mem_res.total_memory
+    gpus_example = Systems.Clusters.Training_10K.total_accelerators * 2.5
+    rate = Infrastructure.Pricing.Cloud.GpuTrainingUtilityScenarioPerHour.rate.to(USD / hour).magnitude
+    daily_cost = gpus_example * rate * 24
     check(gpt3_ckpt_bytes > mem_res.optimizer_state, "Full checkpoint must exceed optimizer-only size")
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     gpt3_ckpt_tb_str = fmt_qty(gpt3_ckpt_bytes, TB, precision=1, commas=False)
+    gpus_example_str = fmt(gpus_example, precision=0, commas=True)
+    rate_str = fmt_usd(rate, precision=0, commas=False, per="GPU-hour")
+    daily_cost_str = fmt_usd(daily_cost, scale="M", precision=1, commas=False)
 ```
 
-Large Language Models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. For example, a large training run consuming 25,000 GPUs at approximately \$2 per GPU-hour incurs \$1.2M in compute costs per day. A failure that loses 24 hours of training progress costs \$1.2M in wasted compute plus schedule delay. The checkpoint overhead spans a wide range: 70B-class dense LLM checkpoints can reach hundreds of gigabytes, and the 175B-parameter running example reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` once FP32 Adam optimizer state is included.
+Large Language Models experience the highest absolute failure costs due to their extended training durations and the computational expense of each training hour. For example, a large training run consuming `{python} FaultToleranceIntroRecap.gpus_example_str` GPUs at approximately `{python} FaultToleranceIntroRecap.rate_str` incurs `{python} FaultToleranceIntroRecap.daily_cost_str` in compute costs per day. A failure that loses 24 hours of training progress costs `{python} FaultToleranceIntroRecap.daily_cost_str` in wasted compute plus schedule delay. The checkpoint overhead spans a wide range: 70B-class dense LLM checkpoints can reach hundreds of gigabytes, and the 175B-parameter running example reaches `{python} FaultToleranceIntroRecap.gpt3_ckpt_tb_str` once FP32 Adam optimizer state is included.
 
 Recommendation Systems present unique challenges because their training is often continuous rather than episodic. The value of a RecSys model derives partly from its freshness. Embeddings that capture recent user behavior outperform stale embeddings. A failure that loses hours of embedding updates may degrade recommendation quality in ways that directly impact revenue. Meta has documented that recommendation model freshness directly correlates with engagement metrics, making recovery time a business-critical metric.[^fn-recsys-freshness-cost]
 
@@ -1429,10 +1437,13 @@ class OomAdamwFootprint:
     # ┌── 1. LOAD (Constants) ──────────────────────
     model = Models.Language.Llama2_70B
     bytes_per_param = 12  # scenario budget: BF16 weights (2) + AdamW states (10)
+    n_gpus_node = Systems.Nodes.DGX_A100.accelerators_per_node
+    gpu_mem = Hardware.Cloud.A100.memory.capacity
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────
     params_count = model.parameters.to(param).magnitude
     footprint = memory_from_params(params_count * param, bytes_per_param * byte / param)
+    node_mem_cap = n_gpus_node * gpu_mem
 
     # ┌── 3. GUARD (Invariants) ────────────────────
     check(footprint.to(GB).magnitude > 0, "footprint must be positive")
@@ -1441,9 +1452,12 @@ class OomAdamwFootprint:
     # ┌── 4. OUTPUT (Formatting) ───────────────────
     params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
     footprint_gb_str = fmt_qty(footprint, GB, precision=0, commas=False)
+    n_gpus_node_str = fmt(n_gpus_node, precision=0)
+    gpu_mem_gb_str = fmt_qty(gpu_mem, GB, precision=0, commas=False)
+    node_mem_cap_gb_str = fmt_qty(node_mem_cap, GB, precision=0, commas=False)
 ```
 
-Resource mismanagement is a prominent failure class. GPU memory allocations accumulate across training iterations as intermediate activations, optimizer states, and gradient buffers are allocated but not released, until the allocator exhausts available capacity and raises an out-of-memory error mid-batch. A `{python} OomAdamwFootprint.params_b_str` parameter model in BF16 with AdamW optimizer states requires roughly `{python} OomAdamwFootprint.footprint_gb_str` of GPU memory, exceeding the 640 GB aggregate capacity of an $8 \times 80$ GB node before activations and temporary buffers are included. The state therefore requires additional sharding across nodes or offload. Memory pressure builds gradually over hundreds of iterations, making root-cause attribution difficult without per-layer memory profiling.
+Resource mismanagement is a prominent failure class. GPU memory allocations accumulate across training iterations as intermediate activations, optimizer states, and gradient buffers are allocated but not released, until the allocator exhausts available capacity and raises an out-of-memory error mid-batch. A `{python} OomAdamwFootprint.params_b_str` parameter model in BF16 with AdamW optimizer states requires roughly `{python} OomAdamwFootprint.footprint_gb_str` of GPU memory, exceeding the `{python} OomAdamwFootprint.node_mem_cap_gb_str` aggregate capacity of an `{python} OomAdamwFootprint.n_gpus_node_str` $\times$ `{python} OomAdamwFootprint.gpu_mem_gb_str` node before activations and temporary buffers are included. The state therefore requires additional sharding across nodes or offload. Memory pressure builds gradually over hundreds of iterations, making root-cause attribution difficult without per-layer memory profiling.
 
 Concurrency and synchronization errors constitute another recurring fault class. In distributed or multi-threaded environments, incorrect coordination among parallel processes leads to race conditions,[^fn-race-condition-training-ft] or inconsistent states.
 
@@ -1965,19 +1979,24 @@ class SDCCollective:
     """The risk of silent corruption in global collectives."""
 
     # ┌── 1. LOAD ──────────────────────────────────────────
-    n_gpus = 100000
+    n_gpus = Systems.Clusters.Training_10K.total_accelerators * 10
     p_sdc_per_gpu_hr = Systems.Reliability.SdcRatePerGpuHr  # illustrative generic SDC-rate assumption
     training_step_s = 2
     # ┌── 2. EXECUTE ───────────────────────────────────────
     exposure_gpu_hr = n_gpus * (training_step_s / SEC_PER_HOUR)  # aggregate GPU-hours per step
     p_step_sdc = 1 - (1 - p_sdc_per_gpu_hr) ** exposure_gpu_hr
+    expected_steps = 1 / p_step_sdc
+    expected_hours = expected_steps * training_step_s / SEC_PER_HOUR
     # ┌── 3. GUARD ─────────────────────────────────────────
     check(p_step_sdc > 0.00005, f"Prob {p_step_sdc:.6f} unexpected")
     check(exposure_gpu_hr > 0, "exposure must be positive")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     prob_str = fmt_percent(p_step_sdc, precision=4, commas=False, style='prose')
     n_gpus_str = fmt(n_gpus, precision=0, commas=True)
+    n_gpus_k_str = fmt_text(fmt_int(n_gpus // 1000), "k")
     training_step_s_str = fmt_time(training_step_s, unit="second", precision=0, commas=False)
+    steps_between_str = fmt_count(round(expected_steps), commas=True, label="step")
+    hours_between_str = fmt_time(expected_hours, "hour", precision=0, style="word")
     _n_tex = n_gpus_str.replace(",", "{,}")
     exposure_eq_math = fmt_math(rf"{_n_tex} \times ({training_step_s}/{SEC_PER_HOUR}) \approx {fmt_int(round(exposure_gpu_hr))}")
 ```
@@ -1991,7 +2010,7 @@ class SDCCollective:
 3. **The exposure**: In a 2-second window, the fleet has `{python} SDCCollective.exposure_eq_math` "GPU-hours" of exposure.
 4. **The probability**: $\Pr(\text{at least one SDC}) \approx$ `{python} SDCCollective.prob_str`.
 
-**Systems insight**: Under this illustrative constant-rate assumption, a 100k-GPU fleet expects one SDC event every 18,000 steps (roughly every 10 hours), even though the per-step probability is only `{python} SDCCollective.prob_str`. Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, corrupted contributions can accumulate in model parameters over a long run. Robustness moves from being a *restart* problem to a *verification* problem: the fleet can use redundant reductions or parity-protected gradients to catch silent parameter corruption.
+**Systems insight**: Under this illustrative constant-rate assumption, a `{python} SDCCollective.n_gpus_k_str`-GPU fleet expects one SDC event every `{python} SDCCollective.steps_between_str` (roughly every `{python} SDCCollective.hours_between_str`), even though the per-step probability is only `{python} SDCCollective.prob_str`. Check-and-verify methods compute a CRC or hash for each gradient shard or reduced buffer, compare the digest across ranks or against a redundant reduction, and block the optimizer step when the digest disagrees. Without checksummed collectives or hash-and-verify gradients on the AllReduce path, corrupted contributions can accumulate in model parameters over a long run. Robustness moves from being a *restart* problem to a *verification* problem: the fleet can use redundant reductions or parity-protected gradients to catch silent parameter corruption.
 
 :::
 
@@ -2326,7 +2345,7 @@ class YoungDalyOptimal:
     overhead_pct_str = fmt_percent(overhead_pct / 100, precision=1, commas=False, style='prose')
     hourly_overhead_pct_str = fmt_percent(hourly_overhead_pct / 100, precision=1, commas=False, style='prose')
     seconds_per_hour_str = fmt_time(SEC_PER_HOUR, "second", precision=0, commas=False, per="hour")
-    n_gpus_str = fmt(10_000, precision=0, commas=True)
+    n_gpus_str = fmt(Systems.Clusters.Training_10K.total_accelerators, precision=0, commas=True)
 ```
 
 ::: {#nbk-fault-tolerance-young-daly-optimal-interval .callout-notebook title="The Young-Daly optimal interval"}
@@ -2511,11 +2530,6 @@ class CheckpointOverheadCalc:
     archB_overhead_pct_str = fmt_percent(archB_overhead_ratio, precision=1, commas=False, style='symbol')
     resnet_overhead_pct_str = fmt_percent(resnet_overhead_ratio, precision=2, commas=False, style='symbol')
     vision_transformer_overhead_pct_str = fmt_percent(vision_transformer_overhead_ratio, precision=2, commas=False, style='symbol')
-
-    archA_workers = 1000  # scenario assumption: checkpoint-storm walkthrough worker count
-    archA_shard = archA_size / archA_workers
-    archA_workers_str = fmt_count(archA_workers, commas=True, label="worker")
-    archA_shard_gb_str = fmt_qty(archA_shard, GB, precision=1, commas=False)
 ```
 
 The Archetype A row below uses the mixed-precision optimizer footprint (`{python} CheckpointOverheadCalc.archA_ckpt_tb_str`), not the full FP32 training-state total (`{python} CheckpointOverheadCalc.archA_fp32_tb_str`) cited in the introduction.
@@ -2645,29 +2659,13 @@ class CheckpointDebug:
     check(total_ckpt_gb_val == 700, f"Expected 700 GB checkpoint, got {total_ckpt_gb_val}")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    weights_gb_str = fmt_qty(params_count * 2 * byte, GB, precision=0, commas=False)
-    optimizer_gb_str = fmt_qty(params_count * 8 * byte, GB, precision=0, commas=False)
-    total_ckpt_gb_str = fmt_qty(total_ckpt_qty, GB, precision=0, commas=False)
-    nfs_gb_per_s_str = fmt_qty(nfs_bw, GB / second, precision=2, commas=False)
-    min_write_s_str = fmt_time(t_write, second, precision=0, commas=False)
-    min_write_min_str = fmt_time(t_write, minute, precision=1, commas=False)
-    per_node_mb_per_s_str = fmt_qty_int(nfs_bw / n_nodes, MB / second, commas=False)
-    per_node_shard_gb_str = fmt_qty(per_node_shard_qty, GB, precision=1, commas=False)
-    per_node_write_min_str = fmt_time(t_write, minute, precision=1, commas=False)  # Aggregated BW bottleneck
-    gpu_cpu_parallel_s_str = fmt_time(t_stage, second, precision=2, commas=False)
-    gpu_cpu_single_path_s_str = fmt_time(t_stage_single, second, precision=1, commas=False)
-    extended_weeks_str = fmt_time(base_weeks * (1 + overhead_pct / 100), 'week', precision=1, commas=False, style='word')
-    extra_cost_k_str = fmt_usd(extra_cost_k * 1000, scale="K", precision=0, commas=False)
     params_b_str = fmt_params(m.parameters, precision=0)
-    bytes_per_param_weights_value_str = fmt(2, precision=0, commas=False)
-    n_gpus_str = fmt_count(n_gpus_ckpt, commas=False, label="GPU")
     n_nodes_str = fmt_count(n_nodes, commas=False, label="node")
+    nfs_gb_per_s_str = fmt_qty(nfs_bw, GB / second, precision=2, commas=False)
+    per_node_mb_per_s_str = fmt_qty_int(nfs_bw / n_nodes, MB / second, commas=False)
     observed_write_min_str = fmt_time(observed_write_min, 'minute', precision=0, commas=False, style='word')
     target_write_min_str = fmt_time(target_write_min, minute, precision=0, commas=False, style='word')
     overhead_pct_str = fmt_percent(overhead_pct / 100, precision=0, commas=False, style='prose')
-    sla_weeks_str = fmt_time(base_weeks, 'week', precision=0, commas=False, style='word')
-    nvme_bw_gb_per_s_str = fmt_qty(nvme_bw, GB / second, precision=1, commas=False)
-    pcie_gb_per_s_str = fmt_qty(pcie_bw, GB / second, precision=0, commas=False)
     residual_overhead_pct_str = fmt_percent(residual_overhead_pct / 100, precision=0, commas=False, style='prose')
 ```
 

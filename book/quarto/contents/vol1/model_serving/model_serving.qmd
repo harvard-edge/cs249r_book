@@ -3906,7 +3906,7 @@ The mobile serving node is governed by four metrics:
 
 Unlike cloud serving where cost dominates, mobile serving faces three related constraints that shape optimization strategy. The first is an energy budget\index{Energy!budget, mobile inference} that throughput targets ignore, because each inference depletes battery. In the modeled pipeline, `{python} MobileServingCalc.m_total_mj_str` at `{python} MobileServingCalc.fps_str` draws about `{python} MobileServingCalc.sustained_mw_str` for the inference path alone, before camera, display, ISP, and OS overhead add to that total in a full photo app, so the optimization target shifts from throughput to energy-per-inference. Thermal throttling\index{Thermal Throttling!mobile serving} compounds this limit, since sustained high-power operation triggers device-specific thermal management once the manufacturer-defined thermal limit is reached, degrading both latency and throughput. Memory constraints\index{Memory!constraints, mobile RAM} close the set, because mobile devices share limited RAM across applications. A model consuming 500 MB may be evicted during background operation, forcing a reload (cold start) that adds 200–500 ms of latency, and even a 150 MB footprint becomes problematic when the model must coexist with other app components. Memory-efficient quantization improves user experience through faster model restoration, and memory-mapped model loading (@sec-model-serving-loading-strategies-eb38) helps further by loading pages on demand rather than requiring the full model in memory.
 
-These constraints make mobile serving optimization qualitatively different from cloud optimization. The goal is not maximum throughput but sustainable performance, maintaining acceptable latency without thermal throttling or excessive battery drain.
+These constraints make mobile serving optimization qualitatively different from cloud optimization. The goal is not maximum throughput but sustainable performance, maintaining acceptable latency without thermal throttling or excessive battery drain. Strict latency budgets make synchronized multi-camera frame processing challenging (@tbl-model-serving-multicamera-timeline). In a 30 FPS autonomous driving pipeline (33 ms total budget), frame capture and arrival jitter consume 15 ms before inference can begin. Batching 6 camera streams into a single GPU invocation completes in 10 ms (at $T=25$ ms), leaving 7 ms for postprocessing, planning, and safety checks. If frame jitter pushes the start past 15 ms, the pipeline misses its deadline.
 
 #### Traffic pattern summary {#sec-model-serving-traffic-pattern-summary}
 
@@ -4667,7 +4667,7 @@ fig, ax, COLORS, plt = book_style.setup_plot(figsize=(10, 4.1))
 
 # ┌── 2. ARRAYS ────────────────────────────────────────────────────────────────
 seq_len = np.linspace(0, 32000, 100)
-from mlsysim import Models
+from mlsysim import Hardware, Models
 
 _m70b = Models.Language.Llama3_70B  # 70-billion-parameter class, FP16
 layers, d_model, bytes_per_param = _m70b.layers, _m70b.hidden_dim, BYTES_FP16.to(byte).magnitude
@@ -4686,8 +4686,8 @@ for b, c in zip(batches, colors):
     gb = get_kv_gb(b, seq_len)
     ax.plot(seq_len, gb, label=f'Batch Size {b}', color=c, linewidth=2)
 
-device_capacity = 80 * GB
-int4_weights = 35 * GB
+device_capacity = Hardware.Cloud.A100.memory.capacity
+int4_weights = _m70b.size_in_bytes(BYTES_INT4)
 limit_gb = (device_capacity - int4_weights).to(GB).magnitude
 ax.axhline(limit_gb, color=COLORS['RedLine'], linestyle='--', linewidth=2)
 
@@ -4785,9 +4785,9 @@ class LlmCaseStudyHwSpecs:
     a100_token_time = transfer_time(case_study_model_weight, a100_bw)
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_gb_str = fmt_memory_capacity(h_a100.memory.capacity, unit=GiB, precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(h_a100.memory.capacity, unit=GB, commas=False)
     a100_bw_tb_per_s_str = fmt_bandwidth(a100_bw, unit=TB / second, precision=2, commas=False)
-    h100_mem_gb_str = fmt_memory_capacity(h_h100.memory.capacity, unit=GiB, precision=0, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(h_h100.memory.capacity, unit=GB, commas=False)
     case_study_model_weight_gb_str = fmt_memory(case_study_model_weight, unit=GB, commas=False)
     case_study_ttft_ms_str = fmt_time(case_study_ttft, 'millisecond', precision=1, commas=False)
     a100_token_ms_str = fmt_time(a100_token_time, 'millisecond', precision=2, commas=False)
@@ -4944,7 +4944,7 @@ class LlmServingCalc:
     realized_tpot_ms_str = fmt_time(realized_tpot, ms, precision=2, commas=False)
     decode_tokens_str = fmt_count(decode_tokens_value, commas=False, label="token")
     total_decode_s_str = fmt_time(total_decode_s, second, precision=2, commas=False)
-    kv_cache_gb_str = fmt_memory_capacity(kv_cache_reserved, unit=GiB, precision=0, commas=False)
+    kv_cache_gb_str = fmt_memory_capacity(kv_cache_reserved, unit=GB, precision=1, commas=False)
     kv_per_token_mb_str = fmt_memory(kv_per_token, unit=MB, precision=3, commas=False)
     kv_capacity_tokens_str = fmt_count(round(kv_capacity_tokens_value), scale="million", precision=1, commas=False, label="token")
     tokens_per_req_str = fmt_count(total_tokens, label="token")
@@ -4957,7 +4957,7 @@ class LlmServingCalc:
         commas=False,
         per="million tokens",
     )
-    remaining_vram_gb_str = fmt_memory_capacity(remaining_vram, unit=GiB, precision=1, commas=False)
+    remaining_vram_gb_str = fmt_memory_capacity(remaining_vram, unit=GB, precision=1, commas=False)
 ```
 
 To obtain the theoretical floor, we divide the `{python} LlmServingCalc.model_weight_gb_str` weight tensor by the `{python} LlmCaseStudyH100BwRecap.h100_bw_tb_per_s_str` bandwidth: $T_{\text{token}} \approx$ `{python} LlmServingCalc.token_time_theoretical_ms_str`. Adding the solver's per-layer dispatch tax gives a modeled TPOT of `{python} LlmServingCalc.realized_tpot_ms_str`. Generating all `{python} LlmServingCalc.decode_tokens_str` therefore takes `{python} LlmServingCalc.decode_tokens_str` $\times$ `{python} LlmServingCalc.realized_tpot_ms_str` = `{python} LlmServingCalc.total_decode_s_str`.
