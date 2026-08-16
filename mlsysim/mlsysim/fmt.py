@@ -2905,7 +2905,9 @@ def _memory_capacity_unit_label(display_unit):
     return None
 
 
-def fmt_memory_capacity(quantity, *, unit=None, precision=None, commas=False):
+def fmt_memory_capacity(
+    quantity, *, unit=None, precision=None, commas=False, approx=False
+):
     """Format branded hardware memory capacities.
 
     Hardware spec sheets commonly label binary memory capacities with decimal
@@ -2928,6 +2930,7 @@ def fmt_memory_capacity(quantity, *, unit=None, precision=None, commas=False):
         display_unit,
         precision=p,
         commas=commas,
+        approx=approx,
         unit_label=_memory_capacity_unit_label(display_unit),
         trim_trailing_zeros=auto_precision,
     )
