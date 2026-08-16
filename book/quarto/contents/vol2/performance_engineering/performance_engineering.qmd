@@ -1004,7 +1004,7 @@ To appreciate the quantitative impact, consider each category applied to a singl
 
 An orthogonal technique for reducing the overhead term in the iron law is **CUDA Graphs**\index{CUDA!graphs, overhead reduction}[^fn-cuda-graphs-constraint]. While operator fusion combines multiple operations into fewer kernels, CUDA Graphs eliminate the CPU overhead of launching those kernels.
 
-[^fn-cuda-graphs-constraint]: **CUDA Graphs**: Introduced in CUDA 10 (2018), originally for graphics rendering pipelines that replay identical command sequences every frame. The strict determinism requirement -- identical operations, shapes, and memory addresses per replay -- directly conflicts with the dynamic shapes and variable batch sizes of LLM serving, restricting their use primarily to the decode phase where the computation pattern repeats per token.
+[^fn-cuda-graphs-constraint]: **CUDA Graphs**\index{CUDA Graphs!definition}: Introduced in CUDA 10 (2018), originally for graphics rendering pipelines that replay identical command sequences every frame. The strict determinism requirement -- identical operations, shapes, and memory addresses per replay -- directly conflicts with the dynamic shapes and variable batch sizes of LLM serving, restricting their use primarily to the decode phase where the computation pattern repeats per token.
 
 In standard PyTorch execution, each kernel launch requires the CPU to push a command to the GPU's command queue. For a transformer decoder layer with 30+ kernels, this CPU-to-GPU roundtrip (typically 5--10 $\mu$s per launch) accumulates to 150--300 $\mu$s per layer. For a 70-layer model, kernel launch overhead alone contributes 10--20 ms per forward pass, a significant fraction of the total time for memory-bound inference.
 
@@ -1095,7 +1095,7 @@ The reduction in HBM traffic can be dramatic. For a sequence length of `{python}
 
 The key insight behind FlashAttention is the **Online Softmax**\index{Online Softmax!FlashAttention}[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $S{\times}S$ matrix.
 
-[^fn-online-softmax-algo]: **Online Softmax**: Online here is an algorithmic term meaning the computation processes data incrementally in a single pass without storing the full input --- the same sense as in online learning or online algorithms. This property is what makes tiling possible: the algorithm never needs the complete $S{\times}S$ score matrix in memory simultaneously, reducing attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ and making long-context inference feasible on fixed-size SRAM.
+[^fn-online-softmax-algo]: **Online Softmax**\index{Online Softmax!definition}: Online here is an algorithmic term meaning the computation processes data incrementally in a single pass without storing the full input --- the same sense as in online learning or online algorithms. This property is what makes tiling possible: the algorithm never needs the complete $S{\times}S$ score matrix in memory simultaneously, reducing attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ and making long-context inference feasible on fixed-size SRAM.
 
 The online algorithm avoids this by maintaining running statistics that are updated incrementally as each tile is processed. When processing tile $t$, the algorithm executes four steps:
 
@@ -1291,7 +1291,7 @@ Fusion reduces the number of trips through HBM; precision engineering reduces th
 
 The first inference-side precision decision is how to shrink weights while protecting the channels that carry rare but essential signal. Post-training quantization to INT8 or INT4 delivers even greater bandwidth savings for inference, but LLMs present a unique challenge: **Outlier Features**\index{Outlier Feature!quantization challenge}[^fn-outlier-features]. @dettmers2022llmint8 discovered that large language models develop a small number of hidden dimensions (about 0.1 percent of features) with activation magnitudes roughly 3--20$\times$ larger than the rest. Applying uniform per-tensor INT8 quantization clips these outliers, destroying the information they carry, or expands the quantization range to accommodate them, wasting precision on the majority of near-zero values.
 
-[^fn-outlier-features]: **Outlier Features**: Large-scale transformers develop emergent "outlier" dimensions with activation magnitudes up to about 20$\times$ larger than typical values [@dettmers2022llmint8]. While these outliers constitute about 0.1 percent of all features, clipping them during INT8 quantization destroys the model's reasoning capabilities. This physical property of large models is the reason post-training quantization (PTQ) requires "outlier-aware" strategies like LLM.int8() or Activation-Aware Weight Quantization (AWQ).
+[^fn-outlier-features]: **Outlier Features**\index{Outlier Feature!definition}: Large-scale transformers develop emergent "outlier" dimensions with activation magnitudes up to about 20$\times$ larger than typical values [@dettmers2022llmint8]. While these outliers constitute about 0.1 percent of all features, clipping them during INT8 quantization destroys the model's reasoning capabilities. This physical property of large models is the reason post-training quantization (PTQ) requires "outlier-aware" strategies like LLM.int8() or Activation-Aware Weight Quantization (AWQ).
 
 ::: {#dfn-performance-engineering-block-wise-quantization .callout-definition title="Block-wise quantization"}
 
@@ -1457,14 +1457,14 @@ A capacity calculation makes the serving impact of precision choices concrete.
 
 **Problem**: A 70B parameter model is served on `{python} KVCacheAnalysis.tensor_parallel_degree_str`$\times$ H100 GPUs. The model weights in FP16 consume `{python} KVCacheAnalysis.weight_fp16_total_gb_str` (`{python} KVCacheAnalysis.weight_fp16_shard_gb_str` per GPU). KV cache at FP16 consumes `{python} KVCacheAnalysis.kv_fp16_gb_str` per request. How does quantizing weights to INT4 and KV cache to INT8 change the maximum batch size?
 
-**Before optimization** (all FP16):
+Before optimization (all FP16):
 
 - Weights: `{python} KVCacheAnalysis.weight_fp16_shard_gb_str`/GPU
 - Available for KV cache: `{python} KVCacheAnalysis.gpu_total_gb_str` - `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` = `{python} KVCacheAnalysis.avail_fp16_gb_str`/GPU
 - KV cache per request: `{python} KVCacheAnalysis.kv_fp16_gb_str` total, or approximately `{python} KVCacheAnalysis.kv_fp16_per_gpu_gb_str`/GPU
 - Maximum batch size: approximately `{python} KVCacheAnalysis.max_batch_fp16_str` requests
 
-**After optimization** (INT4 weights, INT8 KV cache):
+After optimization (INT4 weights, INT8 KV cache):
 
 - Weights: `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` $\times$ (`{python} KVCacheAnalysis.int4_scale_num_str`/`{python} KVCacheAnalysis.int4_scale_den_str`) = `{python} KVCacheAnalysis.weight_int4_gb_str`/GPU (INT4)
 - Available for KV cache: `{python} KVCacheAnalysis.gpu_total_gb_str` - `{python} KVCacheAnalysis.weight_int4_gb_str` = `{python} KVCacheAnalysis.avail_int8_gb_str`/GPU
@@ -1583,7 +1583,7 @@ Backend choice follows the same constraint: the more stable and deployment-speci
 
 Between hand-written CUDA and fully automated graph compilers sits **Triton**\index{Triton!kernel programming}[^fn-triton-tiling], a Python-based language for writing GPU kernels. Triton occupies a middle ground: the programmer specifies the algorithm (tiling strategy, fusion pattern) while Triton handles low-level concerns (thread block scheduling, memory coalescing, shared memory management).
 
-[^fn-triton-tiling]: **Triton**: Introduced by Tillet, Kung, and Cox as an intermediate language and compiler for tiled neural-network computations [@tillet2019], and later developed at OpenAI. The key design decision was making the tile --- not the thread --- the fundamental programming abstraction. This choice directly mirrors the tiling strategy of FlashAttention: the programmer reasons about blocks of data that fit in SRAM, and the compiler maps those blocks to GPU threads and shared memory. This abstraction reduces exposure to low-level CUDA concerns such as warp divergence, bank conflicts, and coalescing while preserving control over the memory hierarchy decisions that determine ML kernel performance.
+[^fn-triton-tiling]: **Triton**\index{Triton!definition}: Introduced by Tillet, Kung, and Cox as an intermediate language and compiler for tiled neural-network computations [@tillet2019], and later developed at OpenAI. The key design decision was making the tile --- not the thread --- the fundamental programming abstraction. This choice directly mirrors the tiling strategy of FlashAttention: the programmer reasons about blocks of data that fit in SRAM, and the compiler maps those blocks to GPU threads and shared memory. This abstraction reduces exposure to low-level CUDA concerns such as warp divergence, bank conflicts, and coalescing while preserving control over the memory hierarchy decisions that determine ML kernel performance.
 
 A Triton kernel for fused GELU activation illustrates the programming model:
 
@@ -1735,7 +1735,7 @@ The preceding sections optimized the same dense computation by moving fewer byte
 
 Speculative decoding\index{Speculative Decoding!bandwidth optimization}[^fn-speculative-decoding-pe] is a latency optimization that breaks the sequential bottleneck of autoregressive generation by using a smaller draft model to predict multiple tokens, which are then verified in parallel by the target model [@leviathan2023speculative; @chen2023accelerating]. The performance-engineering relevance is arithmetic intensity: a single target-model forward pass can process $K$ candidate tokens for roughly the same weight-streaming cost as one token, shifting the decode operating point from the memory-bound slope toward the roofline ridge.
 
-[^fn-speculative-decoding-pe]: **Speculative Decoding**: The draft model may produce tokens that the target model rejects, so the technique trades extra draft-model compute for reduced target-model memory bandwidth pressure. The target model's weights are loaded from HBM once to process $K$ candidate tokens, effectively increasing the arithmetic intensity of the decode phase by $K\times$ when enough tokens are accepted.
+[^fn-speculative-decoding-pe]: **Speculative Decoding**\index{Speculative Decoding!definition}: The draft model may produce tokens that the target model rejects, so the technique trades extra draft-model compute for reduced target-model memory bandwidth pressure. The target model's weights are loaded from HBM once to process $K$ candidate tokens, effectively increasing the arithmetic intensity of the decode phase by $K\times$ when enough tokens are accepted.
 
 @Fig-speculative-decoding contrasts the two decode paths: standard decoding advances one token per sequential target-model pass, while speculative decoding lets the draft model propose a block of $K$ tokens that the target model verifies in a single parallel pass, emitting the accepted prefix together and resampling only at the first rejection.
 
@@ -2174,9 +2174,9 @@ Metrics are not interchangeable; each answers a different bottleneck question. M
 
 The metric choice in @tbl-performance-engineering-key-metrics reflects the fundamental bottleneck shift between training and inference: MFU is usually the right training-efficiency lens, while MBU is often the right inference-efficiency lens when decode is limited by HBM traffic. The roofline model from @sec-performance-engineering-roofline becomes a diagnostic tool when combined with profiling data. Diagnosis follows three steps:
 
-1. **Measure** the achieved FLOP/s and memory bandwidth for a kernel using Nsight Compute.
-2. **Compute** the operational arithmetic intensity from the algorithm (FLOP/byte).
-3. **Plot** the measured performance against the roofline ceiling.
+1. Measure the achieved FLOP/s and memory bandwidth for a kernel using Nsight Compute.
+2. Compute the operational arithmetic intensity from the algorithm (FLOP/byte).
+3. Plot the measured performance against the roofline ceiling.
 
 A kernel that falls far below both the compute ceiling and the bandwidth ceiling has an implementation problem: launch overhead, poor memory access patterns, or low occupancy. A kernel that reaches the bandwidth ceiling but falls below the compute ceiling is memory-bound, and further optimization requires reducing memory traffic (fusion, precision) rather than improving compute efficiency. A kernel at the compute ceiling is compute-bound and can only be improved by algorithmic changes (reducing FLOPs) or faster hardware.
 
@@ -2742,11 +2742,11 @@ As demonstrated by the profiling case study in @sec-performance-engineering-case
 
 ::: {.callout-takeaways title="Match the software to the silicon"}
 
-* **Bytes usually bind**: On H100-class accelerators, the chapter's roofline recap places most transformer work below the FP16 ridge point of `{python} RooflineSummaryRecap.h100_fp16_ridge_str`, so useful speedups come first from reducing HBM traffic, keeping intermediates in SRAM, and spending compute only when it moves the active bottleneck.
-* **Fusion makes locality real**: Operator fusion, CUDA graphs, and FlashAttention are not just kernel tricks; they remove launch overhead and avoid quadratic attention intermediates. In the 8K example, the simplified HBM-traffic scenario gives a `{python} FlashAttentionSummaryRecap.savings_mult_str` ratio, while realized traffic remains implementation-dependent.
-* **Precision buys bandwidth with risk**: FP8, INT8, and INT4 increase effective bandwidth and batch capacity only when outliers, scale factors, and quality checks are managed. Quantization is a systems contract between numerical format, kernel implementation, serving memory, and acceptable model behavior.
-* **Algorithms can move the roofline**: Speculative decoding and mixture-of-experts change how much useful work each target-model pass performs, but they introduce acceptance-rate, routing, AllToAll, and load-balancing constraints. The win is real only after communication and scheduler costs are measured.
-* **Profiling is every step**: The 70B case study shows optimization as bottleneck displacement: INT4 changes batch size, batch size changes arithmetic intensity, and the next limit moves. Fleet performance engineering means measure, optimize the binding term, then measure again before believing the speedup.
+* Bytes usually bind: On H100-class accelerators, the chapter's roofline recap places most transformer work below the FP16 ridge point of `{python} RooflineSummaryRecap.h100_fp16_ridge_str`, so useful speedups come first from reducing HBM traffic, keeping intermediates in SRAM, and spending compute only when it moves the active bottleneck.
+* Fusion makes locality real: Operator fusion, CUDA graphs, and FlashAttention are not just kernel tricks; they remove launch overhead and avoid quadratic attention intermediates. In the 8K example, the simplified HBM-traffic scenario gives a `{python} FlashAttentionSummaryRecap.savings_mult_str` ratio, while realized traffic remains implementation-dependent.
+* Precision buys bandwidth with risk: FP8, INT8, and INT4 increase effective bandwidth and batch capacity only when outliers, scale factors, and quality checks are managed. Quantization is a systems contract between numerical format, kernel implementation, serving memory, and acceptable model behavior.
+* Algorithms can move the roofline: Speculative decoding and mixture-of-experts change how much useful work each target-model pass performs, but they introduce acceptance-rate, routing, AllToAll, and load-balancing constraints. The win is real only after communication and scheduler costs are measured.
+* Profiling is every step: The 70B case study shows optimization as bottleneck displacement: INT4 changes batch size, batch size changes arithmetic intensity, and the next limit moves. Fleet performance engineering means measure, optimize the binding term, then measure again before believing the speedup.
 
 :::
 
