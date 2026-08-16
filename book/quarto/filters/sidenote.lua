@@ -1,56 +1,39 @@
--- Pull a leading [offset=...] marker off a note, returning the value (or nil).
---
--- The marker is a PDF-only layout directive: it feeds \styledsidenote so the
--- copyeditor can nudge a sidenote clear of a figure or another note. It must be
--- removed in EVERY format, not only the one that consumes it. HTML and EPUB have
--- no margin to place the note in, and if the marker survives it is rendered to
--- the reader as literal text at the head of the footnote ("[offset=65mm] Total
--- Cost of Ownership (TCO): ..."). That was leaking 19 times across 8 chapters of
--- the Volume I web build before this was hoisted out of the PDF branch
--- (2026-08-16).
-local function take_offset(note)
-  if #note.content == 0 then
-    return nil
-  end
-  local first_block = note.content[1]
-  if not ((first_block.t == "Para" or first_block.t == "Plain") and #first_block.content > 0) then
-    return nil
-  end
-  local first_inline = first_block.content[1]
-  if first_inline.t ~= "Str" then
-    return nil
-  end
-  local offset = first_inline.text:match("^%[offset=([^%]]+)%]")
-  if not offset then
-    return nil
-  end
-
-  -- Remove only the [offset=...] part, keep the rest of the text
-  first_inline.text = first_inline.text:gsub("^%[offset=[^%]]+%]", "")
-
-  -- If the inline becomes empty, remove it
-  if first_inline.text == "" then
-    table.remove(first_block.content, 1)
-  end
-
-  -- Remove following space if present
-  if #first_block.content > 0 and first_block.content[1].t == "Space" then
-    table.remove(first_block.content, 1)
-  end
-
-  return offset
-end
-
 function Note(note)
-  -- Strip the layout directive first, for all formats (see take_offset).
-  local offset = take_offset(note)
-
   -- Only convert footnotes to sidenotes for PDF/LaTeX output.
   -- ePub is HTML-based: pandoc.RawInline('latex', ...) nodes are ignored by
   -- the EPUB renderer, so the surrounding \sidenote{} delimiters are stripped
   -- while the note body is emitted inline — causing the sidenote text to
   -- appear embedded in the running prose.
   if quarto.doc.is_format("latex") or quarto.doc.is_format("pdf") then
+    local offset = nil
+
+    -- Detect optional [offset=...] marker at the start of the first Para/Plain block
+    if #note.content > 0 then
+      local first_block = note.content[1]
+      if (first_block.t == "Para" or first_block.t == "Plain") and #first_block.content > 0 then
+        local first_inline = first_block.content[1]
+        if first_inline.t == "Str" then
+          local m = first_inline.text:match("^%[offset=([^%]]+)%]")
+          if m then
+            offset = m
+
+            -- Remove only the [offset=...] part, keep the rest of the text
+            first_inline.text = first_inline.text:gsub("^%[offset=[^%]]+%]", "")
+
+            -- If the inline becomes empty, remove it
+            if first_inline.text == "" then
+              table.remove(first_block.content, 1)
+            end
+
+            -- Remove following space if present
+            if #first_block.content > 0 and first_block.content[1].t == "Space" then
+              table.remove(first_block.content, 1)
+            end
+          end
+        end
+      end
+    end
+
     local out = {}
 
     if offset then
@@ -98,9 +81,6 @@ function Note(note)
     return out
   end
 
-  -- For ePub and all other formats, let Pandoc render the footnote normally --
-  -- but return the note rather than nil, because take_offset above edited its
-  -- content. Returning nil tells Pandoc "unchanged" and the stripped [offset=]
-  -- marker comes back, which is exactly how it kept leaking into HTML.
-  return note
+  -- For ePub and all other formats, let Pandoc render footnotes normally.
+  return nil
 end
