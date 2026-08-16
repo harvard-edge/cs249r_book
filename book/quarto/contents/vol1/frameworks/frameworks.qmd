@@ -197,7 +197,7 @@ Consider two engineers writing the same neural network. The first debugs interac
 
 ### Why execution strategy matters: The memory wall {#sec-ml-frameworks-execution-strategy-matters-memory-wall-1ce8}
 
-To understand why execution strategy matters so much, return to the widening compute-bandwidth gap quantified in @eq-memory-wall. Processor arithmetic has grown faster than memory bandwidth, creating the memory wall\index{Memory Wall!execution strategy impact}\index{Memory Wall!framework execution}. Modern accelerators can perform arithmetic far faster than they can fetch data. Element-wise operations like ReLU use only a tiny fraction of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. @Sec-appdx-machine-foundations-roofline-model-2529 formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
+To understand why execution strategy matters so much, return to the widening compute-bandwidth gap quantified by the memory-wall equation (@eq-memory-wall). Processor arithmetic has grown faster than memory bandwidth, creating the memory wall\index{Memory Wall!execution strategy impact}\index{Memory Wall!framework execution}. Modern accelerators can perform arithmetic far faster than they can fetch data. Element-wise operations like ReLU use only a tiny fraction of peak compute capacity, not because the hardware is slow, but because they spend nearly all their time waiting for data. @Sec-appdx-machine-foundations-roofline-model-2529 formalizes this trade-off, showing exactly when operations are memory bound vs. compute bound.
 
 The memory wall creates a critical classification: operations are either compute-bound\index{Compute-Bound!operation classification} (limited by arithmetic throughput, like large matrix multiplications) or memory-bound\index{Memory-Bound!operation classification} (limited by data movement, like activation functions and normalization). Most individual neural network operation types (activations, normalizations, element-wise operations) are memory bound, though the large matrix multiplications that dominate total compute time can be compute bound.
 
@@ -1617,7 +1617,7 @@ $$
 N_{\text{breakeven}} = \frac{T_{\text{compile}}}{T_{\text{eager}} - T_{\text{compiled}}}
 $$ {#eq-compile-breakeven}
 
-Evaluating @eq-compile-breakeven with the hypothetical ResNet-50 values gives approximately `{python} CompilationBenchmark.resnet_breakeven_images_str`; this scenario therefore reaches breakeven before 1.28 million images.
+Evaluating @eq-compile-breakeven with the hypothetical ResNet-50 values gives approximately `{python} CompilationBenchmark.resnet_breakeven_images_str`, well within a single training run of any realistic length.
 
 For production inference ($N_{\text{dev}} \approx 0$, $N_{\text{prod}} \rightarrow \infty$), teams should maximize compilation. With no development iterations and potentially millions of requests, every optimization matters. Aggressive autotuning can be worthwhile even when compilation takes much longer, because the cost is amortized over the deployment lifetime.
 
@@ -1756,9 +1756,7 @@ class DispatchTaxSmallLarge:
     # The per-op tax this chapter already taught the reader is Python dispatch
     # plus kernel launch. A local 5.0 literal here contradicted that and the
     # registry, understating the tax threefold.
-    small_dispatch_us = (
-        Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch
-    ).to(microsecond).magnitude
+    small_dispatch_us = (Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch).to(microsecond).magnitude
     small_hw_us = 2.6
 
     # Scenario 2: GPT-3 Layer (Compute Bound)
@@ -1790,11 +1788,11 @@ class DispatchTaxSmallLarge:
     dispatch_overhead_pct_str = fmt_percent(round(small_overhead_pct) / 100, precision=0, commas=False, style='prose')
     dispatch_compilation_speedup_mult_str = fmt_multiple(small_speedup_limit, precision=1, commas=False)
 
-    gpt3_hw_time_us_str = fmt_time(large_hw_us, 'microsecond', precision=0, commas=False)
+    gpt3_hw_time_us_str = fmt_time(large_hw_us, 'microsecond', precision=0)
     gpt3_hw_time_ms_str = fmt_time(large_hw_us / 1000, 'millisecond', precision=0, commas=False)
     gpt3_sw_time_us_str = fmt_time(large_dispatch_us, 'microsecond', precision=0, commas=False)
     dispatch_ratio_large_str = fmt_ratio(large_overhead_ratio, precision=4, commas=False)
-    t_sw_math = fmt_math(f"T_{{\\text{{sw}}}} \\approx {large_dispatch_us} \\, \\mu s")
+    t_sw_math = fmt_math(f"T_{{\\text{{sw}}}} \\approx {large_dispatch_us:.0f} \\, \\mu s")
 ```
 
 Summed over $N_{\text{ops}}$ operations, the per-operation dispatch cost $t_{\text{dispatch}}$ accumulates into a per-call tax on execution. Whether that tax dominates depends on how the hardware execution time $T_{\text{hw}}$ compares to the software overhead $T_{\text{sw}}$ (both measured in seconds), and the regimes split sharply by model size.
@@ -1866,7 +1864,7 @@ The choice of execution mode determines both developer velocity and model perfor
 **Modern Compromise**
 
 - [ ] **JIT compilation**: How does `torch.compile` bridge the gap?
-- [ ] **Dispatch-overhead estimate**: If six operations each incur 5 $\mu$s of dispatch while hardware work takes 2.6 $\mu$s, which term dominates?
+- [ ] **Dispatch-overhead estimate**: If six operations each incur the chapter's `{python} DispatchTaxSmallLarge.dispatch_us_per_op_str` dispatch tax while hardware work takes 2.6 $\mu$s, which term dominates?
 
 :::
 
@@ -4466,7 +4464,7 @@ The arithmetic-intensity column is the diagnostic column. Matrix multiplications
 # │ Context: Showing that small model training is overhead-bound, not compute-bound
 # │
 # │ Goal: On an A100, this small FP32 step's FLOPs and memory each take ~2 μs, but
-# │      Assume 12 ops × 5 μs dispatch = 60 μs overhead. The step is overhead-bound!
+# │      Assume 12 ops at the chapter's per-op dispatch tax. The step is overhead-bound!
 # │      This explains why torch.compile provides 2-3x speedup for small models.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
@@ -4482,7 +4480,9 @@ class MnistTrainingStepCalc:
     _hidden = 256
     _output = 10
     n_ops = 12  # Illustrative launch-count assumption
-    us_per_op = 5  # 5 μs dispatch/op
+    us_per_op = (
+        (Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch).to(microsecond).magnitude
+    )  # the chapter's per-op tax, from the registry
     peak_flops = Hardware.Cloud.A100.compute.precision_flops["fp32"]
     mem_bw = Hardware.Cloud.A100.memory.bandwidth
     # ┌── 2. EXECUTE (The Compute) ────────────────────────────────────────
@@ -4502,7 +4502,7 @@ class MnistTrainingStepCalc:
     mem_traffic = forward_mem + bwd_mem
     t_compute = (total_flops / peak_flops).to(microsecond)
     t_memory = (mem_traffic / mem_bw).to(microsecond)
-    t_overhead_us = n_ops * us_per_op  # 60 μs (dominant!)
+    t_overhead_us = n_ops * us_per_op  # dominant term
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
     check(
         t_overhead_us > 10 * max(t_compute.to(microsecond).magnitude, t_memory.to(microsecond).magnitude),
@@ -4517,14 +4517,14 @@ class MnistTrainingStepCalc:
     mnist_n_ops_str = fmt_count(n_ops, precision=0, commas=False, label="op")
     mnist_us_per_op_str = fmt_time(us_per_op, 'microsecond', precision=0, commas=False)
     a100_peak_tflop_per_s_str = fmt_qty(peak_flops, TFLOP / second, precision=1, commas=False)
-    a100_mem_bw_tb_per_s_str = fmt_qty(mem_bw, TB / second, precision=1, commas=False)
+    a100_mem_bw_tb_per_s_str = fmt_qty(mem_bw, TB / second, precision=2, commas=False)
 ```
 
 The model estimates ~`{python} MnistTrainingStepCalc.mnist_total_mflop_str` of work and ~`{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str` of memory traffic. To obtain ideal lower bounds, we divide these estimates by the A100 peak rates:
 
 - $T_{\text{compute}} \approx$ `{python} MnistTrainingStepCalc.mnist_total_mflop_str`/`{python} MnistTrainingStepCalc.a100_peak_tflop_per_s_str` FP32 ≈ `{python} MnistTrainingStepCalc.mnist_t_compute_us_str`
 - $T_{\text{memory}} \approx$ `{python} MnistTrainingStepCalc.mnist_mem_traffic_mb_str`/`{python} MnistTrainingStepCalc.a100_mem_bw_tb_per_s_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_memory_us_str`
-- Assuming `{python} MnistTrainingStepCalc.mnist_n_ops_str` launches, $T_{\text{overhead}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
+- Assuming `{python} MnistTrainingStepCalc.mnist_n_ops_str` kernel launches, $T_{\text{overhead}} \approx$ `{python} MnistTrainingStepCalc.mnist_n_ops_str` $\times$ `{python} MnistTrainingStepCalc.mnist_us_per_op_str` ≈ `{python} MnistTrainingStepCalc.mnist_t_overhead_us_str`
 
 Under the stated launch-count and per-launch assumptions, the modeled training step is overhead-bound\index{Overhead-Bound!small model training}. Small models are often sensitive to Python dispatch and kernel launch costs, which drives three common production practices that all serve to reduce the dispatch term rather than changing the model's mathematical work:
 
