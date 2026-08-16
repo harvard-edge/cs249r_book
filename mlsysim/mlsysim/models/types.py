@@ -277,7 +277,7 @@ class TransformerWorkload(Workload):
             strategy=strategy
         )
         
-        return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GB)
+        return (weight_mem + grad_mem + opt_mem + act_mem).to(ureg.GiB)
 
     def lower(self, precision: Quantity = BYTES_FP16) -> ComputationGraph:
         ops = self.inference_flops or (2 * self.parameters.to(ureg.count).magnitude * ureg.flop)

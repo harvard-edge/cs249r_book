@@ -63,3 +63,43 @@ def test_h100_registry_invariants():
     assert h100.compute.peak_flops.to(TFLOP / second).magnitude == pytest.approx(
         989, rel=0.01
     )
+
+
+def test_hardware_and_platform_memory_capacities_use_binary_units():
+    """Golden invariant: Semiconductor memory (RAM, VRAM, HBM, SRAM, flash) in Hardware
+    and Platforms registries must use binary units (GiB, MiB, KiB, TiB), not decimal (GB, MB, KB, TB)."""
+    from mlsysim.platforms.registry import Platforms
+
+    decimal_units = {"GB", "MB", "KB", "TB", "PB"}
+    offenders = []
+
+    for tier in ("Cloud", "Workstation", "Mobile", "Edge", "Tiny"):
+        reg = getattr(Hardware, tier)
+        for name in dir(reg):
+            if name.startswith("_"):
+                continue
+            item = getattr(reg, name)
+            if hasattr(item, "memory") and item.memory:
+                for field in ("capacity", "sram_capacity", "flash_capacity"):
+                    val = getattr(item.memory, field, None)
+                    if val is not None and hasattr(val, "units"):
+                        units = set(val.units._units)
+                        if units & decimal_units:
+                            offenders.append(
+                                f"Hardware.{tier}.{name}.memory.{field} = {val} ({units})"
+                            )
+
+    for p_name in dir(Platforms):
+        if p_name.startswith("_"):
+            continue
+        p = getattr(Platforms, p_name)
+        if hasattr(p, "ram") and p.ram:
+            units = set(p.ram.units._units)
+            if units & decimal_units:
+                offenders.append(f"Platforms.{p_name}.ram = {p.ram} ({units})")
+
+    assert not offenders, (
+        "Memory capacities must use binary units (GiB/MiB/KiB/TiB):\n  "
+        + "\n  ".join(offenders)
+    )
+
