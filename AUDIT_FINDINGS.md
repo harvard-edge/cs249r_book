@@ -140,16 +140,43 @@ mobile memory capacity, and component MTTF have no rows
 
 ---
 
-## 6. Layout domain — reported, not touched
+## 6. Build domain — reported, not touched
 
-These are Zeljko's. The markers stay in the source exactly as he placed them.
+The first two are Zeljko's; the markers stay in the source exactly as he placed
+them. The third is a property of the website render, not of the prose.
 
 | Issue | Effect | Scope |
 |---|---|---|
 | non-LaTeX writers drop a raw TeX inline **with its contents** | five Vol 1 sentences lose a word on the web build | `\mbox{}` × 5 |
 | `[offset=NNmm]` is stripped only in the LaTeX branch of `sidenote.lua` | prints as literal text at the head of footnotes on the web | 32 across both volumes |
+| a cross-chapter `@sec-` renders as the target's **title** on the web and as its **number** in print | the web build reads as a tautology where the prose also names the concept | 123 sites, 35 pages |
 
-Both need a layout-side decision, not a prose edit.
+### The title-echo class — why the prose is right and the web build is wrong
+
+The PDF is a Quarto **book** and numbers its sections; the website is a Quarto
+**site** and has no numbering, so a cross-chapter reference falls back to the
+target's title. The same sentence therefore reads:
+
+| Source | PDF (the deliverable) | Web |
+|---|---|---|
+| `The Roofline Model in @sec-...` | The Roofline Model in section 11.3 | The Roofline Model in Roofline Model |
+| `The Lottery Ticket Hypothesis (@sec-...)` | The Lottery Ticket Hypothesis (section 10.3.1.7) | The Lottery Ticket Hypothesis (Lottery ticket hypothesis) |
+| `Model compression (@sec-...)` | Model compression (Chapter 10) | Model compression (Model Compression) |
+| `...established in @sec-...` | …established in section 1.7 | …established in Iron Law of ML Systems |
+
+Every one of these was verified against the built Vol 1 PDF. **Rewriting the
+prose to read well on the web would damage the print edition**, which is the
+MIT Press deliverable, so nothing here was touched. The fix, if wanted, is a
+site-side crossref decision (number the website's sections, or set a crossref
+format that emits "Chapter N"), not 123 prose edits.
+
+Distinguish this from the eight **bare-`equation`** refs, which were fixed: those
+rendered as the literal word "equation" with no number and left the sentence
+ungrammatical on the web (`"in equation actionable"`), and naming the equation in
+prose improved both formats.
+
+The first two rows need a layout-side decision; the third needs a build-config
+decision. None is a prose edit.
 
 ---
 
