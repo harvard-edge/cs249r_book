@@ -142,8 +142,6 @@ def first_meaningful_char(body: str) -> tuple[str, int]:
 
 def _is_protected_term_token(term: str, start: int, end: int, token: str) -> bool:
     """Return True for case-sensitive tokens that should not be title-cased."""
-    if token.lower() in MINOR_WORDS:
-        return True
     if len(token) == 1:
         return True
     if any(ch.isupper() for ch in token[1:]):
@@ -151,7 +149,7 @@ def _is_protected_term_token(term: str, start: int, end: int, token: str) -> boo
 
     before = term[start - 1] if start > 0 else ""
     after = term[end] if end < len(term) else ""
-    if (before and before in ".`_/") or (after and after in ".`_/"):
+    if (before and before in ".`_") or (after and after in ".`_"):
         return True
     if before.isdigit() or after.isdigit():
         return True
@@ -163,14 +161,16 @@ def _is_protected_term_token(term: str, start: int, end: int, token: str) -> boo
 
 
 def term_head_case_issues(term: str) -> list[tuple[int, str]]:
-    """Return lowercase significant words in a leading footnote term head.
+    """Return Title Case capitalization issues in a leading footnote term head.
 
-    Offsets are relative to `term`. Inline code spans and math spans are
-    skipped; mixed-case identifiers and unit/API tokens are treated as
-    intentionally case-sensitive.
+    Offsets are relative to `term`. Significant words must be Title Cased;
+    minor words (and, or, of, in, for, etc.) must be lowercased unless they
+    open the term head. Inline code spans, math spans, and unit/API tokens are
+    skipped.
     """
     issues: list[tuple[int, str]] = []
     i = 0
+    is_first_word = True
     while i < len(term):
         ch = term[i]
         if ch == "`":
@@ -189,8 +189,18 @@ def term_head_case_issues(term: str) -> list[tuple[int, str]]:
         while i < len(term) and term[i].isalpha():
             i += 1
         token = term[start:i]
-        if token[0].islower() and not _is_protected_term_token(term, start, i, token):
-            issues.append((start, token))
+
+        if token.lower() in MINOR_WORDS:
+            if is_first_word and token[0].islower():
+                issues.append((start, token))
+            elif not is_first_word and token.istitle() and not _is_protected_term_token(term, start, i, token):
+                # Mid-title minor word should be lowercase (e.g. 'and' not 'And')
+                issues.append((start, token))
+        else:
+            if token[0].islower() and not _is_protected_term_token(term, start, i, token):
+                issues.append((start, token))
+
+        is_first_word = False
     return issues
 
 
