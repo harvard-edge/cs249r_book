@@ -1415,6 +1415,7 @@ _RATE_UNITS = {
     "deploys/week",
     "checkpoints/hour",
     "windows/month",
+    "false wake/month",  # singular: a rate of exactly 1 must not read "1 false wakes"
     "false wakes/month",
     "feature reads/request",
     "queries/month",
