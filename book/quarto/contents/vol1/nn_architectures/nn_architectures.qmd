@@ -136,7 +136,7 @@ Machine learning systems face a core engineering trade-off: **representational p
 
 :::
 
-Choosing an architectural backbone sets the primary memory layout and compute pattern for downstream hardware. @Tbl-architecture-families contrasts the six major neural network families across their spatial/temporal inductive biases, tensor operations, and memory access characteristics.
+Choosing an architectural backbone sets the primary memory layout and compute pattern for downstream hardware. @Tbl-architecture-families contrasts the five major neural network families across their spatial/temporal inductive biases, tensor operations, and memory access characteristics.
 
 | **Architecture** | **Data Type**                 | **Core Innovation**            | **System Bottleneck**   |
 |:-----------------|:------------------------------|:-------------------------------|:------------------------|
@@ -1121,7 +1121,7 @@ class LargeMLP:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     dim_str = fmt(width, precision=0, commas=False)
-    params_str = fmt_count(params, label="parameter", commas=False)
+    params_str = fmt_count(params, label="parameter", commas=True)
     mem_mb_str = fmt_memory(mem, unit=MB, precision=1, commas=False)
 
 # Note: Use LargeMLP.dim_str directly.
@@ -3544,7 +3544,7 @@ This chapter only needs the architectural consequence: DLRM turns recommendation
 # └─────────────────────────────────────────────────────────────────────────────
 
 from mlsysim import Hardware
-from mlsysim.fmt import fmt_int, fmt, check
+from mlsysim.fmt import fmt_int, fmt, check, fmt_memory_capacity
 
 # ┌── LEGO ───────────────────────────────────────────────
 class CapacityWall:
@@ -3557,7 +3557,9 @@ class CapacityWall:
     num_items = 100_000_000
     embed_dim = 128
     bytes_per_param = BYTES_FP32
-    a100_capacity = Hardware.Cloud.A100.memory.capacity
+    # nameplate magnitude in decimal GB: the prose shows the reader
+    # `table size / capacity = share`, so both operands must be decimal
+    a100_capacity = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude * GB
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     table_memory = num_items * embed_dim * bytes_per_param
@@ -3572,7 +3574,7 @@ class CapacityWall:
     cw_bytes_per_param_str = fmt_int(bytes_per_param.to(byte).magnitude)
     cw_table_gb_str = fmt_memory(table_memory, unit=GB, precision=1, commas=False)
     cw_utilization_pct_str = fmt_percent(utilization_pct / 100, precision=0, commas=False, style='prose')
-    a100_mem_gb_str = fmt_memory(a100_capacity, unit=GB, precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(a100_capacity, unit=GB, precision=0, commas=False)
 
 # Note: Use CapacityWall.cw_num_items_str directly.
 ```
@@ -4823,11 +4825,11 @@ Constraint analysis comes next. @Tbl-nn-architectures-wildlife-constraints catal
 
 With the constraints fixed, the third step evaluates candidate architectures against the chapter's lighthouse models:
 
-- **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` params, `{python} WildlifeModelSizing.resnet_gflop_str`): Too compute- and power-heavy for this device. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` FP32, it is also marginal against the `{python} WildlifeModelSizing.model_budget_mb_str` model budget before lower-precision weights, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
+- **ResNet-50** (`{python} WildlifeModelSizing.resnet_params_str` params, `{python} WildlifeModelSizing.resnet_gflop_str`): Too compute- and power-heavy for this device. At `{python} WildlifeModelSizing.resnet_fp32_mb_str` FP32, it is also marginal against the `{python} WildlifeModelSizing.model_budget_mb_str` this deployment allocates to model weights before lower-precision weights, activations, and runtime buffers. The main blockers are its GFLOP cost and power draw, not raw storage alone.
 - **MobileNetV1** (`{python} WildlifeModelSizing.mnv1_params_str` params, `{python} WildlifeModelSizing.mnv1_mflop_str`): Promising. It needs `{python} WildlifeModelSizing.mnv1_fp32_mb_str` at FP32, or `{python} WildlifeModelSizing.mnv1_int8_mb_str` when each weight is stored as an 8-bit integer (INT8). Its depthwise separable convolutions are power-efficient.
 - **KWS DS-CNN** (`{python} WildlifeModelSizing.kws_example_params_str` params, `{python} WildlifeModelSizing.kws_example_mflop_str`): Too small. Designed for 12-class audio, insufficient capacity for 50 visual species.
 
-Taken together, these constraints point us to a MobileNetV2 variant with width multiplier 0.75 as the chosen model. It carries ~`{python} WildlifeModelSizing.mnv2_params_str` (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights) and costs ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$. It is a plausible candidate for the 50-class problem; accuracy must be measured on the target data. It fits the memory budget with margin, and its depthwise separable convolutions are power-efficient.
+Taken together, these constraints point us to a MobileNetV2 variant with width multiplier 0.75 as the chosen model. It carries ~`{python} WildlifeModelSizing.mnv2_params_str` parameters (`{python} WildlifeModelSizing.mnv2_fp32_mb_str` FP32, `{python} WildlifeModelSizing.mnv2_int8_mb_str` with INT8 weights) and costs ~`{python} WildlifeModelSizing.mnv2_mflop_str` at $224{\times}224$. It is a plausible candidate for the 50-class problem; accuracy must be measured on the target data. It fits the memory budget with margin, and its depthwise separable convolutions are power-efficient.
 
 The fourth step validates that choice against the hardware. The memory budget checks out:
 $$
@@ -5021,9 +5023,9 @@ class A100ClusterMemory:
     )
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_8x_mem_gb_str = fmt_memory_capacity(a100_8x_mem, unit=GB, precision=0, commas=False)
+    a100_8x_mem_gb_str = fmt_memory_capacity(a100_8x_mem, unit=GiB, precision=0, commas=False)
     edge_device_name_str = MarkdownStr(edge_device.name)
-    edge_mem_gb_str = fmt_memory_capacity(edge_mem, unit=GB, precision=0, commas=False)
+    edge_mem_gb_str = fmt_memory_capacity(edge_mem, unit=GiB, precision=0, commas=False)
     memory_reduction_mult_str = fmt_multiple(round(memory_reduction), precision=0, commas=False)
 ```
 
@@ -5090,7 +5092,7 @@ class KVCacheServingPitfall:
     per_request_gb_str = fmt_qty_int(per_request_memory, GB, commas=False)
     concurrent_2_gb_str = fmt_qty_int(concurrent_2_memory, GB, commas=False)
     concurrent_4_gb_str = fmt_qty_int(concurrent_4_memory, GB, commas=False)
-    device_memory_gb_str = fmt_memory_capacity(device_memory, unit=GB, precision=0, commas=False)
+    device_memory_gb_str = fmt_memory_capacity(device_memory, unit=GiB, precision=0, commas=False)
 ```
 
 ::: {.fallacy-pitfall}

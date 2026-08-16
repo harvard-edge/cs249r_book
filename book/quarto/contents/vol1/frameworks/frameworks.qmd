@@ -1293,7 +1293,7 @@ This explains when compilation can help. Dispatch costs that seem negligible for
 
 from mlsysim.fmt import check, fmt_multiple, fmt_time
 from mlsysim import Ops
-from mlsysim.core.units import microsecond
+from mlsysim.core.units import microsecond, GiB
 
 # ┌── LEGO ───────────────────────────────────────────────
 class FusionSpeedup:
@@ -1735,10 +1735,12 @@ The training-step trace in @sec-ml-frameworks-putting-together-anatomy-training-
 # │ Context: Callout "The Dispatch Tax" comparing overhead-bound vs compute-bound
 # │
 # │ Goal: Demonstrate why compilation benefits small models disproportionately.
-# │ Show: That small MLPs are 92% overhead-bound, while GPT-3 is <0.05% overhead.
+# │ Show: That small MLPs are overhead-bound, while GPT-3 is <0.05% overhead.
 # │ How: Calculate the software-to-hardware execution time ratio for both cases.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
+from mlsysim import Ops
+from mlsysim.core.units import microsecond
 from mlsysim.fmt import fmt_int, fmt, check, fmt_count, fmt_math, fmt_percent, fmt_ratio, fmt_time
 
 # ┌── LEGO ───────────────────────────────────────────────
@@ -1751,7 +1753,12 @@ class DispatchTaxSmallLarge:
     # ┌── 1. LOAD (Constants) ───────────────────────────────────────────────
     # Scenario 1: Small MLP (Overhead Bound)
     small_ops_count = 6
-    small_dispatch_us = 5.0
+    # The per-op tax this chapter already taught the reader is Python dispatch
+    # plus kernel launch. A local 5.0 literal here contradicted that and the
+    # registry, understating the tax threefold.
+    small_dispatch_us = (
+        Ops.RuntimeOverheads.PythonDispatch + Ops.RuntimeOverheads.KernelLaunch
+    ).to(microsecond).magnitude
     small_hw_us = 2.6
 
     # Scenario 2: GPT-3 Layer (Compute Bound)
@@ -2902,7 +2909,7 @@ The dtype\index{Tensor!data types (dtypes)} is the tensor-level lever that trade
 
 Type conversions become another point where abstraction meets physics. Operating on tensors with different types demands explicit conversion rules to preserve numerical correctness. These conversions introduce computational costs and risk precision loss. Frameworks provide type casting capabilities but rely on developers to maintain numerical precision across operations.
 
-Tensors answer the data-representation problem by encoding shape, layout, and precision into a single abstraction. A perfectly shaped tensor on the wrong device, however, or one that must cross a 60$\times$ bandwidth gap to reach the GPU, can erase every layout optimization. The next problem is placement: where data lives and how it moves.
+Tensors answer the data-representation problem by encoding shape, layout, and precision into a single abstraction. A perfectly shaped tensor on the wrong device, however, or one that must cross the PCIe-to-HBM bandwidth gap to reach the GPU, can erase every layout optimization. The next problem is placement: where data lives and how it moves.
 
 #### Device and memory management {#sec-ml-frameworks-device-memory-management-9404}
 
@@ -4330,7 +4337,7 @@ class HbmCapacityFootnote:
     check(a100_mem.to(GB).magnitude >= 80, "A100 HBM capacity anchor should be at least 80 GB.")
 
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
-    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GB, precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
 ```
 
 [^fn-hbm-capacity-constraint]: **HBM (High Bandwidth Memory)**\index{HBM!capacity constraint}: Provides 2--3 TB/s bandwidth on modern GPUs, making it the memory tier that most directly feeds accelerator arithmetic. HBM bandwidth determines whether operations are memory bound or compute bound, and its `{python} HbmCapacityFootnote.a100_mem_gb_str` capacity on an A100\index{A100!HBM capacity} sets the hard ceiling on total live training state. Weights, activations, gradients, optimizer state, and temporary workspace must fit during execution. When they do not, the framework must resort to offloading, selective recomputation, or placement across devices, each adding complexity to what the programmer perceives as a single `loss.backward()` call.
@@ -4633,7 +4640,7 @@ class Model7BMemory:
     # ┌── 4. OUTPUT (Formatting) ─────────────────────────────────────────────
     model_7b_fp16_gb_str = fmt_memory(fp16, unit=GB, commas=False)
     a100_remaining_7b_gb_str = fmt_memory(remaining, unit=GB, commas=False)
-    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GB, precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
 ```
 
 ::: {.fallacy-pitfall}

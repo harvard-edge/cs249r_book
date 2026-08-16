@@ -136,8 +136,8 @@ class ClusterEconomicsContext:
     annual_waste_str = fmt_usd(annual_waste_m * MILLION, scale="M", precision=1, commas=False)
     productive_gpu_gain_str = fmt(productive_gpu_gain, precision=0)
     raw_gpu_equivalent_gain_str = fmt(raw_gpu_equivalent_gain, precision=0)
-    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GB, precision=0, commas=False)
-    h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GB, precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(a100_mem, unit=GiB, precision=0, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(h100_mem, unit=GiB, precision=0, commas=False)
 ```
 
 To make the scheduling problem concrete, consider a research organization operating a `{python} ClusterEconomicsContext.cluster_size_str`-GPU cluster. @brown2020language report that training GPT-3 175B used $3.14 \times 10^{23}$ floating-point operations on a V100 GPU cluster. Imagine 100 large-scale training jobs of that class queued, alongside thousands of smaller experiments and inference workloads all competing for the same resources. The system must decide which jobs run, when they run, and where they run. A naive first-come-first-served policy would let the first few large jobs monopolize the cluster for weeks, starving smaller experiments that researchers need to iterate quickly. A strict fair-share policy would fragment GPUs across many small allocations, preventing any large job from assembling the contiguous allocation it needs. Neither extreme works. The scheduler must navigate a multi-dimensional trade-off space where every decision affects throughput, fairness, cost, and researcher productivity simultaneously.
@@ -713,16 +713,16 @@ class ClusterEconomicsMigRecap:
     _mig = {p.name: p for p in Hardware.Cloud.A100.mig_profiles}
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    a100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.A100.memory.capacity, unit=GB, precision=0, commas=False)
-    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GB, precision=0, commas=False)
+    a100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.A100.memory.capacity, unit=GiB, precision=0, commas=False)
+    h100_mem_gb_str = fmt_memory_capacity(Hardware.Cloud.H100.memory.capacity, unit=GiB, precision=0, commas=False)
     # @tbl-fleet-orchestration-mig-profiles cells (GPU memory + SM count per profile)
-    mig_1g_mem_str = fmt_memory_capacity(_mig["1g.10gb"].gpu_memory, unit=GB, precision=0, commas=False)
+    mig_1g_mem_str = fmt_memory_capacity(_mig["1g.10gb"].gpu_memory, unit=GiB, precision=0, commas=False)
     mig_1g_sm_str = fmt(_mig["1g.10gb"].sm_count, precision=0, commas=False)
-    mig_2g_mem_str = fmt_memory_capacity(_mig["2g.20gb"].gpu_memory, unit=GB, precision=0, commas=False)
+    mig_2g_mem_str = fmt_memory_capacity(_mig["2g.20gb"].gpu_memory, unit=GiB, precision=0, commas=False)
     mig_2g_sm_str = fmt(_mig["2g.20gb"].sm_count, precision=0, commas=False)
-    mig_3g_mem_str = fmt_memory_capacity(_mig["3g.40gb"].gpu_memory, unit=GB, precision=0, commas=False)
+    mig_3g_mem_str = fmt_memory_capacity(_mig["3g.40gb"].gpu_memory, unit=GiB, precision=0, commas=False)
     mig_3g_sm_str = fmt(_mig["3g.40gb"].sm_count, precision=0, commas=False)
-    mig_7g_mem_str = fmt_memory_capacity(_mig["7g.80gb"].gpu_memory, unit=GB, precision=0, commas=False)
+    mig_7g_mem_str = fmt_memory_capacity(_mig["7g.80gb"].gpu_memory, unit=GiB, precision=0, commas=False)
     mig_7g_sm_str = fmt(_mig["7g.80gb"].sm_count, precision=0, commas=False)
 ```
 
@@ -1651,7 +1651,7 @@ Gandiva also implements **Grow-shrink Elasticity**\index{Grow-Shrink Elasticity!
 
 Traditional fair-share scheduling treats all GPU-seconds equally: a job consuming 100 GPU-hours is treated the same whether those hours represent the first 10 percent of a long training run or the last 10 percent of a nearly complete one. From a resource accounting perspective, 100 GPU-hours is 100 GPU-hours regardless of context. **Themis**\index{Themis!definition} [@mahajan2020themis] argues this resource-centric view is fundamentally unfair because it ignores the sunk cost of work already performed.
 
-Themis defines a **Finish-time Fairness**\index{Finish-Time Fairness!definition} metric that allocates resources to minimize the maximum slowdown any job experiences relative to exclusive access (the hypothetical scenario where the job has the entire cluster to itself). Under this metric, a job that is 90 percent complete and needs only 10 more GPU-hours to finish receives higher priority than a job that is 10 percent complete and needs 90 more GPU-hours. The reasoning is economic: delaying the nearly-complete job by an hour wastes the 900 GPU-hours already invested (because those hours only produce value when the job completes), while delaying the early-stage job by an hour has a proportionally smaller impact on the total investment's return.
+Themis defines a **Finish-time Fairness**\index{Finish-Time Fairness!definition} metric that allocates resources to minimize the maximum slowdown any job experiences relative to exclusive access (the hypothetical scenario where the job has the entire cluster to itself). Under this metric, a job that is 90 percent complete and needs only 10 more GPU-hours to finish receives higher priority than a job that is 10 percent complete and needs 90 more GPU-hours. The reasoning is economic: delaying the nearly-complete job by an hour wastes the 90 GPU-hours already invested (because those hours only produce value when the job completes), while delaying the early-stage job by an hour has a proportionally smaller impact on the total investment's return.
 
 This approach benefits shorter jobs and nearly-complete jobs without excessive penalty to longer ones, and it aligns scheduling decisions with the economic value of completing work rather than the simple accounting of resource consumption. Themis implements this metric through an auction mechanism where jobs bid for resources based on their current marginal value (how much their completion time improves per GPU-hour allocated), creating a market-like dynamic that naturally directs resources to their highest-value use.
 
@@ -1917,7 +1917,9 @@ class GpuSharingRoi:
     small_footprint = 26 * GB  # scenario assumption
     n_large = 10
     large_footprint = Models.Language.GPT3.parameters * BYTES_FP16  # 175B FP16
-    a100_mem = Hardware.Cloud.A100.memory.capacity
+    # nameplate magnitude in decimal GB: the model footprints in this
+    # scenario are decimal, so utilization must share their unit space
+    a100_mem = Hardware.Cloud.A100.memory.capacity.to(GiB).magnitude * GB
     gpus_per_large = 8
     models_per_gpu_shared = 2
     gpu_rate = Infrastructure.Pricing.Fleet.GpuHourRef.rate.to(USD / hour).magnitude
@@ -1942,7 +1944,7 @@ class GpuSharingRoi:
     check(abs(annual_savings - 876000) < 1000, f"Savings: expected ~876K, got {annual_savings}")
     # ┌── 4. OUTPUT ────────────────────────────────────────
     gs_excl_util_str = fmt_percent(excl_util_pct / 100, precision=1, style='prose')
-    gs_excl_total_mem_gb_str = fmt_memory_capacity(excl_total_mem, unit=GB, precision=0)
+    gs_excl_total_mem_gb_str = fmt_memory_capacity(excl_total_mem, unit=GB, precision=0, commas=False)
     gs_excl_large_str = fmt_count(excl_large_gpus, label="GPU")
     gs_excl_total_str = fmt_count(excl_total, label="GPU")
     gs_shared_gpus_str = fmt_count(shared_small_gpus, label="GPU")
@@ -2476,9 +2478,9 @@ class DebugValueCalc:
     a100_80_count_str = fmt_count(a100_80_count, commas=False, label="GPU")
     a100_40_count_str = fmt_count(a100_40_count, commas=False, label="GPU")
     v100_count_str = fmt_count(v100_count, commas=False, label="GPU")
-    a100_80_memory_str = fmt_memory_capacity(a100_80_memory, unit=GB, precision=0, commas=False)
+    a100_80_memory_str = fmt_memory_capacity(a100_80_memory, unit=GiB, precision=0, commas=False)
     a100_40_memory_str = fmt_memory(a100_40_memory, unit=GB, precision=0, commas=False)
-    v100_memory_str = fmt_memory_capacity(v100_memory, unit=GB, precision=0, commas=False)
+    v100_memory_str = fmt_memory_capacity(v100_memory, unit=GiB, precision=0, commas=False)
     a100_80_nodes_str = fmt_count(a100_80_nodes, commas=False, label="node")
     a100_40_nodes_str = fmt_count(a100_40_nodes, commas=False, label="node")
     v100_nodes_str = fmt_count(v100_nodes, commas=False, label="node")

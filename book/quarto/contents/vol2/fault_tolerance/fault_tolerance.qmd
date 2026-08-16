@@ -318,7 +318,7 @@ $$R_{\text{system}}(t) = 1 - \prod_{i=1}^{N} (1 - R_i(t))$$
 # │ Goal: Show why unprotected HBM at cluster scale corrupts memory every tens of seconds.
 # │ How: 250 FIT/Mbit x (1,024 x A100 HBM) megabits -> aggregate FIT -> mean time to first error.
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt, fmt_time, check
+from mlsysim.fmt import fmt, fmt_time, check, fmt_memory_capacity
 
 class HbmSerBudget:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────
@@ -336,7 +336,7 @@ class HbmSerBudget:
     fit_per_mbit_str = fmt(ser_fit_per_mbit, precision=0, commas=False)
     time_to_error_str = fmt_time(round(time_to_error_s), 'second', precision=0, commas=False, style='word')
     cluster_gpus_str = fmt(cluster_gpus, precision=0, commas=True)
-    hbm_per_gpu_gb_str = fmt_qty(hbm_per_gpu, GB, precision=0, commas=False)
+    hbm_per_gpu_gb_str = fmt_memory_capacity(hbm_per_gpu, unit=GiB, precision=0, commas=False)
 ```
 
 Composition also exposes which subsystem dominates the budget, and memory is the consequential case. Consider training an Archetype A (GPT-4/Llama-3) 70B model (@sec-vol2-introduction-archetypes) on 1,024 A100 GPUs. Unprotected HBM is the binding term: at roughly `{python} HbmSerBudget.fit_per_mbit_str` FIT per megabit, the cluster's `{python} HbmSerBudget.cluster_gpus_str` $\times$ `{python} HbmSerBudget.hbm_per_gpu_gb_str` of memory accumulates so many failure sites that uncorrected corruption would strike roughly every `{python} HbmSerBudget.time_to_error_str`, making large-scale training impossible. Error-correcting-code (ECC) memory protection is therefore not optional. ECC detects and corrects common single-bit errors, cutting the effective soft-error rate by roughly two orders of magnitude and pushing memory back below the logic and interconnect terms in the budget, though residual multi-bit or escaped corruptions remain as the silent-data-corruption problem.
@@ -1431,7 +1431,7 @@ Software faults in ML frameworks range from syntactic and logical errors to memo
 # │
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim.physics import memory_from_params
-from mlsysim.fmt import fmt_params, fmt_qty, check
+from mlsysim.fmt import fmt_params, fmt_qty, check, fmt_memory_capacity
 
 class OomAdamwFootprint:
     # ┌── 1. LOAD (Constants) ──────────────────────
@@ -1453,8 +1453,8 @@ class OomAdamwFootprint:
     params_b_str = fmt_params(model.parameters, scale="B", precision=0, commas=False)
     footprint_gb_str = fmt_qty(footprint, GB, precision=0, commas=False)
     n_gpus_node_str = fmt(n_gpus_node, precision=0)
-    gpu_mem_gb_str = fmt_qty(gpu_mem, GB, precision=0, commas=False)
-    node_mem_cap_gb_str = fmt_qty(node_mem_cap, GB, precision=0, commas=False)
+    gpu_mem_gb_str = fmt_memory_capacity(gpu_mem, unit=GiB, precision=0, commas=False)
+    node_mem_cap_gb_str = fmt_memory_capacity(node_mem_cap, unit=GiB, precision=0, commas=False)
 ```
 
 Resource mismanagement is a prominent failure class. GPU memory allocations accumulate across training iterations as intermediate activations, optimizer states, and gradient buffers are allocated but not released, until the allocator exhausts available capacity and raises an out-of-memory error mid-batch. A `{python} OomAdamwFootprint.params_b_str` parameter model in BF16 with AdamW optimizer states requires roughly `{python} OomAdamwFootprint.footprint_gb_str` of GPU memory, exceeding the `{python} OomAdamwFootprint.node_mem_cap_gb_str` aggregate capacity of an `{python} OomAdamwFootprint.n_gpus_node_str` $\times$ `{python} OomAdamwFootprint.gpu_mem_gb_str` node before activations and temporary buffers are included. The state therefore requires additional sharding across nodes or offload. Memory pressure builds gradually over hundreds of iterations, making root-cause attribution difficult without per-layer memory profiling.
@@ -1996,7 +1996,7 @@ class SDCCollective:
     n_gpus_k_str = fmt_text(fmt_int(n_gpus // 1000), "k")
     training_step_s_str = fmt_time(training_step_s, unit="second", precision=0, commas=False)
     steps_between_str = fmt_count(round(expected_steps), commas=True, label="step")
-    hours_between_str = fmt_time(expected_hours, "hour", precision=0, style="word")
+    hours_between_str = fmt_time(round(expected_hours), "hour", precision=0, style="word")
     _n_tex = n_gpus_str.replace(",", "{,}")
     exposure_eq_math = fmt_math(rf"{_n_tex} \times ({training_step_s}/{SEC_PER_HOUR}) \approx {fmt_int(round(exposure_gpu_hr))}")
 ```
@@ -2953,7 +2953,7 @@ class FaultToleranceRecoveryRecap:
 
 **Total**: $T_{\text{recovery}} = T_{\text{detect}} + T_{\text{restart}} + T_{\text{load}} + T_{\text{warmup}} \approx$ `{python} RecoveryBudget.t_total_min_str` per failure event.
 
-**Impact**: Recovery time optimization matters more as clusters grow. With the GPU-only baseline from @tbl-cluster-mtbf-scaling, a `{python} RecoveryBudget.n_gpus_1k_str`-GPU cluster has MTBF of `{python} RecoveryBudget.mtbf_1k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_1k_str`, losing about `{python} RecoveryBudget.daily_loss_min_1k_str` daily, a modest `{python} RecoveryBudget.overhead_pct_1k_str` overhead. However, a `{python} RecoveryBudget.n_gpus_10k_str`-GPU cluster has GPU-only MTBF of `{python} RecoveryBudget.mtbf_10k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_10k_str`, losing about `{python} RecoveryBudget.daily_loss_min_10k_str` daily ({python} RecoveryBudget.overhead_pct_10k_str` overhead), equivalent to wasting roughly `{python} RecoveryBudget.waste_gpu_hours_10k_str` every day (the daily lost minutes multiplied across all `{python} RecoveryBudget.n_gpus_10k_str` GPUs).
+**Impact**: Recovery time optimization matters more as clusters grow. With the GPU-only baseline from @tbl-cluster-mtbf-scaling, a `{python} RecoveryBudget.n_gpus_1k_str`-GPU cluster has MTBF of `{python} RecoveryBudget.mtbf_1k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_1k_str`, losing about `{python} RecoveryBudget.daily_loss_min_1k_str` daily, a modest `{python} RecoveryBudget.overhead_pct_1k_str` overhead. However, a `{python} RecoveryBudget.n_gpus_10k_str`-GPU cluster has GPU-only MTBF of `{python} RecoveryBudget.mtbf_10k_hrs_str` and experiences about `{python} RecoveryBudget.failures_per_day_10k_str`, losing about `{python} RecoveryBudget.daily_loss_min_10k_str` daily (`{python} RecoveryBudget.overhead_pct_10k_str` overhead), equivalent to wasting roughly `{python} RecoveryBudget.waste_gpu_hours_10k_str` every day (the daily lost minutes multiplied across all `{python} RecoveryBudget.n_gpus_10k_str` GPUs).
 
 :::
 

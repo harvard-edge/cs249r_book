@@ -25,9 +25,13 @@ XREF_KINDS = r"(?:sec|fig|tbl|eq|lst|algo?)"
 RESIDUAL_XREF = re.compile(rf"\?@({XREF_KINDS}-[\w.-]+)")
 BARE_XREF = re.compile(rf"(?<![?\w])@({XREF_KINDS}-[\w.-]+)")
 LATEX_UNDEF = re.compile(r"\b(?:Figure|Table|Section|Equation|Listing)\s+\?\?+")
+# The separator must not cross a blank line. A real "Table 8.2.1" is a single
+# reference and at worst wraps once; \s+ also spanned paragraph breaks, so a
+# running header ending in "... Case Study" followed by the next subsection
+# number ("9.10.1") was reported as a malformed object number. (2026-08-16)
 MALFORMED_OBJECT_NUMBER = re.compile(
     r"\b(?:Table|Figure|Listing|Algorithm|Lighthouse|Example|Case Study|"
-    r"Systems Perspective)\s+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
+    r"Systems Perspective)(?:[ \t]|\n(?!\s*\n))+(\d+\.\d+\.\d+(?:\.\d+)*)\b"
 )
 TABLE_CAPTION = re.compile(r"\bTable\s+(\d+\.\d+):\s+([^\n]+)")
 NUMBERING_ISSUE_CODES = {
