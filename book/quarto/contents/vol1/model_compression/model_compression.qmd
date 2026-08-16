@@ -74,7 +74,7 @@ class CompressionDeploymentScale:
     llm_175b_params = Models.Language.GPT3.parameters.to(Bparam).magnitude
     llm_175b_mem_fp16 = memory_from_params(llm_175b_params * Bparam, bytes_fp16 * byte / param)
     llm_175b_mem_fp16_gb = llm_175b_mem_fp16.to(GB).magnitude
-    smartphone_ram = round(Platforms.Mobile.ram.to(GB).magnitude) * GB
+    smartphone_ram = Platforms.Mobile.ram
     mcu_ram_kb = Platforms.Tiny.ram.to(KB).magnitude
     mcu_ram = mcu_ram_kb * KB
 
@@ -85,7 +85,7 @@ class CompressionDeploymentScale:
     llm_7b_mem_gb_str = fmt_qty(llm_7b_mem_fp16, GB, precision=0, commas=False)
     llm_175b_str = fmt(llm_175b_params, precision=0, commas=False)
     llm_175b_mem_gb_str = fmt_qty(llm_175b_mem_fp16, GB, precision=0, commas=False)
-    smartphone_ram_gb_str = fmt_qty_int(smartphone_ram, GB, commas=False)
+    smartphone_ram_gb_str = fmt_memory_capacity(smartphone_ram, unit=GiB, precision=0, commas=False)
     mcu_ram_kb_str = fmt_memory_capacity(Platforms.Tiny.ram, unit=KiB, precision=0, commas=False)
 ```
 
@@ -368,7 +368,7 @@ class ModelDeviceComparison:
     mobilenet_int8_mb_str = fmt_qty(mobilenet_int8_mem, MB, precision=1, commas=False)
     dscnn_kb_str = fmt_qty(dscnn_mem, KB, precision=0, commas=False)
     cloud_cap_gb_str = fmt_qty_int(cloud_mem, GB, commas=False, approx=True)
-    mobile_cap_gb_str = fmt_qty_int(mobile_mem, GB, commas=False, approx=True)
+    mobile_cap_gb_str = fmt_memory_capacity(mobile_mem, unit=GiB, precision=0, commas=False)
     tiny_cap_kb_str = fmt_memory_capacity(tiny_mem, unit=KiB, precision=0, commas=False, approx=True)
     dlrm_mobile_overflow_mult_str = fmt_multiple(dlrm_mobile_overflow)
     dlrm_tiny_overflow_mult_str = fmt_multiple(dlrm_tiny_overflow)
@@ -8105,21 +8105,25 @@ class FallaciesAnalysis:
 
     # Combined pruning + quantization scenario (Pitfall 5)
     prune_speedup = 2  # 50% structured sparsity = 2× theoretical
-    actual_combined_pct = 28  # illustrative end-to-end improvement (%)
+    measured_speedup = 1.5  # the chapter's realized outcome, as in TheoryPracticeSpeedup
 
     # ┌── 2. EXECUTE (The Compute) ─────────────────────────────────────────
     quant_speedup = expected_bits / target_bits  # 4× from INT8
     combined_expected = quant_speedup * prune_speedup  # 8× theoretical
     quant_after_overhead = quant_speedup * (1 - overhead_pct / 100)  # scenario quant-only value
+    realized_fraction_pct = measured_speedup / combined_expected * 100
 
     # ┌── 3. GUARD (Invariants) ───────────────────────────────────────────
     check(quant_after_overhead < quant_speedup, "Actual speedup should be less than theoretical due to overhead.")
-    check(actual_combined_pct < combined_expected * 100, "Real-world speedup must be less than theoretical.")
+    check(
+        abs(realized_fraction_pct - 18.75) < 0.01,
+        f"Realized fraction should match the chapter's 1.5x-of-8x scenario, got {realized_fraction_pct:.1f}%.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     int8_size_reduction_mult_str = fmt_multiple(round(quant_speedup), commas=False, precision=0)
     expected_speedup_mult_str = fmt_multiple(combined_expected, precision=0, commas=False)
-    actual_speedup_str = fmt_percent(actual_combined_pct / 100, precision=0, commas=False, style='prose')
+    actual_speedup_str = fmt_percent(realized_fraction_pct / 100, precision=1, commas=False, style='prose')
     bert_fp32_mb_str = fmt_memory(440 * MB, unit=MB, precision=0, commas=False)
     bert_int8_mb_str = fmt_memory(110 * MB, unit=MB, precision=0, commas=False)
     pruning_target_str = fmt_percent(0.70, precision=0, commas=False, style='prose')
@@ -8172,7 +8176,7 @@ Teams apply post-training quantization (PTQ) to avoid retraining and accept a mo
 
 **Pitfall**: *Assuming compression ratios translate directly into proportional deployment gains.*
 
-Teams may obtain a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction through INT8 quantization and expect the same deployment gain. In practice, scales, metadata, unsupported operators, conversions, and sparse indexing erode the benefit. The chapter's `{python} FallaciesAnalysis.actual_speedup_str` end-to-end improvement versus a `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target is a hypothetical trace, not a BERT benchmark. Production workflows must profile deployed latency on target hardware rather than extrapolate from compression ratios.
+Teams may obtain a `{python} FallaciesAnalysis.int8_size_reduction_mult_str` raw weight-payload reduction through INT8 quantization and expect the same deployment gain. In practice, scales, metadata, unsupported operators, conversions, and sparse indexing erode the benefit. The chapter's `{python} FallaciesAnalysis.actual_speedup_str` end-to-end improvement versus an `{python} FallaciesAnalysis.expected_speedup_mult_str` paper target is a hypothetical trace, not a BERT benchmark. Production workflows must profile deployed latency on target hardware rather than extrapolate from compression ratios.
 
 :::
 

@@ -140,6 +140,76 @@ mobile memory capacity, and component MTTF have no rows
 
 ---
 
+## 5b. Wave-2 deep review — 8 Vol 1 chapters, one agent per rendered file
+
+Every section of `nn_architectures`, `data_selection`, `model_compression`,
+`hw_acceleration`, `benchmarking`, `model_serving`, `ml_ops`, and
+`responsible_engr` was read as the reader sees it, against the LEGO cell that
+produced each number. **127 findings.** The mechanical and clearly-correct ones
+are fixed on this branch. The three below are blockers that need an authorial
+decision, because each one is a published figure or worked example whose
+correct value is a judgment call.
+
+### B1 — `hw_acceleration` figure 10 plots a fabricated series (BLOCKING)
+
+The caption states that between 2000 and 2025 compute reached `10^12` times its
+baseline against bandwidth's `10^3`, "leaving a nine-order-of-magnitude
+separation." The plotted arrays are hardcoded:
+
+```python
+compute_performance = [1e3, 1e5, 1e7, 1e9, 1e12, 1e15]
+memory_bandwidth    = [1, 10, 50, 100, 500, 1000]
+```
+
+The chapter's own measured data says otherwise. The compute-to-bandwidth ratio
+**is** the ridge point, and figure 11 and table 12, both in the same section,
+give V100 138.9, A100 153, H100 295.2, B200 281 FLOP/byte: a 2.1x change over
+seven years, not 10^9 over twenty-five. Real anchors put compute growth near
+10^6 and bandwidth near 10^3.5, so the gap is two to three orders.
+
+Fixing this means choosing sourced endpoints for both series, which changes a
+published figure. Not touched: an unsourceable figure does not ship, and neither
+does a replacement invented here.
+
+### B2 — `model_serving` Napkin Math 1.3 rests on a service time the chapter contradicts
+
+The napkin uses 5 ms as the TensorRT FP16 service time. Tables 2, 19, and 20 all
+give 1.4 ms for the same model on the same GPU. Every downstream number depends
+on it: rho <= 1 - (4.6 x 5)/50 = 0.54, 47 GPUs, 62 with headroom, and the "62
+V100s" restated in the economics section. Redone at 1.4 ms the answer is 9 GPUs,
+12 with headroom. Either the napkin's 5 ms is a deliberately conservative
+batch-inclusive figure that the box should say out loud, or the whole worked
+example needs rebuilding at 1.4 ms.
+
+### B3 — `model_serving` prefill ceiling rests on an unstated 10,000 tokens/s
+
+The unit-economics ceiling of 45.2 million tokens/hour and the $0.066/million
+lower bound come from `prefill_tokens_per_s_value = 10_000`, which never reaches
+the page and contradicts the same section's 41.9 ms TTFT for a 1,000-token
+prompt (implying 23,866 tokens/s). A sustained rate cannot be below the
+single-request rate the chapter just derived.
+
+### Also open, lower stakes
+
+`data_selection` FixMatch 8.1x is computed against a 4,000-label baseline while
+the callout tells the reader the baseline is 50K, and none of its inputs are
+shown; the ImageNet size prints as 1.28M, 1.2M, and 1.3M in three worked
+examples; a quiz gives $46,000 as the recurring annual net when it is the first
+year's. `model_compression` prints the INT8-vs-FP32 arithmetic-energy gain as
+18.5x, 30x, and 20x in three adjacent sections; a self-check asserts a ~90
+percent sparsity threshold the body twice says does not exist; a BERT footprint
+ratio is stated as 16x where 440/28 = 15.7. `benchmarking` puts the
+microcontroller-to-cluster power span at "nearly eight orders" in a keyed answer
+where its own table caption says nearly eleven; an "application benchmarks"
+scope is named once and never defined. `ml_ops` states that Knight Capital was
+bankrupted (it was rescued, then acquired) and gives 440 million shares where
+the SEC order it cites says 397 million; four corporate authors render as
+inverted personal names ("Cloud, Google"). `responsible_engr` calls 85 percent
+the aggregate accuracy where the body assigns it to the majority group and 82.5
+percent to the aggregate. `hw_acceleration` has three self-check answers that
+teach runtime precision switching and runtime re-tiling the body explicitly
+denies, and one that assigns BatchNorm's per-channel statistics to LayerNorm.
+
 ## 6. Build domain — reported, not touched
 
 The first two are Zeljko's; the markers stay in the source exactly as he placed
