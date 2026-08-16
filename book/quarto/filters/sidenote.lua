@@ -98,6 +98,9 @@ function Note(note)
     return out
   end
 
-  -- For ePub and all other formats, let Pandoc render footnotes normally.
-  return nil
+  -- For ePub and all other formats, let Pandoc render the footnote normally --
+  -- but return the note rather than nil, because take_offset above edited its
+  -- content. Returning nil tells Pandoc "unchanged" and the stripped [offset=]
+  -- marker comes back, which is exactly how it kept leaking into HTML.
+  return note
 end

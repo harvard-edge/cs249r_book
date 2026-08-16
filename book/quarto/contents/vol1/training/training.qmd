@@ -344,7 +344,7 @@ GPT-2 (1.5 billion parameters) serves as the primary case study because it is la
 : **GPT-2 (1.5 billion parameters) lighthouse model specifications**: Parameter count, architecture depth, dataset size, and total training compute mapped to their systems implications. Each row pairs a model property with the engineering constraint it creates—memory footprint for weights, activation pressure from pipeline depth, I/O throughput requirements, and parallelization demand. {#tbl-training-gpt2-lighthouse-specs tbl-colwidths="[20,26,54]"}
 
 **Mechanism**:
-Training GPT-2 couples a total operation count of $O \approx 6 \cdot P \cdot D_{\text{tokens}} = 1.4 \times 10^{20} \text{ FLOPs}$ with a strict memory footprint $M_{\text{state}} = M_{\text{weights}} + M_{\text{grads}} + M_{\text{opt}} + M_{\text{act}}$. Balancing execution time $T_{\text{train}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator HBM capacity.
+Training GPT-2 couples a total operation count of $O \approx 6 \cdot P \cdot D_{\text{tokens}}$, or `{python} GPT2LighthouseSpecs.gpt2_total_flops_str`, with a strict memory footprint $M_{\text{state}} = M_{\text{weights}} + M_{\text{grads}} + M_{\text{opt}} + M_{\text{act}}$. Balancing execution time $T_{\text{train}} = \frac{O}{R_{\text{peak}} \cdot \eta_{\text{hw}}}$ requires orchestrating data ingestion, activation memory, and compute throughput within accelerator HBM capacity.
 
 :::
 
@@ -2211,6 +2211,9 @@ class GPT2DataPipeline:
     transfer_time = (batch_bytes / pcie_bw).to(second)
 
     parallel_token_ms = tokenization_ms / workers
+    # Single-core host preparation: the stage trace's tokenization plus
+    # PCIe transfer. Stated in the Systems insight, so derive it here.
+    prep_ms = tokenization_ms + transfer_time.to(millisecond).magnitude
     hidden_dim = Models.Language.GPT2.hidden_dim
     layers = Models.Language.GPT2.layers
     heads = Models.Language.GPT2.heads
@@ -2253,6 +2256,7 @@ class GPT2DataPipeline:
     throughput_samples_str = fmt_int(throughput_samples, commas=False)
     n_v100_gpus_str = fmt(n_v100_gpus, precision=0, commas=False)
     accelerator_step_ms_str = fmt_time(effective_step_time, millisecond, precision=1, commas=False)
+    prep_ms_str = fmt_time(prep_ms, 'millisecond', precision=1, commas=False)
 
 # Note: Use GPT2DataPipeline.tokenization_ms_str directly.
 ```
@@ -2274,7 +2278,7 @@ class StorageBandwidthNvme:
 
 ::: {#exmp-training-gpt-2-language-model-data-pipeline .callout-example title="GPT-2 language model data pipeline"}
 
-**Scenario**: Quantifying storage access, CPU tokenization, and PCIe host-to-device transfers supplying an 8-V100 GPU cluster training GPT-2.
+**Scenario**: Quantifying storage access, CPU tokenization, and PCIe host-to-device transfers supplying a `{python} GPT2DataPipeline.n_v100_gpus_str`-V100 GPU cluster training GPT-2.
 
 **Stage trace**:
 
@@ -2283,7 +2287,7 @@ class StorageBandwidthNvme:
 3. **Batching and padding**: Padding and packing generate an int64 tensor of shape `{python} GPT2DataPipeline.batch_size_seq_str` $\times$ `{python} GPT2DataPipeline.seq_len_token_str`, producing `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Transferring the tensor across a PCIe Gen3 x16 bus (`{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` bandwidth) takes $T_{\text{transfer}} =$ `{python} GPT2DataPipeline.transfer_ms_str`, making bus transfer negligible.
 
-**Systems insight**: When single-core CPU preparation time ($T_{\text{prep}} \approx 180\text{ ms}$) exceeds accelerator step time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), the GPU starves, collapsing $\eta_{\text{hw}} \to 0$. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces tokenization latency to $T_{\text{tokenize}} / N_{\text{worker}} \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $T_{\text{prep}}$ with $T_{\text{step}}$ to restore hardware utilization to `{python} GPT2DataPipeline.utilization_pct_str`, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
+**Systems insight**: When single-core CPU preparation time ($T_{\text{prep}} \approx$ `{python} GPT2DataPipeline.prep_ms_str`) exceeds accelerator step time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), the GPU starves, collapsing $\eta_{\text{hw}} \to 0$. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces tokenization latency to $T_{\text{tokenize}} / N_{\text{worker}} \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $T_{\text{prep}}$ with $T_{\text{step}}$ to restore hardware utilization to `{python} GPT2DataPipeline.utilization_pct_str`, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
 
 :::
 
@@ -6152,7 +6156,7 @@ A short calculation shows how quickly the inter-node fabric becomes the binding 
 # │ How: Calculate synchronization latency over a 100 Gbps network.
 # │
 # └─────────────────────────────────────────────────────────────────────────────
-from mlsysim.fmt import fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple, fmt_params, fmt_ratio, fmt_time
+from mlsysim.fmt import fmt_bandwidth, fmt_count, fmt_memory, fmt_multiple, fmt_params, fmt_percent, fmt_ratio, fmt_time, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class NetworkWall:
@@ -6181,6 +6185,14 @@ class NetworkWall:
     # Using the shared helper keeps the communication model consistent.
     time = calc_ring_allreduce_time(gradient_size, n_gpus, network_bw, 0 * second)
 
+    # The Systems lesson quotes the resulting hardware efficiency, so derive it
+    # here rather than restating a second, independently rounded number.
+    compute_time = 1 * second
+    hw_efficiency = (compute_time / (compute_time + time)).to("").magnitude
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────────
+    check(0 < hw_efficiency < 1, "Hardware efficiency must be a fraction")
+
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_params_b_str = fmt_params(params, precision=0)
     n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
@@ -6191,6 +6203,8 @@ class NetworkWall:
     network_time_s_str = fmt_time(time, second, precision=2, commas=False)
     network_bw_gb_per_s_str = fmt_bandwidth(network_bw, unit=GB / second, precision=1, commas=False)
     nvlink_h100_gb_per_s_str = fmt_bandwidth(nvlink_h100, unit=GB / second, precision=0, commas=False)
+    compute_time_s_str = fmt_time(compute_time, second, precision=0, commas=False)
+    hw_efficiency_pct_str = fmt_percent(hw_efficiency, precision=1, commas=False, style='prose')
 
 # Note: Use NetworkWall.network_time_s_str directly.
 ```
@@ -6204,9 +6218,9 @@ class NetworkWall:
 1. **Gradient size** (FP16): `{python} NetworkWall.gradient_size_gb_str` per step.
 2. **AllReduce cost**: Ring AllReduce passes gradient shards around a logical ring, so each worker ends up sending nearly two full copies of the gradient: $2(N_{\text{GPU}}-1)/N_{\text{GPU}}$, which equals `{python} NetworkWall.allreduce_factor_mult_str` for `{python} NetworkWall.n_gpus_str`. That gives `{python} NetworkWall.allreduce_factor_value_str` $\times$ `{python} NetworkWall.gradient_size_gb_str` = `{python} NetworkWall.allreduce_gb_str` total.
 3. **Bandwidth-only lower bound**: At `{python} NetworkWall.network_bw_gb_per_s_str` per worker on the 100 Gbps fabric, synchronization latency is $T_{\text{comm}} = D_{\text{comm}} / \text{BW}_{\text{net}} =$ `{python} NetworkWall.allreduce_gb_str` / `{python} NetworkWall.network_bw_gb_per_s_str` $=$ `{python} NetworkWall.network_time_s_str`.
-4. **Compute comparison**: If the nonoverlapped forward and backward work takes $T_{\text{compute}} \approx 1\text{ s}$, communication latency $T_{\text{comm}} \approx 2.24\text{ s}$ dominates.
+4. **Compute comparison**: If the nonoverlapped forward and backward work takes $T_{\text{compute}} \approx$ `{python} NetworkWall.compute_time_s_str`, communication latency $T_{\text{comm}} \approx$ `{python} NetworkWall.network_time_s_str` dominates.
 
-**Systems lesson**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{comm}} > T_{\text{compute}}$, causing accelerator efficiency $\eta_{\text{hw}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}}}$ to plummet below 31 percent. Mitigations include gradient compression (reducing $D_{\text{comm}}$), ring AllReduce primitives [@sergeev2018horovod], and hierarchical topologies that confine high-frequency transfers to fast intra-node links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs `{python} NetworkWall.network_bw_gb_per_s_str` inter-node).
+**Systems lesson**: The network becomes a wall\index{AllReduce!network wall} when $T_{\text{comm}} > T_{\text{compute}}$, causing accelerator efficiency $\eta_{\text{hw}} = \frac{T_{\text{compute}}}{T_{\text{compute}} + T_{\text{comm}}}$ to plummet to about `{python} NetworkWall.hw_efficiency_pct_str`. Mitigations include gradient compression (reducing $D_{\text{comm}}$), ring AllReduce primitives [@sergeev2018horovod], and hierarchical topologies that confine high-frequency transfers to fast intra-node links (NVLink at `{python} NetworkWall.nvlink_h100_gb_per_s_str` vs `{python} NetworkWall.network_bw_gb_per_s_str` inter-node).
 
 :::
 
@@ -6604,8 +6618,8 @@ class FallaciesPitfallsSetup:
         fp_time_extension_min / 100, fp_time_extension_max / 100, precision=0, commas=False, style="prose"
     )
     fp_io_idle_range_str = fmt_percent_range(fp_io_idle_min / 100, fp_io_idle_max / 100, precision=0, commas=False, style="prose")
-    fp_prefetch_time_before_s_str = fmt_time(fp_prefetch_time_before, "second", precision=0, commas=False)
-    fp_prefetch_time_after_s_str = fmt_time(fp_prefetch_time_after, "second", precision=0, commas=False)
+    fp_prefetch_time_before_s_str = fmt_time(fp_prefetch_time_before, "minute", precision=0, commas=False)
+    fp_prefetch_time_after_s_str = fmt_time(fp_prefetch_time_after, "minute", precision=0, commas=False)
     fp_prefetch_reduction_str = fmt_percent(fp_prefetch_reduction / 100, precision=0, commas=False, style='prose')
 
 # Export for prose
