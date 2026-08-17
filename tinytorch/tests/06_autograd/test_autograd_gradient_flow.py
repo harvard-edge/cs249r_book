@@ -124,6 +124,35 @@ def test_gelu_gradient_flow():
     print("✅ GELU gradient flow works correctly")
 
 
+def test_gelu_backward_large_magnitude_input_does_not_overflow():
+    """GELUBackward.apply() computes its own sigmoid term for the derivative.
+    The naive 1/(1+exp(-z)) formula overflows np.exp for large |z| (z here is
+    1.702*x), so large-magnitude inputs must not raise or warn, and the
+    gradient must saturate to the correct limiting values."""
+    from tinytorch.core.autograd import GELUBackward
+
+    print("Testing GELU backward large-magnitude stability...")
+
+    for scale in [10.0, 200.0, 1000.0]:
+        x = Tensor(np.array([-scale, scale]), requires_grad=True)
+        backward_fn = GELUBackward(x)
+
+        with warnings.catch_warnings():
+            warnings.simplefilter("error")
+            grad = backward_fn.apply(np.array([1.0, 1.0]))
+
+        assert np.all(np.isfinite(grad[0])), f"Non-finite GELU gradient at scale={scale}: {grad}"
+
+    # At a large enough magnitude, GELU behaves like the identity for x>>0
+    # (gradient -> 1) and like a hard zero for x<<0 (gradient -> 0).
+    x = Tensor(np.array([-1000.0, 1000.0]), requires_grad=True)
+    grad = GELUBackward(x).apply(np.array([1.0, 1.0]))
+    assert grad[0][0] == pytest.approx(0.0, abs=1e-6)
+    assert grad[0][1] == pytest.approx(1.0, abs=1e-6)
+
+    print("✅ GELU backward stays stable at large magnitudes")
+
+
 # NOTE: test_layernorm_operations was removed because it tested for Tensor.sqrt()
 # which was never implemented. The transformer module uses np.sqrt() directly,
 # not a Tensor method. Tests should only test implemented functionality.

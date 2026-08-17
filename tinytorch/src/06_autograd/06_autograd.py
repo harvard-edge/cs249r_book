@@ -1935,7 +1935,15 @@ class GELUBackward(Function):
             # GELU derivative using the sigmoid approximation (matches forward):
             # forward: gelu(x) = x * sigmoid(1.702 * x)
             # d/dx [x * sig(1.702x)] = sig(1.702x) + x * 1.702 * sig(1.702x) * (1 - sig(1.702x))
-            sig = 1.0 / (1.0 + np.exp(-1.702 * x))
+            # Numerically stable sigmoid (matches activations.Sigmoid.forward): each
+            # branch keeps its exponent <= 0, so large |x| never overflows np.exp.
+            z = 1.702 * x
+            with np.errstate(over="ignore", invalid="ignore"):
+                sig = np.where(
+                    z >= 0,
+                    1.0 / (1.0 + np.exp(-z)),
+                    np.exp(z) / (1.0 + np.exp(z)),
+                )
             gelu_grad = sig + x * 1.702 * sig * (1.0 - sig)
 
             return (grad_output * gelu_grad,)
