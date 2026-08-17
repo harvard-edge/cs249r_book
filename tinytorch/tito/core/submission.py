@@ -92,8 +92,17 @@ class SubmissionHandler:
             return {}
         try:
             with open(path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except (json.JSONDecodeError, IOError) as e:
+                data = json.load(f)
+            # Valid JSON but not the expected object shape (e.g. a bare
+            # list from a bad merge or partial write) must not be
+            # returned as-is: the declared return type is Dict[str, Any]
+            # and every caller relies on that, calling .get() on the
+            # wrong type crashes deep inside assemble_payload().
+            if isinstance(data, dict):
+                return data
+            self.console.print(f"[yellow]Warning: {path} does not contain a JSON object, ignoring[/yellow]")
+            return {}
+        except (json.JSONDecodeError, IOError, UnicodeDecodeError) as e:
             self.console.print(f"[yellow]Warning: Could not read {path}: {e}[/yellow]")
             return {}
 
