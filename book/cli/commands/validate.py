@@ -439,6 +439,12 @@ class ValidateCommand:
             Scope("integrity", "_run_footnote_refs"),
             Scope("cross-chapter", "_run_footnote_cross_chapter", default=False),
             Scope("capitalization", "_run_footnote_capitalization"),
+            Scope("slug-taxonomy", "_run_footnote_slug_taxonomy",
+                  note="canonical 3-token / 2-hyphen fn-topic-slug format"),
+            Scope("silence-rule", "_run_footnote_silence_rule",
+                  note="no elementary SI or CS 101 gloss definitions"),
+            Scope("physical-units", "_run_footnote_physical_units",
+                  note="physical unit capitalization (e.g. pJ/bit vs PJ/bit)"),
         ],
         "figures": [
             Scope("captions", "_run_figures"),
@@ -8097,6 +8103,150 @@ class ValidateCommand:
             description=(
                 "Footnote definitions use bold head + colon per book-prose §5 (S1–S5)"
             ),
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Footnote Slug Taxonomy (3-token / 2-hyphen fn-topic-slug format)
+    # ------------------------------------------------------------------
+
+    def _run_footnote_slug_taxonomy(self, root: Path) -> ValidationRunResult:
+        """Validate that footnote IDs follow canonical 3-token / 2-hyphen fn-word1-word2-word3 format."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        import importlib.util
+        import sys as _sys
+        script_path = (
+            Path(__file__).resolve().parents[2]
+            / "tools" / "scripts" / "mit_press" / "check_footnote_caps.py"
+        )
+        mod_name = "mlsys_check_footnote_caps"
+        if mod_name in _sys.modules:
+            mod = _sys.modules[mod_name]
+        else:
+            spec = importlib.util.spec_from_file_location(mod_name, script_path)
+            mod = importlib.util.module_from_spec(spec)
+            _sys.modules[mod_name] = mod
+            spec.loader.exec_module(mod)
+
+        allowlist = mod.load_allowlist(mod.DEFAULT_ALLOWLIST)
+        fn_pat = re.compile(r"\[\^(fn-[a-z0-9-]+)\]")
+
+        for file in files:
+            content = self._read_text(file)
+            lines = content.splitlines()
+            for idx, line in enumerate(lines, 1):
+                for m in fn_pat.finditer(line):
+                    fn_id = m.group(1)
+                    if fn_id in allowlist:
+                        continue
+                    tokens = fn_id.split("-")
+                    concept_tokens = tokens[1:] if len(tokens) > 1 else tokens
+                    if len(concept_tokens) != 3:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_slug_taxonomy",
+                                message=(
+                                    f"Footnote [^{fn_id}] has {len(concept_tokens)} concept tokens "
+                                    f"({'/'.join(concept_tokens)}); must follow canonical 3-token "
+                                    f"fn-word1-word2-word3 taxonomy"
+                                ),
+                                severity="warning",
+                                context=line.strip()[:100],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="footnote-slug-taxonomy",
+            description="Footnote IDs must follow canonical 3-token / 2-hyphen fn-topic-slug format",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Silence Rule & Baseline Gloss Filtering
+    # ------------------------------------------------------------------
+
+    def _run_footnote_silence_rule(self, root: Path) -> ValidationRunResult:
+        """Flag elementary SI unit definitions or generic CS 101 glosses that violate the Silence Rule."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        silence_elem_pat = re.compile(
+            r"^\[\^(fn-[a-z0-9-]+)\]:\s*(?:\*+[^*]+\*+:)?\s*(?:The|An?)\s+(?:SI\s+unit|basic\s+unit|fundamental\s+unit|standard\s+CS)\b",
+            re.IGNORECASE,
+        )
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            for idx, line in enumerate(lines, 1):
+                m = silence_elem_pat.match(line.strip())
+                if m:
+                    fn_id = m.group(1)
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="footnote_silence_rule_violation",
+                            message=(
+                                f"Footnote [^{fn_id}] begins with an elementary SI or CS 101 gloss. "
+                                f"Enforce Silence Rule: lead immediately with ML Systems tether."
+                            ),
+                            severity="error",
+                            context=line.strip()[:120],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="footnote-silence-rule",
+            description="Footnotes must not open with elementary SI or CS 101 glosses",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    # ------------------------------------------------------------------
+    # Physical Unit Capitalization Sanity
+    # ------------------------------------------------------------------
+
+    def _run_footnote_physical_units(self, root: Path) -> ValidationRunResult:
+        """Flag physical unit capitalization mismatches (e.g. PJ/bit instead of pJ/bit)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        pj_err_pat = re.compile(r"\bPJ/(?:bit|MAC|op|cycle)\b")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            for idx, line in enumerate(lines, 1):
+                m = pj_err_pat.search(line)
+                if m:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="physical_unit_capitalization_error",
+                            message=(
+                                f"Physical unit mismatch '{m.group(0)}': 'PJ' is Petajoules (10^15 J). "
+                                f"Use 'pJ' for picojoules (10^-12 J)."
+                            ),
+                            severity="error",
+                            context=line.strip()[:100],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="footnote-physical-units",
+            description="Check SI physical unit capitalization (e.g. pJ/bit vs PJ/bit)",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
