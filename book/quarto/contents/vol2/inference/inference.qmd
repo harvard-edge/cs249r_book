@@ -197,7 +197,7 @@ Serialization overhead compounds the problem by converting in-memory tensors to 
 
 Load balancer latency adds another layer. Requests must be routed to appropriate replicas, which requires examining request metadata, consulting routing tables, and forwarding to selected backends. Well-optimized load balancers add 100–500 microseconds; poorly configured ones can add milliseconds.
 
-Coordination overhead emerges when requests require fan-out to multiple services. A recommendation system that queries a user model, item model, and ranking model in parallel must coordinate these queries and aggregate results. The coordination logic itself consumes CPU cycles and introduces latency variation.
+Coordination overhead emerges when requests require fan-out to multiple services. A recommendation system that queries a user model, item model, and ranking model in parallel must coordinate these queries and aggregate results. The coordination logic itself consumes CPU cycles and introduces latency variation. Finally, queuing delay ($T_{\text{queuing}}$) accumulates whenever request arrival rates temporarily exceed available replica processing capacity.
 
 The total serving tax often consumes 10–30 percent of the latency budget in distributed systems, as @eq-serving-tax shows:
 
@@ -2136,14 +2136,14 @@ Prefix caching shares KV cache entries across requests with common prefixes. @Fi
 ::: {#fig-prefix-caching fig-env="figure" fig-pos="htb" fig-cap="**Prefix Caching via Block Sharing**: PagedAttention enables efficient prefix caching by allowing multiple sequences' block tables to point to the same physical blocks for shared content. In this example, the System Prompt is stored in blocks 0-5. Request A and Request B map their first 6 logical pages to these same physical blocks, storing only their unique suffixes in new blocks. This dramatically reduces memory usage and prefill computation for workloads with shared context." fig-alt="Block diagram showing two requests sharing physical memory. Top row: 6 green shared blocks (B0-B5) for system prompt. Request A and Request B page tables both point to shared blocks, with unique suffix blocks in blue and pink respectively."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+\begin{tikzpicture}[font=\small\sffamily, scale=0.9, transform shape]
   \definecolor{SharedColor}{HTML}{D4EFDF}
   \definecolor{UniqueColorA}{HTML}{D1E6F3}
   \definecolor{UniqueColorB}{HTML}{F5D2D5}
   \definecolor{BlockColor}{HTML}{F5F5F5}
 
   \tikzset{
-    block/.style={draw=black!60, fill=BlockColor, minimum width=0.8cm, minimum height=0.6cm, font=\scriptsize\usefont{T1}{phv}{m}{n}, inner sep=0pt},
+    block/.style={draw=black!60, fill=BlockColor, minimum width=0.8cm, minimum height=0.6cm, font=\scriptsize\sffamily, inner sep=0pt},
     ptr/.style={->, >=stealth, thick}
   }
 
@@ -2158,7 +2158,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @Fi
   \node[block, fill=SharedColor, right=0.1cm of pb3] (pb4) {B4};
   \node[block, fill=SharedColor, right=0.1cm of pb4] (pb5) {B5};
 
-  \node[right=0.2cm of pb5, font=\scriptsize\usefont{T1}{phv}{m}{n}] {(System Prompt)};
+  \node[right=0.2cm of pb5, font=\scriptsize\sffamily] {(System Prompt)};
 
   % Unique Blocks for A
   \node[block, fill=UniqueColorA, below=0.4cm of pb0] (pb10) {B10};
@@ -2173,7 +2173,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @Fi
   \node[anchor=east] (reqA_title) at (-1, 1) {\textbf{Request A}};
   \node[block, fill=SharedColor, right=0.2cm of reqA_title] (la0) {P0};
   \node[block, fill=SharedColor, right=0.1cm of la0] (la1) {P1};
-  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, right=0.1cm of la1] (la_dots) {...};
+  \node[font=\scriptsize\sffamily, right=0.1cm of la1] (la_dots) {...};
   \node[block, fill=UniqueColorA, right=0.1cm of la_dots] (la6) {P6};
 
   \draw[ptr, SharedColor!70!black] (la0) -- (pb0);
@@ -2184,7 +2184,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @Fi
   \node[anchor=east, below=0.5cm of reqA_title.east] (reqB_title) {\textbf{Request B}};
   \node[block, fill=SharedColor, right=0.2cm of reqB_title] (lb0) {P0};
   \node[block, fill=SharedColor, right=0.1cm of lb0] (lb1) {P1};
-  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, right=0.1cm of lb1] (lb_dots) {...};
+  \node[font=\scriptsize\sffamily, right=0.1cm of lb1] (lb_dots) {...};
   \node[block, fill=UniqueColorB, right=0.1cm of lb_dots] (lb6) {P6};
 
   \draw[ptr, SharedColor!70!black] (lb0) to[in=220, out=45] (pb0);
@@ -2192,7 +2192,7 @@ Prefix caching shares KV cache entries across requests with common prefixes. @Fi
   \draw[ptr, UniqueColorB!70!black] (lb6) -- (pb12);
 
   % Annotations
-  \node[align=left, font=\scriptsize\usefont{T1}{phv}{m}{n}, anchor=west, right=2cm of la6] {Both requests point\\to same physical blocks\\for blocks 0-5};
+  \node[align=left, font=\scriptsize\sffamily, anchor=west, right=2cm of la6] {Both requests point\\to same physical blocks\\for blocks 0-5};
 
 \end{tikzpicture}
 ```
@@ -2479,7 +2479,7 @@ Speculative decoding was established as an algorithmic optimization in @sec-perf
 *Decode is memory-bound; parallel verification moves work toward the ridge.*
 :::
 
-The latency win is real but conditional, and the condition is the acceptance rate. The expected number of tokens emitted per round, including the correction token, is $\frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$, which collapses toward 1 as acceptance falls. For $K = 5$ draft tokens and a draft model 20$\times$ faster than the target, that sensitivity is steep:
+The latency win is real but conditional, and the condition is the acceptance rate. When the draft model proposes $K$ tokens, high acceptance rates allow the target model to verify and emit multiple tokens in a single forward pass. When acceptance drops, rejected tokens are discarded, reducing the effective generation rate back toward single-token decoding. Mathematically, the expected number of tokens emitted per round, including the correction token, is $\frac{1 - \alpha_{\text{acc}}^{K+1}}{1 - \alpha_{\text{acc}}}$, which collapses toward 1 as acceptance falls. For $K = 5$ draft tokens and a draft model 20$\times$ faster than the target, that sensitivity is steep:
 
 ```{python}
 #| echo: false
@@ -2716,7 +2716,7 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 ::: {#fig-tensor-parallel-flow fig-env="figure" fig-pos="htb" fig-cap="**Tensor Parallelism for Inference**: Computation is distributed across devices by splitting tensor operations. Attention heads are partitioned across GPUs, requiring an AllReduce operation to synchronize results. Feed-forward networks use a column-row splitting strategy that requires only one AllReduce synchronization per block. This approach reduces latency for large models but introduces communication overhead that demands high-bandwidth interconnects like NVLink." fig-alt="Two-column diagram for GPU 0 and GPU 1. Top: Attention layer with heads split across GPUs feeding into AllReduce. Bottom: Feed-forward layer showing column-row split pattern with final AllReduce synchronization."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+\begin{tikzpicture}[font=\small\sffamily, scale=0.9, transform shape]
   \definecolor{GPUColor}{HTML}{E6D4E5}
   \definecolor{OpColor}{HTML}{D1E6F3}
   \definecolor{SyncColor}{HTML}{F5D2D5}
@@ -2729,10 +2729,10 @@ The communication pattern for tensor-parallel inference follows a two-phase sync
 
   % GPU Columns
   \node[gpu_bg] (gpu0_bg) at (-0.25, -0.5) {};
-  \node[above, font=\bfseries\usefont{T1}{phv}{b}{n}] at (gpu0_bg.north) {GPU 0};
+  \node[above, font=\bfseries\sffamily\bfseries] at (gpu0_bg.north) {GPU 0};
 
   \node[gpu_bg] (gpu1_bg) at (4.25, -0.5) {};
-  \node[above, font=\bfseries\usefont{T1}{phv}{b}{n}] at (gpu1_bg.north) {GPU 1};
+  \node[above, font=\bfseries\sffamily\bfseries] at (gpu1_bg.north) {GPU 1};
 
   % Attention Block
   \node[anchor=center] (att_title) at (2, 5.5) {\textbf{Attention Layer}};
@@ -3075,7 +3075,7 @@ Expert parallelism distributes experts across devices, with each device hosting 
 ::: {#fig-moe-routing fig-env="figure" fig-pos="htb" fig-cap="**Mixture-of-Experts (MoE) Routing**: Expert parallelism distributes \"experts\" across different devices. For each token, a gating mechanism selects the top-$k$ experts. An AllToAll communication step dispatches tokens to the devices hosting their selected experts (1). Experts process the tokens in parallel (2). A second AllToAll step gathers the results back to the original device (3). This pattern enables massive model capacity but introduces all-to-all communication overhead." fig-alt="Diagram of MoE token routing. Gating selects top-2 experts. Dashed arrows show All-to-All dispatch to Expert A and B devices. Third device idle. Results gather via All-to-All to weighted sum output."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+\begin{tikzpicture}[font=\small\sffamily, scale=0.9, transform shape]
   \definecolor{GateColor}{HTML}{FCE4CC}
   \definecolor{ExpColor}{HTML}{D4EFDF}
   \definecolor{CommColor}{HTML}{F5D2D5}
@@ -3101,14 +3101,14 @@ Expert parallelism distributes experts across devices, with each device hosting 
   \node[expbox, below=0.5cm of exp3] (exp2) {Device 2\\Expert B};
 
   % Interconnect
-  \node[text=CommColor!80!black, font=\bfseries\usefont{T1}{phv}{b}{n}] at (2.5, 1.5) {All-to-All Dispatch};
+  \node[text=CommColor!80!black, font=\bfseries\sffamily\bfseries] at (2.5, 1.5) {All-to-All Dispatch};
   \draw[comm_arrow] (gating.east) -- (exp1.west);
   \draw[comm_arrow] (gating.east) -- (exp2.west);
 
   % Gather
   \node[box, rounded corners, right=1.5cm of exp3] (agg) {Weighted\\Sum};
 
-  \node[text=CommColor!80!black, font=\bfseries\usefont{T1}{phv}{b}{n}] at (6.5, 2.5) {All-to-All Gather};
+  \node[text=CommColor!80!black, font=\bfseries\sffamily\bfseries] at (6.5, 2.5) {All-to-All Gather};
   \draw[comm_arrow] (exp1.east) -- (agg.north west);
   \draw[comm_arrow] (exp2.east) -- (agg.south west);
 
@@ -3194,12 +3194,12 @@ The trade-off is locality against load balance. Row-wise sharding keeps each emb
 ::: {#fig-embedding-sharding fig-env="figure" fig-pos="htb" fig-cap="**Embedding Sharding Strategies**: Row-wise sharding places complete embedding vectors on specific servers based on entity ID, requiring a network gather for lookup. Column-wise sharding splits each vector across all servers, allowing parallel local lookups followed by an AllGather, which is efficient for popular \"hot\" embeddings. Hybrid sharding combines these approaches, using column sharding for hot items and row sharding for the \"cold\" long tail to balance load and memory." fig-alt="Three-panel diagram. A: Row-wise sharding splits users across servers by ID. B: Column-wise sharding splits embedding dimensions across servers. C: Hybrid combines both, with hot items column-sharded and cold items row-sharded."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.85, transform shape]
+\begin{tikzpicture}[font=\small\sffamily, scale=0.85, transform shape]
   \definecolor{TableColor}{HTML}{D1E6F3}
   \definecolor{ShardColor}{HTML}{E6D4E5}
 
   % A. Row-Wise
-  \node[anchor=west, font=\bfseries\usefont{T1}{phv}{b}{n}] at (0, 4.5) {A. Row-Wise Sharding};
+  \node[anchor=west, font=\bfseries\sffamily\bfseries] at (0, 4.5) {A. Row-Wise Sharding};
 
   \draw[fill=TableColor] (0, 2.5) rectangle (1, 4);
   \node[rotate=90] at (-0.3, 3.25) {Users 0..U};
@@ -3208,16 +3208,16 @@ The trade-off is locality against load balance. Row-wise sharding keeps each emb
 
   % Server 1
   \draw[fill=ShardColor] (2.5, 3.5) rectangle (3.5, 4.0);
-  \node[right, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (3.5, 3.75) {Svr 1: Users 0..K};
+  \node[right, font=\scriptsize\sffamily] at (3.5, 3.75) {Svr 1: Users 0..K};
 
   % Server 2
   \draw[fill=ShardColor] (2.5, 2.5) rectangle (3.5, 3.0);
-  \node[right, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (3.5, 2.75) {Svr 2: Users K..U};
+  \node[right, font=\scriptsize\sffamily] at (3.5, 2.75) {Svr 2: Users K..U};
 
-  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center] at (1.7, 2.0) {Partition by ID\\(Network Gather)};
+  \node[font=\scriptsize\sffamily, align=center] at (1.7, 2.0) {Partition by ID\\(Network Gather)};
 
   % B. Column-Wise
-  \node[anchor=west, font=\bfseries\usefont{T1}{phv}{b}{n}] at (6, 4.5) {B. Column-Wise Sharding};
+  \node[anchor=west, font=\bfseries\sffamily\bfseries] at (6, 4.5) {B. Column-Wise Sharding};
 
   \draw[fill=TableColor] (6, 2.5) rectangle (7, 4);
   \node[rotate=90] at (5.7, 3.25) {Dims 0..d};
@@ -3226,27 +3226,27 @@ The trade-off is locality against load balance. Row-wise sharding keeps each emb
 
   % Server 1 (Col split)
   \draw[fill=ShardColor] (8.5, 2.5) rectangle (9.0, 4.0);
-  \node[above, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (8.75, 4.0) {Svr 1};
+  \node[above, font=\scriptsize\sffamily] at (8.75, 4.0) {Svr 1};
 
   % Server 2
   \draw[fill=ShardColor] (9.1, 2.5) rectangle (9.6, 4.0);
-  \node[above, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (9.35, 4.0) {Svr 2};
+  \node[above, font=\scriptsize\sffamily] at (9.35, 4.0) {Svr 2};
 
-  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center] at (7.7, 2.0) {Partition Vector\\(AllGather)};
+  \node[font=\scriptsize\sffamily, align=center] at (7.7, 2.0) {Partition Vector\\(AllGather)};
 
   % C. Hybrid
-  \node[anchor=west, font=\bfseries\usefont{T1}{phv}{b}{n}] at (0, 0.5) {C. Hybrid Sharding};
+  \node[anchor=west, font=\bfseries\sffamily\bfseries] at (0, 0.5) {C. Hybrid Sharding};
 
   \draw[fill=RedL] (0, -1.0) rectangle (1.5, 0);
-  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}] at (0.75, -0.5) {Hot (Top 1\%)};
+  \node[font=\scriptsize\sffamily] at (0.75, -0.5) {Hot (Top 1\%)};
 
   \draw[fill=BlueL] (0, -2.5) rectangle (1.5, -1.1);
-  \node[font=\scriptsize\usefont{T1}{phv}{m}{n}] at (0.75, -1.8) {Cold (Tail)};
+  \node[font=\scriptsize\sffamily] at (0.75, -1.8) {Cold (Tail)};
 
   \draw[->, thick] (1.7, -1.25) -- (2.7, -1.25);
 
-  \node[draw, fill=RedL, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (4, -0.5) {Replicated/Col-wise};
-  \node[draw, fill=BlueL, font=\scriptsize\usefont{T1}{phv}{m}{n}] at (4, -1.8) {Row-wise Sharded};
+  \node[draw, fill=RedL, font=\scriptsize\sffamily] at (4, -0.5) {Replicated/Col-wise};
+  \node[draw, fill=BlueL, font=\scriptsize\sffamily] at (4, -1.8) {Row-wise Sharded};
 
 \end{tikzpicture}
 ```
@@ -4072,7 +4072,7 @@ The strongest form of bulkhead dedicates entire replicas to specific tenants or 
 ::: {#fig-bulkhead-patterns fig-env="figure" fig-pos="htb" fig-cap="**Bulkhead Isolation Patterns**: To prevent cascading failures in multi-tenant systems, bulkheads isolate resources. Deployment-level bulkheads (shown) assign dedicated physical replicas to high-priority tenants, ensuring complete isolation. Request-level bulkheads enforce strict concurrency limits within shared processes. Like ship compartments, these boundaries ensure that a failure or resource exhaustion in one segment cannot sink the entire platform." fig-alt="Two-tier system diagram. Gold tier at top with dedicated load balancer and 2 replicas. Standard tier below with shared load balancer and 3 replicas, one showing failure. Dashed line marks complete isolation boundary between tiers."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+\begin{tikzpicture}[font=\small\sffamily, scale=0.9, transform shape]
   \definecolor{GoldColor}{HTML}{FCE4CC}
   \definecolor{StdColor}{HTML}{F5F5F5}
   \definecolor{FailColor}{HTML}{F5D2D5}
@@ -4106,11 +4106,11 @@ The strongest form of bulkhead dedicates entire replicas to specific tenants or 
 
   % Isolation Barrier
   \draw[dashed, ultra thick, black!50] (-0.5, 1.8) -- (5.5, 1.8);
-  \node[fill=white, inner sep=2pt, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center] at (8.0, 1.8) {\textbf{Complete Isolation}\\No Shared Resources};
+  \node[fill=white, inner sep=2pt, font=\scriptsize\sffamily, align=center] at (8.0, 1.8) {\textbf{Complete Isolation}\\No Shared Resources};
 
   % Impact Annotation
-  \node[align=left, font=\scriptsize\usefont{T1}{phv}{m}{n}, color=FailColor!80!black, right=0.5cm of r4] {Failure constrained\\to Shared Pool};
-  \node[align=left, font=\scriptsize\usefont{T1}{phv}{m}{n}, color=GoldColor!50!black, right=0.5cm of r1, yshift=-0.5cm] {Gold Tier\\unaffected};
+  \node[align=left, font=\scriptsize\sffamily, color=FailColor!80!black, right=0.5cm of r4] {Failure constrained\\to Shared Pool};
+  \node[align=left, font=\scriptsize\sffamily, color=GoldColor!50!black, right=0.5cm of r1, yshift=-0.5cm] {Gold Tier\\unaffected};
 
 \end{tikzpicture}
 ```
@@ -4182,7 +4182,7 @@ The cost savings above depend on anticipating traffic before it arrives. Proacti
 ::: {#fig-predictive-reactive-scaling fig-env="figure" fig-pos="htb" fig-cap="**Predictive vs. Reactive Scaling**: Reactive scaling (red line) responds to traffic spikes after they occur, leading to periods of under-provisioning where SLOs are violated due to cold start latency. Predictive scaling (blue line) anticipates traffic and begins provisioning capacity before the spike arrives, ensuring consistent performance." fig-alt="Time-series plot with traffic curve, reactive capacity lagging behind the spike, and predictive capacity scaling ahead of it."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.8]
+\begin{tikzpicture}[font=\small\sffamily, scale=0.8]
   \definecolor{BlueLine}{HTML}{006395}
   \definecolor{BlueL}{HTML}{D1E6F3}
   \definecolor{GreenLine}{HTML}{008F45}
@@ -4213,7 +4213,7 @@ The cost savings above depend on anticipating traffic before it arrives. Proacti
 
   % Deficit Area
   \fill[RedL, opacity=0.5] (5, 1.2) -- (5.2, 1.2) -- (5.2, 4.2) -- (5, 4.2) -- cycle;
-  \node[RedLine, font=\tiny\usefont{T1}{phv}{m}{n}, rotate=90] at (5.1, 2.7) {SLO VIOLATION};
+  \node[RedLine, font=\tiny\sffamily, rotate=90] at (5.1, 2.7) {SLO VIOLATION};
 
 \end{tikzpicture}
 ```
@@ -4312,7 +4312,7 @@ The split architecture in @fig-spot-aware-routing achieves approximately 18--27 
 
 ### Global inference infrastructure {#sec-inference-scale-global-inference-infrastructure-df52}
 
-Global serving becomes necessary when distance, failure domains, or data-residency constraints exceed what one region can hide. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located; the engineering choice is whether to replicate computation, cache repeated work, or centralize the model and pay the network penalty. The architectural patterns are useful only when tied to that choice.
+Extending resource isolation and failure boundaries beyond a single data center leads to global infrastructure. Global serving becomes necessary when distance, failure domains, or data-residency constraints exceed what one region can hide. A user in Tokyo expects low-latency responses regardless of where models were trained or where the company headquarters is located; the engineering choice is whether to replicate computation, cache repeated work, or centralize the model and pay the network penalty. The architectural patterns are useful only when tied to that choice.
 
 #### Why multi-region matters {#sec-inference-scale-multiregion-matters-d7d3}
 
@@ -4854,7 +4854,7 @@ To meet this latency budget while evaluating thousands of documents, the system 
 ::: {#fig-ranking-cascade fig-env="figure" fig-pos="htb" fig-cap="**Ranking Cascade Architecture**: To optimize latency and cost, search and recommendation systems use a cascade of increasingly complex models. Early stages (Retrieval) filter millions of candidates down to thousands using fast, cheap heuristics. Later stages use expensive, high-precision models only on the most promising candidates." fig-alt="Funnel diagram with four stages narrowing from retrieval of one million items to final ranking of ten items."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}]
+\begin{tikzpicture}[font=\small\sffamily]
   \definecolor{L0Color}{HTML}{F5F5F5}
   \definecolor{L1Color}{HTML}{EBEBEB}
   \definecolor{L2Color}{HTML}{E0E0E0}
@@ -4875,8 +4875,8 @@ To meet this latency budget while evaluating thousands of documents, the system 
   \draw[->, ultra thick, black!60] (L1) -- (L2);
   \draw[->, ultra thick, black!60] (L2) -- (L3);
 
-  \node[anchor=west, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=red!80, right=0.2cm of L0] {Low Precision, High Recall};
-  \node[anchor=west, font=\scriptsize\usefont{T1}{phv}{m}{n}, text=green!60!black, right=0.2cm of L3] {High Precision, Low Recall};
+  \node[anchor=west, font=\scriptsize\sffamily, text=red!80, right=0.2cm of L0] {Low Precision, High Recall};
+  \node[anchor=west, font=\scriptsize\sffamily, text=green!60!black, right=0.2cm of L3] {High Precision, Low Recall};
 
 \end{tikzpicture}
 ```
