@@ -197,6 +197,39 @@ def test_reflected_operator_gradients():
     print("✅ Reflected operator and sum() gradients work correctly")
 
 
+def test_forward_scalar_branch_gradients():
+    """
+    Gradient-level regression for __add__/__sub__/__truediv__'s scalar
+    (non-Tensor other) branch. tracked_add/tracked_sub/tracked_div
+    previously reassigned `other = Tensor(other)` before calling
+    _original_add/_original_sub/_original_div, so those originals'
+    own scalar branch (`else: return Tensor(self.data + other)`) never
+    ran, only their Tensor branch did, since `other` always arrived
+    pre-converted. tracked_mul already avoided this by keeping a
+    separate Tensor-typed copy for gradient bookkeeping while passing
+    the original `other` through unchanged, add/sub/div now match that.
+    """
+    x = Tensor(np.array([1.0, 2.0, 3.0]), requires_grad=True)
+    y = x + 5
+    y.sum().backward()
+    assert np.allclose(y.data, [6.0, 7.0, 8.0])
+    assert np.allclose(x.grad, [1.0, 1.0, 1.0])
+
+    x = Tensor(np.array([5.0, 10.0]), requires_grad=True)
+    y = x - 2
+    y.sum().backward()
+    assert np.allclose(y.data, [3.0, 8.0])
+    assert np.allclose(x.grad, [1.0, 1.0])
+
+    x = Tensor(np.array([4.0, 6.0, 8.0]), requires_grad=True)
+    y = x / 2
+    y.sum().backward()
+    assert np.allclose(y.data, [2.0, 3.0, 4.0])
+    assert np.allclose(x.grad, [0.5, 0.5, 0.5])
+
+    print("✅ Forward scalar-branch gradients work correctly")
+
+
 if __name__ == "__main__":
     print("\n" + "="*70)
     print("GRADIENT FLOW TEST SUITE")
@@ -209,6 +242,7 @@ if __name__ == "__main__":
     test_layernorm_operations()
     test_reshape_gradient_flow()
     test_reflected_operator_gradients()
+    test_forward_scalar_branch_gradients()
 
     print("\n" + "="*70)
     print("✅ ALL GRADIENT FLOW TESTS PASSED")
