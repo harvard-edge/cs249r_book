@@ -2847,8 +2847,11 @@ def enable_autograd(quiet=False):
 
         def tracked_sigmoid_forward(self, x):
             """Sigmoid with gradient tracking."""
-            result_data = 1.0 / (1.0 + np.exp(-x.data))
-            result = Tensor(result_data)
+            # Delegate to the original, numerically stable implementation
+            # (same pattern as tracked_softmax_forward/tracked_gelu_forward
+            # below) rather than reimplementing sigmoid with a formula that
+            # overflows np.exp for large negative x.
+            result = _original_sigmoid_forward(self, x)
 
             if _GRAD_TRACKING_ENABLED and x.requires_grad:
                 result.requires_grad = True
