@@ -7662,6 +7662,24 @@ class ValidateCommand:
                         context=line.strip()[:100],
                     ))
 
+                dup_m = re.search(
+                    r"\b(example|notebook|napkin math|principle|theorem|checkpoint|war story|perspective|definition|case study|lighthouse)\s*\(\s*\1\s*\\ref\{",
+                    line,
+                    re.IGNORECASE
+                )
+                if dup_m:
+                    issues.append(ValidationIssue(
+                        file=self._relative_file(file),
+                        line=idx,
+                        code="duplicate_callout_noun",
+                        message=(
+                            f"Duplicate callout noun '{dup_m.group(1)} (\\ref{{...}})' — "
+                            f"use (\\ref{{...}}) when noun is already outside parentheses"
+                        ),
+                        severity="error",
+                        context=line.strip()[:100],
+                    ))
+
         return ValidationRunResult(
             name="callout-ref-form",
             description="Custom numbered callouts must use \\ref{id}, not @id",
