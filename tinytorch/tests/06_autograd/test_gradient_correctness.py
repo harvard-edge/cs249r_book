@@ -40,7 +40,7 @@ from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
 from tinytorch.core.activations import ReLU, Sigmoid, Tanh, GELU
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
-from tinytorch.core.autograd import enable_autograd
+from tinytorch.core.autograd import enable_autograd, EPSILON
 
 enable_autograd()
 
@@ -287,6 +287,69 @@ class TestLossGradients:
         # Test points well inside (0, 1) to avoid clip-boundary artifacts
         check_grad(fn, np.array([0.7, 0.3, 0.8, 0.2]),
                    rtol=1e-2, atol=1e-3)
+
+    def test_mse_backward_scales_by_incoming_gradient(self):
+        """Every other MSE test relies on .sum()'s implicit grad_output=1.0,
+        which can't distinguish `grad * grad_output` from `grad / grad_output`
+        since multiplying and dividing by 1 give the same result."""
+        loss_fn = MSELoss()
+        predictions_data = np.array([1.5, 2.5, 2.0])
+        targets_data = np.array([1.0, 2.0, 3.0])
+
+        x = Tensor(predictions_data.copy(), requires_grad=True)
+        loss = loss_fn.forward(x, Tensor(targets_data.copy()))
+
+        incoming_grad = np.full_like(loss.data, 4.0)
+        loss.backward(incoming_grad)
+
+        expected = 2.0 * (predictions_data - targets_data) / len(predictions_data) * incoming_grad
+        np.testing.assert_allclose(x.grad, expected, rtol=1e-5)
+
+    def test_crossentropy_backward_scales_by_incoming_gradient(self):
+        """Same rationale as test_mse_backward_scales_by_incoming_gradient:
+        a non-1.0 incoming gradient is needed to catch a mul/div swap in the
+        final `grad * grad_output` step."""
+        loss_fn = CrossEntropyLoss()
+        logits_data = np.array([[2.0, 1.0, 0.1], [0.5, 1.5, 2.0]])
+        targets_data = np.array([0, 2])
+
+        x = Tensor(logits_data.copy(), requires_grad=True)
+        loss = loss_fn.forward(x, Tensor(targets_data.copy()))
+
+        incoming_grad = np.full_like(loss.data, 5.0)
+        loss.backward(incoming_grad)
+
+        softmax = np.exp(logits_data - logits_data.max(axis=1, keepdims=True))
+        softmax /= softmax.sum(axis=1, keepdims=True)
+        one_hot = np.zeros_like(logits_data)
+        one_hot[np.arange(len(targets_data)), targets_data] = 1.0
+        expected = (softmax - one_hot) / logits_data.shape[0] * incoming_grad
+
+        np.testing.assert_allclose(x.grad, expected, rtol=1e-5)
+
+    def test_bce_backward_clips_at_boundary_and_scales_by_grad_output(self):
+        """BCEBackward recomputes its own clip bound (1 - eps); at a boundary
+        prediction, that exact bound matters (1 + eps or 1 / eps would give a
+        wrong or non-finite gradient). Also uses a non-1.0 incoming gradient,
+        since every other BCE test relies on .sum()'s implicit grad_output=1,
+        which can't distinguish `grad * grad_output` from `grad / grad_output`."""
+        loss_fn = BinaryCrossEntropyLoss()
+        predictions_data = np.array([1.0, 0.0, 0.5])
+        targets_data = np.array([1.0, 0.0, 1.0])
+
+        x = Tensor(predictions_data.copy(), requires_grad=True)
+        loss = loss_fn.forward(x, Tensor(targets_data.copy()))
+
+        incoming_grad = np.full_like(loss.data, 3.0)
+        loss.backward(incoming_grad)
+
+        eps = EPSILON
+        p = np.clip(predictions_data, eps, 1 - eps)
+        y = targets_data
+        expected = (p - y) / (p * (1 - p) * len(predictions_data)) * incoming_grad
+
+        assert np.all(np.isfinite(x.grad)), "BCE gradient must stay finite at prediction boundaries"
+        np.testing.assert_allclose(x.grad, expected, rtol=1e-5)
 
     def test_crossentropy_backward(self):
         loss_fn = CrossEntropyLoss()
