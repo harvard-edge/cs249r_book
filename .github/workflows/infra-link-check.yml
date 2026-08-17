@@ -163,24 +163,50 @@ jobs:
           fi
 
           # ---- Parse the lychee markdown report for an exact count ----
-          # The action writes a report to ./lychee/out.md by default. The
-          # "Errors per input" section lists each broken URL on its own line
-          # like:  * [ERROR] https://example.com/foo (404 Not Found)
-          # We count those for an honest broken_count, and grab the first
-          # 10 URLs as a triage sample for the issue body.
+          # The action writes a report to ./lychee/out.md by default. Broken
+          # links are listed under "## Errors per input", one per line, as
+          #   * [404] <https://example.com/foo> | Not Found
+          # Two properties of that report drive the parsing below.
+          #
+          # 1. Scope the scan to the errors section. The report also carries a
+          #    "## Redirects per input" section whose entries have the exact
+          #    same "* [<status>] <url>" shape, so scanning the whole file
+          #    counts every followed redirect as a broken link. Those entries
+          #    are usually [200], and they can even be a status this workflow
+          #    passed --accept for, which means a whole-file scan reports
+          #    links as broken that lychee was explicitly told are fine.
+          #
+          # 2. The bracketed status is not always numeric. A request that
+          #    never produced an HTTP response is reported as [ERROR] or
+          #    [TIMEOUT]: TLS failures, DNS failures, timeouts, and missing
+          #    local files all land there. Matching only digits drops exactly
+          #    the failures that are hardest to diagnose from a URL alone, and
+          #    a site whose failures are all of that kind parses to 0 and then
+          #    gets reported as "?" by the guard below.
+          #
+          # Lychee wraps each URL as a markdown autolink (<https://...>), so
+          # strip the delimiters to emit a bare URL that renders as a link.
           REPORT="./lychee/out.md"
           BROKEN_COUNT=0
           BROKEN_SAMPLE=""
           if [ -f "$REPORT" ]; then
-            # Lines starting with "* [" are per-link error entries in
-            # lychee's markdown output. Be tolerant of leading whitespace.
-            BROKEN_COUNT=$(grep -cE '^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\]' "$REPORT" || true)
-            # Pull the URL (second whitespace-separated field after the
-            # status code bracket) for the first 10 entries.
-            BROKEN_SAMPLE=$(grep -hE '^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\]' "$REPORT" \
-              | head -n 10 \
-              | sed -E 's/^[[:space:]]*\*[[:space:]]+\[[[:digit:]]+\][[:space:]]+([^[:space:]]+).*/\1/' \
-              || true)
+            BROKEN_URLS=$(awk '
+              /^##[[:space:]]+Errors per input[[:space:]]*$/ { in_errors = 1; next }
+              /^##[[:space:]]/                               { in_errors = 0 }
+              in_errors && /^[[:space:]]*\*[[:space:]]+\[[^]]+\][[:space:]]+/ {
+                  url = $0
+                  sub(/^[[:space:]]*\*[[:space:]]+\[[^]]+\][[:space:]]+/, "", url)
+                  sub(/[[:space:]]*\|.*$/, "", url)
+                  sub(/[[:space:]]+$/, "", url)
+                  sub(/^</, "", url)
+                  sub(/>$/, "", url)
+                  if (url != "") print url
+              }
+            ' "$REPORT" || true)
+            if [ -n "$BROKEN_URLS" ]; then
+              BROKEN_COUNT=$(printf '%s\n' "$BROKEN_URLS" | grep -c . || true)
+              BROKEN_SAMPLE=$(printf '%s\n' "$BROKEN_URLS" | head -n 10)
+            fi
           fi
 
           # If lychee said failure but we couldn't parse a count (e.g. report
