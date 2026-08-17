@@ -255,13 +255,37 @@ prose calls the pipeline "illustrative", and both endpoints are printed beside
 the ratio so a reader can check it. That is honest rounding of a documented
 scenario, not drift.
 
+### Quiz policy — RULED 2026-08-17: disabled for now
+
+The author's ruling on the quiz question is **hold them out of the render**
+rather than rewrite or retire item by item. Implemented by commenting
+`filters/inject_quizzes.lua` out of `config/shared/html/filters.yml`; that
+filter is the only producer of the quiz divs, no chapter authors quiz markup
+directly, and HTML was the only format that injected them. Every
+`*_quizzes.json` file and every `quiz:` frontmatter key is untouched, so
+re-enabling is uncommenting one line.
+
+**Consequence for this ledger:** every remaining quiz finding is now
+*deferred, not open*. That covers the fabricated statistics in `robust_ai`
+(9 of 18), `hw_acceleration`'s three answers teaching what the body denies,
+O6, O7, O12, O13, O15, O16, `ml_workflow`'s saturation and super-linear
+answers, `model_compression`'s ~90 percent sparsity threshold, and
+`data_selection`'s \$46,000 recurring-annual item. None of them can reach a
+reader while the filter is off. **Do not spend a pass on them until the
+quizzes are re-enabled** — and when they are, treat this list as the re-entry
+point, because it is the accumulated backlog.
+
+The two quiz corrections already applied (the benchmarking orders-of-magnitude
+span and the LayerNorm mechanism) stay in: they were cheap, and they are
+correct whenever the quizzes come back.
+
 ### Still open and deliberately untouched
 
 Everything in §5b B1–B3 and the §5 High table that turns on **which of two
-values is canonical** stays for the author (item E). The quiz-policy question
-is unresolved and gates a further batch: many self-check answers assert
-statistics their chapter never states, and one ruling — rewrite against the
-body, or retire the item — would settle dozens of findings at once.
+values is canonical** stays for the author (item E). B1 — the
+`hw_acceleration` figure plotting a fabricated series — remains the one
+release blocker, and it is prose/figure domain, so disabling the quizzes does
+not touch it.
 
 ## 6. Build domain — reported, not touched
 
