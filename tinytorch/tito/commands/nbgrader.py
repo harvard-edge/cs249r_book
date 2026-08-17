@@ -440,6 +440,13 @@ class NBGraderCommand(BaseCommand):
         if release_tier not in RELEASE_TIERS:
             return [f"Unknown TinyTorch release tier: {release_tier}"]
 
+        if not isinstance(notebook, dict):
+            # Valid JSON but not the expected object shape (a bad merge,
+            # interrupted write, or a manually-edited .ipynb gone wrong):
+            # notebook.get() below would crash before the cells-list
+            # check below ever runs.
+            return ["Notebook file does not contain a JSON object"]
+
         cells = notebook.get("cells")
         if not isinstance(cells, list):
             return ["Notebook is missing a cells list"]
