@@ -80,8 +80,13 @@ def load_credentials() -> Optional[Dict[str, str]]:
         return None
     try:
         with p.open("r", encoding="utf-8") as f:
-            return json.load(f)
-    except (OSError, json.JSONDecodeError):
+            data = json.load(f)
+        # Valid JSON but not the expected object shape (manual tampering,
+        # a bad merge) must not be returned as-is: callers do `if creds:`
+        # then `creds.get(...)`, and a non-empty wrong-type value is
+        # truthy, so .get() crashes past the truthiness check.
+        return data if isinstance(data, dict) else None
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError):
         return None
 
 def delete_credentials() -> None:
