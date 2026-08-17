@@ -8,6 +8,7 @@ properly preserve gradient tracking and enable backpropagation.
 import numpy as np
 import pytest
 import sys
+import warnings
 from pathlib import Path
 
 # Add parent directory to path for imports
@@ -15,7 +16,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.autograd import enable_autograd
-from tinytorch.core.activations import GELU
+from tinytorch.core.activations import GELU, Sigmoid
 # Try to import transformer for mean/sqrt monkey-patches (Module 13)
 # This is optional - tests will skip if not available
 try:
@@ -148,6 +149,42 @@ def test_reshape_gradient_flow():
     print("✅ Reshape gradient flow works correctly")
 
 
+def test_sigmoid_large_magnitude_input_does_not_overflow():
+    """
+    The autograd-tracked Sigmoid forward pass (tracked_sigmoid_forward)
+    used to reimplement sigmoid with the naive 1/(1+exp(-x)) formula
+    instead of delegating to the original, numerically stable
+    implementation (which branches on sign to keep every exponent <= 0).
+    For large-magnitude inputs, common right after gradients explode
+    during training, this raised a spurious RuntimeWarning from np.exp
+    overflowing.
+
+    This asserts no such warning fires, and that the result still agrees
+    with real PyTorch at extreme magnitudes.
+    """
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+
+        for scale in (10.0, 200.0, 1000.0):
+            x = Tensor(np.array([-scale, -1.0, 0.0, 1.0, scale], dtype=np.float32),
+                       requires_grad=True)
+            result = Sigmoid()(x)
+            result.sum().backward()
+
+            assert np.all((result.data >= 0.0) & (result.data <= 1.0))
+            assert not np.any(np.isnan(result.data))
+            assert x.grad is not None
+            assert not np.any(np.isnan(x.grad))
+
+        # At extreme magnitude, sigmoid should have fully saturated.
+        x = Tensor(np.array([-1000.0, 1000.0], dtype=np.float32), requires_grad=True)
+        result = Sigmoid()(x)
+        assert result.data[0] == pytest.approx(0.0, abs=1e-6)
+        assert result.data[1] == pytest.approx(1.0, abs=1e-6)
+
+    print("✅ Sigmoid large-magnitude gradient flow works correctly, no overflow warning")
+
+
 if __name__ == "__main__":
     print("\n" + "="*70)
     print("GRADIENT FLOW TEST SUITE")
@@ -159,6 +196,7 @@ if __name__ == "__main__":
     test_gelu_gradient_flow()
     test_layernorm_operations()
     test_reshape_gradient_flow()
+    test_sigmoid_large_magnitude_input_does_not_overflow()
 
     print("\n" + "="*70)
     print("✅ ALL GRADIENT FLOW TESTS PASSED")
