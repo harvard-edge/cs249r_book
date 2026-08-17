@@ -1292,8 +1292,24 @@ def trainer_save_checkpoint(self, path: str):
     }
 
     Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, 'wb') as f:
-        pickle.dump(checkpoint, f)
+    # Write to a temp file first, then atomically replace the target.
+    # Writing directly to `path` would leave a partially-written (corrupt)
+    # checkpoint in place if the process is killed, the disk fills up, or
+    # pickling fails partway through, silently destroying whatever good
+    # checkpoint was there before. os.replace() is atomic on both POSIX
+    # and Windows: `path` is always either the old complete checkpoint or
+    # the new one, never a partial write.
+    tmp_path = f"{path}.tmp"
+    try:
+        with open(tmp_path, 'wb') as f:
+            pickle.dump(checkpoint, f)
+        os.replace(tmp_path, path)
+    except BaseException:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
+        raise
     ### END SOLUTION
 
 Trainer.save_checkpoint = trainer_save_checkpoint
