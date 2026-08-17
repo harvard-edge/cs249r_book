@@ -260,6 +260,76 @@ class TestCheckpointing:
             assert os.path.exists(path)
 
 
+class TestLoadCheckpointMalformedFile:
+    """
+    load_checkpoint previously had no error handling at all: a corrupted
+    or incompatible checkpoint file surfaced a raw pickle.UnpicklingError,
+    EOFError, or KeyError with no context. These confirm it now raises a
+    clear ValueError instead, for the specific corruption modes a checkpoint
+    file can realistically hit (interrupted write, wrong file, wrong
+    version).
+    """
+
+    def test_empty_file_raises_clear_error(self):
+        trainer, _ = simple_trainer()
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="corrupted or incomplete"):
+                trainer.load_checkpoint(path)
+        finally:
+            os.remove(path)
+
+    def test_garbage_bytes_raises_clear_error(self):
+        trainer, _ = simple_trainer()
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            f.write(b"not a pickle file at all, just garbage bytes")
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="corrupted or incomplete"):
+                trainer.load_checkpoint(path)
+        finally:
+            os.remove(path)
+
+    def test_wrong_type_raises_clear_error(self):
+        """A valid pickle, but not a dict at all (e.g. a bare list)."""
+        trainer, _ = simple_trainer()
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            pickle.dump([1, 2, 3], f)
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="does not contain the expected data"):
+                trainer.load_checkpoint(path)
+        finally:
+            os.remove(path)
+
+    def test_missing_required_keys_raises_clear_error(self):
+        """A valid dict, but missing the keys a real checkpoint always has."""
+        trainer, _ = simple_trainer()
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            pickle.dump({"unrelated_key": 1}, f)
+            path = f.name
+        try:
+            with pytest.raises(ValueError, match="missing required keys"):
+                trainer.load_checkpoint(path)
+        finally:
+            os.remove(path)
+
+    def test_valid_checkpoint_still_loads_normally(self):
+        """Regression guard: the new validation must not break the normal case."""
+        trainer, _ = simple_trainer()
+        trainer.epoch = 7
+        with tempfile.NamedTemporaryFile(suffix=".pkl", delete=False) as f:
+            path = f.name
+        try:
+            trainer.save_checkpoint(path)
+            trainer.epoch = 0
+            trainer.load_checkpoint(path)
+            assert trainer.epoch == 7
+        finally:
+            os.remove(path)
+
+
 # ─────────────────────────────────────────────
 # Trainer.evaluate
 # ─────────────────────────────────────────────

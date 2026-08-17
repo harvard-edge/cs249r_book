@@ -1401,7 +1401,33 @@ def trainer_load_checkpoint(self, path: str):
     """
     ### BEGIN SOLUTION
     with open(path, 'rb') as f:
-        checkpoint = pickle.load(f)
+        try:
+            checkpoint = pickle.load(f)
+        except (pickle.UnpicklingError, EOFError) as e:
+            raise ValueError(
+                f"Checkpoint file appears corrupted or incomplete: {path}\n"
+                f"  This can happen if the save was interrupted (crash, disk full,\n"
+                f"  killed process) partway through writing the file.\n"
+                f"  Original error: {e}"
+            ) from e
+
+    if not isinstance(checkpoint, dict):
+        raise ValueError(
+            f"Checkpoint file does not contain the expected data: {path}\n"
+            f"  Expected a dict with keys like 'epoch', 'step', 'history',\n"
+            f"  got a {type(checkpoint).__name__} instead. Is this really a\n"
+            f"  TinyTorch checkpoint file?"
+        )
+
+    required_keys = ('epoch', 'step', 'history', 'training_mode')
+    missing_keys = [k for k in required_keys if k not in checkpoint]
+    if missing_keys:
+        raise ValueError(
+            f"Checkpoint file is missing required keys: {path}\n"
+            f"  Missing: {missing_keys}\n"
+            f"  This checkpoint may be from an incompatible version, or the\n"
+            f"  file may be corrupted."
+        )
 
     self.epoch = checkpoint['epoch']
     self.step = checkpoint['step']
