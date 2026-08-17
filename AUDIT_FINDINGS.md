@@ -210,6 +210,59 @@ percent to the aggregate. `hw_acceleration` has three self-check answers that
 teach runtime precision switching and runtime re-tiling the body explicitly
 denies, and one that assigns BatchNorm's per-channel statistics to LayerNorm.
 
+---
+
+## 5c. Verification pass — 2026-08-17
+
+The §5 and §5b lists above were written against an earlier state of the branch
+and are now **partly stale**: the intervening fix waves closed many of them
+without striking them from the ledger. Every mechanical candidate was
+re-checked against current source before any edit. Do not re-chase a row below
+without re-verifying it first.
+
+### Applied
+
+| Finding | Fix |
+|---|---|
+| `ml_ops` Knight Capital: 440M shares, "bankrupted the firm within 48 hours" | The cited SEC order (Release No. 70694) gives over 4 million executions covering more than 397 million shares and a \$460M loss. The firm was never bankrupted: emergency rescue financing days later, acquisition months after. Both corrected; citation stays on Context per `citation.md` (same source). |
+| `benchmarking` quiz: microcontroller-to-training-cluster span "nearly eight orders" | Eight orders is the **table's** span (150 µW → 10 kW, 10^7.8). The caption gives the training-cluster span as 5.6 µW → ~498 kW, nearly eleven orders (10^10.9). Magnitude corrected, endpoint kept — the keyed answer's own explanation depends on it. |
+| `hw_acceleration` quiz: LayerNorm "per-channel statistics" | Those are BatchNorm's. LayerNorm normalizes each sample across the feature dimension. Mechanism phrase only; the arithmetic-intensity claim and keyed answer were already right. |
+| `ml_ops` four corporate authors render as inverted personal names | Five `author` fields were single-braced, so BibTeX parsed them as Surname/Firstname. Double-braced Google Cloud (×2), NVIDIA Corporation, European Commission; split the mangled Greenhouse Gas Protocol field into its two real corporate authors. |
+
+### Verified already resolved — no action needed
+
+`distributed_training` `\ref{pri-bandwidth-latency-tradeoff}` rendering as raw
+LaTeX (the label never existed; the real one is `pri-alpha-beta-model`) ·
+`distributed_training` "80 GB–80 GB" identical endpoints · `responsible_ai`
+stray backticks after math delimiters · `appendix_machine` 581× vs 582× ·
+`benchmarking` "(~2.2 mJ vs. 2.2 mJ)" · `benchmarking` table caption
+eight-vs-eleven orders, which now states both spans explicitly and correctly ·
+**O5** `compute_infrastructure` Definition 1.3 duplicate **Significance** and
+missing **Distinction** — all seven definition callouts in that chapter now
+carry the complete `{Significance, Distinction, Common pitfall}` set ·
+`responsible_engr` 85 percent vs 82.5 percent aggregate accuracy — no 82.5
+appears anywhere in the chapter and 85 percent is both declared as
+`aggregate_accuracy` and labelled "Aggregate Accuracy" in prose · `conclusion`
+"That lesson" — the preceding sentence is a clear antecedent ·
+`data_selection` ImageNet printed as 1.28M/1.2M/1.3M — one 1.2M reference
+remains, inside a guard message, not reader-facing.
+
+### Verified NOT a defect — do not "fix"
+
+`model_compression` BERT footprint ratio stated as 16× where 440/28 = 15.71.
+The cell computes `round(full_mb / compressed_mb)` with a guard pinning 16, the
+prose calls the pipeline "illustrative", and both endpoints are printed beside
+the ratio so a reader can check it. That is honest rounding of a documented
+scenario, not drift.
+
+### Still open and deliberately untouched
+
+Everything in §5b B1–B3 and the §5 High table that turns on **which of two
+values is canonical** stays for the author (item E). The quiz-policy question
+is unresolved and gates a further batch: many self-check answers assert
+statistics their chapter never states, and one ruling — rewrite against the
+body, or retire the item — would settle dozens of findings at once.
+
 ## 6. Build domain — reported, not touched
 
 The first two are Zeljko's; the markers stay in the source exactly as he placed
