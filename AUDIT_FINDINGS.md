@@ -229,6 +229,30 @@ without re-verifying it first.
 | `hw_acceleration` quiz: LayerNorm "per-channel statistics" | Those are BatchNorm's. LayerNorm normalizes each sample across the feature dimension. Mechanism phrase only; the arithmetic-intensity claim and keyed answer were already right. |
 | `ml_ops` four corporate authors render as inverted personal names | Five `author` fields were single-braced, so BibTeX parsed them as Surname/Firstname. Double-braced Google Cloud (×2), NVIDIA Corporation, European Commission; split the mangled Greenhouse Gas Protocol field into its two real corporate authors. |
 
+### Second wave, same day — B1, O4, and the medium rows
+
+| Finding | Resolution |
+|---|---|
+| **B1** `hw_acceleration` fig. 10 fabricated series (was the release blocker) | Rebuilt from `Hardware.Cloud` across V100/A100/H100/H200/B200. Compute grows 18x, bandwidth 8.9x, gap 2.0x — which equals the 2.02x ridge ratio `@fig-rising-ridge` plots, so the two adjacent figures now agree instead of differing by nine orders. Also fixed an inverted semantic palette (compute was blue) and the MLSysIM violation its own header admitted to. The H200 step, where bandwidth rose with flat compute and the gap narrows, is now guarded: the memory wall is not monotonic, which the old framing taught wrong. |
+| **O4** `compute_infrastructure` 175 GB excluded from the 113 GB total | `total_per_gpu` omitted `opt_state`, so the cause exceeded the effect. The 113 GB turned out to be the *post-offload* figure in the wrong slot. Total is now 288 GB, and 288 - 175 = 113 is what offload leaves. That falsified the systems lesson's "70--75 GB, fitting within the 80 GB envelope"; it does not fit, because 8-way TP keeps 88 GB of weights and gradients resident. Lesson now states offload alone leaves 113 GB and a second sharding axis is required. Cell had **zero guards**; it now has three. |
+| `responsible_engr` bare "The table" | Forward-referenced `@tbl-fairness-archetype` seventeen lines before it exists. Now the cross-reference as sentence subject. |
+| `compute_infrastructure` HBM 4 pJ/bit vs 2 pJ/bit | Two flat "2 pJ/bit" statements contradicted the chapter's own ~2--5 pJ/bit table and its 4 pJ/bit equation. Aligned the statements to the table, which is the authority and already contains the 4. No computed value moved. |
+| Principle 14 reader-confusion risk | The compliance box is the only unnumbered principle, so the lead-in now places it as local to this chapter rather than one of the part-opening principles. Status, not content, so the lead-in still sets the box up. |
+| `capitalization.md` Tier 1/Tier 2 stale names | Six vol1 names plus two vol2 errors, fixed in AIConfigs (`50289df`). Four were the Invariant/Law to Diagnostic/Model epistemic renames a future sweep would have reversed. |
+
+Verified still-open-in-ledger but **already fixed in source** on this pass: the
+TDP footnote (it correctly describes briefly exceeding *sustained power*, not
+rated speed), `performance_engineering` KV headroom 62.5 vs 68.4, the
+`responsible_engr` 10 ms/100 percent figure, `benchmarking`'s wrong section
+ref, and `edge_intelligence`'s device tiers, which now derive from one
+`Platforms.Mobile.ram` value through `fmt_memory_capacity`.
+
+Verified **not a defect**: `introduction`'s 36,000-frame passage. It sets up a
+frame count and a false-negative rate and then deliberately declines to
+multiply them, explaining that the miss count depends on positive frequency,
+temporal filtering, and sensor fusion. That is a correct refusal to overclaim,
+not deleted arithmetic.
+
 ### Verified already resolved — no action needed
 
 `distributed_training` `\ref{pri-bandwidth-latency-tradeoff}` rendering as raw
