@@ -445,6 +445,10 @@ class ValidateCommand:
                   note="no elementary SI or CS 101 gloss definitions"),
             Scope("physical-units", "_run_footnote_physical_units",
                   note="physical unit capitalization (e.g. pJ/bit vs PJ/bit)"),
+            Scope("sentence-count", "_run_footnote_sentence_count",
+                  note="enforce <= 3 sentences per footnote definition (Litmus Gate 4)"),
+            Scope("lead-in-capitalization", "_run_footnote_lead_in_colon_capitalization",
+                  note="CMOS §6.63 / §14.19 bold lead-in colon capitalization"),
         ],
         "figures": [
             Scope("captions", "_run_figures"),
@@ -8247,6 +8251,97 @@ class ValidateCommand:
         return ValidationRunResult(
             name="footnote-physical-units",
             description="Check SI physical unit capitalization (e.g. pJ/bit vs PJ/bit)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_footnote_sentence_count(self, root: Path) -> ValidationRunResult:
+        """Enforce maximum 3 sentences per footnote definition (Litmus Gate 4)."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        fn_def_pat = re.compile(r'^\[\^(fn-[a-z0-9-]+)\]:\s*(.+)$')
+        abbrevs = ['e.g.', 'i.e.', 'vs.', 'etc.', 'al.', 'ref.', 'fig.', 'tab.', 'lst.', 'eq.', 'sec.', 'appdx.', 'no.', 'vol.', 'p.', 'pp.', 'dr.', 'prof.', 'approx.', 'inc.', 'corp.', 'ltd.', 'h.', 't.', 'e.', 'c.', 'j.', 'm.', 'a.', 's.']
+
+        for file in files:
+            lines = file.read_text(encoding="utf-8").split("\n")
+            for idx, line in enumerate(lines, 1):
+                m = fn_def_pat.match(line.strip())
+                if m:
+                    slug = m.group(1)
+                    body = m.group(2)
+
+                    # Clean math and index tags before sentence splitting
+                    clean_body = re.sub(r'\$[^$]+\$', 'MATH', body)
+                    clean_body = re.sub(r'\\index\{[^}]+\}', '', clean_body)
+                    for abbr in abbrevs:
+                        clean_body = re.sub(re.escape(abbr), abbr.replace('.', 'DOT'), clean_body, flags=re.IGNORECASE)
+                    clean_body = re.sub(r'(\d+)\.(\d+)', r'\1DOT\2', clean_body)
+
+                    sentences = [s for s in re.split(r'(?<=[.!?])\s+(?=[A-Z\["\'`])', clean_body) if s.strip()]
+                    if len(sentences) > 3:
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_sentence_count_exceeded",
+                                message=(
+                                    f"Footnote '[^{slug}]' has {len(sentences)} sentences (max allowed is 3 under Gate 4). "
+                                    f"Consolidate definitions to <= 3 sentences."
+                                ),
+                                severity="error",
+                                context=line.strip()[:100],
+                            )
+                        )
+
+        return ValidationRunResult(
+            name="footnote-sentence-count",
+            description="Enforce maximum 3 sentences per footnote definition (Litmus Gate 4)",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_footnote_lead_in_colon_capitalization(self, root: Path) -> ValidationRunResult:
+        """Enforce CMOS §6.63 / §14.19 bold lead-in colon capitalization."""
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+
+        leadin_pat = re.compile(r'(\*\*[^*]+\*\*(?:\\index\{[^}]+\})*):\s*([a-z])')
+
+        for file in files:
+            lines = file.read_text(encoding="utf-8").split("\n")
+            in_code_block = False
+            for idx, line in enumerate(lines, 1):
+                line_str = line.strip()
+                if line_str.startswith("```"):
+                    in_code_block = not in_code_block
+                    continue
+                if in_code_block or line_str.startswith("#"):
+                    continue
+
+                m = leadin_pat.search(line_str)
+                if m:
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="bold_leadin_colon_capitalization",
+                            message=(
+                                f"CMOS §6.63 / §14.19 violation: First letter after lead-in colon '{m.group(1)}: {m.group(2)}' "
+                                f"must be capitalized when introducing a complete sentence definition."
+                            ),
+                            severity="error",
+                            context=line_str[:100],
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="footnote-lead-in-capitalization",
+            description="Enforce CMOS §6.63 / §14.19 bold lead-in colon capitalization",
             files_checked=len(files),
             issues=issues,
             elapsed_ms=int((time.time() - start) * 1000),
