@@ -197,3 +197,33 @@ def check_xref_resolves(root: Path) -> list[IndexIssue]:
                 f"'{src}' -> '{tgt}' (target not found)",
             ))
     return issues
+
+
+def check_makeindex_encap_conflicts(root: Path) -> list[IndexIssue]:
+    """Check for terms with both direct \\index{X} and \\index{X|see{Y}} in the same QMD file."""
+    issues: list[IndexIssue] = []
+    for f in _iter_qmd_files(root):
+        rel = str(f.relative_to(root))
+        lines = f.read_text(encoding="utf-8", errors="replace").splitlines()
+        terms: dict[str, int] = {}
+        see_terms: dict[str, tuple[int, str]] = {}
+        for idx, line in enumerate(lines, 1):
+            for m in INDEX_RE.finditer(line):
+                k = m.group(1)
+                sm = SEEREF_RE.match(k)
+                if sm:
+                    term, tgt = sm.group(1).strip(), sm.group(2).strip()
+                    see_terms[term] = (idx, tgt)
+                else:
+                    h = k.split("!", 1)[0]
+                    if "@" in h:
+                        h = h.split("@", 1)[1]
+                    terms[h] = idx
+        conflicts = set(terms.keys()) & set(see_terms.keys())
+        for c in sorted(conflicts):
+            issues.append(IndexIssue(
+                rel, see_terms[c][0], "makeindex_encap_conflict",
+                f"Term '{c}' has direct \\index on line {terms[c]} and '|see' index on line {see_terms[c][0]} (causes makeindex error)",
+            ))
+    return issues
+

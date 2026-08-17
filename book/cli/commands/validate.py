@@ -697,6 +697,8 @@ class ValidateCommand:
             # heading/div/footnote adjacency).
             Scope("forbidden-contexts", "_run_index_placement_contexts",
                   note='\\index{} not inside code / math / attribute strings'),
+            Scope("encap-conflicts", "_run_index_encap_conflicts",
+                  note="no direct \\index{X} and \\index{X|see{Y}} on same term"),
         ],
 
         "images": [
@@ -11045,6 +11047,28 @@ class ValidateCommand:
         return ValidationRunResult(
             name="index-xref-resolves",
             description="\\index{} see/seealso target resolution",
+            files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
+            issues=issues,
+            elapsed_ms=int((time.time() - t0) * 1000),
+        )
+
+    def _run_index_encap_conflicts(self, root: Path) -> ValidationRunResult:
+        """index --scope encap-conflicts: no direct \\index{X} and \\index{X|see{Y}} on same term."""
+        from cli.commands._index_checks import check_makeindex_encap_conflicts
+
+        t0 = time.time()
+        repo_root = Path(__file__).resolve().parents[3]
+        raw = check_makeindex_encap_conflicts(repo_root / "book")
+        issues = [
+            ValidationIssue(
+                file=i.file, line=i.line, code=i.code,
+                message=i.message, severity=i.severity,
+            )
+            for i in raw
+        ]
+        return ValidationRunResult(
+            name="index-encap-conflicts",
+            description="\\index{} makeindex encap conflict check",
             files_checked=len(list((repo_root / "book" / "quarto" / "contents").rglob("*.qmd"))),
             issues=issues,
             elapsed_ms=int((time.time() - t0) * 1000),
