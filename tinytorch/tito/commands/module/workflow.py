@@ -1349,8 +1349,15 @@ class ModuleWorkflowCommand(BaseCommand):
         try:
             import json
             if progress_file.exists():
-                with open(progress_file, 'r') as f:
-                    return json.load(f)
+                with open(progress_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+                # Valid JSON but not the expected object shape (e.g. a bare
+                # list from a bad merge or partial write) must not be
+                # returned as-is: every caller assumes a dict and calling
+                # .get()/membership/assignment on the wrong type crashes
+                # deep inside whichever command happened to run next.
+                if isinstance(data, dict):
+                    return data
         except Exception:
             pass
 
@@ -1373,7 +1380,7 @@ class ModuleWorkflowCommand(BaseCommand):
             from datetime import datetime
             progress['last_updated'] = datetime.now().isoformat()
 
-            with open(progress_file, 'w') as f:
+            with open(progress_file, 'w', encoding='utf-8') as f:
                 json.dump(progress, f, indent=2)
         except Exception as e:
             self.console.print(f"[yellow]⚠️  Could not save progress: {e}[/yellow]")
@@ -1705,7 +1712,7 @@ class ModuleWorkflowCommand(BaseCommand):
         completed_milestones = []
         if milestones_file.exists():
             try:
-                with open(milestones_file, 'r') as f:
+                with open(milestones_file, 'r', encoding='utf-8') as f:
                     data = json.load(f)
                     completed_milestones = data.get("completed_milestones", [])
             except Exception:
@@ -1827,8 +1834,9 @@ class ModuleWorkflowCommand(BaseCommand):
             milestones_file.parent.mkdir(parents=True, exist_ok=True)
             if milestones_file.exists():
                 try:
-                    with open(milestones_file, 'r') as f:
-                        milestone_progress = json.load(f)
+                    with open(milestones_file, 'r', encoding='utf-8') as f:
+                        loaded = json.load(f)
+                    milestone_progress = loaded if isinstance(loaded, dict) else {}
                 except Exception:
                     milestone_progress = {}
             else:
@@ -1857,7 +1865,7 @@ class ModuleWorkflowCommand(BaseCommand):
             milestone_progress["total_unlocked"] = len(unlocked)
             milestone_progress.setdefault("achievements", [])
 
-            with open(milestones_file, 'w') as f:
+            with open(milestones_file, 'w', encoding='utf-8') as f:
                 json.dump(milestone_progress, f, indent=2)
 
             for milestone_id, milestone in newly_unlocked:
