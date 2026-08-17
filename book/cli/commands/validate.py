@@ -605,6 +605,13 @@ class ValidateCommand:
                   note="part keys valid"),
             Scope("purpose-unnumbered", "_run_purpose_unnumbered",
                   note="Purpose sections unnumbered"),
+            # Added 2026-08-17. purpose.md anti-pattern 8a: an appendix opens
+            # with one unheaded orientation paragraph, never a chapter-style
+            # Purpose heading or italic hook question. A sweep that reshaped the
+            # openings finished vol1 but left three vol2 appendices behind.
+            Scope("appendix-opening", "_run_appendix_opening_shape",
+                  note="appendices open with an unheaded orientation paragraph, "
+                       "not a Purpose heading or hook question"),
         ],
         "code": [
             Scope("python-echo", "_run_python_echo",
@@ -658,6 +665,12 @@ class ValidateCommand:
                   note="caption between two `:::` closes breaks EPUB"),
             Scope("caption-detached", "_run_table_caption_detached",
                   note="prose between pipe table and its `: caption {#tbl-}` breaks xref"),
+            # Added 2026-08-17. auto-tblwidth.md and layout.md both require the
+            # width vector to sum to 100. Restoring a copyeditor's PR wholesale
+            # reintroduced four vectors summing to 110, which had previously been
+            # normalized; nothing caught it because nothing was looking.
+            Scope("colwidths-sum", "_run_table_colwidths_sum",
+                  note="tbl-colwidths vectors must sum to 100"),
         ],
         "listings": [
             # Listings in this book always use ::: {#lst-X lst-cap="..."} divs.
@@ -11594,6 +11607,128 @@ class ValidateCommand:
             elif ch == "," and depth == 0:
                 return text[:idx]
         return None
+
+    def _run_table_colwidths_sum(self, root: Path) -> ValidationRunResult:
+        """tables --scope colwidths-sum: width vectors must sum to 100.
+
+        auto-tblwidth.md: "Widths are percentages and must sum to 100."
+        layout.md:        "Widths are integer percentages and should sum to 100."
+
+        Added 2026-08-17: restoring a copyeditor PR wholesale reintroduced four
+        vectors summing to 110 that had previously been normalized.
+        """
+        start = time.time()
+        files = self._qmd_files(root)
+        issues: List[ValidationIssue] = []
+        pat = re.compile(r'tbl-colwidths="\[([0-9,\s]+)\]"')
+
+        for file in files:
+            for idx, line in enumerate(self._read_text(file).splitlines(), 1):
+                for m in pat.finditer(line):
+                    vals = [int(x) for x in m.group(1).split(",") if x.strip()]
+                    if not vals or sum(vals) == 100:
+                        continue
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="tbl_colwidths_sum",
+                            message=(
+                                f"tbl-colwidths sums to {sum(vals)}, not 100; "
+                                f"rescale keeping the same proportions"
+                            ),
+                            severity="error",
+                            context=f"[{m.group(1)}]",
+                        )
+                    )
+
+        return ValidationRunResult(
+            name="table-colwidths-sum",
+            description="tbl-colwidths vectors must sum to 100",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
+
+    def _run_appendix_opening_shape(self, root: Path) -> ValidationRunResult:
+        """structure --scope appendix-opening: appendices open unheaded.
+
+        purpose.md: an appendix opens with exactly one unheaded orientation
+        paragraph and then `## How to Use This Appendix`. The chapter-style
+        `## Purpose` heading and italic hook question are anti-pattern 8a.
+        A taxonomy appendix may follow the paragraph with Learning Objectives,
+        so the orientation block ends at the first div or `##` heading.
+
+        Added 2026-08-17 after a sweep reshaped vol1 but left three vol2
+        appendices on the old chapter-style opening.
+        """
+        start = time.time()
+        files = [f for f in self._qmd_files(root) if f.name.startswith("appendix_")]
+        issues: List[ValidationIssue] = []
+        hook = re.compile(r"^_.*\?_$")
+
+        for file in files:
+            lines = self._read_text(file).splitlines()
+            i = 0
+            if lines and lines[0].strip() == "---":
+                for j in range(1, len(lines)):
+                    if lines[j].strip() == "---":
+                        i = j + 1
+                        break
+            # The orientation paragraph follows the H1 title.
+            for j in range(i, len(lines)):
+                if lines[j].strip().startswith("# "):
+                    i = j + 1
+                    break
+
+            paragraphs: List[str] = []
+            current: List[str] = []
+            heading_line = heading_text = None
+            for offset, raw in enumerate(lines[i:], start=i + 1):
+                s = raw.strip()
+                if s.startswith("##") or s.startswith(":::"):
+                    heading_line, heading_text = offset, s
+                    break
+                if not s:
+                    if current:
+                        paragraphs.append(" ".join(current))
+                        current = []
+                else:
+                    current.append(s)
+            if current:
+                paragraphs.append(" ".join(current))
+
+            def add(line_no, msg, ctx):
+                issues.append(
+                    ValidationIssue(
+                        file=self._relative_file(file), line=line_no,
+                        code="appendix_opening_shape", message=msg,
+                        severity="error", context=ctx[:120],
+                    )
+                )
+
+            if heading_text and heading_text.startswith("## ") and "Purpose" in heading_text:
+                add(heading_line,
+                    "Appendix uses a chapter-style Purpose heading; open with an "
+                    "unheaded orientation paragraph (purpose.md 8a)",
+                    heading_text)
+            for p in paragraphs:
+                if hook.match(p):
+                    add(heading_line or i,
+                        "Appendix opens with an italic hook question; that is "
+                        "chapter-only (purpose.md 8a)", p)
+            if len(paragraphs) != 1 and not any(hook.match(p) for p in paragraphs):
+                add(i, f"Appendix has {len(paragraphs)} opening paragraphs; "
+                       f"purpose.md wants exactly one",
+                    paragraphs[0] if paragraphs else "(none)")
+
+        return ValidationRunResult(
+            name="appendix-opening-shape",
+            description="Appendices open with one unheaded orientation paragraph",
+            files_checked=len(files),
+            issues=issues,
+            elapsed_ms=int((time.time() - start) * 1000),
+        )
 
     def _run_lego_guard_strength(self, root: Path) -> ValidationRunResult:
         """code --scope lego-guard-strength: stage-3 guards must bound the claim."""
