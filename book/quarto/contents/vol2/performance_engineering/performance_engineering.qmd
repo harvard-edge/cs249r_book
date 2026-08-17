@@ -255,7 +255,7 @@ class MemoryWallScenario:
     shared_mem_per_sm_kib_str = fmt_memory_capacity(shared_per_sm, unit=KiB, precision=0, commas=False)
 ```
 
-An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str` of FP8 compute at a `{python} MemoryWallScenario.h100_tdp_w_str` TDP budget but only `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` of memory bandwidth. If every byte loaded from memory does fewer than `{python} MemoryWallScenario.h100_ridge_fp8_str` arithmetic operations, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
+An NVIDIA H100 delivers `{python} MemoryWallScenario.h100_fp8_tflop_per_s_str` of FP8 compute at a `{python} MemoryWallScenario.h100_tdp_w_str` TDP budget but only `{python} MemoryWallScenario.h100_hbm_bw_tb_per_s_str` of memory bandwidth. If an operation achieves an arithmetic intensity below `{python} MemoryWallScenario.h100_ridge_fp8_str`, the compute units sit idle, starved for data. This gap between compute capability and memory delivery rate is the memory wall, and it defines the landscape within which all performance engineering operates.
 
 The memory wall represents a fundamental physical constraint rather than a temporary engineering limitation. Moving data costs energy proportional to distance. Accessing a value from on-chip SRAM (L1 cache) costs approximately 0.5 pJ, while fetching the same value from off-chip HBM costs roughly 640 pJ, a ratio of `{python} MemoryWallScenario.energy_ratio_mult_str`. Manufacturing constraints limit the amount of SRAM that can sit close to the compute units. HBM provides capacity (the H100 offers `{python} MemoryWallScenario.h100_mem_gb_str`) but at physically greater distance, requiring the data to traverse longer wires. The fundamental tension is that models need gigabytes of parameters and state, but physics dictates that only kilobytes of data can be near the compute units at any given moment.
 
@@ -481,7 +481,7 @@ class RooflineRidgeCalc:
     h100_hbm_bw_tb_per_s_str = fmt_qty(h_h100.memory.bandwidth, TB / second, precision=2, commas=False)
 ```
 
-Any operation performing fewer than `{python} RooflineRidgeCalc.h100_fp16_ridge_str` floating-point operations per byte loaded is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} RooflineRidgeCalc.h100_fp8_tflop_per_s_str` and bandwidth remains `{python} RooflineRidgeCalc.h100_hbm_bw_tb_per_s_str`, the ridge point rises to approximately `{python} RooflineRidgeCalc.h100_fp8_ridge_str`. The A100, with `{python} RooflineRidgeCalc.a100_fp16_tflop_per_s_str` and `{python} RooflineRidgeCalc.a100_hbm_bw_tb_per_s_str`, has a lower ridge point of approximately `{python} RooflineRidgeCalc.a100_ridge_str` at FP16. Across the generations in @tbl-widening-gap, compute has outgrown bandwidth and the ridge point has roughly doubled (V100 to B200), so more workloads fall into the memory-bound regime over time; the per-generation movement is not monotonic, however, because each chip pairs its own compute and bandwidth (the B200 ridge sits slightly below the H100). The durable trend, not any single step, is what makes memory-efficiency techniques more valuable as hardware advances.
+Any operation with an arithmetic intensity below `{python} RooflineRidgeCalc.h100_fp16_ridge_str` is memory-bound on the H100 at FP16. At FP8 precision, where compute doubles to `{python} RooflineRidgeCalc.h100_fp8_tflop_per_s_str` and bandwidth remains `{python} RooflineRidgeCalc.h100_hbm_bw_tb_per_s_str`, the ridge point rises to approximately `{python} RooflineRidgeCalc.h100_fp8_ridge_str`. The A100, with `{python} RooflineRidgeCalc.a100_fp16_tflop_per_s_str` and `{python} RooflineRidgeCalc.a100_hbm_bw_tb_per_s_str`, has a lower ridge point of approximately `{python} RooflineRidgeCalc.a100_ridge_str` at FP16. Across the generations in @tbl-widening-gap, compute has outgrown bandwidth and the ridge point has roughly doubled (V100 to B200), so more workloads fall into the memory-bound regime over time; the per-generation movement is not monotonic, however, because each chip pairs its own compute and bandwidth (the B200 ridge sits slightly below the H100). The durable trend, not any single step, is what makes memory-efficiency techniques more valuable as hardware advances.
 
 @Fig-shifting-roofline overlays the roofline models for four GPU generations on a single log-log plot, making the generational ridge-point shift tabulated earlier visible at a glance. An operation like naive self-attention, with an arithmetic intensity near 10 FLOP/byte, is memory-bound on every generation and falls progressively further below the ridge with each new chip. More critically, operations near 200 FLOP/byte, such as some matrix multiplications and fused blocks, can change regime as hardware changes. The same kernel can change performance regime across hardware generations, a fact that demands re-profiling whenever hardware is upgraded.
 
@@ -730,7 +730,7 @@ The memory-bound nature of inference also explains a common source of confusion:
 
 ## Serving Regimes: Batch Size and Prefill-Decode {#sec-performance-engineering-serving-regimes-9f2c}
 
-Diagnosis locates a workload on the roofline; the serving regime determines which knobs move it. Two structural features of LLM inference, the batch dimension and the split between prompt processing and token generation, decide whether decode stays pinned to the memory-bound slope or climbs toward the compute roof. Both are levers the rest of the chapter's techniques act through.
+When an LLM serving endpoint goes live, serving requests individually at batch size 1 wastes over 90 percent of an accelerator's compute capacity and inflates per-token cost. Yet naively lumping requests into larger batches can cause latency spikes if prompt processing and token generation are treated as identical operations. The serving regime—how a system manages the batch dimension and divides prompt processing from token generation—determines whether decode stays pinned to the memory-bound slope or climbs toward the compute roof. These two structural features are levers through which all subsequent optimization techniques act.
 
 ### Batch size as the universal control knob {#sec-performance-engineering-batch-size}
 
@@ -873,7 +873,7 @@ class RooflineDiagnostic:
     bytes_math = fmt_math(rf"{sci_latex(_ppg)} \times 2 \text{{ bytes}}")
     ai_eq_math = fmt_math(
         rf"I = \frac{{{sci_latex(_flops_mag)} \text{{ FLOP}}}}{{{sci_latex(_bytes_mag)} \text{{ bytes}}}} = "
-        rf"{fmt(arith_intensity.magnitude, precision=0, commas=False)} \text{{ FLOP/byte}}"
+        rf"{fmt_int(round(arith_intensity.magnitude), commas=False)} \text{{ FLOP/byte}}"
     )
     decode_eq_math = fmt_math(
         rf"T_{{\text{{decode}}}} = \frac{{{fmt(_weight_gb, precision=1, commas=False)}\,\text{{GB}}}}"
@@ -1004,7 +1004,7 @@ To appreciate the quantitative impact, consider each category applied to a singl
 
 An orthogonal technique for reducing the overhead term in the iron law is **CUDA Graphs**\index{CUDA!graphs, overhead reduction}[^fn-cuda-graphs-constraint]. While operator fusion combines multiple operations into fewer kernels, CUDA Graphs eliminate the CPU overhead of launching those kernels.
 
-[^fn-cuda-graphs-constraint]: **CUDA Graphs**\index{CUDA Graphs!definition}: Introduced in CUDA 10 (2018), originally for graphics rendering pipelines that replay identical command sequences every frame. The strict determinism requirement -- identical operations, shapes, and memory addresses per replay -- directly conflicts with the dynamic shapes and variable batch sizes of LLM serving, restricting their use primarily to the decode phase where the computation pattern repeats per token.
+[^fn-cuda-graphs-constraint]: **CUDA Graphs**\index{CUDA Graphs!definition}: Introduced in CUDA 10 (2018), originally for graphics rendering pipelines that replay identical command sequences every frame. The strict determinism requirement (identical operations, shapes, and memory addresses per replay) directly conflicts with the dynamic shapes and variable batch sizes of LLM serving, restricting their use primarily to the decode phase where the computation pattern repeats per token.
 
 In standard PyTorch execution, each kernel launch requires the CPU to push a command to the GPU's command queue. For a transformer decoder layer with 30+ kernels, this CPU-to-GPU roundtrip (typically 5--10 $\mu$s per launch) accumulates to 150--300 $\mu$s per layer. For a 70-layer model, kernel launch overhead alone contributes 10--20 ms per forward pass, a significant fraction of the total time for memory-bound inference.
 
@@ -1095,7 +1095,7 @@ The reduction in HBM traffic can be dramatic. For a sequence length of `{python}
 
 The key insight behind FlashAttention is the **Online Softmax**\index{Online Softmax!FlashAttention}[^fn-online-softmax-algo] trick, which makes tiling possible for an operation that appears to require global information. Standard softmax computes $\text{softmax}(s_i) = e^{s_i} / \sum_j e^{s_j}$, but for numerical stability it first subtracts the global maximum: $\text{softmax}(s_i) = e^{s_i - m} / \sum_j e^{s_j - m}$ where $m = \max_j s_j$. Finding this global maximum seems to require seeing all scores first, which would force materializing the full $S{\times}S$ matrix.
 
-[^fn-online-softmax-algo]: **Online Softmax**\index{Online Softmax!definition}: Online here is an algorithmic term meaning the computation processes data incrementally in a single pass without storing the full input --- the same sense as in online learning or online algorithms. This property is what makes tiling possible: the algorithm never needs the complete $S{\times}S$ score matrix in memory simultaneously, reducing attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ and making long-context inference feasible on fixed-size SRAM.
+[^fn-online-softmax-algo]: **Online Softmax**\index{Online Softmax!definition}: Online here is an algorithmic term meaning the computation processes data incrementally in a single pass without storing the full input, in the same sense as in online learning or online algorithms. This property is what makes tiling possible: the algorithm never needs the complete $S{\times}S$ score matrix in memory simultaneously, reducing attention memory from $\mathcal{O}(S^2)$ to $\mathcal{O}(S)$ and making long-context inference feasible on fixed-size SRAM.
 
 The online algorithm avoids this by maintaining running statistics that are updated incrementally as each tile is processed. When processing tile $t$, the algorithm executes four steps:
 
@@ -1419,7 +1419,7 @@ class KVCacheAnalysis:
     batch_ratio = max_batch_int8_val / max_batch_fp16_val
 
     # ┌── 3. GUARD (Invariants) ──────────────────────────────────────────
-    check(kv_cache_qty_f16 > 0.1 * GB, f"KV cache size too low, got {kv_cache_qty_f16.to(GB).magnitude:.2f}")
+    check(abs(kv_cache_qty_f16.to(GB).magnitude - 1.34) < 0.05, f"Expected ~1.34 GB KV cache, got {kv_cache_qty_f16.to(GB).magnitude:.2f}")
     check(max_batch_int8_val > max_batch_fp16_val, "INT8 should increase batch size")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
@@ -1434,7 +1434,7 @@ class KVCacheAnalysis:
     weight_int4_gb_str = fmt_memory(weight_int4_shard, unit=GB, precision=1, commas=False)
     avail_int8_gb_str = fmt_memory(avail_int8, unit=GB, precision=1, commas=False)
     weight_fp16_shard_gb_str = fmt_memory(weight_fp16_shard, unit=GB, precision=1, commas=False)
-    weight_fp16_total_gb_str = fmt_memory(weight_fp16_shard * tensor_parallel_degree, unit=GB, precision=0, commas=False)
+    weight_fp16_total_gb_str = fmt_memory(round(weight_fp16_shard.to(GB).magnitude * tensor_parallel_degree) * GB, unit=GB, precision=0, commas=False)
     tensor_parallel_degree_str = fmt_count(tensor_parallel_degree, commas=False)
     # The nameplate in honest decimal, for displayed equations whose other
     # operands are decimal. Mixing the two printed 80 - 4.4 = 81.5.
@@ -1585,7 +1585,7 @@ Backend choice follows the same constraint: the more stable and deployment-speci
 
 Between hand-written CUDA and fully automated graph compilers sits **Triton**\index{Triton!kernel programming}[^fn-triton-tiling], a Python-based language for writing GPU kernels. Triton occupies a middle ground: the programmer specifies the algorithm (tiling strategy, fusion pattern) while Triton handles low-level concerns (thread block scheduling, memory coalescing, shared memory management).
 
-[^fn-triton-tiling]: **Triton**\index{Triton!definition}: Introduced by Tillet, Kung, and Cox as an intermediate language and compiler for tiled neural-network computations [@tillet2019], and later developed at OpenAI. The key design decision was making the tile --- not the thread --- the fundamental programming abstraction. This choice directly mirrors the tiling strategy of FlashAttention: the programmer reasons about blocks of data that fit in SRAM, and the compiler maps those blocks to GPU threads and shared memory. This abstraction reduces exposure to low-level CUDA concerns such as warp divergence, bank conflicts, and coalescing while preserving control over the memory hierarchy decisions that determine ML kernel performance.
+[^fn-triton-tiling]: **Triton**\index{Triton!definition}: Introduced by Tillet, Kung, and Cox as an intermediate language and compiler for tiled neural-network computations [@tillet2019], and later developed at OpenAI. The key design decision was making the tile, not the thread, the fundamental programming abstraction. This choice directly mirrors the tiling strategy of FlashAttention: the programmer reasons about blocks of data that fit in SRAM, and the compiler maps those blocks to GPU threads and shared memory. This abstraction reduces exposure to low-level CUDA concerns such as warp divergence, bank conflicts, and coalescing while preserving control over the memory hierarchy decisions that determine ML kernel performance.
 
 A Triton kernel for fused GELU activation illustrates the programming model:
 
@@ -1675,7 +1675,7 @@ class CompilationDividend:
     fusion_reduction_pct_str = fmt_percent(round(fusion_reduction * 100) / 100, precision=0, commas=False, style='prose')
     launch_reduction_pct_str = fmt_percent(round(launch_reduction * 100) / 100, precision=0, commas=False, style='prose')
     addressable_share_pct_str = fmt_percent(round((elementwise_share + launch_share) * 100) / 100, precision=0, commas=False, style='prose')
-    tpt_eq_math = fmt_math(rf"1 / {fmt(base_tps, precision=0, commas=False)} = {fmt(_tpt, precision=2, commas=False)}\,\text{{ms}}")
+    tpt_eq_math = fmt_math(rf"1 / {fmt_int(round(base_tps), commas=False)} = {fmt(_tpt, precision=2, commas=False)}\,\text{{ms}}")
     gemm_eq_math = fmt_math(
         rf"{fmt(_tpt, precision=2, commas=False)} \times {fmt(gemm_share, precision=2, commas=False)} = {fmt(gemm_ms, precision=2, commas=False)}\,\text{{ms}}"
     )
@@ -1746,14 +1746,14 @@ The transformation is useful only when the draft model is accurate enough and ch
 ::: {#fig-speculative-decoding fig-env="figure" fig-pos="htb" fig-cap="**Speculative Decoding Process**: Instead of generating tokens sequentially with the large target model, a small draft model proposes a sequence of $K$ tokens. The target model verifies all $K$ tokens in a single parallel forward pass. Drafted tokens that pass the acceptance test are emitted together; the first rejected token triggers a corrected sample and discards the remaining draft." fig-alt="Timeline comparison of two decoding methods. Top: standard decoding with 4 sequential generation steps. Bottom: speculative decoding with fast draft, parallel verify, then 3 accepted tokens (green) and 1 rejected (pink). Braces show time savings."}
 
 ```{.tikz}
-\begin{tikzpicture}[font=\small\usefont{T1}{phv}{m}{n}, scale=0.9, transform shape]
+\begin{tikzpicture}[font=\small\sffamily, scale=0.9, transform shape]
   \definecolor{DraftColor}{HTML}{FCE4CC}
   \definecolor{VerifyColor}{HTML}{D1E6F3}
   \definecolor{AcceptColor}{HTML}{D4EFDF}
   \definecolor{RejectColor}{HTML}{F5D2D5}
 
   \tikzset{
-     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.7cm, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=center}
+     stepbox/.style={draw=black!50, rounded corners=2pt, minimum height=0.7cm, font=\scriptsize\sffamily, align=center}
   }
 
   % Baseline
@@ -1771,11 +1771,11 @@ The transformation is useful only when the draft model is accurate enough and ch
 
   % Draft Step
   \node[stepbox, fill=DraftColor, minimum width=2.0cm] (draft) at (1.2, 1.0) {Draft Model\\Gen [T1..T4]};
-  \node[below, font=\tiny\usefont{T1}{phv}{m}{n}] at (draft.south) {Fast, Low latency};
+  \node[below, font=\tiny\sffamily] at (draft.south) {Fast, Low latency};
 
   % Verify Step
   \node[stepbox, fill=VerifyColor, minimum width=2.0cm, right=0.3cm of draft] (verify) {Target Model\\Verify [T1..T4]};
-  \node[below, font=\tiny\usefont{T1}{phv}{m}{n}] at (verify.south) {Parallel Forward Pass};
+  \node[below, font=\tiny\sffamily] at (verify.south) {Parallel Forward Pass};
 
   % Outcome
   \node[stepbox, fill=AcceptColor, minimum width=0.5cm] (t1) at (5.0, 1.8) {T1};
@@ -1786,11 +1786,11 @@ The transformation is useful only when the draft model is accurate enough and ch
   \draw[->, thick, black!50] (draft) -- (verify);
   \draw[->, thick, black!50] (verify) -- (t1.west |- verify.east);
 
-  \node[right=0.2cm of t4, font=\scriptsize\usefont{T1}{phv}{m}{n}, align=left] {Accept 3\\Reject 1};
+  \node[right=0.2cm of t4, font=\scriptsize\sffamily, align=left] {Accept 3\\Reject 1};
 
   % Speedup annotation
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 3.2) -- (6.6, 3.2) node[midway, below=0.2cm, font=\scriptsize\usefont{T1}{phv}{m}{n}] {Standard Time};
-  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 0.5) -- (4.8, 0.5) node[midway, below=0.2cm, font=\scriptsize\usefont{T1}{phv}{m}{n}] {Speculative Time};
+  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 3.2) -- (6.6, 3.2) node[midway, below=0.2cm, font=\scriptsize\sffamily] {Standard Time};
+  \draw[decorate, decoration={brace, amplitude=5pt}] (0.2, 0.5) -- (4.8, 0.5) node[midway, below=0.2cm, font=\scriptsize\sffamily] {Speculative Time};
 
 \end{tikzpicture}
 ```
@@ -1838,7 +1838,7 @@ A standard MoE transformer layer replaces the feed-forward network (FFN) with mu
 
 ## Communication-Computation Overlap {#sec-performance-engineering-overlap}
 
-After changing the local work through fusion, precision, compilation, speculation, or sparse expert routing, the next exposed iron-law term is often communication. @Sec-communication-overlap established overlap as the technique that removes communication from the critical path when enough useful compute remains to hide it; the single-node mechanics those chapters assumed—namely the CUDA streams, SM partitioning, and bucket hooks—run computation and communication concurrently on one accelerator.
+In a multi-GPU training step or tensor-parallel inference pass, an accelerator can finish a local matrix multiplication in microseconds, only to sit idle while waiting for an AllReduce collective to transfer gradients or activations across the network. If communication runs sequentially after computation, interconnect latency directly limits throughput. Communication-computation overlap removes this communication time from the critical path by executing GPU compute kernels concurrently with data transfers over NVLink or InfiniBand, building on the CUDA streams, SM partitioning, and bucket hooks established in @sec-communication-overlap.
 
 ```{python}
 #| echo: false
@@ -2130,7 +2130,7 @@ PyTorch's Distributed Data Parallel (DDP) module implements gradient overlap by 
 
 When engineers create their own side streams for custom overlap patterns, a set of PyTorch-specific footguns regularly causes silent correctness or performance failures. The default behavior in PyTorch is that all operations enqueue onto the default stream. A tensor produced on the default stream and consumed on a side stream is not automatically safe: without an explicit `event.record()` / `event.wait()` barrier between them, the GPU may begin consuming the tensor before it is fully written. Similarly, memory copies launched without `non_blocking=True` insert implicit synchronization points that serialize the streams the engineer was trying to overlap, often eliminating the overlap benefit entirely. DDP avoids these hazards by managing `record_event()` calls inside its bucket hooks, ensuring each AllReduce starts only after the corresponding gradient compute event has completed. Manually written overlap code must replicate this discipline or risk data races that produce incorrect gradients with no error signal at the framework level.
 
-The techniques covered so far -- fusion, precision, compilation, speculative decoding, MoE, and communication overlap -- address different aspects of the performance equation. Identifying which technique to apply in a given situation requires systematic measurement, and the profiling tools that make this diagnosis possible are the final piece of the optimization toolkit.
+The techniques covered so far (fusion, precision, compilation, speculative decoding, MoE, and communication overlap) address different aspects of the performance equation. Identifying which technique to apply in a given situation requires systematic measurement, and the profiling tools that make this diagnosis possible are the final piece of the optimization toolkit.
 
 ## System Profiling {#sec-performance-engineering-profiling}
 
@@ -2165,7 +2165,7 @@ Metrics are not interchangeable; each answers a different bottleneck question. M
 | **Metric**                                                               | **Definition**                                                                        | **Best diagnostic use**                                                                              | **Caveat or target**                                                                                                                                              |
 |:-------------------------------------------------------------------------|:--------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------------------------------|:------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | **Model FLOPs Utilization (MFU)**                                        | Fraction of hardware peak FLOP/s productively used by model computation               | Training efficiency across memory limits, launch overhead, communication wait, and software overhead | 40--60% is common in well-tuned LLM training; above 60% is excellent                                                                                              |
-| **Hardware FLOPs Utilization (HFU)**                                     | Total arithmetic operations executed, including recomputation, divided by peak FLOP/s | Separating useful model work from overhead such as activation recomputation                          | Usually exceeds MFU, and the HFU--MFU gap estimates wasted compute                                                                                                |
+| **Hardware FLOPs Utilization (HFU)**                                     | Total arithmetic operations executed, including recomputation, divided by peak FLOP/s | Separating useful model work from overhead such as activation recomputation                          | Usually exceeds MFU, and the HFU–MFU gap estimates wasted compute                                                                                                 |
 | **Time-to-first-token (TTFT)**\index{Time to First Token}                | Latency from request arrival to the first generated token                             | Interactive serving responsiveness, including queueing, prefill, and initialization                  | Below 500 ms is generally acceptable; below 200 ms feels responsive                                                                                               |
 | **Inter-token latency (ITL)**\index{Inter-Token Latency}                 | Time between consecutive generated tokens during decode                               | Perceived generation speed after the first token                                                     | Below 50 ms supports comfortable reading; real-time speech may require below 25 ms                                                                                |
 | **Throughput**                                                           | Tokens/second for the system, or tokens/second/GPU for per-device efficiency          | Aggregate serving or training capacity under batching                                                | Large batches improve throughput but increase per-request latency; @sec-appdx-inference-scale-queuing-theory-batched-inference-bbf0 covers the queueing trade-off |
@@ -2745,7 +2745,7 @@ class RooflineSummaryRecap:
     h100_fp16_ridge = Hardware.Cloud.H100.ridge_point().to(flop / byte)
     h100_fp16_ridge_str = fmt_arithmetic_intensity(h100_fp16_ridge, unit=flop / byte, precision=1, commas=False)
 ```
-Performance engineering closes the gap between a model's theoretical efficiency and its hardware implementation by systematically optimizing the terms of the iron law of ML performance (@eq-iron-law-perf): total execution time $T$ is governed by data movement ($D_{\text{vol}} / \text{BW}$), compute execution ($O / (R_{\text{peak}} \cdot \eta_{\text{hw}})$), and latency overhead ($L_{\text{lat}}$). On modern accelerators like the NVIDIA H100—where the FP16 ridge point of the roofline model sits at `{python} RooflineSummaryRecap.h100_fp16_ridge_str`—most autoregressive transformer operations are bound by the memory wall ($D_{\text{vol}} / \text{BW}$).
+Performance engineering closes the gap between a model's theoretical efficiency and its hardware implementation by systematically optimizing the terms of the iron law of ML performance (@eq-iron-law-perf): total execution time $T$ is governed by data movement ($D_{\text{vol}} / \text{BW}$), compute execution ($O / (R_{\text{peak}} \cdot \eta_{\text{hw}})$), and latency overhead ($L_{\text{lat}}$). On modern accelerators like the NVIDIA H100, where the FP16 ridge point of the roofline model sits at `{python} RooflineSummaryRecap.h100_fp16_ridge_str`, most autoregressive transformer operations are bound by the memory wall ($D_{\text{vol}} / \text{BW}$).
 
 ```{python}
 #| echo: false
@@ -2762,7 +2762,7 @@ class FlashAttentionSummaryRecap:
     flash_attn_bytes_per_head = (3 + 1) * seq_len * head_dim * bytes_per_elem
     savings_ratio = (naive_attn_bytes_per_head / flash_attn_bytes_per_head).to("").magnitude
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
-    savings_mult_str = fmt_multiple(savings_ratio, commas=False, precision=0)
+    savings_mult_str = fmt_multiple(round(savings_ratio), commas=False, precision=0)
 ```
 
 Rather than a disjointed menu of tricks, the chapter's techniques form a unified optimization stack targeting each term of this governing equation:
@@ -2787,7 +2787,7 @@ Hardware is sold by its theoretical peak ($R_{\text{peak}}$) but paid for by the
 
 ::: {.callout-chapter-connection title="From single-node optimization to fleet-scale serving"}
 
-With hardware compute and memory hierarchy fundamentals established in @sec-compute-infrastructure, this chapter focused on local execution mechanics---using operator fusion, precision reduction, graph compilation, speculative decoding, and MoE to conquer the memory wall. In production, however, models do not run in isolation; they serve continuous streams of concurrent requests under tight SLA latency budgets. @Sec-inference-scale moves from local execution mechanics to fleet-scale serving architecture, showing how the per-request memory savings and arithmetic intensity gains developed here enable dynamic batching, continuous scheduling, and tail-latency protection at scale.
+With hardware compute and memory hierarchy fundamentals established in @sec-compute-infrastructure, this chapter focused on local execution mechanics: using operator fusion, precision reduction, graph compilation, speculative decoding, and MoE to conquer the memory wall. In production, however, models do not run in isolation; they serve continuous streams of concurrent requests under tight SLA latency budgets. @Sec-inference-scale moves from local execution mechanics to fleet-scale serving architecture, showing how the per-request memory savings and arithmetic intensity gains developed here enable dynamic batching, continuous scheduling, and tail-latency protection at scale.
 
 :::
 
