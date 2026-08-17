@@ -2505,19 +2505,24 @@ def enable_autograd(quiet=False):
         # Ensure self has gradient attributes
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed
+        # Keep a Tensor-typed copy for grad bookkeeping, but call the
+        # original with `other` in its original form (matching
+        # tracked_mul's pattern) so _original_add's own scalar branch
+        # stays reachable instead of always seeing a pre-converted Tensor.
         if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
+            other_tensor = Tensor(other)
+        else:
+            other_tensor = other
+        _ensure_grad_attrs(other_tensor)
 
         # Call original operation
         result = _original_add(self, other)
         _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
+        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = AddBackward(self, other)
+            result._grad_fn = AddBackward(self, other_tensor)
 
         return result
 
@@ -2641,19 +2646,24 @@ def enable_autograd(quiet=False):
         """
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed
+        # Keep a Tensor-typed copy for grad bookkeeping, but call the
+        # original with `other` in its original form (matching
+        # tracked_mul's pattern) so _original_sub's own scalar branch
+        # stays reachable instead of always seeing a pre-converted Tensor.
         if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
+            other_tensor = Tensor(other)
+        else:
+            other_tensor = other
+        _ensure_grad_attrs(other_tensor)
 
         # Call original operation
         result = _original_sub(self, other)
         _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
+        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = SubBackward(self, other)
+            result._grad_fn = SubBackward(self, other_tensor)
 
         return result
 
@@ -2695,19 +2705,24 @@ def enable_autograd(quiet=False):
         """
         _ensure_grad_attrs(self)
 
-        # Convert scalar to Tensor if needed
+        # Keep a Tensor-typed copy for grad bookkeeping, but call the
+        # original with `other` in its original form (matching
+        # tracked_mul's pattern) so _original_div's own scalar branch
+        # stays reachable instead of always seeing a pre-converted Tensor.
         if not isinstance(other, Tensor):
-            other = Tensor(other)
-        _ensure_grad_attrs(other)
+            other_tensor = Tensor(other)
+        else:
+            other_tensor = other
+        _ensure_grad_attrs(other_tensor)
 
         # Call original operation
         result = _original_div(self, other)
         _ensure_grad_attrs(result)
 
         # Track gradient if needed
-        if _get_requires_grad(self) or _get_requires_grad(other):
+        if _get_requires_grad(self) or _get_requires_grad(other_tensor):
             result.requires_grad = True
-            result._grad_fn = DivBackward(self, other)
+            result._grad_fn = DivBackward(self, other_tensor)
 
         return result
 
