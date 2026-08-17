@@ -184,6 +184,33 @@ class TestArithmeticGradients:
 
         check_grad(fn, np.array([1.0, -1.0, 3.0]))
 
+    @pytest.mark.parametrize("op", ["add", "sub", "mul", "div"])
+    def test_partial_requires_grad_only_tracks_the_flagged_operand(self, op):
+        """Every other arithmetic gradient test sets requires_grad=True on
+        both operands. When only one does, the other's .grad must stay None
+        and the flagged operand's gradient must still be correct."""
+        a = Tensor(np.array([2.0, 3.0, 4.0]), requires_grad=True)
+        b = Tensor(np.array([5.0, 6.0, 7.0]), requires_grad=False)
+
+        result = {
+            "add": lambda: a + b,
+            "sub": lambda: a - b,
+            "mul": lambda: a * b,
+            "div": lambda: a / b,
+        }[op]()
+        result.sum().backward()
+
+        assert a.grad is not None
+        assert b.grad is None, "Operand without requires_grad must not accumulate a gradient"
+
+        expected = {
+            "add": np.ones(3),
+            "sub": np.ones(3),
+            "mul": b.data.copy(),
+            "div": 1.0 / b.data,
+        }[op]
+        np.testing.assert_allclose(a.grad, expected, rtol=1e-5)
+
     def test_broadcast_add_backward(self):
         bias_data = np.array([1.0, 2.0])
 
