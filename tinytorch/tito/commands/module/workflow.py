@@ -36,6 +36,36 @@ from ...core.modules import (
     get_all_module_metadata,
 )
 
+def _find_running_jupyter_lab_pids() -> Optional[list]:
+    """Return PIDs of currently running 'jupyter lab' / 'jupyter-lab'
+    processes, or None if this can't be determined (psutil not
+    installed, or a permission error scanning processes).
+
+    None is deliberately distinct from an empty list: it means "unknown"
+    so callers can choose to proceed rather than block a legitimate
+    launch just because the check itself failed.
+    """
+    try:
+        import psutil
+    except ImportError:
+        return None
+
+    pids = []
+    try:
+        for proc in psutil.process_iter(["pid", "cmdline"]):
+            try:
+                cmdline = proc.info.get("cmdline") or []
+            except (psutil.NoSuchProcess, psutil.AccessDenied):
+                continue
+            joined = " ".join(cmdline).lower()
+            if "jupyter" in joined and "lab" in joined:
+                pids.append(proc.info["pid"])
+    except Exception:
+        return None
+
+    return pids
+
+
 class ModuleWorkflowCommand(BaseCommand):
     """Enhanced module command with natural workflow."""
 
@@ -534,6 +564,21 @@ class ModuleWorkflowCommand(BaseCommand):
                     notebook_path = notebooks[0]
                 else:
                     notebook_path = None
+
+            # Avoid piling up untracked Jupyter server processes: repeated
+            # `tito module resume` calls (e.g. after forgetting a session
+            # was already open) previously spawned a brand new server
+            # every time, with no way to clean them up short of finding
+            # and killing them manually.
+            running_pids = _find_running_jupyter_lab_pids()
+            if running_pids:
+                self.console.print(
+                    f"[yellow]⚠️  Jupyter Lab already appears to be running "
+                    f"(pid {running_pids[0]}).[/yellow]"
+                )
+                self.console.print("[dim]Reusing it instead of starting a duplicate server.[/dim]")
+                self.console.print("[dim]Open http://localhost:8888 in your browser if it's not already open.[/dim]")
+                return 0
 
             self.console.print(f"\n[cyan]🚀 Opening Jupyter Lab for module {module_name}...[/cyan]")
 
