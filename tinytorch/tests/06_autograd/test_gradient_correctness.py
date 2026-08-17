@@ -38,7 +38,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 # so that enable_autograd() can patch their forward methods correctly.
 from tinytorch.core.tensor import Tensor
 from tinytorch.core.layers import Linear
-from tinytorch.core.activations import ReLU, Sigmoid, Tanh, GELU
+from tinytorch.core.activations import ReLU, Sigmoid, Tanh, GELU, Softmax
 from tinytorch.core.losses import MSELoss, CrossEntropyLoss, BinaryCrossEntropyLoss
 from tinytorch.core.autograd import enable_autograd
 
@@ -236,6 +236,21 @@ class TestActivationGradients:
         # GELU's derivative changes rapidly; use smaller eps for accuracy
         check_grad(fn, np.array([0.0, 1.0, -1.0, 0.5, -0.5]),
                    rtol=1e-2, atol=1e-3, eps=1e-4)
+
+    def test_softmax_backward_nonuniform_grad(self):
+        """Softmax's gradient depends on grad_output via a sum-and-subtract term;
+        summing the output directly makes that term always cancel to zero
+        (softmax rows always sum to 1), which hides bugs in the subtraction.
+        Weighting the output first keeps grad_output non-uniform."""
+        softmax = Softmax()
+        weights_data = np.array([2.0, -1.0, 3.0])
+
+        def fn(x):
+            y = softmax(x)
+            w = Tensor(weights_data.copy())
+            return (y * w).sum()
+
+        check_grad(fn, np.array([1.0, 2.0, 0.5]))
 
     def test_relu_zero_boundary(self):
         """ReLU grad at x=0 should be 0."""
