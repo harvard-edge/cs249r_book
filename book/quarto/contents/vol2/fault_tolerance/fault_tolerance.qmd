@@ -543,7 +543,7 @@ class ClusterMtbfScaling:
 
 : **Cluster MTBF Scaling**: GPU-only mean time between failures decreases linearly with cluster size, transforming failures from rare events to continuous operating conditions at scale. Additional host, power, storage, and network failure domains reduce system-level MTBF further. {#tbl-cluster-mtbf-scaling}
 
-The theoretical $1/N$ scaling in @tbl-cluster-mtbf-scaling is not merely a textbook exercise. @Fig-published-failure-rates overlays published measurements and fitted projections from Meta's production clusters against the theoretical curve. The @kokolis2025 study of Meta's Research SuperCluster reported measured MTTF values for observed RSC job sizes and projected a 1.8-hour MTTF for 16,384-GPU jobs; Meta's Llama 3\index{Llama-3} training report independently documented 419 failures across 54 days on 16,384 H100 GPUs, an observed MTTF of about 3.1 hours. Together, the measured Llama run and Kokolis projection put 16,384-GPU training on a 2-to-3-hour failure cadence. This evidence transforms the theoretical argument from an abstract scaling law into an engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
+The theoretical $1/N$ scaling in @tbl-cluster-mtbf-scaling is not merely a textbook exercise. @Fig-published-failure-rates overlays published measurements and fitted projections from Meta's production clusters against the theoretical curve. The @kokolis2025 study of Meta's Research SuperCluster reported measured MTTF values for observed RSC job sizes and projected a 1.8-hour MTTF for 16,384-GPU jobs; Meta's Llama 3\index{Llama-3} training report independently documented 419 failures across 54 days on 16,384 H100 GPUs, an observed MTTF of about 3.1 hours. Together, the measured Llama run and Kokolis projection put 16,384-GPU training on a failure cadence of roughly two to three hours, bracketed by the 1.8-hour projection and the 3.1-hour measurement. This evidence transforms the theoretical argument from an abstract scaling law into an engineering constraint that determines checkpoint frequency, recovery architecture, and infrastructure investment.
 
 ::: {#fig-published-failure-rates fig-env="figure" fig-pos="htb" fig-cap="**Published Failure Rates from Production Clusters**: Measured MTTF values and fitted projections from Meta's RSC clusters [@kokolis2025] plotted with Llama 3 training measurements [@dubey2024llama] against the theoretical 1/N curve. At 16,384 GPUs, the Kokolis projection and Llama 3 empirical measurement both fall in the 2-to-3-hour failure range, confirming that fault tolerance is a mathematical necessity, not an edge case. Data sources: Kokolis et al., arXiv:2410.21680; Meta, arXiv:2407.21783." fig-alt="Log-log scatter plot of MTTF in hours vs. GPU count with theoretical 1 over N curve and labeled measured and projected data points from Meta RSC and Llama 3 training."}
 
@@ -3675,7 +3675,7 @@ Investing heavily in hardware redundancy while neglecting software robustness (i
 
 **Pitfall**: *Setting checkpoint interval by intuition.*
 
-Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1000 steps." The Young-Daly formula reveals these intuitions are often wrong. For a 1000-GPU cluster with MTBF of 4 hours and checkpoint time of 5 minutes:
+Organizations commonly set checkpoint intervals based on "feels right": "every hour seems reasonable" or "every 1,000 steps." The Young-Daly formula reveals these intuitions are often wrong. For the 1,000-GPU cluster of @tbl-cluster-mtbf-scaling, whose GPU-only MTBF is 50 hours, with a checkpoint write time of 5 minutes:
 
 ```{python}
 #| echo: false
@@ -3688,7 +3688,7 @@ Organizations commonly set checkpoint intervals based on "feels right": "every h
 # │          and the slower-storage follow-up sentence.
 # │
 # │ Goal: Reproduce the two Young-Daly optimal intervals from a hypothetical
-# │       4-hour-MTBF cluster so the "intuition is wrong" point cannot drift.
+# │       1,000-GPU cluster at the chapter's own MTBF so the "intuition is
 # │ Show: tau_opt = sqrt(2 * T_write * MTBF) for a 5-minute and a 15-minute write.
 # │ How:  Work in minutes; tau = sqrt(2 * write_min * mtbf_min); round to whole
 # │       minutes for display.
@@ -3700,8 +3700,8 @@ from mlsysim.fmt import fmt_int, fmt_display_math, fmt_time, check
 
 class YoungDalyIntuitionFallacy:
     # ┌── 1. LOAD (Constants) ──────────────────────
-    # scenario assumptions: a hypothetical 1,000-GPU cluster posed for this pitfall
-    mtbf_min = 4 * 60  # 4-hour cluster MTBF expressed in minutes
+    # The 1,000-GPU row of the chapter's cluster-MTBF table, plus two write times.
+    mtbf_min = 50 * 60  # the chapter's 1,000-GPU cluster MTBF, in minutes
     write_fast_min = 5  # checkpoint write time, fast storage
     write_slow_min = 15  # checkpoint write time, slower storage / larger model
 
@@ -3711,7 +3711,7 @@ class YoungDalyIntuitionFallacy:
     tau_slow_min = math.sqrt(2 * write_slow_min * mtbf_min)
 
     # ┌── 3. GUARD (Invariants) ────────────────────
-    check(40 < tau_fast_min < 55, "5-minute write should give a ~49-minute interval")
+    check(165 < tau_fast_min < 180, "5-minute write at 50 h MTBF should give a ~173-minute interval")
     check(tau_slow_min > tau_fast_min, "slower storage must lengthen the optimal interval")
 
     # ┌── 4. OUTPUT (Formatting) ───────────────────
@@ -3724,7 +3724,7 @@ class YoungDalyIntuitionFallacy:
 
 `{python} YoungDalyIntuitionFallacy.tau_opt_fast_eq_math`
 
-The intuitive "every hour" is close but suboptimal. If checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval becomes `{python} YoungDalyIntuitionFallacy.tau_opt_slow_min_str`, not the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2--3$\times$ from optimal in either direction.
+The intuitive "every hour" is not close: it checkpoints nearly three times more often than the optimum, spending the difference on write overhead that buys no recovery benefit. If checkpoint time increases to 15 minutes (larger model, slower storage), the optimal interval stretches to `{python} YoungDalyIntuitionFallacy.tau_opt_slow_min_str`, further still from the "every 15 minutes" that some teams adopt to "stay safe." Too-frequent checkpointing wastes more compute than it saves. The quantitative approach reveals that intuition-based intervals often deviate 2--3$\times$ from optimal in either direction.
 
 :::
 
@@ -3732,7 +3732,7 @@ The intuitive "every hour" is close but suboptimal. If checkpoint time increases
 
 **Fallacy**: *If each GPU is 99.99 percent reliable, a 10,000-GPU cluster is also 99.99 percent reliable.*
 
-Reliability does not compose by averaging---it compounds by multiplication. For $N$ serial components each with availability $A$, and assuming their failures are independent, the aggregate availability is $A^N$. With $A = 0.9999$ and $N = 10{,}000$, the cluster availability is $0.9999^{10{,}000} \approx 0.37$: the cluster is down 63 percent of the time. Individual component reliability is necessary but nowhere near sufficient at fleet scale. System-level fault tolerance (checkpointing, elastic recovery, redundancy across failure domains) must be designed explicitly, not assumed to emerge from per-component MTTF.
+Reliability does not compose by averaging---it compounds by multiplication. For $N$ serial components each with availability $A$, and assuming their failures are independent, the aggregate availability is $A^N$. With $A = 0.9999$ and $N = 10{,}000$, the probability that all $N$ are simultaneously up is $0.9999^{10{,}000} \approx 0.37$: for 63 percent of the time, at least one GPU is down. Individual component reliability is necessary but nowhere near sufficient at fleet scale. System-level fault tolerance (checkpointing, elastic recovery, redundancy across failure domains) must be designed explicitly, not assumed to emerge from per-component MTTF.
 
 :::
 
@@ -3747,7 +3747,7 @@ The reliability equation $\text{MTBF}_{\text{system}} = \text{MTBF}_{\text{compo
 - **Shared software**\index{Correlated Failure!shared software}: A bug triggered by specific input fails all replicas simultaneously.
 - **Thermal correlation**\index{Correlated Failure!thermal correlation}: Cooling failure causes clustered GPU throttling.
 
-Correlated failures change two quantities that the simple MTBF equation hides: incident frequency and blast radius. A cluster with 1000 independent GPUs each with 50,000-hour MTBF has a first-GPU-failure MTBF of 50 hours. If a shared power, cooling, or software hazard adds an incident rate 10 times larger than that independent first-failure rate, the effective incident MTBF drops to about 5 hours. Separately, a correlated incident may take out 10 GPUs at once, increasing recovery cost even if the independent GPU failure rate itself has not changed. Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
+Correlated failures change two quantities that the simple MTBF equation hides: incident frequency and blast radius. A cluster with 1,000 independent GPUs each with 50,000-hour MTBF has a first-GPU-failure MTBF of 50 hours. If a shared power, cooling, or software hazard adds an incident rate 10 times larger than that independent first-failure rate, the effective incident MTBF drops to about 5 hours. Separately, a correlated incident may take out 10 GPUs at once, increasing recovery cost even if the independent GPU failure rate itself has not changed. Reliability engineering must identify and mitigate correlation through diversity: different power feeds, different network paths, different software versions in canary deployments.
 
 :::
 

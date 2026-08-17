@@ -15,6 +15,8 @@ real reader-visible defect found in the 2026-08-16 render audit.
                      dropped by the HTML writer, truncating the sentence
   doubled-unit       a self-labeling formatter value ("128 GPUs") followed by a
                      redundant prose noun ("accelerators")
+  bare-ref           a crossref whose link text is a bare object word with no
+                     number, so the sentence points the reader at nothing
 
 Math inside \\( \\), \\[ \\], and pseudocode containers is excluded: that markup
 is rendered client-side and raw LaTeX there is expected.
@@ -62,6 +64,27 @@ def visible_text(raw: str) -> str:
     return htmllib.unescape(t)
 
 
+# A cross-chapter crossref whose link text is a bare object word carries no
+# number on the web (the site build has no numbering), so the sentence points
+# the reader at nothing: "the divergence term in equation actionable".
+# Found 9 times in the 2026-08-16 audit; the fix is to name the object in prose
+# and put the ref in parentheses, which reads in both formats.
+BARE_REF = re.compile(
+    r'<a[^>]+href="[^"]*#(?:eq|sec|fig|tbl|lst)-[^"]*"[^>]*>\s*'
+    r"(equation|section|figure|table|listing)\s*</a>",
+    re.I,
+)
+
+
+def bare_ref_findings(raw: str) -> list[str]:
+    out = []
+    for m in BARE_REF.finditer(raw):
+        s = max(0, m.start() - 220)
+        e = min(len(raw), m.end() + 160)
+        out.append(" ".join(visible_text(raw[s:e]).split()))
+    return out
+
+
 def main(argv: list[str]) -> int:
     roots = [Path(a) for a in argv[1:]]
     if not roots:
@@ -75,12 +98,15 @@ def main(argv: list[str]) -> int:
             if "_files" in str(f):
                 continue
             n_files += 1
-            text = visible_text(f.read_text(errors="ignore"))
+            raw = f.read_text(errors="ignore")
+            text = visible_text(raw)
             for name, pat in CHECKS:
                 for m in pat.finditer(text):
                     s = max(0, m.start() - 60)
                     e = min(len(text), m.end() + 50)
                     findings.append((name, str(f), " ".join(text[s:e].split())))
+            for ctx in bare_ref_findings(raw):
+                findings.append(("bare-ref", str(f), ctx))
 
     if not findings:
         print(f"OK: {n_files} rendered pages, no reader-visible defects")

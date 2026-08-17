@@ -118,6 +118,7 @@ class TrainingScenarios:
     gpt4_training_cost_est_str = fmt_usd(gpt4_cost_est, scale="M", precision=0, commas=False)
     gpt2_fwd_flops_str = fmt_sci(gpt2_fwd_flops)
     gpt2_total_flops_str = fmt_sci_flops(gpt2_total_flops)
+    gpt2_implied_passes_billion_str = fmt_int(implied_passes / BILLION, commas=False)
     adam_example_params_b_str = fmt_params(adam_example_params, precision=0)
     adam_inference_gb_str = fmt_memory(adam_inference, unit=GB, precision=0, commas=False)
     adam_grad_gb_str = fmt_memory(adam_grad, unit=GB, precision=0, commas=False)
@@ -150,7 +151,7 @@ This chapter uses an external order-of-magnitude estimate of approximately `{pyt
 
 [^fn-training-cost-scaling]: [offset=8mm] **Training Cost Scaling**\index{Training Cost!scaling trajectory}: The roughly 2,000$\times$ ratio between this chapter's two cost anchors illustrates how parameter counts, training-token budgets, hardware generations, and accelerator fleets can compound. It is not a controlled comparison of disclosed training bills. OpenAI's GPT-2 report documents the model and training setup but does not disclose training cost [@radford2019language]. Exact GPT-4 training details were also not disclosed, so the GPT-4-class figure is explicitly an industry estimate supported by public reporting and independent infrastructure analysis [@knight2023giantmodels; @semianalysisGPT4].
 
-For GPT-2, the chapter uses roughly `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations per token for a forward evaluation, following the parameter-based accounting associated with the architecture in the GPT-2 technical report [@radford2019language]. The total budget of `{python} TrainingScenarios.gpt2_total_flops_str` corresponds to roughly 165 billion token positions when forward and backward work is approximated as three times the forward cost. This accounting estimate is not a claim that GPT-2 executed 165 billion complete inference requests. The scale makes training systems engineering a distinct discipline and shows how access to training infrastructure can constrain participation in AI development.
+For GPT-2, the chapter uses roughly `{python} TrainingScenarios.gpt2_fwd_flops_str` floating-point operations per token for a forward evaluation, following the parameter-based accounting associated with the architecture in the GPT-2 technical report [@radford2019language]. The total budget of `{python} TrainingScenarios.gpt2_total_flops_str` corresponds to roughly `{python} TrainingScenarios.gpt2_implied_passes_billion_str` billion token positions when forward and backward work is approximated as three times the forward cost. This accounting estimate is not a claim that GPT-2 executed that many complete inference requests. The scale makes training systems engineering a distinct discipline and shows how access to training infrastructure can constrain participation in AI development.
 
 ::: {#dfn-training-training-systems .callout-definition title="Training systems"}
 
@@ -1304,7 +1305,7 @@ Training large models requires managing the memory wall (the bandwidth bottlenec
 
 - [ ] Activation memory: Do you understand why activations (stored for backprop) dominate memory usage, often exceeding parameter size by 10$\times$?
 - [ ] Optimization strategy: Can you explain how Gradient Checkpointing trades compute (re-calculating activations) for memory capacity?
-- [ ] **Memory estimate**: For GPT-2 (1.5B parameters) in mixed precision, put a one-significant-figure number on each term in @eq-total-training-memory: weights, gradients, optimizer state, and activations at batch size 32. Which term is largest, and would the total fit a 32 GB accelerator? The next section works it through.
+- [ ] **Memory estimate**: For GPT-2 (1.5B parameters) in mixed precision, put a one-significant-figure number on each term in @eq-total-training-memory: weights, gradients, optimizer state, and activations at batch size 32. Which term is largest, and would the total fit a 32 GB accelerator?
 
 **Scaling Limits**
 
@@ -2177,7 +2178,7 @@ This min-of-three relationship\index{Training Bottleneck!min-of-three relationsh
 # └─────────────────────────────────────────────────────────────────────────────
 from mlsysim import Hardware, Models
 from mlsysim.core.units import GB, KB, THOUSAND, byte, flop, millisecond, second
-from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth, fmt_math, fmt_percent
+from mlsysim.fmt import fmt_int, fmt, fmt_time, fmt_count, fmt_rate, fmt_memory, fmt_bandwidth, fmt_math, fmt_percent, check
 
 # ┌── LEGO ───────────────────────────────────────────────
 class GPT2DataPipeline:
@@ -2234,6 +2235,17 @@ class GPT2DataPipeline:
     ideal_step_time = gpt2_step_flops / cluster_peak
     effective_step_time = ideal_step_time / (utilization_pct / 100)
     throughput_samples = batch_size / effective_step_time.to(second).magnitude
+    # Without prefetching the host and the accelerator run back to back,
+    # so the step budget carries both terms.
+    step_ms = effective_step_time.to(millisecond).magnitude
+    serial_utilization = round(step_ms / (prep_ms + step_ms), 2)
+
+    # ┌── 3. GUARD (Invariants) ────────────────────────────────────────
+    check(
+        0.3 < serial_utilization < 0.8,
+        f"Serial utilization drifted to {serial_utilization:.0%}; the callout's"
+        " argument needs preparation to be a large but not total share of the step.",
+    )
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     tokens_per_batch_str = fmt_count(tokens_per_batch, scale="K", precision=1, commas=False, label="token")
@@ -2257,6 +2269,7 @@ class GPT2DataPipeline:
     n_v100_gpus_str = fmt(n_v100_gpus, precision=0, commas=False)
     accelerator_step_ms_str = fmt_time(effective_step_time, millisecond, precision=1, commas=False)
     prep_ms_str = fmt_time(prep_ms, 'millisecond', precision=1, commas=False)
+    serial_utilization_pct_str = fmt_percent(serial_utilization, precision=0, commas=False, style='prose')
 
 # Note: Use GPT2DataPipeline.tokenization_ms_str directly.
 ```
@@ -2287,7 +2300,7 @@ class StorageBandwidthNvme:
 3. **Batching and padding**: Padding and packing generate an int64 tensor of shape `{python} GPT2DataPipeline.batch_size_seq_str` $\times$ `{python} GPT2DataPipeline.seq_len_token_str`, producing `{python} GPT2DataPipeline.batch_kb_str` per batch.
 4. **PCIe transfer**: Transferring the tensor across a PCIe Gen3 x16 bus (`{python} GPT2DataPipeline.pcie_gen3_gb_per_s_str` bandwidth) takes $T_{\text{transfer}} =$ `{python} GPT2DataPipeline.transfer_ms_str`, making bus transfer negligible.
 
-**Systems insight**: When single-core CPU preparation time ($T_{\text{prep}} \approx$ `{python} GPT2DataPipeline.prep_ms_str`) exceeds accelerator step time ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), the GPU starves, collapsing $\eta_{\text{hw}} \to 0$. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces tokenization latency to $T_{\text{tokenize}} / N_{\text{worker}} \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $T_{\text{prep}}$ with $T_{\text{step}}$ to restore hardware utilization to `{python} GPT2DataPipeline.utilization_pct_str`, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
+**Systems insight**: Single-core CPU preparation ($T_{\text{prep}} \approx$ `{python} GPT2DataPipeline.prep_ms_str`) consumes most of the accelerator step budget ($T_{\text{step}} \approx$ `{python} GPT2DataPipeline.accelerator_step_ms_str`), so a serial pipeline pays both costs on every step and $\eta_{\text{hw}}$ falls to about `{python} GPT2DataPipeline.serial_utilization_pct_str`. Push preparation any slower and the accelerator starves outright. Scaling to `{python} GPT2DataPipeline.n_cpu_workers_str` parallel worker processes reduces tokenization latency to $T_{\text{tokenize}} / N_{\text{worker}} \approx$ `{python} GPT2DataPipeline.parallel_tokenization_ms_str`, while prefetching overlaps $T_{\text{prep}}$ with $T_{\text{step}}$ to restore hardware utilization to `{python} GPT2DataPipeline.utilization_pct_str`, delivering `{python} GPT2DataPipeline.throughput_samples_str` global samples per second across `{python} GPT2DataPipeline.n_v100_gpus_str` V100 GPUs.
 
 :::
 
@@ -3064,7 +3077,7 @@ class LlamaTraining:
 
 ::: {#nbk-utility-bill .callout-notebook title="The utility bill"}
 
-**Problem**: Under the following simplified assumptions, is it cheaper to rent or purchase a 1,000-H100 cluster for one Llama 2 70-billion-parameter training run?
+**Problem**: Under the following simplified assumptions, is it cheaper to rent or purchase a 1,024-H100 cluster for one Llama 2 70-billion-parameter training run?
 
 **Math**:
 
@@ -3214,16 +3227,14 @@ from mlsysim.fmt import fmt_flop_rate, fmt_percent, fmt_time
 
 class UtilizationGap:
     # ┌── 1. LOAD ──────────────────────────────────────────────────────────────
-    util_gap_min = 50
-    util_gap_max = 70
     gpu = Hardware.Cloud.A100
     gpu_advertised_flops = gpu.compute.peak_flops
     gpu_real_flops_min = gpu_advertised_flops * Literature.Training.MfuLow
     gpu_real_flops_max = gpu_advertised_flops * Literature.Training.MfuHigh
 
     # ┌── 4. OUTPUT ────────────────────────────────────────────────────────────
-    util_gap_min_str = fmt_percent(util_gap_min / 100, precision=0, commas=False, style='prose')
-    util_gap_max_str = fmt_percent(util_gap_max / 100, precision=0, commas=False, style='prose')
+    mfu_low_str = fmt_percent(Literature.Training.MfuLow, precision=0, commas=False, style='prose')
+    mfu_high_str = fmt_percent(Literature.Training.MfuHigh, precision=0, commas=False, style='prose')
     gpu_advertised_tflop_per_s_str = fmt_flop_rate(gpu_advertised_flops, unit=TFLOP / second, precision=0, commas=False)
     gpu_real_min_tflop_per_s_str = fmt_flop_rate(gpu_real_flops_min, unit=TFLOP / second, precision=None, commas=False)
     gpu_real_max_tflop_per_s_str = fmt_flop_rate(gpu_real_flops_max, unit=TFLOP / second, precision=None, commas=False)
@@ -3257,7 +3268,7 @@ class ProfilingScenarios:
 
 Profiling reveals *where* the training system underperforms; the D·A·M taxonomy (@sec-appdx-dam-taxonomy) classifies *what kind* of bottleneck limits throughput. The remaining question is *how* to close the gap. Four optimization techniques\index{Training Optimization!technique selection}, each targeting a specific bottleneck category, together with a systematic framework\index{Training Optimization!systematic framework} for composing them, provide the answer.
 
-Even well-designed pipeline architectures rarely reach hardware peak throughput without targeted optimization. To illustrate the scale of the gap, applying the chapter's low-to-high MFU scenario to an A100 peak of `{python} UtilizationGap.gpu_advertised_tflop_per_s_str` gives `{python} UtilizationGap.gpu_real_min_tflop_per_s_str`--`{python} UtilizationGap.gpu_real_max_tflop_per_s_str` of model-FLOP throughput. These are derived scenario values, not measurements reported for one A100 workload. Published large-model systems report similar gaps between peak and realized throughput [@narayanan2021; @chowdhery2022palm]. Systems such as SuperNeurons show one version of this problem: memory-management bottlenecks can prevent larger networks from training efficiently unless the runtime actively optimizes activation storage and transfer [@wang2019superneurons]. @Tbl-optimization-roadmap extends the D·A·M-based bottleneck classification from @tbl-dam-training-bottlenecks by mapping each bottleneck to the specific optimization technique that addresses it.
+Even well-designed pipeline architectures rarely reach hardware peak throughput without targeted optimization. To illustrate the scale of the gap, applying a model-FLOP utilization of `{python} UtilizationGap.mfu_low_str` to `{python} UtilizationGap.mfu_high_str` to an A100 peak of `{python} UtilizationGap.gpu_advertised_tflop_per_s_str` gives `{python} UtilizationGap.gpu_real_min_tflop_per_s_str`--`{python} UtilizationGap.gpu_real_max_tflop_per_s_str` of model-FLOP throughput. These are derived scenario values, not measurements reported for one A100 workload. Published large-model systems report similar gaps between peak and realized throughput [@narayanan2021; @chowdhery2022palm]. Systems such as SuperNeurons show one version of this problem: memory-management bottlenecks can prevent larger networks from training efficiently unless the runtime actively optimizes activation storage and transfer [@wang2019superneurons]. @Tbl-optimization-roadmap extends the D·A·M-based bottleneck classification from @tbl-dam-training-bottlenecks by mapping each bottleneck to the specific optimization technique that addresses it.
 
 ```{=latex}
 \begingroup
@@ -4869,13 +4880,12 @@ class GradientAccumulation:
     effective_batch_str = fmt(effective_batch, precision=0, commas=False)
     gpus_accum_str = fmt_count(gpus_accum, commas=False, label="GPU")
     gpu_hourly_rate_str = fmt_usd(gpu_hourly_rate, precision=0, commas=False, per="hour")
-    naive_hourly_usd_str = fmt_usd(naive_hourly, precision=0, commas=False, per="hour")
-    accum_hourly_usd_str = fmt_usd(accum_hourly, precision=0, commas=False, per="hour")
-    hourly_burn_reduction_str = fmt_usd(hourly_burn_reduction, precision=0, commas=False, per="hour")
+    naive_hourly_usd_str = fmt_usd(naive_hourly, precision=0, per="hour")
+    accum_hourly_usd_str = fmt_usd(accum_hourly, precision=0, per="hour")
+    hourly_burn_reduction_str = fmt_usd(hourly_burn_reduction, precision=0, per="hour")
     hourly_burn_reduction_pct_str = fmt_percent(hourly_burn_reduction_pct / 100, precision=1, commas=False, style='prose')
     accum_total_usd_str = fmt_usd(accum_total, commas=False, scale="K")
     ideal_time_ratio_mult_str = fmt_multiple(ideal_time_ratio, precision=0, commas=False)
-    accum_steps_str = fmt_count(accum_steps, commas=False, label="step")
     accum_steps_count_str = fmt(accum_steps, precision=0, commas=False)
     v100_mem_capacity_gb_str = fmt_memory_capacity(v100_mem, unit=GiB, precision=0, commas=False)
     local_grad_eqn_str = MarkdownStr(
@@ -5280,7 +5290,7 @@ class GPT2SummaryCalc:
     o_time_days_str = fmt_time(o_time, "day", precision=1, commas=False, style="word")
     o_energy_kwh_str = fmt_qty_int(o_energy, kWh, commas=True)
     o_cost_str = fmt_usd(o_cost, precision=1, commas=True)
-    o_carbon_tonnes_str = fmt_emissions(o_carbon, unit=metric_ton, precision=2, commas=False)
+    o_carbon_tonnes_str = fmt_emissions(o_carbon, unit=metric_ton, precision=1, commas=False)
     energy_reduction_pct_str = fmt_percent(energy_reduction, precision=0, commas=False, style='prose')
     grid_ci_kg_per_kwh_str = fmt_carbon_intensity(grid_ci, unit=kilogram / kWh, precision=2, commas=False)
     electricity_rate_str = fmt_usd(electricity_rate, precision=2, commas=False, per="kWh")
@@ -6079,7 +6089,7 @@ node[above,pos=0.45,text=black!50,font=\usefont{T1}{phv}{m}{n}
 
 :::
 
-Model parallelism's challenge is idle time. While Device one computes layers 1--6, Devices 2--4 sit idle waiting for activations. During the backward pass, the problem reverses: Device four computes first while others wait. This "pipeline bubble" means naive model parallelism can waste much of the available accelerator time even with careful partitioning. Pipeline parallelism addresses this inefficiency, as the discussion of distributed strategies demonstrates.
+Model parallelism's challenge is idle time. While Device 1 computes layers 1--6, Devices 2--4 sit idle waiting for activations. During the backward pass, the problem reverses: Device 4 computes first while others wait. This "pipeline bubble" means naive model parallelism can waste much of the available accelerator time even with careful partitioning. Pipeline parallelism addresses this inefficiency, as the discussion of distributed strategies demonstrates.
 
 ::: {#psp-training-data-vs-model-parallelism .callout-perspective title="Data vs. model parallelism"}
 
@@ -6195,7 +6205,7 @@ class NetworkWall:
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     model_params_b_str = fmt_params(params, precision=0)
-    n_gpus_str = fmt_count(n_gpus, commas=False, label="GPU")
+    n_gpus_str = fmt_count(n_gpus, label="GPU")
     gradient_size_gb_str = fmt_memory(gradient_size, unit=GB, precision=0, commas=False)
     allreduce_factor_mult_str = fmt_multiple(allreduce_factor, precision=2, commas=False)
     allreduce_factor_value_str = fmt_ratio(allreduce_factor, precision=2, commas=False)
@@ -6429,7 +6439,7 @@ class TrainingCarbonFootprint:
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     cf_params_b_str = fmt_count(cf_params, scale='B', precision=0, commas=False, scale_style='word')
     cf_tokens_str = fmt_count(cf_tokens, scale='T', precision=0, commas=False, scale_style='word')
-    cf_num_gpus_str = fmt_count(cf_num_gpus, commas=False, label="GPU")
+    cf_num_gpus_str = fmt_count(cf_num_gpus, label="GPU")
     cf_hosts_str = fmt_count(cf_hosts, commas=False, label="host")
     cf_cpu_tdp_per_host_w_str = fmt_power(cf_cpu_tdp_per_host, unit=watt, precision=0, commas=False)
     cf_gpu_tdp_w_str = fmt_power(cf_gpu_tdp, unit=watt, precision=0, commas=False)
@@ -6565,12 +6575,12 @@ class FallaciesPitfallsSetup:
     fp_io_profile_pct = 40
     fp_prefetch_time_before = 105
     fp_prefetch_time_after = 55
-    fp_prefetch_reduction = int(100 * (fp_prefetch_time_before - fp_prefetch_time_after) / fp_prefetch_time_before)
+    fp_prefetch_reduction = 100 * (fp_prefetch_time_before - fp_prefetch_time_after) / fp_prefetch_time_before
 
     # ┌── 2. GUARD (Invariants) ───────────────────────────────────────────
     check(fp_model_20b_total > fp_model_20b_fp16, "Total memory must exceed weights alone")
     check(fp_actual_speedup_max < fp_gpu_count, "Actual speedup must be less than GPU count (Amdahl)")
-    check(fp_prefetch_reduction >= 47, f"Prefetch reduction should be ~48% (105→55 s), got {fp_prefetch_reduction}%")
+    check(47 <= fp_prefetch_reduction <= 48, f"Prefetch reduction should be ~47.6% (105→55 min), got {fp_prefetch_reduction:.1f}%")
 
     # ┌── 4. OUTPUT (Formatting) ──────────────────────────────────────────────
     fp_model_20b_params_str = fmt_params(fp_model_20b_params, precision=0)
@@ -6620,7 +6630,7 @@ class FallaciesPitfallsSetup:
     fp_io_idle_range_str = fmt_percent_range(fp_io_idle_min / 100, fp_io_idle_max / 100, precision=0, commas=False, style="prose")
     fp_prefetch_time_before_s_str = fmt_time(fp_prefetch_time_before, "minute", precision=0, commas=False)
     fp_prefetch_time_after_s_str = fmt_time(fp_prefetch_time_after, "minute", precision=0, commas=False)
-    fp_prefetch_reduction_str = fmt_percent(fp_prefetch_reduction / 100, precision=0, commas=False, style='prose')
+    fp_prefetch_reduction_str = fmt_percent(fp_prefetch_reduction / 100, precision=1, commas=False, style='prose')
 
 # Export for prose
 ```

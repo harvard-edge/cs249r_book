@@ -785,7 +785,7 @@ class BatchMfuAnchors:
 
 At large batch sizes, the GPU transitions from memory-bound to compute-bound, and utilization increases dramatically. A single H100 achieving `{python} BatchMfuAnchors.mfu_b1_pct_str` utilization at batch size 1 may achieve `{python} BatchMfuAnchors.mfu_batched_pct_str` utilization at large batch sizes. The economic implication is stark: the cost per token decreases by roughly `{python} BatchMfuAnchors.cost_mult_str` as batching carries the workload from the memory-bound to the compute-bound regime.
 
-The constraint is memory: each additional request in the batch requires its own KV cache (the per-request store of attention keys and values for every token generated so far), and the total KV cache across all requests must fit in GPU memory alongside the model weights. The 70B-model-on-8-H100 deployment is a recurring example, revisited with full quantitative detail in the precision dividend (@sec-performance-engineering-quant-strategies) and the case study (@sec-performance-engineering-case-study). A 70B model with 140 GB of weights in FP16 must be sharded across multiple GPUs; on an 8-GPU node that leaves about 62.5 GB per GPU for KV cache before overhead. Precision engineering techniques address exactly this constraint: INT4 weight quantization reduces the per-GPU weight footprint to about 4.4 GB and frees roughly 13 GB per GPU for KV cache, enabling batch sizes that transform the economics of serving.
+The constraint is memory: each additional request in the batch requires its own KV cache (the per-request store of attention keys and values for every token generated so far), and the total KV cache across all requests must fit in GPU memory alongside the model weights. The 70B-model-on-8-H100 deployment is a recurring example, revisited with full quantitative detail in the precision dividend (@sec-performance-engineering-quant-strategies) and the case study (@sec-performance-engineering-case-study). A 70B model with 140 GB of weights in FP16 must be sharded across multiple GPUs; on an 8-GPU node the per-GPU remainder is what the KV cache has to live in, before overhead. Precision engineering techniques address exactly this constraint: INT4 weight quantization reduces the per-GPU weight footprint to about 4.4 GB and frees roughly 13 GB per GPU for KV cache, enabling batch sizes that transform the economics of serving.
 
 A serving scheduler can keep the effective batch full by adding new requests as older requests finish, but that policy only works when memory is available for the active requests. Performance engineering's role is to make that scheduler's job feasible by minimizing the per-request memory footprint, primarily through KV cache compression and weight quantization. Inference serving (@sec-inference-scale) develops the full scheduler; the local point here is that memory optimization expands the batch sizes the scheduler can safely admit.
 
@@ -1436,7 +1436,9 @@ class KVCacheAnalysis:
     weight_fp16_shard_gb_str = fmt_memory(weight_fp16_shard, unit=GB, precision=1, commas=False)
     weight_fp16_total_gb_str = fmt_memory(weight_fp16_shard * tensor_parallel_degree, unit=GB, precision=0, commas=False)
     tensor_parallel_degree_str = fmt_count(tensor_parallel_degree, commas=False)
-    gpu_total_gb_str = fmt_memory_capacity(gpu_total, unit=GiB, precision=0, commas=False)
+    # The nameplate in honest decimal, for displayed equations whose other
+    # operands are decimal. Mixing the two printed 80 - 4.4 = 81.5.
+    gpu_total_decimal_gb_str = fmt_memory(gpu_total, unit=GB, precision=1, commas=False)
     int4_scale_num_str = fmt_int(int4_bits, commas=False)
     int4_scale_den_str = fmt_int(fp16_bits, commas=False)
     context_len_str = fmt_count(seq_len, commas=False)
@@ -1460,14 +1462,14 @@ A capacity calculation makes the serving impact of precision choices concrete.
 Before optimization (all FP16):
 
 - Weights: `{python} KVCacheAnalysis.weight_fp16_shard_gb_str`/GPU
-- Available for KV cache: `{python} KVCacheAnalysis.gpu_total_gb_str` - `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` = `{python} KVCacheAnalysis.avail_fp16_gb_str`/GPU
+- Available for KV cache: `{python} KVCacheAnalysis.gpu_total_decimal_gb_str` - `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` = `{python} KVCacheAnalysis.avail_fp16_gb_str`/GPU
 - KV cache per request: `{python} KVCacheAnalysis.kv_fp16_gb_str` total, or approximately `{python} KVCacheAnalysis.kv_fp16_per_gpu_gb_str`/GPU
 - Maximum batch size: approximately `{python} KVCacheAnalysis.max_batch_fp16_str` requests
 
 After optimization (INT4 weights, INT8 KV cache):
 
 - Weights: `{python} KVCacheAnalysis.weight_fp16_shard_gb_str` $\times$ (`{python} KVCacheAnalysis.int4_scale_num_str`/`{python} KVCacheAnalysis.int4_scale_den_str`) = `{python} KVCacheAnalysis.weight_int4_gb_str`/GPU (INT4)
-- Available for KV cache: `{python} KVCacheAnalysis.gpu_total_gb_str` - `{python} KVCacheAnalysis.weight_int4_gb_str` = `{python} KVCacheAnalysis.avail_int8_gb_str`/GPU
+- Available for KV cache: `{python} KVCacheAnalysis.gpu_total_decimal_gb_str` - `{python} KVCacheAnalysis.weight_int4_gb_str` = `{python} KVCacheAnalysis.avail_int8_gb_str`/GPU
 - KV cache per request (INT8): approximately `{python} KVCacheAnalysis.kv_int8_total_gb_str` total, or `{python} KVCacheAnalysis.kv_int8_per_gpu_gb_str`/GPU
 - Maximum batch size: approximately `{python} KVCacheAnalysis.max_batch_int8_str` requests
 
@@ -1994,19 +1996,20 @@ class OverlapCalc:
     gradient_gb_str = fmt_qty(gradient_qty, GB, precision=1, commas=False)
     ring_allreduce_factor_mult_str = fmt_multiple(ring_allreduce_factor, precision=2, commas=False)
     allreduce_ms_str = fmt_time(allreduce_time, ms, precision=1, commas=False)
+    forward_ms_str = fmt_time(forward_time, ms, precision=1, commas=False)
     backward_ms_str = fmt_time(backward_time, ms, precision=1, commas=False)
     step_no_overlap_ms_str = fmt_time(step_no_overlap, ms, precision=1, commas=False)
     step_overlap_ms_str = fmt_time(step_with_overlap, ms, precision=1, commas=False)
     overlap_speedup_mult_str = fmt_multiple(overlap_speedup, precision=2, commas=False)
     overlap_status_str = MarkdownStr("fully hidden" if can_overlap else "partially hidden")
     num_gpus_str = fmt_int(num_gpus, commas=False)
-    nvlink_bw_gb_per_s_str = fmt_qty_int(nvlink_bw, GB / second, commas=False)
-    per_dir_bw_gb_per_s_str = fmt_qty_int(nvlink_bw / 2, GB / second, commas=False)
+    nvlink_bw_gb_per_s_str = fmt_qty_int(h.nvlink.bandwidth, GB / second, commas=False)
+    per_dir_bw_gb_per_s_str = fmt_qty_int(nvlink_bw, GB / second, commas=False)
 ```
 
-Consider an 8-billion-parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` aggregate bidirectional bandwidth (`{python} OverlapCalc.per_dir_bw_gb_per_s_str` per direction). The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. Per the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The forward pass computation takes 72.6 ms and the backward pass computation (at 40 percent MFU) takes approximately `{python} OverlapCalc.backward_ms_str`.
+Consider an 8-billion-parameter model trained on `{python} OverlapCalc.num_gpus_str` H100 GPUs within a single node connected by NVLink at `{python} OverlapCalc.nvlink_bw_gb_per_s_str` aggregate bidirectional bandwidth (`{python} OverlapCalc.per_dir_bw_gb_per_s_str` per direction). The gradient tensor contains `{python} OverlapCalc.gradient_gb_str` of FP16 values. Per the ring AllReduce analysis in @sec-communication-collective-operations-collective-operations-ring-allreduce-ffce, synchronization transfers $2 \times (N-1)/N =$ `{python} OverlapCalc.ring_allreduce_factor_mult_str` times the gradient volume, taking approximately `{python} OverlapCalc.allreduce_ms_str` at NVLink bandwidth. The forward pass computation takes `{python} OverlapCalc.forward_ms_str` and the backward pass computation (at 40 percent MFU) takes approximately `{python} OverlapCalc.backward_ms_str`.
 
-Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` ($72.6 + 145.2 + 27.2$ ms). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` ($72.6 + 145.2$ ms), a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As cluster scale increases from 8 to 1024 GPUs (@fig-overlap-budget), overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. In that figure, each bar is normalized to the fixed compute budget of 100 units, and the bar height grows roughly fivefold across the x-axis because the exposed-communication segment stacked on top of that budget is precisely the portion of communication that overlap can no longer hide. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
+Without overlap, the training step requires `{python} OverlapCalc.step_no_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str` + `{python} OverlapCalc.allreduce_ms_str`). With overlap, the AllReduce is `{python} OverlapCalc.overlap_status_str` behind the backward pass, reducing the step time to `{python} OverlapCalc.step_overlap_ms_str` (`{python} OverlapCalc.forward_ms_str` + `{python} OverlapCalc.backward_ms_str`), a `{python} OverlapCalc.overlap_speedup_mult_str` improvement. This example illustrates a critical property: overlap is most effective when backward compute time exceeds AllReduce time. As cluster scale increases from 8 to 1024 GPUs (@fig-overlap-budget), overlap efficiency degrades from ~90 percent to ~18 percent because communication overhead eventually exceeds the computation budget. In that figure, each bar is normalized to the fixed compute budget of 100 units, and the bar height grows roughly fivefold across the x-axis because the exposed-communication segment stacked on top of that budget is precisely the portion of communication that overlap can no longer hide. For smaller models or slower interconnects (for example, PCIe at 64 GB/s instead of NVLink at 900 GB/s), the AllReduce would exceed the backward pass, and no amount of overlap can fully hide the communication.
 
 ::: {#fig-overlap-budget fig-env="figure" fig-pos="htb" fig-cap="**The Overlap Budget**: As cluster scale increases (8 to 1024 GPUs), the communication overhead grows, eventually exceeding the computation budget. The overlap efficiency (black line) represents the percentage of communication hidden behind computation, which degrades from ~90 percent to ~18 percent due to inter-node latency and bandwidth constraints on a 70B parameter model." fig-alt="Stacked bar chart of step time contribution vs. GPU count. Overlapped communication, pure computation, and exposed communication. Black line shows overlap efficiency degrading from about 90 percent to about 18 percent."}
 
