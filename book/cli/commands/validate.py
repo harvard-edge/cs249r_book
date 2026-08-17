@@ -2883,6 +2883,9 @@ class ValidateCommand:
         # regardless of how they are spaced.
         # See book-prose.md §5 ("Footnote Marker Placement").
         cite_then_fn_pat = re.compile(r"(\[@[^\]\s]+\])\s*(\[\^fn-[\w-]+\])")
+        fn_before_punct_pat = re.compile(r"(\[\^fn-[\w-]+\])([\.,;:!?])")
+        stacked_fn_pat = re.compile(r"(\[\^fn-[\w-]+\])\s*(\[\^fn-[\w-]+\])")
+        def_colon_prefix_pat = re.compile(r"^:\s*\[\^fn-[\w-]+\]")
 
         # Div classes that are SPACING wrappers, not boxes. `footnote_in_div`
         # exists because a footnote inside a box (tcolorbox callout, minipage,
@@ -3027,6 +3030,45 @@ class ValidateCommand:
                             context=_rich_escape(m.group(0)[:80]),
                         )
                     )
+
+                if def_colon_prefix_pat.match(stripped):
+                    issues.append(
+                        ValidationIssue(
+                            file=self._relative_file(file),
+                            line=idx,
+                            code="footnote_def_colon_prefix",
+                            message="Footnote definition starts with ':[^fn-name]'; use canonical '[^fn-name]:' syntax",
+                            severity="error",
+                            context=stripped[:80],
+                        )
+                    )
+
+                if not fn_def:
+                    for m in fn_before_punct_pat.finditer(line):
+                        fn_marker, punct = m.group(1), m.group(2)
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_inside_punctuation",
+                                message=f"Footnote {_rich_escape(fn_marker)} placed before punctuation '{punct}'; move marker after punctuation per CMOS §14.19/§14.26",
+                                severity="error",
+                                context=_rich_escape(stripped[:80]),
+                            )
+                        )
+
+                    for m in stacked_fn_pat.finditer(line):
+                        fn1, fn2 = m.group(1), m.group(2)
+                        issues.append(
+                            ValidationIssue(
+                                file=self._relative_file(file),
+                                line=idx,
+                                code="footnote_stacked_markers",
+                                message=f"Stacked footnote markers {_rich_escape(fn1)}{_rich_escape(fn2)}; unstack markers across distinct terms",
+                                severity="error",
+                                context=_rich_escape(stripped[:80]),
+                            )
+                        )
 
                 footnotes = fn_pat.findall(line)
                 if not footnotes:
