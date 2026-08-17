@@ -8310,7 +8310,7 @@ class ValidateCommand:
         files = self._qmd_files(root)
         issues: List[ValidationIssue] = []
 
-        leadin_pat = re.compile(r'(\*\*[^*]+\*\*(?:\\index\{[^}]+\})*):\s*([a-z])')
+        leadin_pat = re.compile(r'^(?:[-*1-9.]+\s+|\s*\[\^fn-[^\]]+\]:\s*|\s*(?:\[offset=[^\]]+\]\s*)?)\*\*([^*]+)\*\*(?:\\index\{[^}]+\})*:\s*([a-z])')
 
         for file in files:
             lines = file.read_text(encoding="utf-8").split("\n")
@@ -8323,7 +8323,7 @@ class ValidateCommand:
                 if in_code_block or line_str.startswith("#"):
                     continue
 
-                m = leadin_pat.search(line_str)
+                m = leadin_pat.match(line_str)
                 if m:
                     issues.append(
                         ValidationIssue(
