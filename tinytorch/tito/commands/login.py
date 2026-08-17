@@ -109,9 +109,13 @@ class LoginCommand(BaseCommand):
 
         progress_file = self.config.project_root / ".tito" / "progress.json"
         try:
-            data = json.loads(progress_file.read_text()) if progress_file.exists() else {}
-            completed = data.get("completed_modules", [])
-        except (json.JSONDecodeError, OSError):
+            data = json.loads(progress_file.read_text(encoding="utf-8")) if progress_file.exists() else {}
+            # Valid JSON but not the expected object shape (a bad merge,
+            # partial write) must not be treated as the real data: .get()
+            # on the wrong type raises AttributeError, which isn't one of
+            # the exceptions caught below.
+            completed = data.get("completed_modules", []) if isinstance(data, dict) else []
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError):
             completed = []
 
         if not completed:
